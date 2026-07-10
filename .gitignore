@@ -1,0 +1,5 @@
+# Nix build output symlink
+result
+
+# VM persistent disk
+*.qcow2
