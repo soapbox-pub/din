@@ -20,6 +20,7 @@ let
       mkdir -p $out/share/webos-shell
       cp -r dist $out/share/webos-shell/dist
       install -m444 electron/main.cjs $out/share/webos-shell/main.cjs
+      install -m444 electron/preload.cjs $out/share/webos-shell/preload.cjs
       runHook postInstall
     '';
   };

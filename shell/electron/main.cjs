@@ -10,8 +10,9 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
+const os = require('node:os');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, protocol, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, session } = require('electron');
 
 const DIST = path.join(__dirname, 'dist');
 const INDEX = path.join(DIST, 'index.html');
@@ -50,6 +51,114 @@ function resolveFile(pathname) {
 // resizable window with DevTools rather than the production kiosk shell.
 const DEV_URL = process.env.SHELL_DEV_URL;
 
+// ---------------------------------------------------------------------------
+// Read-only filesystem bridge (see preload.cjs / the Files app).
+//
+// Performance notes: everything is async (libuv threadpool), directory
+// listings stat all entries in parallel and are capped at MAX_DIR_ENTRIES,
+// and file reads are capped at MAX_READ_BYTES so a stray click on a huge
+// file can't balloon the renderer.
+// ---------------------------------------------------------------------------
+
+const fsp = fs.promises;
+const MAX_DIR_ENTRIES = 5000;
+const MAX_READ_BYTES = 16 * 1024 * 1024;
+
+// webContents.id of the shell window; set once the window is created. Used to
+// reject IPC from any other web contents (e.g. <webview> guests).
+let shellContentsId = -1;
+
+/** Throw unless the request comes from the shell window's main frame. */
+function assertShellSender(event) {
+  if (
+    event.sender.id !== shellContentsId ||
+    event.senderFrame !== event.sender.mainFrame
+  ) {
+    throw new Error('fs bridge: unauthorized sender');
+  }
+}
+
+/** Validate and normalize a caller-supplied absolute path. */
+function normalizeAbsolute(p) {
+  if (typeof p !== 'string' || p.length === 0 || !path.isAbsolute(p)) {
+    throw new Error('An absolute path is required');
+  }
+  return path.normalize(p);
+}
+
+/** Classify an fs.Stats as a directory, regular file, or other. */
+function kindOf(stats) {
+  if (stats.isDirectory()) return 'directory';
+  if (stats.isFile()) return 'file';
+  return 'other';
+}
+
+function registerFsHandlers() {
+  ipcMain.handle('fs:home', (event) => {
+    assertShellSender(event);
+    return os.homedir();
+  });
+
+  ipcMain.handle('fs:list', async (event, dirPath) => {
+    assertShellSender(event);
+    const dir = normalizeAbsolute(dirPath);
+
+    const dirents = await fsp.readdir(dir, { withFileTypes: true });
+    const truncated = dirents.length > MAX_DIR_ENTRIES;
+    const slice = truncated ? dirents.slice(0, MAX_DIR_ENTRIES) : dirents;
+
+    const entries = await Promise.all(
+      slice.map(async (dirent) => {
+        const entry = {
+          name: dirent.name,
+          kind: dirent.isDirectory()
+            ? 'directory'
+            : dirent.isFile()
+              ? 'file'
+              : 'other',
+          symlink: dirent.isSymbolicLink(),
+          size: null,
+          mtimeMs: null,
+        };
+        try {
+          // stat() follows symlinks so links to directories browse correctly.
+          const stats = await fsp.stat(path.join(dir, dirent.name));
+          entry.kind = kindOf(stats);
+          entry.size = stats.size;
+          entry.mtimeMs = stats.mtimeMs;
+        } catch {
+          // Broken symlink or permission denied; keep dirent-level info.
+        }
+        return entry;
+      }),
+    );
+
+    return { path: dir, entries, truncated };
+  });
+
+  ipcMain.handle('fs:read', async (event, filePath, maxBytes) => {
+    assertShellSender(event);
+    const file = normalizeAbsolute(filePath);
+    const cap = Math.min(
+      Number.isFinite(maxBytes) && maxBytes > 0 ? Math.floor(maxBytes) : MAX_READ_BYTES,
+      MAX_READ_BYTES,
+    );
+
+    const handle = await fsp.open(file, 'r');
+    try {
+      const stats = await handle.stat();
+      if (!stats.isFile()) throw new Error('Not a regular file');
+      const length = Math.min(stats.size, cap);
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, 0);
+      // Buffers cross IPC as Uint8Array via structured clone (zero re-encode).
+      return { data: buffer, size: stats.size, truncated: stats.size > length };
+    } finally {
+      await handle.close();
+    }
+  });
+}
+
 app.whenReady().then(() => {
   // Save downloads straight to ~/Downloads instead of popping a native
   // GTK save dialog (there is no desktop environment to host one).
@@ -64,6 +173,8 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(resolveFile(pathname)).toString());
   });
 
+  registerFsHandlers();
+
   const win = new BrowserWindow({
     // Dev: normal windowed shell. Production: fullscreen kiosk.
     fullscreen: !DEV_URL,
@@ -76,6 +187,8 @@ app.whenReady().then(() => {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // Expose the read-only fs bridge (window.webosFs) to the shell.
+      preload: path.join(__dirname, 'preload.cjs'),
       // Enable <webview> so the in-shell web browser app can load arbitrary
       // sites (a real embedder, unlike an <iframe> which remote sites block
       // via X-Frame-Options / frame-ancestors). The renderer feature-detects
@@ -83,6 +196,8 @@ app.whenReady().then(() => {
       webviewTag: true,
     },
   });
+
+  shellContentsId = win.webContents.id;
 
   win.loadURL(DEV_URL || 'app://shell/');
 

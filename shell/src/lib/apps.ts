@@ -1,7 +1,8 @@
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Globe } from 'lucide-react';
+import { Folder, Globe } from 'lucide-react';
 import { WebBrowser } from '@/components/desktop/apps/WebBrowser';
+import { FileBrowser } from '@/components/desktop/apps/FileBrowser';
 
 /** Props every windowed app receives from the window manager. */
 export interface AppComponentProps {
@@ -31,6 +32,13 @@ export const APPS: readonly AppDefinition[] = [
     icon: Globe,
     component: WebBrowser,
     defaultSize: { width: 960, height: 640 },
+  },
+  {
+    id: 'file-browser',
+    name: 'Files',
+    icon: Folder,
+    component: FileBrowser,
+    defaultSize: { width: 880, height: 600 },
   },
 ];
 

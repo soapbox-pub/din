@@ -1,0 +1,491 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Download,
+  Eye,
+  EyeOff,
+  File,
+  FileArchive,
+  FileCode,
+  FileImage,
+  FileText,
+  Folder,
+  HardDrive,
+  Home,
+  Link as LinkIcon,
+  RotateCw,
+  X,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { AppComponentProps } from '@/lib/apps';
+import {
+  cleanFsError,
+  formatBytes,
+  getFsBridge,
+  joinPath,
+  parentPath,
+} from '@/lib/fs';
+import type { FsEntry } from '@/lib/fs';
+import {
+  useDirectory,
+  useFileContent,
+  useHomeDir,
+} from '@/hooks/useFileSystem';
+import { Skeleton } from '@/components/ui/skeleton';
+
+/** Cap for preview reads: enough for big images, cheap over IPC. */
+const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+/** Never render more text than this (keeps the DOM responsive). */
+const TEXT_PREVIEW_MAX_CHARS = 512 * 1024;
+
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  svg: 'image/svg+xml',
+};
+
+const CODE_EXTENSIONS = new Set([
+  'js', 'cjs', 'mjs', 'ts', 'tsx', 'jsx', 'json', 'css', 'html', 'xml',
+  'sh', 'bash', 'zsh', 'py', 'rs', 'go', 'c', 'h', 'cpp', 'nix', 'toml',
+  'yaml', 'yml', 'lock',
+]);
+
+const ARCHIVE_EXTENSIONS = new Set([
+  'zip', 'tar', 'gz', 'xz', 'zst', 'bz2', '7z', 'rar', 'qcow2', 'iso', 'img',
+]);
+
+function extensionOf(name: string): string {
+  const idx = name.lastIndexOf('.');
+  return idx > 0 ? name.slice(idx + 1).toLowerCase() : '';
+}
+
+function entryIcon(entry: FsEntry): LucideIcon {
+  if (entry.kind === 'directory') return Folder;
+  const ext = extensionOf(entry.name);
+  if (ext in IMAGE_MIME) return FileImage;
+  if (CODE_EXTENSIONS.has(ext)) return FileCode;
+  if (ARCHIVE_EXTENSIONS.has(ext)) return FileArchive;
+  if (ext === 'md' || ext === 'txt' || ext === 'log') return FileText;
+  return File;
+}
+
+/**
+ * Files - a read-only browser for the underlying OS filesystem.
+ *
+ * Backed by `window.webosFs` (Electron preload + IPC into the main process),
+ * so it sees the VM's real filesystem. Directory listings are cached with
+ * TanStack Query; clicking a directory navigates, clicking a file opens an
+ * in-window preview (text or image). Outside the Electron shell (plain
+ * browser dev) it shows an explanatory fallback.
+ */
+export function FileBrowser(_props: AppComponentProps) {
+  const bridge = getFsBridge();
+  const home = useHomeDir();
+
+  const [history, setHistory] = useState<string[]>([]);
+  const [cursor, setCursor] = useState(-1);
+  // While the user is editing the path bar; null shows the current path.
+  const [addressEdit, setAddressEdit] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+
+  // Until the user navigates, the current directory is the home directory.
+  const cwd = cursor >= 0 ? history[cursor] : (home.data ?? null);
+  const address = addressEdit ?? cwd ?? '';
+
+  const navigate = useCallback(
+    (target: string) => {
+      const normalized = target.length > 1 ? target.replace(/\/+$/, '') : '/';
+      setPreviewPath(null);
+      setAddressEdit(null);
+      setHistory((h) => {
+        const base = cursor >= 0 ? h.slice(0, cursor + 1) : cwd ? [cwd] : [];
+        setCursor(base.length);
+        return [...base, normalized];
+      });
+    },
+    [cursor, cwd],
+  );
+
+  const go = useCallback(
+    (delta: number) => {
+      const target = cursor + delta;
+      if (target < 0 || target >= history.length) return;
+      setPreviewPath(null);
+      setAddressEdit(null);
+      setCursor(target);
+    },
+    [cursor, history],
+  );
+
+  const listing = useDirectory(cwd);
+
+  const entries = useMemo(() => {
+    const items = listing.data?.entries ?? [];
+    const visible = showHidden
+      ? items
+      : items.filter((e) => !e.name.startsWith('.'));
+    return [...visible].sort((a, b) => {
+      if ((a.kind === 'directory') !== (b.kind === 'directory')) {
+        return a.kind === 'directory' ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
+    });
+  }, [listing.data, showHidden]);
+
+  const places = useMemo(() => {
+    const list: { name: string; path: string; icon: LucideIcon }[] = [];
+    if (home.data) {
+      list.push({ name: 'Home', path: home.data, icon: Home });
+      list.push({ name: 'Downloads', path: joinPath(home.data, 'Downloads'), icon: Download });
+    }
+    list.push({ name: 'System', path: '/', icon: HardDrive });
+    return list;
+  }, [home.data]);
+
+  const openEntry = useCallback(
+    (entry: FsEntry) => {
+      if (cwd === null) return;
+      const target = joinPath(cwd, entry.name);
+      if (entry.kind === 'directory') {
+        navigate(target);
+      } else if (entry.kind === 'file') {
+        setPreviewPath(target);
+      }
+    },
+    [cwd, navigate],
+  );
+
+  if (!bridge) {
+    return (
+      <div className="grid h-full w-full place-items-center bg-neutral-950 p-6">
+        <div className="max-w-sm rounded-xl border border-dashed border-white/20 px-8 py-12 text-center">
+          <HardDrive className="mx-auto mb-4 size-8 text-white/40" aria-hidden />
+          <p className="text-sm text-white/70">
+            Files needs the Electron shell to access the OS filesystem. Run{' '}
+            <code className="rounded bg-white/10 px-1 py-0.5">make dev</code> or
+            boot the VM; the bridge is not available in a plain browser.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full w-full flex-col bg-neutral-950">
+      {/* Toolbar */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const raw = address.trim();
+          if (raw.startsWith('/')) navigate(raw);
+        }}
+        className="flex shrink-0 items-center gap-1 border-b border-white/10 bg-neutral-900 px-2 py-1.5"
+      >
+        <ToolButton label="Go back" disabled={cursor <= 0} onClick={() => go(-1)}>
+          <ArrowLeft className="size-4" />
+        </ToolButton>
+        <ToolButton
+          label="Go forward"
+          disabled={cursor >= history.length - 1}
+          onClick={() => go(1)}
+        >
+          <ArrowRight className="size-4" />
+        </ToolButton>
+        <ToolButton
+          label="Go to parent directory"
+          disabled={cwd === null || cwd === '/'}
+          onClick={() => cwd && navigate(parentPath(cwd))}
+        >
+          <ArrowUp className="size-4" />
+        </ToolButton>
+        <ToolButton
+          label="Refresh"
+          onClick={() => listing.refetch()}
+        >
+          <RotateCw className={cn('size-4', listing.isFetching && 'animate-spin')} />
+        </ToolButton>
+
+        <input
+          type="text"
+          aria-label="Current directory path"
+          value={address}
+          onChange={(e) => setAddressEdit(e.target.value)}
+          onFocus={(e) => e.currentTarget.select()}
+          spellCheck={false}
+          autoComplete="off"
+          className="h-8 min-w-0 flex-1 rounded-md border border-white/10 bg-neutral-800 px-3 font-mono text-sm text-white placeholder:text-white/40 focus-visible:border-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+        />
+
+        <ToolButton
+          label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
+          onClick={() => setShowHidden((v) => !v)}
+        >
+          {showHidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+        </ToolButton>
+      </form>
+
+      <div className="relative flex min-h-0 flex-1">
+        {/* Sidebar */}
+        <nav
+          aria-label="Places"
+          className="hidden w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-white/10 bg-neutral-900/60 p-2 sm:flex"
+        >
+          {places.map((place) => (
+            <button
+              key={place.path}
+              type="button"
+              onClick={() => navigate(place.path)}
+              className={cn(
+                'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+                cwd === place.path
+                  ? 'bg-white/15 text-white'
+                  : 'text-white/70 hover:bg-white/10 hover:text-white',
+              )}
+            >
+              <place.icon className="size-4 shrink-0" aria-hidden />
+              <span className="truncate">{place.name}</span>
+            </button>
+          ))}
+        </nav>
+
+        {/* Entry list */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+          {listing.isLoading || cwd === null ? (
+            <ListSkeleton />
+          ) : listing.isError ? (
+            <div className="grid flex-1 place-items-center p-6">
+              <div className="max-w-sm rounded-xl border border-dashed border-white/20 px-8 py-12 text-center">
+                <p className="text-sm text-white/70">
+                  Could not open this directory: {cleanFsError(listing.error)}
+                </p>
+              </div>
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="grid flex-1 place-items-center p-6">
+              <p className="text-sm text-white/50">This folder is empty.</p>
+            </div>
+          ) : (
+            <ul className="p-1">
+              {entries.map((entry) => {
+                const Icon = entryIcon(entry);
+                return (
+                  <li key={entry.name}>
+                    <button
+                      type="button"
+                      onClick={() => openEntry(entry)}
+                      disabled={entry.kind === 'other'}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left',
+                        'hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+                        'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
+                      )}
+                    >
+                      <Icon
+                        className={cn(
+                          'size-4 shrink-0',
+                          entry.kind === 'directory'
+                            ? 'text-sky-400'
+                            : 'text-white/50',
+                        )}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm text-white">
+                        {entry.name}
+                      </span>
+                      {entry.symlink && (
+                        <LinkIcon
+                          className="size-3 shrink-0 text-white/40"
+                          aria-label="Symbolic link"
+                        />
+                      )}
+                      <span className="w-20 shrink-0 text-right text-xs tabular-nums text-white/50">
+                        {entry.kind === 'file' && entry.size !== null
+                          ? formatBytes(entry.size)
+                          : ''}
+                      </span>
+                      <span className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-white/50 md:block">
+                        {entry.mtimeMs !== null
+                          ? new Date(entry.mtimeMs).toLocaleString(undefined, {
+                              dateStyle: 'medium',
+                              timeStyle: 'short',
+                            })
+                          : ''}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {previewPath !== null && (
+          <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
+        )}
+      </div>
+
+      {/* Status bar */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-white/10 bg-neutral-900 px-3 py-1 text-xs text-white/50">
+        <span>
+          {listing.data
+            ? `${entries.length} item${entries.length === 1 ? '' : 's'}`
+            : '…'}
+        </span>
+        {listing.data?.truncated && (
+          <span className="text-amber-400/80">
+            Listing truncated - directory has more entries than shown.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** In-window preview overlay for a single file (text or image). */
+function FilePreview({ path, onClose }: { path: string; onClose: () => void }) {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const content = useFileContent(path, PREVIEW_MAX_BYTES);
+  const mime = IMAGE_MIME[extensionOf(name)];
+
+  const imageUrl = useMemo(() => {
+    if (!mime || !content.data || content.data.truncated) return null;
+    return URL.createObjectURL(
+      new Blob([content.data.data.slice().buffer], { type: mime }),
+    );
+  }, [mime, content.data]);
+
+  // Release each object URL once it is no longer rendered.
+  useEffect(() => {
+    return () => {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+  }, [imageUrl]);
+
+  const text = useMemo(() => {
+    if (mime || !content.data) return null;
+    const bytes = content.data.data;
+    // Null byte in the head -> treat as binary.
+    const head = bytes.subarray(0, Math.min(bytes.length, 8192));
+    if (head.includes(0)) return null;
+    const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    return decoded.slice(0, TEXT_PREVIEW_MAX_CHARS);
+  }, [mime, content.data]);
+
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col bg-neutral-950">
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-neutral-900 px-3 py-1.5">
+        <span className="min-w-0 flex-1 truncate font-mono text-sm text-white">
+          {name}
+        </span>
+        {content.data && (
+          <span className="shrink-0 text-xs text-white/50">
+            {formatBytes(content.data.size)}
+          </span>
+        )}
+        <ToolButton label="Close preview" onClick={onClose}>
+          <X className="size-4" />
+        </ToolButton>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        {content.isLoading ? (
+          <div className="space-y-2 p-4">
+            <Skeleton className="h-4 w-3/4 bg-white/10" />
+            <Skeleton className="h-4 w-full bg-white/10" />
+            <Skeleton className="h-4 w-2/3 bg-white/10" />
+          </div>
+        ) : content.isError ? (
+          <p className="p-4 text-sm text-white/70">
+            Could not read file: {cleanFsError(content.error)}
+          </p>
+        ) : imageUrl ? (
+          <div className="grid h-full place-items-center p-4">
+            <img
+              src={imageUrl}
+              alt={name}
+              className="max-h-full max-w-full rounded-md object-contain"
+            />
+          </div>
+        ) : text !== null ? (
+          <>
+            {(content.data?.truncated ||
+              text.length >= TEXT_PREVIEW_MAX_CHARS) && (
+              <p className="border-b border-white/10 bg-amber-950/40 px-4 py-1.5 text-xs text-amber-300/90">
+                Preview truncated - showing the beginning of the file.
+              </p>
+            )}
+            <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-white/90">
+              {text}
+            </pre>
+          </>
+        ) : (
+          <div className="grid h-full place-items-center p-6">
+            <div className="text-center">
+              <File className="mx-auto mb-3 size-8 text-white/30" aria-hidden />
+              <p className="text-sm text-white/60">
+                Binary file - no preview available.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ListSkeleton() {
+  return (
+    <div className="space-y-1 p-2" aria-hidden>
+      {Array.from({ length: 8 }, (_, i) => (
+        <div key={i} className="flex items-center gap-2 px-2 py-1.5">
+          <Skeleton className="size-4 rounded bg-white/10" />
+          <Skeleton
+            className="h-4 bg-white/10"
+            style={{ width: `${30 + ((i * 17) % 40)}%` }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ToolButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'grid size-8 shrink-0 place-items-center rounded-md text-white/80',
+        'hover:bg-white/10 hover:text-white',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+        'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
