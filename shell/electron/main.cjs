@@ -6,7 +6,7 @@
 //   - unknown paths fall back to index.html (SPA routing)
 //
 // Set SHELL_DEV_URL (e.g. http://localhost:8080) to load a Vite dev server
-// instead of the bundled dist/.
+// (with HMR) instead of the bundled dist/. See `make dev`.
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -45,6 +45,11 @@ function resolveFile(pathname) {
   return INDEX;
 }
 
+// SHELL_DEV_URL (e.g. http://localhost:8080) loads a live Vite dev server
+// with HMR instead of the bundled dist/. In that mode we run a normal
+// resizable window with DevTools rather than the production kiosk shell.
+const DEV_URL = process.env.SHELL_DEV_URL;
+
 app.whenReady().then(() => {
   // Save downloads straight to ~/Downloads instead of popping a native
   // GTK save dialog (there is no desktop environment to host one).
@@ -60,8 +65,11 @@ app.whenReady().then(() => {
   });
 
   const win = new BrowserWindow({
-    fullscreen: true,
-    kiosk: true,
+    // Dev: normal windowed shell. Production: fullscreen kiosk.
+    fullscreen: !DEV_URL,
+    kiosk: !DEV_URL,
+    width: 1280,
+    height: 800,
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
     webPreferences: {
@@ -71,7 +79,11 @@ app.whenReady().then(() => {
     },
   });
 
-  win.loadURL(process.env.SHELL_DEV_URL || 'app://shell/');
+  win.loadURL(DEV_URL || 'app://shell/');
+
+  if (DEV_URL) {
+    win.webContents.openDevTools({ mode: 'detach' });
+  }
 });
 
 app.on('window-all-closed', () => app.quit());

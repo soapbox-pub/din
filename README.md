@@ -15,17 +15,23 @@ web app in any browser.
 
 - Nix (with flakes enabled; the Determinate installer does this by default)
 - QEMU (`qemu-system-x86_64`) on the host for `make run`
-- Node.js for `make dev`
+- Node.js for the dev servers; `make dev` also uses Nix to fetch Electron
 
 ## Usage
 
 ```sh
-make run    # build the OS + VM and boot it in a QEMU window
-make dev    # run the web shell locally with HMR (http://localhost:8080)
-make test   # shell type-check + lint + tests + build
-make build  # just build the VM (./result/bin/run-webos-vm)
-make clean  # remove build output and the VM disk (webos.qcow2)
+make run         # build the OS + VM and boot it in a QEMU window
+make dev         # run the shell in Electron with live HMR (windowed + DevTools)
+make dev-browser # run the shell in a plain browser with HMR (http://localhost:8080)
+make test        # shell type-check + lint + tests + build
+make build       # just build the VM (./result/bin/run-webos-vm)
+make clean       # remove build output and the VM disk (webos.qcow2)
 ```
+
+`make dev` starts Vite, then launches the same `electron/main.cjs` the VM uses
+(pulled from the flake's pinned nixpkgs) against the dev server via
+`SHELL_DEV_URL`. This gives you the real Electron/`app://` environment with Vite
+HMR + React fast refresh. Ctrl-C stops both processes.
 
 The QEMU window shows the shell fullscreen with a live clock. Boot logs also
 appear on the serial console (your terminal).
@@ -43,10 +49,13 @@ appear on the serial console (your terminal).
 
 Three tiers, fastest first:
 
-1. **Browser + HMR** (`make dev`): the shell is an ordinary Vite app; edit
-   `shell/src/` and see changes instantly at http://localhost:8080.
-2. **Electron windowed** (optional): point any local Electron at the dev
-   server: `SHELL_DEV_URL=http://localhost:8080 electron shell/electron/main.cjs`
+1. **Browser + HMR** (`make dev-browser`): the shell is an ordinary Vite app;
+   edit `shell/src/` and see changes instantly at http://localhost:8080.
+2. **Electron windowed + HMR** (`make dev`): runs the shell inside the actual
+   Electron host (`app://` protocol, CSP, download handling) pointed at the Vite
+   dev server, so it matches the VM while staying hot-reloadable. Under the hood
+   this just sets `SHELL_DEV_URL=http://localhost:8080` for
+   `shell/electron/main.cjs`.
 3. **Full VM** (`make run`): rebuilds the OS image; only changed layers
    rebuild. The VM disk (`webos.qcow2`) persists between boots; `make clean`
    resets it.

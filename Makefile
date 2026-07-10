@@ -1,4 +1,4 @@
-.PHONY: build run dev clean
+.PHONY: build run dev dev-browser test clean
 
 # Build the VM runner script (./result/bin/run-webos-vm)
 build:
@@ -8,9 +8,16 @@ build:
 run: build
 	./result/bin/run-webos-vm
 
-# Run the web shell locally with Vite HMR (http://localhost:8080)
+# Run the shell in Electron with live HMR (windowed, DevTools open).
+# Starts Vite, then launches Electron (from the flake's pinned nixpkgs)
+# against it. This mirrors the VM's Electron host; Ctrl-C stops both.
 dev:
-	npm --prefix shell run dev
+	./shell/scripts/dev-electron.sh
+
+# Run the shell in a plain browser with Vite HMR (http://localhost:8080).
+# (GNU make can't use a ':' in target names, hence 'dev-browser'.)
+dev-browser:
+	npm --prefix shell run dev:browser
 
 # Type-check, lint, test, and build the shell
 test:
