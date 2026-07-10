@@ -11,7 +11,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, protocol, net } = require('electron');
+const { app, BrowserWindow, protocol, net, session } = require('electron');
 
 const DIST = path.join(__dirname, 'dist');
 const INDEX = path.join(DIST, 'index.html');
@@ -46,6 +46,14 @@ function resolveFile(pathname) {
 }
 
 app.whenReady().then(() => {
+  // Save downloads straight to ~/Downloads instead of popping a native
+  // GTK save dialog (there is no desktop environment to host one).
+  session.defaultSession.on('will-download', (_event, item) => {
+    const dir = app.getPath('downloads');
+    fs.mkdirSync(dir, { recursive: true });
+    item.setSavePath(path.join(dir, item.getFilename()));
+  });
+
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
     return net.fetch(pathToFileURL(resolveFile(pathname)).toString());

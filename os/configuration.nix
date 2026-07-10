@@ -51,6 +51,12 @@ in
     program = "${webos-shell}/bin/webos-shell";
   };
 
+  # Emoji and broad Unicode coverage for web content.
+  fonts.packages = with pkgs; [
+    noto-fonts
+    noto-fonts-color-emoji
+  ];
+
   # Serial console so `make run` shows boot logs in the terminal too.
   boot.kernelParams = [ "console=ttyS0" ];
 
