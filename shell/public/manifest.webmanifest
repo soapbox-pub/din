@@ -1,0 +1,10 @@
+{
+  "name": "webOS demo",
+  "short_name": "webOS",
+  "description": "A minimal Linux system whose entire UI is a web app.",
+  "start_url": "/",
+  "display": "fullscreen",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "icons": []
+}

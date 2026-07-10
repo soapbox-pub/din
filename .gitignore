@@ -3,3 +3,11 @@ result
 
 # VM persistent disk
 *.qcow2
+
+# Node
+node_modules/
+dist/
+
+# tooling caches
+.eslintcache
+.vite

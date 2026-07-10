@@ -1,52 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>webOS demo</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      background: radial-gradient(ellipse at 50% 40%, #16222e 0%, #0b0f14 70%);
-      color: #e6edf3;
-      font-family: system-ui, sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      user-select: none;
-    }
-    .card { text-align: center; }
-    h1 {
-      font-size: 64px;
-      font-weight: 700;
-      letter-spacing: -1px;
-      background: linear-gradient(90deg, #58a6ff, #7ee787);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-    }
-    p { margin-top: 12px; font-size: 20px; color: #8b949e; }
-    #clock {
-      margin-top: 32px;
-      font-size: 40px;
-      font-variant-numeric: tabular-nums;
-      color: #e6edf3;
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Hello from webOS demo</h1>
-    <p>Linux &rarr; cage &rarr; Electron &mdash; the entire UI is this web page.</p>
-    <div id="clock"></div>
-  </div>
-  <script>
-    const clock = document.getElementById('clock');
-    function tick() {
-      clock.textContent = new Date().toLocaleTimeString();
-    }
-    tick();
-    setInterval(tick, 1000);
-  </script>
-</body>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>webOS demo</title>
+        <meta name="description" content="A minimal Linux system whose entire UI is a web app.">
+        <meta property="og:type" content="website">
+        <meta property="og:title" content="webOS demo">
+        <meta property="og:description" content="A minimal Linux system whose entire UI is a web app.">
+        <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https:; font-src 'self'; base-uri 'self'; manifest-src 'self'; connect-src 'self' blob: https: wss:; img-src 'self' data: blob: https:; media-src 'self' https:">
+        <link rel="manifest" href="/manifest.webmanifest">
+    </head>
+    <body>
+        <div id="root"></div>
+        <script type="module" src="/src/main.tsx"></script>
+    </body>
 </html>

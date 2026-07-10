@@ -1,18 +1,35 @@
 { config, pkgs, lib, ... }:
 
 let
-  # The Electron shell app, copied into the Nix store.
-  shell-src = pkgs.runCommand "webos-shell-src" { } ''
-    mkdir -p $out/share/webos-shell
-    cp -r ${../shell}/. $out/share/webos-shell/
-  '';
+  # Build the Vite/React shell from source (deps fetched via lockfile hash).
+  shell-app = pkgs.buildNpmPackage {
+    pname = "webos-shell";
+    version = "0.1.0";
+    src = ../shell;
+    npmDepsHash = "sha256-JMK1PpA149ZmrE48GXd1f2D2KSvmuYKglf5pHPWpP9c=";
 
-  # Launcher: Electron running the shell app on Wayland (cage provides the compositor).
-  # --disable-gpu keeps the demo reliable in QEMU without virgl; remove it on real
-  # hardware (and verify acceleration!).
+    # The package.json scripts run `npm i` (network); run vite directly instead.
+    buildPhase = ''
+      runHook preBuild
+      npm exec -- vite build -l error
+      runHook postBuild
+    '';
+
+    installPhase = ''
+      runHook preInstall
+      mkdir -p $out/share/webos-shell
+      cp -r dist $out/share/webos-shell/dist
+      install -m444 electron/main.cjs $out/share/webos-shell/main.cjs
+      runHook postInstall
+    '';
+  };
+
+  # Launcher: Electron running the shell host on Wayland (cage provides the
+  # compositor). --disable-gpu keeps the demo reliable in QEMU without virgl;
+  # remove it on real hardware (and verify acceleration!).
   webos-shell = pkgs.writeShellScriptBin "webos-shell" ''
     exec ${pkgs.electron}/bin/electron \
-      ${shell-src}/share/webos-shell \
+      ${shell-app}/share/webos-shell/main.cjs \
       --ozone-platform=wayland \
       --disable-gpu
   '';
