@@ -3,23 +3,28 @@ import { ArrowLeft, ArrowRight, RotateCw, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveNavigation } from '@/lib/sanitizeUrl';
 import type { AppComponentProps } from '@/lib/apps';
+import {
+  BrowserView,
+  type BrowserViewHandle,
+} from '@/components/desktop/apps/BrowserView';
 
-const HOME_URL = 'https://duckduckgo.com/';
+const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
 
 /**
- * A minimal iframe-based web browser.
+ * A minimal web browser.
  *
- * Only https URLs are ever loaded (see `resolveNavigation`/`sanitizeUrl`),
- * satisfying the app's CSP (`frame-src 'self' https:`) and XSS policy. Many
- * sites send `X-Frame-Options`/`frame-ancestors` and will refuse to render;
- * that's a site-side restriction we can't override from an iframe.
+ * The actual rendering surface is abstracted by <BrowserView>, which uses an
+ * Electron <webview> when available (loads any site) and falls back to a
+ * sandboxed <iframe> in a plain browser (subject to remote framing policies).
+ * Only https URLs are ever loaded (see `resolveNavigation` / `sanitizeUrl`).
  */
 export function WebBrowser(_props: AppComponentProps) {
   const [address, setAddress] = useState(HOME_URL);
   const [src, setSrc] = useState(HOME_URL);
   const [history, setHistory] = useState<string[]>([HOME_URL]);
   const [cursor, setCursor] = useState(0);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [loading, setLoading] = useState(false);
+  const viewRef = useRef<BrowserViewHandle>(null);
 
   const navigate = useCallback(
     (raw: string) => {
@@ -47,13 +52,6 @@ export function WebBrowser(_props: AppComponentProps) {
     [cursor, history],
   );
 
-  const reload = useCallback(() => {
-    if (iframeRef.current) {
-      // Re-assigning src forces a reload without dropping our history.
-      iframeRef.current.src = src;
-    }
-  }, [src]);
-
   const canBack = cursor > 0;
   const canForward = cursor < history.length - 1;
 
@@ -64,7 +62,7 @@ export function WebBrowser(_props: AppComponentProps) {
           e.preventDefault();
           navigate(address);
         }}
-        className="flex shrink-0 items-center gap-1 border-b border-white/10 bg-neutral-900 px-2 py-1.5"
+        className="relative flex shrink-0 items-center gap-1 border-b border-white/10 bg-neutral-900 px-2 py-1.5"
       >
         <NavButton label="Go back" disabled={!canBack} onClick={() => go(-1)}>
           <ArrowLeft className="size-4" />
@@ -72,8 +70,8 @@ export function WebBrowser(_props: AppComponentProps) {
         <NavButton label="Go forward" disabled={!canForward} onClick={() => go(1)}>
           <ArrowRight className="size-4" />
         </NavButton>
-        <NavButton label="Reload page" onClick={reload}>
-          <RotateCw className="size-4" />
+        <NavButton label="Reload page" onClick={() => viewRef.current?.reload()}>
+          <RotateCw className={cn('size-4', loading && 'animate-spin')} />
         </NavButton>
 
         <div className="relative flex-1">
@@ -91,16 +89,23 @@ export function WebBrowser(_props: AppComponentProps) {
             className="h-8 w-full rounded-full border border-white/10 bg-neutral-800 pl-8 pr-3 text-sm text-white placeholder:text-white/40 focus-visible:border-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
           />
         </div>
+
+        {loading && (
+          <span
+            aria-hidden
+            className="absolute inset-x-0 bottom-0 h-0.5 animate-pulse bg-blue-500"
+          />
+        )}
       </form>
 
-      <iframe
-        ref={iframeRef}
-        src={src}
-        title="Web content"
-        className="h-full w-full flex-1 border-0 bg-white"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-        referrerPolicy="no-referrer"
-      />
+      <div className="relative flex-1 overflow-hidden bg-white">
+        <BrowserView
+          ref={viewRef}
+          src={src}
+          onLoadStart={() => setLoading(true)}
+          onLoadEnd={() => setLoading(false)}
+        />
+      </div>
     </div>
   );
 }

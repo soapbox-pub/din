@@ -76,6 +76,11 @@ app.whenReady().then(() => {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // Enable <webview> so the in-shell web browser app can load arbitrary
+      // sites (a real embedder, unlike an <iframe> which remote sites block
+      // via X-Frame-Options / frame-ancestors). The renderer feature-detects
+      // this and falls back to an <iframe> when running in a plain browser.
+      webviewTag: true,
     },
   });
 
@@ -84,6 +89,17 @@ app.whenReady().then(() => {
   if (DEV_URL) {
     win.webContents.openDevTools({ mode: 'detach' });
   }
+});
+
+// Harden any <webview> the shell embeds (the web browser app). Keep them
+// sandboxed with no Node integration, and deny requests to spawn native
+// windows (e.g. target=_blank) — navigation stays inside the webview.
+app.on('web-contents-created', (_event, contents) => {
+  if (contents.getType() !== 'webview') return;
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//i.test(url)) contents.loadURL(url);
+    return { action: 'deny' };
+  });
 });
 
 app.on('window-all-closed', () => app.quit());
