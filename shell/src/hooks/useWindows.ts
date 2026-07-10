@@ -22,7 +22,15 @@ export interface WindowState {
   z: number;
   /** Whether the window is minimized to the taskbar. */
   minimized: boolean;
+  /** Whether the window fills the workspace. */
+  maximized: boolean;
+  /** Geometry to restore to when un-maximizing. */
+  restore: { x: number; y: number; width: number; height: number } | null;
 }
+
+/** Minimum window size in pixels. */
+export const MIN_WIDTH = 280;
+export const MIN_HEIGHT = 160;
 
 let nextId = 0;
 const nextWindowId = () => `win-${nextId++}`;
@@ -60,6 +68,8 @@ export function useWindows() {
           height: size.height,
           z: maxZ(ws) + 1,
           minimized: false,
+          maximized: false,
+          restore: null,
         },
       ];
     });
@@ -79,7 +89,52 @@ export function useWindows() {
     setWindows((ws) => ws.map((w) => (w.id === id ? { ...w, x, y } : w)));
   }, []);
 
-  return { windows, open, close, minimize, focus, move };
+  const resize = useCallback(
+    (id: string, geometry: { x: number; y: number; width: number; height: number }) => {
+      setWindows((ws) =>
+        ws.map((w) =>
+          w.id === id
+            ? {
+                ...w,
+                x: geometry.x,
+                y: geometry.y,
+                width: Math.max(MIN_WIDTH, geometry.width),
+                height: Math.max(MIN_HEIGHT, geometry.height),
+              }
+            : w,
+        ),
+      );
+    },
+    [],
+  );
+
+  const toggleMaximize = useCallback((id: string) => {
+    setWindows((ws) => {
+      const top = maxZ(ws);
+      return ws.map((w) => {
+        if (w.id !== id) return w;
+        if (w.maximized && w.restore) {
+          // Restore to the saved geometry.
+          return {
+            ...w,
+            ...w.restore,
+            maximized: false,
+            restore: null,
+            z: top + 1,
+          };
+        }
+        // Maximize: remember the current geometry to restore later.
+        return {
+          ...w,
+          maximized: true,
+          restore: { x: w.x, y: w.y, width: w.width, height: w.height },
+          z: top + 1,
+        };
+      });
+    });
+  }, []);
+
+  return { windows, open, close, minimize, focus, move, resize, toggleMaximize };
 }
 
 export type WindowManager = ReturnType<typeof useWindows>;
