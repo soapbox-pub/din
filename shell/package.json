@@ -1,0 +1,6 @@
+{
+  "name": "webos-shell",
+  "version": "0.1.0",
+  "description": "webos-demo shell - fullscreen Electron hello world",
+  "main": "main.js"
+}
