@@ -1,7 +1,10 @@
 // Preload for the webOS shell renderer.
 //
-// Exposes a filesystem bridge as `window.fs`, backed by IPC handlers in
-// main.cjs. The API is Node-flavored (homedir/readdir/readFile/writeFile/...)
+// Exposes two bridges backed by IPC handlers in main.cjs:
+//   - window.fs: filesystem access for the Files app
+//   - window.pty: interactive shell sessions for the Terminal app
+//
+// The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
 //   - promise-only, no sync or callback variants
 //   - readdir returns rich entries (kind/size/mtime) in one batched call
@@ -47,4 +50,35 @@ contextBridge.exposeInMainWorld('fs', {
    * explicit `{ recursive: true }`.
    */
   rm: (path, options) => ipcRenderer.invoke('fs:rm', path, options),
+});
+
+// Terminal bridge (window.pty), backed by the pty:* handlers in main.cjs.
+// Each session is a real login shell on a pseudo-terminal; data flows as
+// raw bytes (Uint8Array out, string in - what xterm.js produces/consumes).
+contextBridge.exposeInMainWorld('pty', {
+  /** Start a shell session; resolves to its session id. */
+  spawn: (size) => ipcRenderer.invoke('pty:spawn', size),
+
+  /** Send user keystrokes/paste data to a session. */
+  write: (id, data) => ipcRenderer.send('pty:write', id, data),
+
+  /** Inform the session's pty of a new terminal size. */
+  resize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),
+
+  /** Terminate a session (SIGTERM to the pty host, SIGHUP to the shell). */
+  kill: (id) => ipcRenderer.send('pty:kill', id),
+
+  /** Subscribe to output from all sessions. Returns an unsubscribe fn. */
+  onData: (callback) => {
+    const listener = (_event, id, data) => callback(id, data);
+    ipcRenderer.on('pty:data', listener);
+    return () => ipcRenderer.removeListener('pty:data', listener);
+  },
+
+  /** Subscribe to session exits. Returns an unsubscribe fn. */
+  onExit: (callback) => {
+    const listener = (_event, id, code) => callback(id, code);
+    ipcRenderer.on('pty:exit', listener);
+    return () => ipcRenderer.removeListener('pty:exit', listener);
+  },
 });

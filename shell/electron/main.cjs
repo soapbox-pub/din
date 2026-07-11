@@ -11,6 +11,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const { spawn } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, ipcMain, protocol, net, session } = require('electron');
 
@@ -217,6 +218,124 @@ function registerFsHandlers() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// PTY bridge (window.pty - see preload.cjs / the Terminal app).
+//
+// Gives the shell a real interactive terminal. Instead of node-pty (a native
+// module we'd have to rebuild against Electron's ABI inside the Nix build),
+// each session spawns pty-host.py: a stdlib-only Python helper that owns the
+// pseudo-terminal and proxies bytes over pipes (stdin/stdout for terminal
+// I/O, fd 3 for resize commands).
+//
+// Threat model: this is deliberately an arbitrary-command-execution API for
+// the shell's origin, so it adds nothing beyond what the fs bridge already
+// concedes (window.fs can write ~/.bashrc, which is code execution on the
+// next login). The same boundaries apply: strict CSP, the sender guard, and
+// the unprivileged OS user. The preload is never attached to <webview>s, so
+// remote web content can't see it.
+// ---------------------------------------------------------------------------
+
+const PTY_HELPER = path.join(__dirname, 'pty-host.py');
+const MAX_PTY_SESSIONS = 16;
+const MAX_PTY_WRITE_BYTES = 1024 * 1024;
+
+/** id -> ChildProcess running pty-host.py. */
+const ptySessions = new Map();
+let nextPtyId = 1;
+
+/** Clamp a caller-supplied terminal dimension to something sane. */
+function clampDimension(value, fallback) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(500, Math.max(2, Math.floor(value)));
+}
+
+/** The login shell of the user we run as (best effort). */
+function userShell() {
+  try {
+    const shell = os.userInfo().shell;
+    if (shell) return shell;
+  } catch {
+    // fall through
+  }
+  return process.env.SHELL || '/bin/sh';
+}
+
+function registerPtyHandlers() {
+  ipcMain.handle('pty:spawn', (event, size) => {
+    assertShellSender(event);
+    if (ptySessions.size >= MAX_PTY_SESSIONS) {
+      throw new Error(`Too many terminal sessions (max ${MAX_PTY_SESSIONS})`);
+    }
+    const rows = clampDimension(size?.rows, 24);
+    const cols = clampDimension(size?.cols, 80);
+
+    const proc = spawn('python3', [PTY_HELPER, userShell(), String(rows), String(cols)], {
+      cwd: os.homedir(),
+      // fd 3 is the helper's control channel (resize).
+      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+    });
+
+    const id = nextPtyId++;
+    ptySessions.set(id, proc);
+    const sender = event.sender;
+
+    // A write can race the helper's exit (EPIPE); without handlers those
+    // stream errors would be unhandled in the main process.
+    proc.stdin.on('error', () => {});
+    proc.stdio[3]?.on('error', () => {});
+
+    const send = (channel, ...args) => {
+      if (!sender.isDestroyed()) sender.send(channel, ...args);
+    };
+
+    proc.stdout.on('data', (chunk) => send('pty:data', id, chunk));
+    // Helper diagnostics (e.g. exec failures) surface in the terminal too.
+    proc.stderr.on('data', (chunk) => send('pty:data', id, chunk));
+    proc.on('error', (err) => {
+      send('pty:data', id, Buffer.from(`pty host failed: ${err.message}\r\n`));
+      ptySessions.delete(id);
+      send('pty:exit', id, -1);
+    });
+    proc.on('exit', (code) => {
+      ptySessions.delete(id);
+      send('pty:exit', id, code ?? -1);
+    });
+
+    return id;
+  });
+
+  ipcMain.on('pty:write', (event, id, data) => {
+    assertShellSender(event);
+    const proc = ptySessions.get(id);
+    if (!proc || typeof data !== 'string' || data.length > MAX_PTY_WRITE_BYTES) return;
+    proc.stdin.write(data);
+  });
+
+  ipcMain.on('pty:resize', (event, id, cols, rows) => {
+    assertShellSender(event);
+    const proc = ptySessions.get(id);
+    if (!proc) return;
+    const control = proc.stdio[3];
+    if (control && control.writable) {
+      control.write(`resize ${clampDimension(rows, 24)} ${clampDimension(cols, 80)}\n`);
+    }
+  });
+
+  ipcMain.on('pty:kill', (event, id) => {
+    assertShellSender(event);
+    const proc = ptySessions.get(id);
+    if (!proc) return;
+    ptySessions.delete(id);
+    proc.kill('SIGTERM');
+  });
+}
+
+// Don't leave orphaned shells behind when the app quits.
+app.on('will-quit', () => {
+  for (const proc of ptySessions.values()) proc.kill('SIGTERM');
+  ptySessions.clear();
+});
+
 app.whenReady().then(() => {
   // Save downloads straight to ~/Downloads instead of popping a native
   // GTK save dialog (there is no desktop environment to host one).
@@ -232,6 +351,7 @@ app.whenReady().then(() => {
   });
 
   registerFsHandlers();
+  registerPtyHandlers();
 
   const win = new BrowserWindow({
     // Dev: normal windowed shell. Production: fullscreen kiosk.

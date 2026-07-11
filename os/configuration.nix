@@ -6,7 +6,7 @@ let
     pname = "webos-shell";
     version = "0.1.0";
     src = ../shell;
-    npmDepsHash = "sha256-JMK1PpA149ZmrE48GXd1f2D2KSvmuYKglf5pHPWpP9c=";
+    npmDepsHash = "sha256-yA4blfKTg3s3dXE2nIRU6o4EQ7OETVknTbU7A/omuTQ=";
 
     # The package.json scripts run `npm i` (network); run vite directly instead.
     buildPhase = ''
@@ -21,6 +21,7 @@ let
       cp -r dist $out/share/webos-shell/dist
       install -m444 electron/main.cjs $out/share/webos-shell/main.cjs
       install -m444 electron/preload.cjs $out/share/webos-shell/preload.cjs
+      install -m555 electron/pty-host.py $out/share/webos-shell/pty-host.py
       runHook postInstall
     '';
   };
@@ -28,7 +29,9 @@ let
   # Launcher: Electron running the shell host on Wayland (cage provides the
   # compositor). --disable-gpu keeps the demo reliable in QEMU without virgl;
   # remove it on real hardware (and verify acceleration!).
+  # python3 must be on PATH for the Terminal app's pty host (pty-host.py).
   webos-shell = pkgs.writeShellScriptBin "webos-shell" ''
+    export PATH=${pkgs.python3}/bin:$PATH
     exec ${pkgs.electron}/bin/electron \
       ${shell-app}/share/webos-shell/main.cjs \
       --ozone-platform=wayland \
