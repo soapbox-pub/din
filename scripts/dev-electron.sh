@@ -48,9 +48,9 @@ done
 echo "Launching Electron -> ${URL}"
 # GPU acceleration is ON by default: window dragging, backdrop blur, and
 # shadows feel dramatically snappier composited on the GPU than in SwiftShader.
-# If your machine lacks working GL (headless X, QEMU without virgl, broken
-# driver paths), Chromium logs some ANGLE/EGL noise and falls back to software
-# on its own; set DIN_NO_GPU=1 to skip the attempt entirely.
+# Set DIN_NO_GPU=1 to force software rendering (e.g. headless X, broken
+# drivers). If GPU init fails anyway, Chromium logs some ANGLE/EGL noise and
+# falls back to software on its own - the app still works.
 # --enable-unsafe-swiftshader stays in both modes: whenever the GPU is absent
 # or fails to init, Chromium >=137 refuses to create even software WebGL
 # contexts without it, and the Terminal app needs WebGL for crisp box-drawing
@@ -60,7 +60,27 @@ GPU_FLAGS=(--enable-unsafe-swiftshader)
 if [ "${DIN_NO_GPU:-0}" = "1" ]; then
   GPU_FLAGS=(--disable-gpu --enable-unsafe-swiftshader)
 fi
-DIN_DEV_URL="${URL}" "${ELECTRON}" "${ROOT_DIR}/electron/main.cjs" \
+
+# Nix-built Electron can't find host GL drivers on non-NixOS distros (it looks
+# in /run/opengl-driver, a NixOS convention), so GPU init fails and everything
+# renders in software. nixGL bridges that gap by pointing the loader at a
+# Nix-built Mesa. Built with the same nixpkgs pin as Electron so the versions
+# stay in lockstep. nixGLIntel is the Mesa wrapper and covers Intel + AMD;
+# NVIDIA proprietary-driver users need nixGL#nixGLNvidia (requires --impure)
+# or DIN_NO_GPU=1.
+GL_WRAPPER=()
+if [ "${DIN_NO_GPU:-0}" != "1" ] && [ ! -e /run/opengl-driver ]; then
+  echo "Non-NixOS host detected; resolving nixGL for GPU acceleration ..."
+  if NIXGL_DIR="$("${NIX}" build --no-link --print-out-paths \
+    --inputs-from "${ROOT_DIR}/os" --override-input nixpkgs nixpkgs \
+    'github:nix-community/nixGL#nixGLIntel' 2>/dev/null)"; then
+    GL_WRAPPER=("${NIXGL_DIR}/bin/nixGLIntel")
+  else
+    echo "nixGL unavailable; continuing without it (software rendering likely)." >&2
+  fi
+fi
+
+DIN_DEV_URL="${URL}" "${GL_WRAPPER[@]}" "${ELECTRON}" "${ROOT_DIR}/electron/main.cjs" \
   "${GPU_FLAGS[@]}" &
 ELECTRON_PID=$!
 
