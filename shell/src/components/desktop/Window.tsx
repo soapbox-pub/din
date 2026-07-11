@@ -1,7 +1,9 @@
-import { useCallback, useRef } from 'react';
+import { memo, useCallback, useRef } from 'react';
+import type { ComponentType } from 'react';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getApp } from '@/lib/apps';
+import type { AppComponentProps } from '@/lib/apps';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { MIN_HEIGHT, MIN_WIDTH, type WindowState } from '@/hooks/useWindows';
 
@@ -19,6 +21,24 @@ const RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
   { dir: 'sw', className: 'bottom-0 left-0 size-3 cursor-nesw-resize' },
   { dir: 'se', className: 'bottom-0 right-0 size-3 cursor-nwse-resize' },
 ];
+
+/**
+ * Memo boundary between window chrome and app content.
+ *
+ * Window geometry lives in one `windows` array, so dragging/resizing any
+ * window re-renders every <Window> on each pointer move. Both props here are
+ * stable per window instance, so memo() stops those re-renders from cascading
+ * into app subtrees (which can be large, e.g. the Files entry list).
+ */
+const WindowContent = memo(function WindowContent({
+  component: AppComponent,
+  windowId,
+}: {
+  component: ComponentType<AppComponentProps>;
+  windowId: string;
+}) {
+  return <AppComponent windowId={windowId} />;
+});
 
 /** A single draggable, resizable, focusable application window on the desktop. */
 export function Window({ window: win, isTop }: { window: WindowState; isTop: boolean }) {
@@ -120,8 +140,6 @@ export function Window({ window: win, isTop }: { window: WindowState; isTop: boo
 
   if (!app || win.minimized) return null;
 
-  const AppComponent = app.component;
-
   const geometry: React.CSSProperties = win.maximized
     ? { left: 0, top: 0, width: '100%', height: '100%', zIndex: win.z }
     : { left: win.x, top: win.y, width: win.width, height: win.height, zIndex: win.z };
@@ -183,7 +201,7 @@ export function Window({ window: win, isTop }: { window: WindowState; isTop: boo
       </header>
 
       <div className="relative flex-1 overflow-hidden bg-white">
-        <AppComponent windowId={win.id} />
+        <WindowContent component={app.component} windowId={win.id} />
       </div>
 
       {!win.maximized &&

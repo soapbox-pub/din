@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -36,10 +43,22 @@ import {
 } from '@/hooks/useFileSystem';
 import { Skeleton } from '@/components/ui/skeleton';
 
-/** Cap for preview reads: enough for big images, cheap over IPC. */
+/** Cap for image preview reads: enough for big images, cheap over IPC. */
 const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+/** Cap for text preview reads (we only render the beginning anyway). */
+const TEXT_PREVIEW_MAX_BYTES = 1024 * 1024;
 /** Never render more text than this (keeps the DOM responsive). */
 const TEXT_PREVIEW_MAX_CHARS = 512 * 1024;
+
+/**
+ * Shared date formatter. Constructing an Intl.DateTimeFormat is expensive
+ * (~0.1ms), so per-row `toLocaleString` calls dominate render time on large
+ * directories; a single cached instance makes formatting nearly free.
+ */
+const MTIME_FORMAT = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
 
 const IMAGE_MIME: Record<string, string> = {
   png: 'image/png',
@@ -68,14 +87,21 @@ function extensionOf(name: string): string {
   return idx > 0 ? name.slice(idx + 1).toLowerCase() : '';
 }
 
-function entryIcon(entry: FsEntry): LucideIcon {
-  if (entry.kind === 'directory') return Folder;
+/** Icon for a directory entry, keyed off its kind and file extension. */
+function EntryIcon({ entry }: { entry: FsEntry }) {
+  const className = cn(
+    'size-4 shrink-0',
+    entry.kind === 'directory' ? 'text-sky-400' : 'text-white/50',
+  );
+  if (entry.kind === 'directory') return <Folder className={className} aria-hidden />;
   const ext = extensionOf(entry.name);
-  if (ext in IMAGE_MIME) return FileImage;
-  if (CODE_EXTENSIONS.has(ext)) return FileCode;
-  if (ARCHIVE_EXTENSIONS.has(ext)) return FileArchive;
-  if (ext === 'md' || ext === 'txt' || ext === 'log') return FileText;
-  return File;
+  if (ext in IMAGE_MIME) return <FileImage className={className} aria-hidden />;
+  if (CODE_EXTENSIONS.has(ext)) return <FileCode className={className} aria-hidden />;
+  if (ARCHIVE_EXTENSIONS.has(ext)) return <FileArchive className={className} aria-hidden />;
+  if (ext === 'md' || ext === 'txt' || ext === 'log') {
+    return <FileText className={className} aria-hidden />;
+  }
+  return <File className={className} aria-hidden />;
 }
 
 /**
@@ -260,7 +286,7 @@ export function FileBrowser(_props: AppComponentProps) {
         </nav>
 
         {/* Entry list */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex min-w-0 flex-1 flex-col">
           {listing.isLoading || cwd === null ? (
             <ListSkeleton />
           ) : listing.isError ? (
@@ -276,57 +302,8 @@ export function FileBrowser(_props: AppComponentProps) {
               <p className="text-sm text-white/50">This folder is empty.</p>
             </div>
           ) : (
-            <ul className="p-1">
-              {entries.map((entry) => {
-                const Icon = entryIcon(entry);
-                return (
-                  <li key={entry.name}>
-                    <button
-                      type="button"
-                      onClick={() => openEntry(entry)}
-                      disabled={entry.kind === 'other'}
-                      className={cn(
-                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left',
-                        'hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-                        'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
-                      )}
-                    >
-                      <Icon
-                        className={cn(
-                          'size-4 shrink-0',
-                          entry.kind === 'directory'
-                            ? 'text-sky-400'
-                            : 'text-white/50',
-                        )}
-                        aria-hidden
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm text-white">
-                        {entry.name}
-                      </span>
-                      {entry.symlink && (
-                        <LinkIcon
-                          className="size-3 shrink-0 text-white/40"
-                          aria-label="Symbolic link"
-                        />
-                      )}
-                      <span className="w-20 shrink-0 text-right text-xs tabular-nums text-white/50">
-                        {entry.kind === 'file' && entry.size !== null
-                          ? formatBytes(entry.size)
-                          : ''}
-                      </span>
-                      <span className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-white/50 md:block">
-                        {entry.mtimeMs !== null
-                          ? new Date(entry.mtimeMs).toLocaleString(undefined, {
-                              dateStyle: 'medium',
-                              timeStyle: 'short',
-                            })
-                          : ''}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            // Keyed by path so scroll position resets on navigation.
+            <EntryList key={cwd} entries={entries} onOpen={openEntry} />
           )}
         </div>
 
@@ -352,11 +329,126 @@ export function FileBrowser(_props: AppComponentProps) {
   );
 }
 
+/** Fixed row height for the virtualized entry list (px). */
+const ROW_HEIGHT = 32;
+/** Extra rows rendered above/below the viewport to hide scroll pop-in. */
+const OVERSCAN = 10;
+
+/**
+ * Virtualized directory listing.
+ *
+ * Directories like /nix/store can hit the 5000-entry cap; rendering that many
+ * rows makes every render (and layout) of the app expensive. With fixed-height
+ * rows we only mount what is visible (~30 rows), so render cost is constant
+ * regardless of directory size. Memoized so parent re-renders (toolbar typing,
+ * preview open/close) skip it entirely when the listing is unchanged.
+ */
+const EntryList = memo(function EntryList({
+  entries,
+  onOpen,
+}: {
+  entries: FsEntry[];
+  onOpen: (entry: FsEntry) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+
+  // Track the visible height (windows are freely resizable). The observer
+  // fires once on observe, which also provides the initial measurement.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      setViewportHeight(el.clientHeight);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+  const end = Math.min(
+    entries.length,
+    Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN,
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      className="min-h-0 flex-1 overflow-y-auto px-1 py-1"
+    >
+      <ul className="relative" style={{ height: entries.length * ROW_HEIGHT }}>
+        {entries.slice(start, end).map((entry, i) => (
+          <EntryRow
+            key={entry.name}
+            entry={entry}
+            top={(start + i) * ROW_HEIGHT}
+            onOpen={onOpen}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+});
+
+/** One row in the entry list, absolutely positioned within the virtual list. */
+const EntryRow = memo(function EntryRow({
+  entry,
+  top,
+  onOpen,
+}: {
+  entry: FsEntry;
+  top: number;
+  onOpen: (entry: FsEntry) => void;
+}) {
+  return (
+    <li
+      className="absolute inset-x-0"
+      style={{ top, height: ROW_HEIGHT }}
+    >
+      <button
+        type="button"
+        onClick={() => onOpen(entry)}
+        disabled={entry.kind === 'other'}
+        className={cn(
+          'flex h-full w-full items-center gap-2 rounded-md px-2 text-left',
+          'hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+          'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
+        )}
+      >
+        <EntryIcon entry={entry} />
+        <span className="min-w-0 flex-1 truncate text-sm text-white">
+          {entry.name}
+        </span>
+        {entry.symlink && (
+          <LinkIcon
+            className="size-3 shrink-0 text-white/40"
+            aria-label="Symbolic link"
+          />
+        )}
+        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-white/50">
+          {entry.kind === 'file' && entry.size !== null
+            ? formatBytes(entry.size)
+            : ''}
+        </span>
+        <span className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-white/50 md:block">
+          {entry.mtimeMs !== null ? MTIME_FORMAT.format(entry.mtimeMs) : ''}
+        </span>
+      </button>
+    </li>
+  );
+});
+
 /** In-window preview overlay for a single file (text or image). */
 function FilePreview({ path, onClose }: { path: string; onClose: () => void }) {
   const name = path.slice(path.lastIndexOf('/') + 1);
-  const content = useFileContent(path, PREVIEW_MAX_BYTES);
   const mime = IMAGE_MIME[extensionOf(name)];
+  // Text/binary files only need the first chunk; images need full bytes.
+  const content = useFileContent(
+    path,
+    mime ? PREVIEW_MAX_BYTES : TEXT_PREVIEW_MAX_BYTES,
+  );
 
   const imageUrl = useMemo(() => {
     if (!mime || !content.data || content.data.truncated) return null;
