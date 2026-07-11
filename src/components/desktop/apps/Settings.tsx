@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import {
+  Bomb,
+  Bug,
   Check,
   Cloud,
   CloudOff,
@@ -39,12 +41,13 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type SectionId = 'wifi' | 'nostr' | 'appearance';
+type SectionId = 'wifi' | 'nostr' | 'appearance' | 'developers';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
+  { id: 'developers', name: 'Developers', icon: Bug },
 ];
 
 /**
@@ -57,6 +60,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
+ * Developers holds debug utilities such as intentionally crashing the shell
+ * to test the error boundary.
  */
 export function Settings(_props: AppComponentProps) {
   const [section, setSection] = useState<SectionId>('wifi');
@@ -93,8 +98,10 @@ export function Settings(_props: AppComponentProps) {
           <WifiSection />
         ) : section === 'nostr' ? (
           <NostrStorageSection />
-        ) : (
+        ) : section === 'appearance' ? (
           <AppearanceSection />
+        ) : (
+          <DevelopersSection />
         )}
       </div>
     </div>
@@ -565,6 +572,43 @@ function AppearanceSection() {
             updateConfig((current) => ({ ...current, wobblyWindows: checked }))
           }
         />
+      </div>
+    </SectionShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Developers
+// ---------------------------------------------------------------------------
+
+/**
+ * Developer utilities. Currently a single control that crashes the shell on
+ * purpose: clicking "Crash" arms a state flag, and the next render throws.
+ * Throwing during render (rather than in the click handler) matters — React
+ * error boundaries only catch render errors, so this is the reliable way to
+ * exercise the root <ErrorBoundary> death screen.
+ */
+function DevelopersSection() {
+  const [armed, setArmed] = useState(false);
+
+  if (armed) {
+    throw new Error('Intentional crash triggered from Settings → Developers');
+  }
+
+  return (
+    <SectionShell title="Developers">
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <div className="min-w-0">
+          <p className="text-sm text-foreground">Trigger an error</p>
+          <p className="text-xs text-muted-foreground">
+            Throws an uncaught render error to crash the shell and show the
+            death screen. Use TRY AGAIN there to recover.
+          </p>
+        </div>
+        <Button variant="destructive" size="sm" onClick={() => setArmed(true)}>
+          <Bomb aria-hidden />
+          Crash
+        </Button>
       </div>
     </SectionShell>
   );
