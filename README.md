@@ -84,6 +84,9 @@ nix run --inputs-from ./os nixpkgs#prefetch-npm-deps -- package-lock.json
 # copy the sha256-... into npmDepsHash in os/configuration.nix
 ```
 
+Also note: when built from a git checkout, the flake only sees **git-tracked**
+files — `git add` new source files before `npm run os:build`.
+
 ## Notes
 
 - The Settings app manages WiFi through NetworkManager (`nmcli` behind an
