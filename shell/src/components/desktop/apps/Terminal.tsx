@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { RotateCw, SquareTerminal } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { getPtyBridge } from '@/lib/pty';
@@ -75,6 +76,20 @@ export function Terminal(_props: AppComponentProps) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
+
+    // Prefer the WebGL renderer: the default DOM renderer draws box-drawing
+    // and block glyphs straight from the font, leaving gaps and misaligned
+    // borders in TUI apps. WebGL synthesizes those glyphs pixel-perfectly
+    // (customGlyphs). Falls back to the DOM renderer when WebGL is
+    // unavailable (e.g. software rendering disabled).
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+    } catch {
+      // DOM renderer it is.
+    }
+
     fit.fit();
 
     const offData = bridge.onData((id, data) => {

@@ -6,7 +6,7 @@ let
     pname = "webos-shell";
     version = "0.1.0";
     src = ../shell;
-    npmDepsHash = "sha256-yA4blfKTg3s3dXE2nIRU6o4EQ7OETVknTbU7A/omuTQ=";
+    npmDepsHash = "sha256-zWr+6R6uWZD9hmnszjS7tfLPQJeK30R1A3ids9pH3GE=";
 
     # The package.json scripts run `npm i` (network); run vite directly instead.
     buildPhase = ''
