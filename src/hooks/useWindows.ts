@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { getApp } from '@/lib/apps';
 
 /** Highest z among the given windows (0 if none). */
@@ -134,7 +134,13 @@ export function useWindows() {
     });
   }, []);
 
-  return { windows, open, close, minimize, focus, move, resize, toggleMaximize };
+  // Stable identity as long as `windows` doesn't change (all callbacks are
+  // stable), so context consumers and memoized components don't re-render
+  // just because the owner of this hook re-rendered.
+  return useMemo(
+    () => ({ windows, open, close, minimize, focus, move, resize, toggleMaximize }),
+    [windows, open, close, minimize, focus, move, resize, toggleMaximize],
+  );
 }
 
 export type WindowManager = ReturnType<typeof useWindows>;

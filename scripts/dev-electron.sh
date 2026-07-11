@@ -46,15 +46,22 @@ for _ in $(seq 1 60); do
 done
 
 echo "Launching Electron -> ${URL}"
-# --disable-gpu: many dev machines (and headless X/QEMU) lack GL accel, which
-# otherwise floods the console with ANGLE/EGL errors. Drop it if you want to
-# exercise GPU paths locally.
-# --enable-unsafe-swiftshader: with the GPU disabled, Chromium >=137 refuses
-# to create even software WebGL contexts without this flag. The Terminal app
-# needs WebGL for crisp box-drawing glyphs ("unsafe" = SwiftShader is not
-# security-maintained against untrusted WebGL content; acceptable here).
+# GPU acceleration is ON by default: window dragging, backdrop blur, and
+# shadows feel dramatically snappier composited on the GPU than in SwiftShader.
+# If your machine lacks working GL (headless X, QEMU without virgl, broken
+# driver paths), Chromium logs some ANGLE/EGL noise and falls back to software
+# on its own; set DIN_NO_GPU=1 to skip the attempt entirely.
+# --enable-unsafe-swiftshader stays in both modes: whenever the GPU is absent
+# or fails to init, Chromium >=137 refuses to create even software WebGL
+# contexts without it, and the Terminal app needs WebGL for crisp box-drawing
+# glyphs ("unsafe" = SwiftShader is not security-maintained against untrusted
+# WebGL content; acceptable here).
+GPU_FLAGS=(--enable-unsafe-swiftshader)
+if [ "${DIN_NO_GPU:-0}" = "1" ]; then
+  GPU_FLAGS=(--disable-gpu --enable-unsafe-swiftshader)
+fi
 DIN_DEV_URL="${URL}" "${ELECTRON}" "${ROOT_DIR}/electron/main.cjs" \
-  --disable-gpu --enable-unsafe-swiftshader &
+  "${GPU_FLAGS[@]}" &
 ELECTRON_PID=$!
 
 # Exit when either process exits.
