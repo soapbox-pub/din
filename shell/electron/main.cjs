@@ -52,7 +52,19 @@ function resolveFile(pathname) {
 const DEV_URL = process.env.SHELL_DEV_URL;
 
 // ---------------------------------------------------------------------------
-// Read-only filesystem bridge (see preload.cjs / the Files app).
+// Filesystem bridge (window.fs - see preload.cjs / the Files app).
+//
+// Threat model: everything registered here is callable by any script running
+// in the shell's origin, so an XSS in the shell gets this entire API. Since
+// the bridge became write-capable, that means an XSS can persist (e.g. write
+// shell rc files), not just read. Mitigations, in order of importance:
+//   1. Strict CSP in the shell (script-src 'self') - the primary defense.
+//   2. The sender guard below: only the shell window's main frame is
+//      accepted; <webview> guests (arbitrary web content) are rejected.
+//   3. The OS itself: the shell runs as an unprivileged user, so writes to
+//      system paths (/nix/store, /etc, ...) fail with EACCES at the kernel
+//      boundary. The bridge adds no privilege - it can only do what any
+//      process of that user could.
 //
 // Performance notes: everything is async (libuv threadpool), directory
 // listings stat all entries in parallel and are capped at MAX_DIR_ENTRIES,
@@ -93,13 +105,23 @@ function kindOf(stats) {
   return 'other';
 }
 
+/** Plain-object stat summary that survives structured clone. */
+function statSummary(stats) {
+  return { kind: kindOf(stats), size: stats.size, mtimeMs: stats.mtimeMs };
+}
+
 function registerFsHandlers() {
-  ipcMain.handle('fs:home', (event) => {
+  ipcMain.handle('fs:homedir', (event) => {
     assertShellSender(event);
     return os.homedir();
   });
 
-  ipcMain.handle('fs:list', async (event, dirPath) => {
+  ipcMain.handle('fs:stat', async (event, target) => {
+    assertShellSender(event);
+    return statSummary(await fsp.stat(normalizeAbsolute(target)));
+  });
+
+  ipcMain.handle('fs:readdir', async (event, dirPath) => {
     assertShellSender(event);
     const dir = normalizeAbsolute(dirPath);
 
@@ -136,7 +158,7 @@ function registerFsHandlers() {
     return { path: dir, entries, truncated };
   });
 
-  ipcMain.handle('fs:read', async (event, filePath, maxBytes) => {
+  ipcMain.handle('fs:readFile', async (event, filePath, maxBytes) => {
     assertShellSender(event);
     const file = normalizeAbsolute(filePath);
     const cap = Math.min(
@@ -156,6 +178,42 @@ function registerFsHandlers() {
     } finally {
       await handle.close();
     }
+  });
+
+  ipcMain.handle('fs:writeFile', async (event, filePath, data) => {
+    assertShellSender(event);
+    const file = normalizeAbsolute(filePath);
+    if (typeof data !== 'string' && !(data instanceof Uint8Array)) {
+      throw new Error('writeFile data must be a string or Uint8Array');
+    }
+    await fsp.writeFile(file, data);
+  });
+
+  ipcMain.handle('fs:mkdir', async (event, dirPath) => {
+    assertShellSender(event);
+    await fsp.mkdir(normalizeAbsolute(dirPath), { recursive: true });
+  });
+
+  ipcMain.handle('fs:rename', async (event, from, to) => {
+    assertShellSender(event);
+    await fsp.rename(normalizeAbsolute(from), normalizeAbsolute(to));
+  });
+
+  ipcMain.handle('fs:copyFile', async (event, from, to) => {
+    assertShellSender(event);
+    await fsp.copyFile(normalizeAbsolute(from), normalizeAbsolute(to));
+  });
+
+  ipcMain.handle('fs:rm', async (event, target, options) => {
+    assertShellSender(event);
+    const p = normalizeAbsolute(target);
+    if (p === '/') throw new Error('Refusing to remove /');
+    const recursive = options !== null && typeof options === 'object'
+      ? options.recursive === true
+      : false;
+    // Without `recursive`, directories must be empty (rmdir semantics) and
+    // files unlink; never silently ignore missing paths (`force` stays off).
+    await fsp.rm(p, { recursive });
   });
 }
 
@@ -187,7 +245,7 @@ app.whenReady().then(() => {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      // Expose the read-only fs bridge (window.webosFs) to the shell.
+      // Expose the fs bridge (window.fs) to the shell.
       preload: path.join(__dirname, 'preload.cjs'),
       // Enable <webview> so the in-shell web browser app can load arbitrary
       // sites (a real embedder, unlike an <iframe> which remote sites block

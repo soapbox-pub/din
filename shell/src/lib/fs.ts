@@ -1,13 +1,25 @@
 /**
- * Typed access to the read-only OS filesystem bridge exposed by the Electron
- * preload (`window.webosFs`, see electron/preload.cjs + electron/main.cjs).
+ * Typed access to the OS filesystem bridge exposed by the Electron preload
+ * (`window.fs`, see electron/preload.cjs + electron/main.cjs).
+ *
+ * The API is Node-flavored but deliberately not Node's fs module: it is
+ * promise-only, `readdir` returns rich entries in one batched IPC call, and
+ * `readFile` is size-capped. Authority is bounded by the unprivileged OS
+ * user the shell runs as (writes to system paths fail with EACCES).
  *
  * In a plain browser (`make dev-browser`) the bridge is absent; callers must
  * feature-detect via `getFsBridge()` and render a fallback.
  */
 
-/** What a directory entry resolved to (symlinks are followed for `kind`). */
+/** What a path or directory entry resolved to (symlinks are followed). */
 export type FsEntryKind = 'directory' | 'file' | 'other';
+
+export interface FsStat {
+  kind: FsEntryKind;
+  size: number;
+  /** Modification time (ms since epoch). */
+  mtimeMs: number;
+}
 
 export interface FsEntry {
   name: string;
@@ -36,28 +48,46 @@ export interface FsReadResult {
   truncated: boolean;
 }
 
-export interface WebosFsBridge {
-  home(): Promise<string>;
-  list(dirPath: string): Promise<FsListing>;
-  readFile(filePath: string, maxBytes?: number): Promise<FsReadResult>;
+export interface FsBridge {
+  /** Absolute path of the shell user's home directory. */
+  homedir(): Promise<string>;
+  /** Metadata for a single path (follows symlinks). */
+  stat(path: string): Promise<FsStat>;
+  /** List a directory with resolved kind/size/mtime per entry. */
+  readdir(path: string): Promise<FsListing>;
+  /** Read up to `maxBytes` of a regular file. */
+  readFile(path: string, maxBytes?: number): Promise<FsReadResult>;
+  /** Write a file, replacing any existing contents. */
+  writeFile(path: string, data: Uint8Array | string): Promise<void>;
+  /** Create a directory (recursive, like `mkdir -p`). */
+  mkdir(path: string): Promise<void>;
+  /** Rename/move a file or directory. */
+  rename(from: string, to: string): Promise<void>;
+  /** Copy a single regular file. */
+  copyFile(from: string, to: string): Promise<void>;
+  /**
+   * Remove a file or (empty) directory. Deleting a non-empty directory
+   * requires an explicit `recursive: true`.
+   */
+  rm(path: string, options?: { recursive?: boolean }): Promise<void>;
 }
 
 declare global {
   interface Window {
     /** Present only inside the Electron shell. */
-    webosFs?: WebosFsBridge;
+    fs?: FsBridge;
   }
 }
 
 /** The fs bridge, or undefined when running outside the Electron shell. */
-export function getFsBridge(): WebosFsBridge | undefined {
+export function getFsBridge(): FsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.webosFs;
+  return window.fs;
 }
 
 /**
- * Strip Electron's IPC error prefix ("Error invoking remote method 'fs:list':
- * Error: ENOENT ...") so users see just the underlying message.
+ * Strip Electron's IPC error prefix ("Error invoking remote method
+ * 'fs:readdir': Error: ENOENT ...") so users see just the underlying message.
  */
 export function cleanFsError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -79,6 +109,20 @@ export function parentPath(p: string): string {
 /** Join a directory and a child entry name. */
 export function joinPath(dir: string, name: string): string {
   return dir === '/' ? `/${name}` : `${dir.replace(/\/+$/, '')}/${name}`;
+}
+
+/**
+ * Whether a string is usable as a single new file/directory name (no path
+ * separators or traversal).
+ */
+export function isValidEntryName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name !== '.' &&
+    name !== '..' &&
+    !name.includes('/') &&
+    !name.includes('\0')
+  );
 }
 
 /** Human-readable byte size (e.g. "4.2 MB"). */

@@ -19,10 +19,13 @@ import {
   FileImage,
   FileText,
   Folder,
+  FolderPlus,
   HardDrive,
   Home,
   Link as LinkIcon,
+  Pencil,
   RotateCw,
+  Trash2,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -32,6 +35,7 @@ import {
   cleanFsError,
   formatBytes,
   getFsBridge,
+  isValidEntryName,
   joinPath,
   parentPath,
 } from '@/lib/fs';
@@ -39,8 +43,15 @@ import type { FsEntry } from '@/lib/fs';
 import {
   useDirectory,
   useFileContent,
+  useFsMutations,
   useHomeDir,
 } from '@/hooks/useFileSystem';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /** Cap for image preview reads: enough for big images, cheap over IPC. */
@@ -105,17 +116,20 @@ function EntryIcon({ entry }: { entry: FsEntry }) {
 }
 
 /**
- * Files - a read-only browser for the underlying OS filesystem.
+ * Files - a browser for the underlying OS filesystem.
  *
- * Backed by `window.webosFs` (Electron preload + IPC into the main process),
- * so it sees the VM's real filesystem. Directory listings are cached with
- * TanStack Query; clicking a directory navigates, clicking a file opens an
- * in-window preview (text or image). Outside the Electron shell (plain
- * browser dev) it shows an explanatory fallback.
+ * Backed by `window.fs` (Electron preload + IPC into the main process), so it
+ * sees the VM's real filesystem. Directory listings are cached with TanStack
+ * Query; clicking a directory navigates, clicking a file opens an in-window
+ * preview (text or image). Right-click offers rename/delete, and the toolbar
+ * can create folders; writes are bounded by the OS user's permissions.
+ * Outside the Electron shell (plain browser dev) it shows an explanatory
+ * fallback.
  */
 export function FileBrowser(_props: AppComponentProps) {
   const bridge = getFsBridge();
   const home = useHomeDir();
+  const { mkdir, rename, rm } = useFsMutations();
 
   const [history, setHistory] = useState<string[]>([]);
   const [cursor, setCursor] = useState(-1);
@@ -123,6 +137,14 @@ export function FileBrowser(_props: AppComponentProps) {
   const [addressEdit, setAddressEdit] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
+  // Whether the "new folder" name editor row is open.
+  const [creating, setCreating] = useState(false);
+  // Name of the entry currently being renamed inline, if any.
+  const [renamingName, setRenamingName] = useState<string | null>(null);
+  // Entry awaiting delete confirmation, if any.
+  const [confirmDelete, setConfirmDelete] = useState<FsEntry | null>(null);
+  // Last failed operation, shown in the status bar.
+  const [opError, setOpError] = useState<string | null>(null);
 
   // Until the user navigates, the current directory is the home directory.
   const cwd = cursor >= 0 ? history[cursor] : (home.data ?? null);
@@ -133,6 +155,10 @@ export function FileBrowser(_props: AppComponentProps) {
       const normalized = target.length > 1 ? target.replace(/\/+$/, '') : '/';
       setPreviewPath(null);
       setAddressEdit(null);
+      setCreating(false);
+      setRenamingName(null);
+      setConfirmDelete(null);
+      setOpError(null);
       setHistory((h) => {
         const base = cursor >= 0 ? h.slice(0, cursor + 1) : cwd ? [cwd] : [];
         setCursor(base.length);
@@ -148,6 +174,9 @@ export function FileBrowser(_props: AppComponentProps) {
       if (target < 0 || target >= history.length) return;
       setPreviewPath(null);
       setAddressEdit(null);
+      setCreating(false);
+      setRenamingName(null);
+      setConfirmDelete(null);
       setCursor(target);
     },
     [cursor, history],
@@ -190,6 +219,61 @@ export function FileBrowser(_props: AppComponentProps) {
     },
     [cwd, navigate],
   );
+
+  const createFolder = useCallback(
+    (name: string) => {
+      if (cwd === null) return;
+      setOpError(null);
+      mkdir.mutate(joinPath(cwd, name), {
+        onSuccess: () => setCreating(false),
+        onError: (error) => setOpError(cleanFsError(error)),
+      });
+    },
+    [cwd, mkdir],
+  );
+
+  const renameEntry = useCallback(
+    (from: string, to: string) => {
+      if (cwd === null) return;
+      setRenamingName(null);
+      if (from === to) return;
+      setOpError(null);
+      rename.mutate(
+        { from: joinPath(cwd, from), to: joinPath(cwd, to) },
+        { onError: (error) => setOpError(cleanFsError(error)) },
+      );
+    },
+    [cwd, rename],
+  );
+
+  const deleteEntry = useCallback(
+    (entry: FsEntry) => {
+      if (cwd === null) return;
+      setOpError(null);
+      rm.mutate(
+        {
+          path: joinPath(cwd, entry.name),
+          recursive: entry.kind === 'directory',
+        },
+        {
+          onSettled: () => setConfirmDelete(null),
+          onError: (error) => setOpError(cleanFsError(error)),
+        },
+      );
+    },
+    [cwd, rm],
+  );
+
+  const startRename = useCallback((entry: FsEntry) => {
+    setCreating(false);
+    setRenamingName(entry.name);
+  }, []);
+
+  const requestDelete = useCallback((entry: FsEntry) => {
+    setConfirmDelete(entry);
+  }, []);
+
+  const cancelRename = useCallback(() => setRenamingName(null), []);
 
   if (!bridge) {
     return (
@@ -253,6 +337,16 @@ export function FileBrowser(_props: AppComponentProps) {
         />
 
         <ToolButton
+          label="New folder"
+          disabled={listing.data === undefined}
+          onClick={() => {
+            setRenamingName(null);
+            setCreating(true);
+          }}
+        >
+          <FolderPlus className="size-4" />
+        </ToolButton>
+        <ToolButton
           label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
           onClick={() => setShowHidden((v) => !v)}
         >
@@ -287,6 +381,18 @@ export function FileBrowser(_props: AppComponentProps) {
 
         {/* Entry list */}
         <div className="flex min-w-0 flex-1 flex-col">
+          {creating && (
+            <div className="border-b border-white/10 px-1 py-1">
+              <NameEditor
+                icon={<Folder className="size-4 shrink-0 text-sky-400" aria-hidden />}
+                initialValue="untitled folder"
+                label="New folder name"
+                pending={mkdir.isPending}
+                onSubmit={createFolder}
+                onCancel={() => setCreating(false)}
+              />
+            </div>
+          )}
           {listing.isLoading || cwd === null ? (
             <ListSkeleton />
           ) : listing.isError ? (
@@ -297,18 +403,36 @@ export function FileBrowser(_props: AppComponentProps) {
                 </p>
               </div>
             </div>
-          ) : entries.length === 0 ? (
+          ) : entries.length === 0 && !creating ? (
             <div className="grid flex-1 place-items-center p-6">
               <p className="text-sm text-white/50">This folder is empty.</p>
             </div>
           ) : (
             // Keyed by path so scroll position resets on navigation.
-            <EntryList key={cwd} entries={entries} onOpen={openEntry} />
+            <EntryList
+              key={cwd}
+              entries={entries}
+              onOpen={openEntry}
+              onRenameStart={startRename}
+              onDelete={requestDelete}
+              renamingName={renamingName}
+              onRenameSubmit={renameEntry}
+              onRenameCancel={cancelRename}
+            />
           )}
         </div>
 
         {previewPath !== null && (
           <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
+        )}
+
+        {confirmDelete !== null && (
+          <DeleteConfirm
+            entry={confirmDelete}
+            pending={rm.isPending}
+            onConfirm={() => deleteEntry(confirmDelete)}
+            onCancel={() => setConfirmDelete(null)}
+          />
         )}
       </div>
 
@@ -322,6 +446,11 @@ export function FileBrowser(_props: AppComponentProps) {
         {listing.data?.truncated && (
           <span className="text-amber-400/80">
             Listing truncated - directory has more entries than shown.
+          </span>
+        )}
+        {opError !== null && (
+          <span role="alert" className="min-w-0 flex-1 truncate text-right text-red-400">
+            {opError}
           </span>
         )}
       </div>
@@ -346,9 +475,19 @@ const OVERSCAN = 10;
 const EntryList = memo(function EntryList({
   entries,
   onOpen,
+  onRenameStart,
+  onDelete,
+  renamingName,
+  onRenameSubmit,
+  onRenameCancel,
 }: {
   entries: FsEntry[];
   onOpen: (entry: FsEntry) => void;
+  onRenameStart: (entry: FsEntry) => void;
+  onDelete: (entry: FsEntry) => void;
+  renamingName: string | null;
+  onRenameSubmit: (from: string, to: string) => void;
+  onRenameCancel: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -385,6 +524,11 @@ const EntryList = memo(function EntryList({
             entry={entry}
             top={(start + i) * ROW_HEIGHT}
             onOpen={onOpen}
+            onRenameStart={onRenameStart}
+            onDelete={onDelete}
+            isRenaming={entry.name === renamingName}
+            onRenameSubmit={onRenameSubmit}
+            onRenameCancel={onRenameCancel}
           />
         ))}
       </ul>
@@ -397,48 +541,199 @@ const EntryRow = memo(function EntryRow({
   entry,
   top,
   onOpen,
+  onRenameStart,
+  onDelete,
+  isRenaming,
+  onRenameSubmit,
+  onRenameCancel,
 }: {
   entry: FsEntry;
   top: number;
   onOpen: (entry: FsEntry) => void;
+  onRenameStart: (entry: FsEntry) => void;
+  onDelete: (entry: FsEntry) => void;
+  isRenaming: boolean;
+  onRenameSubmit: (from: string, to: string) => void;
+  onRenameCancel: () => void;
 }) {
+  if (isRenaming) {
+    return (
+      <li className="absolute inset-x-0" style={{ top, height: ROW_HEIGHT }}>
+        <NameEditor
+          icon={<EntryIcon entry={entry} />}
+          initialValue={entry.name}
+          label={`Rename ${entry.name}`}
+          onSubmit={(name) => onRenameSubmit(entry.name, name)}
+          onCancel={onRenameCancel}
+        />
+      </li>
+    );
+  }
+
   return (
     <li
       className="absolute inset-x-0"
       style={{ top, height: ROW_HEIGHT }}
     >
-      <button
-        type="button"
-        onClick={() => onOpen(entry)}
-        disabled={entry.kind === 'other'}
-        className={cn(
-          'flex h-full w-full items-center gap-2 rounded-md px-2 text-left',
-          'hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-          'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
-        )}
-      >
-        <EntryIcon entry={entry} />
-        <span className="min-w-0 flex-1 truncate text-sm text-white">
-          {entry.name}
-        </span>
-        {entry.symlink && (
-          <LinkIcon
-            className="size-3 shrink-0 text-white/40"
-            aria-label="Symbolic link"
-          />
-        )}
-        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-white/50">
-          {entry.kind === 'file' && entry.size !== null
-            ? formatBytes(entry.size)
-            : ''}
-        </span>
-        <span className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-white/50 md:block">
-          {entry.mtimeMs !== null ? MTIME_FORMAT.format(entry.mtimeMs) : ''}
-        </span>
-      </button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            onClick={() => onOpen(entry)}
+            disabled={entry.kind === 'other'}
+            className={cn(
+              'flex h-full w-full items-center gap-2 rounded-md px-2 text-left',
+              'hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+              'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
+            )}
+          >
+            <EntryIcon entry={entry} />
+            <span className="min-w-0 flex-1 truncate text-sm text-white">
+              {entry.name}
+            </span>
+            {entry.symlink && (
+              <LinkIcon
+                className="size-3 shrink-0 text-white/40"
+                aria-label="Symbolic link"
+              />
+            )}
+            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-white/50">
+              {entry.kind === 'file' && entry.size !== null
+                ? formatBytes(entry.size)
+                : ''}
+            </span>
+            <span className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-white/50 md:block">
+              {entry.mtimeMs !== null ? MTIME_FORMAT.format(entry.mtimeMs) : ''}
+            </span>
+          </button>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onSelect={() => onRenameStart(entry)}>
+            <Pencil className="size-4" aria-hidden />
+            Rename
+          </ContextMenuItem>
+          <ContextMenuItem variant="destructive" onSelect={() => onDelete(entry)}>
+            <Trash2 className="size-4" aria-hidden />
+            Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     </li>
   );
 });
+
+/**
+ * Inline single-name editor row (new folder, rename). Enter submits, Escape
+ * or blur cancels; invalid names (slashes, '.', '..') can't be submitted.
+ */
+function NameEditor({
+  icon,
+  initialValue,
+  label,
+  pending,
+  onSubmit,
+  onCancel,
+}: {
+  icon: React.ReactNode;
+  initialValue: string;
+  label: string;
+  pending?: boolean;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const valid = isValidEntryName(value.trim());
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valid && !pending) onSubmit(value.trim());
+      }}
+      className="flex items-center gap-2 rounded-md px-2"
+      style={{ height: ROW_HEIGHT }}
+    >
+      {icon}
+      <input
+        type="text"
+        aria-label={label}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onCancel();
+        }}
+        onBlur={() => {
+          if (!pending) onCancel();
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        disabled={pending}
+        autoFocus
+        spellCheck={false}
+        autoComplete="off"
+        className={cn(
+          'h-6 min-w-0 flex-1 rounded border bg-neutral-800 px-2 text-sm text-white',
+          'focus-visible:outline-none focus-visible:ring-2',
+          valid
+            ? 'border-white/20 focus-visible:ring-white/30'
+            : 'border-red-500/60 focus-visible:ring-red-500/40',
+          'disabled:opacity-50',
+        )}
+      />
+    </form>
+  );
+}
+
+/** In-window confirmation overlay for deleting an entry. */
+function DeleteConfirm({
+  entry,
+  pending,
+  onConfirm,
+  onCancel,
+}: {
+  entry: FsEntry;
+  pending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={`Delete ${entry.name}?`}
+      className="absolute inset-0 z-20 grid place-items-center bg-black/60 p-6"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onCancel();
+      }}
+    >
+      <div className="w-full max-w-sm rounded-xl border border-white/10 bg-neutral-900 p-4 shadow-2xl">
+        <p className="text-sm text-white">
+          Delete <span className="font-mono">{entry.name}</span>
+          {entry.kind === 'directory' ? ' and everything inside it' : ''}?
+        </p>
+        <p className="mt-1 text-xs text-white/50">This cannot be undone.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={pending}
+            autoFocus
+            className="h-8 rounded-md px-3 text-sm text-white/80 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={pending}
+            className="h-8 rounded-md bg-red-600 px-3 text-sm font-medium text-white hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:opacity-50"
+          >
+            {pending ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** In-window preview overlay for a single file (text or image). */
 function FilePreview({ path, onClose }: { path: string; onClose: () => void }) {
