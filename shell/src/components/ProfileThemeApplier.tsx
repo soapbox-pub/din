@@ -1,54 +1,11 @@
 import { useEffect } from 'react';
 import { useProfileTheme } from '@/hooks/useProfileTheme';
-import { contrastForeground, relativeLuminance, type ProfileTheme } from '@/lib/profileTheme';
+import { useAppContext } from '@/hooks/useAppContext';
+import { deriveThemeTokens, isDarkTheme } from '@/lib/profileTheme';
 
 const FONT_SANS_FALLBACK =
   "'Inter Variable', ui-sans-serif, system-ui, sans-serif, " +
   "'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'";
-
-/**
- * Build the full shadcn token set from the theme's three colors
- * (background / text / primary), deriving intermediate surfaces with
- * color-mix so the palette works for both light and dark themes.
- */
-function buildCssTokens(theme: ProfileTheme): Record<string, string> {
-  const { background: bg, text: fg, primary } = theme.colors;
-  const primaryForeground = contrastForeground(primary);
-  const mix = (base: string, tint: string, basePercent: number) =>
-    `color-mix(in srgb, ${base} ${basePercent}%, ${tint})`;
-
-  const surface = mix(bg, fg, 96); // cards, popovers
-  const subtle = mix(bg, fg, 88); // secondary, muted, accent
-  const line = mix(bg, fg, 84); // borders, inputs
-
-  return {
-    '--background': bg,
-    '--foreground': fg,
-    '--card': surface,
-    '--card-foreground': fg,
-    '--popover': surface,
-    '--popover-foreground': fg,
-    '--primary': primary,
-    '--primary-foreground': primaryForeground,
-    '--secondary': subtle,
-    '--secondary-foreground': fg,
-    '--muted': subtle,
-    '--muted-foreground': mix(fg, bg, 65),
-    '--accent': subtle,
-    '--accent-foreground': fg,
-    '--border': line,
-    '--input': line,
-    '--ring': primary,
-    '--sidebar': surface,
-    '--sidebar-foreground': fg,
-    '--sidebar-primary': primary,
-    '--sidebar-primary-foreground': primaryForeground,
-    '--sidebar-accent': subtle,
-    '--sidebar-accent-foreground': fg,
-    '--sidebar-border': line,
-    '--sidebar-ring': primary,
-  };
-}
 
 /**
  * ProfileThemeApplier - applies the logged-in user's active profile theme
@@ -66,28 +23,44 @@ function buildCssTokens(theme: ProfileTheme): Record<string, string> {
  */
 export function ProfileThemeApplier() {
   const theme = useProfileTheme();
+  const { config } = useAppContext();
+  const configuredTheme = config.theme;
 
   // Apply color tokens.
   useEffect(() => {
     if (!theme) return;
 
     const root = document.documentElement;
-    const tokens = buildCssTokens(theme);
+    const dark = isDarkTheme(theme.colors.background);
+    const tokens = deriveThemeTokens(theme.colors);
 
     for (const [property, value] of Object.entries(tokens)) {
       root.style.setProperty(property, value);
     }
 
-    // Hint native UI (form controls, scrollbars) toward the theme's mode.
-    root.style.colorScheme = relativeLuminance(theme.colors.background) < 0.4 ? 'dark' : 'light';
+    // Keep the light/dark class (used by `dark:` variants) in sync with the
+    // theme's actual mode, and hint native UI (form controls, scrollbars).
+    root.classList.remove('light', 'dark');
+    root.classList.add(dark ? 'dark' : 'light');
+    root.style.colorScheme = dark ? 'dark' : 'light';
 
     return () => {
       for (const property of Object.keys(tokens)) {
         root.style.removeProperty(property);
       }
       root.style.removeProperty('color-scheme');
+
+      // Restore the configured light/dark class (mirrors useApplyTheme).
+      const fallback =
+        configuredTheme === 'system'
+          ? window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light'
+          : configuredTheme;
+      root.classList.remove('light', 'dark');
+      root.classList.add(fallback);
     };
-  }, [theme]);
+  }, [theme, configuredTheme]);
 
   // Load and apply theme fonts.
   useEffect(() => {

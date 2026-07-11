@@ -8,7 +8,8 @@ import { getPtyBridge } from '@/lib/pty';
 import '@xterm/xterm/css/xterm.css';
 
 /**
- * Colors tuned to the shell's neutral-950 chrome. Roughly the default
+ * Fixed terminal palette (terminals keep their own colors regardless of the
+ * OS theme). Roughly the default
  * "Tango dark" palette with a slightly brighter foreground for contrast.
  */
 const TERMINAL_THEME = {
@@ -151,12 +152,12 @@ export function Terminal(_props: AppComponentProps) {
 
   if (!bridge) {
     return (
-      <div className="grid h-full w-full place-items-center bg-neutral-950 p-6">
-        <div className="max-w-sm rounded-xl border border-dashed border-white/20 px-8 py-12 text-center">
-          <SquareTerminal className="mx-auto mb-4 size-8 text-white/40" aria-hidden />
-          <p className="text-sm text-white/70">
+      <div className="grid h-full w-full place-items-center p-6">
+        <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+          <SquareTerminal className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
+          <p className="text-sm text-muted-foreground">
             Terminal needs the Electron shell to run an OS shell. Run{' '}
-            <code className="rounded bg-white/10 px-1 py-0.5">make dev</code> or
+            <code className="rounded bg-foreground/10 px-1 py-0.5">make dev</code> or
             boot the VM; the bridge is not available in a plain browser.
           </p>
         </div>
@@ -168,15 +169,15 @@ export function Terminal(_props: AppComponentProps) {
     <div className="relative h-full w-full bg-[#0a0a0a]">
       <div ref={containerRef} className="h-full w-full pl-2 pt-1" />
       {exitCode !== null && (
-        <div className="absolute inset-0 grid place-items-center bg-neutral-950/80">
-          <div className="rounded-xl border border-white/15 bg-neutral-900 px-6 py-5 text-center shadow-lg">
-            <p className="mb-3 text-sm text-white/70">
+        <div className="absolute inset-0 grid place-items-center bg-background/80">
+          <div className="rounded-xl border border-border/60 bg-popover px-6 py-5 text-center shadow-lg">
+            <p className="mb-3 text-sm text-muted-foreground">
               Session ended{exitCode !== 0 ? ` (exit code ${exitCode})` : ''}.
             </p>
             <button
               type="button"
               onClick={restart}
-              className="inline-flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
+              className="inline-flex items-center gap-2 rounded-lg bg-foreground/10 px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-foreground/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               <RotateCw className="size-4" aria-hidden />
               New session

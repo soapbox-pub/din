@@ -156,10 +156,10 @@ export function Window({ window: win, isTop }: { window: WindowState; isTop: boo
       onPointerDown={() => focus(win.id)}
       style={geometry}
       className={cn(
-        'absolute flex flex-col overflow-hidden border border-white/10 bg-neutral-900 shadow-2xl',
-        'ring-1 ring-black/40 transition-shadow',
+        'absolute flex flex-col overflow-hidden border border-border/60 bg-card/90 shadow-2xl backdrop-blur-xl',
+        'ring-1 ring-black/20 transition-shadow',
         win.maximized ? 'rounded-none' : 'rounded-xl',
-        isTop && 'ring-white/20',
+        isTop && 'ring-ring/50',
       )}
     >
       <header
@@ -168,19 +168,19 @@ export function Window({ window: win, isTop }: { window: WindowState; isTop: boo
         onPointerUp={onPointerUp}
         onDoubleClick={() => toggleMaximize(win.id)}
         className={cn(
-          'flex h-9 shrink-0 touch-none select-none items-center gap-2 border-b border-white/10 bg-black/40 px-3',
+          'flex h-9 shrink-0 touch-none select-none items-center gap-2 border-b border-border/60 bg-background/60 px-3',
           win.maximized ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
         )}
       >
-        <app.icon className="size-4 shrink-0 text-white/70" aria-hidden />
-        <span className="flex-1 truncate text-sm font-medium text-white/90">
+        <app.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="flex-1 truncate text-sm font-medium text-foreground/90">
           {app.name}
         </span>
         <button
           type="button"
           aria-label="Minimize window"
           onClick={() => minimize(win.id)}
-          className="grid size-6 place-items-center rounded-md text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+          className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Minus className="size-4" />
         </button>
@@ -188,7 +188,7 @@ export function Window({ window: win, isTop }: { window: WindowState; isTop: boo
           type="button"
           aria-label={win.maximized ? 'Restore window' : 'Maximize window'}
           onClick={() => toggleMaximize(win.id)}
-          className="grid size-6 place-items-center rounded-md text-white/70 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+          className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {win.maximized ? (
             <Minimize2 className="size-3.5" />
@@ -200,13 +200,13 @@ export function Window({ window: win, isTop }: { window: WindowState; isTop: boo
           type="button"
           aria-label="Close window"
           onClick={() => close(win.id)}
-          className="grid size-6 place-items-center rounded-md text-white/70 hover:bg-red-500/80 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+          className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-destructive/80 hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X className="size-4" />
         </button>
       </header>
 
-      <div className="relative flex-1 overflow-hidden bg-white">
+      <div className="relative flex-1 overflow-hidden bg-background/80">
         <WindowContent component={app.component} windowId={win.id} />
       </div>
 

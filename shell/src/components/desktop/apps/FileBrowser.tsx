@@ -102,7 +102,7 @@ function extensionOf(name: string): string {
 function EntryIcon({ entry }: { entry: FsEntry }) {
   const className = cn(
     'size-4 shrink-0',
-    entry.kind === 'directory' ? 'text-sky-400' : 'text-white/50',
+    entry.kind === 'directory' ? 'text-primary' : 'text-muted-foreground',
   );
   if (entry.kind === 'directory') return <Folder className={className} aria-hidden />;
   const ext = extensionOf(entry.name);
@@ -277,12 +277,12 @@ export function FileBrowser(_props: AppComponentProps) {
 
   if (!bridge) {
     return (
-      <div className="grid h-full w-full place-items-center bg-neutral-950 p-6">
-        <div className="max-w-sm rounded-xl border border-dashed border-white/20 px-8 py-12 text-center">
-          <HardDrive className="mx-auto mb-4 size-8 text-white/40" aria-hidden />
-          <p className="text-sm text-white/70">
+      <div className="grid h-full w-full place-items-center p-6">
+        <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+          <HardDrive className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
+          <p className="text-sm text-muted-foreground">
             Files needs the Electron shell to access the OS filesystem. Run{' '}
-            <code className="rounded bg-white/10 px-1 py-0.5">make dev</code> or
+            <code className="rounded bg-foreground/10 px-1 py-0.5">make dev</code> or
             boot the VM; the bridge is not available in a plain browser.
           </p>
         </div>
@@ -291,7 +291,7 @@ export function FileBrowser(_props: AppComponentProps) {
   }
 
   return (
-    <div className="flex h-full w-full flex-col bg-neutral-950">
+    <div className="flex h-full w-full flex-col">
       {/* Toolbar */}
       <form
         onSubmit={(e) => {
@@ -299,7 +299,7 @@ export function FileBrowser(_props: AppComponentProps) {
           const raw = address.trim();
           if (raw.startsWith('/')) navigate(raw);
         }}
-        className="flex shrink-0 items-center gap-1 border-b border-white/10 bg-neutral-900 px-2 py-1.5"
+        className="flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/50 px-2 py-1.5"
       >
         <ToolButton label="Go back" disabled={cursor <= 0} onClick={() => go(-1)}>
           <ArrowLeft className="size-4" />
@@ -333,7 +333,7 @@ export function FileBrowser(_props: AppComponentProps) {
           onFocus={(e) => e.currentTarget.select()}
           spellCheck={false}
           autoComplete="off"
-          className="h-8 min-w-0 flex-1 rounded-md border border-white/10 bg-neutral-800 px-3 font-mono text-sm text-white placeholder:text-white/40 focus-visible:border-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+          className="h-8 min-w-0 flex-1 rounded-md border border-border/60 bg-secondary/80 px-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         />
 
         <ToolButton
@@ -358,7 +358,7 @@ export function FileBrowser(_props: AppComponentProps) {
         {/* Sidebar */}
         <nav
           aria-label="Places"
-          className="hidden w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-white/10 bg-neutral-900/60 p-2 sm:flex"
+          className="hidden w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/60 bg-background/30 p-2 sm:flex"
         >
           {places.map((place) => (
             <button
@@ -367,10 +367,10 @@ export function FileBrowser(_props: AppComponentProps) {
               onClick={() => navigate(place.path)}
               className={cn(
                 'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 cwd === place.path
-                  ? 'bg-white/15 text-white'
-                  : 'text-white/70 hover:bg-white/10 hover:text-white',
+                  ? 'bg-foreground/15 text-foreground'
+                  : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
               )}
             >
               <place.icon className="size-4 shrink-0" aria-hidden />
@@ -382,9 +382,9 @@ export function FileBrowser(_props: AppComponentProps) {
         {/* Entry list */}
         <div className="flex min-w-0 flex-1 flex-col">
           {creating && (
-            <div className="border-b border-white/10 px-1 py-1">
+            <div className="border-b border-border/60 px-1 py-1">
               <NameEditor
-                icon={<Folder className="size-4 shrink-0 text-sky-400" aria-hidden />}
+                icon={<Folder className="size-4 shrink-0 text-primary" aria-hidden />}
                 initialValue="untitled folder"
                 label="New folder name"
                 pending={mkdir.isPending}
@@ -397,15 +397,15 @@ export function FileBrowser(_props: AppComponentProps) {
             <ListSkeleton />
           ) : listing.isError ? (
             <div className="grid flex-1 place-items-center p-6">
-              <div className="max-w-sm rounded-xl border border-dashed border-white/20 px-8 py-12 text-center">
-                <p className="text-sm text-white/70">
+              <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+                <p className="text-sm text-muted-foreground">
                   Could not open this directory: {cleanFsError(listing.error)}
                 </p>
               </div>
             </div>
           ) : entries.length === 0 && !creating ? (
             <div className="grid flex-1 place-items-center p-6">
-              <p className="text-sm text-white/50">This folder is empty.</p>
+              <p className="text-sm text-muted-foreground">This folder is empty.</p>
             </div>
           ) : (
             // Keyed by path so scroll position resets on navigation.
@@ -437,7 +437,7 @@ export function FileBrowser(_props: AppComponentProps) {
       </div>
 
       {/* Status bar */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-white/10 bg-neutral-900 px-3 py-1 text-xs text-white/50">
+      <div className="flex shrink-0 items-center gap-2 border-t border-border/60 bg-background/50 px-3 py-1 text-xs text-muted-foreground">
         <span>
           {listing.data
             ? `${entries.length} item${entries.length === 1 ? '' : 's'}`
@@ -449,7 +449,7 @@ export function FileBrowser(_props: AppComponentProps) {
           </span>
         )}
         {opError !== null && (
-          <span role="alert" className="min-w-0 flex-1 truncate text-right text-red-400">
+          <span role="alert" className="min-w-0 flex-1 truncate text-right text-destructive">
             {opError}
           </span>
         )}
@@ -583,26 +583,26 @@ const EntryRow = memo(function EntryRow({
             disabled={entry.kind === 'other'}
             className={cn(
               'flex h-full w-full items-center gap-2 rounded-md px-2 text-left',
-              'hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+              'hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
             )}
           >
             <EntryIcon entry={entry} />
-            <span className="min-w-0 flex-1 truncate text-sm text-white">
+            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
               {entry.name}
             </span>
             {entry.symlink && (
               <LinkIcon
-                className="size-3 shrink-0 text-white/40"
+                className="size-3 shrink-0 text-muted-foreground/80"
                 aria-label="Symbolic link"
               />
             )}
-            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-white/50">
+            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
               {entry.kind === 'file' && entry.size !== null
                 ? formatBytes(entry.size)
                 : ''}
             </span>
-            <span className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-white/50 md:block">
+            <span className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground md:block">
               {entry.mtimeMs !== null ? MTIME_FORMAT.format(entry.mtimeMs) : ''}
             </span>
           </button>
@@ -671,11 +671,11 @@ function NameEditor({
         spellCheck={false}
         autoComplete="off"
         className={cn(
-          'h-6 min-w-0 flex-1 rounded border bg-neutral-800 px-2 text-sm text-white',
+          'h-6 min-w-0 flex-1 rounded border bg-secondary/80 px-2 text-sm text-foreground',
           'focus-visible:outline-none focus-visible:ring-2',
           valid
-            ? 'border-white/20 focus-visible:ring-white/30'
-            : 'border-red-500/60 focus-visible:ring-red-500/40',
+            ? 'border-border focus-visible:ring-ring/70'
+            : 'border-destructive/60 focus-visible:ring-destructive/40',
           'disabled:opacity-50',
         )}
       />
@@ -705,19 +705,19 @@ function DeleteConfirm({
         if (e.key === 'Escape') onCancel();
       }}
     >
-      <div className="w-full max-w-sm rounded-xl border border-white/10 bg-neutral-900 p-4 shadow-2xl">
-        <p className="text-sm text-white">
+      <div className="w-full max-w-sm rounded-xl border border-border/60 bg-popover p-4 shadow-2xl">
+        <p className="text-sm text-foreground">
           Delete <span className="font-mono">{entry.name}</span>
           {entry.kind === 'directory' ? ' and everything inside it' : ''}?
         </p>
-        <p className="mt-1 text-xs text-white/50">This cannot be undone.</p>
+        <p className="mt-1 text-xs text-muted-foreground">This cannot be undone.</p>
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
             disabled={pending}
             autoFocus
-            className="h-8 rounded-md px-3 text-sm text-white/80 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-50"
+            className="h-8 rounded-md px-3 text-sm text-foreground/80 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
           >
             Cancel
           </button>
@@ -725,7 +725,7 @@ function DeleteConfirm({
             type="button"
             onClick={onConfirm}
             disabled={pending}
-            className="h-8 rounded-md bg-red-600 px-3 text-sm font-medium text-white hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:opacity-50"
+            className="h-8 rounded-md bg-destructive px-3 text-sm font-medium text-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive disabled:opacity-50"
           >
             {pending ? 'Deleting…' : 'Delete'}
           </button>
@@ -770,13 +770,13 @@ function FilePreview({ path, onClose }: { path: string; onClose: () => void }) {
   }, [mime, content.data]);
 
   return (
-    <div className="absolute inset-0 z-10 flex flex-col bg-neutral-950">
-      <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-neutral-900 px-3 py-1.5">
-        <span className="min-w-0 flex-1 truncate font-mono text-sm text-white">
+    <div className="absolute inset-0 z-10 flex flex-col bg-background">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-background/50 px-3 py-1.5">
+        <span className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">
           {name}
         </span>
         {content.data && (
-          <span className="shrink-0 text-xs text-white/50">
+          <span className="shrink-0 text-xs text-muted-foreground">
             {formatBytes(content.data.size)}
           </span>
         )}
@@ -788,12 +788,12 @@ function FilePreview({ path, onClose }: { path: string; onClose: () => void }) {
       <div className="min-h-0 flex-1 overflow-auto">
         {content.isLoading ? (
           <div className="space-y-2 p-4">
-            <Skeleton className="h-4 w-3/4 bg-white/10" />
-            <Skeleton className="h-4 w-full bg-white/10" />
-            <Skeleton className="h-4 w-2/3 bg-white/10" />
+            <Skeleton className="h-4 w-3/4 bg-foreground/10" />
+            <Skeleton className="h-4 w-full bg-foreground/10" />
+            <Skeleton className="h-4 w-2/3 bg-foreground/10" />
           </div>
         ) : content.isError ? (
-          <p className="p-4 text-sm text-white/70">
+          <p className="p-4 text-sm text-muted-foreground">
             Could not read file: {cleanFsError(content.error)}
           </p>
         ) : imageUrl ? (
@@ -808,19 +808,19 @@ function FilePreview({ path, onClose }: { path: string; onClose: () => void }) {
           <>
             {(content.data?.truncated ||
               text.length >= TEXT_PREVIEW_MAX_CHARS) && (
-              <p className="border-b border-white/10 bg-amber-950/40 px-4 py-1.5 text-xs text-amber-300/90">
+              <p className="border-b border-border/60 bg-amber-950/40 px-4 py-1.5 text-xs text-amber-300/90">
                 Preview truncated - showing the beginning of the file.
               </p>
             )}
-            <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-white/90">
+            <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground/90">
               {text}
             </pre>
           </>
         ) : (
           <div className="grid h-full place-items-center p-6">
             <div className="text-center">
-              <File className="mx-auto mb-3 size-8 text-white/30" aria-hidden />
-              <p className="text-sm text-white/60">
+              <File className="mx-auto mb-3 size-8 text-muted-foreground/60" aria-hidden />
+              <p className="text-sm text-muted-foreground">
                 Binary file - no preview available.
               </p>
             </div>
@@ -836,9 +836,9 @@ function ListSkeleton() {
     <div className="space-y-1 p-2" aria-hidden>
       {Array.from({ length: 8 }, (_, i) => (
         <div key={i} className="flex items-center gap-2 px-2 py-1.5">
-          <Skeleton className="size-4 rounded bg-white/10" />
+          <Skeleton className="size-4 rounded bg-foreground/10" />
           <Skeleton
-            className="h-4 bg-white/10"
+            className="h-4 bg-foreground/10"
             style={{ width: `${30 + ((i * 17) % 40)}%` }}
           />
         </div>
@@ -866,9 +866,9 @@ function ToolButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'grid size-8 shrink-0 place-items-center rounded-md text-white/80',
-        'hover:bg-white/10 hover:text-white',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+        'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
+        'hover:bg-foreground/10 hover:text-foreground',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
       )}
     >

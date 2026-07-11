@@ -180,10 +180,138 @@ export function relativeLuminance(hexColor: string): number {
   return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
 }
 
-/** Black or white, whichever has more contrast against the given color. */
-export function contrastForeground(hexColor: string): '#000000' | '#ffffff' {
-  const luminance = relativeLuminance(hexColor);
-  const contrastWithWhite = 1.05 / (luminance + 0.05);
-  const contrastWithBlack = (luminance + 0.05) / 0.05;
-  return contrastWithWhite >= contrastWithBlack ? '#ffffff' : '#000000';
+/**
+ * Whether a background color should be treated as a dark theme.
+ * Same WCAG-luminance < 0.2 cutoff Ditto uses for profile themes.
+ */
+export function isDarkTheme(backgroundHex: string): boolean {
+  return relativeLuminance(backgroundHex) < 0.2;
+}
+
+interface Hsl {
+  h: number;
+  s: number;
+  l: number;
+}
+
+/** Convert "#rrggbb" to HSL (h 0-360, s/l 0-100). */
+function hexToHsl(hexColor: string): Hsl {
+  const r = parseInt(hexColor.slice(1, 3), 16) / 255;
+  const g = parseInt(hexColor.slice(3, 5), 16) / 255;
+  const b = parseInt(hexColor.slice(5, 7), 16) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+
+  let h = 0;
+  let s = 0;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+        break;
+      case g:
+        h = ((b - r) / d + 2) * 60;
+        break;
+      default:
+        h = ((r - g) / d + 4) * 60;
+    }
+  }
+
+  return { h, s: s * 100, l: l * 100 };
+}
+
+function formatHsl(h: number, s: number, l: number): string {
+  const round = (value: number) => Math.round(value * 10) / 10;
+  return `hsl(${round(h)} ${round(Math.min(100, Math.max(0, s)))}% ${round(Math.min(100, Math.max(0, l)))}%)`;
+}
+
+function lighten(color: Hsl, amount: number): string {
+  return formatHsl(color.h, color.s, color.l + amount);
+}
+
+function darken(color: Hsl, amount: number): string {
+  return formatHsl(color.h, color.s, color.l - amount);
+}
+
+/**
+ * Foreground for on-primary text: white or near-black, using a 0.5 luminance
+ * midpoint (deliberately different from the 0.2 dark-theme cutoff — vivid
+ * mid-tone primaries still want white text).
+ */
+function onColorForeground(hexColor: string): string {
+  return relativeLuminance(hexColor) > 0.5 ? 'hsl(222.2 84% 4.9%)' : 'hsl(0 0% 100%)';
+}
+
+/**
+ * Derive the full shadcn token set from a profile theme's three core colors,
+ * using the same formulas as Ditto's `deriveTokensFromCore`
+ * (ditto/src/lib/colorUtils.ts):
+ *
+ * - card/popover: bg lightened +2 (dark) or bg as-is (light)
+ * - secondary/muted: bg +8 (dark) / bg -4 (light)
+ * - border/input: primary hue at reduced saturation, L 30 (dark) / 82 (light)
+ * - mutedForeground: dimmed text color
+ * - accent/ring: the primary color itself
+ *
+ * Values are emitted as full `hsl(...)` strings, matching the token format in
+ * index.css.
+ */
+export function deriveThemeTokens(colors: ProfileTheme['colors']): Record<string, string> {
+  const { background: bgHex, text: textHex, primary: primaryHex } = colors;
+  const dark = isDarkTheme(bgHex);
+
+  const bg = hexToHsl(bgHex);
+  const text = hexToHsl(textHex);
+  const primary = hexToHsl(primaryHex);
+
+  // Surface colors derived from the background.
+  const card = dark ? lighten(bg, 2) : formatHsl(bg.h, bg.s, bg.l);
+  const secondary = dark ? lighten(bg, 8) : darken(bg, 4);
+  const border = dark
+    ? formatHsl(primary.h, primary.s * 0.4, 30)
+    : formatHsl(primary.h, primary.s * 0.5, 82);
+
+  // Muted foreground: a dimmer version of the main text color.
+  const mutedForeground = dark
+    ? formatHsl(text.h, Math.max(text.s - 20, 0), Math.max(text.l - 30, 40))
+    : formatHsl(text.h, Math.max(text.s - 30, 0), Math.min(text.l + 35, 55));
+
+  const primaryForeground = onColorForeground(primaryHex);
+  const destructive = dark ? 'hsl(0 72% 51%)' : 'hsl(0 84.2% 60.2%)';
+  const destructiveForeground = dark ? 'hsl(0 0% 95%)' : 'hsl(210 40% 98%)';
+
+  return {
+    '--background': bgHex,
+    '--foreground': textHex,
+    '--card': card,
+    '--card-foreground': textHex,
+    '--popover': card,
+    '--popover-foreground': textHex,
+    '--primary': primaryHex,
+    '--primary-foreground': primaryForeground,
+    '--secondary': secondary,
+    '--secondary-foreground': textHex,
+    '--muted': secondary,
+    '--muted-foreground': mutedForeground,
+    '--accent': primaryHex,
+    '--accent-foreground': primaryForeground,
+    '--destructive': destructive,
+    '--destructive-foreground': destructiveForeground,
+    '--border': border,
+    '--input': border,
+    '--ring': primaryHex,
+    '--sidebar': card,
+    '--sidebar-foreground': textHex,
+    '--sidebar-primary': primaryHex,
+    '--sidebar-primary-foreground': primaryForeground,
+    '--sidebar-accent': secondary,
+    '--sidebar-accent-foreground': textHex,
+    '--sidebar-border': border,
+    '--sidebar-ring': primaryHex,
+  };
 }

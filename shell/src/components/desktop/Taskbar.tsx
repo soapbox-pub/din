@@ -56,14 +56,14 @@ export function Taskbar() {
   );
 
   return (
-    <footer className="relative z-10 flex h-14 items-center gap-2 border-t border-white/10 bg-black/50 px-2 backdrop-blur-xl">
+    <footer className="relative z-10 flex h-14 items-center gap-2 border-t border-border/60 bg-background/70 px-2 backdrop-blur-xl">
       <Popover>
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
             aria-label="Open app launcher"
-            className="size-10 rounded-lg text-white/90 hover:bg-white/10 hover:text-white"
+            className="size-10 rounded-lg text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
           >
             <LayoutGrid className="size-5" />
           </Button>
@@ -130,10 +130,10 @@ export function Taskbar() {
 
       <time
         dateTime={now.toISOString()}
-        className="px-2 text-right text-sm leading-tight text-white/90 tabular-nums"
+        className="px-2 text-right text-sm leading-tight text-foreground/90 tabular-nums"
       >
         {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        <span className="block text-xs text-white/50">
+        <span className="block text-xs text-muted-foreground">
           {now.toLocaleDateString([], { month: 'short', day: 'numeric' })}
         </span>
       </time>
@@ -201,8 +201,8 @@ function TaskbarAppButton({
         if (e.button === 1) open(app.id);
       }}
       className={cn(
-        'relative size-10 rounded-lg text-white/90 hover:bg-white/10 hover:text-white',
-        isAppActive && 'bg-white/10',
+        'relative size-10 rounded-lg text-foreground/90 hover:bg-foreground/10 hover:text-foreground',
+        isAppActive && 'bg-foreground/10',
       )}
     >
       <app.icon className="size-5" />
@@ -210,7 +210,7 @@ function TaskbarAppButton({
         <span
           aria-hidden
           className={cn(
-            'absolute bottom-0.5 left-1/2 h-1 -translate-x-1/2 rounded-full bg-sky-400 transition-all',
+            'absolute bottom-0.5 left-1/2 h-1 -translate-x-1/2 rounded-full bg-primary transition-all',
             isAppActive ? 'w-4' : 'w-1.5',
           )}
         />

@@ -56,13 +56,13 @@ export function WebBrowser(_props: AppComponentProps) {
   const canForward = cursor < history.length - 1;
 
   return (
-    <div className="flex h-full w-full flex-col bg-neutral-950">
+    <div className="flex h-full w-full flex-col">
       <form
         onSubmit={(e) => {
           e.preventDefault();
           navigate(address);
         }}
-        className="relative flex shrink-0 items-center gap-1 border-b border-white/10 bg-neutral-900 px-2 py-1.5"
+        className="relative flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/50 px-2 py-1.5"
       >
         <NavButton label="Go back" disabled={!canBack} onClick={() => go(-1)}>
           <ArrowLeft className="size-4" />
@@ -75,7 +75,7 @@ export function WebBrowser(_props: AppComponentProps) {
         </NavButton>
 
         <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-white/40" aria-hidden />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/80" aria-hidden />
           <input
             type="text"
             inputMode="url"
@@ -86,14 +86,14 @@ export function WebBrowser(_props: AppComponentProps) {
             placeholder="Search or type a URL"
             spellCheck={false}
             autoComplete="off"
-            className="h-8 w-full rounded-full border border-white/10 bg-neutral-800 pl-8 pr-3 text-sm text-white placeholder:text-white/40 focus-visible:border-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+            className="h-8 w-full rounded-full border border-border/60 bg-secondary/80 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         </div>
 
         {loading && (
           <span
             aria-hidden
-            className="absolute inset-x-0 bottom-0 h-0.5 animate-pulse bg-blue-500"
+            className="absolute inset-x-0 bottom-0 h-0.5 animate-pulse bg-primary"
           />
         )}
       </form>
@@ -128,9 +128,9 @@ function NavButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'grid size-8 shrink-0 place-items-center rounded-md text-white/80',
-        'hover:bg-white/10 hover:text-white',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+        'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
+        'hover:bg-foreground/10 hover:text-foreground',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
       )}
     >
