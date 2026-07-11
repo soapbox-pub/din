@@ -86,8 +86,8 @@ export function Terminal(_props: AppComponentProps) {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => webgl.dispose());
       term.loadAddon(webgl);
-    } catch {
-      // DOM renderer it is.
+    } catch (error) {
+      console.warn('Terminal: WebGL renderer unavailable, falling back to DOM renderer', error);
     }
 
     fit.fit();

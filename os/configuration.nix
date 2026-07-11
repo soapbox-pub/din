@@ -29,13 +29,19 @@ let
   # Launcher: Electron running the shell host on Wayland (cage provides the
   # compositor). --disable-gpu keeps the demo reliable in QEMU without virgl;
   # remove it on real hardware (and verify acceleration!).
+  # --enable-unsafe-swiftshader: with the GPU disabled, Chromium >=137 refuses
+  # to create even software WebGL contexts without this flag. The Terminal app
+  # needs WebGL for crisp box-drawing glyphs ("unsafe" = SwiftShader is not
+  # security-maintained against untrusted WebGL content; acceptable for this
+  # demo, revisit if the <webview> browser faces hostile sites in earnest).
   # python3 must be on PATH for the Terminal app's pty host (pty-host.py).
   webos-shell = pkgs.writeShellScriptBin "webos-shell" ''
     export PATH=${pkgs.python3}/bin:$PATH
     exec ${pkgs.electron}/bin/electron \
       ${shell-app}/share/webos-shell/main.cjs \
       --ozone-platform=wayland \
-      --disable-gpu
+      --disable-gpu \
+      --enable-unsafe-swiftshader
   '';
 in
 {

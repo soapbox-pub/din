@@ -50,7 +50,12 @@ echo "Launching Electron -> ${URL}"
 # --disable-gpu: many dev machines (and headless X/QEMU) lack GL accel, which
 # otherwise floods the console with ANGLE/EGL errors. Drop it if you want to
 # exercise GPU paths locally.
-SHELL_DEV_URL="${URL}" "${ELECTRON}" "${SHELL_DIR}/electron/main.cjs" --disable-gpu &
+# --enable-unsafe-swiftshader: with the GPU disabled, Chromium >=137 refuses
+# to create even software WebGL contexts without this flag. The Terminal app
+# needs WebGL for crisp box-drawing glyphs ("unsafe" = SwiftShader is not
+# security-maintained against untrusted WebGL content; acceptable here).
+SHELL_DEV_URL="${URL}" "${ELECTRON}" "${SHELL_DIR}/electron/main.cjs" \
+  --disable-gpu --enable-unsafe-swiftshader &
 ELECTRON_PID=$!
 
 # Exit when either process exits.
