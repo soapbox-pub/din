@@ -1,9 +1,10 @@
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Folder, Globe, SquareTerminal } from 'lucide-react';
+import { Folder, Globe, Settings as SettingsIcon, SquareTerminal } from 'lucide-react';
 import { WebBrowser } from '@/components/desktop/apps/WebBrowser';
 import { FileBrowser } from '@/components/desktop/apps/FileBrowser';
 import { Terminal } from '@/components/desktop/apps/Terminal';
+import { Settings } from '@/components/desktop/apps/Settings';
 
 /** Props every windowed app receives from the window manager. */
 export interface AppComponentProps {
@@ -47,6 +48,13 @@ export const APPS: readonly AppDefinition[] = [
     icon: SquareTerminal,
     component: Terminal,
     defaultSize: { width: 760, height: 480 },
+  },
+  {
+    id: 'settings',
+    name: 'Settings',
+    icon: SettingsIcon,
+    component: Settings,
+    defaultSize: { width: 720, height: 520 },
   },
 ];
 

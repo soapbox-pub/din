@@ -1,8 +1,9 @@
 // Preload for the webOS shell renderer.
 //
-// Exposes two bridges backed by IPC handlers in main.cjs:
+// Exposes three bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
+//   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -81,4 +82,29 @@ contextBridge.exposeInMainWorld('pty', {
     ipcRenderer.on('pty:exit', listener);
     return () => ipcRenderer.removeListener('pty:exit', listener);
   },
+});
+
+// WiFi bridge (window.wifi), backed by the wifi:* handlers in main.cjs
+// (nmcli / NetworkManager). Used by the Settings app.
+contextBridge.exposeInMainWorld('wifi', {
+  /** Adapter/radio state. `available: false` when NetworkManager is absent. */
+  status: () => ipcRenderer.invoke('wifi:status'),
+
+  /** Visible networks, one entry per SSID. `rescan` forces a fresh scan. */
+  networks: (rescan) => ipcRenderer.invoke('wifi:networks', rescan),
+
+  /** Names of saved (remembered) WiFi connection profiles. */
+  saved: () => ipcRenderer.invoke('wifi:saved'),
+
+  /** Join a network, creating or updating its saved profile. */
+  connect: (ssid, password) => ipcRenderer.invoke('wifi:connect', ssid, password),
+
+  /** Disconnect the WiFi adapter from its current network. */
+  disconnect: () => ipcRenderer.invoke('wifi:disconnect'),
+
+  /** Delete a saved network profile. */
+  forget: (ssid) => ipcRenderer.invoke('wifi:forget', ssid),
+
+  /** Turn the WiFi radio on or off. */
+  setRadio: (enabled) => ipcRenderer.invoke('wifi:setRadio', enabled),
 });

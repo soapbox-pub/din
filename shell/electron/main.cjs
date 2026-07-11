@@ -11,7 +11,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-const { spawn } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, ipcMain, protocol, net, session } = require('electron');
 
@@ -336,6 +336,215 @@ app.on('will-quit', () => {
   ptySessions.clear();
 });
 
+// ---------------------------------------------------------------------------
+// WiFi bridge (window.wifi - see preload.cjs / the Settings app).
+//
+// Thin wrapper around `nmcli` (NetworkManager). The shell's OS user is in the
+// `networkmanager` group, so nmcli works without polkit prompts; in a plain
+// browser or on a machine without NetworkManager the bridge reports
+// `available: false` and the Settings app renders a fallback.
+//
+// Threat model: same boundaries as the other bridges (strict CSP, the sender
+// guard, arguments re-validated here). All nmcli invocations use execFile
+// with an argv array - no shell, so SSIDs/passwords can't inject commands.
+// Passwords do transit argv (briefly visible in /proc/<pid>/cmdline to other
+// processes of the same user); acceptable for this single-user demo.
+// ---------------------------------------------------------------------------
+
+const NMCLI_TIMEOUT_MS = 15_000;
+const NMCLI_CONNECT_TIMEOUT_MS = 60_000;
+const WIFI_TYPE = '802-11-wireless';
+
+/** Run nmcli with an argv array; resolves stdout, rejects with a clean message. */
+function nmcli(args, timeout = NMCLI_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'nmcli',
+      args,
+      { timeout, maxBuffer: 4 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (!error) return resolve(stdout);
+        if (error.code === 'ENOENT') return reject(new Error('nmcli-missing'));
+        const detail = (stderr || error.message || '').trim().split('\n')[0];
+        reject(new Error(detail || 'nmcli failed'));
+      },
+    );
+  });
+}
+
+/**
+ * Split one line of `nmcli -t` output into fields. Terse mode separates
+ * fields with ':' and escapes literal ':' and '\' in values with a backslash.
+ */
+function splitTerse(line) {
+  const fields = [];
+  let current = '';
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '\\' && i + 1 < line.length) {
+      current += line[++i];
+    } else if (ch === ':') {
+      fields.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  fields.push(current);
+  return fields;
+}
+
+/** Non-empty lines of nmcli terse output, split into fields. */
+function terseRows(stdout) {
+  return stdout.split('\n').filter((line) => line.length > 0).map(splitTerse);
+}
+
+/** Validate a caller-supplied SSID. */
+function validSsid(ssid) {
+  if (
+    typeof ssid !== 'string' ||
+    ssid.length === 0 ||
+    ssid.length > 64 ||
+    ssid.includes('\0')
+  ) {
+    throw new Error('Invalid SSID');
+  }
+  return ssid;
+}
+
+/** Validate an optional caller-supplied WiFi password. */
+function validPassword(password) {
+  if (password === undefined || password === null || password === '') return undefined;
+  if (typeof password !== 'string' || password.length > 256 || password.includes('\0')) {
+    throw new Error('Invalid password');
+  }
+  return password;
+}
+
+/** The first WiFi device known to NetworkManager, or null. */
+async function wifiDevice() {
+  const rows = terseRows(
+    await nmcli(['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device', 'status']),
+  );
+  const row = rows.find((fields) => fields[1] === 'wifi');
+  if (!row) return null;
+  return { iface: row[0], state: row[2], connection: row[3] || null };
+}
+
+/** Names of saved WiFi connection profiles. */
+async function savedWifiConnections() {
+  const rows = terseRows(await nmcli(['-t', '-f', 'NAME,TYPE', 'connection', 'show']));
+  return rows.filter((fields) => fields[1] === WIFI_TYPE).map((fields) => fields[0]);
+}
+
+function registerWifiHandlers() {
+  ipcMain.handle('wifi:status', async (event) => {
+    assertShellSender(event);
+    try {
+      const [device, radio] = await Promise.all([
+        wifiDevice(),
+        nmcli(['-t', 'radio', 'wifi']),
+      ]);
+      return { available: true, radioEnabled: radio.trim() === 'enabled', device };
+    } catch (error) {
+      if (error.message === 'nmcli-missing') {
+        return { available: false, radioEnabled: false, device: null };
+      }
+      throw error;
+    }
+  });
+
+  ipcMain.handle('wifi:networks', async (event, rescan) => {
+    assertShellSender(event);
+    const rows = terseRows(
+      await nmcli(
+        [
+          '-t', '-f', 'IN-USE,SSID,SIGNAL,SECURITY,FREQ',
+          'device', 'wifi', 'list',
+          '--rescan', rescan === true ? 'yes' : 'auto',
+        ],
+        30_000,
+      ),
+    );
+
+    // One entry per SSID (strongest signal wins; hidden networks skipped).
+    const bySsid = new Map();
+    for (const [inUse, ssid, signal, security, freq] of rows) {
+      if (!ssid) continue;
+      const network = {
+        ssid,
+        inUse: inUse === '*',
+        signal: Number.parseInt(signal, 10) || 0,
+        // e.g. "WPA2", "WPA1 WPA2", "" for open networks.
+        security: security.trim(),
+        freqMhz: Number.parseInt(freq, 10) || 0,
+      };
+      const existing = bySsid.get(ssid);
+      if (!existing || network.inUse || (!existing.inUse && network.signal > existing.signal)) {
+        bySsid.set(ssid, network);
+      }
+    }
+
+    return [...bySsid.values()].sort(
+      (a, b) => Number(b.inUse) - Number(a.inUse) || b.signal - a.signal,
+    );
+  });
+
+  ipcMain.handle('wifi:saved', async (event) => {
+    assertShellSender(event);
+    return savedWifiConnections();
+  });
+
+  ipcMain.handle('wifi:connect', async (event, rawSsid, rawPassword) => {
+    assertShellSender(event);
+    const ssid = validSsid(rawSsid);
+    const password = validPassword(rawPassword);
+    const saved = (await savedWifiConnections()).includes(ssid);
+
+    if (saved) {
+      // Reusing the profile (instead of `device wifi connect`) avoids nmcli
+      // piling up duplicate "SSID 1", "SSID 2" profiles.
+      if (password !== undefined) {
+        await nmcli(['connection', 'modify', 'id', ssid, 'wifi-sec.psk', password]);
+      }
+      await nmcli(['connection', 'up', 'id', ssid], NMCLI_CONNECT_TIMEOUT_MS);
+      return;
+    }
+
+    const args = ['device', 'wifi', 'connect', ssid];
+    if (password !== undefined) args.push('password', password);
+    try {
+      await nmcli(args, NMCLI_CONNECT_TIMEOUT_MS);
+    } catch (error) {
+      // A failed first attempt (wrong password) leaves a broken profile
+      // behind that would shadow the next try; drop it.
+      await nmcli(['connection', 'delete', 'id', ssid]).catch(() => {});
+      throw error;
+    }
+  });
+
+  ipcMain.handle('wifi:disconnect', async (event) => {
+    assertShellSender(event);
+    const device = await wifiDevice();
+    if (!device) throw new Error('No WiFi device');
+    await nmcli(['device', 'disconnect', device.iface]);
+  });
+
+  ipcMain.handle('wifi:forget', async (event, rawSsid) => {
+    assertShellSender(event);
+    const ssid = validSsid(rawSsid);
+    if (!(await savedWifiConnections()).includes(ssid)) {
+      throw new Error(`No saved network named "${ssid}"`);
+    }
+    await nmcli(['connection', 'delete', 'id', ssid]);
+  });
+
+  ipcMain.handle('wifi:setRadio', async (event, enabled) => {
+    assertShellSender(event);
+    await nmcli(['radio', 'wifi', enabled === true ? 'on' : 'off']);
+  });
+}
+
 app.whenReady().then(() => {
   // Save downloads straight to ~/Downloads instead of popping a native
   // GTK save dialog (there is no desktop environment to host one).
@@ -352,6 +561,7 @@ app.whenReady().then(() => {
 
   registerFsHandlers();
   registerPtyHandlers();
+  registerWifiHandlers();
 
   const win = new BrowserWindow({
     // Dev: normal windowed shell. Production: fullscreen kiosk.
