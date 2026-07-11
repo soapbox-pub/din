@@ -1,5 +1,18 @@
 # Din
 
+**Din is a social computer.** You sign in with your Nostr account, and Din
+bridges your identity into every application on the desktop — connecting you
+to your friends across the network. Instead of relying on cloud services, Din
+stores your data encrypted on free public infrastructure (Nostr relays and
+Blossom servers). You can also self-host your own relays and servers, or
+operate entirely locally.
+
+Din features advanced AI integrations: control your whole computer by talking
+to an agent, with support for local LLMs. You can also easily add sandboxed
+OpenClaw agents that run 24/7 — as long as your computer is on.
+
+## Architecture
+
 Din is a web-native desktop environment built in Electron, targeting Linux
 systems. The desktop itself — windows, taskbar, apps, login — is a Vite +
 React 19 + TailwindCSS 4 + shadcn/ui app (based on the
