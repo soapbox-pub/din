@@ -90,11 +90,9 @@ files — `git add` new source files before `npm run os:build`.
 ## Notes
 
 - The Settings app manages WiFi through NetworkManager (`nmcli` behind an
-  Electron IPC bridge). Since QEMU has no wireless hardware, the Aladdin VM
-  loads `mac80211_hwsim` and broadcasts a simulated WPA2 network to join:
-  SSID **`Aladdin Demo`**, password **`demopassword`**. On real hardware,
-  remove the simulation block in `os/configuration.nix` and the physical
-  adapter is used instead.
+  Electron IPC bridge). NetworkManager picks up physical adapters (wired and
+  wireless) automatically. Note that QEMU has no wireless hardware, so the
+  WiFi panel will show no networks inside the VM.
 - Electron runs with `--disable-gpu` for reliability in QEMU without virgl.
   On real hardware, remove it in `os/configuration.nix` and verify GPU
   acceleration.
