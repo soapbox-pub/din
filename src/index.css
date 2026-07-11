@@ -193,3 +193,158 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ===== ErrorBoundary: glitchy death screen ===== */
+
+.death-screen {
+  position: relative;
+  isolation: isolate;
+  background-color: #0000aa;
+  background-image: radial-gradient(
+    ellipse at center,
+    rgb(20 20 200) 0%,
+    #0000aa 55%,
+    #000060 100%
+  );
+}
+
+/* CRT scanlines */
+.death-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 0.05) 0px,
+    rgb(255 255 255 / 0.05) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* Vignette + chromatic haze + flicker */
+.death-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(rgb(0 255 255 / 0.03), rgb(255 0 255 / 0.03)),
+    radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / 0.4) 100%);
+  animation: death-flicker 4s infinite steps(1);
+}
+
+/* VHS tracking bar sweeping down the screen */
+.death-tear {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 6px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(255 255 255 / 0.14),
+    rgb(0 255 255 / 0.1),
+    transparent
+  );
+  animation: death-tear 7s infinite linear;
+}
+
+/* RGB-split glitch title (real text stays intact; pseudo copies show slivers) */
+.death-glitch {
+  position: relative;
+  animation: death-skew 4s infinite steps(1);
+}
+
+.death-glitch::before,
+.death-glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+.death-glitch::before {
+  color: #00ffff;
+  animation: death-slice-1 2.7s infinite linear alternate-reverse;
+}
+
+.death-glitch::after {
+  color: #ff00ff;
+  animation: death-slice-2 3.1s infinite linear alternate-reverse;
+}
+
+.death-cursor {
+  animation: death-blink 1s infinite steps(1);
+}
+
+@keyframes death-flicker {
+  0%, 100% { opacity: 1; }
+  7% { opacity: 0.8; }
+  8% { opacity: 1; }
+  36% { opacity: 0.9; }
+  38% { opacity: 1; }
+  61% { opacity: 0.7; }
+  62% { opacity: 1; }
+  84% { opacity: 0.88; }
+  85% { opacity: 1; }
+}
+
+@keyframes death-tear {
+  0% { top: -5%; }
+  100% { top: 105%; }
+}
+
+@keyframes death-skew {
+  0%, 100% { transform: skewX(0deg); }
+  4% { transform: skewX(-2deg); }
+  5% { transform: skewX(0deg); }
+  42% { transform: skewX(1.5deg) translateX(2px); }
+  43% { transform: skewX(0deg) translateX(0); }
+  78% { transform: skewX(-1deg); }
+  79% { transform: skewX(0deg); }
+}
+
+@keyframes death-slice-1 {
+  0% { clip-path: inset(20% 0 65% 0); transform: translate(-3px, -1px); }
+  20% { clip-path: inset(80% 0 5% 0); transform: translate(3px, 1px); }
+  40% { clip-path: inset(45% 0 42% 0); transform: translate(-3px, 1px); }
+  60% { clip-path: inset(10% 0 82% 0); transform: translate(3px, -1px); }
+  80% { clip-path: inset(65% 0 18% 0); transform: translate(-2px, 0); }
+  100% { clip-path: inset(32% 0 55% 0); transform: translate(2px, 1px); }
+}
+
+@keyframes death-slice-2 {
+  0% { clip-path: inset(70% 0 12% 0); transform: translate(3px, 1px); }
+  20% { clip-path: inset(15% 0 75% 0); transform: translate(-3px, -1px); }
+  40% { clip-path: inset(55% 0 30% 0); transform: translate(3px, -1px); }
+  60% { clip-path: inset(88% 0 3% 0); transform: translate(-3px, 1px); }
+  80% { clip-path: inset(28% 0 60% 0); transform: translate(2px, 0); }
+  100% { clip-path: inset(50% 0 38% 0); transform: translate(-2px, -1px); }
+}
+
+@keyframes death-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .death-screen::after,
+  .death-glitch,
+  .death-cursor {
+    animation: none;
+  }
+
+  .death-glitch::before,
+  .death-glitch::after,
+  .death-tear {
+    display: none;
+  }
+}

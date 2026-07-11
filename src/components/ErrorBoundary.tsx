@@ -54,55 +54,64 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       }
 
       return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <div className="max-w-md w-full space-y-4">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold text-foreground mb-2">
-                Something went wrong
-              </h2>
-              <p className="text-muted-foreground">
-                An unexpected error occurred. The error has been reported.
+        <div className="death-screen min-h-screen overflow-hidden flex items-center justify-center p-4 sm:p-8 font-mono text-white">
+          <div className="death-tear" aria-hidden="true" />
+
+          <div className="relative z-10 w-full max-w-2xl space-y-6 sm:space-y-8">
+            <div className="text-center space-y-4">
+              <span className="inline-block bg-[#aaaaaa] px-3 py-1 text-xs sm:text-sm font-bold tracking-[0.3em] text-[#0000aa] uppercase">
+                Din &mdash; System Fault
+              </span>
+              <h1
+                className="death-glitch text-4xl sm:text-6xl font-bold tracking-tight uppercase"
+                data-text="Fatal Exception"
+              >
+                Fatal Exception
+              </h1>
+              <p className="text-base sm:text-lg text-white/90 text-balance">
+                A problem has been detected and Din has been halted to prevent
+                damage to your session.
               </p>
             </div>
 
-            <div className="bg-muted p-4 rounded-lg">
-              <details className="text-sm">
-                <summary className="cursor-pointer font-medium text-foreground">
-                  Error details
-                </summary>
-                <div className="mt-2 space-y-2">
-                  <div>
-                    <strong className="text-foreground">Message:</strong>
-                    <p className="text-muted-foreground mt-1">
-                      {this.state.error?.message}
-                    </p>
-                  </div>
-                  {this.state.error?.stack && (
-                    <div>
-                      <strong className="text-foreground">Stack trace:</strong>
-                      <pre className="text-xs text-muted-foreground mt-1 overflow-auto max-h-32">
-                        {this.state.error.stack}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </details>
+            <div
+              role="alert"
+              className="bg-white text-[#0000aa] px-4 py-3 sm:px-6 sm:py-4 text-base sm:text-lg font-bold break-words shadow-[6px_6px_0_rgba(0,0,0,0.45)]"
+            >
+              <span aria-hidden="true">*** STOP: </span>
+              {this.state.error?.message || 'Unknown error'}
             </div>
 
-            <div className="flex gap-2">
+            {this.state.error?.stack && (
+              <details className="border border-white/40 bg-black/30">
+                <summary className="cursor-pointer select-none px-4 py-3 text-sm font-bold tracking-widest uppercase hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                  &gt; Stack trace
+                </summary>
+                <pre className="px-4 pb-4 text-xs leading-relaxed text-white/80 overflow-auto max-h-48 whitespace-pre-wrap">
+                  {this.state.error.stack}
+                </pre>
+              </details>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
               <button
                 onClick={this.handleReset}
-                className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+                className="flex-1 border-2 border-white bg-white px-4 py-3 font-bold tracking-widest uppercase text-[#0000aa] transition-colors hover:bg-transparent hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               >
-                Try again
+                [ Try again ]
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="flex-1 px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90 transition-colors"
+                className="flex-1 border-2 border-white px-4 py-3 font-bold tracking-widest uppercase text-white transition-colors hover:bg-white hover:text-[#0000aa] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               >
-                Reload page
+                [ Reboot ]
               </button>
             </div>
+
+            <p className="text-center text-sm text-white/70">
+              Press TRY AGAIN to return to Din, or REBOOT to restart
+              <span className="death-cursor" aria-hidden="true">_</span>
+            </p>
           </div>
         </div>
       );
