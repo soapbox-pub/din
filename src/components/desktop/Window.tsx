@@ -1,9 +1,22 @@
-import { memo, useCallback, useRef } from 'react';
+import { memo, useCallback, useEffect, useRef } from 'react';
 import type { ComponentType } from 'react';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getApp } from '@/lib/apps';
 import type { AppComponentProps } from '@/lib/apps';
+import {
+  createModel,
+  grabModel,
+  modelTopLeft,
+  modelTransform,
+  stepModel,
+  ungrabModel,
+  WOBBLY_ACTIVE,
+  WOBBLY_FORCE,
+  WOBBLY_INITIAL,
+  type WobblyModel,
+} from '@/lib/wobbly';
+import { useAppContext } from '@/hooks/useAppContext';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { MIN_HEIGHT, MIN_WIDTH, type WindowState } from '@/hooks/useWindows';
 
@@ -42,6 +55,27 @@ const WindowContent = memo(function WindowContent({
 });
 
 /**
+ * Live state of the wobbly spring simulation for one window. Exists only
+ * while the window is grabbed or still jiggling after release; `null` means
+ * the window is rigid.
+ */
+interface WobblyDrag {
+  model: WobblyModel;
+  /** requestAnimationFrame handle of the simulation loop. */
+  raf: number;
+  /** Timestamp of the previous simulation frame. */
+  lastTime: number;
+  /** Compiz-style wobbly state bits (WOBBLY_*); 0 once fully settled. */
+  flags: number;
+  /** Whether the pointer currently holds the model's anchor point. */
+  grabbed: boolean;
+  /** Anchor position at grab time; the pointer drags it from here. */
+  anchorOrigin: { x: number; y: number };
+  /** The window's committed layout rect that the CSS transform is relative to. */
+  layout: { x: number; y: number; width: number; height: number };
+}
+
+/**
  * A single draggable, resizable, focusable application window on the desktop.
  *
  * Drag/resize performance: pointer moves NEVER go through React state. During
@@ -52,6 +86,15 @@ const WindowContent = memo(function WindowContent({
  * Routing every pointermove through setState re-rendered the whole desktop
  * (all windows + taskbar) per mouse event, which felt sluggish - especially
  * under software rendering.
+ *
+ * Wobbly windows: when enabled (Settings → Appearance) and the user doesn't
+ * prefer reduced motion, title-bar drags run the Compiz wobbly spring model
+ * (see src/lib/wobbly.ts). The pointer drives the lattice anchor, a rAF loop
+ * integrates the springs, and the deformation is painted as a CSS matrix3d()
+ * homography - still compositor-only, no React involvement. The window
+ * manager position is committed on pointer-up as usual, then again with the
+ * model's resting position once the jelly settles (Compiz moves the window to
+ * the model's top-left bound when the wobble ends).
  */
 export const Window = memo(function Window({
   window: win,
@@ -61,6 +104,7 @@ export const Window = memo(function Window({
   isTop: boolean;
 }) {
   const { close, minimize, focus, move, resize, toggleMaximize } = useWindowManager();
+  const { config } = useAppContext();
   const app = getApp(win.appId);
   const sectionRef = useRef<HTMLElement>(null);
   // Drag state: pointer origin, window origin, and the latest position (so
@@ -83,6 +127,7 @@ export const Window = memo(function Window({
     height: number;
     cur: { x: number; y: number; width: number; height: number };
   } | null>(null);
+  const wobblyRef = useRef<WobblyDrag | null>(null);
 
   /**
    * Put the window into "cheap to move" mode for the duration of a gesture.
@@ -105,6 +150,90 @@ export const Window = memo(function Window({
     el.style.backdropFilter = '';
   }, []);
 
+  /** Paint the current spring-model deformation onto the DOM node. */
+  const renderWobble = useCallback(() => {
+    const st = wobblyRef.current;
+    const el = sectionRef.current;
+    if (!st || !el) return;
+    el.style.transformOrigin = '0 0';
+    el.style.transform = modelTransform(
+      st.model,
+      st.layout.x,
+      st.layout.y,
+      st.layout.width,
+      st.layout.height,
+    );
+  }, []);
+
+  /**
+   * Tear down the wobble. When the model settled naturally, `commit` moves
+   * the window to the model's resting position (Compiz moves the window to
+   * the model's top-left bound when the wobble ends); when interrupted (a
+   * resize grab, maximize, minimize, close), the window snaps to its last
+   * committed geometry.
+   */
+  const stopWobble = useCallback(
+    (commit: boolean) => {
+      const st = wobblyRef.current;
+      if (!st) return;
+      wobblyRef.current = null;
+      cancelAnimationFrame(st.raf);
+      const el = sectionRef.current;
+      if (el) {
+        el.style.transform = '';
+        el.style.transformOrigin = '';
+      }
+      endGesture();
+      if (commit) {
+        const rest = modelTopLeft(st.model);
+        const x = Math.round(rest.x);
+        const y = Math.max(0, Math.round(rest.y));
+        if (el) {
+          el.style.left = `${x}px`;
+          el.style.top = `${y}px`;
+        }
+        if (x !== st.layout.x || y !== st.layout.y) move(win.id, x, y);
+      }
+    },
+    [endGesture, move, win.id],
+  );
+
+  /**
+   * Simulation loop, one spring-model step per animation frame (Compiz
+   * wobblyPreparePaintScreen). Runs while the window is grabbed and until
+   * the model settles after release.
+   */
+  const wobbleFrame = useCallback(
+    (now: number) => {
+      const st = wobblyRef.current;
+      if (!st) return;
+      // Clamp so a background tab doesn't integrate a huge burst at once.
+      const dt = Math.min(now - st.lastTime, 100);
+      st.lastTime = now;
+      if (st.flags & WOBBLY_ACTIVE) {
+        st.flags = stepModel(st.model, dt);
+        // Mirror Compiz: a force-only state must keep the model running.
+        if (st.flags === WOBBLY_FORCE) st.flags |= WOBBLY_INITIAL;
+        renderWobble();
+      }
+      if (!st.grabbed && !(st.flags & WOBBLY_ACTIVE)) {
+        stopWobble(true);
+        return;
+      }
+      st.raf = requestAnimationFrame(wobbleFrame);
+    },
+    [renderWobble, stopWobble],
+  );
+
+  // The wobble loop must not outlive the window (e.g. closed mid-jiggle).
+  useEffect(() => {
+    return () => {
+      const st = wobblyRef.current;
+      if (st) cancelAnimationFrame(st.raf);
+      wobblyRef.current = null;
+    };
+  }, []);
+
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       // Ignore drags initiated on the control buttons.
@@ -122,8 +251,47 @@ export const Window = memo(function Window({
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       beginGesture();
+
+      const wobblyEnabled =
+        config.wobblyWindows &&
+        !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!wobblyEnabled) {
+        // A rigid drag interrupts any leftover jiggle from a settings change.
+        stopWobble(false);
+        return;
+      }
+
+      // Grab the spring model at the pointer (Compiz wobblyWindowGrabNotify):
+      // the nearest lattice point becomes the anchor the pointer drags. If
+      // the window is re-grabbed mid-jiggle, the existing deformed model is
+      // reused so the motion stays continuous.
+      let st = wobblyRef.current;
+      if (!st) {
+        st = {
+          model: createModel(win.x, win.y, win.width, win.height),
+          raf: 0,
+          lastTime: performance.now(),
+          flags: 0,
+          grabbed: false,
+          anchorOrigin: { x: 0, y: 0 },
+          layout: { x: win.x, y: win.y, width: win.width, height: win.height },
+        };
+        wobblyRef.current = st;
+        st.raf = requestAnimationFrame(wobbleFrame);
+      }
+      // Pointer position in workspace coordinates, derived from the offset
+      // within the window so it works regardless of the workspace's origin.
+      const rect = sectionRef.current?.getBoundingClientRect();
+      const anchor = grabModel(
+        st.model,
+        st.layout.x + (rect ? e.clientX - rect.left : win.width / 2),
+        st.layout.y + (rect ? e.clientY - rect.top : 0),
+      );
+      st.grabbed = true;
+      st.anchorOrigin = { x: anchor.x, y: anchor.y };
+      st.flags |= WOBBLY_INITIAL;
     },
-    [focus, win.id, win.x, win.y, win.maximized, beginGesture],
+    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, beginGesture, config.wobblyWindows, stopWobble, wobbleFrame],
   );
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
@@ -132,8 +300,19 @@ export const Window = memo(function Window({
     if (!s || !el) return;
     s.x = s.wx + (e.clientX - s.px);
     s.y = Math.max(0, s.wy + (e.clientY - s.py));
-    // Compositor-only move; left/top stay untouched until pointer-up.
-    el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
+    const st = wobblyRef.current;
+    if (st?.grabbed && st.model.anchor) {
+      // Only the anchor follows the pointer; the rest of the lattice catches
+      // up through the springs (Compiz wobblyWindowMoveNotify). The rAF loop
+      // paints the result.
+      st.model.anchor.x = st.anchorOrigin.x + (s.x - s.wx);
+      st.model.anchor.y = st.anchorOrigin.y + (s.y - s.wy);
+      st.flags |= WOBBLY_INITIAL;
+    } else {
+      // Rigid drag: compositor-only move; left/top stay untouched until
+      // pointer-up.
+      el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
+    }
   }, []);
 
   const onPointerUp = useCallback(
@@ -143,6 +322,27 @@ export const Window = memo(function Window({
       dragState.current = null;
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
       const el = sectionRef.current;
+      const st = wobblyRef.current;
+      if (st?.grabbed) {
+        // Free the anchor and let the model settle around the drop point
+        // (Compiz wobblyWindowUngrabNotify). The drop position is committed
+        // now; the transform keeps wobbling relative to it until the springs
+        // come to rest, then stopWobble() commits the resting position.
+        ungrabModel(st.model);
+        st.grabbed = false;
+        st.flags |= WOBBLY_INITIAL;
+        st.layout.x = s.x;
+        st.layout.y = s.y;
+        if (el) {
+          el.style.left = `${s.x}px`;
+          el.style.top = `${s.y}px`;
+        }
+        // Repaint against the new layout origin in the same frame so the
+        // window doesn't flash at the wrong position.
+        renderWobble();
+        move(win.id, s.x, s.y);
+        return;
+      }
       if (el) {
         // Swap the transform for real left/top in the same frame so the
         // window doesn't jump back while React commits the new geometry.
@@ -153,13 +353,15 @@ export const Window = memo(function Window({
       endGesture();
       move(win.id, s.x, s.y);
     },
-    [move, win.id, endGesture],
+    [move, win.id, endGesture, renderWobble],
   );
 
   const onResizePointerDown = useCallback(
     (dir: ResizeDir) => (e: React.PointerEvent) => {
       e.stopPropagation();
       focus(win.id);
+      // Resizing a still-jiggling window snaps it rigid first.
+      stopWobble(false);
       resizeState.current = {
         dir,
         px: e.clientX,
@@ -173,7 +375,7 @@ export const Window = memo(function Window({
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       beginGesture();
     },
-    [focus, win.id, win.x, win.y, win.width, win.height, beginGesture],
+    [focus, win.id, win.x, win.y, win.width, win.height, beginGesture, stopWobble],
   );
 
   const onResizePointerMove = useCallback((e: React.PointerEvent) => {
@@ -250,7 +452,10 @@ export const Window = memo(function Window({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onDoubleClick={() => toggleMaximize(win.id)}
+        onDoubleClick={() => {
+          stopWobble(false);
+          toggleMaximize(win.id);
+        }}
         className={cn(
           'flex h-9 shrink-0 touch-none select-none items-center gap-2 border-b border-border/60 bg-background/60 px-3',
           win.maximized ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
@@ -263,7 +468,10 @@ export const Window = memo(function Window({
         <button
           type="button"
           aria-label="Minimize window"
-          onClick={() => minimize(win.id)}
+          onClick={() => {
+            stopWobble(false);
+            minimize(win.id);
+          }}
           className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Minus className="size-4" />
@@ -271,7 +479,10 @@ export const Window = memo(function Window({
         <button
           type="button"
           aria-label={win.maximized ? 'Restore window' : 'Maximize window'}
-          onClick={() => toggleMaximize(win.id)}
+          onClick={() => {
+            stopWobble(false);
+            toggleMaximize(win.id);
+          }}
           className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {win.maximized ? (

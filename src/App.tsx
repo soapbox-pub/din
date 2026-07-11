@@ -51,6 +51,7 @@ const defaultConfig: AppConfig = {
     pubkey: null,
     updatedAt: 0,
   },
+  wobblyWindows: true,
 };
 
 export function App() {

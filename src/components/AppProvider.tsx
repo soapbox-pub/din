@@ -36,6 +36,7 @@ const AppConfigSchema = z.object({
   blossomServerMetadata: BlossomServerMetadataSchema,
   useAppBlossomServers: z.boolean(),
   profileThemeMetadata: ProfileThemeMetadataSchema,
+  wobblyWindows: z.boolean(),
 }) satisfies z.ZodType<AppConfig>;
 
 export function AppProvider(props: AppProviderProps) {

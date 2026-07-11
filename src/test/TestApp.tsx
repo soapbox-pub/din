@@ -39,6 +39,7 @@ export function TestApp({ children }: TestAppProps) {
       pubkey: null,
       updatedAt: 0,
     },
+    wobblyWindows: true,
   };
 
   return (

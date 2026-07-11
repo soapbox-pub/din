@@ -44,6 +44,12 @@ export interface AppConfig {
    * as the theme of the entire OS.
    */
   profileThemeMetadata: ProfileThemeMetadata;
+  /**
+   * When true (default), dragging a window runs the Compiz wobbly-windows
+   * spring model so it wriggles like jelly. Automatically suppressed when
+   * the system prefers reduced motion.
+   */
+  wobblyWindows: boolean;
 }
 
 export interface AppContextType {

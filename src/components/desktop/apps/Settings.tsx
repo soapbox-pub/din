@@ -56,7 +56,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * explanatory fallback. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
- * encrypted sync).
+ * encrypted sync) and toggles desktop effects like wobbly windows.
  */
 export function Settings(_props: AppComponentProps) {
   const [section, setSection] = useState<SectionId>('wifi');
@@ -515,6 +515,7 @@ function SyncStatusBadge({ status }: { status: ReturnType<typeof useAppDataSyncS
 
 function AppearanceSection() {
   const { theme, setTheme } = useTheme();
+  const { config, updateConfig } = useAppContext();
 
   return (
     <SectionShell title="Appearance">
@@ -544,6 +545,26 @@ function AppearanceSection() {
             <span className="text-sm">{option.name}</span>
           </button>
         ))}
+      </div>
+
+      <p className="mb-3 mt-4 text-sm text-muted-foreground">Effects</p>
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <div className="min-w-0">
+          <Label htmlFor="wobbly-windows" className="cursor-pointer text-sm">
+            Wobbly windows
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Windows wriggle like jelly while you drag them, Compiz style.
+            Automatically disabled when your system prefers reduced motion.
+          </p>
+        </div>
+        <Switch
+          id="wobbly-windows"
+          checked={config.wobblyWindows}
+          onCheckedChange={(checked) =>
+            updateConfig((current) => ({ ...current, wobblyWindows: checked }))
+          }
+        />
       </div>
     </SectionShell>
   );
