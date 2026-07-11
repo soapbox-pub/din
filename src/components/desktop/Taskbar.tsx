@@ -1,4 +1,5 @@
 import { LayoutGrid, Pin, PinOff, Plus, X } from 'lucide-react';
+import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -15,7 +16,7 @@ import {
 } from '@/components/ui/popover';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { useClock } from '@/hooks/useClock';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { useAppData } from '@/hooks/useAppData';
 import { cn } from '@/lib/utils';
 import { APPS, getApp } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
@@ -25,13 +26,19 @@ import type { WindowState } from '@/hooks/useWindows';
 /** Apps pinned to the taskbar out of the box. */
 const DEFAULT_PINNED = APPS.map((app) => app.id);
 
+const PinnedAppsSchema = z.array(z.string());
+
 /** Bottom toolbar: app launcher, pinned + running apps, clock, account menu. */
 export function Taskbar() {
   const now = useClock();
   const { windows, open } = useWindowManager();
-  const [pinned, setPinned] = useLocalStorage<string[]>(
-    'desktop:pinned-apps',
+  // Pinned apps roam across devices via Din's encrypted app-data layer,
+  // seeded from the pre-sync localStorage key on first run.
+  const [pinned, setPinned] = useAppData<string[]>(
+    'pinned-apps',
+    PinnedAppsSchema,
     DEFAULT_PINNED,
+    { legacyKey: 'desktop:pinned-apps' },
   );
 
   const togglePin = (appId: string) =>

@@ -7,6 +7,7 @@ import { InferSeoMetaPlugin } from 'unhead/plugins';
 import { Suspense } from 'react';
 import NostrProvider from '@/components/NostrProvider';
 import { NostrSync } from '@/components/NostrSync';
+import { AppDataSync } from '@/components/AppDataSync';
 import { ProfileThemeApplier } from '@/components/ProfileThemeApplier';
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -34,6 +35,7 @@ const queryClient = new QueryClient({
 
 const defaultConfig: AppConfig = {
   theme: "dark",
+  syncToNostr: true,
   relayMetadata: APP_RELAYS,
   blossomServerMetadata: {
     servers: [
@@ -59,6 +61,7 @@ export function App() {
           <NostrLoginProvider storageKey='nostr:login'>
             <NostrProvider>
               <NostrSync />
+              <AppDataSync />
               <ProfileThemeApplier />
               <TooltipProvider>
                 <Toaster />

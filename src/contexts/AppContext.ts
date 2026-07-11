@@ -21,6 +21,13 @@ export interface BlossomServerMetadata {
 export interface AppConfig {
   /** Current theme */
   theme: Theme;
+  /**
+   * Master switch for Din's encrypted app-data sync. When true (default),
+   * desktop state (settings, taskbar pins, …) is NIP-44 encrypted and synced
+   * to the user's relays as kind 30078 events. When false, Din operates
+   * entirely locally and never publishes app data.
+   */
+  syncToNostr: boolean;
   /** NIP-65 relay list metadata */
   relayMetadata: RelayMetadata;
   /** User's kind 10063 Blossom server list. */

@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import {
   Check,
+  Cloud,
+  CloudOff,
   Loader2,
   Lock,
   Moon,
   Palette,
   RotateCw,
   Sun,
+  TriangleAlert,
   Wifi,
   WifiHigh,
   WifiLow,
@@ -25,15 +28,22 @@ import {
   useWifiStatus,
 } from '@/hooks/useWifi';
 import { useTheme } from '@/hooks/useTheme';
+import { useAppContext } from '@/hooks/useAppContext';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useAppDataSyncStatus } from '@/hooks/useAppData';
+import { RelayListManager } from '@/components/RelayListManager';
+import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type SectionId = 'wifi' | 'appearance';
+type SectionId = 'wifi' | 'nostr' | 'appearance';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
+  { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
 ];
 
@@ -43,8 +53,10 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * The Wi-Fi section drives NetworkManager through `window.wifi` (Electron
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
- * explanatory fallback. Appearance switches the shell theme (AppContext,
- * persisted to localStorage).
+ * explanatory fallback. Nostr & Storage manages Din's encrypted app-data
+ * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
+ * shell theme (AppContext, persisted to localStorage and roamed via
+ * encrypted sync).
  */
 export function Settings(_props: AppComponentProps) {
   const [section, setSection] = useState<SectionId>('wifi');
@@ -77,7 +89,13 @@ export function Settings(_props: AppComponentProps) {
       </nav>
 
       <div className="min-w-0 flex-1 overflow-y-auto">
-        {section === 'wifi' ? <WifiSection /> : <AppearanceSection />}
+        {section === 'wifi' ? (
+          <WifiSection />
+        ) : section === 'nostr' ? (
+          <NostrStorageSection />
+        ) : (
+          <AppearanceSection />
+        )}
       </div>
     </div>
   );
@@ -391,6 +409,103 @@ function NetworkListSkeleton() {
         </div>
       ))}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Nostr & Storage
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages where Din stores your data: encrypted app-data sync (NIP-78 +
+ * NIP-44), the NIP-65 relay list, and the BUD-03 Blossom server list.
+ */
+function NostrStorageSection() {
+  const { config, updateConfig } = useAppContext();
+  const { user } = useCurrentUser();
+  const syncStatus = useAppDataSyncStatus();
+
+  const nip44Missing = Boolean(user) && !user?.signer.nip44;
+
+  return (
+    <SectionShell title="Nostr & Storage" actions={<SyncStatusBadge status={syncStatus} />}>
+      {/* Encrypted sync master toggle */}
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <div className="min-w-0">
+          <Label htmlFor="sync-to-nostr" className="cursor-pointer text-sm">
+            Encrypted sync
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Store desktop settings encrypted on your Nostr relays so they follow
+            you across devices. Turn off to keep everything on this device only.
+          </p>
+        </div>
+        <Switch
+          id="sync-to-nostr"
+          checked={config.syncToNostr}
+          onCheckedChange={(checked) =>
+            updateConfig((current) => ({ ...current, syncToNostr: checked }))
+          }
+        />
+      </div>
+
+      {!user && (
+        <p className="text-xs text-muted-foreground">
+          Log in to sync your settings, relays, and servers with Nostr.
+        </p>
+      )}
+
+      {nip44Missing && config.syncToNostr && (
+        <p role="alert" className="flex items-start gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          Your signer doesn't support NIP-44 encryption, so settings stay on this
+          device. Upgrade your signer to enable encrypted sync.
+        </p>
+      )}
+
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-sm font-medium text-foreground">Relays</h3>
+          <p className="text-xs text-muted-foreground">
+            Nostr relays Din reads from and publishes to (NIP-65).
+          </p>
+        </div>
+        <RelayListManager />
+      </div>
+
+      <div className="space-y-3 border-t border-border/60 pt-4">
+        <div>
+          <h3 className="text-sm font-medium text-foreground">Blossom servers</h3>
+          <p className="text-xs text-muted-foreground">
+            Servers where Din stores files like your avatar (BUD-03).
+          </p>
+        </div>
+        <BlossomServerManager />
+      </div>
+    </SectionShell>
+  );
+}
+
+/** Small pill showing the aggregate state of Din's encrypted app-data sync. */
+function SyncStatusBadge({ status }: { status: ReturnType<typeof useAppDataSyncStatus> }) {
+  const view = {
+    local: { icon: CloudOff, label: 'Local only', className: 'text-muted-foreground' },
+    syncing: { icon: Loader2, label: 'Syncing…', className: 'text-muted-foreground' },
+    synced: { icon: Check, label: 'Synced', className: 'text-primary' },
+    error: { icon: TriangleAlert, label: 'Sync error', className: 'text-destructive' },
+  }[status];
+
+  return (
+    <span
+      role="status"
+      className={cn('flex items-center gap-1.5 text-xs font-medium', view.className)}
+    >
+      <view.icon
+        className={cn('size-3.5', status === 'syncing' && 'animate-spin')}
+        aria-hidden
+      />
+      {view.label}
+    </span>
   );
 }
 
