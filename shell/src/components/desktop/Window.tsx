@@ -138,11 +138,17 @@ export function Window({ window: win, isTop }: { window: WindowState; isTop: boo
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
   }, []);
 
-  if (!app || win.minimized) return null;
+  if (!app) return null;
 
   const geometry: React.CSSProperties = win.maximized
     ? { left: 0, top: 0, width: '100%', height: '100%', zIndex: win.z }
     : { left: win.x, top: win.y, width: win.width, height: win.height, zIndex: win.z };
+
+  // Minimized windows stay mounted but hidden so app state (terminal
+  // sessions, browser pages, navigation history) survives restore.
+  // `visibility: hidden` (not display:none / unmount) keeps layout intact,
+  // which the Electron <webview> and xterm's fit logic both depend on.
+  if (win.minimized) geometry.visibility = 'hidden';
 
   return (
     <section

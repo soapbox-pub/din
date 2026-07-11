@@ -1,5 +1,12 @@
-import { LayoutGrid } from 'lucide-react';
+import { LayoutGrid, Pin, PinOff, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import {
   Popover,
   PopoverClose,
@@ -8,14 +15,45 @@ import {
 } from '@/components/ui/popover';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { useClock } from '@/hooks/useClock';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { cn } from '@/lib/utils';
 import { APPS, getApp } from '@/lib/apps';
+import type { AppDefinition } from '@/lib/apps';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
+import type { WindowState } from '@/hooks/useWindows';
 
-/** Bottom toolbar: app launcher, running apps, clock, account menu. */
+/** Apps pinned to the taskbar out of the box. */
+const DEFAULT_PINNED = APPS.map((app) => app.id);
+
+/** Bottom toolbar: app launcher, pinned + running apps, clock, account menu. */
 export function Taskbar() {
   const now = useClock();
-  const { windows, open, focus } = useWindowManager();
+  const { windows, open } = useWindowManager();
+  const [pinned, setPinned] = useLocalStorage<string[]>(
+    'desktop:pinned-apps',
+    DEFAULT_PINNED,
+  );
+
+  const togglePin = (appId: string) =>
+    setPinned((prev) =>
+      prev.includes(appId)
+        ? prev.filter((id) => id !== appId)
+        : [...prev, appId],
+    );
+
+  // One taskbar button per app (Windows-style grouping): pinned apps first
+  // in pin order, then any running apps that aren't pinned, in launch order.
+  const running = [...new Set(windows.map((w) => w.appId))];
+  const entryIds = [
+    ...pinned,
+    ...running.filter((id) => !pinned.includes(id)),
+  ].filter((id) => getApp(id));
+
+  // The window that currently holds focus: highest z among visible windows.
+  const activeWindow = windows.reduce<WindowState | null>(
+    (top, w) => (!w.minimized && (!top || w.z > top.z) ? w : top),
+    null,
+  );
 
   return (
     <footer className="relative z-10 flex h-14 items-center gap-2 border-t border-white/10 bg-black/50 px-2 backdrop-blur-xl">
@@ -38,42 +76,54 @@ export function Taskbar() {
         >
           <div className="grid grid-cols-3 gap-2">
             {APPS.map((app) => (
-              <PopoverClose asChild key={app.id}>
-                <button
-                  type="button"
-                  onClick={() => open(app.id)}
-                  className="flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <app.icon className="size-7 text-foreground" aria-hidden />
-                  <span className="text-xs leading-tight text-foreground">
-                    {app.name}
-                  </span>
-                </button>
-              </PopoverClose>
+              <ContextMenu key={app.id}>
+                <ContextMenuTrigger asChild>
+                  <PopoverClose asChild>
+                    <button
+                      type="button"
+                      onClick={() => open(app.id)}
+                      className="flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <app.icon className="size-7 text-foreground" aria-hidden />
+                      <span className="text-xs leading-tight text-foreground">
+                        {app.name}
+                      </span>
+                    </button>
+                  </PopoverClose>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-52">
+                  <ContextMenuItem onSelect={() => togglePin(app.id)}>
+                    {pinned.includes(app.id) ? (
+                      <>
+                        <PinOff aria-hidden /> Unpin from taskbar
+                      </>
+                    ) : (
+                      <>
+                        <Pin aria-hidden /> Pin to taskbar
+                      </>
+                    )}
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             ))}
           </div>
         </PopoverContent>
       </Popover>
 
-      {/* Running apps */}
+      {/* Pinned + running apps */}
       <div className="flex flex-1 items-center gap-1">
-        {windows.map((win) => {
-          const app = getApp(win.appId);
+        {entryIds.map((appId) => {
+          const app = getApp(appId);
           if (!app) return null;
           return (
-            <Button
-              key={win.id}
-              variant="ghost"
-              size="icon"
-              aria-label={`Focus ${app.name}`}
-              onClick={() => focus(win.id)}
-              className={cn(
-                'size-10 rounded-lg text-white/90 hover:bg-white/10 hover:text-white',
-                !win.minimized && 'bg-white/10',
-              )}
-            >
-              <app.icon className="size-5" />
-            </Button>
+            <TaskbarAppButton
+              key={appId}
+              app={app}
+              appWindows={windows.filter((w) => w.appId === appId)}
+              activeWindowId={activeWindow?.id ?? null}
+              isPinned={pinned.includes(appId)}
+              onTogglePin={() => togglePin(appId)}
+            />
           );
         })}
       </div>
@@ -90,5 +140,167 @@ export function Taskbar() {
 
       <LoginArea />
     </footer>
+  );
+}
+
+/**
+ * A single grouped taskbar button for one app.
+ *
+ * Windows-style behavior:
+ * - no windows: click launches the app
+ * - one window: click toggles it (focus if not active, minimize if active)
+ * - multiple windows: click opens a picker listing every window
+ * - middle-click always opens a new window
+ * - right-click: new window, pin/unpin, close all
+ */
+function TaskbarAppButton({
+  app,
+  appWindows,
+  activeWindowId,
+  isPinned,
+  onTogglePin,
+}: {
+  app: AppDefinition;
+  appWindows: WindowState[];
+  activeWindowId: string | null;
+  isPinned: boolean;
+  onTogglePin: () => void;
+}) {
+  const { open, focus, minimize, close } = useWindowManager();
+  const isAppActive = appWindows.some((w) => w.id === activeWindowId);
+
+  /** Focus a window, or minimize it if it's already the active one. */
+  const toggleWindow = (win: WindowState) => {
+    if (win.id === activeWindowId) {
+      minimize(win.id);
+    } else {
+      focus(win.id);
+    }
+  };
+
+  const handleClick = () => {
+    if (appWindows.length === 0) {
+      open(app.id);
+    } else if (appWindows.length === 1) {
+      toggleWindow(appWindows[0]);
+    }
+    // With multiple windows the button is a PopoverTrigger; the picker opens.
+  };
+
+  const button = (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={
+        appWindows.length > 0
+          ? `${app.name} (${appWindows.length} window${appWindows.length > 1 ? 's' : ''})`
+          : `Open ${app.name}`
+      }
+      onClick={handleClick}
+      onAuxClick={(e) => {
+        if (e.button === 1) open(app.id);
+      }}
+      className={cn(
+        'relative size-10 rounded-lg text-white/90 hover:bg-white/10 hover:text-white',
+        isAppActive && 'bg-white/10',
+      )}
+    >
+      <app.icon className="size-5" />
+      {appWindows.length > 0 && (
+        <span
+          aria-hidden
+          className={cn(
+            'absolute bottom-0.5 left-1/2 h-1 -translate-x-1/2 rounded-full bg-sky-400 transition-all',
+            isAppActive ? 'w-4' : 'w-1.5',
+          )}
+        />
+      )}
+    </Button>
+  );
+
+  const menu = (
+    <ContextMenuContent className="w-52">
+      <ContextMenuItem onSelect={() => open(app.id)}>
+        <Plus aria-hidden /> New window
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={onTogglePin}>
+        {isPinned ? (
+          <>
+            <PinOff aria-hidden /> Unpin from taskbar
+          </>
+        ) : (
+          <>
+            <Pin aria-hidden /> Pin to taskbar
+          </>
+        )}
+      </ContextMenuItem>
+      {appWindows.length > 0 && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onSelect={() => appWindows.forEach((w) => close(w.id))}
+          >
+            <X aria-hidden />{' '}
+            {appWindows.length > 1 ? 'Close all windows' : 'Close window'}
+          </ContextMenuItem>
+        </>
+      )}
+    </ContextMenuContent>
+  );
+
+  if (appWindows.length <= 1) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+        {menu}
+      </ContextMenu>
+    );
+  }
+
+  return (
+    <Popover>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <PopoverTrigger asChild>{button}</PopoverTrigger>
+        </ContextMenuTrigger>
+        {menu}
+      </ContextMenu>
+      <PopoverContent side="top" sideOffset={8} className="w-64 p-1">
+        <ul aria-label={`${app.name} windows`} className="flex flex-col gap-0.5">
+          {appWindows.map((win, i) => (
+            <li key={win.id} className="flex items-center gap-0.5">
+              <PopoverClose asChild>
+                <button
+                  type="button"
+                  onClick={() => toggleWindow(win)}
+                  className={cn(
+                    'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    win.id === activeWindowId && 'bg-accent/60',
+                  )}
+                >
+                  <app.icon className="size-4 shrink-0" aria-hidden />
+                  <span className="truncate">
+                    {app.name} {i + 1}
+                  </span>
+                  {win.minimized && (
+                    <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                      Minimized
+                    </span>
+                  )}
+                </button>
+              </PopoverClose>
+              <button
+                type="button"
+                aria-label={`Close ${app.name} ${i + 1}`}
+                onClick={() => close(win.id)}
+                className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="size-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -7,7 +7,11 @@ import { WindowManagerContext } from '@/contexts/WindowManagerContext';
 /** The desktop session: wallpaper workspace with a bottom taskbar. */
 export function Desktop() {
   const manager = useWindows();
-  const topZ = manager.windows.reduce((max, w) => Math.max(max, w.z), 0);
+  // Focus ring goes to the highest visible window; minimized ones don't count.
+  const topZ = manager.windows.reduce(
+    (max, w) => (w.minimized ? max : Math.max(max, w.z)),
+    0,
+  );
 
   return (
     <WindowManagerContext.Provider value={manager}>
@@ -15,7 +19,11 @@ export function Desktop() {
         {/* Workspace area - windows render here */}
         <main aria-label="Desktop" className="relative flex-1 overflow-hidden">
           {manager.windows.map((win) => (
-            <Window key={win.id} window={win} isTop={win.z === topZ} />
+            <Window
+              key={win.id}
+              window={win}
+              isTop={!win.minimized && win.z === topZ}
+            />
           ))}
         </main>
 
