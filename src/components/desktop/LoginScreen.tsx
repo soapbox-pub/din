@@ -40,7 +40,7 @@ export function LoginScreen() {
       </main>
 
       <footer className="relative pb-6 text-center text-sm font-medium tracking-widest text-white/40 uppercase">
-        webOS demo
+        Din
       </footer>
     </Wallpaper>
   );

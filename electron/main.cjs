@@ -1,12 +1,12 @@
-// Electron host for the webOS shell.
+// Electron host for the Din desktop environment.
 //
 // Serves the built Vite app (dist/) over a custom app:// protocol instead of
 // file:// so that:
 //   - the shell gets a real origin (CSP 'self', BrowserRouter, fetch all work)
 //   - unknown paths fall back to index.html (SPA routing)
 //
-// Set SHELL_DEV_URL (e.g. http://localhost:8080) to load a Vite dev server
-// (with HMR) instead of the bundled dist/. See `make dev`.
+// Set DIN_DEV_URL (e.g. http://localhost:8080) to load a Vite dev server
+// (with HMR) instead of the bundled dist/. See `npm run dev`.
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -47,10 +47,10 @@ function resolveFile(pathname) {
   return INDEX;
 }
 
-// SHELL_DEV_URL (e.g. http://localhost:8080) loads a live Vite dev server
+// DIN_DEV_URL (e.g. http://localhost:8080) loads a live Vite dev server
 // with HMR instead of the bundled dist/. In that mode we run a normal
 // resizable window with DevTools rather than the production kiosk shell.
-const DEV_URL = process.env.SHELL_DEV_URL;
+const DEV_URL = process.env.DIN_DEV_URL;
 
 // ---------------------------------------------------------------------------
 // Filesystem bridge (window.fs - see preload.cjs / the Files app).
@@ -587,7 +587,7 @@ app.whenReady().then(() => {
 
   shellContentsId = win.webContents.id;
 
-  win.loadURL(DEV_URL || 'app://shell/');
+  win.loadURL(DEV_URL || 'app://din/');
 
   if (DEV_URL) {
     win.webContents.openDevTools({ mode: 'detach' });

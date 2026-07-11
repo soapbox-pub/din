@@ -1,26 +1,25 @@
 #!/usr/bin/env bash
-# Launch the shell in Electron with live HMR.
+# Launch Din in Electron with live HMR.
 #
 # Starts the Vite dev server, waits for it to come up, then launches Electron
-# pointed at it via SHELL_DEV_URL. Electron loads the same main.cjs used in the
+# pointed at it via DIN_DEV_URL. Electron loads the same main.cjs used in the
 # VM, so app:// routing / CSP behaviour matches production while React fast
 # refresh + Vite HMR stay live. Ctrl-C tears down both processes.
 set -euo pipefail
 
-SHELL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST="localhost"
 PORT="${PORT:-8080}"
 URL="http://${HOST}:${PORT}"
 
-# Resolve Electron from the flake's pinned nixpkgs (same version the VM uses,
-# already in the Nix store). Falls back to `nix run` if a build path is unset.
+# Resolve Electron from the OS flake's pinned nixpkgs (same version Aladdin
+# uses, already in the Nix store).
 NIX="$(command -v nix || echo /nix/var/nix/profiles/default/bin/nix)"
-REPO_ROOT="$(cd "${SHELL_DIR}/.." && pwd)"
 ELECTRON_DIR="$("${NIX}" build --no-link --print-out-paths \
-  --inputs-from "${REPO_ROOT}" 'nixpkgs#electron')"
+  --inputs-from "${ROOT_DIR}/os" 'nixpkgs#electron')"
 ELECTRON="${ELECTRON_DIR}/bin/electron"
 
-cd "${SHELL_DIR}"
+cd "${ROOT_DIR}"
 
 # Start Vite in the background.
 npm exec -- vite --host "${HOST}" --port "${PORT}" --strictPort &
@@ -54,7 +53,7 @@ echo "Launching Electron -> ${URL}"
 # to create even software WebGL contexts without this flag. The Terminal app
 # needs WebGL for crisp box-drawing glyphs ("unsafe" = SwiftShader is not
 # security-maintained against untrusted WebGL content; acceptable here).
-SHELL_DEV_URL="${URL}" "${ELECTRON}" "${SHELL_DIR}/electron/main.cjs" \
+DIN_DEV_URL="${URL}" "${ELECTRON}" "${ROOT_DIR}/electron/main.cjs" \
   --disable-gpu --enable-unsafe-swiftshader &
 ELECTRON_PID=$!
 

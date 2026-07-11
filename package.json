@@ -1,12 +1,16 @@
 {
-  "name": "webos-shell",
+  "name": "din",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "dev": "scripts/dev-electron.sh",
     "dev:browser": "npm i --silent && vite",
     "build": "npm i --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'Project built successfully!'",
-    "test": "npm i --silent && tsc --noEmit && eslint --cache && vitest run --reporter=dot --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'All tests passed!'"
+    "test": "npm i --silent && tsc --noEmit && eslint --cache && vitest run --reporter=dot --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'All tests passed!'",
+    "os:build": "nix build ./os#vm",
+    "os:run": "npm run os:build && ./result/bin/run-aladdin-vm",
+    "os:clean": "rm -f result aladdin.qcow2"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

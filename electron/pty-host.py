@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PTY host for the webOS shell's Terminal app.
+"""PTY host for Din's Terminal app.
 
 Electron's renderer is sandboxed and its main process ships no native
 modules, so instead of node-pty this tiny helper (Python stdlib only)

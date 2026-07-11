@@ -7,8 +7,8 @@ const Index = () => {
   const { user } = useCurrentUser();
 
   useSeoMeta({
-    title: 'webOS demo',
-    description: 'A minimal Linux system whose entire UI is a web app.',
+    title: 'Din',
+    description: 'A web-native desktop environment built in Electron.',
   });
 
   return user ? <Desktop /> : <LoginScreen />;

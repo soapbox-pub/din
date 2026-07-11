@@ -1,4 +1,4 @@
-// Preload for the webOS shell renderer.
+// Preload for the Din renderer.
 //
 // Exposes three bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app

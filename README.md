@@ -1,90 +1,101 @@
-# webos-demo
+# Din
 
-A minimal NixOS system that boots straight into a fullscreen Electron app.
-No X11, no display manager, no desktop environment - just:
+Din is a web-native desktop environment built in Electron, targeting Linux
+systems. The desktop itself — windows, taskbar, apps, login — is a Vite +
+React 19 + TailwindCSS 4 + shadcn/ui app (based on the
+[MKStack](https://soapbox.pub/mkstack) template) hosted by a thin Electron
+shell, so it can run:
+
+- **in kiosk mode** on top of any OS that Electron supports,
+- **windowed** on a normal desktop for development,
+- or as a plain web app in any browser (with reduced integration).
+
+**Aladdin** is the flagship OS of Din: a minimal NixOS system that boots
+straight into Din fullscreen. No X11, no display manager, no traditional
+desktop — just:
 
 ```
-Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> web shell
+Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> Din
 ```
-
-The shell is a Vite + React 19 + TailwindCSS 4 + shadcn/ui app based on the
-[MKStack](https://soapbox.pub/mkstack) template, so it can also run as a plain
-web app in any browser.
 
 ## Requirements
 
-- Nix (with flakes enabled; the Determinate installer does this by default)
-- QEMU (`qemu-system-x86_64`) on the host for `make run`
-- Node.js for the dev servers; `make dev` also uses Nix to fetch Electron
+- Node.js (dev servers and builds)
+- Nix (with flakes enabled; the Determinate installer does this by default) —
+  only needed for `npm run dev` (Electron via Nix) and the Aladdin `os:*`
+  commands
+- QEMU (`qemu-system-x86_64`) on the host for `npm run os:run`
 
 ## Usage
 
 ```sh
-make run         # build the OS + VM and boot it in a QEMU window
-make dev         # run the shell in Electron with live HMR (windowed + DevTools)
-make dev-browser # run the shell in a plain browser with HMR (http://localhost:8080)
-make test        # shell type-check + lint + tests + build
-make build       # just build the VM (./result/bin/run-webos-vm)
-make clean       # remove build output and the VM disk (webos.qcow2)
+npm run dev         # run Din in Electron with live HMR (windowed + DevTools)
+npm run dev:browser # run Din in a plain browser with HMR (http://localhost:8080)
+npm test            # type-check + lint + tests + build
+npm run build       # build the web app into dist/
+npm run os:build    # build the Aladdin VM (./result/bin/run-aladdin-vm)
+npm run os:run      # build the Aladdin VM and boot it in a QEMU window
+npm run os:clean    # remove the VM build output and disk (aladdin.qcow2)
 ```
 
-`make dev` starts Vite, then launches the same `electron/main.cjs` the VM uses
-(pulled from the flake's pinned nixpkgs) against the dev server via
-`SHELL_DEV_URL`. This gives you the real Electron/`app://` environment with Vite
+`npm run dev` starts Vite, then launches the same `electron/main.cjs` Aladdin
+uses (pulled from the OS flake's pinned nixpkgs) against the dev server via
+`DIN_DEV_URL`. This gives you the real Electron/`app://` environment with Vite
 HMR + React fast refresh. Ctrl-C stops both processes.
 
-The QEMU window shows the shell fullscreen with a live clock. Boot logs also
-appear on the serial console (your terminal).
+The QEMU window boots Aladdin into Din fullscreen. Boot logs also appear on
+the serial console (your terminal).
 
 ## Layout
 
-- `flake.nix` - entry point; exposes the VM as `.#vm`
-- `os/configuration.nix` - the whole OS definition: cage + Electron launcher +
-  Nix build of the shell (`buildNpmPackage`)
-- `shell/` - the web shell (MKStack template: Vite, React, Tailwind, shadcn/ui)
-- `shell/electron/main.cjs` - the Electron host; serves `dist/` over a custom
+- `src/` — the Din desktop environment (React, Tailwind, shadcn/ui)
+- `electron/main.cjs` — the Electron host; serves `dist/` over a custom
   `app://` protocol (real origin, SPA fallback for BrowserRouter)
+- `electron/preload.cjs`, `electron/pty-host.py` — the fs/pty/wifi bridges
+  behind Din's Files, Terminal, and Settings apps
+- `os/` — Aladdin, the flagship OS:
+  - `os/flake.nix` — entry point; exposes the VM as `./os#vm` and pulls in
+    the Din source tree (the repo root) as an input
+  - `os/configuration.nix` — the whole OS definition: cage + Electron
+    launcher + Nix build of Din (`buildNpmPackage`)
 
 ## Dev loop
 
 Three tiers, fastest first:
 
-1. **Browser + HMR** (`make dev-browser`): the shell is an ordinary Vite app;
-   edit `shell/src/` and see changes instantly at http://localhost:8080.
-2. **Electron windowed + HMR** (`make dev`): runs the shell inside the actual
-   Electron host (`app://` protocol, CSP, download handling) pointed at the Vite
-   dev server, so it matches the VM while staying hot-reloadable. Under the hood
-   this just sets `SHELL_DEV_URL=http://localhost:8080` for
-   `shell/electron/main.cjs`.
-3. **Full VM** (`make run`): rebuilds the OS image; only changed layers
-   rebuild. The VM disk (`webos.qcow2`) persists between boots; `make clean`
-   resets it.
+1. **Browser + HMR** (`npm run dev:browser`): Din is an ordinary Vite app;
+   edit `src/` and see changes instantly at http://localhost:8080.
+2. **Electron windowed + HMR** (`npm run dev`): runs Din inside the actual
+   Electron host (`app://` protocol, CSP, download handling) pointed at the
+   Vite dev server, so it matches Aladdin while staying hot-reloadable. Under
+   the hood this just sets `DIN_DEV_URL=http://localhost:8080` for
+   `electron/main.cjs`.
+3. **Full VM** (`npm run os:run`): rebuilds the Aladdin image; only changed
+   layers rebuild. The VM disk (`aladdin.qcow2`) persists between boots;
+   `npm run os:clean` resets it.
 
 ### Updating npm dependencies
 
-The Nix build fetches npm deps from `shell/package-lock.json` pinned by hash.
+The Nix build fetches npm deps from `package-lock.json` pinned by hash.
 After changing dependencies, refresh the hash in `os/configuration.nix`:
 
 ```sh
-nix run nixpkgs#prefetch-npm-deps -- shell/package-lock.json
+nix run --inputs-from ./os nixpkgs#prefetch-npm-deps -- package-lock.json
 # copy the sha256-... into npmDepsHash in os/configuration.nix
 ```
-
-Also note: the flake only sees **git-tracked** files - `git add` new shell
-files before `make build`.
 
 ## Notes
 
 - The Settings app manages WiFi through NetworkManager (`nmcli` behind an
-  Electron IPC bridge). Since QEMU has no wireless hardware, the VM loads
-  `mac80211_hwsim` and broadcasts a simulated WPA2 network to join:
-  SSID **`webOS Demo`**, password **`demopassword`**. On real hardware,
+  Electron IPC bridge). Since QEMU has no wireless hardware, the Aladdin VM
+  loads `mac80211_hwsim` and broadcasts a simulated WPA2 network to join:
+  SSID **`Aladdin Demo`**, password **`demopassword`**. On real hardware,
   remove the simulation block in `os/configuration.nix` and the physical
   adapter is used instead.
 - Electron runs with `--disable-gpu` for reliability in QEMU without virgl.
   On real hardware, remove it in `os/configuration.nix` and verify GPU
   acceleration.
-- The shell runs as the unprivileged `web` user with Chromium's sandbox and
+- Din runs as the unprivileged `web` user with Chromium's sandbox and
   context isolation enabled; the renderer has no Node access.
 - The `app://` protocol handler in `main.cjs` serves only files inside
   `dist/` (path-traversal guarded) and falls back to `index.html` for SPA

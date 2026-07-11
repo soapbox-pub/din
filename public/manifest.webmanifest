@@ -1,6 +1,6 @@
 {
-  "name": "webOS demo",
-  "short_name": "webOS",
+  "name": "Din",
+  "short_name": "Din",
   "description": "A minimal Linux system whose entire UI is a web app.",
   "start_url": "/",
   "display": "fullscreen",

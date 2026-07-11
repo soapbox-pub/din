@@ -1,5 +1,17 @@
 {
   "nodes": {
+    "din": {
+      "flake": false,
+      "locked": {
+        "path": "..",
+        "type": "path"
+      },
+      "original": {
+        "path": "..",
+        "type": "path"
+      },
+      "parent": []
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1783389287,
@@ -18,6 +30,7 @@
     },
     "root": {
       "inputs": {
+        "din": "din",
         "nixpkgs": "nixpkgs"
       }
     }
