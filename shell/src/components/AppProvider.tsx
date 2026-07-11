@@ -2,6 +2,7 @@ import { ReactNode, useEffect } from 'react';
 import { z } from 'zod';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { AppContext, type AppConfig, type AppContextType, type Theme, type RelayMetadata, type BlossomServerMetadata } from '@/contexts/AppContext';
+import { ProfileThemeMetadataSchema } from '@/lib/profileTheme';
 
 interface AppProviderProps {
   children: ReactNode;
@@ -33,6 +34,7 @@ const AppConfigSchema = z.object({
   relayMetadata: RelayMetadataSchema,
   blossomServerMetadata: BlossomServerMetadataSchema,
   useAppBlossomServers: z.boolean(),
+  profileThemeMetadata: ProfileThemeMetadataSchema,
 }) satisfies z.ZodType<AppConfig>;
 
 export function AppProvider(props: AppProviderProps) {

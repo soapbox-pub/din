@@ -33,6 +33,11 @@ export function TestApp({ children }: TestAppProps) {
       updatedAt: 0,
     },
     useAppBlossomServers: true,
+    profileThemeMetadata: {
+      theme: null,
+      pubkey: null,
+      updatedAt: 0,
+    },
   };
 
   return (

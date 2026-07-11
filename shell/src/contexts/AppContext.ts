@@ -1,4 +1,5 @@
 import { createContext } from "react";
+import type { ProfileThemeMetadata } from "@/lib/profileTheme";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -30,6 +31,12 @@ export interface AppConfig {
    * are used.
    */
   useAppBlossomServers: boolean;
+  /**
+   * The logged-in user's active profile theme (kind 16767, Profile Themes
+   * NIP). When present and matching the current user's pubkey, it is applied
+   * as the theme of the entire OS.
+   */
+  profileThemeMetadata: ProfileThemeMetadata;
 }
 
 export interface AppContextType {

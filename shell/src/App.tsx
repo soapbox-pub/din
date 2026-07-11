@@ -7,6 +7,7 @@ import { InferSeoMetaPlugin } from 'unhead/plugins';
 import { Suspense } from 'react';
 import NostrProvider from '@/components/NostrProvider';
 import { NostrSync } from '@/components/NostrSync';
+import { ProfileThemeApplier } from '@/components/ProfileThemeApplier';
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NostrLoginProvider } from '@nostrify/react/login';
@@ -43,6 +44,11 @@ const defaultConfig: AppConfig = {
     updatedAt: 0,
   },
   useAppBlossomServers: true,
+  profileThemeMetadata: {
+    theme: null,
+    pubkey: null,
+    updatedAt: 0,
+  },
 };
 
 export function App() {
@@ -53,6 +59,7 @@ export function App() {
           <NostrLoginProvider storageKey='nostr:login'>
             <NostrProvider>
               <NostrSync />
+              <ProfileThemeApplier />
               <TooltipProvider>
                 <Toaster />
                 <Suspense>
