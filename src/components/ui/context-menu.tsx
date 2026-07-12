@@ -104,6 +104,18 @@ function ContextMenuContent({
           className
         )}
         {...props}
+        onPointerUpCapture={(e) => {
+          // On Linux, the `contextmenu` event fires on right-button *press*,
+          // so the menu is already open under the cursor when the button is
+          // released. Radix MenuItem treats a pointerup without a matching
+          // pointerdown as a click (to support press-drag-release), which
+          // would instantly select whatever item the release lands on.
+          // Swallow non-primary-button releases to prevent it; normal item
+          // selection uses the native `click` event (primary button only)
+          // and is unaffected.
+          if (e.button !== 0) e.stopPropagation()
+          props.onPointerUpCapture?.(e)
+        }}
       />
     </ContextMenuPrimitive.Portal>
   )

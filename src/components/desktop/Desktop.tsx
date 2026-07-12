@@ -1,5 +1,6 @@
 import { Wallpaper } from './Wallpaper';
-import { Taskbar } from './Taskbar';
+import { Dock } from './Dock';
+import { MenuBar } from './MenuBar';
 import { Window } from './Window';
 import { FilePickerProvider } from './FilePickerProvider';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
@@ -8,7 +9,7 @@ import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowManagerContext } from '@/contexts/WindowManagerContext';
 
-/** The desktop session: wallpaper workspace with a bottom taskbar. */
+/** The desktop session: top menu bar, wallpaper workspace, bottom dock. */
 export function Desktop() {
   return (
     <InstalledAppsProvider>
@@ -32,6 +33,8 @@ function DesktopSession() {
       <FilePickerProvider>
         <BrowserExtensionHost />
         <Wallpaper>
+          <MenuBar />
+
           {/* Workspace area - windows render here */}
           <main aria-label="Desktop" className="relative flex-1 overflow-hidden">
             {manager.windows.map((win) => (
@@ -43,7 +46,7 @@ function DesktopSession() {
             ))}
           </main>
 
-          <Taskbar />
+          <Dock />
         </Wallpaper>
       </FilePickerProvider>
     </WindowManagerContext.Provider>

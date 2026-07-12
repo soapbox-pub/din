@@ -7,21 +7,15 @@ import {
   Wifi,
   WifiHigh,
   WifiLow,
-  WifiOff,
   WifiZero,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import {
-  Popover,
-  PopoverClose,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { PopoverClose } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { cleanWifiError, getWifiBridge, isSecured } from '@/lib/wifi';
+import { cleanWifiError, isSecured } from '@/lib/wifi';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
   useSavedNetworks,
@@ -37,66 +31,8 @@ export function WifiSignalIcon({ signal, className }: { signal: number; classNam
   return <Icon className={className} aria-hidden />;
 }
 
-/**
- * Taskbar Wi-Fi indicator.
- *
- * The button icon mirrors the adapter state (off/disconnected/signal
- * strength); clicking it opens a quick-connect popover with the radio
- * toggle, nearby networks, and a shortcut to full Wi-Fi settings.
- *
- * Renders nothing outside the Electron shell (no `window.wifi` bridge) or on
- * systems without NetworkManager/adapter, matching how hardware indicators
- * disappear rather than showing a dead control.
- */
-export function WifiIndicator() {
-  const bridge = getWifiBridge();
-  const status = useWifiStatus();
-  const radioEnabled = status.data?.radioEnabled ?? false;
-  const hasAdapter = status.data?.device != null;
-  const networks = useWifiNetworks(radioEnabled && hasAdapter);
-
-  if (!bridge || !status.data?.available || !hasAdapter) return null;
-
-  const current = networks.data?.find((n) => n.inUse) ?? null;
-  const connected = radioEnabled && current != null;
-
-  const label = !radioEnabled
-    ? 'Wi-Fi off'
-    : connected
-      ? `Wi-Fi connected to ${current.ssid}`
-      : 'Wi-Fi not connected';
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={label}
-          title={label}
-          className={cn(
-            'size-10 rounded-lg hover:bg-foreground/10 hover:text-foreground',
-            connected ? 'text-foreground/90' : 'text-muted-foreground',
-          )}
-        >
-          {!radioEnabled ? (
-            <WifiOff className="size-5" />
-          ) : connected ? (
-            <WifiSignalIcon signal={current.signal} className="size-5" />
-          ) : (
-            <WifiZero className="size-5" />
-          )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent side="top" align="end" sideOffset={12} className="w-80 p-0">
-        <WifiPopoverBody />
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 /** Popover content: radio toggle, quick-connect network list, settings link. */
-function WifiPopoverBody() {
+export function WifiPopoverBody() {
   const status = useWifiStatus();
   const radioEnabled = status.data?.radioEnabled ?? false;
   const hasAdapter = status.data?.device != null;
