@@ -9,6 +9,7 @@ import NostrProvider from '@/components/NostrProvider';
 import { NostrSync } from '@/components/NostrSync';
 import { AppDataSync } from '@/components/AppDataSync';
 import { ProfileThemeApplier } from '@/components/ProfileThemeApplier';
+import { CursorThemeApplier } from '@/components/CursorThemeApplier';
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NostrLoginProvider } from '@nostrify/react/login';
@@ -52,6 +53,7 @@ const defaultConfig: AppConfig = {
     updatedAt: 0,
   },
   wobblyWindows: true,
+  customCursor: null,
 };
 
 export function App() {
@@ -64,6 +66,7 @@ export function App() {
               <NostrSync />
               <AppDataSync />
               <ProfileThemeApplier />
+              <CursorThemeApplier />
               <TooltipProvider>
                 <Toaster />
                 <Suspense>

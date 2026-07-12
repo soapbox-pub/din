@@ -40,6 +40,7 @@ export function TestApp({ children }: TestAppProps) {
       updatedAt: 0,
     },
     wobblyWindows: true,
+    customCursor: null,
   };
 
   return (

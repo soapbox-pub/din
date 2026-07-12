@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Bomb,
   Bug,
@@ -8,10 +8,13 @@ import {
   Loader2,
   Lock,
   Moon,
+  MousePointer2,
   Palette,
   RotateCw,
   Sun,
   TriangleAlert,
+  Trash2,
+  Upload,
   Wifi,
   WifiHigh,
   WifiLow,
@@ -33,6 +36,8 @@ import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
+import { useToast } from '@/hooks/useToast';
+import { parseCurXPTheme } from '@/lib/cursorTheme';
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { Button } from '@/components/ui/button';
@@ -573,7 +578,132 @@ function AppearanceSection() {
           }
         />
       </div>
+
+      <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor</p>
+      <CursorThemePicker />
     </SectionShell>
+  );
+}
+
+/**
+ * Custom cursor theme picker. Lets the user select a `.CurXPTheme` file, parses
+ * it in the browser, and stores the resulting cursor images in AppConfig (see
+ * CursorThemeApplier for the DOM side). Other cursor formats can be added later
+ * by extending src/lib/cursorTheme.ts.
+ */
+function CursorThemePicker() {
+  const { config, updateConfig } = useAppContext();
+  const { toast } = useToast();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const active = config.customCursor;
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const theme = await parseCurXPTheme(file);
+      updateConfig((current) => ({ ...current, customCursor: theme }));
+      toast({
+        title: 'Cursor applied',
+        description: `"${theme.name}" is now your cursor.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Couldn't load cursor theme",
+        description:
+          error instanceof Error
+            ? error.message
+            : 'The file could not be read as a .CurXPTheme.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  const clear = () => {
+    updateConfig((current) => ({ ...current, customCursor: null }));
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm text-foreground">Custom cursor</p>
+          <p className="text-xs text-muted-foreground">
+            Select a{' '}
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+              .CurXPTheme
+            </code>{' '}
+            file to replace the system cursor. Animated cursors show their first
+            frame.
+          </p>
+        </div>
+        {active ? (
+          <MousePointer2 className="size-5 shrink-0 text-primary" aria-hidden />
+        ) : (
+          <MousePointer2
+            className="size-5 shrink-0 text-muted-foreground/60"
+            aria-hidden
+          />
+        )}
+      </div>
+
+      {active && (
+        <div className="flex items-center gap-3 rounded-md border bg-background/60 p-2">
+          {active.cursors.default && (
+            <img
+              src={active.cursors.default.dataUrl}
+              alt=""
+              className="size-8 object-contain"
+              style={{ imageRendering: 'auto' }}
+            />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-foreground">
+              {active.name}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {Object.keys(active.cursors).length} cursor
+              {Object.keys(active.cursors).length === 1 ? '' : 's'} mapped
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".CurXPTheme,application/zip"
+          className="hidden"
+          onChange={(e) => handleFile(e.target.files?.[0])}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={busy}
+          onClick={() => inputRef.current?.click()}
+        >
+          {busy ? (
+            <Loader2 className="animate-spin" aria-hidden />
+          ) : (
+            <Upload aria-hidden />
+          )}
+          {active ? 'Replace…' : 'Choose file…'}
+        </Button>
+        {active && (
+          <Button type="button" variant="ghost" size="sm" onClick={clear}>
+            <Trash2 aria-hidden />
+            Reset
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 

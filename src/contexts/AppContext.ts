@@ -1,5 +1,6 @@
 import { createContext } from "react";
 import type { ProfileThemeMetadata } from "@/lib/profileTheme";
+import type { CursorTheme } from "@/lib/cursorTheme";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -50,6 +51,13 @@ export interface AppConfig {
    * the system prefers reduced motion.
    */
   wobblyWindows: boolean;
+  /**
+   * User-selected custom cursor theme (e.g. a `.CurXPTheme`), parsed into
+   * source-format-agnostic cursor images. `null` uses the native OS cursor.
+   * Stored inline (cursor frames are PNG data URLs) so the cursor persists
+   * across reloads without re-selecting the file.
+   */
+  customCursor: CursorTheme | null;
 }
 
 export interface AppContextType {
