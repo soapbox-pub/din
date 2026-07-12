@@ -1,6 +1,7 @@
 import { Wallpaper } from './Wallpaper';
 import { Taskbar } from './Taskbar';
 import { Window } from './Window';
+import { FilePickerProvider } from './FilePickerProvider';
 import { useWindows } from '@/hooks/useWindows';
 import { WindowManagerContext } from '@/contexts/WindowManagerContext';
 
@@ -15,20 +16,22 @@ export function Desktop() {
 
   return (
     <WindowManagerContext.Provider value={manager}>
-      <Wallpaper>
-        {/* Workspace area - windows render here */}
-        <main aria-label="Desktop" className="relative flex-1 overflow-hidden">
-          {manager.windows.map((win) => (
-            <Window
-              key={win.id}
-              window={win}
-              isTop={!win.minimized && win.z === topZ}
-            />
-          ))}
-        </main>
+      <FilePickerProvider>
+        <Wallpaper>
+          {/* Workspace area - windows render here */}
+          <main aria-label="Desktop" className="relative flex-1 overflow-hidden">
+            {manager.windows.map((win) => (
+              <Window
+                key={win.id}
+                window={win}
+                isTop={!win.minimized && win.z === topZ}
+              />
+            ))}
+          </main>
 
-        <Taskbar />
-      </Wallpaper>
+          <Taskbar />
+        </Wallpaper>
+      </FilePickerProvider>
     </WindowManagerContext.Provider>
   );
 }

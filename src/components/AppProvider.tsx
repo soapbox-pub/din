@@ -29,9 +29,12 @@ const BlossomServerMetadataSchema = z.object({
 }) satisfies z.ZodType<BlossomServerMetadata>;
 
 // Zod schema for a parsed custom cursor theme. Cursor frames are stored as
-// PNG data URLs; we validate the shape but keep the data URL opaque.
+// PNG data URLs; we validate the shape but keep the data URLs opaque.
 const CursorImageSchema = z.object({
-  dataUrl: z.string().startsWith('data:image/'),
+  frames: z.array(z.string().startsWith('data:image/')).min(1),
+  intervalMs: z.number(),
+  width: z.number(),
+  height: z.number(),
   hotX: z.number(),
   hotY: z.number(),
 });

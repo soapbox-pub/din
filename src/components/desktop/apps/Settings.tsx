@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Bomb,
   Bug,
@@ -37,7 +37,10 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
 import { useToast } from '@/hooks/useToast';
+import { useFilePicker } from '@/contexts/FilePickerContext';
+import { getFsBridge } from '@/lib/fs';
 import { parseCurXPTheme } from '@/lib/cursorTheme';
+import type { CursorTheme } from '@/lib/cursorTheme';
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { Button } from '@/components/ui/button';
@@ -586,24 +589,36 @@ function AppearanceSection() {
 }
 
 /**
- * Custom cursor theme picker. Lets the user select a `.CurXPTheme` file, parses
- * it in the browser, and stores the resulting cursor images in AppConfig (see
- * CursorThemeApplier for the DOM side). Other cursor formats can be added later
- * by extending src/lib/cursorTheme.ts.
+ * Custom cursor theme picker. Uses Din's in-app file picker to choose a
+ * `.CurXPTheme` file, reads it through the `window.fs` bridge, parses it in the
+ * browser, and stores the resulting cursor frames in AppConfig (see
+ * CursorThemeApplier for the animated DOM side). Other cursor formats can be
+ * added later by extending src/lib/cursorTheme.ts.
  */
 function CursorThemePicker() {
   const { config, updateConfig } = useAppContext();
   const { toast } = useToast();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const { pickFile } = useFilePicker();
+  const bridge = getFsBridge();
   const [busy, setBusy] = useState(false);
 
   const active = config.customCursor;
 
-  const handleFile = async (file: File | undefined) => {
-    if (!file) return;
+  const choose = async () => {
+    const path = await pickFile({
+      title: 'Choose a cursor theme',
+      confirmLabel: 'Apply cursor',
+      extensions: ['.CurXPTheme'],
+    });
+    if (!path) return;
+
     setBusy(true);
     try {
-      const theme = await parseCurXPTheme(file);
+      const fs = getFsBridge();
+      if (!fs) throw new Error('Filesystem is unavailable outside the Din shell.');
+      const { data } = await fs.readFile(path);
+      const fileName = path.split('/').pop() ?? 'Custom cursor';
+      const theme = await parseCurXPTheme(data, fileName);
       updateConfig((current) => ({ ...current, customCursor: theme }));
       toast({
         title: 'Cursor applied',
@@ -620,7 +635,6 @@ function CursorThemePicker() {
       });
     } finally {
       setBusy(false);
-      if (inputRef.current) inputRef.current.value = '';
     }
   };
 
@@ -628,66 +642,52 @@ function CursorThemePicker() {
     updateConfig((current) => ({ ...current, customCursor: null }));
   };
 
+  const mappedCount = active ? Object.keys(active.cursors).length : 0;
+
   return (
     <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm text-foreground">Custom cursor</p>
           <p className="text-xs text-muted-foreground">
-            Select a{' '}
+            Choose a{' '}
             <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
               .CurXPTheme
             </code>{' '}
-            file to replace the system cursor. Animated cursors show their first
-            frame.
+            file to replace the system cursor. Animated cursors play their full
+            animation.
           </p>
         </div>
-        {active ? (
-          <MousePointer2 className="size-5 shrink-0 text-primary" aria-hidden />
-        ) : (
-          <MousePointer2
-            className="size-5 shrink-0 text-muted-foreground/60"
-            aria-hidden
-          />
-        )}
+        <MousePointer2
+          className={cn(
+            'size-5 shrink-0',
+            active ? 'text-primary' : 'text-muted-foreground/60',
+          )}
+          aria-hidden
+        />
       </div>
 
       {active && (
         <div className="flex items-center gap-3 rounded-md border bg-background/60 p-2">
-          {active.cursors.default && (
-            <img
-              src={active.cursors.default.dataUrl}
-              alt=""
-              className="size-8 object-contain"
-              style={{ imageRendering: 'auto' }}
-            />
-          )}
+          <CursorThemePreview theme={active} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">
               {active.name}
             </p>
             <p className="text-xs text-muted-foreground">
-              {Object.keys(active.cursors).length} cursor
-              {Object.keys(active.cursors).length === 1 ? '' : 's'} mapped
+              {mappedCount} cursor{mappedCount === 1 ? '' : 's'} mapped
             </p>
           </div>
         </div>
       )}
 
       <div className="flex items-center gap-2">
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".CurXPTheme,application/zip"
-          className="hidden"
-          onChange={(e) => handleFile(e.target.files?.[0])}
-        />
         <Button
           type="button"
           variant="secondary"
           size="sm"
-          disabled={busy}
-          onClick={() => inputRef.current?.click()}
+          disabled={busy || !bridge}
+          onClick={choose}
         >
           {busy ? (
             <Loader2 className="animate-spin" aria-hidden />
@@ -703,6 +703,46 @@ function CursorThemePicker() {
           </Button>
         )}
       </div>
+
+      {!bridge && (
+        <p className="text-xs text-muted-foreground">
+          Cursor themes require the Din desktop shell.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Small animated preview of a cursor theme's default (Arrow) cursor, so the
+ * user can see the animation in Settings without moving their pointer.
+ */
+function CursorThemePreview({ theme }: { theme: CursorTheme }) {
+  const cursor = theme.cursors.default ?? Object.values(theme.cursors)[0];
+  const [frame, setFrame] = useState(0);
+
+  useEffect(() => {
+    if (!cursor || cursor.frames.length <= 1) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = window.setInterval(() => {
+      setFrame((f) => f + 1);
+    }, cursor.intervalMs);
+    return () => window.clearInterval(id);
+  }, [cursor]);
+
+  if (!cursor) return null;
+
+  // Clamp into range so switching themes (with fewer frames) never over-indexes.
+  const src = cursor.frames[frame % cursor.frames.length];
+
+  return (
+    <div className="grid size-10 shrink-0 place-items-center rounded-md bg-muted/40">
+      <img
+        src={src}
+        alt=""
+        className="max-h-8 max-w-8 object-contain"
+        style={{ imageRendering: 'auto' }}
+      />
     </div>
   );
 }
