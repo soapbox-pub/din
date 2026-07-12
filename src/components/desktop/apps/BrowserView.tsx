@@ -18,6 +18,16 @@ export interface BrowserViewProps {
   onLoadStart?: () => void;
   /** Called when the surface finishes loading (success or failure). */
   onLoadEnd?: () => void;
+  /**
+   * Called when the loaded page reports its title.
+   * Only available on the Electron <webview> surface.
+   */
+  onTitleChange?: (title: string) => void;
+  /**
+   * Called when the loaded page reports its favicon URLs.
+   * Only available on the Electron <webview> surface.
+   */
+  onFaviconChange?: (favicons: string[]) => void;
 }
 
 /**
@@ -73,7 +83,10 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 );
 
 const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
-  function WebviewSurface({ src, onLoadStart, onLoadEnd }, ref) {
+  function WebviewSurface(
+    { src, onLoadStart, onLoadEnd, onTitleChange, onFaviconChange },
+    ref,
+  ) {
     const webviewRef = useRef<ElectronWebviewElement>(null);
 
     useImperativeHandle(ref, () => ({
@@ -102,6 +115,26 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         el.removeEventListener('did-stop-loading', stop);
       };
     }, [onLoadStart, onLoadEnd]);
+
+    // Page metadata (title / favicon), reported only by the Electron webview.
+    useEffect(() => {
+      const el = webviewRef.current;
+      if (!el) return;
+      const title = (e: Event) => {
+        const { title } = e as Event & { title?: string };
+        if (typeof title === 'string') onTitleChange?.(title);
+      };
+      const favicon = (e: Event) => {
+        const { favicons } = e as Event & { favicons?: string[] };
+        if (Array.isArray(favicons)) onFaviconChange?.(favicons);
+      };
+      el.addEventListener('page-title-updated', title);
+      el.addEventListener('page-favicon-updated', favicon);
+      return () => {
+        el.removeEventListener('page-title-updated', title);
+        el.removeEventListener('page-favicon-updated', favicon);
+      };
+    }, [onTitleChange, onFaviconChange]);
 
     return (
       <webview

@@ -2,8 +2,8 @@ import { memo, useCallback, useEffect, useRef } from 'react';
 import type { ComponentType } from 'react';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getApp } from '@/lib/apps';
 import type { AppComponentProps } from '@/lib/apps';
+import { AppIcon } from '@/components/desktop/AppIcon';
 import {
   createModel,
   grabModel,
@@ -17,6 +17,7 @@ import {
   type WobblyModel,
 } from '@/lib/wobbly';
 import { useAppContext } from '@/hooks/useAppContext';
+import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { MIN_HEIGHT, MIN_WIDTH, type WindowState } from '@/hooks/useWindows';
 
@@ -105,6 +106,7 @@ export const Window = memo(function Window({
 }) {
   const { close, minimize, focus, move, resize, toggleMaximize } = useWindowManager();
   const { config } = useAppContext();
+  const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
   const sectionRef = useRef<HTMLElement>(null);
   // Drag state: pointer origin, window origin, and the latest position (so
@@ -461,7 +463,7 @@ export const Window = memo(function Window({
           win.maximized ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
         )}
       >
-        <app.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <AppIcon icon={app.icon} className="size-4 shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate text-sm font-medium text-foreground/90">
           {app.name}
         </span>

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { getApp } from '@/lib/apps';
+import type { AppDefinition } from '@/lib/apps';
 
 /** Highest z among the given windows (0 if none). */
 function maxZ(windows: WindowState[]): number {
@@ -35,8 +35,13 @@ export const MIN_HEIGHT = 160;
 let nextId = 0;
 const nextWindowId = () => `win-${nextId++}`;
 
-/** Manages the set of open windows and their stacking/focus/geometry. */
-export function useWindows() {
+/**
+ * Manages the set of open windows and their stacking/focus/geometry.
+ *
+ * @param getApp Resolver from app id to definition (built-in or installed
+ *   web app). Must be referentially stable while the app list is unchanged.
+ */
+export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   const [windows, setWindows] = useState<WindowState[]>([]);
 
   const focus = useCallback((id: string) => {
@@ -73,7 +78,7 @@ export function useWindows() {
         },
       ];
     });
-  }, []);
+  }, [getApp]);
 
   const close = useCallback((id: string) => {
     setWindows((ws) => ws.filter((w) => w.id !== id));

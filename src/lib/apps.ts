@@ -18,8 +18,12 @@ export interface AppDefinition {
   id: string;
   /** Human-readable name shown in the launcher and window title bar. */
   name: string;
-  /** Icon shown in the launcher and taskbar. */
-  icon: LucideIcon;
+  /**
+   * Icon shown in the launcher and taskbar: either a Lucide component
+   * (built-in apps) or an https image URL (installed web apps). Render
+   * through <AppIcon>, never directly.
+   */
+  icon: LucideIcon | string;
   /** The component rendered inside the app's window. */
   component: ComponentType<AppComponentProps>;
   /** Default window size when the app is launched. */

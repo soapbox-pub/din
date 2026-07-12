@@ -1,4 +1,4 @@
-import { LayoutGrid, Pin, PinOff, Plus, X } from 'lucide-react';
+import { LayoutGrid, Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,12 +15,14 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { LoginArea } from '@/components/auth/LoginArea';
+import { AppIcon } from '@/components/desktop/AppIcon';
 import { WifiIndicator } from '@/components/desktop/WifiIndicator';
 import { useClock } from '@/hooks/useClock';
 import { useAppData } from '@/hooks/useAppData';
 import { cn } from '@/lib/utils';
-import { APPS, getApp } from '@/lib/apps';
+import { APPS } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
+import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import type { WindowState } from '@/hooks/useWindows';
 
@@ -32,7 +34,8 @@ const PinnedAppsSchema = z.array(z.string());
 /** Bottom toolbar: app launcher, pinned + running apps, wifi, clock, account menu. */
 export function Taskbar() {
   const now = useClock();
-  const { windows, open } = useWindowManager();
+  const { windows, open, close } = useWindowManager();
+  const { apps, getApp, webApps, uninstallWebApp } = useInstalledApps();
   // Pinned apps roam across devices via Din's encrypted app-data layer,
   // seeded from the pre-sync localStorage key on first run.
   const [pinned, setPinned] = useAppData<string[]>(
@@ -48,6 +51,13 @@ export function Taskbar() {
         ? prev.filter((id) => id !== appId)
         : [...prev, appId],
     );
+
+  /** Uninstall a web app: close its windows, unpin it, drop the entry. */
+  const uninstall = (appId: string) => {
+    windows.filter((w) => w.appId === appId).forEach((w) => close(w.id));
+    setPinned((prev) => prev.filter((id) => id !== appId));
+    uninstallWebApp(appId);
+  };
 
   // One taskbar button per app (Windows-style grouping): pinned apps first
   // in pin order, then any running apps that aren't pinned, in launch order.
@@ -83,7 +93,7 @@ export function Taskbar() {
           className="w-72"
         >
           <div className="grid grid-cols-3 gap-2">
-            {APPS.map((app) => (
+            {apps.map((app) => (
               <ContextMenu key={app.id}>
                 <ContextMenuTrigger asChild>
                   <PopoverClose asChild>
@@ -92,7 +102,7 @@ export function Taskbar() {
                       onClick={() => open(app.id)}
                       className="flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <app.icon className="size-7 text-foreground" aria-hidden />
+                      <AppIcon icon={app.icon} className="size-7 text-foreground" />
                       <span className="text-xs leading-tight text-foreground">
                         {app.name}
                       </span>
@@ -111,6 +121,17 @@ export function Taskbar() {
                       </>
                     )}
                   </ContextMenuItem>
+                  {webApps.some((webApp) => webApp.id === app.id) && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        variant="destructive"
+                        onSelect={() => uninstall(app.id)}
+                      >
+                        <Trash2 aria-hidden /> Uninstall
+                      </ContextMenuItem>
+                    </>
+                  )}
                 </ContextMenuContent>
               </ContextMenu>
             ))}
@@ -131,6 +152,11 @@ export function Taskbar() {
               activeWindowId={activeWindow?.id ?? null}
               isPinned={pinned.includes(appId)}
               onTogglePin={() => togglePin(appId)}
+              onUninstall={
+                webApps.some((webApp) => webApp.id === appId)
+                  ? () => uninstall(appId)
+                  : undefined
+              }
             />
           );
         })}
@@ -169,12 +195,15 @@ function TaskbarAppButton({
   activeWindowId,
   isPinned,
   onTogglePin,
+  onUninstall,
 }: {
   app: AppDefinition;
   appWindows: WindowState[];
   activeWindowId: string | null;
   isPinned: boolean;
   onTogglePin: () => void;
+  /** Present only for installed web apps; removes the app entirely. */
+  onUninstall?: () => void;
 }) {
   const { open, focus, minimize, close } = useWindowManager();
   const isAppActive = appWindows.some((w) => w.id === activeWindowId);
@@ -215,7 +244,7 @@ function TaskbarAppButton({
         isAppActive && 'bg-foreground/10',
       )}
     >
-      <app.icon className="size-5" />
+      <AppIcon icon={app.icon} className="size-5" />
       {appWindows.length > 0 && (
         <span
           aria-hidden
@@ -255,6 +284,14 @@ function TaskbarAppButton({
           </ContextMenuItem>
         </>
       )}
+      {onUninstall && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onSelect={onUninstall}>
+            <Trash2 aria-hidden /> Uninstall
+          </ContextMenuItem>
+        </>
+      )}
     </ContextMenuContent>
   );
 
@@ -288,7 +325,7 @@ function TaskbarAppButton({
                     win.id === activeWindowId && 'bg-accent/60',
                   )}
                 >
-                  <app.icon className="size-4 shrink-0" aria-hidden />
+                  <AppIcon icon={app.icon} className="size-4 shrink-0" />
                   <span className="truncate">
                     {app.name} {i + 1}
                   </span>
