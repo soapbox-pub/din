@@ -47,6 +47,9 @@ import {
   useHomeDir,
 } from '@/hooks/useFileSystem';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
+import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { TabStrip } from '@/components/desktop/TabStrip';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -116,19 +119,139 @@ function EntryIcon({ entry }: { entry: FsEntry }) {
   return <File className={className} aria-hidden />;
 }
 
+let nextTabId = 0;
+const newTabId = () => `files-${nextTabId++}`;
+
+/** Basename shown on a tab for a given directory (root shows "/"). */
+function tabTitle(cwd: string | null): string {
+  if (!cwd) return 'Files';
+  if (cwd === '/') return '/';
+  const base = cwd.slice(cwd.lastIndexOf('/') + 1);
+  return base || '/';
+}
+
 /**
  * Files - a browser for the underlying OS filesystem.
  *
  * Backed by `window.fs` (Electron preload + IPC into the main process), so it
- * sees the VM's real filesystem. Directory listings are cached with TanStack
- * Query; clicking a directory navigates, clicking a file opens an in-window
- * preview (text or image). Right-click offers rename/delete, and the toolbar
- * can create folders; writes are bounded by the OS user's permissions.
- * Outside the Electron shell (plain browser dev) it shows an explanatory
- * fallback.
+ * sees the VM's real filesystem. This shell manages tabs: each tab is an
+ * independent navigation context (its own history, cwd, and preview), all
+ * kept mounted so background tabs retain their state; only the active one is
+ * visible. The tab strip is published into the window title bar. Outside the
+ * Electron shell (plain-browser dev) it shows an explanatory fallback.
  */
-export function FileBrowser(_props: AppComponentProps) {
+export function FileBrowser({ windowId }: AppComponentProps) {
   const bridge = getFsBridge();
+  const { close: closeWindow } = useWindowManager();
+  const setTitlebar = useWindowTitlebar();
+
+  const [tabs, setTabs] = useState<{ id: string }[]>(() => [{ id: newTabId() }]);
+  const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
+  // Current directory per tab, reported up by each tab for its label.
+  const [cwds, setCwds] = useState<Record<string, string | null>>({});
+
+  const openTab = useCallback(() => {
+    const tab = { id: newTabId() };
+    setTabs((ts) => [...ts, tab]);
+    setActiveId(tab.id);
+  }, []);
+
+  const closeTab = useCallback(
+    (id: string) => {
+      setTabs((ts) => {
+        const index = ts.findIndex((t) => t.id === id);
+        if (index === -1) return ts;
+        const next = ts.filter((t) => t.id !== id);
+        if (next.length === 0) {
+          closeWindow(windowId);
+          return ts;
+        }
+        setActiveId((current) =>
+          current === id ? next[Math.max(0, index - 1)].id : current,
+        );
+        return next;
+      });
+      setCwds((c) => {
+        const { [id]: _, ...rest } = c;
+        return rest;
+      });
+    },
+    [closeWindow, windowId],
+  );
+
+  const reportCwd = useCallback((id: string, cwd: string | null) => {
+    setCwds((c) => (c[id] === cwd ? c : { ...c, [id]: cwd }));
+  }, []);
+
+  useEffect(() => {
+    if (!bridge) return;
+    setTitlebar(
+      <TabStrip
+        tabs={tabs.map((t) => ({
+          id: t.id,
+          title: tabTitle(cwds[t.id] ?? null),
+          icon: <Folder className="size-3.5 text-primary" />,
+        }))}
+        activeId={activeId}
+        label="Files tabs"
+        newTabLabel="New tab"
+        onActivate={setActiveId}
+        onClose={closeTab}
+        onNew={openTab}
+      />,
+    );
+    return () => setTitlebar(null);
+  }, [bridge, tabs, cwds, activeId, closeTab, openTab, setTitlebar]);
+
+  if (!bridge) {
+    return (
+      <div className="grid h-full w-full place-items-center p-6">
+        <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+          <HardDrive className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
+          <p className="text-sm text-muted-foreground">
+            Files needs the Electron shell to access the OS filesystem. Run{' '}
+            <code className="rounded bg-foreground/10 px-1 py-0.5">make dev</code> or
+            boot the VM; the bridge is not available in a plain browser.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-full w-full">
+      {tabs.map((tab) => (
+        <div
+          key={tab.id}
+          className="absolute inset-0"
+          style={
+            tab.id === activeId
+              ? undefined
+              : { visibility: 'hidden', pointerEvents: 'none' }
+          }
+        >
+          <FileBrowserTab
+            tabId={tab.id}
+            onCwdChange={reportCwd}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One Files tab: an independent navigation context (history, cwd, preview,
+ * and inline-edit UI state). Reports its current directory up via
+ * `onCwdChange` so the shell can label the tab.
+ */
+function FileBrowserTab({
+  tabId,
+  onCwdChange,
+}: {
+  tabId: string;
+  onCwdChange: (id: string, cwd: string | null) => void;
+}) {
   const home = useHomeDir();
   const { mkdir, rename, rm } = useFsMutations();
 
@@ -150,6 +273,11 @@ export function FileBrowser(_props: AppComponentProps) {
   // Until the user navigates, the current directory is the home directory.
   const cwd = cursor >= 0 ? history[cursor] : (home.data ?? null);
   const address = addressEdit ?? cwd ?? '';
+
+  // Report the current directory up so the shell can label this tab.
+  useEffect(() => {
+    onCwdChange(tabId, cwd);
+  }, [tabId, cwd, onCwdChange]);
 
   const navigate = useCallback(
     (target: string) => {
@@ -270,21 +398,6 @@ export function FileBrowser(_props: AppComponentProps) {
   }, []);
 
   const cancelRename = useCallback(() => setRenamingName(null), []);
-
-  if (!bridge) {
-    return (
-      <div className="grid h-full w-full place-items-center p-6">
-        <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
-          <HardDrive className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
-          <p className="text-sm text-muted-foreground">
-            Files needs the Electron shell to access the OS filesystem. Run{' '}
-            <code className="rounded bg-foreground/10 px-1 py-0.5">make dev</code> or
-            boot the VM; the bridge is not available in a plain browser.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full w-full flex-col">

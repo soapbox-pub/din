@@ -247,8 +247,12 @@ export const Window = memo(function Window({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      // Ignore drags initiated on the control buttons.
-      if ((e.target as HTMLElement).closest('button')) return;
+      // Ignore drags initiated on interactive title-bar controls: the window
+      // controls (buttons) and any app-provided controls (e.g. tab strip
+      // tabs, which are role="tab" divs). Capturing the pointer for a drag
+      // here would swallow their click, so bail before setPointerCapture.
+      const target = e.target as HTMLElement;
+      if (target.closest('button, [role="tab"], [data-window-no-drag]')) return;
       focus(win.id);
       // Maximized windows are pinned; don't allow title-bar dragging.
       if (win.maximized) return;
