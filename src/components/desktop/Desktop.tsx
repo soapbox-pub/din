@@ -3,6 +3,7 @@ import { Taskbar } from './Taskbar';
 import { Window } from './Window';
 import { FilePickerProvider } from './FilePickerProvider';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
+import { BrowserExtensionHost } from './BrowserExtensionHost';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowManagerContext } from '@/contexts/WindowManagerContext';
@@ -29,6 +30,7 @@ function DesktopSession() {
   return (
     <WindowManagerContext.Provider value={manager}>
       <FilePickerProvider>
+        <BrowserExtensionHost />
         <Wallpaper>
           {/* Workspace area - windows render here */}
           <main aria-label="Desktop" className="relative flex-1 overflow-hidden">

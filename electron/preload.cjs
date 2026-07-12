@@ -1,9 +1,10 @@
 // Preload for the Din renderer.
 //
-// Exposes three bridges backed by IPC handlers in main.cjs:
+// Exposes four bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
+//   - window.crx: Chrome extension coordination for the Web Browser app
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -107,4 +108,49 @@ contextBridge.exposeInMainWorld('wifi', {
 
   /** Turn the WiFi radio on or off. */
   setRadio: (enabled) => ipcRenderer.invoke('wifi:setRadio', enabled),
+});
+
+// Chrome extension bridge (window.crx), backed by the crx:* handlers in
+// main.cjs (electron-chrome-extensions). Used by the web browser app to
+// coordinate its tab UI with the extension system: extensions can ask for
+// tabs to be created/activated/closed, and the shell reports which tab is
+// active plus the WebContents id of each newly attached <webview> guest.
+contextBridge.exposeInMainWorld('crx', {
+  /** Report the active browser tab's webContents id. */
+  tabActivated: (wcId) => ipcRenderer.send('crx:tabActivated', wcId),
+
+  /** Answer a `create` tab request with the new guest's webContents id. */
+  resolveCreateTab: (requestId, wcId) =>
+    ipcRenderer.send('crx:resolveCreateTab', requestId, wcId),
+
+  /**
+   * Subscribe to extension-initiated tab commands. Returns an unsubscribe fn.
+   * Commands: { type: 'create', requestId, url?, active }
+   *           { type: 'open', url }             (target=_blank from a page)
+   *           { type: 'select', wcId }          (chrome.tabs.update active)
+   *           { type: 'close', wcId }           (chrome.tabs.remove)
+   */
+  onTabCommand: (callback) => {
+    const create = (_event, d) =>
+      callback({ type: 'create', requestId: d.requestId, url: d.url, active: d.active });
+    const open = (_event, d) => callback({ type: 'open', url: d.url });
+    const select = (_event, d) => callback({ type: 'select', wcId: d.wcId });
+    const close = (_event, d) => callback({ type: 'close', wcId: d.wcId });
+    ipcRenderer.on('crx:createTab', create);
+    ipcRenderer.on('crx:openTab', open);
+    ipcRenderer.on('crx:selectTab', select);
+    ipcRenderer.on('crx:removeTab', close);
+    return () => {
+      ipcRenderer.removeListener('crx:createTab', create);
+      ipcRenderer.removeListener('crx:openTab', open);
+      ipcRenderer.removeListener('crx:selectTab', select);
+      ipcRenderer.removeListener('crx:removeTab', close);
+    };
+  },
+
+  /** Installed extensions ({ id, name, version, description }[]). */
+  listExtensions: () => ipcRenderer.invoke('crx:listExtensions'),
+
+  /** Uninstall an installed extension by id. */
+  uninstallExtension: (id) => ipcRenderer.invoke('crx:uninstallExtension', id),
 });

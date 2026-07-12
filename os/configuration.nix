@@ -36,7 +36,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-ZmzeKo4z0NHiimLEEpp0/DtPmJ7OCVFmi5hitJys2Ho=";
+    npmDepsHash = "sha256-GdPj/OpJClvsExbqizqCDS2S+uVX9IxD4WuKRt6efKo=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -57,6 +57,15 @@ let
       install -m444 electron/main.cjs $out/share/din/main.cjs
       install -m444 electron/preload.cjs $out/share/din/preload.cjs
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
+
+      # Runtime node modules for main.cjs's Chrome extension support
+      # (electron-chrome-extensions + electron-chrome-web-store and their
+      # transitive runtime deps). Resolved relative to main.cjs, so they
+      # live in a node_modules directory beside it.
+      mkdir -p $out/share/din/node_modules
+      for dep in electron-chrome-extensions electron-chrome-web-store debug ms adm-zip; do
+        cp -r node_modules/$dep $out/share/din/node_modules/
+      done
       runHook postInstall
     '';
   };

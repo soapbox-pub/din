@@ -9,10 +9,16 @@ import { isWebviewAvailable } from '@/lib/isElectron';
 /** Imperative controls a BrowserView surface exposes to its parent. */
 export interface BrowserViewHandle {
   reload: () => void;
+  /** Navigate the surface to a new URL. */
+  loadURL: (url: string) => void;
+  /** Go back in the surface's own history (webview only; no-op in iframe). */
+  goBack: () => void;
+  /** Go forward in the surface's own history (webview only). */
+  goForward: () => void;
 }
 
 export interface BrowserViewProps {
-  /** The https URL to display. */
+  /** The URL to display when the surface mounts. */
   src: string;
   /** Called when the surface starts loading a page. */
   onLoadStart?: () => void;
@@ -28,6 +34,18 @@ export interface BrowserViewProps {
    * Only available on the Electron <webview> surface.
    */
   onFaviconChange?: (favicons: string[]) => void;
+  /**
+   * Called when the surface commits a navigation (link clicks, redirects,
+   * history moves), with its current back/forward availability.
+   * Only available on the Electron <webview> surface.
+   */
+  onNavigate?: (url: string, canGoBack: boolean, canGoForward: boolean) => void;
+  /**
+   * Called once the guest attaches, with its WebContents id. The browser app
+   * reports this to the Chrome extension system (tab tracking).
+   * Only available on the Electron <webview> surface.
+   */
+  onWebContentsId?: (id: number) => void;
 }
 
 /**
@@ -36,11 +54,15 @@ export interface BrowserViewProps {
  * Abstracts over two implementations chosen at runtime:
  *   - Electron <webview>: a real embedder that loads arbitrary sites,
  *     bypassing the X-Frame-Options / frame-ancestors restrictions that block
- *     iframes. Used when running inside the Electron shell.
+ *     iframes. Used when running inside the Electron shell. Navigation
+ *     history is the guest's own (goBack/goForward drive the webContents).
  *   - <iframe>: the web fallback (e.g. `make dev-browser`). Subject to remote
- *     sites' framing policies, so many sites will refuse to load.
+ *     sites' framing policies, so many sites will refuse to load. Back and
+ *     forward are handled by the caller (manual history).
  *
- * Both only ever receive https URLs (sanitized upstream).
+ * Surfaces only ever receive https URLs - plus chrome-extension:// URLs on
+ * the webview surface, for extension options/dashboard pages (validated
+ * upstream, see `isAllowedTabUrl`).
  */
 export const BrowserView = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function BrowserView(props, ref) {
@@ -55,18 +77,29 @@ export const BrowserView = forwardRef<BrowserViewHandle, BrowserViewProps>(
 const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function IframeSurface({ src, onLoadStart, onLoadEnd }, ref) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
+    // The last URL the caller requested (reload re-requests it).
+    const currentSrc = useRef(src);
 
     useImperativeHandle(ref, () => ({
       reload: () => {
-        if (iframeRef.current) iframeRef.current.src = src;
+        if (iframeRef.current) iframeRef.current.src = currentSrc.current;
+        onLoadStart?.();
       },
-    }), [src]);
+      loadURL: (url: string) => {
+        currentSrc.current = url;
+        if (iframeRef.current) iframeRef.current.src = url;
+        onLoadStart?.();
+      },
+      goBack: () => {},
+      goForward: () => {},
+    }), [onLoadStart]);
 
-    // An <iframe> has no reliable "load started" event, so signal start when
-    // the requested src changes and end on its `load` event.
+    // An <iframe> has no reliable "load started" event, so signal start once
+    // on mount and end on its `load` event (loadURL signals its own starts).
     useEffect(() => {
       onLoadStart?.();
-    }, [src, onLoadStart]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return (
       <iframe
@@ -84,24 +117,24 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
 const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function WebviewSurface(
-    { src, onLoadStart, onLoadEnd, onTitleChange, onFaviconChange },
+    { src, onLoadStart, onLoadEnd, onTitleChange, onFaviconChange, onNavigate, onWebContentsId },
     ref,
   ) {
     const webviewRef = useRef<ElectronWebviewElement>(null);
+    // The initial src is fixed for the element's lifetime; navigations go
+    // through loadURL so the guest keeps its own history.
+    const initialSrc = useRef(src);
 
     useImperativeHandle(ref, () => ({
       reload: () => webviewRef.current?.reload(),
+      loadURL: (url: string) => {
+        webviewRef.current?.loadURL(url).catch(() => {
+          // Aborted/failed loads reject; the did-fail-load path handles UI.
+        });
+      },
+      goBack: () => webviewRef.current?.goBack(),
+      goForward: () => webviewRef.current?.goForward(),
     }), []);
-
-    // Keep the displayed page in sync with the requested src. Assigning via
-    // the element's loadURL avoids a full element remount on every navigation.
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      if (el.getAttribute('src') !== src) {
-        el.setAttribute('src', src);
-      }
-    }, [src]);
 
     useEffect(() => {
       const el = webviewRef.current;
@@ -136,11 +169,57 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       };
     }, [onTitleChange, onFaviconChange]);
 
+    // Committed navigations (link clicks, redirects, back/forward) keep the
+    // address bar and back/forward buttons in sync with the guest.
+    useEffect(() => {
+      const el = webviewRef.current;
+      if (!el) return;
+      const report = (url: unknown) => {
+        if (typeof url !== 'string') return;
+        onNavigate?.(url, el.canGoBack(), el.canGoForward());
+      };
+      const navigate = (e: Event) => {
+        report((e as Event & { url?: string }).url);
+      };
+      const navigateInPage = (e: Event) => {
+        const { url, isMainFrame } = e as Event & { url?: string; isMainFrame?: boolean };
+        if (isMainFrame) report(url);
+      };
+      el.addEventListener('did-navigate', navigate);
+      el.addEventListener('did-navigate-in-page', navigateInPage);
+      return () => {
+        el.removeEventListener('did-navigate', navigate);
+        el.removeEventListener('did-navigate-in-page', navigateInPage);
+      };
+    }, [onNavigate]);
+
+    // Report the guest's WebContents id once it attaches (used to register
+    // the tab with the Chrome extension system).
+    useEffect(() => {
+      const el = webviewRef.current;
+      if (!el) return;
+      const attached = () => {
+        try {
+          onWebContentsId?.(el.getWebContentsId());
+        } catch {
+          // Guest not attached yet; dom-ready below retries.
+        }
+      };
+      el.addEventListener('did-attach', attached);
+      el.addEventListener('dom-ready', attached);
+      return () => {
+        el.removeEventListener('did-attach', attached);
+        el.removeEventListener('dom-ready', attached);
+      };
+    }, [onWebContentsId]);
+
     return (
       <webview
         ref={webviewRef}
-        src={src}
+        src={initialSrc.current}
         // A partition isolates cookies/storage from the shell's own origin.
+        // It is also the session the Chrome extension system is attached to
+        // (see electron/main.cjs) - extensions apply to browser tabs only.
         partition="persist:webbrowser"
         className="h-full w-full bg-white"
         style={{ display: 'flex' }}
@@ -153,4 +232,9 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 interface ElectronWebviewElement extends HTMLElement {
   reload(): void;
   loadURL(url: string): Promise<void>;
+  goBack(): void;
+  goForward(): void;
+  canGoBack(): boolean;
+  canGoForward(): boolean;
+  getWebContentsId(): number;
 }

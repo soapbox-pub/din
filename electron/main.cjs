@@ -13,12 +13,20 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawn, execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, session, webContents } = require('electron');
+const { ElectronChromeExtensions } = require('electron-chrome-extensions');
+const {
+  installChromeWebStore,
+  uninstallExtension,
+} = require('electron-chrome-web-store');
 
 const DIST = path.join(__dirname, 'dist');
 const INDEX = path.join(DIST, 'index.html');
 
-// Must be called before app is ready.
+// Must be called before app is ready. NOTE: each call to
+// registerSchemesAsPrivileged REPLACES the full list, and requiring
+// electron-chrome-extensions above already registered the crx scheme
+// (extension action icons) - so it must be re-declared here.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'app',
@@ -26,6 +34,12 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true,
       supportFetchAPI: true,
+    },
+  },
+  {
+    scheme: 'crx',
+    privileges: {
+      bypassCSP: true,
     },
   },
 ]);
@@ -545,14 +559,222 @@ function registerWifiHandlers() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Chrome extension support (the web browser app).
+//
+// electron-chrome-extensions implements the chrome.* extension APIs that
+// Electron itself lacks (tabs, actions, popups, ...), and
+// electron-chrome-web-store lets users install extensions by browsing the
+// Chrome Web Store inside the browser app. Everything is scoped to the
+// browser's session partition (persist:webbrowser):
+//   - extensions run against browsed sites only; they can never see the
+//     shell's origin (where app data lives) or its privileged bridges
+//   - the shell's own session (defaultSession) never loads extensions
+//
+// Tab model: the shell renders browser tabs as <webview> elements, so each
+// tab is a guest WebContents owned by the shell window. Guests are registered
+// with the extension system as they're created (web-contents-created below).
+// Extension-initiated tab operations (chrome.tabs.create/update/remove and
+// window.open) are bridged to the shell renderer over IPC (window.crx in
+// preload.cjs), which creates/activates/closes the corresponding tab UI.
+//
+// IMPORTANT: never attach session.webRequest listeners to the browser
+// session; doing so silently disables chrome.webRequest for extensions
+// (which content blockers like uBlock Origin depend on).
+// ---------------------------------------------------------------------------
+
+const WEBBROWSER_PARTITION = 'persist:webbrowser';
+
+/** The BrowserWindow hosting the shell (set at startup). */
+let shellWindow = null;
+
+/** The extension system for the browser session (set at startup). */
+let chromeExtensions = null;
+
+/** Where Chrome Web Store installs / unpacked extensions live on disk. */
+function extensionsPath() {
+  return path.join(app.getPath('userData'), 'Extensions');
+}
+
+/** The session all browser <webview> tabs run in. */
+function browserSession() {
+  return session.fromPartition(WEBBROWSER_PARTITION);
+}
+
+/** Send an event to the shell renderer, if it's still alive. */
+function sendToShell(channel, payload) {
+  if (shellWindow && !shellWindow.webContents.isDestroyed()) {
+    shellWindow.webContents.send(channel, payload);
+  }
+}
+
+/**
+ * Resolve a renderer-supplied WebContents id to a browser-tab guest, or null.
+ * Only <webview> guests inside the browser partition qualify; anything else
+ * (the shell itself, popups, stale ids) is rejected.
+ */
+function browserTabFromId(wcId) {
+  if (typeof wcId !== 'number') return null;
+  const contents = webContents.fromId(wcId);
+  if (!contents || contents.isDestroyed()) return null;
+  if (contents.getType() !== 'webview') return null;
+  if (contents.session !== browserSession()) return null;
+  return contents;
+}
+
+// chrome.tabs.create round-trips through the shell renderer (it owns the tab
+// UI). Each request gets an id; the renderer answers with the new <webview>
+// guest's WebContents id once it attaches.
+let nextTabRequestId = 1;
+const pendingTabRequests = new Map();
+const TAB_REQUEST_TIMEOUT_MS = 15_000;
+
+/** Ask the shell to open a browser tab; resolves to the tab's WebContents. */
+function requestShellTab(details) {
+  return new Promise((resolve, reject) => {
+    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
+      reject(new Error('Shell window unavailable'));
+      return;
+    }
+    const requestId = nextTabRequestId++;
+    const timer = setTimeout(() => {
+      pendingTabRequests.delete(requestId);
+      reject(new Error('Tab creation timed out'));
+    }, TAB_REQUEST_TIMEOUT_MS);
+    pendingTabRequests.set(requestId, { resolve, reject, timer });
+    sendToShell('crx:createTab', {
+      requestId,
+      url: typeof details.url === 'string' ? details.url : undefined,
+      active: details.active !== false,
+    });
+  });
+}
+
+/**
+ * Write a standalone preload that injects the <browser-action-list> custom
+ * element (extension toolbar buttons) into the shell. The shell renderer is
+ * sandboxed, so it can't require() the module itself - instead we concatenate
+ * the library's self-contained script (its only external require is
+ * 'electron', which sandboxed preloads may load) with a call to its export.
+ */
+function ensureBrowserActionPreload() {
+  const source = fs.readFileSync(
+    require.resolve('electron-chrome-extensions/browser-action'),
+    'utf8',
+  );
+  const file = path.join(app.getPath('userData'), 'browser-action.preload.js');
+  fs.writeFileSync(file, `${source}\n;module.exports.injectBrowserAction();\n`);
+  return file;
+}
+
+function setupChromeExtensions() {
+  chromeExtensions = new ElectronChromeExtensions({
+    // din is AGPL-3.0-or-later, compatible with the library's GPL-3.0.
+    license: 'GPL-3.0',
+    session: browserSession(),
+
+    createTab: async (details) => {
+      const contents = await requestShellTab(details);
+      return [contents, shellWindow];
+    },
+    selectTab: (tab) => {
+      sendToShell('crx:selectTab', { wcId: tab.id });
+    },
+    removeTab: (tab) => {
+      sendToShell('crx:removeTab', { wcId: tab.id });
+    },
+    createWindow: async (details) => {
+      // The desktop has exactly one native window; extension "windows"
+      // (e.g. a popup the extension opens) become tabs instead.
+      const url = Array.isArray(details.url) ? details.url[0] : details.url;
+      await requestShellTab({ url, active: true });
+      return shellWindow;
+    },
+  });
+
+  // Chrome Web Store installs: browsing chromewebstore.google.com inside a
+  // browser tab gets a working "Add to Chrome" button. Also re-loads all
+  // previously installed extensions from disk at startup.
+  installChromeWebStore({
+    session: browserSession(),
+    extensionsPath: extensionsPath(),
+    // Allow Manifest V2 so proven extensions like uBlock Origin keep working
+    // (Electron has no declarativeNetRequest, which most MV3 blockers need).
+    minimumManifestVersion: 2,
+    allowUnpackedExtensions: true,
+  }).catch((error) => {
+    console.error('chrome-web-store setup failed:', error);
+  });
+
+  // Serve crx://extension-icon/... in the shell session so the toolbar's
+  // <browser-action-list> and the extensions manager can render icons.
+  ElectronChromeExtensions.handleCRXProtocol(session.defaultSession);
+
+  // Inject the <browser-action-list> element into the shell.
+  session.defaultSession.registerPreloadScript({
+    id: 'crx-browser-action',
+    type: 'frame',
+    filePath: ensureBrowserActionPreload(),
+  });
+}
+
+function registerCrxHandlers() {
+  // The shell reports which browser tab is active (drives per-tab extension
+  // action state and which tab chrome.tabs APIs consider "active").
+  ipcMain.on('crx:tabActivated', (event, wcId) => {
+    assertShellSender(event);
+    const tab = browserTabFromId(wcId);
+    if (tab && chromeExtensions) chromeExtensions.selectTab(tab);
+  });
+
+  // The shell answers a crx:createTab request with the new guest's id.
+  ipcMain.on('crx:resolveCreateTab', (event, requestId, wcId) => {
+    assertShellSender(event);
+    const pending = pendingTabRequests.get(requestId);
+    if (!pending) return;
+    pendingTabRequests.delete(requestId);
+    clearTimeout(pending.timer);
+    const tab = browserTabFromId(wcId);
+    if (tab) pending.resolve(tab);
+    else pending.reject(new Error('Tab creation failed'));
+  });
+
+  // Installed-extension listing for the browser's extensions menu.
+  ipcMain.handle('crx:listExtensions', (event) => {
+    assertShellSender(event);
+    return browserSession()
+      .extensions.getAllExtensions()
+      .map((extension) => ({
+        id: extension.id,
+        name: extension.manifest?.name ?? extension.name,
+        version: extension.version,
+        description: extension.manifest?.description ?? '',
+      }));
+  });
+
+  ipcMain.handle('crx:uninstallExtension', async (event, extensionId) => {
+    assertShellSender(event);
+    if (typeof extensionId !== 'string' || !/^[a-p]{32}$/.test(extensionId)) {
+      throw new Error('Invalid extension id');
+    }
+    await uninstallExtension(extensionId, {
+      session: browserSession(),
+      extensionsPath: extensionsPath(),
+    });
+  });
+}
+
 app.whenReady().then(() => {
   // Save downloads straight to ~/Downloads instead of popping a native
-  // GTK save dialog (there is no desktop environment to host one).
-  session.defaultSession.on('will-download', (_event, item) => {
+  // GTK save dialog (there is no desktop environment to host one). Applies
+  // to both the shell session and the browser tabs' session.
+  const downloadToHome = (_event, item) => {
     const dir = app.getPath('downloads');
     fs.mkdirSync(dir, { recursive: true });
     item.setSavePath(path.join(dir, item.getFilename()));
-  });
+  };
+  session.defaultSession.on('will-download', downloadToHome);
+  browserSession().on('will-download', downloadToHome);
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
@@ -562,6 +784,11 @@ app.whenReady().then(() => {
   registerFsHandlers();
   registerPtyHandlers();
   registerWifiHandlers();
+  registerCrxHandlers();
+
+  // Must run before any <webview> is created so the extension system's
+  // preload/APIs are in place when the first tab loads.
+  setupChromeExtensions();
 
   const win = new BrowserWindow({
     // Dev: normal windowed shell. Production: fullscreen kiosk.
@@ -586,6 +813,7 @@ app.whenReady().then(() => {
   });
 
   shellContentsId = win.webContents.id;
+  shellWindow = win;
 
   win.loadURL(DEV_URL || 'app://din/');
 
@@ -596,11 +824,20 @@ app.whenReady().then(() => {
 
 // Harden any <webview> the shell embeds (the web browser app). Keep them
 // sandboxed with no Node integration, and deny requests to spawn native
-// windows (e.g. target=_blank) — navigation stays inside the webview.
+// windows - target=_blank and friends become new browser tabs instead.
+// Browser-partition guests are also registered as tabs with the Chrome
+// extension system (chrome.tabs sees them; content scripts inject).
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
+
+  if (chromeExtensions && shellWindow && contents.session === browserSession()) {
+    chromeExtensions.addTab(contents, shellWindow);
+  }
+
   contents.setWindowOpenHandler(({ url }) => {
-    if (/^https:\/\//i.test(url)) contents.loadURL(url);
+    if (/^(https|chrome-extension):\/\//i.test(url)) {
+      sendToShell('crx:openTab', { url });
+    }
     return { action: 'deny' };
   });
 });

@@ -102,6 +102,15 @@ files — `git add` new source files before `npm run os:build`.
 
 ## Notes
 
+- The Web Browser app supports Chrome extensions (tabs, toolbar actions,
+  content scripts) via
+  [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell);
+  install them by browsing the Chrome Web Store inside the browser, or drop
+  unpacked extensions into the app's `Extensions/` data directory. Extensions
+  run only in the browser's session partition — never against the shell.
+  Manifest V2 is allowed (Electron lacks `declarativeNetRequest`, so classic
+  content blockers like uBlock Origin need it); `chrome.*` API coverage is
+  broad but not complete.
 - The Settings app manages WiFi through NetworkManager (`nmcli` behind an
   Electron IPC bridge). NetworkManager picks up physical adapters (wired and
   wireless) automatically. Note that QEMU has no wireless hardware, so the

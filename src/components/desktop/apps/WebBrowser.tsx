@@ -1,13 +1,21 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Globe,
   MonitorDown,
+  Plus,
+  Puzzle,
   RotateCw,
   Search,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveNavigation, sanitizeUrl } from '@/lib/sanitizeUrl';
+import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
+import { consumeTabCommands } from '@/lib/browserTabBus';
+import { isWebviewAvailable } from '@/lib/isElectron';
 import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,78 +35,297 @@ import {
 } from '@/components/desktop/apps/BrowserView';
 
 const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
+const WEB_STORE_URL = 'https://chromewebstore.google.com/';
+
+let nextTabId = 0;
+const newTabId = () => `tab-${nextTabId++}`;
+
+/** One browser tab: UI state plus its rendering surface's identity. */
+interface Tab {
+  id: string;
+  /** URL the surface was mounted with (fixed for the surface's lifetime). */
+  initialSrc: string;
+  /** Address bar text (user-editable). */
+  address: string;
+  /** Last committed URL. */
+  url: string;
+  title: string | null;
+  favicon: string | null;
+  loading: boolean;
+  /** The <webview> guest's WebContents id (null in the iframe fallback). */
+  wcId: number | null;
+  canBack: boolean;
+  canForward: boolean;
+  /** Manual history for the iframe fallback (webview keeps its own). */
+  history: string[];
+  cursor: number;
+  /** chrome.tabs.create request to answer once the guest attaches. */
+  pendingRequestId: number | null;
+}
+
+function createTab(url: string, pendingRequestId: number | null = null): Tab {
+  return {
+    id: newTabId(),
+    initialSrc: url,
+    address: url,
+    url,
+    title: null,
+    favicon: null,
+    loading: false,
+    wcId: null,
+    canBack: false,
+    canForward: false,
+    history: [url],
+    cursor: 0,
+    pendingRequestId,
+  };
+}
+
+/** Events a tab surface reports up to the browser. */
+type TabEvent =
+  | { kind: 'loading'; value: boolean }
+  | { kind: 'title'; value: string }
+  | { kind: 'favicon'; value: string | null }
+  | { kind: 'navigate'; url: string; canBack: boolean; canForward: boolean }
+  | { kind: 'webContentsId'; value: number };
 
 /**
- * A minimal web browser.
+ * A tabbed web browser.
  *
- * The actual rendering surface is abstracted by <BrowserView>, which uses an
- * Electron <webview> when available (loads any site) and falls back to a
- * sandboxed <iframe> in a plain browser (subject to remote framing policies).
- * Only https URLs are ever loaded (see `resolveNavigation` / `sanitizeUrl`).
+ * Rendering surfaces are abstracted by <BrowserView>: an Electron <webview>
+ * when available (loads any site, native history, Chrome extension support)
+ * with a sandboxed <iframe> fallback in a plain browser. Only https URLs are
+ * user-navigable (see `resolveNavigation`); chrome-extension:// pages are
+ * additionally allowed when opened by the extension system.
  *
- * The toolbar's install button turns the current site into a desktop app
- * (PWA-style): it gets an entry in the app launcher and opens in its own
- * chrome-less window.
+ * Inside the Electron shell, browser tabs are tracked by the Chrome extension
+ * system (electron-chrome-extensions, see electron/main.cjs): the toolbar
+ * shows extension actions (<browser-action-list>), an extensions menu manages
+ * installs, and extension tab commands arrive via the browserTabBus.
  */
-export function WebBrowser(_props: AppComponentProps) {
-  const [address, setAddress] = useState(HOME_URL);
-  const [src, setSrc] = useState(HOME_URL);
-  const [history, setHistory] = useState<string[]>([HOME_URL]);
-  const [cursor, setCursor] = useState(0);
-  const [loading, setLoading] = useState(false);
-  // Page metadata reported by the Electron webview (null in the iframe
-  // fallback); used to prefill the install dialog.
-  const [pageTitle, setPageTitle] = useState<string | null>(null);
-  const [favicon, setFavicon] = useState<string | null>(null);
-  const viewRef = useRef<BrowserViewHandle>(null);
+export function WebBrowser({ windowId }: AppComponentProps) {
+  const { close: closeWindow } = useWindowManager();
+  const [tabs, setTabs] = useState<Tab[]>(() => [createTab(HOME_URL)]);
+  const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
+  const views = useRef(new Map<string, BrowserViewHandle>());
+  // Mirror of `tabs` for event handlers that need the current list without
+  // re-subscribing on every state change.
+  const tabsRef = useRef(tabs);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+  const crx = getCrxBridge();
+  const webviewMode = isWebviewAvailable();
+
+  const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+
+  const updateTab = useCallback(
+    (id: string, patch: Partial<Tab> | ((tab: Tab) => Partial<Tab>)) => {
+      setTabs((ts) =>
+        ts.map((t) =>
+          t.id === id
+            ? { ...t, ...(typeof patch === 'function' ? patch(t) : patch) }
+            : t,
+        ),
+      );
+    },
+    [],
+  );
+
+  const openTab = useCallback(
+    (url: string, activate = true, pendingRequestId: number | null = null) => {
+      const tab = createTab(url, pendingRequestId);
+      setTabs((ts) => [...ts, tab]);
+      if (activate) setActiveId(tab.id);
+      return tab.id;
+    },
+    [],
+  );
+
+  const closeTab = useCallback(
+    (id: string) => {
+      views.current.delete(id);
+      const ts = tabsRef.current;
+      const index = ts.findIndex((t) => t.id === id);
+      if (index === -1) return;
+      const next = ts.filter((t) => t.id !== id);
+      if (next.length === 0) {
+        // Closing the last tab closes the browser window.
+        closeWindow(windowId);
+        return;
+      }
+      setTabs(next);
+      setActiveId((current) =>
+        current === id ? next[Math.max(0, index - 1)].id : current,
+      );
+    },
+    [closeWindow, windowId],
+  );
+
+  /** Register/unregister a tab surface's imperative handle. */
+  const registerView = useCallback((id: string, handle: BrowserViewHandle | null) => {
+    if (handle) views.current.set(id, handle);
+    else views.current.delete(id);
+  }, []);
+
+  const onTabEvent = useCallback(
+    (id: string, event: TabEvent) => {
+      switch (event.kind) {
+        case 'loading':
+          updateTab(id, { loading: event.value });
+          break;
+        case 'title':
+          updateTab(id, { title: event.value || null });
+          break;
+        case 'favicon':
+          updateTab(id, { favicon: event.value });
+          break;
+        case 'navigate':
+          updateTab(id, {
+            url: event.url,
+            address: event.url,
+            canBack: event.canBack,
+            canForward: event.canForward,
+          });
+          break;
+        case 'webContentsId': {
+          // Answer any pending chrome.tabs.create request now that the
+          // guest attached and its WebContents id is known.
+          const tab = tabsRef.current.find((t) => t.id === id);
+          if (tab?.pendingRequestId != null) {
+            crx?.resolveCreateTab(tab.pendingRequestId, event.value);
+          }
+          updateTab(id, { wcId: event.value, pendingRequestId: null });
+          break;
+        }
+      }
+    },
+    [updateTab, crx],
+  );
+
+  // Report the active tab to the extension system (drives chrome.tabs'
+  // notion of "active" and per-tab extension action state).
+  const lastReportedWcId = useRef<number | null>(null);
+  useEffect(() => {
+    if (!crx) return;
+    const wcId = activeTab?.wcId ?? null;
+    if (wcId !== null && wcId !== lastReportedWcId.current) {
+      lastReportedWcId.current = wcId;
+      crx.tabActivated(wcId);
+    }
+  }, [crx, activeTab?.wcId, activeId]);
+
+  // Consume extension-initiated tab commands (chrome.tabs.*, target=_blank).
+  useEffect(() => {
+    return consumeTabCommands((command) => {
+      switch (command.type) {
+        case 'create': {
+          const url =
+            command.url && isAllowedTabUrl(command.url) ? command.url : HOME_URL;
+          openTab(url, command.active, command.requestId);
+          break;
+        }
+        case 'open': {
+          if (isAllowedTabUrl(command.url)) openTab(command.url, true);
+          break;
+        }
+        case 'select': {
+          const tab = tabsRef.current.find((t) => t.wcId === command.wcId);
+          if (tab) setActiveId(tab.id);
+          break;
+        }
+        case 'close': {
+          const tab = tabsRef.current.find((t) => t.wcId === command.wcId);
+          if (tab) closeTab(tab.id);
+          break;
+        }
+      }
+    });
+  }, [openTab, closeTab]);
 
   const navigate = useCallback(
     (raw: string) => {
       const resolved = resolveNavigation(raw);
       if (!resolved) return;
-      setSrc(resolved);
-      setAddress(resolved);
-      setPageTitle(null);
-      setFavicon(null);
-      setHistory((h) => {
-        const trimmed = h.slice(0, cursor + 1);
-        setCursor(trimmed.length);
-        return [...trimmed, resolved];
+      updateTab(activeId, (tab) => {
+        const trimmed = tab.history.slice(0, tab.cursor + 1);
+        return {
+          address: resolved,
+          url: resolved,
+          title: null,
+          favicon: null,
+          history: [...trimmed, resolved],
+          cursor: trimmed.length,
+        };
       });
+      views.current.get(activeId)?.loadURL(resolved);
     },
-    [cursor],
+    [activeId, updateTab],
   );
 
   const go = useCallback(
     (delta: number) => {
-      const target = cursor + delta;
-      if (target < 0 || target >= history.length) return;
-      setCursor(target);
-      setSrc(history[target]);
-      setAddress(history[target]);
-      setPageTitle(null);
-      setFavicon(null);
+      const view = views.current.get(activeId);
+      if (!view) return;
+      if (webviewMode) {
+        // The guest owns its history; state syncs via `navigate` events.
+        if (delta < 0) view.goBack();
+        else view.goForward();
+        return;
+      }
+      const tab = tabsRef.current.find((t) => t.id === activeId);
+      if (!tab) return;
+      const target = tab.cursor + delta;
+      if (target < 0 || target >= tab.history.length) return;
+      const url = tab.history[target];
+      view.loadURL(url);
+      updateTab(activeId, { cursor: target, address: url, url, title: null, favicon: null });
     },
-    [cursor, history],
+    [activeId, updateTab, webviewMode],
   );
 
-  const onTitleChange = useCallback((title: string) => {
-    setPageTitle(title || null);
-  }, []);
-
-  const onFaviconChange = useCallback((favicons: string[]) => {
-    setFavicon(favicons[0] ?? null);
-  }, []);
-
-  const canBack = cursor > 0;
-  const canForward = cursor < history.length - 1;
+  const canBack = webviewMode ? activeTab.canBack : activeTab.cursor > 0;
+  const canForward = webviewMode
+    ? activeTab.canForward
+    : activeTab.cursor < activeTab.history.length - 1;
 
   return (
     <div className="flex h-full w-full flex-col">
+      {/* Tab strip */}
+      <div
+        role="tablist"
+        aria-label="Browser tabs"
+        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/40 bg-background/70 px-1.5 pt-1.5"
+      >
+        {tabs.map((tab) => (
+          <TabButton
+            key={tab.id}
+            tab={tab}
+            active={tab.id === activeId}
+            onActivate={() => setActiveId(tab.id)}
+            onClose={() => closeTab(tab.id)}
+          />
+        ))}
+        <button
+          type="button"
+          aria-label="New tab"
+          title="New tab"
+          onClick={() => openTab(HOME_URL)}
+          className={cn(
+            'mb-1 grid size-7 shrink-0 place-items-center rounded-md text-foreground/70',
+            'hover:bg-foreground/10 hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
+
+      {/* Toolbar */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          navigate(address);
+          navigate(activeTab.address);
         }}
         className="relative flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/50 px-2 py-1.5"
       >
@@ -108,8 +335,8 @@ export function WebBrowser(_props: AppComponentProps) {
         <NavButton label="Go forward" disabled={!canForward} onClick={() => go(1)}>
           <ArrowRight className="size-4" />
         </NavButton>
-        <NavButton label="Reload page" onClick={() => viewRef.current?.reload()}>
-          <RotateCw className={cn('size-4', loading && 'animate-spin')} />
+        <NavButton label="Reload page" onClick={() => views.current.get(activeId)?.reload()}>
+          <RotateCw className={cn('size-4', activeTab.loading && 'animate-spin')} />
         </NavButton>
 
         <div className="relative flex-1">
@@ -118,8 +345,8 @@ export function WebBrowser(_props: AppComponentProps) {
             type="text"
             inputMode="url"
             aria-label="Address and search bar"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
+            value={activeTab.address}
+            onChange={(e) => updateTab(activeId, { address: e.target.value })}
             onFocus={(e) => e.currentTarget.select()}
             placeholder="Search or type a URL"
             spellCheck={false}
@@ -128,9 +355,17 @@ export function WebBrowser(_props: AppComponentProps) {
           />
         </div>
 
-        <InstallSiteButton url={src} pageTitle={pageTitle} favicon={favicon} />
+        {crx && <BrowserActionList tabWcId={activeTab.wcId} />}
 
-        {loading && (
+        {crx && <ExtensionsMenu onOpenUrl={(url) => openTab(url)} />}
+
+        <InstallSiteButton
+          url={activeTab.url}
+          pageTitle={activeTab.title}
+          favicon={activeTab.favicon}
+        />
+
+        {activeTab.loading && (
           <span
             aria-hidden
             className="absolute inset-x-0 bottom-0 h-0.5 animate-pulse bg-primary"
@@ -138,17 +373,325 @@ export function WebBrowser(_props: AppComponentProps) {
         )}
       </form>
 
+      {/* Tab surfaces: all stay mounted so background tabs keep their state;
+          only the active one is visible. (visibility, not display:none -
+          Electron <webview>s misbehave when display is toggled.) */}
       <div className="relative flex-1 overflow-hidden bg-white">
-        <BrowserView
-          ref={viewRef}
-          src={src}
-          onLoadStart={() => setLoading(true)}
-          onLoadEnd={() => setLoading(false)}
-          onTitleChange={onTitleChange}
-          onFaviconChange={onFaviconChange}
-        />
+        {tabs.map((tab) => (
+          <TabSurface
+            key={tab.id}
+            id={tab.id}
+            initialSrc={tab.initialSrc}
+            active={tab.id === activeId}
+            onRegister={registerView}
+            onEvent={onTabEvent}
+          />
+        ))}
       </div>
     </div>
+  );
+}
+
+/** A single tab in the tab strip. */
+function TabButton({
+  tab,
+  active,
+  onActivate,
+  onClose,
+}: {
+  tab: Tab;
+  active: boolean;
+  onActivate: () => void;
+  onClose: () => void;
+}) {
+  const label = tab.title ?? hostnameOf(tab.url) ?? 'New tab';
+  const icon = tab.favicon ? sanitizeUrl(tab.favicon) : null;
+
+  return (
+    <div
+      role="tab"
+      aria-selected={active}
+      aria-label={label}
+      tabIndex={0}
+      onClick={onActivate}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate();
+        }
+      }}
+      onAuxClick={(e) => {
+        // Middle-click closes, like every browser.
+        if (e.button === 1) onClose();
+      }}
+      title={label}
+      className={cn(
+        'group flex h-8 w-44 min-w-0 shrink-0 cursor-default items-center gap-2 rounded-t-lg border border-b-0 px-2.5 text-xs',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        active
+          ? 'border-border/60 bg-background text-foreground'
+          : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+      )}
+    >
+      {icon ? (
+        <img src={icon} alt="" aria-hidden className="size-4 shrink-0 rounded-sm" />
+      ) : (
+        <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
+      )}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <button
+        type="button"
+        aria-label={`Close ${label}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className={cn(
+          'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
+          'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
+          active && 'opacity-100',
+          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        )}
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * One tab's rendering surface. Memoized so unrelated tab-state updates (e.g.
+ * another tab's title changing) don't re-render every surface. All callbacks
+ * derive from the two stable props, so effect subscriptions inside
+ * BrowserView stay put across renders.
+ */
+const TabSurface = memo(function TabSurface({
+  id,
+  initialSrc,
+  active,
+  onRegister,
+  onEvent,
+}: {
+  id: string;
+  initialSrc: string;
+  active: boolean;
+  onRegister: (id: string, handle: BrowserViewHandle | null) => void;
+  onEvent: (id: string, event: TabEvent) => void;
+}) {
+  const onLoadStart = useCallback(
+    () => onEvent(id, { kind: 'loading', value: true }),
+    [id, onEvent],
+  );
+  const onLoadEnd = useCallback(
+    () => onEvent(id, { kind: 'loading', value: false }),
+    [id, onEvent],
+  );
+  const onTitleChange = useCallback(
+    (title: string) => onEvent(id, { kind: 'title', value: title }),
+    [id, onEvent],
+  );
+  const onFaviconChange = useCallback(
+    (favicons: string[]) => onEvent(id, { kind: 'favicon', value: favicons[0] ?? null }),
+    [id, onEvent],
+  );
+  const onNavigate = useCallback(
+    (url: string, canBack: boolean, canForward: boolean) =>
+      onEvent(id, { kind: 'navigate', url, canBack, canForward }),
+    [id, onEvent],
+  );
+  const onWebContentsId = useCallback(
+    (wcId: number) => onEvent(id, { kind: 'webContentsId', value: wcId }),
+    [id, onEvent],
+  );
+  const ref = useCallback(
+    (handle: BrowserViewHandle | null) => onRegister(id, handle),
+    [id, onRegister],
+  );
+
+  return (
+    <div
+      className="absolute inset-0"
+      style={active ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
+    >
+      <BrowserView
+        ref={ref}
+        src={initialSrc}
+        onLoadStart={onLoadStart}
+        onLoadEnd={onLoadEnd}
+        onTitleChange={onTitleChange}
+        onFaviconChange={onFaviconChange}
+        onNavigate={onNavigate}
+        onWebContentsId={onWebContentsId}
+      />
+    </div>
+  );
+});
+
+/** Hostname of a URL, for tab labels before a title arrives. */
+function hostnameOf(url: string): string | null {
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Chrome extension toolbar actions (<browser-action-list>, a custom
+ * element injected by electron-chrome-extensions' preload).
+ *
+ * Its configuration must be set as DOM attributes imperatively: the element
+ * only exposes getter properties backed by attributes, and React assigns to
+ * properties when they exist (`key in element`), which would bypass the
+ * attribute the element actually reads.
+ */
+function BrowserActionList({ tabWcId }: { tabWcId: number | null }) {
+  const ref = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.setAttribute('partition', 'persist:webbrowser');
+    el.setAttribute('alignment', 'bottom right');
+    if (tabWcId !== null) el.setAttribute('tab', String(tabWcId));
+    else el.removeAttribute('tab');
+  }, [tabWcId]);
+
+  return <browser-action-list ref={ref} className="flex shrink-0 items-center" />;
+}
+
+/**
+ * Toolbar menu managing installed Chrome extensions: lists them with
+ * uninstall buttons and links to the Chrome Web Store to install more.
+ */
+function ExtensionsMenu({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
+  const crx = getCrxBridge();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [extensions, setExtensions] = useState<CrxExtension[] | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!crx) return;
+    try {
+      setExtensions(await crx.listExtensions());
+    } catch {
+      setExtensions([]);
+    }
+  }, [crx]);
+
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) refresh();
+  };
+
+  const uninstall = async (extension: CrxExtension) => {
+    if (!crx) return;
+    try {
+      await crx.uninstallExtension(extension.id);
+      toast({ title: `${extension.name} removed` });
+      refresh();
+    } catch {
+      toast({
+        title: `Couldn't remove ${extension.name}`,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  if (!crx) return null;
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Extensions"
+          title="Extensions"
+          className={cn(
+            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
+            'hover:bg-foreground/10 hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <Puzzle className="size-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} className="w-80">
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <h3 className="text-sm font-medium">Extensions</h3>
+            <p className="text-xs text-muted-foreground">
+              Extensions run on the sites you browse in this app.
+            </p>
+          </div>
+
+          {extensions === null ? null : extensions.length === 0 ? (
+            <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+              No extensions installed yet.
+            </p>
+          ) : (
+            <ul className="max-h-64 space-y-1 overflow-y-auto">
+              {extensions.map((extension) => (
+                <li key={extension.id} className="flex items-center gap-2 rounded-md px-1 py-1">
+                  <ExtensionIcon id={extension.id} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">{extension.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {extension.version}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${extension.name}`}
+                    title={`Remove ${extension.name}`}
+                    onClick={() => uninstall(extension)}
+                    className={cn(
+                      'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60',
+                      'hover:bg-destructive/10 hover:text-destructive',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    )}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <Button
+            variant="secondary"
+            className="w-full"
+            onClick={() => {
+              setOpen(false);
+              onOpenUrl(WEB_STORE_URL);
+            }}
+          >
+            Browse the Chrome Web Store
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Extension icon via the crx:// protocol, with a glyph fallback. */
+function ExtensionIcon({ id }: { id: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-secondary">
+        <Puzzle className="size-3.5 text-muted-foreground" aria-hidden />
+      </span>
+    );
+  }
+  return (
+    <img
+      src={crxIconUrl(id, 32)}
+      alt=""
+      aria-hidden
+      className="size-6 shrink-0 rounded-md"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
