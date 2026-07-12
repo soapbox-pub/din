@@ -1,6 +1,17 @@
 # Project Overview
 
-This project is a Nostr client application built with React 19.x, TailwindCSS 4.x, Vite, shadcn/ui, and Nostrify.
+**Din is a social computer** — a web-native desktop environment (windows, taskbar, apps, login) built as a Vite + React 19 + TailwindCSS 4 + shadcn/ui app, hosted by a thin Electron shell. Users sign in with their Nostr account, and Din bridges that identity into every app on the desktop, storing data on Nostr relays and Blossom servers. **Aladdin** is Din's flagship OS: a minimal NixOS system that boots straight into Din fullscreen (kernel → systemd → cage → Electron → Din). Din also runs windowed for development or as a plain web app in a browser. See `README.md` for full architecture, dev-loop tiers, and Aladdin/Nix details.
+
+## Commands
+
+```sh
+npm run dev         # Din in Electron with HMR (windowed + DevTools)
+npm run dev:browser # Din in a plain browser with HMR (http://localhost:8080)
+npm test            # type-check + lint + tests + build — THE validation script
+npm run build       # build the web app into dist/
+npm run os:build    # build the Aladdin VM
+npm run os:run      # build + boot the Aladdin VM in QEMU
+```
 
 ## Technology Stack
 
@@ -22,6 +33,8 @@ This project is a Nostr client application built with React 19.x, TailwindCSS 4.
 - `/src/contexts/` — React context providers (`AppContext`).
 - `/src/test/` — testing utilities including the `TestApp` wrapper.
 - `/public/` — static assets.
+- `/electron/` — the Electron host: `main.cjs` (serves `dist/` over a custom `app://` protocol with SPA fallback), `preload.cjs` and `pty-host.py` (fs/pty/wifi bridges behind the Files, Terminal, and Settings apps).
+- `/os/` — Aladdin, the flagship OS: `flake.nix` (entry point, exposes the VM as `./os#vm`) and `configuration.nix` (the whole OS: cage + Electron launcher + Nix build of Din). The Nix build only sees **git-tracked** files — `git add` new files before `npm run os:build` — and pins npm deps via `npmDepsHash` (refresh it after dependency changes; see README).
 - `App.tsx` — **already configured** with `QueryClientProvider`, `NostrProvider`, `UnheadProvider`, `AppProvider`, `NostrLoginProvider`. **Read before editing**; changes are rarely needed.
 - `AppRouter.tsx` — React Router configuration. The catch-all `/:nip19` route handles all NIP-19 identifiers (see the `nip19-routing` skill).
 
