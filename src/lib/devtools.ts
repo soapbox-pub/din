@@ -5,12 +5,13 @@
  * The bridge lets the Web Browser app dock Chrome DevTools inside a tab.
  * Din runs as a single native window (fullscreen kiosk under cage), so the
  * default detached devtools window is unusable; instead the browser renders
- * a devtools host <webview> below the page and asks the main process to wire
- * it to the inspected tab via webContents.setDevToolsWebContents():
+ * a devtools host <webview> below the page, and the main process loads the
+ * bundled DevTools frontend in it, connected to the inspected tab over a
+ * loopback CDP bridge (electron/devtools-bridge.cjs):
  *   - the shell opens/closes devtools for a tab by WebContents id
  *   - the main process forwards toggle shortcuts pressed inside guests
  *     (keyboard focus lives there, invisible to the shell) and context-menu
- *     "Inspect" clicks, and reports devtools closing from any side
+ *     "Inspect" clicks, and reports sessions dying with their tab or pane
  *
  * In a plain browser (`npm run dev:browser`) the bridge is absent; callers
  * must feature-detect via `getDevtoolsBridge()` and hide devtools UI.
@@ -31,7 +32,7 @@ export type DevtoolsCommand =
       y: number;
     }
   | {
-      /** The tab's devtools closed (frontend close button, tab destroyed…). */
+      /** The tab's devtools session died with its tab or pane. */
       type: 'closed';
       wcId: number;
     };

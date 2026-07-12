@@ -158,8 +158,9 @@ contextBridge.exposeInMainWorld('crx', {
 
 // DevTools bridge (window.devtools), backed by the devtools:* handlers in
 // main.cjs. The web browser app docks Chrome DevTools inside a tab: it
-// renders a devtools host <webview> (partition "devtools") and asks main to
-// wire it to the inspected tab via webContents.setDevToolsWebContents.
+// renders a devtools host <webview> and asks main to open the tab's
+// devtools in it (the host loads the bundled DevTools frontend, connected
+// to the tab over a loopback CDP bridge - see devtools-bridge.cjs).
 contextBridge.exposeInMainWorld('devtools', {
   /** Dock a tab's devtools into a devtools host <webview> and open them. */
   open: (targetWcId, hostWcId) =>
@@ -177,7 +178,7 @@ contextBridge.exposeInMainWorld('devtools', {
    * unsubscribe fn. Commands:
    *   { type: 'toggle', wcId }        (F12 / Ctrl+Shift+I inside a guest)
    *   { type: 'inspect', wcId, x, y } (context menu "Inspect")
-   *   { type: 'closed', wcId }        (devtools closed, from any side)
+   *   { type: 'closed', wcId }        (devtools died with its tab/pane)
    */
   onCommand: (callback) => {
     const toggle = (_event, d) => callback({ type: 'toggle', wcId: d.wcId });

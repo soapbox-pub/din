@@ -5,13 +5,15 @@ import { getDevtoolsBridge } from '@/lib/devtools';
  * The docked Chrome DevTools surface for one browser tab.
  *
  * Renders a devtools host <webview> and, once its guest attaches, asks the
- * main process to dock the inspected tab's devtools into it
- * (webContents.setDevToolsWebContents + openDevTools, see electron/main.cjs).
+ * main process to open the tab's devtools in it. Main navigates the host to
+ * the bundled DevTools frontend, connected to the inspected tab over a
+ * loopback CDP bridge (see electron/devtools-bridge.cjs for why the naive
+ * setDevToolsWebContents wiring doesn't work for <webview> hosts).
  *
- * The host lives in its own in-memory session partition ("devtools") so it
- * is never treated as a browser tab: the Chrome extension system ignores it
- * and it carries no persistent state. Electron-shell only - the parent must
- * not render this in the iframe fallback (the bridge is absent there).
+ * The host lives in its own session partition (persist:devtools) so it is
+ * never treated as a browser tab: the Chrome extension system ignores it and
+ * devtools preferences persist across runs. Electron-shell only - the parent
+ * must not render this in the iframe fallback (the bridge is absent there).
  */
 export function DevToolsPane({
   targetWcId,
@@ -70,10 +72,11 @@ export function DevToolsPane({
   return (
     <webview
       ref={webviewRef}
-      // setDevToolsWebContents requires a host that has never navigated.
+      // A blank start page; the main process navigates the guest to the
+      // devtools frontend once devtools.open() wires the session up.
       src="about:blank"
-      // In-memory partition (no persist:) - see electron/main.cjs.
-      partition="devtools"
+      // See DEVTOOLS_PARTITION in electron/main.cjs.
+      partition="persist:devtools"
       className="h-full w-full bg-white"
       style={{ display: 'flex' }}
     />

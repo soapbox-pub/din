@@ -20,6 +20,7 @@ const {
   installChromeWebStore,
   uninstallExtension,
 } = require('electron-chrome-web-store');
+const { DevtoolsBridge } = require('./devtools-bridge.cjs');
 
 const DIST = path.join(__dirname, 'dist');
 const INDEX = path.join(DIST, 'index.html');
@@ -771,25 +772,31 @@ function registerCrxHandlers() {
 // Din runs fullscreen with a single native window (cage shows exactly one
 // surface), so Electron's default detached-devtools window is unusable.
 // Instead, devtools dock inside the browser tab: the shell renders a second
-// <webview> (the "host") below the page and asks main to wire it up with
-// webContents.setDevToolsWebContents(host) + openDevTools().
+// <webview> (the "host") below the page, and the host loads the bundled
+// DevTools frontend connected to the inspected tab over a loopback CDP
+// WebSocket bridge (see devtools-bridge.cjs for why the straightforward
+// setDevToolsWebContents wiring can't be used, and for the bridge's
+// security properties).
 //
-// Hosts live in their own in-memory session partition ("devtools", no
-// persist:) so they are never registered as browser tabs with the Chrome
-// extension system and carry no persistent state. Both ends of every request
+// Hosts live in their own session partition (persist:devtools, which also
+// keeps devtools preferences across runs) so they are never registered as
+// browser tabs with the Chrome extension system. Both ends of every request
 // are validated: the target must be a browser-tab guest and the host a
 // devtools-partition guest, and only the shell may call the handlers.
 // ---------------------------------------------------------------------------
 
-const DEVTOOLS_PARTITION = 'devtools';
+const DEVTOOLS_PARTITION = 'persist:devtools';
 
-/** The in-memory session all devtools host <webview>s run in. */
+/** The session all devtools host <webview>s run in. */
 function devtoolsSession() {
   return session.fromPartition(DEVTOOLS_PARTITION);
 }
 
-/** Maps a devtools host's WebContents id to its inspected tab's id. */
-const devtoolsTargets = new Map();
+/** CDP proxy connecting devtools frontends to their inspected tabs. */
+const devtoolsBridge = new DevtoolsBridge({
+  // A session died with its tab or pane; let the shell reconcile pane UI.
+  onSessionEnded: (targetId) => sendToShell('devtools:closed', { wcId: targetId }),
+});
 
 /** Resolve a renderer-supplied id to a devtools host guest, or null. */
 function devtoolsHostFromId(wcId) {
@@ -809,41 +816,28 @@ function isDevtoolsToggleInput(input) {
 }
 
 function registerDevtoolsHandlers() {
-  // Dock a tab's devtools into a devtools host <webview> and open them.
-  ipcMain.handle('devtools:open', (event, targetWcId, hostWcId) => {
+  // Open a tab's devtools inside a devtools host <webview>.
+  ipcMain.handle('devtools:open', async (event, targetWcId, hostWcId) => {
     assertShellSender(event);
     const target = browserTabFromId(targetWcId);
     const host = devtoolsHostFromId(hostWcId);
     if (!target || !host) throw new Error('devtools: invalid target or host');
-
-    devtoolsTargets.set(host.id, target.id);
-
-    // Closes from any side (the devtools frontend's own close button, the
-    // tab being destroyed, devtools:close below) funnel through this event;
-    // the shell reconciles its pane UI on it.
-    target.once('devtools-closed', () => {
-      devtoolsTargets.delete(host.id);
-      sendToShell('devtools:closed', { wcId: targetWcId });
-    });
-
-    target.setDevToolsWebContents(host);
-    target.openDevTools();
+    await devtoolsBridge.open(target, host);
   });
 
   // Close a tab's devtools (the shell is about to unmount the host).
   ipcMain.handle('devtools:close', (event, targetWcId) => {
     assertShellSender(event);
-    const target = browserTabFromId(targetWcId);
-    if (target) target.closeDevTools();
+    if (typeof targetWcId !== 'number') return;
+    devtoolsBridge.close(targetWcId);
   });
 
-  // Highlight the element at page coordinates (context-menu "Inspect").
+  // Reveal the element at page coordinates (context-menu "Inspect").
   ipcMain.handle('devtools:inspect', (event, targetWcId, x, y) => {
     assertShellSender(event);
-    const target = browserTabFromId(targetWcId);
-    if (!target || !target.isDevToolsOpened()) return;
+    if (typeof targetWcId !== 'number') return;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    target.inspectElement(Math.round(x), Math.round(y));
+    devtoolsBridge.inspect(targetWcId, Math.round(x), Math.round(y));
   });
 }
 
@@ -933,7 +927,7 @@ app.on('web-contents-created', (_event, contents) => {
   if (contents.session === devtoolsSession()) {
     contents.on('before-input-event', (event, input) => {
       if (!isDevtoolsToggleInput(input)) return;
-      const targetId = devtoolsTargets.get(contents.id);
+      const targetId = devtoolsBridge.targetIdForHost(contents.id);
       if (targetId === undefined) return;
       event.preventDefault();
       sendToShell('devtools:toggleRequested', { wcId: targetId });
