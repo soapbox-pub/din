@@ -1,10 +1,11 @@
 // Preload for the Din renderer.
 //
-// Exposes four bridges backed by IPC handlers in main.cjs:
+// Exposes five bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //   - window.crx: Chrome extension coordination for the Web Browser app
+//   - window.devtools: docked devtools control for the Web Browser app
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -153,4 +154,43 @@ contextBridge.exposeInMainWorld('crx', {
 
   /** Uninstall an installed extension by id. */
   uninstallExtension: (id) => ipcRenderer.invoke('crx:uninstallExtension', id),
+});
+
+// DevTools bridge (window.devtools), backed by the devtools:* handlers in
+// main.cjs. The web browser app docks Chrome DevTools inside a tab: it
+// renders a devtools host <webview> (partition "devtools") and asks main to
+// wire it to the inspected tab via webContents.setDevToolsWebContents.
+contextBridge.exposeInMainWorld('devtools', {
+  /** Dock a tab's devtools into a devtools host <webview> and open them. */
+  open: (targetWcId, hostWcId) =>
+    ipcRenderer.invoke('devtools:open', targetWcId, hostWcId),
+
+  /** Close a tab's devtools. */
+  close: (targetWcId) => ipcRenderer.invoke('devtools:close', targetWcId),
+
+  /** Highlight the element at page coordinates in the tab's open devtools. */
+  inspect: (targetWcId, x, y) =>
+    ipcRenderer.invoke('devtools:inspect', targetWcId, x, y),
+
+  /**
+   * Subscribe to devtools commands from the main process. Returns an
+   * unsubscribe fn. Commands:
+   *   { type: 'toggle', wcId }        (F12 / Ctrl+Shift+I inside a guest)
+   *   { type: 'inspect', wcId, x, y } (context menu "Inspect")
+   *   { type: 'closed', wcId }        (devtools closed, from any side)
+   */
+  onCommand: (callback) => {
+    const toggle = (_event, d) => callback({ type: 'toggle', wcId: d.wcId });
+    const inspect = (_event, d) =>
+      callback({ type: 'inspect', wcId: d.wcId, x: d.x, y: d.y });
+    const closed = (_event, d) => callback({ type: 'closed', wcId: d.wcId });
+    ipcRenderer.on('devtools:toggleRequested', toggle);
+    ipcRenderer.on('devtools:inspectRequested', inspect);
+    ipcRenderer.on('devtools:closed', closed);
+    return () => {
+      ipcRenderer.removeListener('devtools:toggleRequested', toggle);
+      ipcRenderer.removeListener('devtools:inspectRequested', inspect);
+      ipcRenderer.removeListener('devtools:closed', closed);
+    };
+  },
 });

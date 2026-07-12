@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Code,
   Globe,
   MonitorDown,
   Plus,
@@ -14,6 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 import { resolveNavigation, sanitizeUrl } from '@/lib/sanitizeUrl';
 import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
+import { getDevtoolsBridge } from '@/lib/devtools';
 import { consumeTabCommands } from '@/lib/browserTabBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import type { AppComponentProps } from '@/lib/apps';
@@ -33,9 +35,15 @@ import {
   BrowserView,
   type BrowserViewHandle,
 } from '@/components/desktop/apps/BrowserView';
+import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 
 const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
 const WEB_STORE_URL = 'https://chromewebstore.google.com/';
+
+/** Devtools pane sizing (px): default, minimum, and minimum page height. */
+const DEVTOOLS_DEFAULT_HEIGHT = 288;
+const DEVTOOLS_MIN_HEIGHT = 120;
+const PAGE_MIN_HEIGHT = 96;
 
 let nextTabId = 0;
 const newTabId = () => `tab-${nextTabId++}`;
@@ -61,6 +69,8 @@ interface Tab {
   cursor: number;
   /** chrome.tabs.create request to answer once the guest attaches. */
   pendingRequestId: number | null;
+  /** Whether the tab's docked devtools pane is open (webview mode only). */
+  devtoolsOpen: boolean;
 }
 
 function createTab(url: string, pendingRequestId: number | null = null): Tab {
@@ -78,6 +88,7 @@ function createTab(url: string, pendingRequestId: number | null = null): Tab {
     history: [url],
     cursor: 0,
     pendingRequestId,
+    devtoolsOpen: false,
   };
 }
 
@@ -102,6 +113,10 @@ type TabEvent =
  * system (electron-chrome-extensions, see electron/main.cjs): the toolbar
  * shows extension actions (<browser-action-list>), an extensions menu manages
  * installs, and extension tab commands arrive via the browserTabBus.
+ *
+ * Each tab can dock Chrome DevTools below the page (webview mode only):
+ * toggled from the toolbar, F12 / Ctrl+Shift+I, or the context menu's
+ * "Inspect" - see the devtools bridge (src/lib/devtools.ts).
  */
 export function WebBrowser({ windowId }: AppComponentProps) {
   const { close: closeWindow } = useWindowManager();
@@ -115,7 +130,13 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     tabsRef.current = tabs;
   }, [tabs]);
   const crx = getCrxBridge();
+  const devtools = getDevtoolsBridge();
   const webviewMode = isWebviewAvailable();
+  // One devtools pane height per browser window, shared across tabs (like
+  // desktop browsers). Resized by dragging the pane's separator.
+  const [devtoolsHeight, setDevtoolsHeight] = useState(DEVTOOLS_DEFAULT_HEIGHT);
+  // Context-menu "Inspect" coordinates awaiting a tab's devtools to open.
+  const pendingInspect = useRef(new Map<string, { x: number; y: number }>());
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
 
@@ -145,6 +166,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   const closeTab = useCallback(
     (id: string) => {
       views.current.delete(id);
+      pendingInspect.current.delete(id);
       const ts = tabsRef.current;
       const index = ts.findIndex((t) => t.id === id);
       if (index === -1) return;
@@ -243,6 +265,73 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     });
   }, [openTab, closeTab]);
 
+  /** Open or close a tab's docked devtools pane. */
+  const toggleDevtools = useCallback(
+    (id: string) => {
+      if (!devtools) return;
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab) return;
+      if (tab.devtoolsOpen) {
+        pendingInspect.current.delete(id);
+        // Ask main to close first so the target detaches cleanly; the pane
+        // itself unmounts with the state change.
+        if (tab.wcId !== null) devtools.close(tab.wcId).catch(() => {});
+        updateTab(id, { devtoolsOpen: false });
+      } else {
+        updateTab(id, { devtoolsOpen: true });
+      }
+    },
+    [devtools, updateTab],
+  );
+
+  /** A tab's devtools finished opening; run any pending "Inspect" request. */
+  const onDevtoolsReady = useCallback(
+    (id: string) => {
+      if (!devtools) return;
+      const pending = pendingInspect.current.get(id);
+      if (!pending) return;
+      pendingInspect.current.delete(id);
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (tab?.wcId != null) {
+        devtools.inspect(tab.wcId, pending.x, pending.y).catch(() => {});
+      }
+    },
+    [devtools],
+  );
+
+  // Consume devtools commands from the main process: toggle shortcuts
+  // pressed inside guests (keyboard focus lives there, invisible to the
+  // shell), context-menu "Inspect" clicks, and close notifications. Every
+  // browser window subscribes; commands carry the tab's WebContents id, so
+  // only the owning window acts.
+  useEffect(() => {
+    if (!devtools) return;
+    return devtools.onCommand((command) => {
+      const tab = tabsRef.current.find((t) => t.wcId === command.wcId);
+      if (!tab) return;
+      switch (command.type) {
+        case 'toggle':
+          toggleDevtools(tab.id);
+          break;
+        case 'inspect':
+          setActiveId(tab.id);
+          if (tab.devtoolsOpen && tab.wcId !== null) {
+            devtools.inspect(tab.wcId, command.x, command.y).catch(() => {});
+          } else {
+            pendingInspect.current.set(tab.id, { x: command.x, y: command.y });
+            updateTab(tab.id, { devtoolsOpen: true });
+          }
+          break;
+        case 'closed':
+          // Devtools closed from the other side (frontend close button, tab
+          // died) - or an echo of our own close; either way, reconcile.
+          pendingInspect.current.delete(tab.id);
+          updateTab(tab.id, { devtoolsOpen: false });
+          break;
+      }
+    });
+  }, [devtools, toggleDevtools, updateTab]);
+
   const navigate = useCallback(
     (raw: string) => {
       const resolved = resolveNavigation(raw);
@@ -289,8 +378,23 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     ? activeTab.canForward
     : activeTab.cursor < activeTab.history.length - 1;
 
+  // F12 / Ctrl+Shift+I while focus is in the shell's chrome (address bar,
+  // buttons). The same shortcut inside a page arrives as a `toggle` command
+  // from the main process instead (see the devtools.onCommand effect).
+  const onToolbarKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!devtools) return;
+      const toggle =
+        e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'i');
+      if (!toggle) return;
+      e.preventDefault();
+      toggleDevtools(activeId);
+    },
+    [devtools, toggleDevtools, activeId],
+  );
+
   return (
-    <div className="flex h-full w-full flex-col">
+    <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
       {/* Tab strip */}
       <div
         role="tablist"
@@ -365,6 +469,17 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           favicon={activeTab.favicon}
         />
 
+        {devtools && (
+          <NavButton
+            label="Developer tools"
+            title="Developer tools (F12)"
+            pressed={activeTab.devtoolsOpen}
+            onClick={() => toggleDevtools(activeId)}
+          >
+            <Code className="size-4" />
+          </NavButton>
+        )}
+
         {activeTab.loading && (
           <span
             aria-hidden
@@ -383,6 +498,10 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             id={tab.id}
             initialSrc={tab.initialSrc}
             active={tab.id === activeId}
+            devtoolsWcId={tab.devtoolsOpen ? tab.wcId : null}
+            devtoolsHeight={devtoolsHeight}
+            onDevtoolsResize={setDevtoolsHeight}
+            onDevtoolsReady={onDevtoolsReady}
             onRegister={registerView}
             onEvent={onTabEvent}
           />
@@ -462,22 +581,37 @@ function TabButton({
 /**
  * One tab's rendering surface. Memoized so unrelated tab-state updates (e.g.
  * another tab's title changing) don't re-render every surface. All callbacks
- * derive from the two stable props, so effect subscriptions inside
- * BrowserView stay put across renders.
+ * derive from stable props, so effect subscriptions inside BrowserView stay
+ * put across renders.
+ *
+ * When the tab's devtools are open (webview mode only), the surface splits:
+ * page on top, docked DevTools pane below, separated by a draggable divider.
  */
 const TabSurface = memo(function TabSurface({
   id,
   initialSrc,
   active,
+  devtoolsWcId,
+  devtoolsHeight,
+  onDevtoolsResize,
+  onDevtoolsReady,
   onRegister,
   onEvent,
 }: {
   id: string;
   initialSrc: string;
   active: boolean;
+  /** The guest to inspect, or null when the tab's devtools are closed. */
+  devtoolsWcId: number | null;
+  devtoolsHeight: number;
+  onDevtoolsResize: (height: number) => void;
+  onDevtoolsReady: (id: string) => void;
   onRegister: (id: string, handle: BrowserViewHandle | null) => void;
   onEvent: (id: string, event: TabEvent) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [resizing, setResizing] = useState(false);
+
   const onLoadStart = useCallback(
     () => onEvent(id, { kind: 'loading', value: true }),
     [id, onEvent],
@@ -507,22 +641,88 @@ const TabSurface = memo(function TabSurface({
     (handle: BrowserViewHandle | null) => onRegister(id, handle),
     [id, onRegister],
   );
+  const onReady = useCallback(() => onDevtoolsReady(id), [id, onDevtoolsReady]);
+
+  /** Clamp a pane height so both page and devtools stay usable. */
+  const clampHeight = useCallback((height: number) => {
+    const total = containerRef.current?.getBoundingClientRect().height;
+    const max =
+      total === undefined
+        ? height
+        : Math.max(DEVTOOLS_MIN_HEIGHT, total - PAGE_MIN_HEIGHT);
+    return Math.min(Math.max(height, DEVTOOLS_MIN_HEIGHT), max);
+  }, []);
 
   return (
     <div
-      className="absolute inset-0"
+      ref={containerRef}
+      className="absolute inset-0 flex flex-col"
       style={active ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
     >
-      <BrowserView
-        ref={ref}
-        src={initialSrc}
-        onLoadStart={onLoadStart}
-        onLoadEnd={onLoadEnd}
-        onTitleChange={onTitleChange}
-        onFaviconChange={onFaviconChange}
-        onNavigate={onNavigate}
-        onWebContentsId={onWebContentsId}
-      />
+      <div
+        className="relative min-h-0 flex-1"
+        // While dragging the divider, keep pointer events away from the
+        // embedded surfaces so they can't swallow the drag.
+        style={resizing ? { pointerEvents: 'none' } : undefined}
+      >
+        <BrowserView
+          ref={ref}
+          src={initialSrc}
+          onLoadStart={onLoadStart}
+          onLoadEnd={onLoadEnd}
+          onTitleChange={onTitleChange}
+          onFaviconChange={onFaviconChange}
+          onNavigate={onNavigate}
+          onWebContentsId={onWebContentsId}
+        />
+      </div>
+
+      {devtoolsWcId !== null && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize developer tools"
+            tabIndex={0}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              setResizing(true);
+            }}
+            onPointerMove={(e) => {
+              if (!resizing) return;
+              const bottom = containerRef.current?.getBoundingClientRect().bottom;
+              if (bottom !== undefined) onDevtoolsResize(clampHeight(bottom - e.clientY));
+            }}
+            onPointerUp={(e) => {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+              setResizing(false);
+            }}
+            onPointerCancel={() => setResizing(false)}
+            onKeyDown={(e) => {
+              if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+              e.preventDefault();
+              const delta = e.key === 'ArrowUp' ? 24 : -24;
+              onDevtoolsResize(clampHeight(devtoolsHeight + delta));
+            }}
+            className={cn(
+              'h-1.5 shrink-0 cursor-row-resize touch-none border-t border-border bg-background',
+              'hover:bg-primary/40 motion-safe:transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              resizing && 'bg-primary/40',
+            )}
+          />
+          <div
+            className="shrink-0 overflow-hidden"
+            style={{
+              height: devtoolsHeight,
+              ...(resizing ? { pointerEvents: 'none' } : undefined),
+            }}
+          >
+            <DevToolsPane targetWcId={devtoolsWcId} onReady={onReady} />
+          </div>
+        </>
+      )}
     </div>
   );
 });
@@ -833,19 +1033,27 @@ function InstallSiteButton({
 
 function NavButton({
   label,
+  title,
   onClick,
   disabled,
+  pressed,
   children,
 }: {
   label: string;
+  /** Tooltip text (defaults to the accessible label). */
+  title?: string;
   onClick: () => void;
   disabled?: boolean;
+  /** Toggle-button state (e.g. the devtools button while its pane is open). */
+  pressed?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       aria-label={label}
+      aria-pressed={pressed}
+      title={title ?? label}
       onClick={onClick}
       disabled={disabled}
       className={cn(
@@ -853,6 +1061,7 @@ function NavButton({
         'hover:bg-foreground/10 hover:text-foreground',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
+        pressed && 'bg-foreground/10 text-foreground',
       )}
     >
       {children}

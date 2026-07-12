@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawn, execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, net, session, webContents } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, session, webContents, Menu, MenuItem } = require('electron');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const buildChromeContextMenu = require('electron-chrome-context-menu').default;
 const {
@@ -765,6 +765,88 @@ function registerCrxHandlers() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// DevTools for the web browser app (window.devtools - see preload.cjs).
+//
+// Din runs fullscreen with a single native window (cage shows exactly one
+// surface), so Electron's default detached-devtools window is unusable.
+// Instead, devtools dock inside the browser tab: the shell renders a second
+// <webview> (the "host") below the page and asks main to wire it up with
+// webContents.setDevToolsWebContents(host) + openDevTools().
+//
+// Hosts live in their own in-memory session partition ("devtools", no
+// persist:) so they are never registered as browser tabs with the Chrome
+// extension system and carry no persistent state. Both ends of every request
+// are validated: the target must be a browser-tab guest and the host a
+// devtools-partition guest, and only the shell may call the handlers.
+// ---------------------------------------------------------------------------
+
+const DEVTOOLS_PARTITION = 'devtools';
+
+/** The in-memory session all devtools host <webview>s run in. */
+function devtoolsSession() {
+  return session.fromPartition(DEVTOOLS_PARTITION);
+}
+
+/** Maps a devtools host's WebContents id to its inspected tab's id. */
+const devtoolsTargets = new Map();
+
+/** Resolve a renderer-supplied id to a devtools host guest, or null. */
+function devtoolsHostFromId(wcId) {
+  if (typeof wcId !== 'number') return null;
+  const contents = webContents.fromId(wcId);
+  if (!contents || contents.isDestroyed()) return null;
+  if (contents.getType() !== 'webview') return null;
+  if (contents.session !== devtoolsSession()) return null;
+  return contents;
+}
+
+/** Whether a before-input-event input is the devtools toggle shortcut. */
+function isDevtoolsToggleInput(input) {
+  if (input.type !== 'keyDown') return false;
+  if (input.key === 'F12') return true;
+  return Boolean(input.control && input.shift && input.key.toLowerCase() === 'i');
+}
+
+function registerDevtoolsHandlers() {
+  // Dock a tab's devtools into a devtools host <webview> and open them.
+  ipcMain.handle('devtools:open', (event, targetWcId, hostWcId) => {
+    assertShellSender(event);
+    const target = browserTabFromId(targetWcId);
+    const host = devtoolsHostFromId(hostWcId);
+    if (!target || !host) throw new Error('devtools: invalid target or host');
+
+    devtoolsTargets.set(host.id, target.id);
+
+    // Closes from any side (the devtools frontend's own close button, the
+    // tab being destroyed, devtools:close below) funnel through this event;
+    // the shell reconciles its pane UI on it.
+    target.once('devtools-closed', () => {
+      devtoolsTargets.delete(host.id);
+      sendToShell('devtools:closed', { wcId: targetWcId });
+    });
+
+    target.setDevToolsWebContents(host);
+    target.openDevTools();
+  });
+
+  // Close a tab's devtools (the shell is about to unmount the host).
+  ipcMain.handle('devtools:close', (event, targetWcId) => {
+    assertShellSender(event);
+    const target = browserTabFromId(targetWcId);
+    if (target) target.closeDevTools();
+  });
+
+  // Highlight the element at page coordinates (context-menu "Inspect").
+  ipcMain.handle('devtools:inspect', (event, targetWcId, x, y) => {
+    assertShellSender(event);
+    const target = browserTabFromId(targetWcId);
+    if (!target || !target.isDevToolsOpened()) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    target.inspectElement(Math.round(x), Math.round(y));
+  });
+}
+
 app.whenReady().then(() => {
   // Save downloads straight to ~/Downloads instead of popping a native
   // GTK save dialog (there is no desktop environment to host one). Applies
@@ -786,6 +868,7 @@ app.whenReady().then(() => {
   registerPtyHandlers();
   registerWifiHandlers();
   registerCrxHandlers();
+  registerDevtoolsHandlers();
 
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
@@ -844,11 +927,36 @@ app.on('web-contents-created', (_event, contents) => {
     return { action: 'deny' };
   });
 
+  // Devtools hosts: pressing the toggle shortcut while focus is inside the
+  // devtools pane closes it (routed to its inspected tab). No Chrome context
+  // menu either - the devtools frontend manages its own menus.
+  if (contents.session === devtoolsSession()) {
+    contents.on('before-input-event', (event, input) => {
+      if (!isDevtoolsToggleInput(input)) return;
+      const targetId = devtoolsTargets.get(contents.id);
+      if (targetId === undefined) return;
+      event.preventDefault();
+      sendToShell('devtools:toggleRequested', { wcId: targetId });
+    });
+    return;
+  }
+
+  // F12 / Ctrl+Shift+I inside a page toggles the tab's docked devtools.
+  // Keyboard focus lives in the guest then, so the shell can't see the
+  // shortcut itself - forward it.
+  if (isBrowserTab) {
+    contents.on('before-input-event', (event, input) => {
+      if (!isDevtoolsToggleInput(input)) return;
+      event.preventDefault();
+      sendToShell('devtools:toggleRequested', { wcId: contents.id });
+    });
+  }
+
   // Chrome-style right-click menu: navigation, clipboard, link/image
   // actions, plus any items extensions registered via chrome.contextMenus
   // (e.g. uBlock Origin's "Block element...").
   contents.on('context-menu', (_e, params) => {
-    const menu = buildChromeContextMenu({
+    let menu = buildChromeContextMenu({
       params,
       webContents: contents,
       extensionMenuItems:
@@ -861,6 +969,28 @@ app.on('web-contents-created', (_event, contents) => {
         }
       },
     });
+    // buildChromeContextMenu always appends an "Inspect" item last, wired
+    // straight to inspectElement() - which opens devtools in a detached
+    // native window (unusable in the single-window kiosk shell). Rebuild the
+    // menu with that item swapped for one that routes to the shell's docked
+    // devtools pane.
+    if (isBrowserTab) {
+      const replaced = new Menu();
+      for (const item of menu.items.slice(0, -1)) replaced.append(item);
+      replaced.append(
+        new MenuItem({
+          label: 'Inspect',
+          click: () => {
+            sendToShell('devtools:inspectRequested', {
+              wcId: contents.id,
+              x: params.x,
+              y: params.y,
+            });
+          },
+        }),
+      );
+      menu = replaced;
+    }
     menu.popup({ window: shellWindow ?? undefined });
   });
 });
