@@ -15,6 +15,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { LoginArea } from '@/components/auth/LoginArea';
+import { WifiIndicator } from '@/components/desktop/WifiIndicator';
 import { useClock } from '@/hooks/useClock';
 import { useAppData } from '@/hooks/useAppData';
 import { cn } from '@/lib/utils';
@@ -28,7 +29,7 @@ const DEFAULT_PINNED = APPS.map((app) => app.id);
 
 const PinnedAppsSchema = z.array(z.string());
 
-/** Bottom toolbar: app launcher, pinned + running apps, clock, account menu. */
+/** Bottom toolbar: app launcher, pinned + running apps, wifi, clock, account menu. */
 export function Taskbar() {
   const now = useClock();
   const { windows, open } = useWindowManager();
@@ -134,6 +135,8 @@ export function Taskbar() {
           );
         })}
       </div>
+
+      <WifiIndicator />
 
       <time
         dateTime={now.toISOString()}

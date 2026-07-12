@@ -16,15 +16,13 @@ import {
   Trash2,
   Upload,
   Wifi,
-  WifiHigh,
-  WifiLow,
   WifiOff,
-  WifiZero,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import { cleanWifiError, getWifiBridge, isSecured } from '@/lib/wifi';
+import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
   useSavedNetworks,
@@ -241,13 +239,15 @@ function WifiSection() {
 
 /** Signal-strength icon for a network (0-100). */
 function SignalIcon({ network }: { network: WifiNetwork }) {
-  const className = cn(
-    'size-5 shrink-0',
-    network.inUse ? 'text-primary' : 'text-muted-foreground',
+  return (
+    <WifiSignalIcon
+      signal={network.signal}
+      className={cn(
+        'size-5 shrink-0',
+        network.inUse ? 'text-primary' : 'text-muted-foreground',
+      )}
+    />
   );
-  const Icon =
-    network.signal >= 70 ? Wifi : network.signal >= 45 ? WifiHigh : network.signal >= 20 ? WifiLow : WifiZero;
-  return <Icon className={className} aria-hidden />;
 }
 
 function NetworkRow({
