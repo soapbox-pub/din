@@ -15,6 +15,7 @@ const { spawn, execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, ipcMain, protocol, net, session, webContents } = require('electron');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
+const buildChromeContextMenu = require('electron-chrome-context-menu').default;
 const {
   installChromeWebStore,
   uninstallExtension,
@@ -830,7 +831,9 @@ app.whenReady().then(() => {
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() !== 'webview') return;
 
-  if (chromeExtensions && shellWindow && contents.session === browserSession()) {
+  const isBrowserTab = contents.session === browserSession();
+
+  if (chromeExtensions && shellWindow && isBrowserTab) {
     chromeExtensions.addTab(contents, shellWindow);
   }
 
@@ -839,6 +842,26 @@ app.on('web-contents-created', (_event, contents) => {
       sendToShell('crx:openTab', { url });
     }
     return { action: 'deny' };
+  });
+
+  // Chrome-style right-click menu: navigation, clipboard, link/image
+  // actions, plus any items extensions registered via chrome.contextMenus
+  // (e.g. uBlock Origin's "Block element...").
+  contents.on('context-menu', (_e, params) => {
+    const menu = buildChromeContextMenu({
+      params,
+      webContents: contents,
+      extensionMenuItems:
+        chromeExtensions && isBrowserTab
+          ? chromeExtensions.getContextMenuItems(contents, params)
+          : [],
+      openLink: (url) => {
+        if (/^(https|chrome-extension):\/\//i.test(url)) {
+          sendToShell('crx:openTab', { url });
+        }
+      },
+    });
+    menu.popup({ window: shellWindow ?? undefined });
   });
 });
 

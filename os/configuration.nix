@@ -36,7 +36,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-GdPj/OpJClvsExbqizqCDS2S+uVX9IxD4WuKRt6efKo=";
+    npmDepsHash = "sha256-W2/xr9qmsII6t/m6uNzg2sntGyuc9ylFROzz+As0GDw=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -63,7 +63,7 @@ let
       # transitive runtime deps). Resolved relative to main.cjs, so they
       # live in a node_modules directory beside it.
       mkdir -p $out/share/din/node_modules
-      for dep in electron-chrome-extensions electron-chrome-web-store debug ms adm-zip; do
+      for dep in electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip; do
         cp -r node_modules/$dep $out/share/din/node_modules/
       done
       runHook postInstall
