@@ -35,8 +35,7 @@ Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> Din
 
 - Node.js (dev servers and builds)
 - Nix (with flakes enabled; the Determinate installer does this by default) —
-  only needed for `npm run dev` (Electron via Nix) and the Aladdin `os:*`
-  commands
+  only needed for the Aladdin `os:*` commands
 - QEMU (`qemu-system-x86_64`) on the host for `npm run os:run`
 
 ## Usage
@@ -52,9 +51,10 @@ npm run os:clean    # remove the VM build output and disk (aladdin.qcow2)
 ```
 
 `npm run dev` starts Vite, then launches the same `electron/main.cjs` Aladdin
-uses (pulled from the OS flake's pinned nixpkgs) against the dev server via
-`DIN_DEV_URL`. This gives you the real Electron/`app://` environment with Vite
-HMR + React fast refresh. Ctrl-C stops both processes.
+uses (Electron comes from devDependencies, pinned to the version the OS image
+ships) against the dev server via `DIN_DEV_URL`. This gives you the real
+Electron/`app://` environment with Vite HMR + React fast refresh. Ctrl-C stops
+both processes.
 
 The QEMU window boots Aladdin into Din fullscreen. Boot logs also appear on
 the serial console (your terminal).

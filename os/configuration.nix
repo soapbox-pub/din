@@ -36,7 +36,12 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-vFD0I+1EAx+/8U5LKVjZY7QhTmEUvfte51sg7lnqVJQ=";
+    npmDepsHash = "sha256-ZmzeKo4z0NHiimLEEpp0/DtPmJ7OCVFmi5hitJys2Ho=";
+
+    # The electron npm package (used by `npm run dev` on dev machines) tries
+    # to download its binary in a postinstall hook; the VM uses nixpkgs
+    # Electron instead, and there's no network in the build sandbox anyway.
+    ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
 
     # The package.json scripts run `npm i` (network); run vite directly instead.
     buildPhase = ''
