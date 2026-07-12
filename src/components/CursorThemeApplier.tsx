@@ -1,17 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useAppContext } from '@/hooks/useAppContext';
-import type {
-  CssCursorKeyword,
-  CursorImage,
-  CursorTheme,
-} from '@/lib/cursorTheme';
+import type { CssCursorKeyword, CursorImage } from '@/lib/cursorTheme';
 
 /**
- * The set of CSS cursor keywords the overlay understands, longest-first so
- * that when we scan a computed `cursor` string we match e.g. `nwse-resize`
- * before `w-resize`.
+ * The set of CSS cursor keywords the applier understands.
  */
-const KNOWN_KEYWORDS: CssCursorKeyword[] = [
+const KNOWN_KEYWORDS = new Set<CssCursorKeyword>([
   'not-allowed',
   'nwse-resize',
   'nesw-resize',
@@ -38,196 +32,239 @@ const KNOWN_KEYWORDS: CssCursorKeyword[] = [
   'text',
   'wait',
   'help',
-];
+]);
+
+/** Elements whose `cursor: auto` resolves to the text I-beam. */
+const TEXT_ENTRY_SELECTOR = [
+  'input:not([type])',
+  'input[type="text"]',
+  'input[type="search"]',
+  'input[type="url"]',
+  'input[type="tel"]',
+  'input[type="email"]',
+  'input[type="password"]',
+  'input[type="number"]',
+  'textarea',
+  '[contenteditable]:not([contenteditable="false"])',
+].join(', ');
 
 /**
- * `auto` and `default` both resolve to the arrow; everything unrecognised also
- * falls back to the default cursor so the pointer never disappears.
+ * Map a computed `cursor` value (e.g. "pointer", "auto",
+ * "url(...) 4 4, ns-resize") to the keyword we should theme. `auto` resolves
+ * to `text` over text-entry elements and `default` everywhere else; anything
+ * unrecognised falls back to `default` so the pointer never disappears.
  */
-function keywordFromComputed(value: string): CssCursorKeyword {
-  // Computed values look like: "pointer", "auto", "url(...) 4 4, auto",
-  // "ns-resize", etc. Take the final comma-separated fallback token.
+function keywordFromComputed(value: string, el: Element): CssCursorKeyword {
+  // Take the final comma-separated fallback token of the computed value.
   const last = value.split(',').pop()?.trim() ?? 'default';
-  for (const keyword of KNOWN_KEYWORDS) {
-    if (last === keyword) return keyword;
+  if (last === 'auto') {
+    return el.closest(TEXT_ENTRY_SELECTOR) ? 'text' : 'default';
   }
-  return 'default';
+  return KNOWN_KEYWORDS.has(last as CssCursorKeyword)
+    ? (last as CssCursorKeyword)
+    : 'default';
 }
 
 /**
  * CursorThemeApplier - applies the user's selected custom cursor theme
  * (e.g. a `.CurXPTheme`) to the entire OS, with animation.
  *
- * CSS `cursor:` can't animate, so instead of emitting CSS we hide the native
- * cursor (`cursor: none` under `html.custom-cursor`) and render our own cursor
- * as a fixed-position `<img>` that:
+ * CSS can't animate `cursor` declaratively, but JS can swap the
+ * `cursor: url(...)` value on a timer - and then the *browser* renders the
+ * cursor natively at the OS level. Compared to a JS overlay that chases the
+ * pointer, this has zero movement latency, can't flash the native arrow
+ * (the native cursor *is* the themed image), and costs nothing while the
+ * pointer moves.
  *
- *   - follows the pointer (positioned so the theme's hot-spot sits under the
- *     real pointer location);
- *   - picks the themed image matching whatever CSS `cursor` the element under
- *     the pointer requests (so buttons show the hand, text shows the I-beam,
- *     resize edges show the resize glyphs, …); and
- *   - cycles the cursor's animation frames on a timer driven by the theme's
- *     per-cursor interval.
+ * How it works:
  *
- * Frames are PNG data URLs produced at parse time on a canvas (see
- * src/lib/cursorTheme.ts), so no event-sourced or remote strings reach the
- * DOM. Honors `prefers-reduced-motion` by freezing on the first frame.
+ *   - A constructed stylesheet forces every element to `cursor: inherit`, so
+ *     the single inline `cursor` value we set on `<html>` applies everywhere.
+ *   - Animation is one `setTimeout` chain that rewrites that inline value
+ *     with the next frame (pre-encoded PNG data URLs from parse time).
+ *   - Which cursor *role* to show (arrow/hand/I-beam/resize/...) only changes
+ *     when the pointer crosses into a new element, so detection runs on
+ *     `pointerover` - not on every move - and is memoised per element in a
+ *     WeakMap with a short TTL. A cache miss briefly lifts the overrides
+ *     (synchronously, so nothing paints in between) and reads the element's
+ *     intended computed cursor.
+ *   - Every themed value keeps the real keyword as a fallback
+ *     (`url(...) x y, pointer`), so if the browser rejects an image (e.g.
+ *     oversized) the correct native cursor shows instead of nothing.
+ *
+ * Honors `prefers-reduced-motion` by freezing on the first frame, and pauses
+ * the frame timer while the document is hidden.
  */
 export function CursorThemeApplier() {
   const { config } = useAppContext();
   const theme = config.customCursor;
 
-  // Keep the latest theme in a ref so the long-lived pointer/RAF loop doesn't
-  // need to be torn down and rebuilt on unrelated config changes.
-  const themeRef = useRef<CursorTheme | null>(theme);
   useEffect(() => {
-    themeRef.current = theme;
-  }, [theme]);
-
-  useEffect(() => {
+    if (!theme) return;
     const root = document.documentElement;
 
-    if (!theme) {
-      root.classList.remove('custom-cursor');
-      return;
-    }
-
+    // Constructed stylesheet (CSSOM rules aren't subject to CSP style-src):
+    // every element inherits the cursor set inline on <html>. `!important`
+    // beats Tailwind `cursor-*` utilities and component styles.
+    const sheet = new CSSStyleSheet();
+    sheet.insertRule('html.custom-cursor * { cursor: inherit !important; }');
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     root.classList.add('custom-cursor');
 
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-    // The cursor element. Rendered above everything, non-interactive.
-    const el = document.createElement('img');
-    el.setAttribute('aria-hidden', 'true');
-    el.alt = '';
-    el.decoding = 'sync';
-    el.draggable = false;
-    Object.assign(el.style, {
-      position: 'fixed',
-      left: '0',
-      top: '0',
-      zIndex: '2147483647',
-      pointerEvents: 'none',
-      imageRendering: 'auto',
-      willChange: 'transform',
-      display: 'none',
-    } satisfies Partial<CSSStyleDeclaration>);
-    document.body.appendChild(el);
+    // Pre-decode every frame once so swaps never wait on image decode.
+    const uniqueFrames = new Set<string>();
+    for (const cursor of Object.values(theme.cursors)) {
+      for (const frame of cursor.frames) uniqueFrames.add(frame);
+    }
+    const warm: HTMLImageElement[] = [];
+    for (const frame of uniqueFrames) {
+      const img = new Image();
+      img.src = frame;
+      warm.push(img);
+    }
 
-    // Current pointer position and which cursor/frame we're showing.
-    let pointerX = 0;
-    let pointerY = 0;
-    let visible = false;
-    let currentKeyword: CssCursorKeyword | null = null;
-    let currentCursor: CursorImage | null = null;
+    // Precomputed CSS cursor value per keyword per frame:
+    // `url("data:...") hotX hotY, keyword`.
+    const valueCache = new Map<CssCursorKeyword, string[]>();
+    const frameValues = (keyword: CssCursorKeyword): string[] => {
+      let values = valueCache.get(keyword);
+      if (!values) {
+        const cursor = theme.cursors[keyword] ?? theme.cursors.default;
+        values = cursor
+          ? cursor.frames.map(
+              (f) => `url("${f}") ${cursor.hotX} ${cursor.hotY}, ${keyword}`,
+            )
+          : [];
+        valueCache.set(keyword, values);
+      }
+      return values;
+    };
+
+    let currentKeyword: CssCursorKeyword = 'default';
+    let currentCursor: CursorImage | null =
+      theme.cursors.default ?? Object.values(theme.cursors)[0] ?? null;
     let frameIndex = 0;
-    let lastFrameTime = 0;
-    let rafId = 0;
+    let timer = 0;
 
-    /** Choose the themed cursor for whatever is under the pointer. */
-    const resolveCursor = (): void => {
-      const active = themeRef.current;
-      if (!active) return;
+    const applyFrame = (): void => {
+      const values = frameValues(currentKeyword);
+      root.style.cursor = values[frameIndex % values.length] ?? '';
+    };
 
-      const target = document.elementFromPoint(pointerX, pointerY);
-      let keyword: CssCursorKeyword = 'default';
-      if (target) {
-        // Our hiding rule sets `cursor: none !important` on every element, so
-        // reading computed style directly would always yield "none". Toggle
-        // the class off, read the element's *intended* cursor, then toggle it
-        // back — all synchronously, so the browser never paints in between and
-        // there is no flicker.
-        root.classList.remove('custom-cursor');
-        const intended = getComputedStyle(target).cursor;
-        root.classList.add('custom-cursor');
-        keyword = keywordFromComputed(intended);
-      }
-      // Fall back to the theme's default arrow when the exact keyword isn't
-      // themed (e.g. an unthemed `help` still gets *a* cursor).
-      const cursor = active.cursors[keyword] ?? active.cursors.default ?? null;
-
-      if (keyword !== currentKeyword || cursor !== currentCursor) {
-        currentKeyword = keyword;
-        currentCursor = cursor;
-        frameIndex = 0;
-        lastFrameTime = 0;
-        if (cursor) {
-          el.style.width = `${cursor.width}px`;
-          el.style.height = `${cursor.height}px`;
-          el.src = cursor.frames[0];
-        }
+    const stopAnimation = (): void => {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = 0;
       }
     };
 
-    /** Position the element so its hot-spot lands on the pointer. */
-    const place = (): void => {
-      if (!currentCursor) return;
-      const x = pointerX - currentCursor.hotX;
-      const y = pointerY - currentCursor.hotY;
-      el.style.transform = `translate(${x}px, ${y}px)`;
+    const scheduleAnimation = (): void => {
+      stopAnimation();
+      const cursor = currentCursor;
+      if (!cursor || cursor.frames.length <= 1) return;
+      if (reduceMotion.matches || document.hidden) return;
+      timer = window.setTimeout(() => {
+        frameIndex = (frameIndex + 1) % cursor.frames.length;
+        applyFrame();
+        scheduleAnimation();
+      }, cursor.intervalMs);
     };
 
-    const loop = (now: number): void => {
-      rafId = requestAnimationFrame(loop);
-      if (!visible || !currentCursor) return;
+    const setKeyword = (keyword: CssCursorKeyword): void => {
+      if (keyword === currentKeyword) return;
+      currentKeyword = keyword;
+      currentCursor = theme.cursors[keyword] ?? theme.cursors.default ?? null;
+      frameIndex = 0;
+      applyFrame();
+      scheduleAnimation();
+    };
 
-      const frames = currentCursor.frames;
-      if (frames.length > 1 && !reduceMotion.matches) {
-        if (lastFrameTime === 0) lastFrameTime = now;
-        if (now - lastFrameTime >= currentCursor.intervalMs) {
-          frameIndex = (frameIndex + 1) % frames.length;
-          el.src = frames[frameIndex];
-          lastFrameTime = now;
-        }
+    // Per-element keyword cache. Rotated on a short TTL so elements whose
+    // cursor changes (e.g. a button becoming disabled) don't stay stale.
+    let cache = new WeakMap<Element, CssCursorKeyword>();
+    let cacheStamp = performance.now();
+
+    const probe = (el: Element, bypassCache = false): CssCursorKeyword => {
+      const now = performance.now();
+      if (now - cacheStamp > 5000) {
+        cache = new WeakMap();
+        cacheStamp = now;
       }
-    };
-
-    const onPointerMove = (e: PointerEvent): void => {
-      pointerX = e.clientX;
-      pointerY = e.clientY;
-      if (!visible) {
-        visible = true;
-        el.style.display = 'block';
+      if (!bypassCache) {
+        const hit = cache.get(el);
+        if (hit) return hit;
       }
-      resolveCursor();
-      place();
+      // Lift both overrides so the computed style reveals the cursor the
+      // element actually asks for. All synchronous - the browser never paints
+      // in between, so there is no flicker. This forces one style recalc, but
+      // only on cache misses (first hover of an element), never per move.
+      sheet.disabled = true;
+      const previous = root.style.cursor;
+      root.style.cursor = '';
+      const computed = getComputedStyle(el).cursor;
+      root.style.cursor = previous;
+      sheet.disabled = false;
+      const keyword = keywordFromComputed(computed, el);
+      cache.set(el, keyword);
+      return keyword;
     };
 
-    const hide = (): void => {
-      visible = false;
-      el.style.display = 'none';
+    const onPointerOver = (e: PointerEvent): void => {
+      if (e.target instanceof Element) setKeyword(probe(e.target));
     };
 
-    // Hide when the pointer leaves the document/window entirely. `pointerout`
-    // with no relatedTarget fires when leaving the window; blur covers focus
-    // loss (e.g. alt-tab) and mouseleave the document edge.
-    const onPointerOut = (e: PointerEvent): void => {
-      if (!e.relatedTarget) hide();
+    // `:active` styles can change an element's cursor (grab -> grabbing)
+    // without a pointerover, so re-probe on button transitions.
+    const onPointerButton = (e: PointerEvent): void => {
+      if (e.target instanceof Element) setKeyword(probe(e.target, true));
     };
 
-    window.addEventListener('pointermove', onPointerMove, { passive: true });
-    window.addEventListener('pointerdown', onPointerMove, { passive: true });
-    window.addEventListener('pointerup', onPointerMove, { passive: true });
-    window.addEventListener('pointerout', onPointerOut, { passive: true });
-    document.addEventListener('mouseleave', hide, { passive: true });
-    window.addEventListener('blur', hide, { passive: true });
+    const onVisibilityOrMotion = (): void => {
+      frameIndex = 0;
+      applyFrame();
+      scheduleAnimation();
+    };
 
-    rafId = requestAnimationFrame(loop);
+    window.addEventListener('pointerover', onPointerOver, {
+      passive: true,
+      capture: true,
+    });
+    window.addEventListener('pointerdown', onPointerButton, {
+      passive: true,
+      capture: true,
+    });
+    window.addEventListener('pointerup', onPointerButton, {
+      passive: true,
+      capture: true,
+    });
+    document.addEventListener('visibilitychange', onVisibilityOrMotion);
+    reduceMotion.addEventListener('change', onVisibilityOrMotion);
+
+    applyFrame();
+    scheduleAnimation();
 
     return () => {
-      cancelAnimationFrame(rafId);
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerdown', onPointerMove);
-      window.removeEventListener('pointerup', onPointerMove);
-      window.removeEventListener('pointerout', onPointerOut);
-      document.removeEventListener('mouseleave', hide);
-      window.removeEventListener('blur', hide);
-      el.remove();
+      stopAnimation();
+      window.removeEventListener('pointerover', onPointerOver, {
+        capture: true,
+      });
+      window.removeEventListener('pointerdown', onPointerButton, {
+        capture: true,
+      });
+      window.removeEventListener('pointerup', onPointerButton, {
+        capture: true,
+      });
+      document.removeEventListener('visibilitychange', onVisibilityOrMotion);
+      reduceMotion.removeEventListener('change', onVisibilityOrMotion);
+      root.style.cursor = '';
       root.classList.remove('custom-cursor');
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+        (s) => s !== sheet,
+      );
+      warm.length = 0;
     };
-    // Re-run only when the *presence* of a theme toggles or the theme object
-    // identity changes (a new theme selected). Frame data is read via the ref.
   }, [theme]);
 
   return null;

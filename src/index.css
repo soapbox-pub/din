@@ -349,14 +349,3 @@
   }
 }
 
-/*
- * Custom cursor themes (see CursorThemeApplier). When a theme is active, the
- * native cursor is hidden everywhere and replaced by a JS-driven <img> overlay
- * that follows the pointer and animates. `!important` beats Tailwind's
- * `cursor-*` utilities and shadcn component styles.
- */
-html.custom-cursor,
-html.custom-cursor * {
-  cursor: none !important;
-}
-
