@@ -37,7 +37,7 @@ The assistant's behavior is defined by this file (`AGENTS.md`). Edit it directly
 
 ## Nostr Protocol Integration
 
-**Load the `nostr` skill before building or modifying any Nostr feature** (events, queries, publishing, profiles, login, custom kinds). It covers NIP/kind selection, kind ranges, tag and content design, the `useNostr`/`useAuthor`/`useNostrPublish` hooks, `LoginArea`, NIP-19 basics, and pointers to the specialized skills (`nostr-security`, `nip19-routing`, `file-uploads`, `nostr-encryption`, `nostr-relay-pools`).
+**Load the `nostr-dev` skill before building or modifying any Nostr feature** (events, queries, publishing, profiles, login, custom kinds). It covers NIP/kind selection, kind ranges, tag and content design, the `useNostr`/`useAuthor`/`useNostrPublish` hooks, `LoginArea`, NIP-19 basics, and pointers to the specialized skills (`nostr-security`, `nip19-routing`, `file-uploads`, `nostr-encryption`, `nostr-relay-pools`).
 
 Two rules that always apply, even without the skill loaded:
 

@@ -1,5 +1,5 @@
 ---
-name: nostr
+name: nostr-dev
 description: Core Nostr protocol development guide — choosing between existing NIPs and custom kinds, kind ranges (regular/replaceable/addressable), tag and content field design, event validation, the useNostr/useAuthor/useNostrPublish hooks, querying with TanStack Query, login with LoginArea, NIP-19 identifier basics, and the security model. Load whenever building or modifying any Nostr feature (events, queries, publishing, profiles, custom kinds).
 ---
 
