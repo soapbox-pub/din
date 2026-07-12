@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 import {
@@ -38,6 +37,7 @@ import {
   isValidEntryName,
   joinPath,
   parentPath,
+  sortEntries,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
 import {
@@ -46,6 +46,7 @@ import {
   useFsMutations,
   useHomeDir,
 } from '@/hooks/useFileSystem';
+import { useVirtualRows } from '@/hooks/useVirtualRows';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -189,12 +190,7 @@ export function FileBrowser(_props: AppComponentProps) {
     const visible = showHidden
       ? items
       : items.filter((e) => !e.name.startsWith('.'));
-    return [...visible].sort((a, b) => {
-      if ((a.kind === 'directory') !== (b.kind === 'directory')) {
-        return a.kind === 'directory' ? -1 : 1;
-      }
-      return a.name.localeCompare(b.name, undefined, { numeric: true });
-    });
+    return sortEntries(visible);
   }, [listing.data, showHidden]);
 
   const places = useMemo(() => {
@@ -467,10 +463,10 @@ const OVERSCAN = 10;
  * Virtualized directory listing.
  *
  * Directories like /nix/store can hit the 5000-entry cap; rendering that many
- * rows makes every render (and layout) of the app expensive. With fixed-height
- * rows we only mount what is visible (~30 rows), so render cost is constant
- * regardless of directory size. Memoized so parent re-renders (toolbar typing,
- * preview open/close) skip it entirely when the listing is unchanged.
+ * rows makes every render (and layout) of the app expensive. Windowing (see
+ * useVirtualRows) keeps render cost constant regardless of directory size.
+ * Memoized so parent re-renders (toolbar typing, preview open/close) skip it
+ * entirely when the listing is unchanged.
  */
 const EntryList = memo(function EntryList({
   entries,
@@ -489,35 +485,19 @@ const EntryList = memo(function EntryList({
   onRenameSubmit: (from: string, to: string) => void;
   onRenameCancel: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
-
-  // Track the visible height (windows are freely resizable). The observer
-  // fires once on observe, which also provides the initial measurement.
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => {
-      setViewportHeight(el.clientHeight);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-  const end = Math.min(
-    entries.length,
-    Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN,
-  );
+  const { containerRef, onScroll, start, end, totalHeight } = useVirtualRows({
+    count: entries.length,
+    rowHeight: ROW_HEIGHT,
+    overscan: OVERSCAN,
+  });
 
   return (
     <div
       ref={containerRef}
-      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      onScroll={onScroll}
       className="min-h-0 flex-1 overflow-y-auto px-1 py-1"
     >
-      <ul className="relative" style={{ height: entries.length * ROW_HEIGHT }}>
+      <ul className="relative" style={{ height: totalHeight }}>
         {entries.slice(start, end).map((entry, i) => (
           <EntryRow
             key={entry.name}

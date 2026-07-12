@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
   Download,
@@ -18,9 +18,11 @@ import {
   getFsBridge,
   joinPath,
   parentPath,
+  sortEntries,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
 import { useDirectory, useHomeDir } from '@/hooks/useFileSystem';
+import { useVirtualRows } from '@/hooks/useVirtualRows';
 import type { FilePickerOptions } from '@/contexts/FilePickerContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -63,15 +65,13 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
 
   const listing = useDirectory(effectiveCwd);
 
-  const entries = useMemo(() => {
-    const items = (listing.data?.entries ?? []).filter((e) => !e.name.startsWith('.'));
-    return [...items].sort((a, b) => {
-      if ((a.kind === 'directory') !== (b.kind === 'directory')) {
-        return a.kind === 'directory' ? -1 : 1;
-      }
-      return a.name.localeCompare(b.name, undefined, { numeric: true });
-    });
-  }, [listing.data]);
+  const entries = useMemo(
+    () =>
+      sortEntries(
+        (listing.data?.entries ?? []).filter((e) => !e.name.startsWith('.')),
+      ),
+    [listing.data],
+  );
 
   const places = useMemo(() => {
     const list: { name: string; path: string; icon: LucideIcon }[] = [];
@@ -102,6 +102,11 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     },
     [effectiveCwd, navigate, exts, onConfirm],
   );
+
+  // Single click: files become the selection, directories clear it.
+  const selectEntry = useCallback((entry: FsEntry, path: string) => {
+    setSelected(entry.kind === 'file' ? path : null);
+  }, []);
 
   // Escape cancels.
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -189,7 +194,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
           </nav>
 
           {/* File list */}
-          <div className="min-w-0 flex-1 overflow-y-auto p-1">
+          <div className="min-w-0 flex-1 overflow-hidden">
             {!bridge ? (
               <FallbackMessage>
                 The file picker needs the Din desktop shell and isn't available
@@ -197,7 +202,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
               </FallbackMessage>
             ) : listing.isError ? (
               <FallbackMessage>{cleanFsError(listing.error)}</FallbackMessage>
-            ) : listing.isLoading ? (
+            ) : listing.isLoading || effectiveCwd === null ? (
               <div className="space-y-1 p-2">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <Skeleton key={i} className="h-8 w-full" />
@@ -206,43 +211,16 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             ) : entries.length === 0 ? (
               <FallbackMessage>This folder is empty.</FallbackMessage>
             ) : (
-              <ul className="p-1">
-                {entries.map((entry) => {
-                  const path = effectiveCwd ? joinPath(effectiveCwd, entry.name) : entry.name;
-                  const selectable =
-                    entry.kind === 'directory' || matchesExtensions(entry.name, exts);
-                  const isSelected = selected === path;
-                  return (
-                    <li key={entry.name}>
-                      <button
-                        type="button"
-                        disabled={!selectable}
-                        onClick={() => {
-                          if (entry.kind === 'file' && selectable) setSelected(path);
-                          else if (entry.kind === 'directory') setSelected(null);
-                        }}
-                        onDoubleClick={() => openEntry(entry)}
-                        className={cn(
-                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                          isSelected
-                            ? 'bg-primary/15 text-foreground'
-                            : 'text-foreground hover:bg-foreground/5',
-                          !selectable && 'opacity-40',
-                        )}
-                      >
-                        <EntryIcon entry={entry} />
-                        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                        {entry.kind === 'file' && entry.size !== null && (
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {formatBytes(entry.size)}
-                          </span>
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+              // Keyed by path so scroll position resets on navigation.
+              <PickerList
+                key={effectiveCwd}
+                cwd={effectiveCwd}
+                entries={entries}
+                exts={exts}
+                selected={selected}
+                onSelect={selectEntry}
+                onOpen={openEntry}
+              />
             )}
           </div>
         </div>
@@ -271,6 +249,113 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     </div>
   );
 }
+
+/** Fixed row height for the virtualized picker list (px). */
+const ROW_HEIGHT = 32;
+/** Extra rows rendered above/below the viewport to hide scroll pop-in. */
+const OVERSCAN = 10;
+
+/**
+ * Virtualized picker listing. Directory listings can reach thousands of
+ * entries (the bridge caps at 5000); windowing keeps the mounted DOM at
+ * ~viewport size, and memoized rows keep a selection change from re-rendering
+ * every row.
+ */
+const PickerList = memo(function PickerList({
+  cwd,
+  entries,
+  exts,
+  selected,
+  onSelect,
+  onOpen,
+}: {
+  cwd: string;
+  entries: FsEntry[];
+  exts: string[] | null;
+  selected: string | null;
+  onSelect: (entry: FsEntry, path: string) => void;
+  onOpen: (entry: FsEntry) => void;
+}) {
+  const { containerRef, onScroll, start, end, totalHeight } = useVirtualRows({
+    count: entries.length,
+    rowHeight: ROW_HEIGHT,
+    overscan: OVERSCAN,
+  });
+
+  return (
+    <div
+      ref={containerRef}
+      onScroll={onScroll}
+      className="h-full overflow-y-auto p-1"
+    >
+      <ul className="relative" style={{ height: totalHeight }}>
+        {entries.slice(start, end).map((entry, i) => {
+          const path = joinPath(cwd, entry.name);
+          return (
+            <PickerRow
+              key={entry.name}
+              entry={entry}
+              path={path}
+              top={(start + i) * ROW_HEIGHT}
+              selectable={
+                entry.kind === 'directory' || matchesExtensions(entry.name, exts)
+              }
+              isSelected={selected === path}
+              onSelect={onSelect}
+              onOpen={onOpen}
+            />
+          );
+        })}
+      </ul>
+    </div>
+  );
+});
+
+/** One row in the picker list, absolutely positioned within the virtual list. */
+const PickerRow = memo(function PickerRow({
+  entry,
+  path,
+  top,
+  selectable,
+  isSelected,
+  onSelect,
+  onOpen,
+}: {
+  entry: FsEntry;
+  path: string;
+  top: number;
+  selectable: boolean;
+  isSelected: boolean;
+  onSelect: (entry: FsEntry, path: string) => void;
+  onOpen: (entry: FsEntry) => void;
+}) {
+  return (
+    <li className="absolute inset-x-0" style={{ top, height: ROW_HEIGHT }}>
+      <button
+        type="button"
+        disabled={!selectable}
+        onClick={() => onSelect(entry, path)}
+        onDoubleClick={() => onOpen(entry)}
+        className={cn(
+          'flex h-full w-full items-center gap-2 rounded-md px-2 text-left text-sm',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          isSelected
+            ? 'bg-primary/15 text-foreground'
+            : 'text-foreground hover:bg-foreground/5',
+          !selectable && 'opacity-40',
+        )}
+      >
+        <EntryIcon entry={entry} />
+        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+        {entry.kind === 'file' && entry.size !== null && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {formatBytes(entry.size)}
+          </span>
+        )}
+      </button>
+    </li>
+  );
+});
 
 function EntryIcon({ entry }: { entry: FsEntry }) {
   const className = cn(

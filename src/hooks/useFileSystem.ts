@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getFsBridge } from '@/lib/fs';
+import { getFsBridge, parentPath } from '@/lib/fs';
 import type { FsListing, FsReadResult } from '@/lib/fs';
 
 /**
@@ -7,8 +7,8 @@ import type { FsListing, FsReadResult } from '@/lib/fs';
  *
  * Listings are cached per path so revisiting a directory is instant, while a
  * short staleTime keeps contents reasonably fresh; the Files app also exposes
- * an explicit refresh (via `refetch`). Write operations invalidate cached
- * listings so every open Files window converges on the new state.
+ * an explicit refresh (via `refetch`). Write operations invalidate the cached
+ * listings they affect so open Files windows converge on the new state.
  */
 
 function requireBridge() {
@@ -59,30 +59,47 @@ export function useFileContent(path: string | null, maxBytes?: number) {
 }
 
 /**
- * Write operations on the filesystem. Each mutation invalidates all cached
- * directory listings on success (open windows refetch what they display).
+ * Write operations on the filesystem. Each mutation invalidates only the
+ * cached listings a change can actually affect: the parent directory (its
+ * children changed) plus the changed path and anything beneath it (renamed or
+ * deleted directories another window may be viewing). Blanket-invalidating
+ * every `['fs', 'readdir']` query made each rename/delete refetch and re-stat
+ * every open directory - thousands of stat calls when a large directory like
+ * ~/Downloads was open anywhere.
  */
 export function useFsMutations() {
   const queryClient = useQueryClient();
 
-  const invalidateListings = () =>
-    queryClient.invalidateQueries({ queryKey: ['fs', 'readdir'] });
+  const invalidateListings = (...paths: string[]) => {
+    const affected = paths.flatMap((p) => [p, parentPath(p)]);
+    return queryClient.invalidateQueries({
+      predicate: (query) => {
+        const [scope, op, dir] = query.queryKey;
+        if (scope !== 'fs' || op !== 'readdir' || typeof dir !== 'string') {
+          return false;
+        }
+        return affected.some(
+          (p) => dir === p || dir.startsWith(p === '/' ? '/' : `${p}/`),
+        );
+      },
+    });
+  };
 
   const mkdir = useMutation({
     mutationFn: (path: string) => requireBridge().mkdir(path),
-    onSuccess: invalidateListings,
+    onSuccess: (_data, path) => invalidateListings(path),
   });
 
   const rename = useMutation({
     mutationFn: ({ from, to }: { from: string; to: string }) =>
       requireBridge().rename(from, to),
-    onSuccess: invalidateListings,
+    onSuccess: (_data, { from, to }) => invalidateListings(from, to),
   });
 
   const rm = useMutation({
     mutationFn: ({ path, recursive }: { path: string; recursive?: boolean }) =>
       requireBridge().rm(path, { recursive }),
-    onSuccess: invalidateListings,
+    onSuccess: (_data, { path }) => invalidateListings(path),
   });
 
   return { mkdir, rename, rm };
