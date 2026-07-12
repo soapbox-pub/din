@@ -17,6 +17,7 @@ import { resolveNavigation, sanitizeUrl } from '@/lib/sanitizeUrl';
 import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
 import { getDevtoolsBridge } from '@/lib/devtools';
 import { consumeTabCommands } from '@/lib/browserTabBus';
+import { consumeInspectorDock } from '@/lib/inspectorBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
@@ -30,20 +31,27 @@ import {
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useToast } from '@/hooks/useToast';
 import {
   BrowserView,
   type BrowserViewHandle,
 } from '@/components/desktop/apps/BrowserView';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
+import {
+  InspectorToolbar,
+  type DockMode,
+} from '@/components/desktop/apps/InspectorToolbar';
+import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
 
 const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
 const WEB_STORE_URL = 'https://chromewebstore.google.com/';
 
-/** Devtools pane sizing (px): default, minimum, and minimum page height. */
+/** Devtools pane sizing (px): default, minimum, and minimum page size. */
 const DEVTOOLS_DEFAULT_HEIGHT = 288;
-const DEVTOOLS_MIN_HEIGHT = 120;
-const PAGE_MIN_HEIGHT = 96;
+const DEVTOOLS_DEFAULT_WIDTH = 400;
+const DEVTOOLS_MIN_SIZE = 120;
+const PAGE_MIN_SIZE = 96;
 
 let nextTabId = 0;
 const newTabId = () => `tab-${nextTabId++}`;
@@ -69,8 +77,12 @@ interface Tab {
   cursor: number;
   /** chrome.tabs.create request to answer once the guest attaches. */
   pendingRequestId: number | null;
-  /** Whether the tab's docked devtools pane is open (webview mode only). */
-  devtoolsOpen: boolean;
+  /** Where the tab's inspector is docked (webview mode only). */
+  dock: DockMode;
+  /** Id of the undocked devtools window, when dock === 'window'. */
+  undockedWindowId: string | null;
+  /** Selected device-emulation preset id, or null when not emulating. */
+  deviceId: string | null;
 }
 
 function createTab(url: string, pendingRequestId: number | null = null): Tab {
@@ -88,7 +100,9 @@ function createTab(url: string, pendingRequestId: number | null = null): Tab {
     history: [url],
     cursor: 0,
     pendingRequestId,
-    devtoolsOpen: false,
+    dock: 'closed',
+    undockedWindowId: null,
+    deviceId: null,
   };
 }
 
@@ -119,7 +133,8 @@ type TabEvent =
  * "Inspect" - see the devtools bridge (src/lib/devtools.ts).
  */
 export function WebBrowser({ windowId }: AppComponentProps) {
-  const { close: closeWindow } = useWindowManager();
+  const { close: closeWindow, open: openWindow, windows } = useWindowManager();
+  const setTitlebar = useWindowTitlebar();
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab(HOME_URL)]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   const views = useRef(new Map<string, BrowserViewHandle>());
@@ -132,9 +147,13 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   const crx = getCrxBridge();
   const devtools = getDevtoolsBridge();
   const webviewMode = isWebviewAvailable();
-  // One devtools pane height per browser window, shared across tabs (like
-  // desktop browsers). Resized by dragging the pane's separator.
+  // One docked-pane size per browser window, shared across tabs (like desktop
+  // browsers): height for bottom docking, width for right docking. Resized by
+  // dragging the pane's separator.
   const [devtoolsHeight, setDevtoolsHeight] = useState(DEVTOOLS_DEFAULT_HEIGHT);
+  const [devtoolsWidth, setDevtoolsWidth] = useState(DEVTOOLS_DEFAULT_WIDTH);
+  // The dock position to restore to when reopening the inspector.
+  const lastDock = useRef<Exclude<DockMode, 'closed'>>('bottom');
   // Context-menu "Inspect" coordinates awaiting a tab's devtools to open.
   const pendingInspect = useRef(new Map<string, { x: number; y: number }>());
 
@@ -168,6 +187,13 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       views.current.delete(id);
       pendingInspect.current.delete(id);
       const ts = tabsRef.current;
+      const closed = ts.find((t) => t.id === id);
+      // Tear down the tab's inspector side-effects: an undocked devtools
+      // window and any active device emulation.
+      if (closed?.undockedWindowId) closeWindow(closed.undockedWindowId);
+      if (closed?.wcId != null && (closed.deviceId || closed.dock !== 'closed')) {
+        devtools?.emulate(closed.wcId, null).catch(() => {});
+      }
       const index = ts.findIndex((t) => t.id === id);
       if (index === -1) return;
       const next = ts.filter((t) => t.id !== id);
@@ -181,8 +207,24 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         current === id ? next[Math.max(0, index - 1)].id : current,
       );
     },
-    [closeWindow, windowId],
+    [closeWindow, windowId, devtools],
   );
+
+  // Publish the tab strip into the window's title bar so tabs share a line
+  // with the window controls (Chrome-style). Cleared on unmount to restore
+  // the default title.
+  useEffect(() => {
+    setTitlebar(
+      <TabStrip
+        tabs={tabs}
+        activeId={activeId}
+        onActivate={setActiveId}
+        onCloseTab={closeTab}
+        onNewTab={() => openTab(HOME_URL)}
+      />,
+    );
+    return () => setTitlebar(null);
+  }, [tabs, activeId, closeTab, openTab, setTitlebar]);
 
   /** Register/unregister a tab surface's imperative handle. */
   const registerView = useCallback((id: string, handle: BrowserViewHandle | null) => {
@@ -265,23 +307,60 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     });
   }, [openTab, closeTab]);
 
-  /** Open or close a tab's docked devtools pane. */
-  const toggleDevtools = useCallback(
-    (id: string) => {
+  /**
+   * Move a tab's inspector to a dock position, or close it ('closed').
+   * Handles opening/closing the undocked window and detaching the CDP
+   * session when the inspector is dismissed. Docked <-> docked transitions
+   * keep the same DevToolsPane mounted, so no CDP churn.
+   */
+  const setDock = useCallback(
+    (id: string, mode: DockMode) => {
       if (!devtools) return;
       const tab = tabsRef.current.find((t) => t.id === id);
-      if (!tab) return;
-      if (tab.devtoolsOpen) {
-        pendingInspect.current.delete(id);
-        // Ask main to close first so the target detaches cleanly; the pane
-        // itself unmounts with the state change.
-        if (tab.wcId !== null) devtools.close(tab.wcId).catch(() => {});
-        updateTab(id, { devtoolsOpen: false });
-      } else {
-        updateTab(id, { devtoolsOpen: true });
+      if (!tab || tab.dock === mode) return;
+      if (mode !== 'closed') lastDock.current = mode;
+
+      // Leaving the undocked window: close it.
+      if (tab.dock === 'window' && tab.undockedWindowId) {
+        closeWindow(tab.undockedWindowId);
       }
+
+      if (mode === 'closed') {
+        pendingInspect.current.delete(id);
+        // Ask main to close so the target detaches cleanly; the pane unmounts
+        // with the state change.
+        if (tab.wcId !== null) devtools.close(tab.wcId).catch(() => {});
+        updateTab(id, { dock: 'closed', undockedWindowId: null });
+        return;
+      }
+
+      if (mode === 'window') {
+        // Undock into its own desktop window, hosting a DevToolsPane for this
+        // tab. Closing the docked pane first detaches cleanly; the window's
+        // pane reopens the session against its own host.
+        if (tab.wcId !== null) devtools.close(tab.wcId).catch(() => {});
+        const winId =
+          tab.wcId !== null
+            ? openWindow('devtools', { targetWcId: tab.wcId }) ?? null
+            : null;
+        updateTab(id, { dock: 'window', undockedWindowId: winId });
+        return;
+      }
+
+      // Docked (bottom / right).
+      updateTab(id, { dock: mode, undockedWindowId: null });
     },
-    [devtools, updateTab],
+    [devtools, updateTab, closeWindow, openWindow],
+  );
+
+  /** Toggle a tab's inspector open (to its last dock) / closed. */
+  const toggleDevtools = useCallback(
+    (id: string) => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab) return;
+      setDock(id, tab.dock === 'closed' ? lastDock.current : 'closed');
+    },
+    [setDock],
   );
 
   /** A tab's devtools finished opening; run any pending "Inspect" request. */
@@ -315,22 +394,76 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           break;
         case 'inspect':
           setActiveId(tab.id);
-          if (tab.devtoolsOpen && tab.wcId !== null) {
+          if (tab.dock !== 'closed' && tab.wcId !== null) {
             devtools.inspect(tab.wcId, command.x, command.y).catch(() => {});
           } else {
             pendingInspect.current.set(tab.id, { x: command.x, y: command.y });
-            updateTab(tab.id, { devtoolsOpen: true });
+            setDock(tab.id, lastDock.current);
           }
           break;
         case 'closed':
           // Devtools closed from the other side (frontend close button, tab
-          // died) - or an echo of our own close; either way, reconcile.
+          // died) - or an echo of our own close; either way, reconcile. Not
+          // fired for undocked windows (they close via the window manager).
           pendingInspect.current.delete(tab.id);
-          updateTab(tab.id, { devtoolsOpen: false });
+          if (tab.dock !== 'window') {
+            updateTab(tab.id, { dock: 'closed' });
+          }
           break;
       }
     });
-  }, [devtools, toggleDevtools, updateTab]);
+  }, [devtools, toggleDevtools, setDock, updateTab]);
+
+  /** Apply/clear a tab's device emulation whenever its selection changes. */
+  const setDevice = useCallback(
+    (id: string, deviceId: string | null) => {
+      if (!devtools) return;
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab || tab.wcId === null) return;
+      updateTab(id, { deviceId });
+      const preset = deviceId ? findDevicePreset(deviceId) : null;
+      if (preset) {
+        devtools
+          .emulate(tab.wcId, {
+            width: preset.width,
+            height: preset.height,
+            deviceScaleFactor: preset.deviceScaleFactor,
+            mobile: preset.mobile,
+            userAgent: preset.userAgent,
+          })
+          .catch(() => {});
+      } else {
+        devtools.emulate(tab.wcId, null).catch(() => {});
+      }
+    },
+    [devtools, updateTab],
+  );
+
+  // Reconcile when an undocked devtools window is closed from its own title
+  // bar: its DevToolsPane unmounts and detaches silently (no 'closed'
+  // command), so watch the window manager and reset the tab to 'closed' when
+  // its window disappears.
+  useEffect(() => {
+    for (const tab of tabsRef.current) {
+      if (
+        tab.dock === 'window' &&
+        tab.undockedWindowId &&
+        !windows.some((w) => w.id === tab.undockedWindowId)
+      ) {
+        updateTab(tab.id, { dock: 'closed', undockedWindowId: null });
+      }
+    }
+  }, [windows, updateTab]);
+
+  // Re-dock requests from an undocked DevTools window (its dock controls live
+  // in a separate component tree). Route by the inspected tab's WebContents
+  // id, so only the browser window that owns the tab acts.
+  useEffect(() => {
+    return consumeInspectorDock(({ targetWcId, mode }) => {
+      const tab = tabsRef.current.find((t) => t.wcId === targetWcId);
+      if (tab) setDock(tab.id, mode);
+    });
+  }, [setDock]);
 
   const navigate = useCallback(
     (raw: string) => {
@@ -395,36 +528,6 @@ export function WebBrowser({ windowId }: AppComponentProps) {
 
   return (
     <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
-      {/* Tab strip */}
-      <div
-        role="tablist"
-        aria-label="Browser tabs"
-        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/40 bg-background/70 px-1.5 pt-1.5"
-      >
-        {tabs.map((tab) => (
-          <TabButton
-            key={tab.id}
-            tab={tab}
-            active={tab.id === activeId}
-            onActivate={() => setActiveId(tab.id)}
-            onClose={() => closeTab(tab.id)}
-          />
-        ))}
-        <button
-          type="button"
-          aria-label="New tab"
-          title="New tab"
-          onClick={() => openTab(HOME_URL)}
-          className={cn(
-            'mb-1 grid size-7 shrink-0 place-items-center rounded-md text-foreground/70',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
-
       {/* Toolbar */}
       <form
         onSubmit={(e) => {
@@ -473,7 +576,8 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           <NavButton
             label="Developer tools"
             title="Developer tools (F12)"
-            pressed={activeTab.devtoolsOpen}
+            pressed={activeTab.dock !== 'closed'}
+            disabled={activeTab.wcId === null}
             onClick={() => toggleDevtools(activeId)}
           >
             <Code className="size-4" />
@@ -498,15 +602,75 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             id={tab.id}
             initialSrc={tab.initialSrc}
             active={tab.id === activeId}
-            devtoolsWcId={tab.devtoolsOpen ? tab.wcId : null}
+            // Only render a docked pane for bottom/right; 'window' hosts its
+            // own pane in a separate desktop window.
+            dock={tab.dock === 'bottom' || tab.dock === 'right' ? tab.dock : null}
+            deviceId={tab.deviceId}
+            devtoolsWcId={tab.wcId}
             devtoolsHeight={devtoolsHeight}
-            onDevtoolsResize={setDevtoolsHeight}
+            devtoolsWidth={devtoolsWidth}
+            device={tab.deviceId ? findDevicePreset(tab.deviceId) ?? null : null}
+            onDevtoolsResizeHeight={setDevtoolsHeight}
+            onDevtoolsResizeWidth={setDevtoolsWidth}
             onDevtoolsReady={onDevtoolsReady}
+            onSetDock={setDock}
+            onSelectDevice={setDevice}
             onRegister={registerView}
             onEvent={onTabEvent}
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The browser's tab strip, rendered into the window title bar so tabs sit on
+ * the same line as the window controls. The surrounding <header> is the drag
+ * handle; tab buttons and the new-tab button handle their own clicks, and
+ * dragging empty space still moves the window.
+ */
+function TabStrip({
+  tabs,
+  activeId,
+  onActivate,
+  onCloseTab,
+  onNewTab,
+}: {
+  tabs: Tab[];
+  activeId: string;
+  onActivate: (id: string) => void;
+  onCloseTab: (id: string) => void;
+  onNewTab: () => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Browser tabs"
+      className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+    >
+      {tabs.map((tab) => (
+        <TabButton
+          key={tab.id}
+          tab={tab}
+          active={tab.id === activeId}
+          onActivate={() => onActivate(tab.id)}
+          onClose={() => onCloseTab(tab.id)}
+        />
+      ))}
+      <button
+        type="button"
+        aria-label="New tab"
+        title="New tab"
+        onClick={onNewTab}
+        className={cn(
+          'grid size-7 shrink-0 place-items-center rounded-md text-foreground/70',
+          'hover:bg-foreground/10 hover:text-foreground',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        )}
+      >
+        <Plus className="size-4" />
+      </button>
     </div>
   );
 }
@@ -545,10 +709,10 @@ function TabButton({
       }}
       title={label}
       className={cn(
-        'group flex h-8 w-44 min-w-0 shrink-0 cursor-default items-center gap-2 rounded-t-lg border border-b-0 px-2.5 text-xs',
+        'group flex h-7 w-44 min-w-0 shrink-0 cursor-default items-center gap-2 rounded-md border px-2.5 text-xs',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         active
-          ? 'border-border/60 bg-background text-foreground'
+          ? 'border-border/60 bg-background text-foreground shadow-sm'
           : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
       )}
     >
@@ -584,28 +748,50 @@ function TabButton({
  * derive from stable props, so effect subscriptions inside BrowserView stay
  * put across renders.
  *
- * When the tab's devtools are open (webview mode only), the surface splits:
- * page on top, docked DevTools pane below, separated by a draggable divider.
+ * Layout (webview mode only):
+ *  - When the tab's inspector is docked, the surface splits into page +
+ *    DevTools pane, laid out as a column (dock 'bottom') or row (dock
+ *    'right'), separated by a draggable divider that resizes the pane.
+ *  - When a device preset is selected, the page is centered in a framed
+ *    viewport of the device's CSS dimensions (the actual metrics/user-agent
+ *    override is applied over CDP; this is just the visual frame + scroll).
  */
 const TabSurface = memo(function TabSurface({
   id,
   initialSrc,
   active,
+  dock,
+  deviceId,
   devtoolsWcId,
   devtoolsHeight,
-  onDevtoolsResize,
+  devtoolsWidth,
+  device,
+  onDevtoolsResizeHeight,
+  onDevtoolsResizeWidth,
   onDevtoolsReady,
+  onSetDock,
+  onSelectDevice,
   onRegister,
   onEvent,
 }: {
   id: string;
   initialSrc: string;
   active: boolean;
-  /** The guest to inspect, or null when the tab's devtools are closed. */
+  /** Docked pane position, or null when not docked in this surface. */
+  dock: 'bottom' | 'right' | null;
+  /** Selected device preset id, or null. */
+  deviceId: string | null;
+  /** The guest to inspect (the tab's own WebContents id), or null. */
   devtoolsWcId: number | null;
   devtoolsHeight: number;
-  onDevtoolsResize: (height: number) => void;
+  devtoolsWidth: number;
+  /** Selected device preset for the responsive view, or null. */
+  device: DevicePreset | null;
+  onDevtoolsResizeHeight: (height: number) => void;
+  onDevtoolsResizeWidth: (width: number) => void;
   onDevtoolsReady: (id: string) => void;
+  onSetDock: (id: string, mode: DockMode) => void;
+  onSelectDevice: (id: string, deviceId: string | null) => void;
   onRegister: (id: string, handle: BrowserViewHandle | null) => void;
   onEvent: (id: string, event: TabEvent) => void;
 }) {
@@ -643,27 +829,57 @@ const TabSurface = memo(function TabSurface({
   );
   const onReady = useCallback(() => onDevtoolsReady(id), [id, onDevtoolsReady]);
 
-  /** Clamp a pane height so both page and devtools stay usable. */
-  const clampHeight = useCallback((height: number) => {
-    const total = containerRef.current?.getBoundingClientRect().height;
-    const max =
-      total === undefined
-        ? height
-        : Math.max(DEVTOOLS_MIN_HEIGHT, total - PAGE_MIN_HEIGHT);
-    return Math.min(Math.max(height, DEVTOOLS_MIN_HEIGHT), max);
-  }, []);
+  const docked = dock !== null && devtoolsWcId !== null;
+  const side = dock === 'right';
 
-  return (
+  /** Clamp a pane size so both page and devtools stay usable. */
+  const clampSize = useCallback(
+    (size: number, vertical: boolean) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      const total = rect ? (vertical ? rect.height : rect.width) : undefined;
+      const max =
+        total === undefined
+          ? size
+          : Math.max(DEVTOOLS_MIN_SIZE, total - PAGE_MIN_SIZE);
+      return Math.min(Math.max(size, DEVTOOLS_MIN_SIZE), max);
+    },
+    [],
+  );
+
+  const paneSize = side ? devtoolsWidth : devtoolsHeight;
+  const commitPaneSize = side ? onDevtoolsResizeWidth : onDevtoolsResizeHeight;
+
+  // The page area. A single BrowserView is always mounted (toggling the
+  // device frame must not remount it - that would reload the page). When a
+  // device preset is active it's wrapped in a fixed-size framed viewport,
+  // centered in a scrollable backdrop; otherwise it fills the area.
+  const pageArea = (
     <div
-      ref={containerRef}
-      className="absolute inset-0 flex flex-col"
-      style={active ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
+      className={cn(
+        'relative min-h-0 min-w-0 flex-1',
+        device ? 'grid place-items-center overflow-auto bg-muted/40 p-4' : undefined,
+      )}
+      // While dragging the divider, keep pointer events away from the
+      // embedded surfaces so they can't swallow the drag.
+      style={resizing ? { pointerEvents: 'none' } : undefined}
     >
+      {device && (
+        <span className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-full bg-background/80 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm">
+          {device.name} &middot; {device.width}&times;{device.height}
+          {device.deviceScaleFactor !== 1 && ` @${device.deviceScaleFactor}x`}
+        </span>
+      )}
       <div
-        className="relative min-h-0 flex-1"
-        // While dragging the divider, keep pointer events away from the
-        // embedded surfaces so they can't swallow the drag.
-        style={resizing ? { pointerEvents: 'none' } : undefined}
+        className={cn(
+          device
+            ? 'overflow-hidden rounded-[1.75rem] border-4 border-foreground/80 bg-white shadow-2xl'
+            : 'absolute inset-0',
+        )}
+        style={
+          device
+            ? { width: device.width, height: device.height, maxWidth: '100%' }
+            : undefined
+        }
       >
         <BrowserView
           ref={ref}
@@ -676,12 +892,22 @@ const TabSurface = memo(function TabSurface({
           onWebContentsId={onWebContentsId}
         />
       </div>
+    </div>
+  );
 
-      {devtoolsWcId !== null && (
+  return (
+    <div
+      ref={containerRef}
+      className={cn('absolute inset-0 flex', side ? 'flex-row' : 'flex-col')}
+      style={active ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
+    >
+      {pageArea}
+
+      {docked && (
         <>
           <div
             role="separator"
-            aria-orientation="horizontal"
+            aria-orientation={side ? 'vertical' : 'horizontal'}
             aria-label="Resize developer tools"
             tabIndex={0}
             onPointerDown={(e) => {
@@ -691,8 +917,14 @@ const TabSurface = memo(function TabSurface({
             }}
             onPointerMove={(e) => {
               if (!resizing) return;
-              const bottom = containerRef.current?.getBoundingClientRect().bottom;
-              if (bottom !== undefined) onDevtoolsResize(clampHeight(bottom - e.clientY));
+              const rect = containerRef.current?.getBoundingClientRect();
+              if (!rect) return;
+              // The pane hugs the far edge; its size is the distance from the
+              // pointer to that edge (right for 'right', bottom otherwise).
+              const next = side
+                ? clampSize(rect.right - e.clientX, false)
+                : clampSize(rect.bottom - e.clientY, true);
+              commitPaneSize(next);
             }}
             onPointerUp={(e) => {
               e.currentTarget.releasePointerCapture(e.pointerId);
@@ -700,26 +932,40 @@ const TabSurface = memo(function TabSurface({
             }}
             onPointerCancel={() => setResizing(false)}
             onKeyDown={(e) => {
-              if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+              const grow = side ? 'ArrowLeft' : 'ArrowUp';
+              const shrink = side ? 'ArrowRight' : 'ArrowDown';
+              if (e.key !== grow && e.key !== shrink) return;
               e.preventDefault();
-              const delta = e.key === 'ArrowUp' ? 24 : -24;
-              onDevtoolsResize(clampHeight(devtoolsHeight + delta));
+              const delta = e.key === grow ? 24 : -24;
+              commitPaneSize(clampSize(paneSize + delta, !side));
             }}
             className={cn(
-              'h-1.5 shrink-0 cursor-row-resize touch-none border-t border-border bg-background',
+              'shrink-0 touch-none bg-background',
               'hover:bg-primary/40 motion-safe:transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              side
+                ? 'w-1.5 cursor-col-resize border-l border-border'
+                : 'h-1.5 cursor-row-resize border-t border-border',
               resizing && 'bg-primary/40',
             )}
           />
           <div
-            className="shrink-0 overflow-hidden"
+            className="flex shrink-0 flex-col overflow-hidden"
             style={{
-              height: devtoolsHeight,
+              [side ? 'width' : 'height']: paneSize,
               ...(resizing ? { pointerEvents: 'none' } : undefined),
             }}
           >
-            <DevToolsPane targetWcId={devtoolsWcId} onReady={onReady} />
+            <InspectorToolbar
+              dock={side ? 'right' : 'bottom'}
+              deviceId={deviceId}
+              onSetDock={(mode) => onSetDock(id, mode)}
+              onClose={() => onSetDock(id, 'closed')}
+              onSelectDevice={(next) => onSelectDevice(id, next)}
+            />
+            <div className="min-h-0 flex-1">
+              <DevToolsPane targetWcId={devtoolsWcId} onReady={onReady} />
+            </div>
           </div>
         </>
       )}
@@ -1068,3 +1314,4 @@ function NavButton({
     </button>
   );
 }
+

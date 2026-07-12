@@ -27,7 +27,7 @@ import { useWindowManager } from '@/contexts/WindowManagerContext';
 import type { WindowState } from '@/hooks/useWindows';
 
 /** Apps pinned to the taskbar out of the box. */
-const DEFAULT_PINNED = APPS.map((app) => app.id);
+const DEFAULT_PINNED = APPS.filter((app) => !app.hidden).map((app) => app.id);
 
 const PinnedAppsSchema = z.array(z.string());
 
@@ -93,7 +93,7 @@ export function Taskbar() {
           className="w-72"
         >
           <div className="grid grid-cols-3 gap-2">
-            {apps.map((app) => (
+            {apps.filter((app) => !app.hidden).map((app) => (
               <ContextMenu key={app.id}>
                 <ContextMenuTrigger asChild>
                   <PopoverClose asChild>

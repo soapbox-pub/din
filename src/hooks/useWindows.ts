@@ -6,12 +6,20 @@ function maxZ(windows: WindowState[]): number {
   return windows.reduce((max, w) => Math.max(max, w.z), 0);
 }
 
+/**
+ * Arbitrary launch parameters passed to an app instance when its window is
+ * opened. Serializable, app-defined; the app reads them off its props.
+ */
+export type WindowParams = Record<string, unknown>;
+
 /** A live window instance on the desktop. */
 export interface WindowState {
   /** Unique per-instance id. */
   id: string;
   /** The app definition id this window hosts. */
   appId: string;
+  /** Launch parameters passed at open() time, or undefined. */
+  params?: WindowParams;
   /** Position of the top-left corner, in pixels relative to the workspace. */
   x: number;
   y: number;
@@ -53,9 +61,9 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
     });
   }, []);
 
-  const open = useCallback((appId: string) => {
+  const open = useCallback((appId: string, params?: WindowParams) => {
     const app = getApp(appId);
-    if (!app) return;
+    if (!app) return undefined;
 
     const size = app.defaultSize ?? { width: 800, height: 560 };
     const id = nextWindowId();
@@ -67,6 +75,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
         {
           id,
           appId,
+          params,
           x: 80 + offset,
           y: 60 + offset,
           width: size.width,
@@ -78,6 +87,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
         },
       ];
     });
+    return id;
   }, [getApp]);
 
   const close = useCallback((id: string) => {

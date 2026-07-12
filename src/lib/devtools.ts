@@ -37,6 +37,20 @@ export type DevtoolsCommand =
       wcId: number;
     };
 
+/** Device-metrics + user-agent override for the responsive/device view. */
+export interface DeviceMetrics {
+  /** Viewport width in CSS pixels. */
+  width: number;
+  /** Viewport height in CSS pixels. */
+  height: number;
+  /** Device pixel ratio; 0 uses the platform default. */
+  deviceScaleFactor?: number;
+  /** Emulate a mobile device (touch events, mobile viewport). */
+  mobile?: boolean;
+  /** Override the navigator user-agent string. */
+  userAgent?: string;
+}
+
 export interface DevtoolsBridge {
   /** Dock a tab's devtools into a devtools host <webview> and open them. */
   open(targetWcId: number, hostWcId: number): Promise<void>;
@@ -44,6 +58,11 @@ export interface DevtoolsBridge {
   close(targetWcId: number): Promise<void>;
   /** Highlight the element at page coordinates in the tab's open devtools. */
   inspect(targetWcId: number, x: number, y: number): Promise<void>;
+  /**
+   * Apply device/responsive emulation to a tab, or clear it with `null`.
+   * Works whether or not the tab's devtools pane is open.
+   */
+  emulate(targetWcId: number, metrics: DeviceMetrics | null): Promise<void>;
   /** Subscribe to devtools commands. Returns an unsubscribe fn. */
   onCommand(callback: (command: DevtoolsCommand) => void): () => void;
 }

@@ -1,9 +1,10 @@
-import { memo, useCallback, useEffect, useRef } from 'react';
-import type { ComponentType } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import {
   createModel,
   grabModel,
@@ -48,11 +49,13 @@ const RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
 const WindowContent = memo(function WindowContent({
   component: AppComponent,
   windowId,
+  params,
 }: {
   component: ComponentType<AppComponentProps>;
   windowId: string;
+  params: AppComponentProps['params'];
 }) {
-  return <AppComponent windowId={windowId} />;
+  return <AppComponent windowId={windowId} params={params} />;
 });
 
 /**
@@ -130,6 +133,12 @@ export const Window = memo(function Window({
     cur: { x: number; y: number; width: number; height: number };
   } | null>(null);
   const wobblyRef = useRef<WobblyDrag | null>(null);
+
+  // Custom title-bar content published by the hosted app (e.g. the browser's
+  // tab strip), rendered inline with the window controls. `null` shows the
+  // default icon + name. The setter is stable so apps can publish from an
+  // effect without re-subscribing.
+  const [titlebar, setTitlebar] = useState<ReactNode>(null);
 
   /**
    * Put the window into "cheap to move" mode for the duration of a gesture.
@@ -459,14 +468,25 @@ export const Window = memo(function Window({
           toggleMaximize(win.id);
         }}
         className={cn(
-          'flex h-9 shrink-0 touch-none select-none items-center gap-2 border-b border-border/60 bg-background/60 px-3',
+          'flex h-9 shrink-0 touch-none select-none items-center gap-2 border-b border-border/60 bg-background/60 pr-3',
+          titlebar ? 'pl-2' : 'pl-3',
           win.maximized ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
         )}
       >
-        <AppIcon icon={app.icon} className="size-4 shrink-0 text-muted-foreground" />
-        <span className="flex-1 truncate text-sm font-medium text-foreground/90">
-          {app.name}
-        </span>
+        {titlebar ? (
+          // The app owns the flexible region (drag still works on its empty
+          // space; interactive controls inside handle their own events).
+          <div className="flex min-w-0 flex-1 items-center self-stretch">
+            {titlebar}
+          </div>
+        ) : (
+          <>
+            <AppIcon icon={app.icon} className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate text-sm font-medium text-foreground/90">
+              {app.name}
+            </span>
+          </>
+        )}
         <button
           type="button"
           aria-label="Minimize window"
@@ -504,7 +524,9 @@ export const Window = memo(function Window({
       </header>
 
       <div className="relative flex-1 overflow-hidden bg-background/80">
-        <WindowContent component={app.component} windowId={win.id} />
+        <WindowTitlebarContext.Provider value={setTitlebar}>
+          <WindowContent component={app.component} windowId={win.id} params={win.params} />
+        </WindowTitlebarContext.Provider>
       </div>
 
       {!win.maximized &&

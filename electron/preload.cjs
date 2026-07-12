@@ -174,6 +174,13 @@ contextBridge.exposeInMainWorld('devtools', {
     ipcRenderer.invoke('devtools:inspect', targetWcId, x, y),
 
   /**
+   * Apply device/responsive emulation to a tab (metrics object) or clear it
+   * (null). Independent of whether the tab's devtools pane is open.
+   */
+  emulate: (targetWcId, metrics) =>
+    ipcRenderer.invoke('devtools:emulate', targetWcId, metrics),
+
+  /**
    * Subscribe to devtools commands from the main process. Returns an
    * unsubscribe fn. Commands:
    *   { type: 'toggle', wcId }        (F12 / Ctrl+Shift+I inside a guest)

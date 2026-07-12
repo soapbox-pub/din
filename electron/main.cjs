@@ -839,6 +839,34 @@ function registerDevtoolsHandlers() {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     devtoolsBridge.inspect(targetWcId, Math.round(x), Math.round(y));
   });
+
+  // Apply or clear device/responsive emulation on a tab.
+  ipcMain.handle('devtools:emulate', async (event, targetWcId, metrics) => {
+    assertShellSender(event);
+    const target = browserTabFromId(targetWcId);
+    if (!target) throw new Error('devtools: invalid target');
+    if (metrics === null) {
+      await devtoolsBridge.emulate(target.id, null);
+      return;
+    }
+    if (
+      !metrics ||
+      !Number.isFinite(metrics.width) ||
+      !Number.isFinite(metrics.height)
+    ) {
+      throw new Error('devtools: invalid emulation metrics');
+    }
+    await devtoolsBridge.emulate(target.id, {
+      width: metrics.width,
+      height: metrics.height,
+      deviceScaleFactor: Number.isFinite(metrics.deviceScaleFactor)
+        ? metrics.deviceScaleFactor
+        : 0,
+      mobile: Boolean(metrics.mobile),
+      userAgent:
+        typeof metrics.userAgent === 'string' ? metrics.userAgent : undefined,
+    });
+  });
 }
 
 app.whenReady().then(() => {

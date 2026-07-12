@@ -148,6 +148,14 @@ class DevtoolsBridge {
     this._listening = null;
     /** token -> session */
     this._sessions = new Map();
+    /**
+     * Device-emulation attachments, keyed by target WebContents id. Device
+     * emulation is independent of devtools sessions (the responsive/device
+     * view works with the pane closed), so it keeps its own debugger
+     * attachment when no devtools session already holds one.
+     * @type {Map<number, { ownsDebugger: boolean }>}
+     */
+    this._emulations = new Map();
   }
 
   /** Lazily start the loopback server; resolves to its ephemeral port. */
@@ -227,6 +235,92 @@ class DevtoolsBridge {
     else session.pendingInspects.push(point);
   }
 
+  /**
+   * Apply or clear device-metrics + user-agent emulation on a tab (the
+   * responsive/device view). `metrics` null clears all overrides. Works
+   * whether or not the tab's devtools pane is open: it reuses an existing
+   * debugger attachment (from a devtools session) or makes its own.
+   *
+   * @param {number} targetId  Inspected tab's WebContents id.
+   * @param {null | {
+   *   width: number, height: number, deviceScaleFactor?: number,
+   *   mobile?: boolean, userAgent?: string,
+   * }} metrics
+   */
+  async emulate(targetId, metrics) {
+    const target = webContents.fromId(targetId);
+    if (!target || target.isDestroyed()) return;
+    const dbg = target.debugger;
+
+    if (metrics === null) {
+      // Clear overrides, then release any debugger attachment we own.
+      const emulation = this._emulations.get(targetId);
+      try {
+        if (dbg.isAttached()) {
+          await dbg.sendCommand('Emulation.clearDeviceMetricsOverride');
+          await dbg.sendCommand('Emulation.setUserAgentOverride', { userAgent: '' });
+          await dbg.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
+        }
+      } catch {
+        // Target navigated/died mid-clear; nothing more to do.
+      }
+      if (emulation) {
+        this._emulations.delete(targetId);
+        // Only detach if a devtools session isn't also using the debugger.
+        if (emulation.ownsDebugger && !this._sessionForTarget(targetId)) {
+          try {
+            if (dbg.isAttached()) dbg.detach();
+          } catch {
+            // best effort
+          }
+        }
+      }
+      return;
+    }
+
+    // Ensure a debugger attachment. If a devtools session already holds one,
+    // piggyback on it; otherwise attach and remember that we own it.
+    let ownsDebugger = this._emulations.get(targetId)?.ownsDebugger ?? false;
+    try {
+      if (!dbg.isAttached()) {
+        dbg.attach('1.3');
+        ownsDebugger = true;
+      }
+    } catch {
+      return;
+    }
+    this._emulations.set(targetId, { ownsDebugger });
+
+    const {
+      width,
+      height,
+      deviceScaleFactor = 0,
+      mobile = false,
+      userAgent,
+    } = metrics;
+    try {
+      await dbg.sendCommand('Emulation.setDeviceMetricsOverride', {
+        width: Math.round(width),
+        height: Math.round(height),
+        deviceScaleFactor,
+        mobile,
+        screenWidth: Math.round(width),
+        screenHeight: Math.round(height),
+      });
+      await dbg.sendCommand('Emulation.setTouchEmulationEnabled', {
+        enabled: mobile,
+        maxTouchPoints: mobile ? 5 : 0,
+      });
+      if (typeof userAgent === 'string' && userAgent) {
+        await dbg.sendCommand('Emulation.setUserAgentOverride', { userAgent });
+      } else {
+        await dbg.sendCommand('Emulation.setUserAgentOverride', { userAgent: '' });
+      }
+    } catch {
+      // Target navigated/died mid-apply; the next apply or clear reconciles.
+    }
+  }
+
   /** The tab a devtools host guest is inspecting, or undefined. */
   targetIdForHost(hostId) {
     for (const session of this._sessions.values()) {
@@ -248,10 +342,15 @@ class DevtoolsBridge {
     session.closeSocket?.();
     const target = webContents.fromId(session.targetId);
     if (target && !target.isDestroyed()) {
-      try {
-        if (target.debugger.isAttached()) target.debugger.detach();
-      } catch {
-        // best effort
+      // Keep the debugger attached if device emulation is still using it;
+      // detaching would drop the active metrics/user-agent overrides.
+      const emulated = this._emulations.has(session.targetId);
+      if (!emulated) {
+        try {
+          if (target.debugger.isAttached()) target.debugger.detach();
+        } catch {
+          // best effort
+        }
       }
     }
     if (notify) this._onSessionEnded?.(session.targetId);
