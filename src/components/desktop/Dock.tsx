@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
 import { z } from 'zod';
 import {
@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { APPS } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import type { WindowState } from '@/hooks/useWindows';
 
 /** Apps kept in the Dock out of the box. */
@@ -68,7 +68,8 @@ export function Dock({
   /** The workspace <main> element; window x/y coordinates are relative to it. */
   workspaceRef: React.RefObject<HTMLElement | null>;
 }) {
-  const { windows, close } = useWindowManager();
+  const { windows } = useWindowManager();
+  const { closeApp } = useWindowActions();
   const { getApp, webApps, uninstallWebApp } = useInstalledApps();
   // Pinned apps roam across devices via Din's encrypted app-data layer,
   // seeded from the pre-sync localStorage key on first run.
@@ -79,19 +80,27 @@ export function Dock({
     { legacyKey: 'desktop:pinned-apps' },
   );
 
-  const togglePin = (appId: string) =>
-    setPinned((prev) =>
-      prev.includes(appId)
-        ? prev.filter((id) => id !== appId)
-        : [...prev, appId],
-    );
+  // Stable handlers so memo(DockItem) isn't defeated by fresh closures on
+  // every dock re-render (the dock re-renders on every window commit).
+  const togglePin = useCallback(
+    (appId: string) =>
+      setPinned((prev) =>
+        prev.includes(appId)
+          ? prev.filter((id) => id !== appId)
+          : [...prev, appId],
+      ),
+    [setPinned],
+  );
 
   /** Uninstall a web app: close its windows, unpin it, drop the entry. */
-  const uninstall = (appId: string) => {
-    windows.filter((w) => w.appId === appId).forEach((w) => close(w.id));
-    setPinned((prev) => prev.filter((id) => id !== appId));
-    uninstallWebApp(appId);
-  };
+  const uninstall = useCallback(
+    (appId: string) => {
+      closeApp(appId);
+      setPinned((prev) => prev.filter((id) => id !== appId));
+      uninstallWebApp(appId);
+    },
+    [closeApp, setPinned, uninstallWebApp],
+  );
 
   // One dock tile per app: pinned apps first in pin order, then any
   // running apps that aren't pinned, in launch order.
@@ -130,6 +139,12 @@ export function Dock({
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
   const pointerX = useRef<number | null>(null);
   const rafId = useRef(0);
+
+  /** Stable tile-ref registrar (identity matters for memo'd DockItems). */
+  const registerRef = useCallback((appId: string, el: HTMLDivElement | null) => {
+    if (el) itemRefs.current.set(appId, el);
+    else itemRefs.current.delete(appId);
+  }, []);
 
   // Kept fresh via an every-render effect so the rAF callback sees the
   // current tile list.
@@ -287,17 +302,14 @@ export function Dock({
             <DockItem
               key={appId}
               app={app}
-              refCallback={(el) => {
-                if (el) itemRefs.current.set(appId, el);
-                else itemRefs.current.delete(appId);
-              }}
+              registerRef={registerRef}
               appWindows={windows.filter((w) => w.appId === appId)}
               activeWindowId={activeWindow?.id ?? null}
               isPinned={pinned.includes(appId)}
-              onTogglePin={() => togglePin(appId)}
+              onTogglePin={togglePin}
               onUninstall={
                 webApps.some((webApp) => webApp.id === appId)
-                  ? () => uninstall(appId)
+                  ? uninstall
                   : undefined
               }
             />
@@ -316,10 +328,16 @@ export function Dock({
  * - multiple windows: click opens a picker listing every window
  * - middle-click always opens a new window
  * - right-click: new window, pin/unpin, close all, uninstall
+ *
+ * Memoized: the dock re-renders on every window commit, but a tile (and its
+ * Radix context-menu/popover tree) only re-renders when its own app's
+ * windows, active state, or pin state actually changed. `appWindows` is a
+ * fresh array each parent render, so the comparator checks its elements
+ * (window objects are referentially stable while unchanged).
  */
-function DockItem({
+const DockItem = memo(function DockItem({
   app,
-  refCallback,
+  registerRef,
   appWindows,
   activeWindowId,
   isPinned,
@@ -327,15 +345,15 @@ function DockItem({
   onUninstall,
 }: {
   app: AppDefinition;
-  refCallback: (el: HTMLDivElement | null) => void;
+  registerRef: (appId: string, el: HTMLDivElement | null) => void;
   appWindows: WindowState[];
   activeWindowId: string | null;
   isPinned: boolean;
-  onTogglePin: () => void;
+  onTogglePin: (appId: string) => void;
   /** Present only for installed web apps; removes the app entirely. */
-  onUninstall?: () => void;
+  onUninstall?: (appId: string) => void;
 }) {
-  const { open, focus, minimize, close } = useWindowManager();
+  const { open, focus, minimize, close, closeApp } = useWindowActions();
   const isAppActive = appWindows.some((w) => w.id === activeWindowId);
 
   /** Focus a window, or minimize it if it's already the active one. */
@@ -405,7 +423,7 @@ function DockItem({
       <ContextMenuItem onSelect={() => open(app.id)}>
         <Plus aria-hidden /> New window
       </ContextMenuItem>
-      <ContextMenuItem onSelect={onTogglePin}>
+      <ContextMenuItem onSelect={() => onTogglePin(app.id)}>
         {isPinned ? (
           <>
             <PinOff aria-hidden /> Remove from Dock
@@ -419,9 +437,7 @@ function DockItem({
       {appWindows.length > 0 && (
         <>
           <ContextMenuSeparator />
-          <ContextMenuItem
-            onSelect={() => appWindows.forEach((w) => close(w.id))}
-          >
+          <ContextMenuItem onSelect={() => closeApp(app.id)}>
             <X aria-hidden />{' '}
             {appWindows.length > 1 ? 'Close all windows' : 'Close window'}
           </ContextMenuItem>
@@ -430,7 +446,7 @@ function DockItem({
       {onUninstall && (
         <>
           <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onSelect={onUninstall}>
+          <ContextMenuItem variant="destructive" onSelect={() => onUninstall(app.id)}>
             <Trash2 aria-hidden /> Uninstall
           </ContextMenuItem>
         </>
@@ -439,7 +455,7 @@ function DockItem({
   );
 
   const wrapperProps = {
-    ref: refCallback,
+    ref: (el: HTMLDivElement | null) => registerRef(app.id, el),
     className: cn(
       'group/dock-item relative h-20',
       'motion-safe:transition-[width] motion-safe:duration-150 motion-safe:ease-out',
@@ -521,4 +537,12 @@ function DockItem({
       {runningDot}
     </div>
   );
-}
+}, (prev, next) =>
+  prev.app === next.app &&
+  prev.registerRef === next.registerRef &&
+  prev.activeWindowId === next.activeWindowId &&
+  prev.isPinned === next.isPinned &&
+  prev.onTogglePin === next.onTogglePin &&
+  prev.onUninstall === next.onUninstall &&
+  prev.appWindows.length === next.appWindows.length &&
+  prev.appWindows.every((w, i) => w === next.appWindows[i]));

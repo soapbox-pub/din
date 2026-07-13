@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/popover';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useToast } from '@/hooks/useToast';
 import {
@@ -133,7 +133,11 @@ type TabEvent =
  * "Inspect" - see the devtools bridge (src/lib/devtools.ts).
  */
 export function WebBrowser({ windowId }: AppComponentProps) {
-  const { close: closeWindow, open: openWindow, windows } = useWindowManager();
+  // Actions only: subscribing to window state here would re-render the whole
+  // browser (tab strip, toolbar, every BrowserView host) on every desktop
+  // commit. The one thing that needs window state - reconciling undocked
+  // DevTools windows - lives in <UndockedDevToolsReconciler /> below.
+  const { close: closeWindow, open: openWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab(HOME_URL)]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
@@ -442,18 +446,9 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   // Reconcile when an undocked devtools window is closed from its own title
   // bar: its DevToolsPane unmounts and detaches silently (no 'closed'
   // command), so watch the window manager and reset the tab to 'closed' when
-  // its window disappears.
-  useEffect(() => {
-    for (const tab of tabsRef.current) {
-      if (
-        tab.dock === 'window' &&
-        tab.undockedWindowId &&
-        !windows.some((w) => w.id === tab.undockedWindowId)
-      ) {
-        updateTab(tab.id, { dock: 'closed', undockedWindowId: null });
-      }
-    }
-  }, [windows, updateTab]);
+  // its window disappears. Isolated in a null-rendering child so only it
+  // subscribes to window state (see the comment on useWindowActions above).
+  // (Rendered near the bottom of this component's JSX.)
 
   // Re-dock requests from an undocked DevTools window (its dock controls live
   // in a separate component tree). Route by the inspected tab's WebContents
@@ -620,8 +615,43 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           />
         ))}
       </div>
+
+      <UndockedDevToolsReconciler tabsRef={tabsRef} updateTab={updateTab} />
     </div>
   );
+}
+
+/**
+ * Watches the window manager and resets a tab's DevTools to 'closed' when
+ * its undocked DevTools window disappears (closed from its own title bar:
+ * the pane unmounts and detaches silently, with no 'closed' command).
+ *
+ * Renders nothing. Kept as a separate component because it's the browser's
+ * only consumer of window STATE - subscribing in WebBrowser itself would
+ * re-render the entire browser tree on every desktop window commit.
+ */
+function UndockedDevToolsReconciler({
+  tabsRef,
+  updateTab,
+}: {
+  tabsRef: React.RefObject<Tab[]>;
+  updateTab: (id: string, patch: Partial<Tab>) => void;
+}) {
+  const { windows } = useWindowManager();
+
+  useEffect(() => {
+    for (const tab of tabsRef.current) {
+      if (
+        tab.dock === 'window' &&
+        tab.undockedWindowId &&
+        !windows.some((w) => w.id === tab.undockedWindowId)
+      ) {
+        updateTab(tab.id, { dock: 'closed', undockedWindowId: null });
+      }
+    }
+  }, [windows, tabsRef, updateTab]);
+
+  return null;
 }
 
 /**
@@ -1155,7 +1185,7 @@ function InstallSiteButton({
   favicon: string | null;
 }) {
   const { installWebApp, findWebAppByUrl } = useInstalledApps();
-  const { open: openApp } = useWindowManager();
+  const { open: openApp } = useWindowActions();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');

@@ -1,5 +1,5 @@
 import { LayoutGrid, LogOut, Search, Trash2, UserPlus, WifiOff, WifiZero } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -27,7 +27,7 @@ import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
 import { getWifiBridge } from '@/lib/wifi';
 import { cn } from '@/lib/utils';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 
 /**
  * macOS-style menu bar along the top of the desktop.
@@ -43,6 +43,9 @@ import { useWindowManager } from '@/contexts/WindowManagerContext';
  * above the fullscreen window.
  */
 export function MenuBar() {
+  // Subscribes to window state (needed for the fullscreen scrim), so this
+  // re-renders on every window commit - all children are memoized so the
+  // re-render stops at this component's own <header> element.
   const { windows } = useWindowManager();
   const fullscreen = windows.some((w) => w.maximized && !w.minimized);
 
@@ -66,14 +69,16 @@ export function MenuBar() {
 }
 
 /** Left menu: the full searchable apps launcher. */
-function AppsMenu() {
+const AppsMenu = memo(function AppsMenu() {
   const { apps, uninstallWebApp, webApps } = useInstalledApps();
-  const { windows, open, close } = useWindowManager();
+  // Actions only: keeps the launcher (a large Radix popover tree) out of
+  // the per-window-commit re-render cascade.
+  const { open, closeApp } = useWindowActions();
   const [query, setQuery] = useState('');
 
   /** Uninstall a web app: close its windows, then drop the entry. */
   const uninstall = (appId: string) => {
-    windows.filter((w) => w.appId === appId).forEach((w) => close(w.id));
+    closeApp(appId);
     uninstallWebApp(appId);
   };
 
@@ -156,14 +161,14 @@ function AppsMenu() {
       </PopoverContent>
     </Popover>
   );
-}
+});
 
 /**
  * Wi-Fi status item: glyph mirrors the adapter state; clicking opens the
  * quick-connect panel. Renders nothing outside the Electron shell or on
  * systems without an adapter, like hardware indicators do.
  */
-function WifiMenuItem() {
+const WifiMenuItem = memo(function WifiMenuItem() {
   const bridge = getWifiBridge();
   const status = useWifiStatus();
   const radioEnabled = status.data?.radioEnabled ?? false;
@@ -208,10 +213,10 @@ function WifiMenuItem() {
       </PopoverContent>
     </Popover>
   );
-}
+});
 
 /** Account status item: avatar opens the account panel. */
-function AccountMenuItem() {
+const AccountMenuItem = memo(function AccountMenuItem() {
   const { currentUser } = useLoggedInAccounts();
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [quickLoginPubkey, setQuickLoginPubkey] = useState<string | null>(null);
@@ -265,10 +270,10 @@ function AccountMenuItem() {
       />
     </>
   );
-}
+});
 
 /** Menu-bar clock: weekday, date, and time, macOS style. */
-function ClockDisplay() {
+const ClockDisplay = memo(function ClockDisplay() {
   const now = useClock();
 
   return (
@@ -281,7 +286,7 @@ function ClockDisplay() {
       {now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
     </time>
   );
-}
+});
 
 /** Account header: current user, other accounts, add-account, log out. */
 function AccountPanel({

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -19,7 +19,7 @@ import {
 } from '@/lib/wobbly';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { MIN_HEIGHT, MIN_WIDTH, type WindowState } from '@/hooks/useWindows';
 
 /** Which edges/corner a resize drag is acting on. */
@@ -107,7 +107,11 @@ export const Window = memo(function Window({
   window: WindowState;
   isTop: boolean;
 }) {
-  const { close, minimize, focus, move, resize, toggleMaximize } = useWindowManager();
+  // Actions only (stable identity): subscribing to the full manager would
+  // re-render every window's chrome on every commit anywhere on the desktop,
+  // defeating the memo() above. With actions only, this component re-renders
+  // solely when its own `window` object or `isTop` changes.
+  const { close, minimize, focus, move, resize, toggleMaximize } = useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
@@ -530,7 +534,13 @@ export const Window = memo(function Window({
 
       <div className="relative flex-1 overflow-hidden bg-background/80">
         <WindowTitlebarContext.Provider value={setTitlebar}>
-          <WindowContent component={app.component} windowId={win.id} params={win.params} />
+          {/* Built-in apps are code-split (React.lazy); the fallback shows
+              while an app's chunk loads on its first launch. */}
+          <Suspense
+            fallback={<div className="size-full animate-pulse bg-muted/40" />}
+          >
+            <WindowContent component={app.component} windowId={win.id} params={win.params} />
+          </Suspense>
         </WindowTitlebarContext.Provider>
       </div>
 

@@ -47,7 +47,7 @@ import {
   useHomeDir,
 } from '@/hooks/useFileSystem';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
 import {
@@ -142,7 +142,7 @@ function tabTitle(cwd: string | null): string {
  */
 export function FileBrowser({ windowId }: AppComponentProps) {
   const bridge = getFsBridge();
-  const { close: closeWindow } = useWindowManager();
+  const { close: closeWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
 
   const [tabs, setTabs] = useState<{ id: string }[]>(() => [{ id: newTabId() }]);

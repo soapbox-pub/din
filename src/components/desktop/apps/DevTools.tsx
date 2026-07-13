@@ -2,7 +2,7 @@ import { Code } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 import { InspectorToolbar } from '@/components/desktop/apps/InspectorToolbar';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { publishInspectorDock } from '@/lib/inspectorBus';
 
 /**
@@ -25,7 +25,7 @@ import { publishInspectorDock } from '@/lib/inspectorBus';
  * state instead of a blank pane.
  */
 export function DevTools({ windowId, params }: AppComponentProps) {
-  const { close: closeWindow } = useWindowManager();
+  const { close: closeWindow } = useWindowActions();
   const targetWcId =
     typeof params?.targetWcId === 'number' ? params.targetWcId : null;
 

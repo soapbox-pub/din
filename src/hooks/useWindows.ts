@@ -7,6 +7,43 @@ function maxZ(windows: WindowState[]): number {
 }
 
 /**
+ * The z counter only ever increments, so compact it back to 1..N once it
+ * grows past this. Keeps window z-indexes bounded (the Dock sits at 9999,
+ * and windows must never stack above it).
+ */
+const Z_COMPACT_THRESHOLD = 5000;
+
+/**
+ * Raise a window to the top of the stack (and un-minimize it).
+ *
+ * Returns the input array unchanged when the window is already the visible
+ * top - this is the hot path: every pointer-down on a window calls focus(),
+ * and clicks inside the already-focused window would otherwise rebuild the
+ * array and re-render the whole desktop (all windows, dock, menu bar) for
+ * nothing.
+ */
+function raise(ws: WindowState[], id: string): WindowState[] {
+  const target = ws.find((w) => w.id === id);
+  if (!target) return ws;
+  const top = maxZ(ws);
+  if (!target.minimized && target.z === top) return ws;
+  if (top < Z_COMPACT_THRESHOLD) {
+    return ws.map((w) =>
+      w.id === id ? { ...w, z: top + 1, minimized: false } : w,
+    );
+  }
+  // Compact: reassign 1..N in stacking order, with the target on top.
+  const order = new Map(
+    [...ws].sort((a, b) => a.z - b.z).map((w, i) => [w.id, i + 1]),
+  );
+  return ws.map((w) =>
+    w.id === id
+      ? { ...w, z: ws.length + 1, minimized: false }
+      : { ...w, z: order.get(w.id)! },
+  );
+}
+
+/**
  * Arbitrary launch parameters passed to an app instance when its window is
  * opened. Serializable, app-defined; the app reads them off its props.
  */
@@ -53,12 +90,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   const [windows, setWindows] = useState<WindowState[]>([]);
 
   const focus = useCallback((id: string) => {
-    setWindows((ws) => {
-      const top = maxZ(ws);
-      return ws.map((w) =>
-        w.id === id ? { ...w, z: top + 1, minimized: false } : w,
-      );
-    });
+    setWindows((ws) => raise(ws, id));
   }, []);
 
   const open = useCallback((appId: string, params?: WindowParams) => {
@@ -94,6 +126,14 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
     setWindows((ws) => ws.filter((w) => w.id !== id));
   }, []);
 
+  const closeApp = useCallback((appId: string) => {
+    setWindows((ws) =>
+      ws.some((w) => w.appId === appId)
+        ? ws.filter((w) => w.appId !== appId)
+        : ws,
+    );
+  }, []);
+
   const minimize = useCallback((id: string) => {
     setWindows((ws) =>
       ws.map((w) => (w.id === id ? { ...w, minimized: true } : w)),
@@ -101,24 +141,34 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   }, []);
 
   const move = useCallback((id: string, x: number, y: number) => {
-    setWindows((ws) => ws.map((w) => (w.id === id ? { ...w, x, y } : w)));
+    setWindows((ws) => {
+      // A click on the title bar without movement commits the same
+      // geometry; skip the no-op update (it would re-render the desktop).
+      const target = ws.find((w) => w.id === id);
+      if (!target || (target.x === x && target.y === y)) return ws;
+      return ws.map((w) => (w.id === id ? { ...w, x, y } : w));
+    });
   }, []);
 
   const resize = useCallback(
     (id: string, geometry: { x: number; y: number; width: number; height: number }) => {
-      setWindows((ws) =>
-        ws.map((w) =>
-          w.id === id
-            ? {
-                ...w,
-                x: geometry.x,
-                y: geometry.y,
-                width: Math.max(MIN_WIDTH, geometry.width),
-                height: Math.max(MIN_HEIGHT, geometry.height),
-              }
-            : w,
-        ),
-      );
+      const width = Math.max(MIN_WIDTH, geometry.width);
+      const height = Math.max(MIN_HEIGHT, geometry.height);
+      setWindows((ws) => {
+        const t = ws.find((w) => w.id === id);
+        if (
+          !t ||
+          (t.x === geometry.x &&
+            t.y === geometry.y &&
+            t.width === width &&
+            t.height === height)
+        ) {
+          return ws;
+        }
+        return ws.map((w) =>
+          w.id === id ? { ...w, x: geometry.x, y: geometry.y, width, height } : w,
+        );
+      });
     },
     [],
   );
@@ -149,13 +199,24 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
     });
   }, []);
 
-  // Stable identity as long as `windows` doesn't change (all callbacks are
-  // stable), so context consumers and memoized components don't re-render
-  // just because the owner of this hook re-rendered.
-  return useMemo(
-    () => ({ windows, open, close, minimize, focus, move, resize, toggleMaximize }),
-    [windows, open, close, minimize, focus, move, resize, toggleMaximize],
+  // The actions object is referentially stable for the lifetime of the
+  // desktop (all callbacks have stable identities except `open`, which only
+  // changes when the installed-app list changes). Components that only
+  // dispatch actions subscribe to this via WindowActionsContext and are NOT
+  // re-rendered when window state changes - that's what lets memo(Window)
+  // and memo(DockItem) actually skip work.
+  const actions = useMemo(
+    () => ({ open, close, closeApp, minimize, focus, move, resize, toggleMaximize }),
+    [open, close, closeApp, minimize, focus, move, resize, toggleMaximize],
   );
+
+  // Back-compat full manager: state + actions in one object. Its identity
+  // changes on every window mutation, so only components that genuinely
+  // need `windows` should consume it.
+  return useMemo(() => ({ windows, actions, ...actions }), [windows, actions]);
 }
 
 export type WindowManager = ReturnType<typeof useWindows>;
+
+/** The stable action set of the window manager (no state). */
+export type WindowActions = WindowManager['actions'];

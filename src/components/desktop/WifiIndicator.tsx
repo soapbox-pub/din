@@ -23,7 +23,7 @@ import {
   useWifiNetworks,
   useWifiStatus,
 } from '@/hooks/useWifi';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 
 /** Signal-strength icon (0-100), shared with the Settings Wi-Fi section. */
 export function WifiSignalIcon({ signal, className }: { signal: number; className?: string }) {
@@ -39,7 +39,7 @@ export function WifiPopoverBody() {
   const networks = useWifiNetworks(radioEnabled && hasAdapter);
   const saved = useSavedNetworks();
   const { connect, disconnect, setRadio } = useWifiMutations();
-  const { open } = useWindowManager();
+  const { open } = useWindowActions();
 
   // SSID whose inline password form is open, if any.
   const [joining, setJoining] = useState<string | null>(null);

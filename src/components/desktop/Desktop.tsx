@@ -8,7 +8,7 @@ import { InstalledAppsProvider } from './InstalledAppsProvider';
 import { BrowserExtensionHost } from './BrowserExtensionHost';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { WindowManagerContext } from '@/contexts/WindowManagerContext';
+import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
 
 /** The desktop session: top menu bar, wallpaper workspace, bottom dock. */
 export function Desktop() {
@@ -34,30 +34,32 @@ function DesktopSession() {
 
   return (
     <WindowManagerContext.Provider value={manager}>
-      <FilePickerProvider>
-        <BrowserExtensionHost />
-        <Wallpaper>
-          <MenuBar />
+      <WindowActionsContext.Provider value={manager.actions}>
+        <FilePickerProvider>
+          <BrowserExtensionHost />
+          <Wallpaper>
+            <MenuBar />
 
-          {/* Workspace area - windows render here. The Dock overlays its
-              bottom edge and auto-hides, so windows can use the full height. */}
-          <main
-            ref={workspaceRef}
-            aria-label="Desktop"
-            className="relative flex-1 overflow-hidden"
-          >
-            {manager.windows.map((win) => (
-              <Window
-                key={win.id}
-                window={win}
-                isTop={!win.minimized && win.z === topZ}
-              />
-            ))}
-          </main>
+            {/* Workspace area - windows render here. The Dock overlays its
+                bottom edge and auto-hides, so windows can use the full height. */}
+            <main
+              ref={workspaceRef}
+              aria-label="Desktop"
+              className="relative flex-1 overflow-hidden"
+            >
+              {manager.windows.map((win) => (
+                <Window
+                  key={win.id}
+                  window={win}
+                  isTop={!win.minimized && win.z === topZ}
+                />
+              ))}
+            </main>
 
-          <Dock workspaceRef={workspaceRef} />
-        </Wallpaper>
-      </FilePickerProvider>
+            <Dock workspaceRef={workspaceRef} />
+          </Wallpaper>
+        </FilePickerProvider>
+      </WindowActionsContext.Provider>
     </WindowManagerContext.Provider>
   );
 }

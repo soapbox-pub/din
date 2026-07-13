@@ -5,7 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { RotateCw, SquareTerminal } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { getPtyBridge } from '@/lib/pty';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
 import '@xterm/xterm/css/xterm.css';
@@ -61,7 +61,7 @@ interface TermTab {
  */
 export function Terminal({ windowId }: AppComponentProps) {
   const bridge = getPtyBridge();
-  const { close: closeWindow } = useWindowManager();
+  const { close: closeWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
 
   const [tabs, setTabs] = useState<TermTab[]>(() => [

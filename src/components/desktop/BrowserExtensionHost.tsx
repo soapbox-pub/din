@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { getCrxBridge } from '@/lib/crx';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
-import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 
 /**
  * Desktop-lifetime listener for Chrome-extension tab commands (window.crx).
@@ -16,7 +16,7 @@ import { useWindowManager } from '@/contexts/WindowManagerContext';
  * Renders nothing. Does nothing outside the Electron shell.
  */
 export function BrowserExtensionHost() {
-  const { open } = useWindowManager();
+  const { open } = useWindowActions();
 
   useEffect(() => {
     const crx = getCrxBridge();

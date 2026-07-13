@@ -1,10 +1,26 @@
+import { lazy } from 'react';
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { WebBrowser } from '@/components/desktop/apps/WebBrowser';
-import { FileBrowser } from '@/components/desktop/apps/FileBrowser';
-import { Terminal } from '@/components/desktop/apps/Terminal';
-import { Settings } from '@/components/desktop/apps/Settings';
-import { DevTools } from '@/components/desktop/apps/DevTools';
+
+// Built-in apps are code-split: each is its own chunk, loaded the first time
+// it's launched (windows render app content inside <Suspense>). Statically
+// importing them shipped every app - including xterm + its WebGL addon -
+// in the main bundle, which slowed boot and first paint of the desktop.
+const WebBrowser = lazy(() =>
+  import('@/components/desktop/apps/WebBrowser').then((m) => ({ default: m.WebBrowser })),
+);
+const FileBrowser = lazy(() =>
+  import('@/components/desktop/apps/FileBrowser').then((m) => ({ default: m.FileBrowser })),
+);
+const Terminal = lazy(() =>
+  import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
+);
+const Settings = lazy(() =>
+  import('@/components/desktop/apps/Settings').then((m) => ({ default: m.Settings })),
+);
+const DevTools = lazy(() =>
+  import('@/components/desktop/apps/DevTools').then((m) => ({ default: m.DevTools })),
+);
 
 /** Props every windowed app receives from the window manager. */
 export interface AppComponentProps {
