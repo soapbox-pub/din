@@ -38,11 +38,23 @@ import { useWindowManager } from '@/contexts/WindowManagerContext';
  *
  * The bar itself is borderless and transparent, fading from a soft scrim
  * into the wallpaper so it reads as part of the desktop rather than a
- * separate chrome strip.
+ * separate chrome strip. When a window is fullscreened it turns solid —
+ * white in light mode, black in dark mode — so it reads as system chrome
+ * above the fullscreen window.
  */
 export function MenuBar() {
+  const { windows } = useWindowManager();
+  const fullscreen = windows.some((w) => w.maximized && !w.minimized);
+
   return (
-    <header className="relative z-20 flex h-9 items-center justify-between bg-gradient-to-b from-background/60 via-background/25 to-transparent px-2">
+    <header
+      className={cn(
+        'relative z-20 flex h-9 items-center justify-between px-2 transition-colors',
+        fullscreen
+          ? 'bg-white dark:bg-black'
+          : 'bg-gradient-to-b from-background/60 via-background/25 to-transparent',
+      )}
+    >
       <AppsMenu />
       <div className="flex items-center gap-1.5">
         <WifiMenuItem />

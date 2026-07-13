@@ -456,10 +456,11 @@ export const Window = memo(function Window({
       onPointerDown={() => focus(win.id)}
       style={geometry}
       className={cn(
-        'absolute flex flex-col overflow-hidden border border-border/60 bg-card/90 shadow-2xl backdrop-blur-xl',
-        'ring-1 ring-black/20 transition-shadow',
-        win.maximized ? 'rounded-none' : 'rounded-xl',
-        isTop && 'ring-ring/50',
+        'absolute flex flex-col overflow-hidden bg-card/90 backdrop-blur-xl',
+        win.maximized
+          ? 'rounded-none'
+          : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
+        !win.maximized && isTop && 'ring-ring/50',
       )}
     >
       <header
