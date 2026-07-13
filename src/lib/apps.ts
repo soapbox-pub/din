@@ -1,6 +1,5 @@
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Code, Folder, Globe, Settings as SettingsIcon, SquareTerminal } from 'lucide-react';
 import { WebBrowser } from '@/components/desktop/apps/WebBrowser';
 import { FileBrowser } from '@/components/desktop/apps/FileBrowser';
 import { Terminal } from '@/components/desktop/apps/Terminal';
@@ -22,9 +21,10 @@ export interface AppDefinition {
   /** Human-readable name shown in the launcher and window title bar. */
   name: string;
   /**
-   * Icon shown in the launcher and taskbar: either a Lucide component
-   * (built-in apps) or an https image URL (installed web apps). Render
-   * through <AppIcon>, never directly.
+   * Icon shown in the launcher and taskbar: a root-relative image path
+   * (built-in apps, served from public/), an https image URL (installed
+   * web apps), or a Lucide component. Render through <AppIcon>, never
+   * directly.
    */
   icon: LucideIcon | string;
   /** The component rendered inside the app's window. */
@@ -44,28 +44,28 @@ export const APPS: readonly AppDefinition[] = [
   {
     id: 'web-browser',
     name: 'Web Browser',
-    icon: Globe,
+    icon: '/icons/apps/web-browser.png',
     component: WebBrowser,
     defaultSize: { width: 960, height: 640 },
   },
   {
     id: 'file-browser',
     name: 'Files',
-    icon: Folder,
+    icon: '/icons/apps/file-browser.png',
     component: FileBrowser,
     defaultSize: { width: 880, height: 600 },
   },
   {
     id: 'terminal',
     name: 'Terminal',
-    icon: SquareTerminal,
+    icon: '/icons/apps/terminal.png',
     component: Terminal,
     defaultSize: { width: 760, height: 480 },
   },
   {
     id: 'settings',
     name: 'Settings',
-    icon: SettingsIcon,
+    icon: '/icons/apps/settings.png',
     component: Settings,
     defaultSize: { width: 720, height: 520 },
   },
@@ -75,7 +75,7 @@ export const APPS: readonly AppDefinition[] = [
     // its launch params.
     id: 'devtools',
     name: 'Developer Tools',
-    icon: Code,
+    icon: '/icons/apps/devtools.png',
     component: DevTools,
     defaultSize: { width: 720, height: 560 },
     hidden: true,

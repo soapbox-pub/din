@@ -4,9 +4,11 @@ import type { LucideIcon } from 'lucide-react';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
 
 /**
- * Renders a desktop app icon: a Lucide component for built-in apps, or an
- * https image (favicon) for installed web apps. Image URLs are sanitized
- * (https-only) and fall back to a Globe glyph when they fail to load.
+ * Renders a desktop app icon: a root-relative image path for built-in apps
+ * (bundled under public/icons/apps/), an https image (favicon) for installed
+ * web apps, or a Lucide component. Remote URLs are sanitized (https-only);
+ * local paths must be root-relative (`/...` but not `//...`). Anything that
+ * fails validation or loading falls back to a Globe glyph.
  */
 export function AppIcon({
   icon,
@@ -22,7 +24,10 @@ export function AppIcon({
     return <Icon className={className} aria-hidden />;
   }
 
-  const src = sanitizeUrl(icon);
+  // Root-relative paths ship with the app itself; everything else must pass
+  // the https-only sanitizer (protocol-relative `//` is remote, not local).
+  const isLocal = icon.startsWith('/') && !icon.startsWith('//');
+  const src = isLocal ? icon : sanitizeUrl(icon);
   if (!src || failed) {
     return <Globe className={className} aria-hidden />;
   }
