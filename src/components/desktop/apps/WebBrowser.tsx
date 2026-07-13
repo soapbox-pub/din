@@ -48,6 +48,14 @@ import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
 const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
 const WEB_STORE_URL = 'https://chromewebstore.google.com/';
 
+/**
+ * A blank new tab: the surface loads about:blank and the address bar starts
+ * empty and focused, so the user can just type. Not treated as a "real" URL
+ * anywhere - the address bar shows nothing for it and navigate events for it
+ * are coerced back to empty (see onTabEvent / createTab).
+ */
+const NEW_TAB_URL = 'about:blank';
+
 /** Devtools pane sizing (px): default, minimum, and minimum page size. */
 const DEVTOOLS_DEFAULT_HEIGHT = 288;
 const DEVTOOLS_DEFAULT_WIDTH = 400;
@@ -87,11 +95,14 @@ interface Tab {
 }
 
 function createTab(url: string, pendingRequestId: number | null = null): Tab {
+  // A blank new tab shows an empty address bar (ready to type), even though
+  // its surface loads about:blank.
+  const blank = url === NEW_TAB_URL;
   return {
     id: newTabId(),
     initialSrc: url,
-    address: url,
-    url,
+    address: blank ? '' : url,
+    url: blank ? '' : url,
     title: null,
     favicon: null,
     loading: false,
@@ -140,9 +151,11 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   // DevTools windows - lives in <UndockedDevToolsReconciler /> below.
   const { close: closeWindow, open: openWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
-  const [tabs, setTabs] = useState<Tab[]>(() => [createTab(HOME_URL)]);
+  const [tabs, setTabs] = useState<Tab[]>(() => [createTab(NEW_TAB_URL)]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   const views = useRef(new Map<string, BrowserViewHandle>());
+  // The address/search input, for Ctrl+L and focusing fresh blank tabs.
+  const addressRef = useRef<HTMLInputElement>(null);
   // Mirror of `tabs` for event handlers that need the current list without
   // re-subscribing on every state change.
   const tabsRef = useRef(tabs);
@@ -187,6 +200,24 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     [],
   );
 
+  /** Focus (and select) the address bar - Ctrl+L / clicking a blank tab. */
+  const focusAddress = useCallback(() => {
+    const input = addressRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
+  }, []);
+
+  /**
+   * Open a fresh blank tab and drop the cursor in the empty address bar,
+   * ready to type (the new-tab button and Ctrl+T). Focus waits a frame for
+   * the address bar to reflect the newly-activated tab.
+   */
+  const openNewTab = useCallback(() => {
+    openTab(NEW_TAB_URL);
+    requestAnimationFrame(focusAddress);
+  }, [openTab, focusAddress]);
+
   const closeTab = useCallback(
     (id: string) => {
       views.current.delete(id);
@@ -215,6 +246,12 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     [closeWindow, windowId, devtools],
   );
 
+  // The browser opens on a blank tab; drop the cursor in the address bar so
+  // the user can type a destination straight away. Runs once on mount.
+  useEffect(() => {
+    focusAddress();
+  }, [focusAddress]);
+
   // Publish the tab strip into the window's title bar so tabs share a line
   // with the window controls (Chrome-style). Cleared on unmount to restore
   // the default title.
@@ -225,11 +262,11 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         activeId={activeId}
         onActivate={setActiveId}
         onCloseTab={closeTab}
-        onNewTab={() => openTab(HOME_URL)}
+        onNewTab={openNewTab}
       />,
     );
     return () => setTitlebar(null);
-  }, [tabs, activeId, closeTab, openTab, setTitlebar]);
+  }, [tabs, activeId, closeTab, openNewTab, setTitlebar]);
 
   /** Register/unregister a tab surface's imperative handle. */
   const registerView = useCallback((id: string, handle: BrowserViewHandle | null) => {
@@ -251,8 +288,8 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           break;
         case 'navigate':
           updateTab(id, {
-            url: event.url,
-            address: event.url,
+            url: event.url === NEW_TAB_URL ? '' : event.url,
+            address: event.url === NEW_TAB_URL ? '' : event.url,
             canBack: event.canBack,
             canForward: event.canForward,
           });
@@ -510,7 +547,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   // F12 / Ctrl+Shift+I while focus is in the shell's chrome (address bar,
   // buttons). The same shortcut inside a page arrives as a `toggle` command
   // from the main process instead (see the devtools.onCommand effect).
-  // Ctrl+T / Ctrl+W never reach here: the desktop's global handler
+  // Ctrl+T / Ctrl+W / Ctrl+L never reach here: the desktop's global handler
   // (DesktopHotkeys) captures them and routes them via the hotkey bus below.
   const onToolbarKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -524,31 +561,40 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     [devtools, toggleDevtools, activeId],
   );
 
-  // Ctrl+T / Ctrl+W pressed while this window is focused (keyboard focus in
-  // the shell DOM): routed here by DesktopHotkeys, scoped by window id.
+  // Ctrl+T / Ctrl+W / Ctrl+L pressed while this window is focused (keyboard
+  // focus in the shell DOM): routed here by DesktopHotkeys, scoped by
+  // window id.
   useEffect(() => {
     return consumeBrowserHotkeys((hotkey) => {
       if (hotkey.windowId !== windowId) return;
-      if (hotkey.action === 'new-tab') openTab(HOME_URL);
-      else closeTab(activeId);
+      if (hotkey.action === 'new-tab') openNewTab();
+      else if (hotkey.action === 'close-tab') closeTab(activeId);
+      else focusAddress();
     });
-  }, [windowId, openTab, closeTab, activeId]);
+  }, [windowId, openNewTab, closeTab, focusAddress, activeId]);
 
-  // Ctrl+T / Ctrl+W pressed inside a page: forwarded by the main process
-  // with the guest's WebContents id (focus lives in the guest, invisible to
-  // the shell). Every browser window subscribes; only the one owning the
-  // tab acts.
+  // Ctrl+T / Ctrl+W / Ctrl+L pressed inside a page: forwarded by the main
+  // process with the guest's WebContents id (focus lives in the guest,
+  // invisible to the shell). Every browser window subscribes; only the one
+  // owning the tab acts.
   useEffect(() => {
     const bridge = getShellShortcuts();
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
-      if (shortcut.action !== 'new-tab' && shortcut.action !== 'close-tab') return;
+      if (
+        shortcut.action !== 'new-tab' &&
+        shortcut.action !== 'close-tab' &&
+        shortcut.action !== 'focus-address'
+      ) {
+        return;
+      }
       const tab = tabsRef.current.find((t) => t.wcId === shortcut.wcId);
       if (!tab) return;
-      if (shortcut.action === 'new-tab') openTab(HOME_URL);
-      else closeTab(tab.id);
+      if (shortcut.action === 'new-tab') openNewTab();
+      else if (shortcut.action === 'close-tab') closeTab(tab.id);
+      else focusAddress();
     });
-  }, [openTab, closeTab]);
+  }, [openNewTab, closeTab, focusAddress]);
 
   return (
     <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
@@ -573,6 +619,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/80" aria-hidden />
           <input
+            ref={addressRef}
             type="text"
             inputMode="url"
             aria-label="Address and search bar"

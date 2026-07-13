@@ -13,8 +13,9 @@ const WEB_BROWSER_APP_ID = 'web-browser';
  * - Alt+Tab / Alt+Shift+Tab cycle focus through the open (non-minimized)
  *   windows.
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
- *   Browser (open / close a tab). Deliberately scoped: other apps keep
- *   these keys (e.g. Ctrl+W is delete-word in a terminal shell).
+ *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
+ *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
+ *   delete-word in a terminal shell).
  *
  * Each action is fed from two sources:
  *  - a window-level keydown listener (capture phase, so it wins over app
@@ -58,14 +59,14 @@ export function DesktopHotkeys() {
 
       if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
         const key = e.key.toLowerCase();
-        if (key !== 't' && key !== 'w') return;
+        if (key !== 't' && key !== 'w' && key !== 'l') return;
         const top = topWindow();
         if (!top || top.appId !== WEB_BROWSER_APP_ID) return;
         e.preventDefault();
         e.stopPropagation();
         publishBrowserHotkey({
           windowId: top.id,
-          action: key === 't' ? 'new-tab' : 'close-tab',
+          action: key === 't' ? 'new-tab' : key === 'w' ? 'close-tab' : 'focus-address',
         });
       }
     };

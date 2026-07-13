@@ -10,6 +10,7 @@
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
  *   - Ctrl+T in a browser tab -> { action: 'new-tab', wcId }
  *   - Ctrl+W in a browser tab -> { action: 'close-tab', wcId }
+ *   - Ctrl+L in a browser tab -> { action: 'focus-address', wcId }
  *
  * Tab-scoped shortcuts carry the guest's WebContents id so only the browser
  * window owning that tab acts (mirrors the devtools command routing).
@@ -34,6 +35,11 @@ export type ShellShortcut =
   | {
       /** Ctrl+W pressed inside a browser tab: close that tab. */
       action: 'close-tab';
+      wcId: number;
+    }
+  | {
+      /** Ctrl+L pressed inside a browser tab: focus its address bar. */
+      action: 'focus-address';
       wcId: number;
     };
 

@@ -61,7 +61,7 @@ export function consumeTabCommands(consumer: Consumer): () => void {
 export interface BrowserHotkey {
   /** Desktop window id of the target browser instance. */
   windowId: string;
-  action: 'new-tab' | 'close-tab';
+  action: 'new-tab' | 'close-tab' | 'focus-address';
 }
 
 type HotkeyConsumer = (hotkey: BrowserHotkey) => void;

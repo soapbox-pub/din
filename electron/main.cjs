@@ -830,6 +830,7 @@ function shellShortcutForInput(input) {
     const key = input.key.toLowerCase();
     if (key === 't') return { action: 'new-tab' };
     if (key === 'w') return { action: 'close-tab' };
+    if (key === 'l') return { action: 'focus-address' };
   }
   return null;
 }
