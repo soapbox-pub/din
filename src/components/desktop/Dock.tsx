@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
 import { z } from 'zod';
 import {
@@ -116,12 +116,67 @@ export function Dock({
     [],
   );
 
-  // Cursor position in "slot" units (fractional index into entryIds), or
-  // null when the pointer is off the dock. Slot distances drive per-tile
-  // magnification; deriving the position from the tile under the pointer
-  // keeps the math stable while widths animate.
-  const [cursor, setCursor] = useState<number | null>(null);
+  // Cursor-driven magnification bypasses React entirely: pointer moves are
+  // coalesced to one requestAnimationFrame tick, which computes each tile's
+  // width and writes it straight onto the DOM node. Routing this through
+  // setState re-rendered the whole dock (every tile plus its Radix menu
+  // tree) per mouse event - mice report faster than the frame rate - and
+  // interleaved per-event getBoundingClientRect reads with animating widths,
+  // forcing synchronous layouts. That made sweeping across the dock feel
+  // sluggish, especially under software rendering.
+  //
+  // React always renders tiles at BASE_WIDTH and never touches width again
+  // (the rendered value is constant), so these direct writes stick.
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
+  const pointerX = useRef<number | null>(null);
+  const rafId = useRef(0);
+
+  // Kept fresh via an every-render effect so the rAF callback sees the
+  // current tile list.
+  const paintRef = useRef<() => void>(() => {});
+  const paint = () => {
+    const clientX = pointerX.current;
+    // Cursor position in "slot" units (fractional index into entryIds), or
+    // null when the pointer is off the dock. Derived from the tile under the
+    // pointer so the math stays stable while widths animate; rects are read
+    // before the width writes below, so the frame does one layout, not many.
+    let cursor: number | null = null;
+    if (clientX !== null) {
+      entryIds.forEach((id, i) => {
+        const el = itemRefs.current.get(id);
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        if (clientX >= rect.left && clientX < rect.right) {
+          cursor = i + (clientX - rect.left) / rect.width - 0.5;
+        }
+      });
+    }
+    entryIds.forEach((id, i) => {
+      const el = itemRefs.current.get(id);
+      if (!el) return;
+      const scale = cursor === null ? 1 : magnify(Math.abs(i - cursor));
+      el.style.width = `${Math.round(BASE_WIDTH * scale)}px`;
+    });
+  };
+  useEffect(() => {
+    paintRef.current = paint;
+  });
+
+  const scheduleMagnify = useCallback(
+    (clientX: number | null) => {
+      if (reduceMotion) return;
+      pointerX.current = clientX;
+      if (rafId.current) return;
+      rafId.current = requestAnimationFrame(() => {
+        rafId.current = 0;
+        paintRef.current();
+      });
+    },
+    [reduceMotion],
+  );
+
+  useEffect(() => () => cancelAnimationFrame(rafId.current), []);
+
   // The visible strip of tiles; its untransformed layout box is the dock's
   // footprint for window-intersection checks (offsets ignore the slide
   // transform, unlike getBoundingClientRect).
@@ -168,19 +223,32 @@ export function Dock({
   // Hot-edge reveal: sweeping the pointer into the strip at the very bottom
   // of the screen slides a hidden dock back up; it retracts once the pointer
   // wanders back above the dock. Pointermove (not mousemove) so reveals also
-  // fire mid-drag while a window holds pointer capture.
+  // fire mid-drag while a window holds pointer capture. The listener only
+  // exists while a window overlaps the dock (the only time it can be hidden)
+  // and does no layout reads until a reveal is actually in progress, so
+  // window drags - which fire pointermove at mouse-report rate - don't pay
+  // for a forced reflow per event.
   const [revealed, setRevealed] = useState(false);
+  // A reveal only means something while the dock is hideable; drop stale
+  // reveals as soon as nothing overlaps (adjust-state-during-render pattern).
+  const [wasIntersecting, setWasIntersecting] = useState(intersecting);
+  if (wasIntersecting !== intersecting) {
+    setWasIntersecting(intersecting);
+    if (!intersecting) setRevealed(false);
+  }
   useEffect(() => {
+    if (!intersecting) return;
     const onPointerMove = (e: PointerEvent) => {
       const fromBottom = window.innerHeight - e.clientY;
-      const dockHeight = stripRef.current?.offsetHeight ?? 80;
-      setRevealed((prev) =>
-        prev ? fromBottom <= dockHeight + REVEAL_SLACK : fromBottom <= REVEAL_ZONE,
-      );
+      setRevealed((prev) => {
+        if (!prev) return fromBottom <= REVEAL_ZONE;
+        const dockHeight = stripRef.current?.offsetHeight ?? 80;
+        return fromBottom <= dockHeight + REVEAL_SLACK;
+      });
     };
     window.addEventListener('pointermove', onPointerMove);
     return () => window.removeEventListener('pointermove', onPointerMove);
-  }, []);
+  }, [intersecting]);
 
   // Keyboard users can still tab into the dock while it's hidden; keep it
   // on-screen whenever any tile holds focus.
@@ -188,20 +256,6 @@ export function Dock({
 
   // Hidden only while a window overlaps it and nobody is asking for it.
   const hidden = intersecting && !revealed && !focusWithin;
-
-  const handlePointerMove = (clientX: number) => {
-    if (reduceMotion) return;
-    let next: number | null = null;
-    entryIds.forEach((id, i) => {
-      const el = itemRefs.current.get(id);
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      if (clientX >= rect.left && clientX < rect.right) {
-        next = i + (clientX - rect.left) / rect.width - 0.5;
-      }
-    });
-    setCursor(next);
-  };
 
   if (entryIds.length === 0) return null;
 
@@ -223,18 +277,16 @@ export function Dock({
       <div
         ref={stripRef}
         className="flex items-end"
-        onMouseMove={(e) => handlePointerMove(e.clientX)}
-        onMouseLeave={() => setCursor(null)}
+        onMouseMove={(e) => scheduleMagnify(e.clientX)}
+        onMouseLeave={() => scheduleMagnify(null)}
       >
-        {entryIds.map((appId, i) => {
+        {entryIds.map((appId) => {
           const app = getApp(appId);
           if (!app) return null;
-          const scale = cursor === null ? 1 : magnify(Math.abs(i - cursor));
           return (
             <DockItem
               key={appId}
               app={app}
-              width={Math.round(BASE_WIDTH * scale)}
               refCallback={(el) => {
                 if (el) itemRefs.current.set(appId, el);
                 else itemRefs.current.delete(appId);
@@ -267,7 +319,6 @@ export function Dock({
  */
 function DockItem({
   app,
-  width,
   refCallback,
   appWindows,
   activeWindowId,
@@ -276,8 +327,6 @@ function DockItem({
   onUninstall,
 }: {
   app: AppDefinition;
-  /** Animated slot width in px; the square tile inside fills it. */
-  width: number;
   refCallback: (el: HTMLDivElement | null) => void;
   appWindows: WindowState[];
   activeWindowId: string | null;
@@ -395,7 +444,10 @@ function DockItem({
       'group/dock-item relative h-20',
       'motion-safe:transition-[width] motion-safe:duration-150 motion-safe:ease-out',
     ),
-    style: { width },
+    // Rest width only; magnification writes widths directly onto the node
+    // (see Dock). React re-renders never change this value, so they don't
+    // clobber the animated width.
+    style: { width: BASE_WIDTH },
   } as const;
 
   const runningDot = appWindows.length > 0 && (
