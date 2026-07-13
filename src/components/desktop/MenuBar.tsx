@@ -44,7 +44,7 @@ export function MenuBar() {
   return (
     <header className="relative z-20 flex h-9 items-center justify-between bg-gradient-to-b from-background/60 via-background/25 to-transparent px-2">
       <AppsMenu />
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-1.5">
         <WifiMenuItem />
         <AccountMenuItem />
         <ClockDisplay />
@@ -213,9 +213,9 @@ function AccountMenuItem() {
             aria-label="Account"
             className="grid size-7 place-items-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Avatar className="size-5.5">
+            <Avatar className="size-4.5">
               <AvatarImage src={currentUser?.metadata.picture} alt="" />
-              <AvatarFallback className="text-[10px]">
+              <AvatarFallback className="text-[9px]">
                 {currentUser?.metadata.name?.charAt(0) ?? '?'}
               </AvatarFallback>
             </Avatar>
@@ -264,8 +264,9 @@ function ClockDisplay() {
       dateTime={now.toISOString()}
       className="px-2 text-sm font-medium tabular-nums text-foreground/90"
     >
-      {now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}{' '}
-      {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      {now.toLocaleDateString([], { weekday: 'short' })}{' '}
+      {now.toLocaleDateString([], { month: 'short', day: 'numeric' })}{' '}
+      {now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
     </time>
   );
 }
