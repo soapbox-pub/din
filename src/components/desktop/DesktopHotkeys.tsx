@@ -1,33 +1,75 @@
-import { useEffect } from 'react';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useEffect, useRef } from 'react';
+import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { publishBrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
+import type { WindowState } from '@/hooks/useWindows';
+
+/** The built-in Web Browser's app id (see src/lib/apps.ts). */
+const WEB_BROWSER_APP_ID = 'web-browser';
 
 /**
  * Desktop-wide keyboard shortcuts. Renders nothing.
  *
- * Alt+Tab / Alt+Shift+Tab cycle focus through the open (non-minimized)
- * windows. The same action is fed from two sources:
+ * - Alt+Tab / Alt+Shift+Tab cycle focus through the open (non-minimized)
+ *   windows.
+ * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
+ *   Browser (open / close a tab). Deliberately scoped: other apps keep
+ *   these keys (e.g. Ctrl+W is delete-word in a terminal shell).
  *
+ * Each action is fed from two sources:
  *  - a window-level keydown listener (capture phase, so it wins over app
- *    content like xterm) for keys pressed while focus is in the shell, and
+ *    content) for keys pressed while focus is in the shell DOM, and
  *  - the shell-shortcut bridge for keys pressed inside Electron <webview>
  *    guests, where keydown never reaches the shell DOM (the main process
- *    intercepts them via before-input-event - see src/lib/shellShortcuts).
+ *    intercepts them via before-input-event - see src/lib/shellShortcuts;
+ *    tab shortcuts from guests route by WebContents id directly in the
+ *    Web Browser app).
  *
  * Note: when Din runs windowed inside a desktop environment, the host
  * window manager usually consumes Alt+Tab first; in the Aladdin kiosk
  * (cage) and the plain-browser dev loop the shortcut reaches us.
  */
 export function DesktopHotkeys() {
-  const { cycleFocus } = useWindowActions();
+  const { windows, actions } = useWindowManager();
+  const { cycleFocus } = actions;
+
+  // The keydown handler needs the current window list without re-binding
+  // the listener on every desktop commit.
+  const windowsRef = useRef<WindowState[]>(windows);
+  useEffect(() => {
+    windowsRef.current = windows;
+  }, [windows]);
 
   useEffect(() => {
+    /** The focused window: highest z among non-minimized (as the Dock). */
+    const topWindow = () =>
+      windowsRef.current.reduce<WindowState | null>(
+        (top, w) => (!w.minimized && (!top || w.z > top.z) ? w : top),
+        null,
+      );
+
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || !e.altKey || e.ctrlKey || e.metaKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-      cycleFocus(e.shiftKey);
+      if (e.key === 'Tab' && e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleFocus(e.shiftKey);
+        return;
+      }
+
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        const key = e.key.toLowerCase();
+        if (key !== 't' && key !== 'w') return;
+        const top = topWindow();
+        if (!top || top.appId !== WEB_BROWSER_APP_ID) return;
+        e.preventDefault();
+        e.stopPropagation();
+        publishBrowserHotkey({
+          windowId: top.id,
+          action: key === 't' ? 'new-tab' : 'close-tab',
+        });
+      }
     };
+
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [cycleFocus]);

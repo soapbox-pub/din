@@ -51,3 +51,33 @@ export function consumeTabCommands(consumer: Consumer): () => void {
     if (index !== -1) consumers.splice(index, 1);
   };
 }
+
+/**
+ * A browser hotkey routed by the desktop's global handler (DesktopHotkeys):
+ * Ctrl+T / Ctrl+W act on the focused desktop window, which the shell knows
+ * but the browser app doesn't. Scoped by window id so only the targeted
+ * browser instance acts; not queued (a hotkey with no live target is stale).
+ */
+export interface BrowserHotkey {
+  /** Desktop window id of the target browser instance. */
+  windowId: string;
+  action: 'new-tab' | 'close-tab';
+}
+
+type HotkeyConsumer = (hotkey: BrowserHotkey) => void;
+
+const hotkeyConsumers: HotkeyConsumer[] = [];
+
+/** Deliver a hotkey to every mounted browser (each filters by window id). */
+export function publishBrowserHotkey(hotkey: BrowserHotkey): void {
+  for (const consumer of [...hotkeyConsumers]) consumer(hotkey);
+}
+
+/** Subscribe a mounted Web Browser to hotkeys. Returns an unsubscribe fn. */
+export function consumeBrowserHotkeys(consumer: HotkeyConsumer): () => void {
+  hotkeyConsumers.push(consumer);
+  return () => {
+    const index = hotkeyConsumers.indexOf(consumer);
+    if (index !== -1) hotkeyConsumers.splice(index, 1);
+  };
+}

@@ -17,7 +17,7 @@ import { resolveNavigation, sanitizeUrl } from '@/lib/sanitizeUrl';
 import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
 import { getDevtoolsBridge } from '@/lib/devtools';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
-import { consumeTabCommands } from '@/lib/browserTabBus';
+import { consumeTabCommands, consumeBrowserHotkeys } from '@/lib/browserTabBus';
 import { consumeInspectorDock } from '@/lib/inspectorBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import type { AppComponentProps } from '@/lib/apps';
@@ -507,26 +507,13 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     ? activeTab.canForward
     : activeTab.cursor < activeTab.history.length - 1;
 
-  // Keyboard shortcuts while focus is in the shell's chrome (address bar,
-  // buttons): Ctrl+T opens a tab, Ctrl+W closes the active one, and F12 /
-  // Ctrl+Shift+I toggle devtools. The same shortcuts inside a page arrive
-  // forwarded from the main process instead (keyboard focus lives in the
-  // guest there - see the devtools.onCommand and shell-shortcut effects).
+  // F12 / Ctrl+Shift+I while focus is in the shell's chrome (address bar,
+  // buttons). The same shortcut inside a page arrives as a `toggle` command
+  // from the main process instead (see the devtools.onCommand effect).
+  // Ctrl+T / Ctrl+W never reach here: the desktop's global handler
+  // (DesktopHotkeys) captures them and routes them via the hotkey bus below.
   const onToolbarKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-        const key = e.key.toLowerCase();
-        if (key === 't') {
-          e.preventDefault();
-          openTab(HOME_URL);
-          return;
-        }
-        if (key === 'w') {
-          e.preventDefault();
-          closeTab(activeId);
-          return;
-        }
-      }
       if (!devtools) return;
       const toggle =
         e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'i');
@@ -534,8 +521,18 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       e.preventDefault();
       toggleDevtools(activeId);
     },
-    [devtools, toggleDevtools, activeId, openTab, closeTab],
+    [devtools, toggleDevtools, activeId],
   );
+
+  // Ctrl+T / Ctrl+W pressed while this window is focused (keyboard focus in
+  // the shell DOM): routed here by DesktopHotkeys, scoped by window id.
+  useEffect(() => {
+    return consumeBrowserHotkeys((hotkey) => {
+      if (hotkey.windowId !== windowId) return;
+      if (hotkey.action === 'new-tab') openTab(HOME_URL);
+      else closeTab(activeId);
+    });
+  }, [windowId, openTab, closeTab, activeId]);
 
   // Ctrl+T / Ctrl+W pressed inside a page: forwarded by the main process
   // with the guest's WebContents id (focus lives in the guest, invisible to

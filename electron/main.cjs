@@ -889,6 +889,31 @@ function registerDevtoolsHandlers() {
 }
 
 app.whenReady().then(() => {
+  // Replace Electron's default application menu. Its role accelerators
+  // (Ctrl+W "Close Window", Ctrl+Q "Quit") tear down the entire shell -
+  // fatal in a desktop environment where Ctrl+W means "close the app's
+  // tab" - and menu accelerators swallow those keys before the shell
+  // renderer ever sees them. Production (kiosk) runs with no menu at all;
+  // dev keeps reload plus the shell devtools on a non-conflicting
+  // accelerator (the browser app already uses F12 / Ctrl+Shift+I for
+  // per-tab devtools).
+  if (DEV_URL) {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        {
+          label: 'Develop',
+          submenu: [
+            { role: 'reload' },
+            { role: 'forceReload' },
+            { role: 'toggleDevTools', accelerator: 'CmdOrCtrl+Alt+I' },
+          ],
+        },
+      ]),
+    );
+  } else {
+    Menu.setApplicationMenu(null);
+  }
+
   // Save downloads straight to ~/Downloads instead of popping a native
   // GTK save dialog (there is no desktop environment to host one). Applies
   // to both the shell session and the browser tabs' session.
