@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { resolveNavigation, sanitizeUrl } from '@/lib/sanitizeUrl';
 import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
 import { getDevtoolsBridge } from '@/lib/devtools';
+import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { consumeTabCommands } from '@/lib/browserTabBus';
 import { consumeInspectorDock } from '@/lib/inspectorBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
@@ -506,11 +507,26 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     ? activeTab.canForward
     : activeTab.cursor < activeTab.history.length - 1;
 
-  // F12 / Ctrl+Shift+I while focus is in the shell's chrome (address bar,
-  // buttons). The same shortcut inside a page arrives as a `toggle` command
-  // from the main process instead (see the devtools.onCommand effect).
+  // Keyboard shortcuts while focus is in the shell's chrome (address bar,
+  // buttons): Ctrl+T opens a tab, Ctrl+W closes the active one, and F12 /
+  // Ctrl+Shift+I toggle devtools. The same shortcuts inside a page arrive
+  // forwarded from the main process instead (keyboard focus lives in the
+  // guest there - see the devtools.onCommand and shell-shortcut effects).
   const onToolbarKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        const key = e.key.toLowerCase();
+        if (key === 't') {
+          e.preventDefault();
+          openTab(HOME_URL);
+          return;
+        }
+        if (key === 'w') {
+          e.preventDefault();
+          closeTab(activeId);
+          return;
+        }
+      }
       if (!devtools) return;
       const toggle =
         e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'i');
@@ -518,8 +534,24 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       e.preventDefault();
       toggleDevtools(activeId);
     },
-    [devtools, toggleDevtools, activeId],
+    [devtools, toggleDevtools, activeId, openTab, closeTab],
   );
+
+  // Ctrl+T / Ctrl+W pressed inside a page: forwarded by the main process
+  // with the guest's WebContents id (focus lives in the guest, invisible to
+  // the shell). Every browser window subscribes; only the one owning the
+  // tab acts.
+  useEffect(() => {
+    const bridge = getShellShortcuts();
+    if (!bridge) return;
+    return bridge.onShortcut((shortcut) => {
+      if (shortcut.action !== 'new-tab' && shortcut.action !== 'close-tab') return;
+      const tab = tabsRef.current.find((t) => t.wcId === shortcut.wcId);
+      if (!tab) return;
+      if (shortcut.action === 'new-tab') openTab(HOME_URL);
+      else closeTab(tab.id);
+    });
+  }, [openTab, closeTab]);
 
   return (
     <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>

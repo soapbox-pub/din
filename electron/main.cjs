@@ -815,6 +815,25 @@ function isDevtoolsToggleInput(input) {
   return Boolean(input.control && input.shift && input.key.toLowerCase() === 'i');
 }
 
+/**
+ * Map a guest before-input-event to a shell shortcut payload, or null.
+ * Keyboard focus lives inside <webview> guests, so shell-level shortcuts
+ * (window switching, browser tab management) must be intercepted here and
+ * forwarded to the shell renderer (see src/lib/shellShortcuts.ts).
+ */
+function shellShortcutForInput(input) {
+  if (input.type !== 'keyDown') return null;
+  if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
+    return { action: 'cycle-windows', backward: Boolean(input.shift) };
+  }
+  if (input.control && !input.shift && !input.alt && !input.meta) {
+    const key = input.key.toLowerCase();
+    if (key === 't') return { action: 'new-tab' };
+    if (key === 'w') return { action: 'close-tab' };
+  }
+  return null;
+}
+
 function registerDevtoolsHandlers() {
   // Open a tab's devtools inside a devtools host <webview>.
   ipcMain.handle('devtools:open', async (event, targetWcId, hostWcId) => {
@@ -950,27 +969,42 @@ app.on('web-contents-created', (_event, contents) => {
   });
 
   // Devtools hosts: pressing the toggle shortcut while focus is inside the
-  // devtools pane closes it (routed to its inspected tab). No Chrome context
-  // menu either - the devtools frontend manages its own menus.
+  // devtools pane closes it (routed to its inspected tab). Alt+Tab still
+  // switches desktop windows. No Chrome context menu either - the devtools
+  // frontend manages its own menus.
   if (contents.session === devtoolsSession()) {
     contents.on('before-input-event', (event, input) => {
-      if (!isDevtoolsToggleInput(input)) return;
-      const targetId = devtoolsBridge.targetIdForHost(contents.id);
-      if (targetId === undefined) return;
-      event.preventDefault();
-      sendToShell('devtools:toggleRequested', { wcId: targetId });
+      if (isDevtoolsToggleInput(input)) {
+        const targetId = devtoolsBridge.targetIdForHost(contents.id);
+        if (targetId === undefined) return;
+        event.preventDefault();
+        sendToShell('devtools:toggleRequested', { wcId: targetId });
+        return;
+      }
+      const shortcut = shellShortcutForInput(input);
+      if (shortcut?.action === 'cycle-windows') {
+        event.preventDefault();
+        sendToShell('shortcut', shortcut);
+      }
     });
     return;
   }
 
-  // F12 / Ctrl+Shift+I inside a page toggles the tab's docked devtools.
-  // Keyboard focus lives in the guest then, so the shell can't see the
-  // shortcut itself - forward it.
+  // Shell-level shortcuts inside a page: F12 / Ctrl+Shift+I toggles the
+  // tab's docked devtools; Ctrl+T / Ctrl+W manage browser tabs; Alt+Tab
+  // switches desktop windows. Keyboard focus lives in the guest then, so
+  // the shell can't see the keys itself - forward them.
   if (isBrowserTab) {
     contents.on('before-input-event', (event, input) => {
-      if (!isDevtoolsToggleInput(input)) return;
+      if (isDevtoolsToggleInput(input)) {
+        event.preventDefault();
+        sendToShell('devtools:toggleRequested', { wcId: contents.id });
+        return;
+      }
+      const shortcut = shellShortcutForInput(input);
+      if (!shortcut) return;
       event.preventDefault();
-      sendToShell('devtools:toggleRequested', { wcId: contents.id });
+      sendToShell('shortcut', { ...shortcut, wcId: contents.id });
     });
   }
 

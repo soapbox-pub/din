@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Wallpaper } from './Wallpaper';
 import { Dock } from './Dock';
+import { DesktopHotkeys } from './DesktopHotkeys';
 import { MenuBar } from './MenuBar';
 import { Window } from './Window';
 import { FilePickerProvider } from './FilePickerProvider';
@@ -37,6 +38,7 @@ function DesktopSession() {
       <WindowActionsContext.Provider value={manager.actions}>
         <FilePickerProvider>
           <BrowserExtensionHost />
+          <DesktopHotkeys />
           <Wallpaper>
             <MenuBar />
 

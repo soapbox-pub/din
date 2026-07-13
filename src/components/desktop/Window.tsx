@@ -1,5 +1,6 @@
 import { memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
@@ -24,6 +25,19 @@ import { MIN_HEIGHT, MIN_WIDTH, type WindowState } from '@/hooks/useWindows';
 
 /** Which edges/corner a resize drag is acting on. */
 type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+/**
+ * Dragging with the pointer within this many pixels of the workspace's top
+ * edge arms the snap-to-maximize (drop to maximize, GNOME/Windows style).
+ */
+const SNAP_TOP_PX = 6;
+
+/**
+ * Dragging a maximized window's title bar farther than this tears it away:
+ * the window un-maximizes under the cursor and the drag continues. Small
+ * enough to feel immediate, large enough that a sloppy click doesn't tear.
+ */
+const TEAR_AWAY_PX = 8;
 
 /** The eight resize handles: edges + corners. */
 const RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
@@ -91,6 +105,12 @@ interface WobblyDrag {
  * (all windows + taskbar) per mouse event, which felt sluggish - especially
  * under software rendering.
  *
+ * Edge snapping: dragging the title bar to the workspace's top edge shows a
+ * "drop to maximize" preview and maximizes on release (restore geometry is
+ * the pre-drag spot). Dragging a maximized window's title bar tears it away:
+ * past a small threshold it un-maximizes under the cursor and the gesture
+ * continues as a normal drag.
+ *
  * Wobbly windows: when enabled (Settings → Appearance) and the user doesn't
  * prefer reduced motion, title-bar drags run the Compiz wobbly spring model
  * (see src/lib/wobbly.ts). The pointer drives the lattice anchor, a rAF loop
@@ -111,13 +131,16 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object or `isTop` changes.
-  const { close, minimize, focus, move, resize, toggleMaximize } = useWindowActions();
+  const { close, minimize, focus, move, resize, maximize, unmaximize, toggleMaximize } =
+    useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
   const sectionRef = useRef<HTMLElement>(null);
   // Drag state: pointer origin, window origin, and the latest position (so
-  // pointer-up/cancel can commit without needing event coordinates).
+  // pointer-up/cancel can commit without needing event coordinates). The
+  // workspace origin is cached at grab time (it can't change mid-drag) so
+  // pointer moves never force a layout read.
   const dragState = useRef<{
     px: number;
     py: number;
@@ -125,6 +148,14 @@ export const Window = memo(function Window({
     wy: number;
     x: number;
     y: number;
+    /** Workspace origin/width in viewport coordinates, cached at grab. */
+    wsLeft: number;
+    wsTop: number;
+    wsWidth: number;
+    /** Armed tear-away from maximized: the size to restore to, or null. */
+    tearAway: { width: number; height: number } | null;
+    /** Whether the pointer currently rides the top snap-to-maximize zone. */
+    snap: boolean;
   } | null>(null);
   const resizeState = useRef<{
     dir: ResizeDir;
@@ -143,6 +174,11 @@ export const Window = memo(function Window({
   // default icon + name. The setter is stable so apps can publish from an
   // effect without re-subscribing.
   const [titlebar, setTitlebar] = useState<ReactNode>(null);
+
+  // Whether the drag pointer is riding the top edge: shows the "drop to
+  // maximize" preview overlay. Only flips when the zone boundary is crossed,
+  // so pointer moves still avoid React state churn.
+  const [snapHint, setSnapHint] = useState(false);
 
   /**
    * Put the window into "cheap to move" mode for the duration of a gesture.
@@ -258,8 +294,36 @@ export const Window = memo(function Window({
       const target = e.target as HTMLElement;
       if (target.closest('button, [role="tab"], [data-window-no-drag]')) return;
       focus(win.id);
-      // Maximized windows are pinned; don't allow title-bar dragging.
-      if (win.maximized) return;
+      const ws = sectionRef.current?.parentElement?.getBoundingClientRect();
+      const wsLeft = ws?.left ?? 0;
+      const wsTop = ws?.top ?? 0;
+      const wsWidth = ws?.width ?? window.innerWidth;
+      if (win.maximized) {
+        // Arm a tear-away: nothing moves yet - once the pointer travels past
+        // TEAR_AWAY_PX (see onPointerMove), the window un-maximizes under
+        // the cursor and the gesture continues as a normal drag.
+        const restore = win.restore ?? {
+          x: win.x,
+          y: win.y,
+          width: win.width,
+          height: win.height,
+        };
+        dragState.current = {
+          px: e.clientX,
+          py: e.clientY,
+          wx: 0,
+          wy: 0,
+          x: 0,
+          y: 0,
+          wsLeft,
+          wsTop,
+          wsWidth,
+          tearAway: { width: restore.width, height: restore.height },
+          snap: false,
+        };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        return;
+      }
       dragState.current = {
         px: e.clientX,
         py: e.clientY,
@@ -267,6 +331,11 @@ export const Window = memo(function Window({
         wy: win.y,
         x: win.x,
         y: win.y,
+        wsLeft,
+        wsTop,
+        wsWidth,
+        tearAway: null,
+        snap: false,
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       beginGesture();
@@ -310,29 +379,71 @@ export const Window = memo(function Window({
       st.anchorOrigin = { x: anchor.x, y: anchor.y };
       st.flags |= WOBBLY_INITIAL;
     },
-    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, beginGesture, config.wobblyWindows, stopWobble, wobbleFrame],
+    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.restore, beginGesture, config.wobblyWindows, stopWobble, wobbleFrame],
   );
 
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    const s = dragState.current;
-    const el = sectionRef.current;
-    if (!s || !el) return;
-    s.x = s.wx + (e.clientX - s.px);
-    s.y = Math.max(0, s.wy + (e.clientY - s.py));
-    const st = wobblyRef.current;
-    if (st?.grabbed && st.model.anchor) {
-      // Only the anchor follows the pointer; the rest of the lattice catches
-      // up through the springs (Compiz wobblyWindowMoveNotify). The rAF loop
-      // paints the result.
-      st.model.anchor.x = st.anchorOrigin.x + (s.x - s.wx);
-      st.model.anchor.y = st.anchorOrigin.y + (s.y - s.wy);
-      st.flags |= WOBBLY_INITIAL;
-    } else {
-      // Rigid drag: compositor-only move; left/top stay untouched until
-      // pointer-up.
-      el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
-    }
-  }, []);
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const s = dragState.current;
+      const el = sectionRef.current;
+      if (!s || !el) return;
+
+      if (s.tearAway) {
+        // Maximized window being dragged: past the threshold, restore it
+        // under the cursor (horizontally proportional, like Windows/GNOME)
+        // and continue as a normal drag.
+        if (Math.hypot(e.clientX - s.px, e.clientY - s.py) < TEAR_AWAY_PX) return;
+        const { width, height } = s.tearAway;
+        const fraction = s.wsWidth > 0
+          ? Math.min(Math.max((e.clientX - s.wsLeft) / s.wsWidth, 0), 1)
+          : 0.5;
+        const x = Math.round(e.clientX - s.wsLeft - width * fraction);
+        // Keep the grab point's offset within the title bar (window top was 0).
+        const y = Math.max(0, e.clientY - s.py);
+        s.tearAway = null;
+        s.wx = x;
+        s.wy = y;
+        s.x = x;
+        s.y = y;
+        s.px = e.clientX;
+        s.py = e.clientY;
+        // Write the restored geometry directly so this frame is already
+        // correct; the state commit below re-renders with the same values.
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        el.style.width = `${width}px`;
+        el.style.height = `${height}px`;
+        beginGesture();
+        unmaximize(win.id, { x, y, width, height });
+        return;
+      }
+
+      s.x = s.wx + (e.clientX - s.px);
+      s.y = Math.max(0, s.wy + (e.clientY - s.py));
+
+      // Snap-to-maximize hint while the pointer rides the top edge.
+      const inSnapZone = e.clientY - s.wsTop <= SNAP_TOP_PX;
+      if (inSnapZone !== s.snap) {
+        s.snap = inSnapZone;
+        setSnapHint(inSnapZone);
+      }
+
+      const st = wobblyRef.current;
+      if (st?.grabbed && st.model.anchor) {
+        // Only the anchor follows the pointer; the rest of the lattice catches
+        // up through the springs (Compiz wobblyWindowMoveNotify). The rAF loop
+        // paints the result.
+        st.model.anchor.x = st.anchorOrigin.x + (s.x - s.wx);
+        st.model.anchor.y = st.anchorOrigin.y + (s.y - s.wy);
+        st.flags |= WOBBLY_INITIAL;
+      } else {
+        // Rigid drag: compositor-only move; left/top stay untouched until
+        // pointer-up.
+        el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
+      }
+    },
+    [beginGesture, unmaximize, win.id],
+  );
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
@@ -340,7 +451,24 @@ export const Window = memo(function Window({
       if (!s) return;
       dragState.current = null;
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+
+      // An armed tear-away that never crossed the threshold is just a click
+      // on a maximized title bar - nothing moved, nothing to commit.
+      if (s.tearAway) return;
+
       const el = sectionRef.current;
+
+      if (s.snap) {
+        // Dropped on the top edge: maximize. Restore geometry is the
+        // window's pre-drag spot, so un-maximizing returns it there.
+        setSnapHint(false);
+        stopWobble(false);
+        if (el) el.style.transform = '';
+        endGesture();
+        maximize(win.id, { x: s.wx, y: s.wy, width: win.width, height: win.height });
+        return;
+      }
+
       const st = wobblyRef.current;
       if (st?.grabbed) {
         // Free the anchor and let the model settle around the drop point
@@ -372,7 +500,7 @@ export const Window = memo(function Window({
       endGesture();
       move(win.id, s.x, s.y);
     },
-    [move, win.id, endGesture, renderWobble],
+    [move, win.id, win.width, win.height, endGesture, renderWobble, maximize, stopWobble],
   );
 
   const onResizePointerDown = useCallback(
@@ -477,9 +605,8 @@ export const Window = memo(function Window({
           toggleMaximize(win.id);
         }}
         className={cn(
-          'flex h-9 shrink-0 touch-none select-none items-center gap-2 border-b border-border/60 bg-background/60 pr-3',
+          'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b border-border/60 bg-background/60 pr-3 active:cursor-grabbing',
           titlebar ? 'pl-2' : 'pl-3',
-          win.maximized ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
         )}
       >
         {titlebar ? (
@@ -555,6 +682,19 @@ export const Window = memo(function Window({
             className={cn('absolute z-10 touch-none', className)}
           />
         ))}
+
+      {/* "Drop to maximize" preview while the drag rides the top edge.
+          Portaled to the workspace so it outlines the full snap target
+          instead of being clipped to the window's own box. */}
+      {snapHint &&
+        sectionRef.current?.parentElement &&
+        createPortal(
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-1.5 z-[9000] rounded-xl border-2 border-primary/50 bg-primary/10 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-150"
+          />,
+          sectionRef.current.parentElement,
+        )}
     </section>
   );
 });

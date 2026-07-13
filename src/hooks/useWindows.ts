@@ -173,6 +173,69 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
     [],
   );
 
+  /**
+   * Maximize a window (no-op if already maximized). `restore` overrides the
+   * geometry remembered for un-maximizing - the drag-to-top-edge snap passes
+   * the window's pre-drag spot so a later restore returns it there, not to
+   * wherever it was dropped along the top edge.
+   */
+  const maximize = useCallback(
+    (id: string, restore?: { x: number; y: number; width: number; height: number }) => {
+      setWindows((ws) => {
+        const top = maxZ(ws);
+        return ws.map((w) =>
+          w.id === id && !w.maximized
+            ? {
+                ...w,
+                maximized: true,
+                restore: restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
+                z: top + 1,
+              }
+            : w,
+        );
+      });
+    },
+    [],
+  );
+
+  /**
+   * Un-maximize a window to an explicit geometry (no-op if not maximized).
+   * Used by the title-bar tear-away drag, which restores the window under
+   * the cursor rather than at its remembered position.
+   */
+  const unmaximize = useCallback(
+    (id: string, geometry: { x: number; y: number; width: number; height: number }) => {
+      setWindows((ws) =>
+        ws.map((w) =>
+          w.id === id && w.maximized
+            ? { ...w, ...geometry, maximized: false, restore: null }
+            : w,
+        ),
+      );
+    },
+    [],
+  );
+
+  /**
+   * Alt+Tab-style focus cycling through the non-minimized windows.
+   * Forward raises the bottom-most window to the top, so repeated presses
+   * visit every window in order; backward sends the top window to the back,
+   * exactly undoing a forward step.
+   */
+  const cycleFocus = useCallback((backward = false) => {
+    setWindows((ws) => {
+      const visible = ws.filter((w) => !w.minimized).sort((a, b) => a.z - b.z);
+      if (visible.length < 2) return ws;
+      const rotated = backward
+        ? [visible[visible.length - 1], ...visible.slice(0, -1)]
+        : [...visible.slice(1), visible[0]];
+      // Reassign 1..N in the new order. Colliding with a minimized window's
+      // z is harmless: hidden windows don't take part in stacking or focus.
+      const zOf = new Map(rotated.map((w, i) => [w.id, i + 1]));
+      return ws.map((w) => (zOf.has(w.id) ? { ...w, z: zOf.get(w.id)! } : w));
+    });
+  }, []);
+
   const toggleMaximize = useCallback((id: string) => {
     setWindows((ws) => {
       const top = maxZ(ws);
@@ -206,8 +269,20 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   // re-rendered when window state changes - that's what lets memo(Window)
   // and memo(DockItem) actually skip work.
   const actions = useMemo(
-    () => ({ open, close, closeApp, minimize, focus, move, resize, toggleMaximize }),
-    [open, close, closeApp, minimize, focus, move, resize, toggleMaximize],
+    () => ({
+      open,
+      close,
+      closeApp,
+      minimize,
+      focus,
+      move,
+      resize,
+      maximize,
+      unmaximize,
+      toggleMaximize,
+      cycleFocus,
+    }),
+    [open, close, closeApp, minimize, focus, move, resize, maximize, unmaximize, toggleMaximize, cycleFocus],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

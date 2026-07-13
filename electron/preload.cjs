@@ -202,3 +202,22 @@ contextBridge.exposeInMainWorld('devtools', {
     };
   },
 });
+
+// Shell-level keyboard shortcuts forwarded from the main process. Keyboard
+// focus often lives inside <webview> guests (browser tabs, devtools panes),
+// where the shell can't observe keydown events - main.cjs intercepts shell
+// shortcuts there via before-input-event and forwards them here. See
+// src/lib/shellShortcuts.ts for the typed renderer-side accessor.
+contextBridge.exposeInMainWorld('shellShortcuts', {
+  /**
+   * Subscribe to forwarded shortcuts. Returns an unsubscribe fn. Payloads:
+   *   { action: 'cycle-windows', backward } (Alt+Tab / Alt+Shift+Tab)
+   *   { action: 'new-tab', wcId }           (Ctrl+T in a browser tab)
+   *   { action: 'close-tab', wcId }         (Ctrl+W in a browser tab)
+   */
+  onShortcut: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('shortcut', handler);
+    return () => ipcRenderer.removeListener('shortcut', handler);
+  },
+});
