@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
 import { z } from 'zod';
 import {
@@ -41,9 +41,20 @@ function magnify(distance: number): number {
   return 1 + ((MAX_SCALE - 1) * (Math.cos((distance / FALLOFF) * Math.PI) + 1)) / 2;
 }
 
+/** Height of the hot zone at the screen's bottom edge that reveals a hidden dock, in px. */
+const REVEAL_ZONE = 8;
+/** Extra slack above the dock before a hot-edge reveal retracts, in px. */
+const REVEAL_SLACK = 24;
+
 /**
  * macOS-style Dock: a centered, backgroundless strip of app tiles that
  * magnify as the pointer sweeps across them.
+ *
+ * The dock overlays the bottom edge of the workspace and hides itself
+ * intelligently: whenever any visible window intersects its footprint
+ * (including maximized windows, which fill the whole workspace) it slides
+ * off-screen, and it slides back when the pointer reaches the bottom edge
+ * of the screen or when no window overlaps it anymore.
  *
  * Shows pinned apps first (roaming via encrypted app data), then any
  * running apps that aren't pinned. Each tile keeps the grouped-window
@@ -51,7 +62,12 @@ function magnify(distance: number): number {
  * windows, middle-click always opens a new window, and right-click offers
  * pin/unpin, close, and uninstall.
  */
-export function Dock() {
+export function Dock({
+  workspaceRef,
+}: {
+  /** The workspace <main> element; window x/y coordinates are relative to it. */
+  workspaceRef: React.RefObject<HTMLElement | null>;
+}) {
   const { windows, close } = useWindowManager();
   const { getApp, webApps, uninstallWebApp } = useInstalledApps();
   // Pinned apps roam across devices via Din's encrypted app-data layer,
@@ -106,6 +122,72 @@ export function Dock() {
   // keeps the math stable while widths animate.
   const [cursor, setCursor] = useState<number | null>(null);
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
+  // The visible strip of tiles; its untransformed layout box is the dock's
+  // footprint for window-intersection checks (offsets ignore the slide
+  // transform, unlike getBoundingClientRect).
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // Does any visible window overlap the dock's footprint? Geometry comes
+  // from committed window-manager state, so this re-evaluates on every
+  // move/resize/open/close/minimize/maximize commit.
+  const [intersecting, setIntersecting] = useState(false);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const workspace = workspaceRef.current;
+      const strip = stripRef.current;
+      if (!workspace || !strip) {
+        setIntersecting(false);
+        return;
+      }
+      const workspaceRect = workspace.getBoundingClientRect();
+      // Dock footprint in viewport coordinates. The footer is pinned to
+      // inset-x-0 bottom-0, so the strip's offsets are viewport offsets.
+      const dockTop = window.innerHeight - strip.offsetHeight;
+      const dockLeft = strip.offsetLeft;
+      const dockRight = dockLeft + strip.offsetWidth;
+      setIntersecting(
+        windows.some((w) => {
+          if (w.minimized) return false;
+          // Maximized windows fill the workspace, which reaches the screen bottom.
+          if (w.maximized) return workspaceRect.bottom > dockTop;
+          const left = workspaceRect.left + w.x;
+          const top = workspaceRect.top + w.y;
+          return (
+            top + w.height > dockTop &&
+            left < dockRight &&
+            left + w.width > dockLeft
+          );
+        }),
+      );
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [windows, entryIds.length, workspaceRef]);
+
+  // Hot-edge reveal: sweeping the pointer into the strip at the very bottom
+  // of the screen slides a hidden dock back up; it retracts once the pointer
+  // wanders back above the dock. Pointermove (not mousemove) so reveals also
+  // fire mid-drag while a window holds pointer capture.
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      const fromBottom = window.innerHeight - e.clientY;
+      const dockHeight = stripRef.current?.offsetHeight ?? 80;
+      setRevealed((prev) =>
+        prev ? fromBottom <= dockHeight + REVEAL_SLACK : fromBottom <= REVEAL_ZONE,
+      );
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    return () => window.removeEventListener('pointermove', onPointerMove);
+  }, []);
+
+  // Keyboard users can still tab into the dock while it's hidden; keep it
+  // on-screen whenever any tile holds focus.
+  const [focusWithin, setFocusWithin] = useState(false);
+
+  // Hidden only while a window overlaps it and nobody is asking for it.
+  const hidden = intersecting && !revealed && !focusWithin;
 
   const handlePointerMove = (clientX: number) => {
     if (reduceMotion) return;
@@ -124,8 +206,22 @@ export function Dock() {
   if (entryIds.length === 0) return null;
 
   return (
-    <footer aria-label="Dock" className="relative z-[9999] flex justify-center">
+    <footer
+      aria-label="Dock"
+      className={cn(
+        'absolute inset-x-0 bottom-0 z-[9999] flex justify-center',
+        'motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out',
+        hidden && 'pointer-events-none translate-y-full',
+      )}
+      onFocus={() => setFocusWithin(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setFocusWithin(false);
+        }
+      }}
+    >
       <div
+        ref={stripRef}
         className="flex items-end"
         onMouseMove={(e) => handlePointerMove(e.clientX)}
         onMouseLeave={() => setCursor(null)}

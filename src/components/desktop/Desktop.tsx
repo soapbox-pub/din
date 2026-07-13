@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Wallpaper } from './Wallpaper';
 import { Dock } from './Dock';
 import { MenuBar } from './MenuBar';
@@ -22,6 +23,9 @@ export function Desktop() {
 function DesktopSession() {
   const { getApp } = useInstalledApps();
   const manager = useWindows(getApp);
+  // Shared with the Dock so it can translate window coordinates (which are
+  // relative to the workspace) into viewport space for intersection checks.
+  const workspaceRef = useRef<HTMLElement>(null);
   // Focus ring goes to the highest visible window; minimized ones don't count.
   const topZ = manager.windows.reduce(
     (max, w) => (w.minimized ? max : Math.max(max, w.z)),
@@ -35,8 +39,13 @@ function DesktopSession() {
         <Wallpaper>
           <MenuBar />
 
-          {/* Workspace area - windows render here */}
-          <main aria-label="Desktop" className="relative flex-1 overflow-hidden">
+          {/* Workspace area - windows render here. The Dock overlays its
+              bottom edge and auto-hides, so windows can use the full height. */}
+          <main
+            ref={workspaceRef}
+            aria-label="Desktop"
+            className="relative flex-1 overflow-hidden"
+          >
             {manager.windows.map((win) => (
               <Window
                 key={win.id}
@@ -46,7 +55,7 @@ function DesktopSession() {
             ))}
           </main>
 
-          <Dock />
+          <Dock workspaceRef={workspaceRef} />
         </Wallpaper>
       </FilePickerProvider>
     </WindowManagerContext.Provider>
