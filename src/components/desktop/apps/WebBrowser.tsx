@@ -49,8 +49,11 @@ const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
 const WEB_STORE_URL = 'https://chromewebstore.google.com/';
 
 /**
- * A blank new tab: the surface loads about:blank and the address bar starts
- * empty and focused, so the user can just type. Not treated as a "real" URL
+ * A blank new tab. The underlying surface loads about:blank (a real,
+ * loadable page - unlike chrome://newtab, which is Chrome-internal and
+ * won't load in an Electron <webview> or the iframe fallback); the custom
+ * NewTabPage React component is rendered over it, and the address bar starts
+ * empty and focused so the user can just type. Not treated as a "real" URL
  * anywhere - the address bar shows nothing for it and navigate events for it
  * are coerced back to empty (see onTabEvent / createTab).
  */
@@ -498,11 +501,11 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     });
   }, [setDock]);
 
-  const navigate = useCallback(
-    (raw: string) => {
+  const navigateTab = useCallback(
+    (id: string, raw: string) => {
       const resolved = resolveNavigation(raw);
       if (!resolved) return;
-      updateTab(activeId, (tab) => {
+      updateTab(id, (tab) => {
         const trimmed = tab.history.slice(0, tab.cursor + 1);
         return {
           address: resolved,
@@ -513,9 +516,14 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           cursor: trimmed.length,
         };
       });
-      views.current.get(activeId)?.loadURL(resolved);
+      views.current.get(id)?.loadURL(resolved);
     },
-    [activeId, updateTab],
+    [updateTab],
+  );
+
+  const navigate = useCallback(
+    (raw: string) => navigateTab(activeId, raw),
+    [navigateTab, activeId],
   );
 
   const go = useCallback(
@@ -673,6 +681,10 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             id={tab.id}
             initialSrc={tab.initialSrc}
             active={tab.id === activeId}
+            // A blank tab (empty url) shows the custom new-tab page overlaid
+            // on its (about:blank) surface until the user navigates.
+            isNewTab={tab.url === ''}
+            onNavigate={navigateTab}
             // Only render a docked pane for bottom/right; 'window' hosts its
             // own pane in a separate desktop window.
             dock={tab.dock === 'bottom' || tab.dock === 'right' ? tab.dock : null}
@@ -866,6 +878,8 @@ const TabSurface = memo(function TabSurface({
   id,
   initialSrc,
   active,
+  isNewTab,
+  onNavigate: onNavigateToUrl,
   dock,
   deviceId,
   devtoolsWcId,
@@ -883,6 +897,10 @@ const TabSurface = memo(function TabSurface({
   id: string;
   initialSrc: string;
   active: boolean;
+  /** Show the custom new-tab page over the surface (blank tab). */
+  isNewTab: boolean;
+  /** Navigate this tab to a URL/search (from the new-tab page). */
+  onNavigate: (id: string, raw: string) => void;
   /** Docked pane position, or null when not docked in this surface. */
   dock: 'bottom' | 'right' | null;
   /** Selected device preset id, or null. */
@@ -998,6 +1016,11 @@ const TabSurface = memo(function TabSurface({
           onWebContentsId={onWebContentsId}
         />
       </div>
+      {/* The custom new-tab page sits over the (blank) surface until the
+          user picks a destination; navigating swaps in the real page. */}
+      {isNewTab && (
+        <NewTabPage onNavigate={(raw) => onNavigateToUrl(id, raw)} />
+      )}
     </div>
   );
 
@@ -1078,6 +1101,88 @@ const TabSurface = memo(function TabSurface({
     </div>
   );
 });
+
+/** Quick links shown on the new-tab page. Brand-tinted monogram tiles, so
+ * no network favicon fetch is needed. */
+const NEW_TAB_LINKS: { label: string; url: string; color: string }[] = [
+  { label: 'Wikipedia', url: HOME_URL, color: '#636466' },
+  { label: 'DuckDuckGo', url: 'https://duckduckgo.com/', color: '#de5833' },
+  { label: 'GitHub', url: 'https://github.com/', color: '#24292f' },
+  { label: 'Hacker News', url: 'https://news.ycombinator.com/', color: '#ff6600' },
+  { label: 'YouTube', url: 'https://www.youtube.com/', color: '#ff0000' },
+  { label: 'Nostr', url: 'https://nostr.com/', color: '#8e30eb' },
+];
+
+/**
+ * The browser's new-tab page: a centered search box over quick-link tiles,
+ * shown over a blank tab's surface until the user picks a destination.
+ * Styled to match the desktop (the search box and address bar both feed the
+ * same `resolveNavigation`, so typing here or in the address bar is
+ * equivalent). Deliberately offline: monogram tiles instead of fetched
+ * favicons.
+ */
+function NewTabPage({ onNavigate }: { onNavigate: (raw: string) => void }) {
+  const [query, setQuery] = useState('');
+
+  return (
+    <div className="absolute inset-0 flex flex-col items-center overflow-auto bg-gradient-to-b from-background to-muted/40 px-6 py-16 text-foreground">
+      <div className="flex w-full max-w-xl flex-col items-center">
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <div className="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
+            <Globe className="size-7" aria-hidden />
+          </div>
+          <h1 className="text-2xl font-semibold tracking-tight">New Tab</h1>
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onNavigate(query);
+          }}
+          className="relative w-full"
+        >
+          <Search
+            className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground/80"
+            aria-hidden
+          />
+          <input
+            type="text"
+            inputMode="url"
+            aria-label="Search or type a URL"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search or type a URL"
+            spellCheck={false}
+            autoComplete="off"
+            className="h-12 w-full rounded-full border border-border/60 bg-background/80 pl-12 pr-4 text-base shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          />
+        </form>
+
+        <div className="mt-10 grid w-full grid-cols-3 gap-4 sm:grid-cols-6">
+          {NEW_TAB_LINKS.map((link) => (
+            <button
+              key={link.url}
+              type="button"
+              onClick={() => onNavigate(link.url)}
+              className="group flex flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span
+                aria-hidden
+                className="grid size-12 place-items-center rounded-2xl text-lg font-semibold text-white shadow-sm transition-transform group-hover:scale-105"
+                style={{ backgroundColor: link.color }}
+              >
+                {link.label[0]}
+              </span>
+              <span className="w-full truncate text-center text-xs text-muted-foreground">
+                {link.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Hostname of a URL, for tab labels before a title arrives. */
 function hostnameOf(url: string): string | null {
