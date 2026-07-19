@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
-import { RotateCw, SquareTerminal } from 'lucide-react';
+import { SquareTerminal } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { getPtyBridge } from '@/lib/pty';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -118,6 +118,9 @@ interface SplitNode {
   b: LayoutNode;
 }
 type LayoutNode = LeafNode | SplitNode;
+
+/** Tab-management actions triggered by keyboard shortcuts inside a pane. */
+type TabShortcut = 'next-tab' | 'prev-tab' | 'new-tab' | 'close-tab';
 
 /** One terminal tab: its identity, tab label, and pane layout. */
 interface TermTab {
@@ -242,6 +245,9 @@ function flattenLayout(
  * bridge (see src/lib/pty.ts). Sessions run as the unprivileged OS user and
  * die with the window. Multiple tabs share one window: all sessions stay
  * mounted (their xterm state survives) and only the active tab is visible.
+ * Ctrl+PageUp/PageDown switch tabs, Ctrl+Shift+T opens one and Ctrl+Shift+W
+ * closes one (gnome-terminal/Tilix bindings); when a shell exits its pane
+ * closes, and closing the last tab closes the window.
  * Within a tab, right-click offers Tilix-style tiling: split a pane right or
  * down into a tree of terminals with draggable dividers.
  * Outside the Electron shell (plain-browser dev) there is no bridge, so a
@@ -347,6 +353,32 @@ export function Terminal({ windowId }: AppComponentProps) {
     [closeWindow, windowId],
   );
 
+  // Tab shortcuts originate inside xterm sessions (which swallow every
+  // keystroke), so panes dispatch through a stable callback backed by a ref
+  // that always sees the latest tabs/activeId — session effects never re-run.
+  const shortcutRef = useRef<(action: TabShortcut) => void>(() => {});
+  useLayoutEffect(() => {
+    shortcutRef.current = (action) => {
+      switch (action) {
+        case 'new-tab':
+          openTab();
+          break;
+        case 'close-tab':
+          closeTab(activeId);
+          break;
+        case 'next-tab':
+        case 'prev-tab': {
+          const index = tabs.findIndex((t) => t.id === activeId);
+          if (index === -1) return;
+          const delta = action === 'next-tab' ? 1 : -1;
+          setActiveId(tabs[(index + delta + tabs.length) % tabs.length].id);
+          break;
+        }
+      }
+    };
+  });
+  const onTabShortcut = useCallback((action: TabShortcut) => shortcutRef.current(action), []);
+
   const focusPane = useCallback((tabId: string, paneId: string) => {
     setTabs((ts) =>
       ts.map((t) =>
@@ -414,6 +446,7 @@ export function Terminal({ windowId }: AppComponentProps) {
           onFocusPane={focusPane}
           onResizeSplit={resizeSplit}
           onCwdChange={handleCwdChange}
+          onTabShortcut={onTabShortcut}
         />
       ))}
     </div>
@@ -433,6 +466,7 @@ const TerminalTab = memo(function TerminalTab({
   onFocusPane,
   onResizeSplit,
   onCwdChange,
+  onTabShortcut,
 }: {
   tab: TermTab;
   active: boolean;
@@ -441,6 +475,7 @@ const TerminalTab = memo(function TerminalTab({
   onFocusPane: (tabId: string, paneId: string) => void;
   onResizeSplit: (tabId: string, splitId: string, ratio: number) => void;
   onCwdChange: (paneId: string, cwd: string) => void;
+  onTabShortcut: (action: TabShortcut) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -513,6 +548,7 @@ const TerminalTab = memo(function TerminalTab({
             onSplit={handleSplit}
             onClose={handleClose}
             onCwdChange={onCwdChange}
+            onTabShortcut={onTabShortcut}
           />
         </div>
       ))}
@@ -568,37 +604,36 @@ const TerminalSession = memo(function TerminalSession({
   onSplit,
   onClose,
   onCwdChange,
+  onTabShortcut,
 }: {
   paneId: string;
   /** Whether the owning tab is visible. */
   active: boolean;
   /** Whether this pane should hold keyboard focus within its tab. */
   focused: boolean;
-  /** Working directory to start the shell in on first spawn (and restarts). */
+  /** Working directory to start the shell in on first spawn. */
   initialCwd?: string;
   onSplit: (paneId: string, dir: SplitDir) => void;
   onClose: (paneId: string) => void;
   onCwdChange: (paneId: string, cwd: string) => void;
+  onTabShortcut: (action: TabShortcut) => void;
 }) {
   const bridge = getPtyBridge();
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<XTerm | null>(null);
-  const [exitCode, setExitCode] = useState<number | null>(null);
-  /** Bumped to tear down the old session/terminal and start fresh. */
-  const [epoch, setEpoch] = useState(0);
-  /** Tracks the shell's current working directory via OSC 7; also used for restarts. */
+  /** Tracks the shell's current working directory via OSC 7. */
   const cwdRef = useRef<string | undefined>(initialCwd);
-  /** Always-fresh reference to onCwdChange so the effect closure never goes stale. */
+  // Always-fresh references to the callbacks so the (long-lived) effect
+  // closure never goes stale.
   const onCwdChangeRef = useRef(onCwdChange);
+  const onCloseRef = useRef(onClose);
+  const onTabShortcutRef = useRef(onTabShortcut);
   useLayoutEffect(() => {
     onCwdChangeRef.current = onCwdChange;
+    onCloseRef.current = onClose;
+    onTabShortcutRef.current = onTabShortcut;
   });
-
-  const restart = useCallback(() => {
-    setExitCode(null);
-    setEpoch((n) => n + 1);
-  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -694,10 +729,27 @@ const TerminalSession = memo(function TerminalSession({
     };
     container.addEventListener('wheel', onWheel, { passive: false, capture: true });
 
-    // Ctrl/Cmd +/-/0 keyboard zoom. Returning false stops xterm from also
-    // sending the keystroke to the shell.
+    // Ctrl/Cmd +/-/0 keyboard zoom and gnome-terminal/Tilix-style tab
+    // shortcuts: Ctrl+PageUp/PageDown switch tabs, Ctrl+Shift+T opens one,
+    // Ctrl+Shift+W closes the current one. Returning false stops xterm from
+    // also sending the keystroke to the shell.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey) || e.altKey) return true;
+      if (!e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
+        e.preventDefault();
+        onTabShortcutRef.current(e.key === 'PageUp' ? 'prev-tab' : 'next-tab');
+        return false;
+      }
+      if (e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        onTabShortcutRef.current('new-tab');
+        return false;
+      }
+      if (e.shiftKey && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        onTabShortcutRef.current('close-tab');
+        return false;
+      }
       switch (e.key) {
         case '+':
         case '=':
@@ -735,8 +787,11 @@ const TerminalSession = memo(function TerminalSession({
         term.write(data);
       }
     });
-    const offExit = bridge.onExit((id, code) => {
-      if (id === sessionId) setExitCode(code);
+    const offExit = bridge.onExit((id) => {
+      // The shell ended (Ctrl+D, `exit`, crash): close the pane right away —
+      // no interstitial. Closing a tab's last pane closes the tab, and the
+      // last tab closes the window.
+      if (id === sessionId) onCloseRef.current(paneId);
     });
 
     term.onData((data) => {
@@ -795,7 +850,7 @@ const TerminalSession = memo(function TerminalSession({
       termRef.current = null;
       term.dispose();
     };
-  }, [bridge, epoch, paneId]);
+  }, [bridge, paneId]);
 
   // When this pane's tab becomes active, refit (its container had zero size
   // while hidden, so xterm's cached dimensions are stale) and re-rasterize
@@ -833,32 +888,6 @@ const TerminalSession = memo(function TerminalSession({
       <ContextMenuTrigger asChild>
         <div className="relative h-full w-full">
           <div ref={containerRef} className="h-full w-full pl-2 pt-1" />
-          {exitCode !== null && (
-            <div className="absolute inset-0 grid place-items-center bg-background/80">
-              <div className="rounded-xl border border-border/60 bg-popover px-6 py-5 text-center shadow-lg">
-                <p className="mb-3 text-sm text-muted-foreground">
-                  Session ended{exitCode !== 0 ? ` (exit code ${exitCode})` : ''}.
-                </p>
-                <div className="flex items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={restart}
-                    className="inline-flex items-center gap-2 rounded-lg bg-foreground/10 px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-foreground/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  >
-                    <RotateCw className="size-4" aria-hidden />
-                    New session
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onClose(paneId)}
-                    className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent

@@ -56,10 +56,6 @@ export function TabStrip({
           key={tab.id}
           tab={tab}
           active={tab.id === activeId}
-          // A lone tab has no close affordance: closing it would leave the
-          // window empty (apps close the window when the last tab closes, but
-          // hiding the button keeps the common case unambiguous).
-          showClose={tabs.length > 1}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onClose(tab.id)}
         />
@@ -81,17 +77,18 @@ export function TabStrip({
   );
 }
 
-/** A single tab in the strip. */
+/**
+ * A single tab in the strip. Every tab is closable — including a lone one:
+ * apps close the whole window when their last tab closes.
+ */
 function TabButton({
   tab,
   active,
-  showClose,
   onActivate,
   onClose,
 }: {
   tab: TabDescriptor;
   active: boolean;
-  showClose: boolean;
   onActivate: () => void;
   onClose: () => void;
 }) {
@@ -110,7 +107,7 @@ function TabButton({
       }}
       onAuxClick={(e) => {
         // Middle-click closes, like every browser.
-        if (e.button === 1 && showClose) onClose();
+        if (e.button === 1) onClose();
       }}
       title={tab.title}
       className={cn(
@@ -123,24 +120,22 @@ function TabButton({
     >
       {tab.icon && <span className="shrink-0 opacity-80">{tab.icon}</span>}
       <span className="min-w-0 flex-1 truncate">{tab.title}</span>
-      {showClose && (
-        <button
-          type="button"
-          aria-label={`Close ${tab.title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose();
-          }}
-          className={cn(
-            'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
-            'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-            active && 'opacity-100',
-            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
-        >
-          <X className="size-3" />
-        </button>
-      )}
+      <button
+        type="button"
+        aria-label={`Close ${tab.title}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className={cn(
+          'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
+          'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
+          active && 'opacity-100',
+          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        )}
+      >
+        <X className="size-3" />
+      </button>
     </div>
   );
 }
