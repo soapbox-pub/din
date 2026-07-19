@@ -27,6 +27,19 @@ export function sanitizeUrl(input: string): string | null {
 }
 
 /**
+ * Whether two URLs share the same origin (scheme + host + port). Non-URL
+ * inputs are never equal. Used to keep an installed app's logged-in session
+ * pinned to its own site when a link is routed into its window.
+ */
+export function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Turn a query-or-URL string into a navigable https URL. If it looks like a
  * bare search term, hand it to a search engine instead.
  */

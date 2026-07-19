@@ -156,6 +156,16 @@ function isFeaturedHero(app: StoreApp): boolean {
 }
 
 /**
+ * Find the pinned hero app (FEATURED_HERO_HOST) in a list of listings, newest
+ * first. Lets the featured rail resolve its hero (Ditto) from the general
+ * catalog after fetching — so it can lead with the app even when it isn't a
+ * member of the curated follow pack.
+ */
+export function findFeaturedHero(apps: StoreApp[]): StoreApp | undefined {
+  return apps.find(isFeaturedHero);
+}
+
+/**
  * Move the pinned hero app (FEATURED_HERO_HOST) to the front so the store's
  * landing page always leads with it, preserving the newest-first order of the
  * remaining apps. Returns the list unchanged when the hero app isn't present.

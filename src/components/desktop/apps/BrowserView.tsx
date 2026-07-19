@@ -2,9 +2,11 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
 } from 'react';
 import { isWebviewAvailable } from '@/lib/isElectron';
+import { useAppContext } from '@/hooks/useAppContext';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
 
 /**
@@ -167,10 +169,52 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   ) {
     // The partition is fixed for the element's lifetime (like the initial src).
     const partitionRef = useRef(partition);
-    const webviewRef = useRef<ElectronWebviewElement>(null);
+    // The <webview> is created imperatively (see the mount effect below), so
+    // this starts null and is filled in before any listener effect runs.
+    const webviewRef = useRef<ElectronWebviewElement | null>(null);
+    // Host for the imperatively-created guest.
+    const containerRef = useRef<HTMLDivElement>(null);
     // The initial src is fixed for the element's lifetime; navigations go
     // through loadURL so the guest keeps its own history.
     const initialSrc = useRef(src);
+    // The shell's interface zoom, applied to the guest so its content scales
+    // in lockstep with the rest of the desktop (see the zoom-sync effect).
+    const { config } = useAppContext();
+    const zoomFactor = config.zoomLevel / 100;
+
+    // Create the <webview> imperatively and configure it *before* inserting it
+    // into the DOM. Electron reads a guest's attributes when the element is
+    // connected and the guest attaches; several - notably `allowpopups` - are
+    // silently ignored if set afterwards. React (both its own attribute
+    // handling and ref callbacks) only sets attributes after the element is
+    // already in the document, so a JSX `<webview allowpopups>` never takes
+    // effect: the guest attaches with popups disabled, every target=_blank /
+    // window.open dies inside the guest, and the main process's
+    // setWindowOpenHandler (which re-routes those URLs to a browser tab or
+    // installed app) never even fires. Building the element off-DOM and
+    // appending it fully-configured is the only reliable order. Runs once;
+    // the guest's own history/navigation is driven through the ref handle.
+    useLayoutEffect(() => {
+      const container = containerRef.current;
+      if (!container || webviewRef.current) return;
+      const el = document.createElement('webview') as unknown as ElectronWebviewElement;
+      // A partition isolates cookies/storage from the shell's own origin. The
+      // Web Browser's partition is where the Chrome extension system is
+      // attached (see electron/main.cjs); installed apps use their own
+      // partition, which is where the Nostr identity bridge is attached.
+      el.setAttribute('partition', partitionRef.current);
+      // Enable guest-initiated popups (see the note above).
+      el.setAttribute('allowpopups', 'true');
+      el.setAttribute('src', initialSrc.current);
+      el.className = 'h-full w-full bg-white';
+      el.style.display = 'flex';
+      webviewRef.current = el;
+      container.appendChild(el);
+      return () => {
+        el.remove();
+        webviewRef.current = null;
+      };
+    }, []);
 
     useImperativeHandle(ref, () => ({
       reload: () => webviewRef.current?.reload(),
@@ -256,6 +300,30 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       };
     }, [onNavigate]);
 
+    // Keep the guest's page zoom in lockstep with the shell's interface zoom.
+    // The interface zoom is applied to the shell frame via
+    // webFrame.setZoomFactor (see AppProvider), which - per Electron - only
+    // scales the shell frame and does NOT propagate to <webview> guests.
+    // Beyond the visual mismatch, a shell frame zoomed to anything other than
+    // 1 offsets the guest's mouse hit-testing, so links stop being clickable;
+    // matching the guest's own zoom factor keeps its content scaled *and* its
+    // clicks aligned. Chromium resets a guest's zoom on navigation, so it is
+    // reapplied on every dom-ready as well as when the interface zoom changes.
+    useEffect(() => {
+      const el = webviewRef.current;
+      if (!el) return;
+      const apply = () => {
+        try {
+          el.setZoomFactor(zoomFactor);
+        } catch {
+          // Guest not attached yet; the dom-ready listener retries.
+        }
+      };
+      apply();
+      el.addEventListener('dom-ready', apply);
+      return () => el.removeEventListener('dom-ready', apply);
+    }, [zoomFactor]);
+
     // Report the guest's WebContents id once it attaches (used to register
     // the tab with the Chrome extension system).
     useEffect(() => {
@@ -276,19 +344,9 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       };
     }, [onWebContentsId]);
 
-    return (
-      <webview
-        ref={webviewRef}
-        src={initialSrc.current}
-        // A partition isolates cookies/storage from the shell's own origin.
-        // The Web Browser's partition is where the Chrome extension system is
-        // attached (see electron/main.cjs); installed apps use their own
-        // partition, which is where the Nostr identity bridge is attached.
-        partition={partitionRef.current}
-        className="h-full w-full bg-white"
-        style={{ display: 'flex' }}
-      />
-    );
+    // Host for the guest built in the mount effect above. The <webview> itself
+    // is not rendered by React so its attributes can be set before insertion.
+    return <div ref={containerRef} className="h-full w-full" style={{ display: 'flex' }} />;
   },
 );
 
@@ -298,6 +356,7 @@ interface ElectronWebviewElement extends HTMLElement {
   loadURL(url: string): Promise<void>;
   goBack(): void;
   goForward(): void;
+  setZoomFactor(factor: number): void;
   canGoBack(): boolean;
   canGoForward(): boolean;
   getWebContentsId(): number;

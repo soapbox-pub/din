@@ -11,7 +11,7 @@ import {
   WebAppsSchema,
   type WebApp,
 } from '@/lib/webApps';
-import { sanitizeUrl } from '@/lib/sanitizeUrl';
+import { sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { useAppData } from '@/hooks/useAppData';
 import {
@@ -29,12 +29,27 @@ import { WebAppFrame } from '@/components/desktop/apps/WebAppFrame';
 const componentCache = new Map<string, ComponentType<AppComponentProps>>();
 
 function webAppComponent(webApp: WebApp): ComponentType<AppComponentProps> {
-  const cacheKey = `${webApp.id}\u0000${webApp.url}\u0000${webApp.themeColor ?? ''}`;
+  const cacheKey = `${webApp.id}\u0000${webApp.url}\u0000${webApp.themeColor ?? ''}\u0000${webApp.name}\u0000${webApp.icon ?? ''}`;
   let component = componentCache.get(cacheKey);
   if (!component) {
-    const { url, themeColor } = webApp;
-    component = function InstalledWebApp(_props: AppComponentProps) {
-      return <WebAppFrame url={url} themeColor={themeColor} />;
+    const { url, name, themeColor } = webApp;
+    // AppIcon falls back to a Globe glyph when a favicon fails to load.
+    const icon = webApp.icon ?? Globe;
+    component = function InstalledWebApp(props: AppComponentProps) {
+      // A link routed into this app (see BrowserExtensionHost) arrives as a
+      // `url` launch param, so the window opens at that deep link instead of
+      // the app's home URL. WebAppFrame re-checks it shares the app's origin.
+      const initialUrl =
+        typeof props.params?.url === 'string' ? props.params.url : undefined;
+      return (
+        <WebAppFrame
+          url={url}
+          initialUrl={initialUrl}
+          name={name}
+          icon={icon}
+          themeColor={themeColor}
+        />
+      );
     };
     componentCache.set(cacheKey, component);
   }
@@ -72,6 +87,8 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
       webApps,
       getApp: (id) => apps.find((app) => app.id === id),
       findWebAppByUrl: (url) => webApps.find((webApp) => webApp.url === url),
+      findWebAppForUrl: (url) =>
+        webApps.find((webApp) => sameOrigin(webApp.url, url)),
       installWebApp: ({ name, url, icon, themeColor }) => {
         const safeUrl = sanitizeUrl(url);
         if (!safeUrl) return null;

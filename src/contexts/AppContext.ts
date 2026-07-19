@@ -52,6 +52,13 @@ export interface AppConfig {
    */
   wobblyWindows: boolean;
   /**
+   * Interface zoom level, as a percentage (100 = native size). Applied via
+   * Chromium page zoom in the Electron shell (DPI-style scaling of the whole
+   * desktop); has no effect in a plain browser, where the browser's own zoom
+   * applies. Device-specific, so it is kept local and never synced.
+   */
+  zoomLevel: number;
+  /**
    * User-selected custom cursor theme (e.g. a `.CurXPTheme`), parsed into
    * source-format-agnostic cursor images. `null` uses the native OS cursor.
    * Stored inline (cursor frames are PNG data URLs) so the cursor persists

@@ -287,7 +287,7 @@ const BatteryMenuItem = memo(function BatteryMenuItem() {
           aria-label={label}
           title={label}
           className={cn(
-            'h-7 rounded-md px-1 hover:bg-foreground/10 hover:text-foreground',
+            'h-7 rounded-md px-0 hover:bg-foreground/10 hover:text-foreground',
             critical ? 'text-destructive' : 'text-foreground/90',
           )}
         >
