@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawn, execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, net, session, webContents, Menu, MenuItem } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem } = require('electron');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const buildChromeContextMenu = require('electron-chrome-context-menu').default;
 const {
@@ -22,7 +22,26 @@ const {
 } = require('electron-chrome-web-store');
 const { DevtoolsBridge } = require('./devtools-bridge.cjs');
 
-const DIST = path.join(__dirname, 'dist');
+// Locate the built Vite app. Two supported layouts:
+//   - Aladdin/Nix: main.cjs and dist/ are installed side by side (__dirname/dist)
+//   - repo/standalone launcher (os/x11/din-session.sh): main.cjs lives in
+//     electron/, dist/ sits at the repo root (__dirname/../dist)
+// DIN_DIST_DIR overrides both. Without this, the standalone session loads
+// app://din/ against a non-existent electron/dist and shows a black screen.
+function resolveDistDir() {
+  const candidates = [
+    process.env.DIN_DIST_DIR,
+    path.join(__dirname, 'dist'),
+    path.join(__dirname, '..', 'dist'),
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'index.html'))) return path.resolve(dir);
+  }
+  // Nothing found: fall back to the colocated layout so paths/errors are sane.
+  return path.join(__dirname, 'dist');
+}
+
+const DIST = resolveDistDir();
 const INDEX = path.join(DIST, 'index.html');
 
 // Must be called before app is ready. NOTE: each call to
@@ -451,6 +470,334 @@ async function wifiDevice() {
 async function savedWifiConnections() {
   const rows = terseRows(await nmcli(['-t', '-f', 'NAME,TYPE', 'connection', 'show']));
   return rows.filter((fields) => fields[1] === WIFI_TYPE).map((fields) => fields[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Display bridge (window.display), backed by xrandr. Meaningful only on a bare
+// X11 session (the os/x11 standalone launcher), where Din is the whole desktop
+// and nothing else manages screen resolution. On Wayland/cage (Aladdin) xrandr
+// isn't applicable, so status reports `available: false` and the Settings
+// panel renders a fallback - same shape as the WiFi bridge in QEMU.
+//
+// Threat model: same boundaries as the other bridges (strict CSP, sender
+// guard, arguments re-validated). xrandr runs via execFile with an argv array
+// - no shell - and the output name / mode are matched against xrandr's own
+// parsed output before use, so neither can inject or select an invalid mode.
+// ---------------------------------------------------------------------------
+
+const XRANDR_TIMEOUT_MS = 15_000;
+
+/** Run xrandr with an argv array; resolves stdout, rejects with a clean message. */
+function xrandr(args, timeout = XRANDR_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    execFile('xrandr', args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (!error) return resolve(stdout);
+      if (error.code === 'ENOENT') return reject(new Error('xrandr-missing'));
+      const detail = (stderr || error.message || '').trim().split('\n')[0];
+      reject(new Error(detail || 'xrandr failed'));
+    });
+  });
+}
+
+/**
+ * Parse `xrandr --query` into a list of outputs. Each output header looks like
+ *   eDP connected primary 1920x1200+0+0 (normal ...) 302mm x 188mm
+ * followed by indented mode lines
+ *   1920x1200     60.00*+     ('*' = current mode, '+' = preferred/native)
+ */
+function parseXrandr(stdout) {
+  const outputs = [];
+  let current = null;
+  for (const line of stdout.split('\n')) {
+    const head = line.match(
+      /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+\d+\+\d+)?/,
+    );
+    if (head) {
+      current = {
+        name: head[1],
+        connected: head[2] === 'connected',
+        primary: Boolean(head[3]),
+        current: head[4] ? { width: Number(head[4]), height: Number(head[5]) } : null,
+        modes: [],
+      };
+      outputs.push(current);
+      continue;
+    }
+    const mode = line.match(/^\s+(\d+)x(\d+)\s+(.*)$/);
+    if (mode && current) {
+      current.modes.push({
+        width: Number(mode[1]),
+        height: Number(mode[2]),
+        current: mode[3].includes('*'),
+        preferred: mode[3].includes('+'),
+      });
+    }
+  }
+  return outputs;
+}
+
+function registerDisplayHandlers() {
+  ipcMain.handle('display:status', async (event) => {
+    assertShellSender(event);
+    try {
+      const outputs = parseXrandr(await xrandr(['--query']));
+      return { available: true, outputs: outputs.filter((o) => o.connected) };
+    } catch (error) {
+      if (error.message === 'xrandr-missing') return { available: false, outputs: [] };
+      throw error;
+    }
+  });
+
+  ipcMain.handle('display:setMode', async (event, rawOutput, rawWidth, rawHeight) => {
+    assertShellSender(event);
+    // Re-derive the real outputs and only act on a name/mode that xrandr
+    // actually reports - never trust the renderer's strings directly.
+    const outputs = parseXrandr(await xrandr(['--query']));
+    const output = outputs.find((o) => o.connected && o.name === rawOutput);
+    if (!output) throw new Error('Unknown display output');
+    const width = Number(rawWidth);
+    const height = Number(rawHeight);
+    if (!output.modes.some((m) => m.width === width && m.height === height)) {
+      throw new Error('Unsupported mode for this output');
+    }
+    await xrandr(['--output', output.name, '--mode', `${width}x${height}`]);
+
+    // With no WM, resize the shell to the new mode immediately rather than
+    // waiting on a RandR event (which the display-metrics-changed listener
+    // also handles). Assumes the primary output sits at the origin, which
+    // holds for the single-display standalone session.
+    if (output.primary && shellWindow && !shellWindow.isDestroyed()) {
+      shellWindow.setBounds({ x: 0, y: 0, width, height });
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Power bridge (window.power), backed by /sys/class/power_supply. Read-only
+// sysfs, so it needs no external binary and works on any Linux session (cage
+// on Aladdin or the bare-X11 standalone launcher). Reports `available: false`
+// where there's no battery (desktops, the QEMU VM) so the menu-bar indicator
+// hides and the Settings panel shows a fallback. Sender-guarded like the
+// other bridges.
+// ---------------------------------------------------------------------------
+
+const POWER_SUPPLY_DIR = '/sys/class/power_supply';
+
+/** Read a sysfs attribute, trimmed, or null when it's absent/unreadable. */
+async function readPowerAttr(dir, name) {
+  try {
+    return (await fsp.readFile(path.join(dir, name), 'utf8')).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Map the kernel's battery status string to a small stable enum. */
+function mapBatteryStatus(raw) {
+  switch ((raw || '').toLowerCase()) {
+    case 'charging':
+      return 'charging';
+    case 'discharging':
+      return 'discharging';
+    case 'full':
+      return 'full';
+    case 'not charging':
+      return 'not-charging';
+    default:
+      return 'unknown';
+  }
+}
+
+/** Read one battery directory into { name, percent, status, secondsRemaining }. */
+async function readBattery(dir, name) {
+  const [statusRaw, capacityRaw, energyNow, energyFull, powerNow, chargeNow, chargeFull, currentNow] =
+    await Promise.all([
+      readPowerAttr(dir, 'status'),
+      readPowerAttr(dir, 'capacity'),
+      readPowerAttr(dir, 'energy_now'),
+      readPowerAttr(dir, 'energy_full'),
+      readPowerAttr(dir, 'power_now'),
+      readPowerAttr(dir, 'charge_now'),
+      readPowerAttr(dir, 'charge_full'),
+      readPowerAttr(dir, 'current_now'),
+    ]);
+
+  const status = mapBatteryStatus(statusRaw);
+
+  // Charge level: prefer the kernel's capacity %, else derive from now/full.
+  const now = Number(energyNow ?? chargeNow);
+  const full = Number(energyFull ?? chargeFull);
+  const rate = Number(powerNow ?? currentNow);
+  let percent = capacityRaw !== null ? Number.parseInt(capacityRaw, 10) : NaN;
+  if (Number.isNaN(percent) && Number.isFinite(now) && full > 0) {
+    percent = Math.round((now / full) * 100);
+  }
+  percent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+
+  // Time estimate: energy(µWh)/power(µW) or charge(µAh)/current(µA) -> hours.
+  let secondsRemaining = null;
+  if (rate > 0 && Number.isFinite(now) && Number.isFinite(full)) {
+    if (status === 'charging' && full > now) {
+      secondsRemaining = Math.round(((full - now) / rate) * 3600);
+    } else if (status === 'discharging') {
+      secondsRemaining = Math.round((now / rate) * 3600);
+    }
+  }
+
+  return { name, percent, status, secondsRemaining };
+}
+
+function registerPowerHandlers() {
+  ipcMain.handle('power:status', async (event) => {
+    assertShellSender(event);
+    let names;
+    try {
+      names = await fsp.readdir(POWER_SUPPLY_DIR);
+    } catch {
+      return { available: false, acConnected: false, batteries: [] };
+    }
+
+    const batteries = [];
+    let acConnected = false;
+    for (const name of names.sort()) {
+      const dir = path.join(POWER_SUPPLY_DIR, name);
+      const type = await readPowerAttr(dir, 'type');
+      if (type === 'Battery') {
+        if ((await readPowerAttr(dir, 'present')) === '0') continue;
+        batteries.push(await readBattery(dir, name));
+      } else if (type === 'Mains' || type === 'USB') {
+        // Mains = AC adapter; a USB-C port online means USB-PD is supplying power.
+        if ((await readPowerAttr(dir, 'online')) === '1') acConnected = true;
+      }
+    }
+
+    return { available: batteries.length > 0, acConnected, batteries };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Audio bridge (window.audio), backed by wpctl (WirePlumber/PipeWire). Drives
+// the default sink's volume and mute for the menu-bar control, the Settings
+// sound panel, and the media-key OSD. Where wpctl is absent (no PipeWire) it
+// reports available:false and the UI falls back. Same trust boundary as the
+// other bridges: sender guard, argv execFile, volume re-clamped here.
+// ---------------------------------------------------------------------------
+
+const WPCTL_TIMEOUT_MS = 5_000;
+const DEFAULT_SINK = '@DEFAULT_AUDIO_SINK@';
+
+/** Run wpctl with an argv array; resolves stdout, rejects with a clean message. */
+function wpctl(args, timeout = WPCTL_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    execFile('wpctl', args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      if (!error) return resolve(stdout);
+      if (error.code === 'ENOENT') return reject(new Error('wpctl-missing'));
+      const detail = (stderr || error.message || '').trim().split('\n')[0];
+      reject(new Error(detail || 'wpctl failed'));
+    });
+  });
+}
+
+/** Clamp a caller-supplied percentage to an integer 0..100. */
+function clampVolume(pct) {
+  const n = Number(pct);
+  if (!Number.isFinite(n)) throw new Error('Invalid volume');
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/** Default sink volume/mute, or available:false when wpctl is absent. */
+async function audioStatus() {
+  try {
+    // "Volume: 0.65" or "Volume: 0.65 [MUTED]"
+    const out = await wpctl(['get-volume', DEFAULT_SINK]);
+    const match = out.match(/Volume:\s*([\d.]+)/);
+    const volume = match ? Math.round(Number.parseFloat(match[1]) * 100) : null;
+    return { available: true, volume, muted: /\[MUTED\]/.test(out) };
+  } catch (error) {
+    if (error.message === 'wpctl-missing') {
+      return { available: false, volume: null, muted: false };
+    }
+    throw error;
+  }
+}
+
+async function audioSetVolume(pct) {
+  const v = clampVolume(pct);
+  // -l 1.0 caps at 100% so we never push into PipeWire's >1.0 boost range.
+  await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${v}%`]);
+  return audioStatus();
+}
+
+async function audioSetMuted(muted) {
+  await wpctl(['set-mute', DEFAULT_SINK, muted ? '1' : '0']);
+  return audioStatus();
+}
+
+async function audioAdjust(deltaPct) {
+  const sign = deltaPct >= 0 ? '+' : '-';
+  await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${Math.abs(deltaPct)}%${sign}`]);
+  return audioStatus();
+}
+
+async function audioToggleMute() {
+  await wpctl(['set-mute', DEFAULT_SINK, 'toggle']);
+  return audioStatus();
+}
+
+function registerAudioHandlers() {
+  ipcMain.handle('audio:status', async (event) => {
+    assertShellSender(event);
+    return audioStatus();
+  });
+  ipcMain.handle('audio:setVolume', async (event, pct) => {
+    assertShellSender(event);
+    return audioSetVolume(pct);
+  });
+  ipcMain.handle('audio:setMuted', async (event, muted) => {
+    assertShellSender(event);
+    return audioSetMuted(muted === true);
+  });
+}
+
+/**
+ * Global media keys (VolumeUp/Down/Mute). Din owns the whole session, so it
+ * grabs these directly, adjusts the default sink, and pushes the new state to
+ * the shell so it can show the volume OSD. Harmless when wpctl is absent (the
+ * adjust rejects and no OSD is shown).
+ */
+function registerMediaKeys() {
+  const push = (statusPromise) =>
+    statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
+  globalShortcut.register('VolumeUp', () => push(audioAdjust(5)));
+  globalShortcut.register('VolumeDown', () => push(audioAdjust(-5)));
+  globalShortcut.register('VolumeMute', () => push(audioToggleMute()));
+}
+
+// ---------------------------------------------------------------------------
+// Screenshot bridge (window.screenshot), backed by the screenshot:* handler
+// below. Captures the shell window's rendered contents - the whole Din desktop
+// (wallpaper, open windows, menu bar, dock) - as a PNG via Electron's
+// compositor (webContents.capturePage). No display-server capture API, so it
+// works on any session (cage/Wayland or bare X11) with no external tool.
+// Absent in a plain browser, where the Screenshot app feature-detects and
+// shows a fallback. Same trust boundary as the other bridges: sender guard.
+// ---------------------------------------------------------------------------
+
+function registerScreenshotHandlers() {
+  ipcMain.handle('screenshot:capture', async (event) => {
+    assertShellSender(event);
+    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
+      throw new Error('Shell window unavailable');
+    }
+    const image = await shellWindow.webContents.capturePage();
+    const { width, height } = image.getSize();
+    if (width === 0 || height === 0) {
+      throw new Error('Captured an empty image');
+    }
+    // A PNG data URL survives structured clone and drops straight into an
+    // <img> / fetch() in the renderer (see src/lib/screenshot.ts).
+    return { dataUrl: image.toDataURL(), width, height };
+  });
 }
 
 function registerWifiHandlers() {
@@ -934,6 +1281,11 @@ app.whenReady().then(() => {
   registerFsHandlers();
   registerPtyHandlers();
   registerWifiHandlers();
+  registerDisplayHandlers();
+  registerPowerHandlers();
+  registerAudioHandlers();
+  registerMediaKeys();
+  registerScreenshotHandlers();
   registerCrxHandlers();
   registerDevtoolsHandlers();
 
@@ -941,12 +1293,22 @@ app.whenReady().then(() => {
   // preload/APIs are in place when the first tab loads.
   setupChromeExtensions();
 
+  // Production runs with no window manager (cage on Aladdin, or a bare X11
+  // login session via os/x11). cage force-fills the one app, but bare X11 has
+  // nothing to honor the EWMH fullscreen hint, so the window would sit at its
+  // default size letterboxed on a black screen. Size it to the primary
+  // display's bounds explicitly and drop the frame; fullscreen/kiosk still
+  // apply where a compositor does honor them.
+  const production = !DEV_URL;
+  const primaryBounds = screen.getPrimaryDisplay().bounds;
   const win = new BrowserWindow({
-    // Dev: normal windowed shell. Production: fullscreen kiosk.
-    fullscreen: !DEV_URL,
-    kiosk: !DEV_URL,
-    width: 1280,
-    height: 800,
+    // Dev: normal windowed shell. Production: fills the display, frameless.
+    fullscreen: production,
+    kiosk: production,
+    frame: !production,
+    ...(production
+      ? { x: primaryBounds.x, y: primaryBounds.y, width: primaryBounds.width, height: primaryBounds.height }
+      : { width: 1280, height: 800 }),
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
     webPreferences: {
@@ -966,12 +1328,34 @@ app.whenReady().then(() => {
   shellContentsId = win.webContents.id;
   shellWindow = win;
 
+  // With no window manager, the shell won't follow a resolution change on its
+  // own. Refit it to the primary display whenever the display metrics change
+  // (e.g. the Settings display panel applying a new xrandr mode).
+  if (production) {
+    const refit = () => {
+      if (win.isDestroyed()) return;
+      const b = screen.getPrimaryDisplay().bounds;
+      win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+    };
+    screen.on('display-metrics-changed', refit);
+    screen.on('display-added', refit);
+    screen.on('display-removed', refit);
+    win.on('closed', () => {
+      screen.removeListener('display-metrics-changed', refit);
+      screen.removeListener('display-added', refit);
+      screen.removeListener('display-removed', refit);
+    });
+  }
+
   win.loadURL(DEV_URL || 'app://din/');
 
   if (DEV_URL) {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 });
+
+// Release the media-key grabs (VolumeUp/Down/Mute) when the app exits.
+app.on('will-quit', () => globalShortcut.unregisterAll());
 
 // Harden any <webview> the shell embeds (the web browser app). Keep them
 // sandboxed with no Node integration, and deny requests to spawn native

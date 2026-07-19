@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  BatteryFull,
   Bomb,
   Bug,
   Check,
@@ -7,14 +8,17 @@ import {
   CloudOff,
   Loader2,
   Lock,
+  Monitor,
   Moon,
   MousePointer2,
   Palette,
+  Plug,
   RotateCw,
   Sun,
   TriangleAlert,
   Trash2,
   Upload,
+  Volume2,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -30,6 +34,17 @@ import {
   useWifiNetworks,
   useWifiStatus,
 } from '@/hooks/useWifi';
+import { cleanDisplayError, formatMode, getDisplayBridge } from '@/lib/display';
+import type { DisplayMode, DisplayOutput } from '@/lib/display';
+import { useDisplayStatus, useSetDisplayMode } from '@/hooks/useDisplay';
+import { formatTimeRemaining, getPowerBridge, summarizePower } from '@/lib/power';
+import type { BatteryInfo } from '@/lib/power';
+import { useBatteryStatus } from '@/hooks/usePower';
+import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
+import { getAudioBridge } from '@/lib/audio';
+import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
+import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
+import { Slider } from '@/components/ui/slider';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -47,10 +62,20 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type SectionId = 'wifi' | 'nostr' | 'appearance' | 'developers';
+type SectionId =
+  | 'wifi'
+  | 'display'
+  | 'battery'
+  | 'sound'
+  | 'nostr'
+  | 'appearance'
+  | 'developers';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
+  { id: 'display', name: 'Display', icon: Monitor },
+  { id: 'battery', name: 'Battery', icon: BatteryFull },
+  { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
   { id: 'developers', name: 'Developers', icon: Bug },
@@ -62,7 +87,12 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * The Wi-Fi section drives NetworkManager through `window.wifi` (Electron
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
- * explanatory fallback. Nostr & Storage manages Din's encrypted app-data
+ * explanatory fallback. The Display section changes screen resolution through
+ * `window.display` (xrandr) for the bare-X11 standalone session; on Wayland it
+ * shows a fallback. The Battery section reads `window.power`
+ * (/sys/class/power_supply) and hides on machines with no battery. The Sound
+ * section drives the default sink's volume/mute through `window.audio`
+ * (wpctl/PipeWire). Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
@@ -102,6 +132,12 @@ export function Settings(_props: AppComponentProps) {
       <div className="min-w-0 flex-1 overflow-y-auto">
         {section === 'wifi' ? (
           <WifiSection />
+        ) : section === 'display' ? (
+          <DisplaySection />
+        ) : section === 'battery' ? (
+          <BatterySection />
+        ) : section === 'sound' ? (
+          <SoundSection />
         ) : section === 'nostr' ? (
           <NostrStorageSection />
         ) : section === 'appearance' ? (
@@ -424,6 +460,522 @@ function NetworkListSkeleton() {
         </div>
       ))}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Display
+// ---------------------------------------------------------------------------
+
+/**
+ * Screen resolution for each connected output, via the xrandr display bridge
+ * (window.display). Meaningful on the bare-X11 standalone session where Din is
+ * the whole desktop; on Wayland/cage or in a plain browser it renders a
+ * fallback, since the compositor sizes Din to the display automatically.
+ */
+function DisplaySection() {
+  const bridge = getDisplayBridge();
+  const status = useDisplayStatus();
+  const setMode = useSetDisplayMode();
+  // Last failed operation, keyed to the output it concerned.
+  const [opError, setOpError] = useState<{ output: string; message: string } | null>(null);
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Display">
+        <FallbackCard icon={Monitor}>
+          Display settings need the Din desktop shell. A plain browser has no
+          screen resolution to manage.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell
+      title="Display"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh displays"
+          title="Refresh displays"
+          disabled={!status.data?.available}
+          onClick={() => status.refetch()}
+        >
+          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+        </Button>
+      }
+    >
+      {status.isLoading ? (
+        <DisplayListSkeleton />
+      ) : status.isError ? (
+        <FallbackCard>Could not read display state: {cleanDisplayError(status.error)}</FallbackCard>
+      ) : !status.data?.available ? (
+        <FallbackCard icon={Monitor}>
+          Screen resolution can't be changed here. This session uses a Wayland
+          compositor (cage), which sizes Din to the display automatically.
+        </FallbackCard>
+      ) : status.data.outputs.length === 0 ? (
+        <FallbackCard icon={Monitor}>No connected displays were found.</FallbackCard>
+      ) : (
+        <ul className="flex flex-col gap-2" aria-label="Displays">
+          {status.data.outputs.map((output) => (
+            <DisplayRow
+              key={output.name}
+              output={output}
+              pending={setMode.isPending && setMode.variables?.output === output.name}
+              error={opError?.output === output.name ? opError.message : null}
+              onSetMode={(width, height) => {
+                setOpError(null);
+                setMode.mutate(
+                  { output: output.name, width, height },
+                  {
+                    onError: (error) =>
+                      setOpError({ output: output.name, message: cleanDisplayError(error) }),
+                  },
+                );
+              }}
+            />
+          ))}
+        </ul>
+      )}
+    </SectionShell>
+  );
+}
+
+/** A friendlier label for common xrandr output names. */
+function friendlyOutputName(name: string): string {
+  if (/^(eDP|LVDS)/i.test(name)) return 'Built-in display';
+  if (/^HDMI/i.test(name)) return 'HDMI display';
+  if (/^(DisplayPort|DP)/i.test(name)) return 'DisplayPort display';
+  if (/^(VGA|DVI)/i.test(name)) return `${name.replace(/-.*/, '')} display`;
+  return name;
+}
+
+function DisplayRow({
+  output,
+  pending,
+  error,
+  onSetMode,
+}: {
+  output: DisplayOutput;
+  pending: boolean;
+  error: string | null;
+  onSetMode: (width: number, height: number) => void;
+}) {
+  // Collapse xrandr's per-refresh-rate rows to unique resolutions, largest
+  // first, carrying the current/native flags forward.
+  const modes = useMemo(() => {
+    const byResolution = new Map<string, DisplayMode>();
+    for (const mode of output.modes) {
+      const key = `${mode.width}x${mode.height}`;
+      const existing = byResolution.get(key);
+      byResolution.set(key, {
+        width: mode.width,
+        height: mode.height,
+        current: (existing?.current ?? false) || mode.current,
+        preferred: (existing?.preferred ?? false) || mode.preferred,
+      });
+    }
+    return [...byResolution.values()].sort(
+      (a, b) => b.width - a.width || b.height - a.height,
+    );
+  }, [output.modes]);
+
+  const currentValue = output.current
+    ? `${output.current.width}x${output.current.height}`
+    : '';
+  const friendly = friendlyOutputName(output.name);
+  const selectId = `resolution-${output.name}`;
+
+  return (
+    <li className="rounded-lg border border-border/60 bg-background/40 p-3">
+      <div className="flex items-center gap-3">
+        <Monitor className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-2 truncate text-sm text-foreground">
+            {friendly}
+            {output.primary && (
+              <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                Primary
+              </span>
+            )}
+          </p>
+          <p className="truncate text-xs text-muted-foreground">{output.name}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {pending && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />}
+          <Label htmlFor={selectId} className="sr-only">
+            Resolution for {friendly}
+          </Label>
+          <select
+            id={selectId}
+            value={currentValue}
+            disabled={pending || modes.length === 0}
+            onChange={(e) => {
+              const [width, height] = e.target.value.split('x').map(Number);
+              if (Number.isFinite(width) && Number.isFinite(height)) onSetMode(width, height);
+            }}
+            className={cn(
+              'h-8 rounded-md border border-border/60 bg-background px-2 text-sm text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'disabled:cursor-not-allowed disabled:opacity-60',
+            )}
+          >
+            {currentValue === '' && <option value="">—</option>}
+            {modes.map((mode) => (
+              <option key={`${mode.width}x${mode.height}`} value={`${mode.width}x${mode.height}`}>
+                {formatMode(mode.width, mode.height)}
+                {mode.preferred ? ' (native)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {error !== null && (
+        <p role="alert" className="mt-2 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function DisplayListSkeleton() {
+  return (
+    <div className="flex flex-col gap-2" aria-hidden>
+      {Array.from({ length: 2 }, (_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
+        >
+          <Skeleton className="size-5 rounded bg-foreground/10" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-32 bg-foreground/10" />
+            <Skeleton className="h-3 w-16 bg-foreground/10" />
+          </div>
+          <Skeleton className="h-8 w-28 rounded-md bg-foreground/10" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Battery
+// ---------------------------------------------------------------------------
+
+/**
+ * Battery and power state, via the power bridge (window.power, reading
+ * /sys/class/power_supply). Works on any Linux session; hides behind a
+ * fallback on machines with no battery (desktops, the VM) or in a plain
+ * browser.
+ */
+function BatterySection() {
+  const bridge = getPowerBridge();
+  const status = useBatteryStatus();
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Battery">
+        <FallbackCard icon={BatteryFull}>
+          Battery status needs the Din desktop shell; it isn't available in a
+          plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const data = status.data;
+  const summary = data ? summarizePower(data) : null;
+  const critical =
+    summary !== null &&
+    !summary.charging &&
+    summary.percent !== null &&
+    summary.percent <= 15;
+
+  return (
+    <SectionShell
+      title="Battery"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh battery status"
+          title="Refresh battery status"
+          disabled={!data?.available}
+          onClick={() => status.refetch()}
+        >
+          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+        </Button>
+      }
+    >
+      {status.isLoading ? (
+        <BatterySkeleton />
+      ) : status.isError ? (
+        <FallbackCard>Could not read battery state.</FallbackCard>
+      ) : !data?.available ? (
+        <FallbackCard icon={BatteryFull}>
+          No battery was detected. This looks like a desktop or virtual machine.
+        </FallbackCard>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {summary && (
+            <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+              <BatteryGlyph
+                percent={summary.percent}
+                charging={summary.charging}
+                className={cn('size-9 shrink-0', critical ? 'text-destructive' : 'text-foreground')}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-2xl font-semibold tabular-nums text-foreground">
+                  {summary.percent !== null ? `${summary.percent}%` : '—'}
+                </p>
+                <p className={cn('text-sm', critical ? 'text-destructive' : 'text-muted-foreground')}>
+                  {describeBattery(summary, data.acConnected)}
+                </p>
+              </div>
+              {data.acConnected && (
+                <span className="flex items-center gap-1.5 rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                  <Plug className="size-3.5" aria-hidden />
+                  Plugged in
+                </span>
+              )}
+            </div>
+          )}
+
+          <ul className="flex flex-col gap-2" aria-label="Batteries">
+            {data.batteries.map((battery) => (
+              <BatteryDetailRow key={battery.name} battery={battery} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+/** One-line description of the overall power state. */
+function describeBattery(
+  summary: NonNullable<ReturnType<typeof summarizePower>>,
+  acConnected: boolean,
+): string {
+  if (summary.status === 'full' || summary.percent === 100) {
+    return acConnected ? 'Fully charged' : 'Full';
+  }
+  if (summary.charging) {
+    return summary.secondsRemaining !== null
+      ? `Charging · ${formatTimeRemaining(summary.secondsRemaining)} until full`
+      : 'Charging';
+  }
+  if (summary.secondsRemaining !== null) {
+    return `${formatTimeRemaining(summary.secondsRemaining)} remaining`;
+  }
+  return acConnected ? 'Plugged in, not charging' : 'On battery';
+}
+
+/** Per-battery status text for the detail rows. */
+function batteryRowStatus(battery: BatteryInfo): string {
+  switch (battery.status) {
+    case 'charging':
+      return battery.secondsRemaining !== null
+        ? `Charging · ${formatTimeRemaining(battery.secondsRemaining)} until full`
+        : 'Charging';
+    case 'discharging':
+      return battery.secondsRemaining !== null
+        ? `${formatTimeRemaining(battery.secondsRemaining)} remaining`
+        : 'Discharging';
+    case 'full':
+      return 'Full';
+    case 'not-charging':
+      return 'Not charging';
+    default:
+      return 'Unknown';
+  }
+}
+
+function BatteryDetailRow({ battery }: { battery: BatteryInfo }) {
+  const charging = battery.status === 'charging';
+  const critical = !charging && battery.percent !== null && battery.percent <= 15;
+  const percent = battery.percent ?? 0;
+
+  return (
+    <li className="rounded-lg border border-border/60 bg-background/40 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <BatteryGlyph
+            percent={battery.percent}
+            charging={charging}
+            className="size-4.5 shrink-0 text-muted-foreground"
+          />
+          <span className="truncate text-sm text-foreground">{battery.name}</span>
+        </div>
+        <span className="text-sm tabular-nums text-muted-foreground">
+          {battery.percent !== null ? `${battery.percent}%` : '—'}
+        </span>
+      </div>
+
+      <div
+        className="mt-2 h-2 overflow-hidden rounded-full bg-foreground/10"
+        role="progressbar"
+        aria-valuenow={battery.percent ?? undefined}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`${battery.name} charge`}
+      >
+        <div
+          className={cn('h-full rounded-full', critical ? 'bg-destructive' : 'bg-primary')}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+
+      <p className="mt-1.5 text-xs text-muted-foreground">{batteryRowStatus(battery)}</p>
+    </li>
+  );
+}
+
+function BatterySkeleton() {
+  return (
+    <div className="flex flex-col gap-4" aria-hidden>
+      <div className="flex items-center gap-4 rounded-xl border border-border/60 p-4">
+        <Skeleton className="size-9 rounded bg-foreground/10" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-6 w-16 bg-foreground/10" />
+          <Skeleton className="h-3.5 w-32 bg-foreground/10" />
+        </div>
+      </div>
+      <div className="rounded-lg border border-border/60 p-3">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-3.5 w-20 bg-foreground/10" />
+          <Skeleton className="h-3.5 w-8 bg-foreground/10" />
+        </div>
+        <Skeleton className="mt-2 h-2 w-full rounded-full bg-foreground/10" />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sound
+// ---------------------------------------------------------------------------
+
+/**
+ * Output volume and mute, via the audio bridge (window.audio, wpctl/PipeWire).
+ * Works on any Linux session; falls back where PipeWire/wpctl is absent or in
+ * a plain browser. Media keys drive the same sink and show the volume OSD.
+ */
+function SoundSection() {
+  const bridge = getAudioBridge();
+  const status = useAudioStatus();
+  const { setVolume, setMuted } = useAudioMutations();
+
+  const serverVolume = status.data?.volume ?? 0;
+  const muted = status.data?.muted ?? false;
+
+  // Local value for a smooth drag; committed to wpctl on release, re-synced to
+  // the server value (media keys, external wpctl) by adjusting state during
+  // render rather than in an effect.
+  const [value, setValue] = useState(serverVolume);
+  const [lastServer, setLastServer] = useState(serverVolume);
+  if (serverVolume !== lastServer) {
+    setLastServer(serverVolume);
+    setValue(serverVolume);
+  }
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Sound">
+        <FallbackCard icon={Volume2}>
+          Sound settings need the Din desktop shell; volume can't be controlled
+          in a plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell
+      title="Sound"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh sound status"
+          title="Refresh sound status"
+          disabled={!status.data?.available}
+          onClick={() => status.refetch()}
+        >
+          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+        </Button>
+      }
+    >
+      {status.isLoading ? (
+        <div className="h-20 rounded-xl border border-border/60" aria-hidden>
+          <div className="flex h-full items-center gap-4 px-4">
+            <Skeleton className="size-8 rounded bg-foreground/10" />
+            <Skeleton className="h-2 flex-1 rounded-full bg-foreground/10" />
+          </div>
+        </div>
+      ) : !status.data?.available ? (
+        <FallbackCard icon={Volume2}>
+          No audio output was found. PipeWire (wpctl) isn't available on this
+          system, so volume can't be managed here.
+        </FallbackCard>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={muted ? 'Unmute' : 'Mute'}
+              title={muted ? 'Unmute' : 'Mute'}
+              className="size-9 shrink-0 text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
+              onClick={() => setMuted.mutate(!muted)}
+            >
+              <VolumeGlyph
+                volume={value}
+                muted={muted}
+                className={cn('size-6', muted && 'text-muted-foreground')}
+              />
+            </Button>
+            <Slider
+              aria-label="Output volume"
+              value={[muted ? 0 : value]}
+              min={0}
+              max={100}
+              step={1}
+              className="flex-1"
+              onValueChange={([v]) => {
+                if (muted) setMuted.mutate(false);
+                setValue(v);
+              }}
+              onValueCommit={([v]) => setVolume.mutate(v)}
+            />
+            <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
+              {muted ? 'Muted' : `${value}%`}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+            <div className="min-w-0">
+              <Label htmlFor="mute-output" className="cursor-pointer text-sm">
+                Mute
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Silence all output without losing your volume level.
+              </p>
+            </div>
+            <Switch
+              id="mute-output"
+              checked={muted}
+              onCheckedChange={(checked) => setMuted.mutate(checked)}
+            />
+          </div>
+        </div>
+      )}
+    </SectionShell>
   );
 }
 

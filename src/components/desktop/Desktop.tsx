@@ -3,6 +3,7 @@ import { Wallpaper } from './Wallpaper';
 import { Dock } from './Dock';
 import { DesktopHotkeys } from './DesktopHotkeys';
 import { MenuBar } from './MenuBar';
+import { VolumeOsd } from './VolumeOsd';
 import { Window } from './Window';
 import { FilePickerProvider } from './FilePickerProvider';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
@@ -59,6 +60,7 @@ function DesktopSession() {
             </main>
 
             <Dock workspaceRef={workspaceRef} />
+            <VolumeOsd />
           </Wallpaper>
         </FilePickerProvider>
       </WindowActionsContext.Provider>

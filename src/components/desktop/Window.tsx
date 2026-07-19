@@ -33,6 +33,17 @@ type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 const SNAP_TOP_PX = 6;
 
 /**
+ * Dragging with the pointer within this many pixels of the workspace's left
+ * or right edge arms a half-workspace tile (drop to snap the window to that
+ * half, GNOME/Windows style). More generous than the top zone: you shove the
+ * window into the side rather than clip a thin strip.
+ */
+const SNAP_EDGE_PX = 24;
+
+/** Which edge a title-bar drag is currently snapping to, or null. */
+type SnapZone = 'top' | 'left' | 'right' | null;
+
+/**
  * Dragging a maximized window's title bar farther than this tears it away:
  * the window un-maximizes under the cursor and the drag continues. Small
  * enough to feel immediate, large enough that a sloppy click doesn't tear.
@@ -131,7 +142,7 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object or `isTop` changes.
-  const { close, minimize, focus, move, resize, maximize, unmaximize, toggleMaximize } =
+  const { close, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize } =
     useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
@@ -152,10 +163,10 @@ export const Window = memo(function Window({
     wsLeft: number;
     wsTop: number;
     wsWidth: number;
-    /** Armed tear-away from maximized: the size to restore to, or null. */
+    /** Armed tear-away from maximized/tiled: the size to restore to, or null. */
     tearAway: { width: number; height: number } | null;
-    /** Whether the pointer currently rides the top snap-to-maximize zone. */
-    snap: boolean;
+    /** Which snap zone (top/left/right) the pointer currently rides, or null. */
+    snap: SnapZone;
   } | null>(null);
   const resizeState = useRef<{
     dir: ResizeDir;
@@ -175,10 +186,10 @@ export const Window = memo(function Window({
   // effect without re-subscribing.
   const [titlebar, setTitlebar] = useState<ReactNode>(null);
 
-  // Whether the drag pointer is riding the top edge: shows the "drop to
-  // maximize" preview overlay. Only flips when the zone boundary is crossed,
-  // so pointer moves still avoid React state churn.
-  const [snapHint, setSnapHint] = useState(false);
+  // Which snap zone (if any) the drag pointer is riding: drives the "drop to
+  // maximize"/"drop to tile" preview overlay. Only flips when a zone boundary
+  // is crossed, so pointer moves still avoid React state churn.
+  const [snapHint, setSnapHint] = useState<SnapZone>(null);
 
   /**
    * Put the window into "cheap to move" mode for the duration of a gesture.
@@ -298,10 +309,10 @@ export const Window = memo(function Window({
       const wsLeft = ws?.left ?? 0;
       const wsTop = ws?.top ?? 0;
       const wsWidth = ws?.width ?? window.innerWidth;
-      if (win.maximized) {
+      if (win.maximized || win.snapped) {
         // Arm a tear-away: nothing moves yet - once the pointer travels past
-        // TEAR_AWAY_PX (see onPointerMove), the window un-maximizes under
-        // the cursor and the gesture continues as a normal drag.
+        // TEAR_AWAY_PX (see onPointerMove), the window un-maximizes/un-tiles
+        // under the cursor and the gesture continues as a normal drag.
         const restore = win.restore ?? {
           x: win.x,
           y: win.y,
@@ -319,7 +330,7 @@ export const Window = memo(function Window({
           wsTop,
           wsWidth,
           tearAway: { width: restore.width, height: restore.height },
-          snap: false,
+          snap: null,
         };
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         return;
@@ -335,7 +346,7 @@ export const Window = memo(function Window({
         wsTop,
         wsWidth,
         tearAway: null,
-        snap: false,
+        snap: null,
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       beginGesture();
@@ -379,7 +390,7 @@ export const Window = memo(function Window({
       st.anchorOrigin = { x: anchor.x, y: anchor.y };
       st.flags |= WOBBLY_INITIAL;
     },
-    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.restore, beginGesture, config.wobblyWindows, stopWobble, wobbleFrame],
+    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, win.restore, beginGesture, config.wobblyWindows, stopWobble, wobbleFrame],
   );
 
   const onPointerMove = useCallback(
@@ -421,11 +432,15 @@ export const Window = memo(function Window({
       s.x = s.wx + (e.clientX - s.px);
       s.y = Math.max(0, s.wy + (e.clientY - s.py));
 
-      // Snap-to-maximize hint while the pointer rides the top edge.
-      const inSnapZone = e.clientY - s.wsTop <= SNAP_TOP_PX;
-      if (inSnapZone !== s.snap) {
-        s.snap = inSnapZone;
-        setSnapHint(inSnapZone);
+      // Snap hint while the pointer rides a workspace edge: top maximizes,
+      // left/right tile to that half. Top wins its (thinner) corner overlap.
+      let zone: SnapZone = null;
+      if (e.clientY - s.wsTop <= SNAP_TOP_PX) zone = 'top';
+      else if (e.clientX - s.wsLeft <= SNAP_EDGE_PX) zone = 'left';
+      else if (s.wsLeft + s.wsWidth - e.clientX <= SNAP_EDGE_PX) zone = 'right';
+      if (zone !== s.snap) {
+        s.snap = zone;
+        setSnapHint(zone);
       }
 
       const st = wobblyRef.current;
@@ -459,13 +474,16 @@ export const Window = memo(function Window({
       const el = sectionRef.current;
 
       if (s.snap) {
-        // Dropped on the top edge: maximize. Restore geometry is the
-        // window's pre-drag spot, so un-maximizing returns it there.
-        setSnapHint(false);
+        // Dropped on an edge: maximize (top) or tile to a half (left/right).
+        // Restore geometry is the window's pre-drag spot, so un-snapping
+        // returns it there rather than to wherever it was dropped.
+        const restore = { x: s.wx, y: s.wy, width: win.width, height: win.height };
+        setSnapHint(null);
         stopWobble(false);
         if (el) el.style.transform = '';
         endGesture();
-        maximize(win.id, { x: s.wx, y: s.wy, width: win.width, height: win.height });
+        if (s.snap === 'top') maximize(win.id, restore);
+        else tile(win.id, s.snap, restore);
         return;
       }
 
@@ -500,7 +518,7 @@ export const Window = memo(function Window({
       endGesture();
       move(win.id, s.x, s.y);
     },
-    [move, win.id, win.width, win.height, endGesture, renderWobble, maximize, stopWobble],
+    [move, win.id, win.width, win.height, endGesture, renderWobble, maximize, tile, stopWobble],
   );
 
   const onResizePointerDown = useCallback(
@@ -571,15 +589,25 @@ export const Window = memo(function Window({
 
   if (!app) return null;
 
+  // maximized/tiled are CSS-driven (the window's own x/y/width/height keep
+  // their pre-snap values); a normal window renders at its stored geometry.
   const geometry: React.CSSProperties = win.maximized
     ? { left: 0, top: 0, width: '100%', height: '100%', zIndex: win.z }
-    : { left: win.x, top: win.y, width: win.width, height: win.height, zIndex: win.z };
+    : win.snapped === 'left'
+      ? { left: 0, top: 0, width: '50%', height: '100%', zIndex: win.z }
+      : win.snapped === 'right'
+        ? { left: '50%', top: 0, width: '50%', height: '100%', zIndex: win.z }
+        : { left: win.x, top: win.y, width: win.width, height: win.height, zIndex: win.z };
 
   // Minimized windows stay mounted but hidden so app state (terminal
   // sessions, browser pages, navigation history) survives restore.
   // `visibility: hidden` (not display:none / unmount) keeps layout intact,
   // which the Electron <webview> and xterm's fit logic both depend on.
   if (win.minimized) geometry.visibility = 'hidden';
+
+  // Maximized and edge-tiled windows sit flush against the workspace edges:
+  // square corners, no floating shadow/ring.
+  const flush = win.maximized || win.snapped !== null;
 
   return (
     <section
@@ -589,10 +617,10 @@ export const Window = memo(function Window({
       style={geometry}
       className={cn(
         'absolute flex flex-col overflow-hidden bg-card/90 backdrop-blur-xl',
-        win.maximized
+        flush
           ? 'rounded-none'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
-        !win.maximized && isTop && 'ring-ring/50',
+        !flush && isTop && 'ring-ring/50',
       )}
     >
       <header
@@ -671,7 +699,7 @@ export const Window = memo(function Window({
         </WindowTitlebarContext.Provider>
       </div>
 
-      {!win.maximized &&
+      {!flush &&
         RESIZE_HANDLES.map(({ dir, className }) => (
           <div
             key={dir}
@@ -683,7 +711,8 @@ export const Window = memo(function Window({
           />
         ))}
 
-      {/* "Drop to maximize" preview while the drag rides the top edge.
+      {/* Snap preview while the drag rides a workspace edge: full target for
+          "drop to maximize" (top), the left/right half for "drop to tile".
           Portaled to the workspace so it outlines the full snap target
           instead of being clipped to the window's own box. */}
       {snapHint &&
@@ -691,7 +720,12 @@ export const Window = memo(function Window({
         createPortal(
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-1.5 z-[9000] rounded-xl border-2 border-primary/50 bg-primary/10 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-150"
+            className={cn(
+              'pointer-events-none absolute z-[9000] rounded-xl border-2 border-primary/50 bg-primary/10 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-150',
+              snapHint === 'top' && 'inset-1.5',
+              snapHint === 'left' && 'inset-y-1.5 left-1.5 right-1/2',
+              snapHint === 'right' && 'inset-y-1.5 left-1/2 right-1.5',
+            )}
           />,
           sectionRef.current.parentElement,
         )}

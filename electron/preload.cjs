@@ -1,9 +1,13 @@
 // Preload for the Din renderer.
 //
-// Exposes five bridges backed by IPC handlers in main.cjs:
+// Exposes nine bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
+//   - window.display: xrandr screen-resolution control for the Settings app
+//   - window.power: battery/AC status for the menu bar and Settings app
+//   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
+//   - window.screenshot: capture the desktop as a PNG for the Screenshot app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.devtools: docked devtools control for the Web Browser app
 //
@@ -109,6 +113,61 @@ contextBridge.exposeInMainWorld('wifi', {
 
   /** Turn the WiFi radio on or off. */
   setRadio: (enabled) => ipcRenderer.invoke('wifi:setRadio', enabled),
+});
+
+// Display bridge (window.display), backed by the display:* handlers in
+// main.cjs (xrandr). Used by the Settings app to change screen resolution on
+// a bare X11 session. `available: false` where xrandr doesn't apply
+// (Wayland/cage), so the panel can render a fallback.
+contextBridge.exposeInMainWorld('display', {
+  /** Connected outputs with their available modes. `available: false` = no xrandr. */
+  status: () => ipcRenderer.invoke('display:status'),
+
+  /** Set an output's resolution (validated against its reported modes). */
+  setMode: (output, width, height) =>
+    ipcRenderer.invoke('display:setMode', output, width, height),
+});
+
+// Power bridge (window.power), backed by the power:* handler in main.cjs
+// (/sys/class/power_supply). Used by the menu-bar battery indicator and the
+// Settings battery panel. `available: false` on machines with no battery.
+contextBridge.exposeInMainWorld('power', {
+  /** Battery/AC state. `available: false` when no battery is present. */
+  status: () => ipcRenderer.invoke('power:status'),
+});
+
+// Audio bridge (window.audio), backed by the audio:* handlers in main.cjs
+// (wpctl / PipeWire). Drives the default sink for the menu-bar control, the
+// Settings sound panel, and the media-key OSD. Mutations resolve to the new
+// { available, volume, muted } state. `available: false` when wpctl is absent.
+contextBridge.exposeInMainWorld('audio', {
+  /** Default sink volume/mute. `available: false` when wpctl is absent. */
+  status: () => ipcRenderer.invoke('audio:status'),
+
+  /** Set the default sink volume (0-100). Resolves to the new state. */
+  setVolume: (percent) => ipcRenderer.invoke('audio:setVolume', percent),
+
+  /** Mute or unmute the default sink. Resolves to the new state. */
+  setMuted: (muted) => ipcRenderer.invoke('audio:setMuted', muted),
+
+  /**
+   * Subscribe to media-key volume changes (VolumeUp/Down/Mute), for the OSD.
+   * The callback receives the new { available, volume, muted } state. Returns
+   * an unsubscribe fn.
+   */
+  onOsd: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('audio:osd', listener);
+    return () => ipcRenderer.removeListener('audio:osd', listener);
+  },
+});
+
+// Screenshot bridge (window.screenshot), backed by the screenshot:* handler in
+// main.cjs (webContents.capturePage). Snapshots the Din desktop as a PNG for
+// the Screenshot app. Absent in a plain browser, where the app falls back.
+contextBridge.exposeInMainWorld('screenshot', {
+  /** Capture the desktop; resolves to { dataUrl, width, height } (PNG). */
+  capture: () => ipcRenderer.invoke('screenshot:capture'),
 });
 
 // Chrome extension bridge (window.crx), backed by the crx:* handlers in
