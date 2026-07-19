@@ -11,11 +11,13 @@ import {
   Laptop,
   Loader2,
   Lock,
+  Minus,
   Monitor,
   Moon,
   MousePointer2,
   Palette,
   Plug,
+  Plus,
   RotateCw,
   Sun,
   TriangleAlert,
@@ -619,20 +621,28 @@ function DisplayZoomControl({
         </div>
       </div>
       {available ? (
-        <div className="flex items-center gap-4">
-          <Slider
-            id="interface-zoom"
-            aria-label="Interface zoom"
-            value={[value]}
-            min={MIN_ZOOM}
-            max={MAX_ZOOM}
-            step={ZOOM_STEP}
-            className="flex-1"
-            onValueChange={([v]) => onChange(clampZoom(v))}
-          />
-          <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
+        <div className="flex items-center justify-center gap-3">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Zoom out"
+            disabled={value <= MIN_ZOOM}
+            onClick={() => onChange(clampZoom(value - ZOOM_STEP))}
+          >
+            <Minus className="size-4" />
+          </Button>
+          <span className="w-16 text-center text-sm tabular-nums font-medium">
             {value}%
           </span>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Zoom in"
+            disabled={value >= MAX_ZOOM}
+            onClick={() => onChange(clampZoom(value + ZOOM_STEP))}
+          >
+            <Plus className="size-4" />
+          </Button>
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
