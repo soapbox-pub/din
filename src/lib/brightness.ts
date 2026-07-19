@@ -3,7 +3,8 @@
  * (`window.brightness`, see electron/preload.cjs + electron/main.cjs).
  *
  * Covers two independent display-light controls:
- *   - Screen backlight, via brightnessctl (/sys/class/backlight).
+ *   - Screen backlight (/sys/class/backlight), via brightnessctl where
+ *     installed, else raw sysfs reads + systemd-logind writes.
  *   - Night light / red shift (warm color temperature), via a Wayland/X11
  *     gamma tool (gammastep, or wlsunset as a fallback) held running in the
  *     main process.
@@ -25,7 +26,7 @@ export interface NightLightState {
 }
 
 export interface BrightnessStatus {
-  /** False when brightnessctl or a backlight device is absent. */
+  /** False when no backlight device (or usable backend) is present. */
   available: boolean;
   /** Backlight level 0-100, or null if it couldn't be read. */
   brightness: number | null;

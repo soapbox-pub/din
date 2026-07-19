@@ -984,9 +984,12 @@ function registerMediaKeys() {
 
 // ---------------------------------------------------------------------------
 // Brightness bridge (window.brightness). Two independent halves:
-//   - Screen backlight, via brightnessctl (/sys/class/backlight). Needs write
-//     access to the backlight sysfs node (brightnessctl ships udev rules that
-//     grant the `video` group; see os/configuration.nix).
+//   - Screen backlight (/sys/class/backlight), via brightnessctl where
+//     installed (Aladdin ships it with udev rules that grant the `video`
+//     group write access; see os/configuration.nix). Where it's absent (e.g.
+//     a dev host), fall back to reading sysfs directly (world-readable) and
+//     writing through systemd-logind's Session.SetBrightness D-Bus call,
+//     which any active session may use without extra privileges.
 //   - Night light / red shift: a warm color temperature held by a Wayland/X11
 //     gamma tool (gammastep preferred, wlsunset as a fallback) kept running in
 //     the main process. Under Wayland the gamma ramp is torn down when the
@@ -1029,8 +1032,8 @@ function clampTemperature(kelvin) {
   return Math.max(MIN_TEMPERATURE, Math.min(MAX_TEMPERATURE, Math.round(n)));
 }
 
-/** Backlight level 0-100, null if no backlight device, or throws if the tool is missing. */
-async function backlightGet() {
+/** Backlight level 0-100 via brightnessctl, null if no backlight device. */
+async function brightnessctlGet() {
   // Machine-readable: "device,class,current,40%,max".
   const out = await brightnessctl(['-m', '-c', BACKLIGHT_CLASS, 'info']);
   const line = out
@@ -1040,6 +1043,111 @@ async function backlightGet() {
   if (!line) return null;
   const match = (line.split(',')[3] || '').match(/(\d+)/);
   return match ? Number(match[1]) : null;
+}
+
+// --- Sysfs + logind fallback backend (no brightnessctl on the host). ---
+
+const BACKLIGHT_SYS_DIR = '/sys/class/backlight';
+let backlightBackendPromise = null; // cached probe: 'brightnessctl' | 'sysfs' | null
+
+/** First device under /sys/class/backlight, or null (desktops, VMs). */
+function sysfsBacklightDevice() {
+  try {
+    return fs.readdirSync(BACKLIGHT_SYS_DIR).sort()[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read a small sysfs integer file; null if missing or non-numeric. */
+function readSysInt(file) {
+  try {
+    const n = Number(fs.readFileSync(file, 'utf8').trim());
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Backlight level 0-100 straight from sysfs, null if unreadable. */
+function sysfsBacklightGet() {
+  const device = sysfsBacklightDevice();
+  if (!device) return null;
+  const current = readSysInt(path.join(BACKLIGHT_SYS_DIR, device, 'brightness'));
+  const max = readSysInt(path.join(BACKLIGHT_SYS_DIR, device, 'max_brightness'));
+  if (current === null || !max) return null;
+  return Math.round((current / max) * 100);
+}
+
+/** Set the backlight to a raw sysfs value via logind's SetBrightness. */
+function logindSetBrightness(device, value) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'busctl',
+      [
+        'call',
+        'org.freedesktop.login1',
+        '/org/freedesktop/login1/session/auto',
+        'org.freedesktop.login1.Session',
+        'SetBrightness',
+        'ssu',
+        BACKLIGHT_CLASS,
+        device,
+        String(value),
+      ],
+      { timeout: BRIGHTNESSCTL_TIMEOUT_MS },
+      (error, _stdout, stderr) => {
+        if (!error) return resolve();
+        const detail = (stderr || error.message || '').trim().split('\n')[0];
+        reject(new Error(detail || 'busctl failed'));
+      },
+    );
+  });
+}
+
+/** Resolve (and cache) which backlight backend works on this machine. */
+function ensureBacklightBackend() {
+  if (!backlightBackendPromise) {
+    backlightBackendPromise = (async () => {
+      try {
+        if ((await brightnessctlGet()) !== null) return 'brightnessctl';
+      } catch {
+        // brightnessctl missing or failing; fall through to sysfs.
+      }
+      return sysfsBacklightGet() !== null ? 'sysfs' : null;
+    })();
+  }
+  return backlightBackendPromise;
+}
+
+/** Backlight level 0-100 via whichever backend is available, or null. */
+async function backlightGet() {
+  const backend = await ensureBacklightBackend();
+  if (backend === 'brightnessctl') return brightnessctlGet();
+  if (backend === 'sysfs') return sysfsBacklightGet();
+  return null;
+}
+
+/** Set the backlight to a clamped 1-100 percentage via the active backend. */
+async function backlightSet(pct) {
+  const backend = await ensureBacklightBackend();
+  if (backend === 'brightnessctl') {
+    await brightnessctl(['-c', BACKLIGHT_CLASS, 'set', `${pct}%`]);
+    return;
+  }
+  if (backend !== 'sysfs') throw new Error('no-backlight');
+  const device = sysfsBacklightDevice();
+  const max = device
+    ? readSysInt(path.join(BACKLIGHT_SYS_DIR, device, 'max_brightness'))
+    : null;
+  if (!device || !max) throw new Error('no-backlight');
+  const raw = Math.max(1, Math.round((pct / 100) * max));
+  try {
+    // Direct write works where udev has granted this user access.
+    fs.writeFileSync(path.join(BACKLIGHT_SYS_DIR, device, 'brightness'), String(raw));
+  } catch {
+    await logindSetBrightness(device, raw);
+  }
 }
 
 // --- Night light (red shift) state, held in the main process. ---
@@ -1139,8 +1247,7 @@ async function brightnessStatus() {
 }
 
 async function brightnessSet(pct) {
-  const v = clampBrightness(pct);
-  await brightnessctl(['-c', BACKLIGHT_CLASS, 'set', `${v}%`]);
+  await backlightSet(clampBrightness(pct));
   return brightnessStatus();
 }
 
@@ -1164,26 +1271,26 @@ async function brightnessSetTemperature(kelvin) {
 }
 
 /**
- * Global brightness media keys. Electron's accelerator table doesn't document
- * the monitor-brightness keys, so we try a few spellings and let unsupported
- * ones fail quietly - the menu-bar slider and Settings panel work regardless.
+ * Brightness media keys. Electron's accelerator grammar has no brightness key
+ * names (globalShortcut can only grab the audio media keys), but the
+ * compositor delivers XF86MonBrightnessUp/Down to the focused client as
+ * ordinary keyboard input with the DOM key "BrightnessUp"/"BrightnessDown".
+ * Din is that client, so intercept them in before-input-event - attached to
+ * every webContents, since focus may live inside a <webview> guest - adjust
+ * the backlight, and push the new state to the shell for the OSD.
  */
-function registerBrightnessMediaKeys() {
-  const push = (statusPromise) =>
-    statusPromise.then((s) => sendToShell('brightness:osd', s)).catch(() => {});
-  const keys = [
-    ['MonBrightnessUp', 5],
-    ['BrightnessUp', 5],
-    ['MonBrightnessDown', -5],
-    ['BrightnessDown', -5],
-  ];
-  for (const [accelerator, delta] of keys) {
-    try {
-      globalShortcut.register(accelerator, () => push(brightnessAdjust(delta)));
-    } catch {
-      // Unsupported accelerator on this Electron build; skip it.
-    }
-  }
+function attachBrightnessMediaKeys(contents) {
+  contents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    let delta = null;
+    if (input.key === 'BrightnessUp' || input.code === 'BrightnessUp') delta = 5;
+    if (input.key === 'BrightnessDown' || input.code === 'BrightnessDown') delta = -5;
+    if (delta === null) return;
+    event.preventDefault();
+    brightnessAdjust(delta)
+      .then((s) => sendToShell('brightness:osd', s))
+      .catch(() => {});
+  });
 }
 
 function registerBrightnessHandlers() {
@@ -1203,7 +1310,6 @@ function registerBrightnessHandlers() {
     assertShellSender(event);
     return brightnessSetTemperature(kelvin);
   });
-  registerBrightnessMediaKeys();
 }
 
 // ---------------------------------------------------------------------------
@@ -1893,8 +1999,8 @@ app.whenReady().then(() => {
   }
 });
 
-// Release the media-key grabs (VolumeUp/Down/Mute, brightness) and stop the
-// night-light gamma child when the app exits.
+// Release the media-key grabs (VolumeUp/Down/Mute) and stop the night-light
+// gamma child when the app exits.
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   stopNightLight();
@@ -1906,6 +2012,10 @@ app.on('will-quit', () => {
 // Browser-partition guests are also registered as tabs with the Chrome
 // extension system (chrome.tabs sees them; content scripts inject).
 app.on('web-contents-created', (_event, contents) => {
+  // Brightness keys arrive as ordinary keyboard input to whichever contents
+  // holds focus (shell or any guest), so hook them everywhere.
+  attachBrightnessMediaKeys(contents);
+
   if (contents.getType() !== 'webview') return;
 
   const isBrowserTab = contents.session === browserSession();
