@@ -47,6 +47,11 @@ export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 ELECTRON="${ROOT_DIR}/node_modules/.bin/electron"
 MAIN="${ROOT_DIR}/electron/main.cjs"
 
+# main.cjs serves the built app over app://; point it at this checkout's build
+# explicitly. (It also falls back to __dirname/../dist, but being explicit
+# means the standalone session never depends on that guess.)
+export DIN_DIST_DIR="${ROOT_DIR}/dist"
+
 if [ ! -x "${ELECTRON}" ]; then
   echo "din-session: Electron not found at ${ELECTRON}. Run 'npm install'." >&2
   exit 1

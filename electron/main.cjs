@@ -22,7 +22,26 @@ const {
 } = require('electron-chrome-web-store');
 const { DevtoolsBridge } = require('./devtools-bridge.cjs');
 
-const DIST = path.join(__dirname, 'dist');
+// Locate the built Vite app. Two supported layouts:
+//   - Aladdin/Nix: main.cjs and dist/ are installed side by side (__dirname/dist)
+//   - repo/standalone launcher (os/x11/din-session.sh): main.cjs lives in
+//     electron/, dist/ sits at the repo root (__dirname/../dist)
+// DIN_DIST_DIR overrides both. Without this, the standalone session loads
+// app://din/ against a non-existent electron/dist and shows a black screen.
+function resolveDistDir() {
+  const candidates = [
+    process.env.DIN_DIST_DIR,
+    path.join(__dirname, 'dist'),
+    path.join(__dirname, '..', 'dist'),
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'index.html'))) return path.resolve(dir);
+  }
+  // Nothing found: fall back to the colocated layout so paths/errors are sane.
+  return path.join(__dirname, 'dist');
+}
+
+const DIST = resolveDistDir();
 const INDEX = path.join(DIST, 'index.html');
 
 // Must be called before app is ready. NOTE: each call to
