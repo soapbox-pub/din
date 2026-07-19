@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import type { ComponentType } from 'react';
-import type { LucideIcon } from 'lucide-react';
+import { Camera, type LucideIcon } from 'lucide-react';
 
 // Built-in apps are code-split: each is its own chunk, loaded the first time
 // it's launched (windows render app content inside <Suspense>). Statically
@@ -17,6 +17,9 @@ const Terminal = lazy(() =>
 );
 const Settings = lazy(() =>
   import('@/components/desktop/apps/Settings').then((m) => ({ default: m.Settings })),
+);
+const Screenshot = lazy(() =>
+  import('@/components/desktop/apps/Screenshot').then((m) => ({ default: m.Screenshot })),
 );
 const DevTools = lazy(() =>
   import('@/components/desktop/apps/DevTools').then((m) => ({ default: m.DevTools })),
@@ -84,6 +87,13 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/settings.png',
     component: Settings,
     defaultSize: { width: 720, height: 520 },
+  },
+  {
+    id: 'screenshot',
+    name: 'Screenshot',
+    icon: Camera,
+    component: Screenshot,
+    defaultSize: { width: 720, height: 560 },
   },
   {
     // The Web Browser's "undock into separate window" inspector. Hidden from

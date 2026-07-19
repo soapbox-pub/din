@@ -773,6 +773,33 @@ function registerMediaKeys() {
   globalShortcut.register('VolumeMute', () => push(audioToggleMute()));
 }
 
+// ---------------------------------------------------------------------------
+// Screenshot bridge (window.screenshot), backed by the screenshot:* handler
+// below. Captures the shell window's rendered contents - the whole Din desktop
+// (wallpaper, open windows, menu bar, dock) - as a PNG via Electron's
+// compositor (webContents.capturePage). No display-server capture API, so it
+// works on any session (cage/Wayland or bare X11) with no external tool.
+// Absent in a plain browser, where the Screenshot app feature-detects and
+// shows a fallback. Same trust boundary as the other bridges: sender guard.
+// ---------------------------------------------------------------------------
+
+function registerScreenshotHandlers() {
+  ipcMain.handle('screenshot:capture', async (event) => {
+    assertShellSender(event);
+    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
+      throw new Error('Shell window unavailable');
+    }
+    const image = await shellWindow.webContents.capturePage();
+    const { width, height } = image.getSize();
+    if (width === 0 || height === 0) {
+      throw new Error('Captured an empty image');
+    }
+    // A PNG data URL survives structured clone and drops straight into an
+    // <img> / fetch() in the renderer (see src/lib/screenshot.ts).
+    return { dataUrl: image.toDataURL(), width, height };
+  });
+}
+
 function registerWifiHandlers() {
   ipcMain.handle('wifi:status', async (event) => {
     assertShellSender(event);
@@ -1258,6 +1285,7 @@ app.whenReady().then(() => {
   registerPowerHandlers();
   registerAudioHandlers();
   registerMediaKeys();
+  registerScreenshotHandlers();
   registerCrxHandlers();
   registerDevtoolsHandlers();
 

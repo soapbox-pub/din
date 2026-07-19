@@ -1,12 +1,13 @@
 // Preload for the Din renderer.
 //
-// Exposes eight bridges backed by IPC handlers in main.cjs:
+// Exposes nine bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //   - window.display: xrandr screen-resolution control for the Settings app
 //   - window.power: battery/AC status for the menu bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
+//   - window.screenshot: capture the desktop as a PNG for the Screenshot app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.devtools: docked devtools control for the Web Browser app
 //
@@ -159,6 +160,14 @@ contextBridge.exposeInMainWorld('audio', {
     ipcRenderer.on('audio:osd', listener);
     return () => ipcRenderer.removeListener('audio:osd', listener);
   },
+});
+
+// Screenshot bridge (window.screenshot), backed by the screenshot:* handler in
+// main.cjs (webContents.capturePage). Snapshots the Din desktop as a PNG for
+// the Screenshot app. Absent in a plain browser, where the app falls back.
+contextBridge.exposeInMainWorld('screenshot', {
+  /** Capture the desktop; resolves to { dataUrl, width, height } (PNG). */
+  capture: () => ipcRenderer.invoke('screenshot:capture'),
 });
 
 // Chrome extension bridge (window.crx), backed by the crx:* handlers in
