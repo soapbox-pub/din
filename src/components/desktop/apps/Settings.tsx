@@ -24,6 +24,7 @@ import {
   Volume2,
   Wifi,
   WifiOff,
+  ZoomIn,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -578,18 +579,74 @@ function toPlacements(drafts: DisplayDraft[]): DisplayPlacement[] {
   }));
 }
 
+const MIN_ZOOM = 50; // %
+const MAX_ZOOM = 200; // %
+const ZOOM_STEP = 10; // %
+
+/** Clamp a zoom percentage to the supported range and round to an integer. */
+function clampZoom(percent: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(percent)));
+}
+
+/**
+ * Interface zoom - scales the whole desktop up or down like browser zoom. Lives
+ * in AppConfig (persisted locally) and is applied to the document root, so it
+ * works everywhere Din runs, including the Wayland/cage and browser sessions
+ * where the xrandr arrangement below is unavailable.
+ */
+function DisplayZoomControl({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (percent: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+      <div className="flex items-center gap-3">
+        <ZoomIn className="size-6 shrink-0 text-foreground/90" aria-hidden />
+        <div className="min-w-0">
+          <Label htmlFor="interface-zoom" className="text-sm">
+            Zoom
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Scale everything on the desktop up or down.
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-4">
+        <Slider
+          id="interface-zoom"
+          aria-label="Interface zoom"
+          value={[value]}
+          min={MIN_ZOOM}
+          max={MAX_ZOOM}
+          step={ZOOM_STEP}
+          className="flex-1"
+          onValueChange={([v]) => onChange(clampZoom(v))}
+        />
+        <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
+          {value}%
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The whole multi-output arrangement, via the xrandr display bridge
  * (window.display). Meaningful on the bare-X11 standalone session where Din is
  * the whole desktop: drag displays to position them, pick a resolution, choose
  * the primary, and switch any output on or off; "Apply" commits the layout in
- * one atomic xrandr call. On Wayland/cage or in a plain browser it renders a
- * fallback, since the compositor arranges the outputs automatically.
+ * one atomic xrandr call. On Wayland/cage or in a plain browser the arrangement
+ * falls back to a note, since the compositor arranges the outputs automatically
+ * - but the zoom control above always applies.
  */
 function DisplaySection() {
   const bridge = getDisplayBridge();
   const status = useDisplayStatus();
   const apply = useApplyDisplayLayout();
+  const { config, updateConfig } = useAppContext();
 
   const outputs = status.data?.available ? status.data.outputs : undefined;
   const baseline = useMemo(() => (outputs ? draftFromOutputs(outputs) : []), [outputs]);
@@ -643,16 +700,64 @@ function DisplaySection() {
     setError(null);
   };
 
-  if (!bridge) {
-    return (
-      <SectionShell title="Display">
-        <FallbackCard icon={Monitor}>
-          Display settings need the Din desktop shell. A plain browser has no
-          displays to arrange.
-        </FallbackCard>
-      </SectionShell>
-    );
-  }
+  const setZoom = (percent: number) =>
+    updateConfig((c) => ({ ...c, zoomLevel: clampZoom(percent) }));
+
+  const arrangement = !bridge ? (
+    <FallbackCard icon={Monitor}>
+      Displays can't be arranged in a plain browser - it has none to arrange.
+      The zoom control above still works.
+    </FallbackCard>
+  ) : status.isLoading ? (
+    <DisplayListSkeleton />
+  ) : status.isError ? (
+    <FallbackCard>Could not read display state: {cleanDisplayError(status.error)}</FallbackCard>
+  ) : !status.data?.available ? (
+    <FallbackCard icon={Monitor}>
+      Displays can't be arranged here. This session uses a Wayland
+      compositor (cage), which sizes Din to the display automatically.
+    </FallbackCard>
+  ) : draft.length === 0 ? (
+    <FallbackCard icon={Monitor}>No connected displays were found.</FallbackCard>
+  ) : (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-muted-foreground">
+        Drag a display to position it. Changes preview below and take effect
+        when you apply them.
+      </p>
+      <DisplayArrange draft={draft} selected={selected} onSelect={setSelected} onMove={moveTo} />
+
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="ghost" size="sm" disabled={!dirty || apply.isPending} onClick={onRevert}>
+          Revert
+        </Button>
+        <Button size="sm" disabled={!canApply} onClick={onApply}>
+          {apply.isPending && <Loader2 className="size-4 animate-spin" aria-hidden />}
+          Apply
+        </Button>
+      </div>
+
+      {error !== null && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+
+      <ul className="flex flex-col gap-2" aria-label="Displays">
+        {draft.map((d) => (
+          <DisplayControlRow
+            key={d.name}
+            draft={d}
+            canDisable={enabledCount > 1}
+            selected={selected === d.name}
+            onToggle={setEnabled}
+            onPrimary={setPrimary}
+            onMode={setModeFor}
+          />
+        ))}
+      </ul>
+    </div>
+  );
 
   return (
     <SectionShell
@@ -663,63 +768,15 @@ function DisplaySection() {
           size="icon"
           aria-label="Refresh displays"
           title="Refresh displays"
-          disabled={!status.data?.available}
+          disabled={!bridge || !status.data?.available}
           onClick={() => status.refetch()}
         >
           <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
         </Button>
       }
     >
-      {status.isLoading ? (
-        <DisplayListSkeleton />
-      ) : status.isError ? (
-        <FallbackCard>Could not read display state: {cleanDisplayError(status.error)}</FallbackCard>
-      ) : !status.data?.available ? (
-        <FallbackCard icon={Monitor}>
-          Displays can't be arranged here. This session uses a Wayland
-          compositor (cage), which sizes Din to the display automatically.
-        </FallbackCard>
-      ) : draft.length === 0 ? (
-        <FallbackCard icon={Monitor}>No connected displays were found.</FallbackCard>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <p className="text-xs text-muted-foreground">
-            Drag a display to position it. Changes preview below and take effect
-            when you apply them.
-          </p>
-          <DisplayArrange draft={draft} selected={selected} onSelect={setSelected} onMove={moveTo} />
-
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="ghost" size="sm" disabled={!dirty || apply.isPending} onClick={onRevert}>
-              Revert
-            </Button>
-            <Button size="sm" disabled={!canApply} onClick={onApply}>
-              {apply.isPending && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              Apply
-            </Button>
-          </div>
-
-          {error !== null && (
-            <p role="alert" className="text-xs text-destructive">
-              {error}
-            </p>
-          )}
-
-          <ul className="flex flex-col gap-2" aria-label="Displays">
-            {draft.map((d) => (
-              <DisplayControlRow
-                key={d.name}
-                draft={d}
-                canDisable={enabledCount > 1}
-                selected={selected === d.name}
-                onToggle={setEnabled}
-                onPrimary={setPrimary}
-                onMode={setModeFor}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
+      <DisplayZoomControl value={config.zoomLevel} onChange={setZoom} />
+      {arrangement}
     </SectionShell>
   );
 }

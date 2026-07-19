@@ -52,6 +52,12 @@ export interface AppConfig {
    */
   wobblyWindows: boolean;
   /**
+   * Interface zoom level, as a percentage (100 = native size). Scales the
+   * entire Din desktop up or down, like browser zoom. Device-specific, so it
+   * is kept local and never synced across machines.
+   */
+  zoomLevel: number;
+  /**
    * User-selected custom cursor theme (e.g. a `.CurXPTheme`), parsed into
    * source-format-agnostic cursor images. `null` uses the native OS cursor.
    * Stored inline (cursor frames are PNG data URLs) so the cursor persists

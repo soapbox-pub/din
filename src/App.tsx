@@ -53,6 +53,7 @@ const defaultConfig: AppConfig = {
     updatedAt: 0,
   },
   wobblyWindows: true,
+  zoomLevel: 100,
   customCursor: null,
 };
 

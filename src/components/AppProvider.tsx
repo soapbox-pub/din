@@ -54,6 +54,7 @@ const AppConfigSchema = z.object({
   useAppBlossomServers: z.boolean(),
   profileThemeMetadata: ProfileThemeMetadataSchema,
   wobblyWindows: z.boolean(),
+  zoomLevel: z.number(),
   customCursor: CursorThemeSchema.nullable(),
 }) satisfies z.ZodType<AppConfig>;
 
@@ -101,11 +102,30 @@ export function AppProvider(props: AppProviderProps) {
   // Apply theme effects to document
   useApplyTheme(config.theme);
 
+  // Apply the interface zoom level to the document root
+  useApplyZoom(config.zoomLevel);
+
   return (
     <AppContext.Provider value={appContextValue}>
       {children}
     </AppContext.Provider>
   );
+}
+
+/**
+ * Hook to apply the interface zoom level to the document root. The stored
+ * value is a percentage (100 = native), applied via the CSS `zoom` property so
+ * it scales the whole desktop - windows, coordinates and hit-testing included -
+ * everywhere Din runs (Electron, cage, or a plain browser).
+ */
+function useApplyZoom(zoomLevel: number) {
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.style.zoom = String(zoomLevel / 100);
+    return () => {
+      root.style.zoom = '';
+    };
+  }, [zoomLevel]);
 }
 
 /**
