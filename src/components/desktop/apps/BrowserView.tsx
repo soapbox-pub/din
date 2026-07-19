@@ -5,6 +5,7 @@ import {
   useRef,
 } from 'react';
 import { isWebviewAvailable } from '@/lib/isElectron';
+import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
 
 /**
  * The Electron session partition for the ad-hoc Web Browser app's tabs. The
@@ -28,6 +29,12 @@ export interface BrowserViewHandle {
   goBack: () => void;
   /** Go forward in the surface's own history (webview only). */
   goForward: () => void;
+  /**
+   * Harvest the page's icon hints (link rel=icon / apple-touch-icon /
+   * mask-icon plus web-app-manifest icons) for choosing an install icon.
+   * Webview only; the iframe fallback resolves to an empty list.
+   */
+  collectIcons: () => Promise<IconCandidate[]>;
 }
 
 export interface BrowserViewProps {
@@ -118,6 +125,8 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       },
       goBack: () => {},
       goForward: () => {},
+      // The iframe fallback can't reach into cross-origin guest DOM.
+      collectIcons: () => Promise.resolve([]),
     }), [onLoadStart]);
 
     // An <iframe> has no reliable "load started" event, so signal start once
@@ -172,6 +181,16 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       },
       goBack: () => webviewRef.current?.goBack(),
       goForward: () => webviewRef.current?.goForward(),
+      collectIcons: async () => {
+        const el = webviewRef.current;
+        if (!el) return [];
+        try {
+          const result = await el.executeJavaScript(COLLECT_ICONS_JS);
+          return Array.isArray(result) ? (result as IconCandidate[]) : [];
+        } catch {
+          return [];
+        }
+      },
     }), []);
 
     useEffect(() => {
@@ -282,4 +301,5 @@ interface ElectronWebviewElement extends HTMLElement {
   canGoBack(): boolean;
   canGoForward(): boolean;
   getWebContentsId(): number;
+  executeJavaScript(code: string): Promise<unknown>;
 }

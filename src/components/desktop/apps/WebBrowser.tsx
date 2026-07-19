@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveNavigation, sanitizeUrl } from '@/lib/sanitizeUrl';
+import { pickBestIcon, type IconCandidate } from '@/lib/appIcon';
 import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
 import { getDevtoolsBridge } from '@/lib/devtools';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
@@ -705,6 +706,9 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           pageTitle={activeTab.title}
           favicon={activeTab.favicon}
           themeColor={activeTab.themeColor}
+          collectIcons={() =>
+            views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
+          }
         />
 
         {devtools && (
@@ -1625,17 +1629,23 @@ function InstallSiteButton({
   pageTitle,
   favicon,
   themeColor,
+  collectIcons,
 }: {
   url: string;
   pageTitle: string | null;
   favicon: string | null;
   themeColor: string | null;
+  collectIcons: () => Promise<IconCandidate[]>;
 }) {
   const { installWebApp, findWebAppByUrl } = useInstalledApps();
   const { open: openApp } = useWindowActions();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  // The best icon resolved from the page's link/manifest hints (prefers SVG),
+  // filled in asynchronously when the popover opens. Null until resolved, so
+  // the preview shows the reported-favicon baseline in the meantime.
+  const [resolvedIcon, setResolvedIcon] = useState<string | null>(null);
 
   const site = useMemo(() => {
     const safe = sanitizeUrl(url);
@@ -1651,10 +1661,23 @@ function InstallSiteButton({
   }, [url, favicon]);
 
   const installed = site ? findWebAppByUrl(site.url) : undefined;
+  // Prefer the higher-quality icon resolved from the page's hints, falling
+  // back to the reported-favicon baseline until (or unless) that resolves.
+  const effectiveIcon = resolvedIcon ?? site?.icon ?? '';
 
   const onOpenChange = (next: boolean) => {
     setOpen(next);
-    if (next) setName(pageTitle ?? site?.hostname ?? '');
+    if (!next) return;
+    setName(pageTitle ?? site?.hostname ?? '');
+    setResolvedIcon(null);
+    if (site) {
+      const forSite = site.url;
+      collectIcons()
+        .then((candidates) => setResolvedIcon(pickBestIcon(candidates, forSite, favicon)))
+        .catch(() => {
+          /* Leave the baseline icon in place. */
+        });
+    }
   };
 
   const install = () => {
@@ -1664,7 +1687,7 @@ function InstallSiteButton({
     const webApp = installWebApp({
       name,
       url: site.url,
-      icon: site.icon,
+      icon: effectiveIcon,
       themeColor: normalizeThemeColor(themeColor) ?? undefined,
     });
     if (!webApp) return;
@@ -1732,7 +1755,7 @@ function InstallSiteButton({
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <AppIcon icon={site.icon} className="size-8 shrink-0" />
+              <AppIcon icon={effectiveIcon} className="size-8 shrink-0" />
               <div className="min-w-0 flex-1 space-y-1">
                 <Label htmlFor="install-app-name" className="text-xs">
                   App name
