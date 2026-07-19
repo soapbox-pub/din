@@ -2,10 +2,12 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronRight,
   Code,
   Globe,
   History,
   MonitorDown,
+  PanelLeft,
   Plus,
   Puzzle,
   RotateCw,
@@ -38,6 +40,7 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
 import {
   bareUrl,
   matchHistory,
@@ -81,6 +84,12 @@ const newTabId = () => `tab-${nextTabId++}`;
 /** One browser tab: UI state plus its rendering surface's identity. */
 interface Tab {
   id: string;
+  /**
+   * The tab that opened this one (target=_blank, window.open,
+   * chrome.tabs.create), or null for a top-level tab. Drives the tree-tabs
+   * sidebar; harmless (unused) in the horizontal strip.
+   */
+  parentId: string | null;
   /** URL the surface was mounted with (fixed for the surface's lifetime). */
   initialSrc: string;
   /** Address bar text (user-editable). */
@@ -109,12 +118,17 @@ interface Tab {
   deviceId: string | null;
 }
 
-function createTab(url: string, pendingRequestId: number | null = null): Tab {
+function createTab(
+  url: string,
+  pendingRequestId: number | null = null,
+  parentId: string | null = null,
+): Tab {
   // A blank new tab shows an empty address bar (ready to type), even though
   // its surface loads about:blank.
   const blank = url === NEW_TAB_URL;
   return {
     id: newTabId(),
+    parentId,
     initialSrc: url,
     address: blank ? '' : url,
     url: blank ? '' : url,
@@ -179,6 +193,17 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   useEffect(() => {
     tabsRef.current = tabs;
   }, [tabs]);
+  // Mirror of `activeId` for event handlers that read it without
+  // re-subscribing (extension tab commands parent new tabs off the active).
+  const activeIdRef = useRef(activeId);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+  // Tree-tabs mode: a vertical sidebar of tabs nested by opener, shared
+  // across every browser window (a plain browser preference).
+  const [treeTabs, setTreeTabs] = useLocalStorage('din:browser:tree-tabs', false);
+  // Collapsed subtrees in the tree sidebar (by tab id).
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const crx = getCrxBridge();
   const devtools = getDevtoolsBridge();
   const webviewMode = isWebviewAvailable();
@@ -210,8 +235,13 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   );
 
   const openTab = useCallback(
-    (url: string, activate = true, pendingRequestId: number | null = null) => {
-      const tab = createTab(url, pendingRequestId);
+    (
+      url: string,
+      activate = true,
+      pendingRequestId: number | null = null,
+      parentId: string | null = null,
+    ) => {
+      const tab = createTab(url, pendingRequestId, parentId);
       setTabs((ts) => [...ts, tab]);
       if (activate) setActiveId(tab.id);
       return tab.id;
@@ -251,12 +281,23 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       }
       const index = ts.findIndex((t) => t.id === id);
       if (index === -1) return;
-      const next = ts.filter((t) => t.id !== id);
+      const next = ts
+        .filter((t) => t.id !== id)
+        // Promote the closed tab's children to its parent, so a subtree
+        // survives when its root is closed (Firefox-style). No-op in the
+        // horizontal strip, which ignores parentId.
+        .map((t) => (t.parentId === id ? { ...t, parentId: closed?.parentId ?? null } : t));
       if (next.length === 0) {
         // Closing the last tab closes the browser window.
         closeWindow(windowId);
         return;
       }
+      setCollapsed((c) => {
+        if (!c.has(id)) return c;
+        const copy = new Set(c);
+        copy.delete(id);
+        return copy;
+      });
       setTabs(next);
       setActiveId((current) =>
         current === id ? next[Math.max(0, index - 1)].id : current,
@@ -273,8 +314,13 @@ export function WebBrowser({ windowId }: AppComponentProps) {
 
   // Publish the tab strip into the window's title bar so tabs share a line
   // with the window controls (Chrome-style). Cleared on unmount to restore
-  // the default title.
+  // the default title. In tree-tabs mode the tabs live in a body sidebar
+  // instead, so the title bar keeps its default (page) title.
   useEffect(() => {
+    if (treeTabs) {
+      setTitlebar(null);
+      return;
+    }
     setTitlebar(
       <TabStrip
         tabs={tabs}
@@ -285,7 +331,17 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       />,
     );
     return () => setTitlebar(null);
-  }, [tabs, activeId, closeTab, openNewTab, setTitlebar]);
+  }, [treeTabs, tabs, activeId, closeTab, openNewTab, setTitlebar]);
+
+  /** Collapse/expand a subtree in the tree sidebar. */
+  const toggleCollapsed = useCallback((id: string) => {
+    setCollapsed((c) => {
+      const copy = new Set(c);
+      if (copy.has(id)) copy.delete(id);
+      else copy.add(id);
+      return copy;
+    });
+  }, []);
 
   // Tint the window chrome with the active tab's page theme color, Safari
   // style. The Window sanitizes the raw value; null restores the default.
@@ -367,11 +423,16 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         case 'create': {
           const url =
             command.url && isAllowedTabUrl(command.url) ? command.url : HOME_URL;
-          openTab(url, command.active, command.requestId);
+          // The command carries no opener, but chrome.tabs.create /
+          // window.open come from the foreground tab; nest the new tab under
+          // it (drives the tree sidebar, ignored by the horizontal strip).
+          openTab(url, command.active, command.requestId, activeIdRef.current);
           break;
         }
         case 'open': {
-          if (isAllowedTabUrl(command.url)) openTab(command.url, true);
+          if (isAllowedTabUrl(command.url)) {
+            openTab(command.url, true, null, activeIdRef.current);
+          }
           break;
         }
         case 'select': {
@@ -664,6 +725,22 @@ export function WebBrowser({ windowId }: AppComponentProps) {
 
   return (
     <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
+      {/* In tree-tabs mode the tab strip is a vertical sidebar beside the
+          toolbar + surfaces column; otherwise it lives in the title bar and
+          this row holds just the column. */}
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {treeTabs && (
+          <TreeTabStrip
+            tabs={tabs}
+            activeId={activeId}
+            collapsed={collapsed}
+            onActivate={setActiveId}
+            onCloseTab={closeTab}
+            onNewTab={openNewTab}
+            onToggleCollapsed={toggleCollapsed}
+          />
+        )}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Toolbar */}
       <form
         onSubmit={(e) => {
@@ -710,6 +787,15 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
           }
         />
+
+        <NavButton
+          label={treeTabs ? 'Use horizontal tabs' : 'Use vertical tabs'}
+          title={treeTabs ? 'Horizontal tabs' : 'Vertical tabs'}
+          pressed={treeTabs}
+          onClick={() => setTreeTabs((v) => !v)}
+        >
+          <PanelLeft className="size-4" />
+        </NavButton>
 
         {devtools && (
           <NavButton
@@ -762,6 +848,8 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             onEvent={onTabEvent}
           />
         ))}
+      </div>
+        </div>
       </div>
 
       <UndockedDevToolsReconciler tabsRef={tabsRef} updateTab={updateTab} />
@@ -1038,6 +1126,198 @@ function TabButton({
           : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
       )}
     >
+      {icon ? (
+        <img src={icon} alt="" aria-hidden className="size-4 shrink-0 rounded-sm" />
+      ) : (
+        <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
+      )}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <button
+        type="button"
+        aria-label={`Close ${label}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className={cn(
+          'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
+          'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
+          active && 'opacity-100',
+          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        )}
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+/** A tab plus its position in the tree sidebar. */
+interface TreeRow {
+  tab: Tab;
+  depth: number;
+  hasChildren: boolean;
+}
+
+/**
+ * Flatten the flat tab list into depth-first sidebar order using each tab's
+ * `parentId`. Tabs whose parent is missing (closed, or opened in another
+ * window) fall back to roots, so every tab is always reachable. Descendants
+ * of a collapsed tab are omitted.
+ */
+function flattenTabTree(tabs: Tab[], collapsed: Set<string>): TreeRow[] {
+  const ids = new Set(tabs.map((t) => t.id));
+  const childrenOf = new Map<string | null, Tab[]>();
+  for (const tab of tabs) {
+    const key = tab.parentId && ids.has(tab.parentId) ? tab.parentId : null;
+    const list = childrenOf.get(key);
+    if (list) list.push(tab);
+    else childrenOf.set(key, [tab]);
+  }
+  const rows: TreeRow[] = [];
+  const walk = (parentId: string | null, depth: number) => {
+    for (const tab of childrenOf.get(parentId) ?? []) {
+      const hasChildren = childrenOf.has(tab.id);
+      rows.push({ tab, depth, hasChildren });
+      if (hasChildren && !collapsed.has(tab.id)) walk(tab.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return rows;
+}
+
+/**
+ * The tree-tabs sidebar: a vertical list of tabs nested by their opener,
+ * with collapsible subtrees. Rendered in the browser body (not the title
+ * bar) beside the toolbar + surfaces column.
+ */
+function TreeTabStrip({
+  tabs,
+  activeId,
+  collapsed,
+  onActivate,
+  onCloseTab,
+  onNewTab,
+  onToggleCollapsed,
+}: {
+  tabs: Tab[];
+  activeId: string;
+  collapsed: Set<string>;
+  onActivate: (id: string) => void;
+  onCloseTab: (id: string) => void;
+  onNewTab: () => void;
+  onToggleCollapsed: (id: string) => void;
+}) {
+  const rows = useMemo(() => flattenTabTree(tabs, collapsed), [tabs, collapsed]);
+  return (
+    <div className="flex w-60 shrink-0 flex-col border-r border-border/60 bg-background/40">
+      <div className="flex items-center justify-between gap-1 px-2.5 py-1.5">
+        <span className="text-xs font-medium text-muted-foreground">Tabs</span>
+        <button
+          type="button"
+          aria-label="New tab"
+          title="New tab"
+          onClick={onNewTab}
+          className={cn(
+            'grid size-6 shrink-0 place-items-center rounded-md text-foreground/70',
+            'hover:bg-foreground/10 hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
+      <div
+        role="tablist"
+        aria-label="Browser tabs"
+        aria-orientation="vertical"
+        className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 pb-2"
+      >
+        {rows.map(({ tab, depth, hasChildren }) => (
+          <TreeTabRow
+            key={tab.id}
+            tab={tab}
+            depth={depth}
+            hasChildren={hasChildren}
+            collapsed={collapsed.has(tab.id)}
+            active={tab.id === activeId}
+            onActivate={() => onActivate(tab.id)}
+            onClose={() => onCloseTab(tab.id)}
+            onToggleCollapsed={() => onToggleCollapsed(tab.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A single row in the tree-tabs sidebar. */
+function TreeTabRow({
+  tab,
+  depth,
+  hasChildren,
+  collapsed,
+  active,
+  onActivate,
+  onClose,
+  onToggleCollapsed,
+}: {
+  tab: Tab;
+  depth: number;
+  hasChildren: boolean;
+  collapsed: boolean;
+  active: boolean;
+  onActivate: () => void;
+  onClose: () => void;
+  onToggleCollapsed: () => void;
+}) {
+  const label = tab.title ?? hostnameOf(tab.url) ?? 'New tab';
+  const icon = tab.favicon ? sanitizeUrl(tab.favicon) : null;
+
+  return (
+    <div
+      role="tab"
+      aria-selected={active}
+      aria-label={label}
+      tabIndex={0}
+      onClick={onActivate}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate();
+        }
+      }}
+      onAuxClick={(e) => {
+        // Middle-click closes, like every browser.
+        if (e.button === 1) onClose();
+      }}
+      title={label}
+      style={{ paddingInlineStart: 4 + depth * 14 }}
+      className={cn(
+        'group flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md pr-1.5 text-xs',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        active
+          ? 'bg-background text-foreground shadow-sm'
+          : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+      )}
+    >
+      {hasChildren ? (
+        <button
+          type="button"
+          aria-label={collapsed ? 'Expand' : 'Collapse'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleCollapsed();
+          }}
+          className="grid size-4 shrink-0 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ChevronRight
+            className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
+          />
+        </button>
+      ) : (
+        <span className="size-4 shrink-0" aria-hidden />
+      )}
       {icon ? (
         <img src={icon} alt="" aria-hidden className="size-4 shrink-0 rounded-sm" />
       ) : (

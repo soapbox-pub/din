@@ -164,6 +164,14 @@ For font installation, color-scheme changes, light/dark theming, or the `isolate
 
 ### Using Git
 
-Use `git status` / `git diff` to review changes and `git log` to learn project conventions. If you make a mistake, `git checkout` restores files.
+Use `git status` / `git diff` to review changes and `git log` to learn project conventions.
 
-**Always commit when you are finished.** Non-negotiable — every completed task ends with a commit. Don't wait for the user to ask.
+**Multiple agents often work in this repository at the same time.** The working tree is shared, so at any moment it may contain other agents' in-flight changes — including files that don't yet type-check, compile, or make sense. Treat anything you didn't edit as someone else's live work:
+
+- **Never run commands that touch files you didn't edit.** In particular **NEVER use `git stash`** (or `git stash pop`) — it rips every agent's uncommitted work out of the tree and interrupts them. Same for `git add -A` / `git add .`, `git reset`, `git checkout .`, `git clean`, and branch switches: they sweep up or destroy others' in-flight work.
+- **Stage only your own files by name** (`git add path/to/file1 path/to/file2`) and commit just those. Don't attribute, fix, revert, or commit changes you didn't make — even if they look broken or unfinished.
+- If you must undo one of *your own* edits, scope it to that exact file (`git checkout -- path/to/your/file`), never a whole directory or the tree.
+
+**A red `npm test` may not be your fault.** Because another agent may have left the tree mid-edit, a full validation run can fail on files you never touched. Still run it, but also validate your files in isolation (e.g. `npx eslint <your-file>`, or type-check and read the errors for *your* paths). If the only failures are in files you didn't edit, say so plainly and commit your scoped changes anyway — don't fix the other agent's work to force a green run.
+
+**Always commit when you are finished.** Non-negotiable — every completed task ends with a commit of your own files. Don't wait for the user to ask.
