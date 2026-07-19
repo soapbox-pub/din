@@ -467,8 +467,19 @@ const DockItem = memo(function DockItem({
     </ContextMenuContent>
   );
 
+  // Stable identity is load-bearing beyond render perf: React detaches a
+  // changed ref callback during the commit's mutation phase, before layout
+  // effects run - so an inline arrow here would empty the dock-tile registry
+  // for this app in the very commit that minimizes its window, and the genie
+  // animation (which looks the tile up in a layout effect) would fall back
+  // to the bottom-center of the screen instead of targeting the tile.
+  const tileRef = useCallback(
+    (el: HTMLDivElement | null) => registerRef(app.id, el),
+    [registerRef, app.id],
+  );
+
   const wrapperProps = {
-    ref: (el: HTMLDivElement | null) => registerRef(app.id, el),
+    ref: tileRef,
     className: cn(
       'group/dock-item relative h-20',
       'motion-safe:transition-[width] motion-safe:duration-150 motion-safe:ease-out',

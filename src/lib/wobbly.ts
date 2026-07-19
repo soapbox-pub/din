@@ -153,6 +153,40 @@ export function grabModel(model: WobblyModel, x: number, y: number): WobblyPoint
 }
 
 /**
+ * Reposition the lattice's mobile points to span the rectangle (x, y, width,
+ * height), velocities zeroed; the immobile anchor is left where it is. The
+ * springs keep their existing rest lengths, so a lattice spread over a
+ * larger rect contracts toward the anchor like a released rubber sheet.
+ *
+ * This is the inverse of Compiz's wobbly "maximize effect"
+ * (`wobblyWindowResizeNotify`), which re-inits the springs at the new
+ * geometry while the points still sit at the old one and lets the model pull
+ * itself into shape. Used for the tear-away drag: the model is created at
+ * the restored geometry, grabbed at the pointer, then spread over the
+ * maximized rect so the window shrinks into the cursor's hand.
+ */
+export function spreadModel(
+  model: WobblyModel,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const gw = GRID_WIDTH - 1;
+  const gh = GRID_HEIGHT - 1;
+  for (let gridY = 0; gridY < GRID_HEIGHT; gridY++) {
+    for (let gridX = 0; gridX < GRID_WIDTH; gridX++) {
+      const object = model.objects[gridY * GRID_WIDTH + gridX];
+      if (object.immobile) continue;
+      object.x = x + (gridX * width) / gw;
+      object.y = y + (gridY * height) / gh;
+      object.velocityX = 0;
+      object.velocityY = 0;
+    }
+  }
+}
+
+/**
  * Release the grab; the model then settles freely (Compiz
  * `wobblyWindowUngrabNotify`).
  */

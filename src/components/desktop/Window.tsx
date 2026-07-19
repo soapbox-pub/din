@@ -15,6 +15,7 @@ import {
   grabModel,
   modelTopLeft,
   modelTransform,
+  spreadModel,
   stepModel,
   ungrabModel,
   WOBBLY_ACTIVE,
@@ -596,6 +597,15 @@ export const Window = memo(function Window({
         const x = Math.round(e.clientX - s.wsLeft - width * fraction);
         // Keep the grab point's offset within the title bar (window top was 0).
         const y = Math.max(0, e.clientY - s.py);
+        // The rect the window is painted at right now (the maximized/tiled
+        // CSS layout, in pixels) - measured before the style writes below
+        // replace it. The wobbly shrink springs from here.
+        const prevRect = {
+          x: el.offsetLeft,
+          y: el.offsetTop,
+          width: el.offsetWidth,
+          height: el.offsetHeight,
+        };
         s.tearAway = null;
         s.wx = x;
         s.wy = y;
@@ -609,8 +619,47 @@ export const Window = memo(function Window({
         el.style.top = `${y}px`;
         el.style.width = `${width}px`;
         el.style.height = `${height}px`;
+        // Interrupt any stale jiggle before beginGesture: stopWobble ends
+        // the gesture styling, which must not undo the beginGesture below.
+        stopWobble(false);
         beginGesture();
         unmaximize(win.id, { x, y, width, height });
+
+        // With wobbly enabled, the tear-away is springy instead of a snap:
+        // the model is created at rest at the restored geometry, grabbed at
+        // the pointer, then spread back over the rect the window just
+        // occupied - the springs contract the fullscreen sheet into the
+        // cursor (the inverse of Compiz's wobbly maximize effect), and the
+        // continuing drag wobbles from its very first frame instead of
+        // staying rigid until the next grab.
+        if (
+          config.wobblyWindows &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ) {
+          const st: WobblyDrag = {
+            model: createModel(x, y, width, height),
+            raf: 0,
+            lastTime: performance.now(),
+            flags: WOBBLY_INITIAL,
+            grabbed: true,
+            anchorOrigin: { x: 0, y: 0 },
+            layout: { x, y, width, height },
+          };
+          // Grab first (the anchor point near the cursor snaps to the hand
+          // immediately), then spread the rest of the lattice.
+          const anchor = grabModel(
+            st.model,
+            e.clientX - s.wsLeft,
+            e.clientY - s.wsTop,
+          );
+          st.anchorOrigin = { x: anchor.x, y: anchor.y };
+          spreadModel(st.model, prevRect.x, prevRect.y, prevRect.width, prevRect.height);
+          wobblyRef.current = st;
+          st.raf = requestAnimationFrame(wobbleFrame);
+          // Paint the still-fullscreen first frame now, so the browser never
+          // shows the restored-size window before the shrink starts.
+          renderWobble();
+        }
         return;
       }
 
@@ -642,7 +691,7 @@ export const Window = memo(function Window({
         el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
       }
     },
-    [beginGesture, unmaximize, win.id],
+    [beginGesture, unmaximize, win.id, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
   );
 
   const onPointerUp = useCallback(
