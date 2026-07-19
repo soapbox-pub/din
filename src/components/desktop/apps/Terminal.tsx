@@ -56,6 +56,45 @@ const newTabId = () => `termtab-${nextTabId++}`;
 let nextSplitId = 0;
 const newSplitId = () => `split-${nextSplitId++}`;
 
+/**
+ * Terminal font size ("zoom"), shared across every pane and tab and persisted
+ * so it survives restarts. Tilix-style Ctrl/Cmd+scroll and Ctrl/Cmd +/-/0
+ * mutate it through {@link setSharedFontSize}; live sessions subscribe via
+ * {@link fontSizeListeners} and refit when it changes.
+ */
+const FONT_SIZE_KEY = 'din.terminal.fontSize';
+const DEFAULT_FONT_SIZE = 13;
+const MIN_FONT_SIZE = 6;
+const MAX_FONT_SIZE = 40;
+
+const clampFontSize = (size: number) =>
+  Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(size)));
+
+const loadFontSize = (): number => {
+  try {
+    const raw = Number(localStorage.getItem(FONT_SIZE_KEY));
+    if (Number.isFinite(raw) && raw >= MIN_FONT_SIZE && raw <= MAX_FONT_SIZE) return raw;
+  } catch {
+    // localStorage unavailable — fall back to the default.
+  }
+  return DEFAULT_FONT_SIZE;
+};
+
+let currentFontSize = loadFontSize();
+const fontSizeListeners = new Set<(size: number) => void>();
+
+const setSharedFontSize = (size: number) => {
+  const clamped = clampFontSize(size);
+  if (clamped === currentFontSize) return;
+  currentFontSize = clamped;
+  try {
+    localStorage.setItem(FONT_SIZE_KEY, String(clamped));
+  } catch {
+    // Persisting is best-effort; the in-memory value still applies.
+  }
+  for (const listener of fontSizeListeners) listener(clamped);
+};
+
 /** Split axis: 'row' places panes side by side, 'column' stacks them. */
 type SplitDir = 'row' | 'column';
 
@@ -572,7 +611,7 @@ const TerminalSession = memo(function TerminalSession({
 
     const term = new XTerm({
       cursorBlink: true,
-      fontSize: 13,
+      fontSize: currentFontSize,
       fontFamily:
         "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace",
       scrollback: 5000,
@@ -635,6 +674,46 @@ const TerminalSession = memo(function TerminalSession({
 
     fit.fit();
     termRef.current = term;
+
+    // Zoom: keep this session's font size synced with the shared (persisted)
+    // value and refit so cols/rows track the new glyph metrics.
+    const applyFontSize = (size: number) => {
+      if (disposed) return;
+      term.options.fontSize = size;
+      fit.fit();
+    };
+    fontSizeListeners.add(applyFontSize);
+
+    // Ctrl/Cmd + scroll wheel zooms (Tilix-style). Capture phase + stopPropagation
+    // so xterm's own wheel handler doesn't also scroll the buffer while zooming.
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setSharedFontSize(currentFontSize + (e.deltaY < 0 ? 1 : -1));
+    };
+    container.addEventListener('wheel', onWheel, { passive: false, capture: true });
+
+    // Ctrl/Cmd +/-/0 keyboard zoom. Returning false stops xterm from also
+    // sending the keystroke to the shell.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey) || e.altKey) return true;
+      switch (e.key) {
+        case '+':
+        case '=':
+          setSharedFontSize(currentFontSize + 1);
+          return false;
+        case '-':
+        case '_':
+          setSharedFontSize(currentFontSize - 1);
+          return false;
+        case '0':
+          setSharedFontSize(DEFAULT_FONT_SIZE);
+          return false;
+        default:
+          return true;
+      }
+    });
 
     // The WebGL glyph atlas can silently corrupt (glyphs render as black
     // boxes) after GPU resets or OS suspend/resume — a known Chromium/driver
@@ -703,6 +782,8 @@ const TerminalSession = memo(function TerminalSession({
     return () => {
       disposed = true;
       observer.disconnect();
+      fontSizeListeners.delete(applyFontSize);
+      container.removeEventListener('wheel', onWheel, { capture: true });
       container.removeEventListener('mousedown', focus);
       window.removeEventListener('focus', clearAtlas);
       document.removeEventListener('visibilitychange', onVisibilityChange);
