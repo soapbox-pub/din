@@ -28,6 +28,24 @@ export const APP_CATEGORY_TAGS = [
   'bunker', 'desktop', 'ephemeral', 'password-manager',
 ];
 
+/**
+ * Follow Packs (kind 39089) are addressable lists of pubkeys curated by a
+ * single author, with `title`/`description`/`image` tags describing the pack.
+ */
+export const FOLLOW_PACK_KIND = 39089;
+
+/**
+ * The "Team Soapbox" follow pack — the App Store's featured-apps source.
+ * Listings authored by the pack's members are surfaced on the store's
+ * landing page. Addressable coordinate decoded from
+ * naddr1qvzqqqyckypzpyexz3t34l966ngh5xg7u2q788hthdqmj0av3lv8s2tz9t43zt6dqqxxkdrsx4mnqm3jxfeh2ess5pyrw
+ */
+export const FEATURED_APPS_PACK = {
+  kind: FOLLOW_PACK_KIND,
+  pubkey: '932614571afcbad4d17a191ee281e39eebbb41b93fac8fd87829622aeb112f4d',
+  identifier: 'k4p5w0n22suf',
+} as const;
+
 /** A web application parsed from a kind 31990 listing, ready to install. */
 export interface StoreApp {
   /** Address coordinate "31990:<pubkey>:<d>", the app's stable identity. */

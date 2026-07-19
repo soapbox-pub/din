@@ -5,6 +5,7 @@ import { NostrContext } from '@nostrify/react';
 import { NUser, useNostrLogin } from '@nostrify/react/login';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
+import { SEARCH_RELAYS } from '@/lib/searchRelays';
 
 interface NostrProviderProps {
   children: React.ReactNode;
@@ -67,6 +68,13 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
       });
     },
     reqRouter(filters: NostrFilter[]) {
+      // NIP-50 queries must go to relays that implement the `search`
+      // capability — the user's general read relays may not. Route the whole
+      // REQ to the search group so results come back in relevance order.
+      if (filters.some((filter) => 'search' in filter)) {
+        return new Map(SEARCH_RELAYS.map((url) => [url, filters]));
+      }
+
       const routes = new Map<string, NostrFilter[]>();
 
       // Route to all read relays
