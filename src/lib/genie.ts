@@ -1,25 +1,40 @@
 /**
- * Genie minimize — the "window gets sucked into the dock" animation. Compiz
- * ships it as the "magic lamp" effect; macOS calls it the genie effect.
+ * Genie minimize — a port of the "magic lamp" effect from Compiz's animation
+ * plugin (`src/animation/magiclamp.c`, © 2006 Erkin Bahceci; based on the
+ * Minimize plugin by David Reveman). macOS calls the same idea the genie
+ * effect.
  *
- * The live window element is warped by a per-frame CSS matrix3d() homography
- * (the same technique the wobbly-windows deformation uses — see
- * src/lib/wobbly.ts): each frame fits the projective transform mapping the
- * window's layout box onto a quad interpolated between the window's rect and
- * the app's dock tile. The bottom corners lead the top corners by EDGE_LAG
- * of the timeline, so mid-animation the window is a tall funnel — bottom
- * edge already pinched into the tile, top edge still up at the window — which
- * is what reads as "poured into the dock" rather than a rigid scale-down.
+ * Compiz deforms a 2 × GRID_RES mesh over the window. Two pieces make the
+ * effect read as "sucked into the dock" rather than a rigid scale-down, and
+ * both are ported here faithfully:
  *
- * A true genie additionally bows the window's sides, but a single homography
- * can only produce straight-edged quads, and slicing live DOM content (an
- * Electron <webview>, an xterm) into strips isn't an option. The staggered
- * corners are a close, cheap approximation that runs compositor-only.
+ * - **The lamp silhouette is a function of height, not time.** Each vertex's
+ *   x is derived from its *current* y through a normalized sigmoid running
+ *   from the icon's mouth (fully pinched) up to the window's far edge (full
+ *   width). The funnel stands still while the window streams through it.
+ * - **A three-phase timeline** over linear progress: a "pre-shape" phase
+ *   (first 22%) morphs the rectangle into the lamp shape while the near edge
+ *   heads for the icon; a "stretch" phase ends with the near edge attached
+ *   to the icon and the far edge still at the window (its share of the
+ *   timeline is proportional to the travel distances); a "post-stretch"
+ *   phase translates the whole shape into the icon, vertices piling up
+ *   (clamping) at its far side until the window is fully swallowed.
  *
- * Restore plays the same timeline backwards.
+ * The DOM can't warp live content through a mesh (the windows host an
+ * Electron <webview>, xterm, etc.), so — exactly like the wobbly-windows
+ * port in src/lib/wobbly.ts — we evaluate the model only at the four corners
+ * and fit the projective transform (CSS matrix3d) mapping the window onto
+ * that quad. Corner trajectories match Compiz; edge curvature between
+ * corners and the "wavy" sides of the default Magic Lamp variant are lost
+ * (this matches Compiz's straight-sided "Vacuum" variant, i.e. magic lamp
+ * with max_waves = 0). A short end-of-timeline fade covers the final pop
+ * that Compiz hides behind the (opaque) icon — our dock tiles sit on a
+ * transparent strip.
+ *
+ * Restore plays the same timeline backwards, as Compiz does for unminimize.
  */
 
-import { quadTransform } from '@/lib/wobbly';
+import { quadTransform, type QuadPoint } from '@/lib/wobbly';
 
 /** An axis-aligned rectangle in workspace coordinates. */
 export interface GenieRect {
@@ -29,24 +44,36 @@ export interface GenieRect {
   height: number;
 }
 
-/** Total timeline length. */
-const DURATION_MS = 400;
+/** Genie timeline length. Progress over it is linear, like Compiz. */
+const GENIE_DURATION_MS = 400;
+
+/** Portion of the timeline that morphs the rectangle into the lamp shape. */
+const PRE_SHAPE_END = 0.22;
 
 /**
- * Fraction of the timeline by which the bottom edge leads the top edge.
- * Higher = more exaggerated stretch; 0 degenerates into a plain scale.
+ * Point in the timeline where the window starts fading. Compiz keeps the
+ * window opaque - its final frame is icon-sized, hidden behind the icon -
+ * but our dock strip is transparent, so the shrunken window would visibly
+ * pop out of existence without a fade.
  */
-const EDGE_LAG = 0.45;
+const FADE_START = 0.8;
+
+/** Compiz `sigmoid(fx)`: the lamp silhouette curve. */
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-10 * (x - 0.5)));
+}
+
+const SIGMOID_0 = sigmoid(0);
+const SIGMOID_1 = sigmoid(1);
 
 /**
- * Point in the timeline where the window starts fading. The dock strip has
- * no background, so without a fade the shrunken window would visibly pop
- * out of existence on top of the tile icon.
+ * Compiz `decelerateProgress`: the segment [0.5, 0.75] of a slope-8 sigmoid,
+ * normalized. Used to slow the pre-shape morph toward its end.
  */
-const FADE_START = 0.7;
-
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+function decelerate(progress: number): number {
+  const s2 = (x: number) => 1 / (1 + Math.exp(-16 * (x - 0.5)));
+  const x = 1 - progress;
+  return 1 - (s2(0.5 + x * 0.25) - s2(0.5)) / (s2(0.75) - s2(0.5));
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -54,27 +81,66 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 /**
- * Paint the deformation for overall progress `p` onto the element: 0 is the
- * window at rest in its own geometry, 1 is fully swallowed by the tile.
+ * Paint the deformation for progress `p` onto the element: 0 is the window
+ * at rest in its own geometry, 1 is fully swallowed by the tile. A port of
+ * Compiz `fxMagicLampModelStep` for the minimize-downward case, evaluated at
+ * the four mesh corners.
  */
 function paintFrame(el: HTMLElement, win: GenieRect, target: GenieRect, p: number): void {
-  const pBottom = easeInOutCubic(Math.min(1, p / (1 - EDGE_LAG)));
-  const pTop = easeInOutCubic(Math.max(0, (p - EDGE_LAG) / (1 - EDGE_LAG)));
+  // Compiz's edge names, for a window above the icon: the "close" end is
+  // the window's bottom edge, heading for the icon's mouth (top edge); the
+  // "far" end is the window's top edge, last to be swallowed.
+  const iconCloseY = target.y;
+  const iconFarY = target.y + target.height;
+  const winFarY = win.y;
+  const winCloseY = Math.min(win.y + win.height, iconCloseY);
+  /** Height of the funnel: how far the far edge travels to the mouth. */
+  const funnel = Math.max(1, iconCloseY - winFarY);
 
-  // Corner destinations relative to the window's layout box (the transform
-  // applies with transform-origin 0 0).
-  const left = target.x - win.x;
-  const right = left + target.width;
-  const top = target.y - win.y;
-  const bottom = top + target.height;
+  // The stretch phase's share of the timeline is proportional to the close
+  // edge's share of the total travel (Compiz stretchPhaseEnd).
+  const closeDist = iconCloseY - winCloseY;
+  let stretchEnd = PRE_SHAPE_END + ((1 - PRE_SHAPE_END) * closeDist) / (funnel + closeDist);
+  if (stretchEnd < PRE_SHAPE_END + 0.1) stretchEnd = PRE_SHAPE_END + 0.1;
+
+  const preShape = p < PRE_SHAPE_END ? 1 - decelerate(1 - p / PRE_SHAPE_END) : 1;
+  const stretch = Math.min(1, p / stretchEnd);
+  const post = p < stretchEnd ? 0 : (p - stretchEnd) / (1 - stretchEnd);
+
+  const corner = (gx: 0 | 1, gy: 0 | 1): QuadPoint => {
+    const origX = win.x + gx * win.width;
+    const origY = win.y + gy * win.height;
+    const iconX = target.x + gx * target.width;
+    const iconY = target.y + gy * target.height;
+
+    // Stretch pulls each row toward the icon in proportion to its grid y:
+    // the far edge (gy 0) holds still while the close edge (gy 1) attaches
+    // to the icon; post-stretch then translates the whole shape into the
+    // icon, rows piling up (the clamp below) at its far side.
+    const stretched = (1 - gy) * origY + gy * iconY;
+    let y = post === 0 ? lerp(origY, stretched, stretch) : stretched + post * funnel;
+    y = Math.min(y, iconFarY);
+
+    // The silhouette: x follows the corner's *current* height through the
+    // sigmoid, from full window width at the far end (fx 1) down to icon
+    // width at the mouth (fx 0). During pre-shape, blend from the original
+    // rectangle into this lamp shape.
+    const fx = Math.min(1, Math.max(0, (iconCloseY - y) / funnel));
+    const fy = (sigmoid(fx) - SIGMOID_0) / (SIGMOID_1 - SIGMOID_0);
+    let x = fy * (origX - iconX) + iconX;
+    if (preShape < 1) x = lerp(origX, x, preShape);
+
+    // Corner offsets are relative to the window's layout box.
+    return { x: x - win.x, y: y - win.y };
+  };
 
   el.style.transform = quadTransform(
     win.width,
     win.height,
-    { x: lerp(0, left, pTop), y: lerp(0, top, pTop) },
-    { x: lerp(win.width, right, pTop), y: lerp(0, top, pTop) },
-    { x: lerp(0, left, pBottom), y: lerp(win.height, bottom, pBottom) },
-    { x: lerp(win.width, right, pBottom), y: lerp(win.height, bottom, pBottom) },
+    corner(0, 0),
+    corner(1, 0),
+    corner(0, 1),
+    corner(1, 1),
   );
   el.style.opacity =
     p <= FADE_START
@@ -103,8 +169,48 @@ export function animateGenie(
   const start = performance.now();
 
   const frame = (now: number) => {
-    const t = Math.min(1, (now - start) / DURATION_MS);
+    const t = Math.min(1, (now - start) / GENIE_DURATION_MS);
     paintFrame(el, win, target, direction === 'minimize' ? t : 1 - t);
+    if (t < 1) {
+      raf = requestAnimationFrame(frame);
+    } else {
+      onDone();
+    }
+  };
+
+  frame(start);
+  return () => cancelAnimationFrame(raf);
+}
+
+/** FLIP timeline length. */
+const FLIP_DURATION_MS = 250;
+
+/**
+ * FLIP-style geometry transition for maximize/restore/tile: the element's
+ * layout has already jumped to `to` (React committed the new geometry); this
+ * plays a compositor-only translate+scale that starts at `from` and eases
+ * (cubic ease-out, decelerating into place) to identity. Same contract as
+ * animateGenie: first frame painted synchronously, `onDone` owns cleanup and
+ * never fires on cancel; returns a cancel function.
+ */
+export function animateFlip(
+  el: HTMLElement,
+  from: GenieRect,
+  to: GenieRect,
+  onDone: () => void,
+): () => void {
+  el.style.transformOrigin = '0 0';
+  let raf = 0;
+  const start = performance.now();
+
+  const frame = (now: number) => {
+    const t = Math.min(1, (now - start) / FLIP_DURATION_MS);
+    const p = 1 - Math.pow(1 - t, 3);
+    const x = lerp(from.x - to.x, 0, p);
+    const y = lerp(from.y - to.y, 0, p);
+    const sx = lerp(from.width / to.width, 1, p);
+    const sy = lerp(from.height / to.height, 1, p);
+    el.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${sx}, ${sy})`;
     if (t < 1) {
       raf = requestAnimationFrame(frame);
     } else {

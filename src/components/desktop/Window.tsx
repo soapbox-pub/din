@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { getDockTileRect } from '@/lib/dockTiles';
-import { animateGenie, type GenieRect } from '@/lib/genie';
+import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
@@ -183,6 +183,16 @@ export const Window = memo(function Window({
     cur: { x: number; y: number; width: number; height: number };
   } | null>(null);
   const wobblyRef = useRef<WobblyDrag | null>(null);
+  // Cancel handle of whichever window-body animation (genie minimize/restore
+  // or FLIP maximize/tile) currently owns the transform; the two are
+  // mutually exclusive, so one handle covers both.
+  const animCancel = useRef<(() => void) | null>(null);
+  // The rect the window was last committed at, in workspace coordinates -
+  // the "first" frame of the FLIP maximize/restore animation. Kept fresh by
+  // a per-commit layout effect below; the snap-drop path overwrites it with
+  // the drop position, where the window visually sat (drags don't commit
+  // geometry until release).
+  const paintedRect = useRef<GenieRect | null>(null);
 
   // Custom title-bar content published by the hosted app (e.g. the browser's
   // tab strip), rendered inline with the window controls. `null` shows the
@@ -315,7 +325,6 @@ export const Window = memo(function Window({
   // window never flashes. Watching the flag here (rather than wrapping the
   // minimize/focus actions) covers every trigger: title-bar button, dock
   // tile clicks, and the dock's window picker.
-  const genieCancel = useRef<(() => void) | null>(null);
   const prevMinimized = useRef(win.minimized);
   useLayoutEffect(() => {
     if (prevMinimized.current === win.minimized) return;
@@ -323,8 +332,8 @@ export const Window = memo(function Window({
     const el = sectionRef.current;
     if (!el) return;
 
-    genieCancel.current?.();
-    genieCancel.current = null;
+    animCancel.current?.();
+    animCancel.current = null;
 
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
@@ -365,13 +374,13 @@ export const Window = memo(function Window({
     el.style.pointerEvents = 'none';
     if (minimizing) el.style.visibility = 'visible';
 
-    genieCancel.current = animateGenie(
+    animCancel.current = animateGenie(
       el,
       winRect,
       target,
       minimizing ? 'minimize' : 'restore',
       () => {
-        genieCancel.current = null;
+        animCancel.current = null;
         el.style.transform = '';
         el.style.transformOrigin = '';
         el.style.opacity = '';
@@ -384,8 +393,69 @@ export const Window = memo(function Window({
     );
   }, [win.minimized, win.appId, beginGesture, endGesture, stopWobble]);
 
-  // The genie loop must not outlive the window either.
-  useEffect(() => () => genieCancel.current?.(), []);
+  // Maximize/restore/tile transitions FLIP from the previous committed rect
+  // to the new one: React swaps the geometry instantly (CSS percentages or
+  // restored pixels), then this effect plays a compositor-only
+  // translate+scale from the old rect down to identity, decelerating into
+  // place. Skipped mid-gesture: a tear-away drag already moves the window
+  // under the pointer, and animating against it would fight the cursor.
+  const prevMode = useRef({ maximized: win.maximized, snapped: win.snapped });
+  useLayoutEffect(() => {
+    const prev = prevMode.current;
+    prevMode.current = { maximized: win.maximized, snapped: win.snapped };
+    if (prev.maximized === win.maximized && prev.snapped === win.snapped) return;
+    const el = sectionRef.current;
+    const from = paintedRect.current;
+    if (!el || !from || win.minimized) return;
+    if (dragState.current || resizeState.current) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    animCancel.current?.();
+    animCancel.current = null;
+    stopWobble(false);
+
+    const to: GenieRect = {
+      x: el.offsetLeft,
+      y: el.offsetTop,
+      width: el.offsetWidth,
+      height: el.offsetHeight,
+    };
+    if (!to.width || !to.height || !from.width || !from.height) return;
+    if (
+      from.x === to.x &&
+      from.y === to.y &&
+      from.width === to.width &&
+      from.height === to.height
+    ) {
+      return;
+    }
+
+    beginGesture();
+    animCancel.current = animateFlip(el, from, to, () => {
+      animCancel.current = null;
+      el.style.transform = '';
+      el.style.transformOrigin = '';
+      endGesture();
+    });
+  }, [win.maximized, win.snapped, win.minimized, beginGesture, endGesture, stopWobble]);
+
+  // Record the committed rect for the next FLIP. Declared after the FLIP
+  // effect so it runs later in the same commit: the FLIP reads the previous
+  // commit's rect before this overwrites it. Offsets ignore transforms, so
+  // recording is safe mid-animation.
+  useLayoutEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    paintedRect.current = {
+      x: el.offsetLeft,
+      y: el.offsetTop,
+      width: el.offsetWidth,
+      height: el.offsetHeight,
+    };
+  });
+
+  // Neither animation loop may outlive the window (e.g. closed mid-flight).
+  useEffect(() => () => animCancel.current?.(), []);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -573,6 +643,9 @@ export const Window = memo(function Window({
         stopWobble(false);
         if (el) el.style.transform = '';
         endGesture();
+        // The FLIP into the snap target starts from the drop position, where
+        // the window visually sat (the drag never committed geometry).
+        paintedRect.current = { x: s.x, y: s.y, width: win.width, height: win.height };
         if (s.snap === 'top') maximize(win.id, restore);
         else tile(win.id, s.snap, restore);
         return;
@@ -725,6 +798,11 @@ export const Window = memo(function Window({
       style={geometry}
       className={cn(
         'absolute flex flex-col overflow-hidden bg-card/90 backdrop-blur-xl',
+        // Open animation: a quick macOS-style pop (fade + zoom from 95%),
+        // running once on mount. CSS keyframes take precedence over inline
+        // transforms for their duration, so gestures in the first 200ms are
+        // visually deferred, never broken.
+        'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200',
         flush
           ? 'rounded-none'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
