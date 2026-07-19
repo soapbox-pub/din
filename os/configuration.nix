@@ -79,9 +79,10 @@ let
   # security-maintained against untrusted WebGL content; acceptable for this
   # demo, revisit if the <webview> browser faces hostile sites in earnest).
   # python3 must be on PATH for the Terminal app's pty host (pty-host.py),
-  # and nmcli for the Settings app's WiFi bridge.
+  # nmcli for the Settings app's WiFi bridge, and brightnessctl + gammastep for
+  # the Settings/menu-bar brightness bridge (backlight + night light).
   din-launcher = pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:$PATH
     exec ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.cjs \
       --ozone-platform=wayland \
@@ -97,13 +98,19 @@ in
   # picked up by NetworkManager automatically.
   networking.networkmanager.enable = true;
 
-  # Unprivileged user Din runs as. `networkmanager` group membership
-  # lets the WiFi settings panel control connections without polkit prompts.
+  # Unprivileged user Din runs as. `networkmanager` group membership lets the
+  # WiFi settings panel control connections without polkit prompts; `video`
+  # lets the brightness bridge write the backlight (via brightnessctl's udev
+  # rules below) without root.
   users.users.web = {
     isNormalUser = true;
     description = "Din desktop user";
-    extraGroups = [ "networkmanager" ];
+    extraGroups = [ "networkmanager" "video" ];
   };
+
+  # brightnessctl ships udev rules that grant the `video` group write access to
+  # /sys/class/backlight, so the Settings brightness panel works unprivileged.
+  services.udev.packages = [ pkgs.brightnessctl ];
 
   # cage: a Wayland compositor that runs exactly one fullscreen application.
   # This is the entire graphical stack - no X11, no display manager, no desktop.

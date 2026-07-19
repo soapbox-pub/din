@@ -33,14 +33,17 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
+import { BrightnessGlyph, BrightnessPopoverBody } from '@/components/desktop/BrightnessIndicator';
 import { useClock } from '@/hooks/useClock';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
 import { useBatteryStatus } from '@/hooks/usePower';
 import { useAudioStatus } from '@/hooks/useAudio';
+import { useBrightnessStatus } from '@/hooks/useBrightness';
 import { getWifiBridge, isEthernetConnected } from '@/lib/wifi';
 import { getPowerBridge, summarizePower } from '@/lib/power';
 import { getAudioBridge } from '@/lib/audio';
+import { getBrightnessBridge } from '@/lib/brightness';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
@@ -78,6 +81,7 @@ export function MenuBar() {
     >
       <AppsMenu />
       <div className="flex items-center gap-1.5">
+        <BrightnessMenuItem />
         <VolumeMenuItem />
         <BatteryMenuItem />
         <WifiMenuItem />
@@ -178,6 +182,42 @@ const AppsMenu = memo(function AppsMenu() {
             </div>
           )}
         </div>
+      </PopoverContent>
+    </Popover>
+  );
+});
+
+/**
+ * Brightness status item: sun glyph; clicking opens a backlight slider plus a
+ * night-light (red shift) toggle. Renders nothing outside the Electron shell
+ * or where neither the backlight nor a gamma tool is present, like the other
+ * hardware indicators.
+ */
+const BrightnessMenuItem = memo(function BrightnessMenuItem() {
+  const bridge = getBrightnessBridge();
+  const status = useBrightnessStatus();
+
+  if (!bridge) return null;
+  const data = status.data;
+  if (!data || (!data.available && !data.nightLight.available)) return null;
+
+  const label = data.available ? `Brightness ${data.brightness ?? '?'}%` : 'Display';
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          title={label}
+          className="size-7 rounded-md text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
+        >
+          <BrightnessGlyph brightness={data.brightness} className="size-4.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">
+        <BrightnessPopoverBody />
       </PopoverContent>
     </Popover>
   );

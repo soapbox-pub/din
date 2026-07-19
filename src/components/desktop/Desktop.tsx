@@ -4,6 +4,7 @@ import { Dock } from './Dock';
 import { DesktopHotkeys } from './DesktopHotkeys';
 import { MenuBar } from './MenuBar';
 import { VolumeOsd } from './VolumeOsd';
+import { BrightnessOsd } from './BrightnessOsd';
 import { Window } from './Window';
 import { FilePickerProvider } from './FilePickerProvider';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
@@ -64,6 +65,7 @@ function DesktopSession() {
 
             <Dock workspaceRef={workspaceRef} />
             <VolumeOsd />
+            <BrightnessOsd />
           </Wallpaper>
         </FilePickerProvider>
       </WindowActionsContext.Provider>

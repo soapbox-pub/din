@@ -54,6 +54,9 @@ import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
 import { getAudioBridge } from '@/lib/audio';
 import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
 import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
+import { getBrightnessBridge, MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
+import { useBrightnessMutations, useBrightnessStatus } from '@/hooks/useBrightness';
+import { BrightnessGlyph } from '@/components/desktop/BrightnessIndicator';
 import { Slider } from '@/components/ui/slider';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -75,6 +78,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 type SectionId =
   | 'wifi'
   | 'display'
+  | 'brightness'
   | 'battery'
   | 'sound'
   | 'nostr'
@@ -84,6 +88,7 @@ type SectionId =
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
   { id: 'display', name: 'Display', icon: Monitor },
+  { id: 'brightness', name: 'Brightness', icon: Sun },
   { id: 'battery', name: 'Battery', icon: BatteryFull },
   { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
@@ -144,6 +149,8 @@ export function Settings(_props: AppComponentProps) {
           <WifiSection />
         ) : section === 'display' ? (
           <DisplaySection />
+        ) : section === 'brightness' ? (
+          <BrightnessSection />
         ) : section === 'battery' ? (
           <BatterySection />
         ) : section === 'sound' ? (
@@ -1183,6 +1190,162 @@ function BatterySkeleton() {
 // ---------------------------------------------------------------------------
 // Sound
 // ---------------------------------------------------------------------------
+
+/**
+ * Screen backlight and night light (red shift), via the brightness bridge
+ * (window.brightness). Backlight rides on brightnessctl (/sys/class/backlight);
+ * night light on a Wayland/X11 gamma tool (gammastep/wlsunset). Each half falls
+ * back independently, and the whole section falls back in a plain browser.
+ * Media keys drive the backlight and show the brightness OSD.
+ */
+function BrightnessSection() {
+  const bridge = getBrightnessBridge();
+  const status = useBrightnessStatus();
+  const { setBrightness, setNightLight, setTemperature } = useBrightnessMutations();
+
+  const backlightAvailable = status.data?.available ?? false;
+  const serverBrightness = status.data?.brightness ?? 0;
+  const nightLight = status.data?.nightLight;
+
+  // Local values for smooth drags; committed on release, re-synced to the
+  // server value by adjusting state during render rather than in an effect.
+  const [value, setValue] = useState(serverBrightness);
+  const [lastServer, setLastServer] = useState(serverBrightness);
+  if (serverBrightness !== lastServer) {
+    setLastServer(serverBrightness);
+    setValue(serverBrightness);
+  }
+
+  const serverTemp = nightLight?.temperature ?? MAX_TEMPERATURE;
+  const [temp, setTemp] = useState(serverTemp);
+  const [lastTemp, setLastTemp] = useState(serverTemp);
+  if (serverTemp !== lastTemp) {
+    setLastTemp(serverTemp);
+    setTemp(serverTemp);
+  }
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Brightness">
+        <FallbackCard icon={Sun}>
+          Brightness settings need the Din desktop shell; the screen backlight
+          can't be controlled in a plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const refresh = (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label="Refresh brightness status"
+      title="Refresh brightness status"
+      onClick={() => status.refetch()}
+    >
+      <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+    </Button>
+  );
+
+  if (status.isLoading) {
+    return (
+      <SectionShell title="Brightness" actions={refresh}>
+        <div className="h-20 rounded-xl border border-border/60" aria-hidden>
+          <div className="flex h-full items-center gap-4 px-4">
+            <Skeleton className="size-8 rounded bg-foreground/10" />
+            <Skeleton className="h-2 flex-1 rounded-full bg-foreground/10" />
+          </div>
+        </div>
+      </SectionShell>
+    );
+  }
+
+  if (!backlightAvailable && !nightLight?.available) {
+    return (
+      <SectionShell title="Brightness" actions={refresh}>
+        <FallbackCard icon={Sun}>
+          No backlight or gamma tool was found. Neither brightnessctl nor a
+          night-light tool (gammastep/wlsunset) is available on this system.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell title="Brightness" actions={refresh}>
+      <div className="flex flex-col gap-4">
+        {backlightAvailable && (
+          <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+            <BrightnessGlyph brightness={value} className="size-6 shrink-0 text-foreground/90" />
+            <Slider
+              aria-label="Screen brightness"
+              value={[value]}
+              min={0}
+              max={100}
+              step={1}
+              className="flex-1"
+              onValueChange={([v]) => setValue(v)}
+              onValueCommit={([v]) => setBrightness.mutate(v)}
+            />
+            <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
+              {value}%
+            </span>
+          </div>
+        )}
+
+        {nightLight?.available && (
+          <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <Moon
+                  className={cn(
+                    'size-6 shrink-0',
+                    nightLight.enabled ? 'text-foreground/90' : 'text-muted-foreground',
+                  )}
+                  aria-hidden
+                />
+                <div className="min-w-0">
+                  <Label htmlFor="night-light" className="cursor-pointer text-sm">
+                    Night Light
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Warm the display's colors to reduce blue light.
+                  </p>
+                </div>
+              </div>
+              <Switch
+                id="night-light"
+                checked={nightLight.enabled}
+                onCheckedChange={(checked) => setNightLight.mutate(checked)}
+              />
+            </div>
+
+            {nightLight.enabled && (
+              <div className="flex items-center gap-3 border-t border-border/60 pt-4">
+                <span className="text-xs text-muted-foreground">Cooler</span>
+                {/* Invert the axis so dragging right warms the screen. */}
+                <Slider
+                  aria-label="Color temperature"
+                  value={[MIN_TEMPERATURE + MAX_TEMPERATURE - temp]}
+                  min={MIN_TEMPERATURE}
+                  max={MAX_TEMPERATURE}
+                  step={100}
+                  className="flex-1"
+                  onValueChange={([v]) => setTemp(MIN_TEMPERATURE + MAX_TEMPERATURE - v)}
+                  onValueCommit={() => setTemperature.mutate(temp)}
+                />
+                <span className="text-xs text-muted-foreground">Warmer</span>
+                <span className="w-16 text-right text-sm tabular-nums text-muted-foreground">
+                  {temp}K
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </SectionShell>
+  );
+}
 
 /**
  * Output volume and mute, via the audio bridge (window.audio, wpctl/PipeWire).

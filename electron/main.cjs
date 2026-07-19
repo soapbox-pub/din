@@ -983,6 +983,230 @@ function registerMediaKeys() {
 }
 
 // ---------------------------------------------------------------------------
+// Brightness bridge (window.brightness). Two independent halves:
+//   - Screen backlight, via brightnessctl (/sys/class/backlight). Needs write
+//     access to the backlight sysfs node (brightnessctl ships udev rules that
+//     grant the `video` group; see os/configuration.nix).
+//   - Night light / red shift: a warm color temperature held by a Wayland/X11
+//     gamma tool (gammastep preferred, wlsunset as a fallback) kept running in
+//     the main process. Under Wayland the gamma ramp is torn down when the
+//     client disconnects, so the tool must stay alive for the tint to persist;
+//     we run it in continuous mode with equal day/night temps.
+// Either half reports available:false where its tool/device is absent. Same
+// trust boundary as the other bridges: sender guard, argv execFile/spawn,
+// values re-clamped here.
+// ---------------------------------------------------------------------------
+
+const BRIGHTNESSCTL_TIMEOUT_MS = 5_000;
+const BACKLIGHT_CLASS = 'backlight';
+const NIGHT_LIGHT_TOOLS = ['gammastep', 'wlsunset'];
+const MIN_TEMPERATURE = 2500;
+const MAX_TEMPERATURE = 6500;
+
+/** Run brightnessctl with an argv array; resolves stdout, rejects with a clean message. */
+function brightnessctl(args, timeout = BRIGHTNESSCTL_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    execFile('brightnessctl', args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      if (!error) return resolve(stdout);
+      if (error.code === 'ENOENT') return reject(new Error('brightnessctl-missing'));
+      const detail = (stderr || error.message || '').trim().split('\n')[0];
+      reject(new Error(detail || 'brightnessctl failed'));
+    });
+  });
+}
+
+/** Clamp a caller-supplied percentage to an integer 1..100 (never fully dark). */
+function clampBrightness(pct) {
+  const n = Number(pct);
+  if (!Number.isFinite(n)) throw new Error('Invalid brightness');
+  return Math.max(1, Math.min(100, Math.round(n)));
+}
+
+/** Clamp a caller-supplied color temperature to an integer in the useful range. */
+function clampTemperature(kelvin) {
+  const n = Number(kelvin);
+  if (!Number.isFinite(n)) throw new Error('Invalid temperature');
+  return Math.max(MIN_TEMPERATURE, Math.min(MAX_TEMPERATURE, Math.round(n)));
+}
+
+/** Backlight level 0-100, null if no backlight device, or throws if the tool is missing. */
+async function backlightGet() {
+  // Machine-readable: "device,class,current,40%,max".
+  const out = await brightnessctl(['-m', '-c', BACKLIGHT_CLASS, 'info']);
+  const line = out
+    .trim()
+    .split('\n')
+    .find((l) => l.includes(`,${BACKLIGHT_CLASS},`));
+  if (!line) return null;
+  const match = (line.split(',')[3] || '').match(/(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+// --- Night light (red shift) state, held in the main process. ---
+let nightLightTool = null; // resolved tool name, or null when none is present
+let nightLightProbed = false; // whether we've looked for a tool yet
+let nightLightProc = null; // the running gamma child, or null when off
+let nightLightEnabled = false;
+let nightLightTemp = 4500;
+
+/** Resolve whether a gamma tool exists (ENOENT = missing); cached after first probe. */
+function probeTool(tool) {
+  return new Promise((resolve) => {
+    execFile(tool, ['-V'], { timeout: 3_000 }, (error) => {
+      // Any error other than ENOENT (e.g. an unknown flag) still means the
+      // binary is present and runnable.
+      resolve(!error || error.code !== 'ENOENT');
+    });
+  });
+}
+
+/** Find and cache the first available gamma tool (gammastep, then wlsunset). */
+async function ensureNightLightTool() {
+  if (nightLightProbed) return nightLightTool;
+  nightLightProbed = true;
+  for (const tool of NIGHT_LIGHT_TOOLS) {
+    if (await probeTool(tool)) {
+      nightLightTool = tool;
+      break;
+    }
+  }
+  return nightLightTool;
+}
+
+/** Argv that holds a fixed color temperature continuously (so the ramp persists). */
+function nightLightArgs(tool, temp) {
+  if (tool === 'wlsunset') {
+    // wlsunset needs night < day and a schedule; pin the schedule so it stays
+    // at the night temperature essentially all day.
+    return ['-t', String(temp), '-T', String(temp + 500), '-S', '23:59', '-s', '00:00'];
+  }
+  // gammastep: manual location, equal day/night temps, no fade transition.
+  return ['-l', '0:0', '-t', `${temp}:${temp}`, '-r'];
+}
+
+/** Stop the running gamma child, if any. */
+function stopNightLight() {
+  if (nightLightProc) {
+    try {
+      nightLightProc.kill('SIGTERM');
+    } catch {
+      // Already gone.
+    }
+    nightLightProc = null;
+  }
+  nightLightEnabled = false;
+}
+
+/** (Re)start the gamma child at the current temperature. Throws if no tool exists. */
+async function startNightLight() {
+  const tool = await ensureNightLightTool();
+  if (!tool) throw new Error('night-light-missing');
+  stopNightLight();
+  const proc = spawn(tool, nightLightArgs(tool, nightLightTemp), { stdio: 'ignore' });
+  proc.on('error', () => {}); // spawn race (e.g. tool vanished); status stays sane
+  proc.on('exit', () => {
+    if (nightLightProc === proc) {
+      nightLightProc = null;
+      nightLightEnabled = false;
+    }
+  });
+  nightLightProc = proc;
+  nightLightEnabled = true;
+}
+
+function nightLightStatus() {
+  return {
+    available: nightLightTool !== null,
+    enabled: nightLightEnabled,
+    temperature: nightLightTemp,
+  };
+}
+
+/** Backlight level + night-light state; per-half available:false when a tool is absent. */
+async function brightnessStatus() {
+  await ensureNightLightTool();
+  let available = false;
+  let brightness = null;
+  try {
+    brightness = await backlightGet();
+    available = brightness !== null;
+  } catch {
+    // brightnessctl missing or no backlight device: degrade to unavailable.
+    available = false;
+    brightness = null;
+  }
+  return { available, brightness, nightLight: nightLightStatus() };
+}
+
+async function brightnessSet(pct) {
+  const v = clampBrightness(pct);
+  await brightnessctl(['-c', BACKLIGHT_CLASS, 'set', `${v}%`]);
+  return brightnessStatus();
+}
+
+/** Relative backlight nudge for the media keys; read-modify-set so it never hits 0. */
+async function brightnessAdjust(deltaPct) {
+  const current = await backlightGet();
+  if (current === null) throw new Error('no-backlight');
+  return brightnessSet(current + deltaPct);
+}
+
+async function brightnessSetNightLight(enabled) {
+  if (enabled) await startNightLight();
+  else stopNightLight();
+  return brightnessStatus();
+}
+
+async function brightnessSetTemperature(kelvin) {
+  nightLightTemp = clampTemperature(kelvin);
+  if (nightLightEnabled) await startNightLight(); // respawn with the new temp
+  return brightnessStatus();
+}
+
+/**
+ * Global brightness media keys. Electron's accelerator table doesn't document
+ * the monitor-brightness keys, so we try a few spellings and let unsupported
+ * ones fail quietly - the menu-bar slider and Settings panel work regardless.
+ */
+function registerBrightnessMediaKeys() {
+  const push = (statusPromise) =>
+    statusPromise.then((s) => sendToShell('brightness:osd', s)).catch(() => {});
+  const keys = [
+    ['MonBrightnessUp', 5],
+    ['BrightnessUp', 5],
+    ['MonBrightnessDown', -5],
+    ['BrightnessDown', -5],
+  ];
+  for (const [accelerator, delta] of keys) {
+    try {
+      globalShortcut.register(accelerator, () => push(brightnessAdjust(delta)));
+    } catch {
+      // Unsupported accelerator on this Electron build; skip it.
+    }
+  }
+}
+
+function registerBrightnessHandlers() {
+  ipcMain.handle('brightness:status', async (event) => {
+    assertShellSender(event);
+    return brightnessStatus();
+  });
+  ipcMain.handle('brightness:setBrightness', async (event, pct) => {
+    assertShellSender(event);
+    return brightnessSet(pct);
+  });
+  ipcMain.handle('brightness:setNightLight', async (event, enabled) => {
+    assertShellSender(event);
+    return brightnessSetNightLight(enabled === true);
+  });
+  ipcMain.handle('brightness:setTemperature', async (event, kelvin) => {
+    assertShellSender(event);
+    return brightnessSetTemperature(kelvin);
+  });
+  registerBrightnessMediaKeys();
+}
+
+// ---------------------------------------------------------------------------
 // Screenshot bridge (window.screenshot), backed by the screenshot:* handler
 // below. Captures the shell window's rendered contents - the whole Din desktop
 // (wallpaper, open windows, menu bar, dock) - as a PNG via Electron's
@@ -1579,6 +1803,7 @@ app.whenReady().then(() => {
   registerPowerHandlers();
   registerAudioHandlers();
   registerMediaKeys();
+  registerBrightnessHandlers();
   registerScreenshotHandlers();
   registerCrxHandlers();
   registerDevtoolsHandlers();
@@ -1668,8 +1893,12 @@ app.whenReady().then(() => {
   }
 });
 
-// Release the media-key grabs (VolumeUp/Down/Mute) when the app exits.
-app.on('will-quit', () => globalShortcut.unregisterAll());
+// Release the media-key grabs (VolumeUp/Down/Mute, brightness) and stop the
+// night-light gamma child when the app exits.
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  stopNightLight();
+});
 
 // Harden any <webview> the shell embeds (the web browser app). Keep them
 // sandboxed with no Node integration, and deny requests to spawn native

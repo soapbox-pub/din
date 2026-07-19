@@ -1,12 +1,13 @@
 // Preload for the Din renderer.
 //
-// Exposes nine bridges backed by IPC handlers in main.cjs:
+// Exposes ten bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //   - window.display: xrandr multi-output arrangement for the Settings app
 //   - window.power: battery/AC status for the menu bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
+//   - window.brightness: backlight + night light for the menu bar, Settings, OSD
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.devtools: docked devtools control for the Web Browser app
@@ -165,6 +166,38 @@ contextBridge.exposeInMainWorld('audio', {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('audio:osd', listener);
     return () => ipcRenderer.removeListener('audio:osd', listener);
+  },
+});
+
+// Brightness bridge (window.brightness), backed by the brightness:* handlers in
+// main.cjs. Two independent halves: the screen backlight (brightnessctl /
+// /sys/class/backlight) and night light / red shift (a warm color temperature
+// held by a Wayland/X11 gamma tool, gammastep or wlsunset). Drives the menu-bar
+// control, the Settings brightness panel, and the media-key OSD. Mutations
+// resolve to the new { available, brightness, nightLight } state; each half
+// reports available:false where its tool/device is absent.
+contextBridge.exposeInMainWorld('brightness', {
+  /** Backlight level + night-light state. See per-field `available` flags. */
+  status: () => ipcRenderer.invoke('brightness:status'),
+
+  /** Set the backlight level (0-100). Resolves to the new state. */
+  setBrightness: (percent) => ipcRenderer.invoke('brightness:setBrightness', percent),
+
+  /** Turn the warm night-light tint on or off. Resolves to the new state. */
+  setNightLight: (enabled) => ipcRenderer.invoke('brightness:setNightLight', enabled),
+
+  /** Set the night-light color temperature in Kelvin. Resolves to the new state. */
+  setTemperature: (kelvin) => ipcRenderer.invoke('brightness:setTemperature', kelvin),
+
+  /**
+   * Subscribe to media-key brightness changes (MonBrightnessUp/Down), for the
+   * OSD. The callback receives the new { available, brightness, nightLight }
+   * state. Returns an unsubscribe fn.
+   */
+  onOsd: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('brightness:osd', listener);
+    return () => ipcRenderer.removeListener('brightness:osd', listener);
   },
 });
 
