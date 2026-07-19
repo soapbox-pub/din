@@ -34,7 +34,7 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
-import { normalizeThemeColor } from '@/lib/themeColor';
+import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import {
   BrowserView,
@@ -570,6 +570,24 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     ? activeTab.canForward
     : activeTab.cursor < activeTab.history.length - 1;
 
+  // Tint the toolbar with the active tab's theme color, matching the title
+  // bar (the Window tints it from the same value via useWindowAccent). The
+  // theme tokens are mapped with `@theme inline`, so overriding them locally
+  // re-themes every toolbar control to keep contrast on the arbitrary color.
+  const accent = normalizeThemeColor(activeTab.themeColor);
+  const accentDark = accent !== null && isDarkThemeColor(accent);
+  const toolbarTint = accent
+    ? ({
+        backgroundColor: accent,
+        '--foreground': accentDark ? '#ffffff' : '#000000',
+        '--muted-foreground': accentDark
+          ? 'rgb(255 255 255 / 0.7)'
+          : 'rgb(0 0 0 / 0.6)',
+        '--border': accentDark ? 'rgb(255 255 255 / 0.15)' : 'rgb(0 0 0 / 0.15)',
+        '--secondary': accentDark ? 'rgb(255 255 255 / 0.15)' : 'rgb(0 0 0 / 0.06)',
+      } as React.CSSProperties)
+    : undefined;
+
   // F12 / Ctrl+Shift+I while focus is in the shell's chrome (address bar,
   // buttons). The same shortcut inside a page arrives as a `toggle` command
   // from the main process instead (see the devtools.onCommand effect).
@@ -630,7 +648,13 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           e.preventDefault();
           navigate(activeTab.address);
         }}
-        className="relative flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/50 px-2 py-1.5"
+        style={toolbarTint}
+        className={cn(
+          'relative flex shrink-0 items-center gap-1 border-b px-2 py-1.5',
+          // The overridden --border already carries its own alpha; the
+          // default keeps the token at 60%.
+          accent ? 'border-border' : 'border-border/60 bg-background/50',
+        )}
       >
         <NavButton label="Go back" disabled={!canBack} onClick={() => go(-1)}>
           <ArrowLeft className="size-4" />
