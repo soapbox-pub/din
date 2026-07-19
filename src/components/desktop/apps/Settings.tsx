@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bomb,
   Bug,
@@ -7,6 +7,7 @@ import {
   CloudOff,
   Loader2,
   Lock,
+  Monitor,
   Moon,
   MousePointer2,
   Palette,
@@ -30,6 +31,9 @@ import {
   useWifiNetworks,
   useWifiStatus,
 } from '@/hooks/useWifi';
+import { cleanDisplayError, formatMode, getDisplayBridge } from '@/lib/display';
+import type { DisplayMode, DisplayOutput } from '@/lib/display';
+import { useDisplayStatus, useSetDisplayMode } from '@/hooks/useDisplay';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -47,10 +51,11 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type SectionId = 'wifi' | 'nostr' | 'appearance' | 'developers';
+type SectionId = 'wifi' | 'display' | 'nostr' | 'appearance' | 'developers';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
+  { id: 'display', name: 'Display', icon: Monitor },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
   { id: 'developers', name: 'Developers', icon: Bug },
@@ -62,7 +67,9 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * The Wi-Fi section drives NetworkManager through `window.wifi` (Electron
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
- * explanatory fallback. Nostr & Storage manages Din's encrypted app-data
+ * explanatory fallback. The Display section changes screen resolution through
+ * `window.display` (xrandr) for the bare-X11 standalone session; on Wayland it
+ * shows a fallback. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
@@ -102,6 +109,8 @@ export function Settings(_props: AppComponentProps) {
       <div className="min-w-0 flex-1 overflow-y-auto">
         {section === 'wifi' ? (
           <WifiSection />
+        ) : section === 'display' ? (
+          <DisplaySection />
         ) : section === 'nostr' ? (
           <NostrStorageSection />
         ) : section === 'appearance' ? (
@@ -421,6 +430,206 @@ function NetworkListSkeleton() {
             <Skeleton className="h-3.5 bg-foreground/10" style={{ width: `${30 + ((i * 23) % 35)}%` }} />
             <Skeleton className="h-3 w-16 bg-foreground/10" />
           </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Display
+// ---------------------------------------------------------------------------
+
+/**
+ * Screen resolution for each connected output, via the xrandr display bridge
+ * (window.display). Meaningful on the bare-X11 standalone session where Din is
+ * the whole desktop; on Wayland/cage or in a plain browser it renders a
+ * fallback, since the compositor sizes Din to the display automatically.
+ */
+function DisplaySection() {
+  const bridge = getDisplayBridge();
+  const status = useDisplayStatus();
+  const setMode = useSetDisplayMode();
+  // Last failed operation, keyed to the output it concerned.
+  const [opError, setOpError] = useState<{ output: string; message: string } | null>(null);
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Display">
+        <FallbackCard icon={Monitor}>
+          Display settings need the Din desktop shell. A plain browser has no
+          screen resolution to manage.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell
+      title="Display"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh displays"
+          title="Refresh displays"
+          disabled={!status.data?.available}
+          onClick={() => status.refetch()}
+        >
+          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+        </Button>
+      }
+    >
+      {status.isLoading ? (
+        <DisplayListSkeleton />
+      ) : status.isError ? (
+        <FallbackCard>Could not read display state: {cleanDisplayError(status.error)}</FallbackCard>
+      ) : !status.data?.available ? (
+        <FallbackCard icon={Monitor}>
+          Screen resolution can't be changed here. This session uses a Wayland
+          compositor (cage), which sizes Din to the display automatically.
+        </FallbackCard>
+      ) : status.data.outputs.length === 0 ? (
+        <FallbackCard icon={Monitor}>No connected displays were found.</FallbackCard>
+      ) : (
+        <ul className="flex flex-col gap-2" aria-label="Displays">
+          {status.data.outputs.map((output) => (
+            <DisplayRow
+              key={output.name}
+              output={output}
+              pending={setMode.isPending && setMode.variables?.output === output.name}
+              error={opError?.output === output.name ? opError.message : null}
+              onSetMode={(width, height) => {
+                setOpError(null);
+                setMode.mutate(
+                  { output: output.name, width, height },
+                  {
+                    onError: (error) =>
+                      setOpError({ output: output.name, message: cleanDisplayError(error) }),
+                  },
+                );
+              }}
+            />
+          ))}
+        </ul>
+      )}
+    </SectionShell>
+  );
+}
+
+/** A friendlier label for common xrandr output names. */
+function friendlyOutputName(name: string): string {
+  if (/^(eDP|LVDS)/i.test(name)) return 'Built-in display';
+  if (/^HDMI/i.test(name)) return 'HDMI display';
+  if (/^(DisplayPort|DP)/i.test(name)) return 'DisplayPort display';
+  if (/^(VGA|DVI)/i.test(name)) return `${name.replace(/-.*/, '')} display`;
+  return name;
+}
+
+function DisplayRow({
+  output,
+  pending,
+  error,
+  onSetMode,
+}: {
+  output: DisplayOutput;
+  pending: boolean;
+  error: string | null;
+  onSetMode: (width: number, height: number) => void;
+}) {
+  // Collapse xrandr's per-refresh-rate rows to unique resolutions, largest
+  // first, carrying the current/native flags forward.
+  const modes = useMemo(() => {
+    const byResolution = new Map<string, DisplayMode>();
+    for (const mode of output.modes) {
+      const key = `${mode.width}x${mode.height}`;
+      const existing = byResolution.get(key);
+      byResolution.set(key, {
+        width: mode.width,
+        height: mode.height,
+        current: (existing?.current ?? false) || mode.current,
+        preferred: (existing?.preferred ?? false) || mode.preferred,
+      });
+    }
+    return [...byResolution.values()].sort(
+      (a, b) => b.width - a.width || b.height - a.height,
+    );
+  }, [output.modes]);
+
+  const currentValue = output.current
+    ? `${output.current.width}x${output.current.height}`
+    : '';
+  const friendly = friendlyOutputName(output.name);
+  const selectId = `resolution-${output.name}`;
+
+  return (
+    <li className="rounded-lg border border-border/60 bg-background/40 p-3">
+      <div className="flex items-center gap-3">
+        <Monitor className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-2 truncate text-sm text-foreground">
+            {friendly}
+            {output.primary && (
+              <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                Primary
+              </span>
+            )}
+          </p>
+          <p className="truncate text-xs text-muted-foreground">{output.name}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {pending && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />}
+          <Label htmlFor={selectId} className="sr-only">
+            Resolution for {friendly}
+          </Label>
+          <select
+            id={selectId}
+            value={currentValue}
+            disabled={pending || modes.length === 0}
+            onChange={(e) => {
+              const [width, height] = e.target.value.split('x').map(Number);
+              if (Number.isFinite(width) && Number.isFinite(height)) onSetMode(width, height);
+            }}
+            className={cn(
+              'h-8 rounded-md border border-border/60 bg-background px-2 text-sm text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'disabled:cursor-not-allowed disabled:opacity-60',
+            )}
+          >
+            {currentValue === '' && <option value="">—</option>}
+            {modes.map((mode) => (
+              <option key={`${mode.width}x${mode.height}`} value={`${mode.width}x${mode.height}`}>
+                {formatMode(mode.width, mode.height)}
+                {mode.preferred ? ' (native)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {error !== null && (
+        <p role="alert" className="mt-2 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function DisplayListSkeleton() {
+  return (
+    <div className="flex flex-col gap-2" aria-hidden>
+      {Array.from({ length: 2 }, (_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
+        >
+          <Skeleton className="size-5 rounded bg-foreground/10" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-32 bg-foreground/10" />
+            <Skeleton className="h-3 w-16 bg-foreground/10" />
+          </div>
+          <Skeleton className="h-8 w-28 rounded-md bg-foreground/10" />
         </div>
       ))}
     </div>

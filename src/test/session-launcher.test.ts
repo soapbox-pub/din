@@ -27,8 +27,9 @@ describe('standalone Din session launcher', () => {
     // The launcher deliberately sets no DIN_DEV_URL; main.cjs must still key
     // the fullscreen kiosk off its absence, or the session opens windowed.
     expect(main).toMatch(/DEV_URL\s*=\s*process\.env\.DIN_DEV_URL/);
-    expect(main).toMatch(/fullscreen:\s*!DEV_URL/);
-    expect(main).toMatch(/kiosk:\s*!DEV_URL/);
+    expect(main).toMatch(/production\s*=\s*!DEV_URL/);
+    expect(main).toMatch(/fullscreen:\s*production/);
+    expect(main).toMatch(/kiosk:\s*production/);
   });
 
   it('execs paths that actually exist in the tree', () => {

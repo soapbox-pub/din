@@ -1,9 +1,10 @@
 // Preload for the Din renderer.
 //
-// Exposes five bridges backed by IPC handlers in main.cjs:
+// Exposes six bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
+//   - window.display: xrandr screen-resolution control for the Settings app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.devtools: docked devtools control for the Web Browser app
 //
@@ -109,6 +110,19 @@ contextBridge.exposeInMainWorld('wifi', {
 
   /** Turn the WiFi radio on or off. */
   setRadio: (enabled) => ipcRenderer.invoke('wifi:setRadio', enabled),
+});
+
+// Display bridge (window.display), backed by the display:* handlers in
+// main.cjs (xrandr). Used by the Settings app to change screen resolution on
+// a bare X11 session. `available: false` where xrandr doesn't apply
+// (Wayland/cage), so the panel can render a fallback.
+contextBridge.exposeInMainWorld('display', {
+  /** Connected outputs with their available modes. `available: false` = no xrandr. */
+  status: () => ipcRenderer.invoke('display:status'),
+
+  /** Set an output's resolution (validated against its reported modes). */
+  setMode: (output, width, height) =>
+    ipcRenderer.invoke('display:setMode', output, width, height),
 });
 
 // Chrome extension bridge (window.crx), backed by the crx:* handlers in

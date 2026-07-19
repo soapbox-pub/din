@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawn, execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, net, session, webContents, Menu, MenuItem } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, Menu, MenuItem } = require('electron');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const buildChromeContextMenu = require('electron-chrome-context-menu').default;
 const {
@@ -470,6 +470,106 @@ async function wifiDevice() {
 async function savedWifiConnections() {
   const rows = terseRows(await nmcli(['-t', '-f', 'NAME,TYPE', 'connection', 'show']));
   return rows.filter((fields) => fields[1] === WIFI_TYPE).map((fields) => fields[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Display bridge (window.display), backed by xrandr. Meaningful only on a bare
+// X11 session (the os/x11 standalone launcher), where Din is the whole desktop
+// and nothing else manages screen resolution. On Wayland/cage (Aladdin) xrandr
+// isn't applicable, so status reports `available: false` and the Settings
+// panel renders a fallback - same shape as the WiFi bridge in QEMU.
+//
+// Threat model: same boundaries as the other bridges (strict CSP, sender
+// guard, arguments re-validated). xrandr runs via execFile with an argv array
+// - no shell - and the output name / mode are matched against xrandr's own
+// parsed output before use, so neither can inject or select an invalid mode.
+// ---------------------------------------------------------------------------
+
+const XRANDR_TIMEOUT_MS = 15_000;
+
+/** Run xrandr with an argv array; resolves stdout, rejects with a clean message. */
+function xrandr(args, timeout = XRANDR_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    execFile('xrandr', args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (!error) return resolve(stdout);
+      if (error.code === 'ENOENT') return reject(new Error('xrandr-missing'));
+      const detail = (stderr || error.message || '').trim().split('\n')[0];
+      reject(new Error(detail || 'xrandr failed'));
+    });
+  });
+}
+
+/**
+ * Parse `xrandr --query` into a list of outputs. Each output header looks like
+ *   eDP connected primary 1920x1200+0+0 (normal ...) 302mm x 188mm
+ * followed by indented mode lines
+ *   1920x1200     60.00*+     ('*' = current mode, '+' = preferred/native)
+ */
+function parseXrandr(stdout) {
+  const outputs = [];
+  let current = null;
+  for (const line of stdout.split('\n')) {
+    const head = line.match(
+      /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+\d+\+\d+)?/,
+    );
+    if (head) {
+      current = {
+        name: head[1],
+        connected: head[2] === 'connected',
+        primary: Boolean(head[3]),
+        current: head[4] ? { width: Number(head[4]), height: Number(head[5]) } : null,
+        modes: [],
+      };
+      outputs.push(current);
+      continue;
+    }
+    const mode = line.match(/^\s+(\d+)x(\d+)\s+(.*)$/);
+    if (mode && current) {
+      current.modes.push({
+        width: Number(mode[1]),
+        height: Number(mode[2]),
+        current: mode[3].includes('*'),
+        preferred: mode[3].includes('+'),
+      });
+    }
+  }
+  return outputs;
+}
+
+function registerDisplayHandlers() {
+  ipcMain.handle('display:status', async (event) => {
+    assertShellSender(event);
+    try {
+      const outputs = parseXrandr(await xrandr(['--query']));
+      return { available: true, outputs: outputs.filter((o) => o.connected) };
+    } catch (error) {
+      if (error.message === 'xrandr-missing') return { available: false, outputs: [] };
+      throw error;
+    }
+  });
+
+  ipcMain.handle('display:setMode', async (event, rawOutput, rawWidth, rawHeight) => {
+    assertShellSender(event);
+    // Re-derive the real outputs and only act on a name/mode that xrandr
+    // actually reports - never trust the renderer's strings directly.
+    const outputs = parseXrandr(await xrandr(['--query']));
+    const output = outputs.find((o) => o.connected && o.name === rawOutput);
+    if (!output) throw new Error('Unknown display output');
+    const width = Number(rawWidth);
+    const height = Number(rawHeight);
+    if (!output.modes.some((m) => m.width === width && m.height === height)) {
+      throw new Error('Unsupported mode for this output');
+    }
+    await xrandr(['--output', output.name, '--mode', `${width}x${height}`]);
+
+    // With no WM, resize the shell to the new mode immediately rather than
+    // waiting on a RandR event (which the display-metrics-changed listener
+    // also handles). Assumes the primary output sits at the origin, which
+    // holds for the single-display standalone session.
+    if (output.primary && shellWindow && !shellWindow.isDestroyed()) {
+      shellWindow.setBounds({ x: 0, y: 0, width, height });
+    }
+  });
 }
 
 function registerWifiHandlers() {
@@ -953,6 +1053,7 @@ app.whenReady().then(() => {
   registerFsHandlers();
   registerPtyHandlers();
   registerWifiHandlers();
+  registerDisplayHandlers();
   registerCrxHandlers();
   registerDevtoolsHandlers();
 
@@ -960,12 +1061,22 @@ app.whenReady().then(() => {
   // preload/APIs are in place when the first tab loads.
   setupChromeExtensions();
 
+  // Production runs with no window manager (cage on Aladdin, or a bare X11
+  // login session via os/x11). cage force-fills the one app, but bare X11 has
+  // nothing to honor the EWMH fullscreen hint, so the window would sit at its
+  // default size letterboxed on a black screen. Size it to the primary
+  // display's bounds explicitly and drop the frame; fullscreen/kiosk still
+  // apply where a compositor does honor them.
+  const production = !DEV_URL;
+  const primaryBounds = screen.getPrimaryDisplay().bounds;
   const win = new BrowserWindow({
-    // Dev: normal windowed shell. Production: fullscreen kiosk.
-    fullscreen: !DEV_URL,
-    kiosk: !DEV_URL,
-    width: 1280,
-    height: 800,
+    // Dev: normal windowed shell. Production: fills the display, frameless.
+    fullscreen: production,
+    kiosk: production,
+    frame: !production,
+    ...(production
+      ? { x: primaryBounds.x, y: primaryBounds.y, width: primaryBounds.width, height: primaryBounds.height }
+      : { width: 1280, height: 800 }),
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
     webPreferences: {
@@ -984,6 +1095,25 @@ app.whenReady().then(() => {
 
   shellContentsId = win.webContents.id;
   shellWindow = win;
+
+  // With no window manager, the shell won't follow a resolution change on its
+  // own. Refit it to the primary display whenever the display metrics change
+  // (e.g. the Settings display panel applying a new xrandr mode).
+  if (production) {
+    const refit = () => {
+      if (win.isDestroyed()) return;
+      const b = screen.getPrimaryDisplay().bounds;
+      win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+    };
+    screen.on('display-metrics-changed', refit);
+    screen.on('display-added', refit);
+    screen.on('display-removed', refit);
+    win.on('closed', () => {
+      screen.removeListener('display-metrics-changed', refit);
+      screen.removeListener('display-added', refit);
+      screen.removeListener('display-removed', refit);
+    });
+  }
 
   win.loadURL(DEV_URL || 'app://din/');
 
