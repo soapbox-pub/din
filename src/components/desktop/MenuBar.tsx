@@ -18,8 +18,17 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
 import AuthDialog from '@/components/auth/AuthDialog';
 import { QuickLoginDialog } from '@/components/auth/QuickLoginDialog';
+import { EditProfileForm } from '@/components/EditProfileForm';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
@@ -32,6 +41,7 @@ import { useAudioStatus } from '@/hooks/useAudio';
 import { getWifiBridge, isEthernetConnected } from '@/lib/wifi';
 import { getPowerBridge, summarizePower } from '@/lib/power';
 import { getAudioBridge } from '@/lib/audio';
+import { sanitizeUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -320,6 +330,7 @@ const WifiMenuItem = memo(function WifiMenuItem() {
 const AccountMenuItem = memo(function AccountMenuItem() {
   const { currentUser } = useLoggedInAccounts();
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [quickLoginPubkey, setQuickLoginPubkey] = useState<string | null>(null);
 
   return (
@@ -349,9 +360,22 @@ const AccountMenuItem = memo(function AccountMenuItem() {
             onAddAccount={() => setAuthDialogOpen(true)}
             onJoin={() => setAuthDialogOpen(true)}
             onQuickLogin={setQuickLoginPubkey}
+            onEditProfile={() => setEditProfileOpen(true)}
           />
         </PopoverContent>
       </Popover>
+
+      <Dialog open={editProfileOpen} onOpenChange={setEditProfileOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit profile</DialogTitle>
+            <DialogDescription>
+              Update your public Nostr profile. Changes are published to your relays.
+            </DialogDescription>
+          </DialogHeader>
+          <EditProfileForm onSaved={() => setEditProfileOpen(false)} />
+        </DialogContent>
+      </Dialog>
 
       {quickLoginPubkey && (
         <QuickLoginDialog
@@ -394,10 +418,12 @@ function AccountPanel({
   onAddAccount,
   onJoin,
   onQuickLogin,
+  onEditProfile,
 }: {
   onAddAccount: () => void;
   onJoin: () => void;
   onQuickLogin: (pubkey: string) => void;
+  onEditProfile: () => void;
 }) {
   const { currentUser, otherUsers, isLoading, setLogin, removeLogin } =
     useLoggedInAccounts();
@@ -439,13 +465,38 @@ function AccountPanel({
   }
 
   const pending = isLoading && !currentUser.metadata.name;
+  const npub = nip19.npubEncode(currentUser.pubkey);
+  const shortNpub = `${npub.slice(0, 12)}…${npub.slice(-6)}`;
+  const bannerUrl = currentUser.metadata.banner
+    ? sanitizeUrl(currentUser.metadata.banner)
+    : null;
+  const about = currentUser.metadata.about?.trim();
 
   return (
-    <div className="flex flex-col gap-1 p-2">
-      <div className="flex items-center gap-3 px-2 py-2">
-        <Avatar className="size-10" shape={getAvatarShape(currentUser.metadata)}>
+    <div className="flex flex-col">
+      {/* Real kind-0 profile header: banner, avatar, name, handle, bio. */}
+      <div
+        className={cn(
+          'h-16 w-full',
+          bannerUrl ? 'bg-cover bg-center' : 'bg-gradient-to-br from-primary/25 to-primary/5',
+        )}
+      >
+        {bannerUrl && (
+          <img
+            src={bannerUrl}
+            alt=""
+            aria-hidden
+            className="size-full object-cover"
+          />
+        )}
+      </div>
+      <div className="px-3 pb-2">
+        <Avatar
+          className="-mt-8 size-16 border-4 border-popover shadow-sm"
+          shape={getAvatarShape(currentUser.metadata)}
+        >
           <AvatarImage src={currentUser.metadata.picture} alt="" />
-          <AvatarFallback>
+          <AvatarFallback className="text-lg">
             {pending ? (
               <Skeleton className="size-full rounded-full" />
             ) : (
@@ -453,69 +504,92 @@ function AccountPanel({
             )}
           </AvatarFallback>
         </Avatar>
-        <div className="min-w-0 flex-1">
+
+        <div className="mt-2 min-w-0">
           {pending ? (
-            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-5 w-32" />
           ) : (
-            <p className="truncate text-sm font-medium text-foreground">
+            <p className="truncate text-base font-semibold text-foreground">
               {displayName(currentUser)}
             </p>
           )}
+          <p className="truncate text-xs text-muted-foreground">
+            {currentUser.metadata.nip05 ?? shortNpub}
+          </p>
+          {about && (
+            <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">
+              {about}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-3 flex gap-2">
           <PopoverClose asChild>
-            <Link
-              to={`/${nip19.npubEncode(currentUser.pubkey)}`}
-              className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+            <Button asChild variant="secondary" size="sm" className="flex-1">
+              <Link to={`/${npub}`}>View profile</Link>
+            </Button>
+          </PopoverClose>
+          <PopoverClose asChild>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="flex-1"
+              onClick={onEditProfile}
             >
-              View profile
-            </Link>
+              Edit profile
+            </Button>
           </PopoverClose>
         </div>
+      </div>
+
+      <Separator />
+
+      <div className="flex flex-col gap-1 p-2">
+        {otherUsers.map((user) => {
+          const userPending = isLoading && !user.metadata.name;
+          return (
+            <button
+              key={user.id}
+              type="button"
+              onClick={() => setLogin(user.id)}
+              className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Avatar className="size-7" shape={getAvatarShape(user.metadata)}>
+                <AvatarImage src={user.metadata.picture} alt="" />
+                <AvatarFallback className="text-xs">
+                  {userPending ? (
+                    <Skeleton className="size-full rounded-full" />
+                  ) : (
+                    displayName(user).charAt(0)
+                  )}
+                </AvatarFallback>
+              </Avatar>
+              <span className="truncate text-sm text-foreground">
+                {userPending ? <Skeleton className="h-3.5 w-20" /> : displayName(user)}
+              </span>
+            </button>
+          );
+        })}
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onAddAccount}
+          className="justify-start text-muted-foreground hover:text-foreground"
+        >
+          <UserPlus aria-hidden />
+          Add another account
+        </Button>
         <Button
           variant="ghost"
           size="sm"
           onClick={() => removeLogin(currentUser.id)}
-          className="shrink-0 text-muted-foreground hover:text-destructive"
+          className="justify-start text-muted-foreground hover:text-destructive"
         >
           <LogOut aria-hidden />
           Log out
         </Button>
       </div>
-
-      {otherUsers.map((user) => {
-        const userPending = isLoading && !user.metadata.name;
-        return (
-          <button
-            key={user.id}
-            type="button"
-            onClick={() => setLogin(user.id)}
-            className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Avatar className="size-7" shape={getAvatarShape(user.metadata)}>
-              <AvatarImage src={user.metadata.picture} alt="" />
-              <AvatarFallback className="text-xs">
-                {userPending ? (
-                  <Skeleton className="size-full rounded-full" />
-                ) : (
-                  displayName(user).charAt(0)
-                )}
-              </AvatarFallback>
-            </Avatar>
-            <span className="truncate text-sm text-foreground">
-              {userPending ? <Skeleton className="h-3.5 w-20" /> : displayName(user)}
-            </span>
-          </button>
-        );
-      })}
-
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onAddAccount}
-        className="justify-start text-muted-foreground hover:text-foreground"
-      >
-        <UserPlus aria-hidden />
-        Add another account
-      </Button>
     </div>
   );
 }
