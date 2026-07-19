@@ -35,6 +35,13 @@ export interface BrowserViewProps {
    */
   onFaviconChange?: (favicons: string[]) => void;
   /**
+   * Called when the loaded page's theme color changes (its
+   * `<meta name="theme-color">`), with `null` when the page has none.
+   * The raw reported string is untrusted; sanitize before styling.
+   * Only available on the Electron <webview> surface.
+   */
+  onThemeColorChange?: (color: string | null) => void;
+  /**
    * Called when the surface commits a navigation (link clicks, redirects,
    * history moves), with its current back/forward availability.
    * Only available on the Electron <webview> surface.
@@ -117,7 +124,7 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
 const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function WebviewSurface(
-    { src, onLoadStart, onLoadEnd, onTitleChange, onFaviconChange, onNavigate, onWebContentsId },
+    { src, onLoadStart, onLoadEnd, onTitleChange, onFaviconChange, onThemeColorChange, onNavigate, onWebContentsId },
     ref,
   ) {
     const webviewRef = useRef<ElectronWebviewElement>(null);
@@ -161,13 +168,19 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         const { favicons } = e as Event & { favicons?: string[] };
         if (Array.isArray(favicons)) onFaviconChange?.(favicons);
       };
+      const themeColor = (e: Event) => {
+        const { themeColor } = e as Event & { themeColor?: string | null };
+        onThemeColorChange?.(typeof themeColor === 'string' ? themeColor : null);
+      };
       el.addEventListener('page-title-updated', title);
       el.addEventListener('page-favicon-updated', favicon);
+      el.addEventListener('did-change-theme-color', themeColor);
       return () => {
         el.removeEventListener('page-title-updated', title);
         el.removeEventListener('page-favicon-updated', favicon);
+        el.removeEventListener('did-change-theme-color', themeColor);
       };
-    }, [onTitleChange, onFaviconChange]);
+    }, [onTitleChange, onFaviconChange, onThemeColorChange]);
 
     // Committed navigations (link clicks, redirects, back/forward) keep the
     // address bar and back/forward buttons in sync with the guest.

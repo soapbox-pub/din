@@ -12,6 +12,7 @@ import {
   type WebApp,
 } from '@/lib/webApps';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
+import { normalizeThemeColor } from '@/lib/themeColor';
 import { useAppData } from '@/hooks/useAppData';
 import {
   InstalledAppsContext,
@@ -28,12 +29,12 @@ import { WebAppFrame } from '@/components/desktop/apps/WebAppFrame';
 const componentCache = new Map<string, ComponentType<AppComponentProps>>();
 
 function webAppComponent(webApp: WebApp): ComponentType<AppComponentProps> {
-  const cacheKey = `${webApp.id}\u0000${webApp.url}`;
+  const cacheKey = `${webApp.id}\u0000${webApp.url}\u0000${webApp.themeColor ?? ''}`;
   let component = componentCache.get(cacheKey);
   if (!component) {
-    const url = webApp.url;
+    const { url, themeColor } = webApp;
     component = function InstalledWebApp(_props: AppComponentProps) {
-      return <WebAppFrame url={url} />;
+      return <WebAppFrame url={url} themeColor={themeColor} />;
     };
     componentCache.set(cacheKey, component);
   }
@@ -71,12 +72,18 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
       webApps,
       getApp: (id) => apps.find((app) => app.id === id),
       findWebAppByUrl: (url) => webApps.find((webApp) => webApp.url === url),
-      installWebApp: ({ name, url, icon }) => {
+      installWebApp: ({ name, url, icon, themeColor }) => {
         const safeUrl = sanitizeUrl(url);
         if (!safeUrl) return null;
         const safeIcon = icon ? (sanitizeUrl(icon) ?? undefined) : undefined;
+        const safeThemeColor = normalizeThemeColor(themeColor) ?? undefined;
         const trimmedName = name.trim() || new URL(safeUrl).hostname;
-        const webApp = createWebApp({ name: trimmedName, url: safeUrl, icon: safeIcon });
+        const webApp = createWebApp({
+          name: trimmedName,
+          url: safeUrl,
+          icon: safeIcon,
+          themeColor: safeThemeColor,
+        });
         setWebApps((prev) => [...prev, webApp]);
         return webApp;
       },

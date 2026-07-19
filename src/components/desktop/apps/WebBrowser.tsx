@@ -33,6 +33,8 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowAccent } from '@/contexts/WindowAccentContext';
+import { normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import {
   BrowserView,
@@ -79,6 +81,8 @@ interface Tab {
   url: string;
   title: string | null;
   favicon: string | null;
+  /** Page-reported `<meta name="theme-color">` (raw; webview mode only). */
+  themeColor: string | null;
   loading: boolean;
   /** The <webview> guest's WebContents id (null in the iframe fallback). */
   wcId: number | null;
@@ -108,6 +112,7 @@ function createTab(url: string, pendingRequestId: number | null = null): Tab {
     url: blank ? '' : url,
     title: null,
     favicon: null,
+    themeColor: null,
     loading: false,
     wcId: null,
     canBack: false,
@@ -126,6 +131,7 @@ type TabEvent =
   | { kind: 'loading'; value: boolean }
   | { kind: 'title'; value: string }
   | { kind: 'favicon'; value: string | null }
+  | { kind: 'themeColor'; value: string | null }
   | { kind: 'navigate'; url: string; canBack: boolean; canForward: boolean }
   | { kind: 'webContentsId'; value: number };
 
@@ -271,6 +277,14 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     return () => setTitlebar(null);
   }, [tabs, activeId, closeTab, openNewTab, setTitlebar]);
 
+  // Tint the window chrome with the active tab's page theme color, Safari
+  // style. The Window sanitizes the raw value; null restores the default.
+  const setAccent = useWindowAccent();
+  useEffect(() => {
+    setAccent(activeTab.themeColor);
+    return () => setAccent(null);
+  }, [activeTab.themeColor, setAccent]);
+
   /** Register/unregister a tab surface's imperative handle. */
   const registerView = useCallback((id: string, handle: BrowserViewHandle | null) => {
     if (handle) views.current.set(id, handle);
@@ -288,6 +302,9 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           break;
         case 'favicon':
           updateTab(id, { favicon: event.value });
+          break;
+        case 'themeColor':
+          updateTab(id, { themeColor: event.value });
           break;
         case 'navigate':
           updateTab(id, {
@@ -512,6 +529,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           url: resolved,
           title: null,
           favicon: null,
+          themeColor: null,
           history: [...trimmed, resolved],
           cursor: trimmed.length,
         };
@@ -542,7 +560,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       if (target < 0 || target >= tab.history.length) return;
       const url = tab.history[target];
       view.loadURL(url);
-      updateTab(activeId, { cursor: target, address: url, url, title: null, favicon: null });
+      updateTab(activeId, { cursor: target, address: url, url, title: null, favicon: null, themeColor: null });
     },
     [activeId, updateTab, webviewMode],
   );
@@ -649,6 +667,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           url={activeTab.url}
           pageTitle={activeTab.title}
           favicon={activeTab.favicon}
+          themeColor={activeTab.themeColor}
         />
 
         {devtools && (
@@ -938,6 +957,10 @@ const TabSurface = memo(function TabSurface({
     (favicons: string[]) => onEvent(id, { kind: 'favicon', value: favicons[0] ?? null }),
     [id, onEvent],
   );
+  const onThemeColorChange = useCallback(
+    (color: string | null) => onEvent(id, { kind: 'themeColor', value: color }),
+    [id, onEvent],
+  );
   const onNavigate = useCallback(
     (url: string, canBack: boolean, canForward: boolean) =>
       onEvent(id, { kind: 'navigate', url, canBack, canForward }),
@@ -1012,6 +1035,7 @@ const TabSurface = memo(function TabSurface({
           onLoadEnd={onLoadEnd}
           onTitleChange={onTitleChange}
           onFaviconChange={onFaviconChange}
+          onThemeColorChange={onThemeColorChange}
           onNavigate={onNavigate}
           onWebContentsId={onWebContentsId}
         />
@@ -1360,10 +1384,12 @@ function InstallSiteButton({
   url,
   pageTitle,
   favicon,
+  themeColor,
 }: {
   url: string;
   pageTitle: string | null;
   favicon: string | null;
+  themeColor: string | null;
 }) {
   const { installWebApp, findWebAppByUrl } = useInstalledApps();
   const { open: openApp } = useWindowActions();
@@ -1393,7 +1419,14 @@ function InstallSiteButton({
 
   const install = () => {
     if (!site) return;
-    const webApp = installWebApp({ name, url: site.url, icon: site.icon });
+    // Capture the page's theme color (normalized) so the installed app's
+    // window opens pre-tinted instead of flashing default chrome.
+    const webApp = installWebApp({
+      name,
+      url: site.url,
+      icon: site.icon,
+      themeColor: normalizeThemeColor(themeColor) ?? undefined,
+    });
     if (!webApp) return;
     setOpen(false);
     toast({

@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
+import { WindowAccentContext } from '@/contexts/WindowAccentContext';
+import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import {
   createModel,
   grabModel,
@@ -185,6 +187,11 @@ export const Window = memo(function Window({
   // default icon + name. The setter is stable so apps can publish from an
   // effect without re-subscribing.
   const [titlebar, setTitlebar] = useState<ReactNode>(null);
+
+  // Chrome accent color published by the hosted app (e.g. the loaded page's
+  // theme-color), tinting the title bar Safari-style. The raw value comes
+  // from an untrusted page, so it's strictly normalized before styling.
+  const [accentRaw, setAccent] = useState<string | null>(null);
 
   // Which snap zone (if any) the drag pointer is riding: drives the "drop to
   // maximize"/"drop to tile" preview overlay. Only flips when a zone boundary
@@ -609,6 +616,23 @@ export const Window = memo(function Window({
   // square corners, no floating shadow/ring.
   const flush = win.maximized || win.snapped !== null;
 
+  // Sanitized chrome accent. Theme tokens can't guarantee contrast against
+  // an arbitrary page color, so tinted chrome flips its foregrounds to plain
+  // black/white based on the accent's luminance.
+  const accent = normalizeThemeColor(accentRaw);
+  const accentDark = accent !== null && isDarkThemeColor(accent);
+  const chromeText = accent
+    ? accentDark ? 'text-white/90' : 'text-black/80'
+    : 'text-foreground/90';
+  const chromeMuted = accent
+    ? accentDark ? 'text-white/70' : 'text-black/60'
+    : 'text-muted-foreground';
+  const chromeHover = accent
+    ? accentDark
+      ? 'hover:bg-white/15 hover:text-white'
+      : 'hover:bg-black/10 hover:text-black'
+    : 'hover:bg-foreground/10 hover:text-foreground';
+
   return (
     <section
       ref={sectionRef}
@@ -632,8 +656,12 @@ export const Window = memo(function Window({
           stopWobble(false);
           toggleMaximize(win.id);
         }}
+        style={accent ? { backgroundColor: accent } : undefined}
         className={cn(
-          'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b border-border/60 bg-background/60 pr-3 active:cursor-grabbing',
+          'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b pr-3 active:cursor-grabbing',
+          accent
+            ? accentDark ? 'border-white/10' : 'border-black/10'
+            : 'border-border/60 bg-background/60',
           titlebar ? 'pl-2' : 'pl-3',
         )}
       >
@@ -645,8 +673,8 @@ export const Window = memo(function Window({
           </div>
         ) : (
           <>
-            <AppIcon icon={app.icon} className="size-4 shrink-0 text-muted-foreground" />
-            <span className="flex-1 truncate text-sm font-medium text-foreground/90">
+            <AppIcon icon={app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
+            <span className={cn('flex-1 truncate text-sm font-medium', chromeText)}>
               {app.name}
             </span>
           </>
@@ -658,7 +686,7 @@ export const Window = memo(function Window({
             stopWobble(false);
             minimize(win.id);
           }}
-          className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn('grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted, chromeHover)}
         >
           <Minus className="size-4" />
         </button>
@@ -669,7 +697,7 @@ export const Window = memo(function Window({
             stopWobble(false);
             toggleMaximize(win.id);
           }}
-          className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn('grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted, chromeHover)}
         >
           {win.maximized ? (
             <Minimize2 className="size-3.5" />
@@ -681,7 +709,7 @@ export const Window = memo(function Window({
           type="button"
           aria-label="Close window"
           onClick={() => close(win.id)}
-          className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-destructive/80 hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn('grid size-6 place-items-center rounded-md hover:bg-destructive/80 hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted)}
         >
           <X className="size-4" />
         </button>
@@ -689,13 +717,15 @@ export const Window = memo(function Window({
 
       <div className="relative flex-1 overflow-hidden bg-background/80">
         <WindowTitlebarContext.Provider value={setTitlebar}>
-          {/* Built-in apps are code-split (React.lazy); the fallback shows
-              while an app's chunk loads on its first launch. */}
-          <Suspense
-            fallback={<div className="size-full animate-pulse bg-muted/40" />}
-          >
-            <WindowContent component={app.component} windowId={win.id} params={win.params} />
-          </Suspense>
+          <WindowAccentContext.Provider value={setAccent}>
+            {/* Built-in apps are code-split (React.lazy); the fallback shows
+                while an app's chunk loads on its first launch. */}
+            <Suspense
+              fallback={<div className="size-full animate-pulse bg-muted/40" />}
+            >
+              <WindowContent component={app.component} windowId={win.id} params={win.params} />
+            </Suspense>
+          </WindowAccentContext.Provider>
         </WindowTitlebarContext.Provider>
       </div>
 

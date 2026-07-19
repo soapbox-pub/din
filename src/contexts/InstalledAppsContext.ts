@@ -12,9 +12,12 @@ export interface InstalledAppsManager {
   webApps: readonly WebApp[];
   /**
    * Install a website as an app. The URL (and icon, if any) are sanitized to
-   * https; returns the created entry, or `null` if the URL was invalid.
+   * https and the theme color to canonical `#rrggbb`; returns the created
+   * entry, or `null` if the URL was invalid.
    */
-  installWebApp: (input: { name: string; url: string; icon?: string }) => WebApp | null;
+  installWebApp: (
+    input: { name: string; url: string; icon?: string; themeColor?: string },
+  ) => WebApp | null;
   /** Remove an installed web app. */
   uninstallWebApp: (id: string) => void;
   /** Find an installed web app by its exact start URL. */

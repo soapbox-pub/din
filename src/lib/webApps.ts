@@ -17,6 +17,12 @@ export interface WebApp {
   url: string;
   /** Optional https favicon URL. */
   icon?: string;
+  /**
+   * The site's `<meta name="theme-color">` captured at install time, in
+   * canonical `#rrggbb` form. Pre-tints the app window's chrome until the
+   * live page reports its own color.
+   */
+  themeColor?: string;
 }
 
 /** Zod schema for the stored `web-apps` list. */
@@ -26,6 +32,7 @@ export const WebAppsSchema: z.ZodType<WebApp[]> = z.array(
     name: z.string().min(1),
     url: z.string().url(),
     icon: z.string().url().optional(),
+    themeColor: z.string().regex(/^#[0-9a-f]{6}$/).optional(),
   }),
 );
 

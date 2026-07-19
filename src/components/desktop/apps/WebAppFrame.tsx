@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
 import {
   BrowserView,
 } from '@/components/desktop/apps/BrowserView';
+import { useWindowAccent } from '@/contexts/WindowAccentContext';
 
 /**
  * Standalone, chrome-less window content for an installed web app: the site
@@ -11,9 +12,25 @@ import {
  * The URL is sanitized (https-only) even though it was validated at install
  * time — stored data is never trusted blindly.
  */
-export function WebAppFrame({ url }: { url: string }) {
+export function WebAppFrame({ url, themeColor }: { url: string; themeColor?: string }) {
   const [loading, setLoading] = useState(false);
+  // Chrome tint: the install-time theme color pre-tints the title bar; the
+  // live page's reported color takes over once known (webview mode only),
+  // falling back to the stored color when a page reports none. The Window
+  // sanitizes the value before styling.
+  const [pageColor, setPageColor] = useState<string | null>(themeColor ?? null);
+  const setAccent = useWindowAccent();
   const src = sanitizeUrl(url);
+
+  useEffect(() => {
+    setAccent(pageColor);
+    return () => setAccent(null);
+  }, [pageColor, setAccent]);
+
+  const onThemeColorChange = useCallback(
+    (color: string | null) => setPageColor(color ?? themeColor ?? null),
+    [themeColor],
+  );
 
   if (!src) {
     return (
@@ -31,6 +48,7 @@ export function WebAppFrame({ url }: { url: string }) {
         src={src}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
+        onThemeColorChange={onThemeColorChange}
       />
       {loading && (
         <span
