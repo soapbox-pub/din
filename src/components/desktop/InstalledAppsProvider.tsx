@@ -29,12 +29,14 @@ import { WebAppFrame } from '@/components/desktop/apps/WebAppFrame';
 const componentCache = new Map<string, ComponentType<AppComponentProps>>();
 
 function webAppComponent(webApp: WebApp): ComponentType<AppComponentProps> {
-  const cacheKey = `${webApp.id}\u0000${webApp.url}\u0000${webApp.themeColor ?? ''}`;
+  const cacheKey = `${webApp.id}\u0000${webApp.url}\u0000${webApp.themeColor ?? ''}\u0000${webApp.name}\u0000${webApp.icon ?? ''}`;
   let component = componentCache.get(cacheKey);
   if (!component) {
-    const { url, themeColor } = webApp;
+    const { url, name, themeColor } = webApp;
+    // AppIcon falls back to a Globe glyph when a favicon fails to load.
+    const icon = webApp.icon ?? Globe;
     component = function InstalledWebApp(_props: AppComponentProps) {
-      return <WebAppFrame url={url} themeColor={themeColor} />;
+      return <WebAppFrame url={url} name={name} icon={icon} themeColor={themeColor} />;
     };
     componentCache.set(cacheKey, component);
   }
