@@ -344,6 +344,55 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     });
   }, []);
 
+  /**
+   * Drag-and-drop a tree-sidebar tab to a new spot. `position` is relative to
+   * the target row: 'before'/'after' make the dragged tab a sibling of the
+   * target (adopting its parent) placed just before/after it, while 'inside'
+   * nests the dragged tab as the target's first child. The tab's own subtree
+   * follows it (descendants track it by parentId). Dropping onto itself or
+   * into its own subtree is rejected, so the tree can never form a cycle.
+   * Sibling order is driven by array order, so we splice the dragged tab out
+   * and reinsert it next to the target.
+   */
+  const moveTab = useCallback(
+    (dragId: string, targetId: string, position: DropZone) => {
+      if (dragId === targetId) return;
+      setTabs((ts) => {
+        const dragged = ts.find((t) => t.id === dragId);
+        const target = ts.find((t) => t.id === targetId);
+        if (!dragged || !target) return ts;
+        // Reject drops into the dragged tab's own subtree (would orphan a
+        // cycle). Walk the target's ancestors looking for the dragged tab.
+        const byId = new Map(ts.map((t) => [t.id, t]));
+        for (
+          let cur: Tab | undefined = target;
+          cur?.parentId != null;
+          cur = byId.get(cur.parentId) ?? undefined
+        ) {
+          if (cur.parentId === dragId) return ts;
+        }
+        const newParent = position === 'inside' ? targetId : target.parentId;
+        const moved: Tab = { ...dragged, parentId: newParent };
+        const without = ts.filter((t) => t.id !== dragId);
+        const targetIndex = without.findIndex((t) => t.id === targetId);
+        // 'before' lands at the target's index; 'after' and 'inside' (first
+        // child) both land immediately past it.
+        const insertAt = position === 'before' ? targetIndex : targetIndex + 1;
+        return [...without.slice(0, insertAt), moved, ...without.slice(insertAt)];
+      });
+      // Reveal the child when nesting into a collapsed subtree.
+      if (position === 'inside') {
+        setCollapsed((c) => {
+          if (!c.has(targetId)) return c;
+          const copy = new Set(c);
+          copy.delete(targetId);
+          return copy;
+        });
+      }
+    },
+    [],
+  );
+
   // Tint the window chrome with the active tab's page theme color, Safari
   // style. The Window sanitizes the raw value; null restores the default.
   const setAccent = useWindowAccent();
@@ -726,23 +775,10 @@ export function WebBrowser({ windowId }: AppComponentProps) {
 
   return (
     <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
-      {/* In tree-tabs mode the tab strip is a vertical sidebar beside the
-          toolbar + surfaces column; otherwise it lives in the title bar and
-          this row holds just the column. */}
-      <div className="flex min-h-0 min-w-0 flex-1">
-        {treeTabs && (
-          <TreeTabStrip
-            tabs={tabs}
-            activeId={activeId}
-            collapsed={collapsed}
-            onActivate={setActiveId}
-            onCloseTab={closeTab}
-            onNewTab={openNewTab}
-            onToggleCollapsed={toggleCollapsed}
-          />
-        )}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* Toolbar */}
+      {/* Toolbar: spans the full width across the top, sitting *over* the
+          tree-tabs sidebar and the page surface (not beside the tabs). In the
+          horizontal-strip mode the tabs live in the title bar, so this is
+          simply the toolbar above the surface. */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -811,10 +847,27 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         )}
       </form>
 
-      {/* Tab surfaces: all stay mounted so background tabs keep their state;
-          only the active one is visible. (visibility, not display:none -
-          Electron <webview>s misbehave when display is toggled.) */}
-      <div className="relative flex-1 overflow-hidden bg-white">
+      {/* Body: the tree-tabs sidebar (when enabled) beside the page surface,
+          both sitting below the full-width toolbar. In the horizontal-strip
+          mode the tabs live in the title bar, so this is just the surface. */}
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {treeTabs && (
+          <TreeTabStrip
+            tabs={tabs}
+            activeId={activeId}
+            collapsed={collapsed}
+            onActivate={setActiveId}
+            onCloseTab={closeTab}
+            onNewTab={openNewTab}
+            onToggleCollapsed={toggleCollapsed}
+            onMoveTab={moveTab}
+          />
+        )}
+
+        {/* Tab surfaces: all stay mounted so background tabs keep their state;
+            only the active one is visible. (visibility, not display:none -
+            Electron <webview>s misbehave when display is toggled.) */}
+        <div className="relative min-w-0 flex-1 overflow-hidden bg-white">
         {tabs.map((tab) => (
           <TabSurface
             key={tab.id}
@@ -842,7 +895,6 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             onEvent={onTabEvent}
           />
         ))}
-      </div>
         </div>
       </div>
 
@@ -1146,6 +1198,12 @@ function TabButton({
   );
 }
 
+/**
+ * Where a dragged tab lands relative to the row it's dropped on: as a sibling
+ * just 'before' or 'after' it, or nested 'inside' as its first child.
+ */
+type DropZone = 'before' | 'after' | 'inside';
+
 /** A tab plus its position in the tree sidebar. */
 interface TreeRow {
   tab: Tab;
@@ -1193,6 +1251,7 @@ function TreeTabStrip({
   onCloseTab,
   onNewTab,
   onToggleCollapsed,
+  onMoveTab,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -1201,8 +1260,12 @@ function TreeTabStrip({
   onCloseTab: (id: string) => void;
   onNewTab: () => void;
   onToggleCollapsed: (id: string) => void;
+  onMoveTab: (dragId: string, targetId: string, position: DropZone) => void;
 }) {
   const rows = useMemo(() => flattenTabTree(tabs, collapsed), [tabs, collapsed]);
+  // The tab currently being dragged, or null. Shared across rows so a row can
+  // tell whether it's a valid drop target (and skip itself).
+  const [dragId, setDragId] = useState<string | null>(null);
   return (
     <div
       role="tablist"
@@ -1218,9 +1281,17 @@ function TreeTabStrip({
           hasChildren={hasChildren}
           collapsed={collapsed.has(tab.id)}
           active={tab.id === activeId}
+          dragging={dragId === tab.id}
+          dragActive={dragId !== null}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onCloseTab(tab.id)}
           onToggleCollapsed={() => onToggleCollapsed(tab.id)}
+          onDragStart={() => setDragId(tab.id)}
+          onDragEnd={() => setDragId(null)}
+          onDrop={(position) => {
+            if (dragId) onMoveTab(dragId, tab.id, position);
+            setDragId(null);
+          }}
         />
       ))}
       {/* The new-tab button sits at the bottom of the tab list (Firefox-style). */}
@@ -1249,21 +1320,53 @@ function TreeTabRow({
   hasChildren,
   collapsed,
   active,
+  dragging,
+  dragActive,
   onActivate,
   onClose,
   onToggleCollapsed,
+  onDragStart,
+  onDragEnd,
+  onDrop,
 }: {
   tab: Tab;
   depth: number;
   hasChildren: boolean;
   collapsed: boolean;
   active: boolean;
+  /** This row is the one being dragged. */
+  dragging: boolean;
+  /** Some row (this one or another) is being dragged. */
+  dragActive: boolean;
   onActivate: () => void;
   onClose: () => void;
   onToggleCollapsed: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDrop: (position: DropZone) => void;
 }) {
   const label = tab.title ?? hostnameOf(tab.url) ?? 'New tab';
   const icon = tab.favicon ? sanitizeUrl(tab.favicon) : null;
+  // The drop indicator to draw while another tab hovers over this row, or
+  // null. The top/bottom thirds re-order (sibling before/after), the middle
+  // nests (child).
+  const [dropZone, setDropZone] = useState<DropZone | null>(null);
+
+  const onDragOver = (e: React.DragEvent) => {
+    // Not a valid target: no drag in progress, or this is the dragged row.
+    if (!dragActive || dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = e.currentTarget.getBoundingClientRect();
+    const offset = e.clientY - rect.top;
+    const zone: DropZone =
+      offset < rect.height * 0.3
+        ? 'before'
+        : offset > rect.height * 0.7
+          ? 'after'
+          : 'inside';
+    setDropZone((z) => (z === zone ? z : zone));
+  };
 
   return (
     <div
@@ -1271,6 +1374,7 @@ function TreeTabRow({
       aria-selected={active}
       aria-label={label}
       tabIndex={0}
+      draggable
       onClick={onActivate}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -1282,16 +1386,49 @@ function TreeTabRow({
         // Middle-click closes, like every browser.
         if (e.button === 1) onClose();
       }}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        // Firefox needs data set for a drag to actually start.
+        e.dataTransfer.setData('text/plain', tab.id);
+        onDragStart();
+      }}
+      onDragEnd={() => {
+        setDropZone(null);
+        onDragEnd();
+      }}
+      onDragOver={onDragOver}
+      onDragLeave={() => setDropZone(null)}
+      onDrop={(e) => {
+        e.preventDefault();
+        const zone = dropZone;
+        setDropZone(null);
+        if (zone) onDrop(zone);
+      }}
       title={label}
       style={{ paddingInlineStart: 4 + depth * 14 }}
       className={cn(
-        'group flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
+        'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        dragging && 'opacity-40',
+        dropZone === 'inside' && 'ring-2 ring-inset ring-primary',
         active
           ? 'border-border bg-background text-foreground shadow-sm'
           : 'border-border/50 bg-background/30 text-muted-foreground hover:border-border hover:bg-foreground/5 hover:text-foreground',
       )}
     >
+      {/* Sibling drop indicators: a bar in the gap above / below the row. */}
+      {dropZone === 'before' && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-1 -top-[3px] h-0.5 rounded-full bg-primary"
+        />
+      )}
+      {dropZone === 'after' && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-primary"
+        />
+      )}
       {hasChildren ? (
         <button
           type="button"
@@ -1310,7 +1447,13 @@ function TreeTabRow({
         <span className="size-4 shrink-0" aria-hidden />
       )}
       {icon ? (
-        <img src={icon} alt="" aria-hidden className="size-4 shrink-0 rounded-sm" />
+        <img
+          src={icon}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className="size-4 shrink-0 rounded-sm"
+        />
       ) : (
         <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
       )}
