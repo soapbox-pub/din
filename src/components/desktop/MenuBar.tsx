@@ -209,9 +209,10 @@ const VolumeMenuItem = memo(function VolumeMenuItem() {
 });
 
 /**
- * Battery status item: glyph + percentage; clicking opens a details popover.
- * Renders nothing outside the Electron shell or on machines with no battery
- * (desktops, the VM), like the other hardware indicators.
+ * Battery status item: a macOS-style solid-fill glyph (bolt when charging);
+ * clicking opens a details popover. Renders nothing outside the Electron
+ * shell or on machines with no battery (desktops, the VM), like the other
+ * hardware indicators.
  */
 const BatteryMenuItem = memo(function BatteryMenuItem() {
   const bridge = getPowerBridge();
@@ -234,18 +235,16 @@ const BatteryMenuItem = memo(function BatteryMenuItem() {
           aria-label={label}
           title={label}
           className={cn(
-            'h-7 gap-1 rounded-md px-1.5 hover:bg-foreground/10 hover:text-foreground',
+            'h-7 rounded-md px-1.5 hover:bg-foreground/10 hover:text-foreground',
             critical ? 'text-destructive' : 'text-foreground/90',
           )}
         >
+          {/* size-* class opts out of the Button's [&_svg]:size-4 override. */}
           <BatteryGlyph
             percent={summary.percent}
             charging={summary.charging}
-            className="size-4.5"
+            className="size-3.5 w-7"
           />
-          {summary.percent !== null && (
-            <span className="text-xs font-medium tabular-nums">{summary.percent}%</span>
-          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">

@@ -1,14 +1,5 @@
-import {
-  Battery,
-  BatteryCharging,
-  BatteryFull,
-  BatteryLow,
-  BatteryMedium,
-  BatteryWarning,
-  Plug,
-  Settings2,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { useId } from 'react';
+import { Plug, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PopoverClose } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -21,9 +12,13 @@ import {
 import { useBatteryStatus } from '@/hooks/usePower';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 
+/** Bolt overlaid on the battery while charging, macOS style. */
+const BOLT_PATH = 'M13.6 2.4 L9.2 8 h2.7 l-1.5 3.6 l4.4 -5.6 h-2.7 Z';
+
 /**
- * Battery glyph: a charging bolt when plugged in, otherwise a fill level that
- * steps down with the charge. Shared by the menu-bar item and Settings panel.
+ * Battery glyph, macOS style: an outlined body with a solid fill that scales
+ * with the charge, and a bolt overlaid (knocked out of the body behind it)
+ * while charging. Shared by the menu-bar item and Settings panel.
  */
 export function BatteryGlyph({
   percent,
@@ -34,14 +29,51 @@ export function BatteryGlyph({
   charging: boolean;
   className?: string;
 }) {
-  let Icon: LucideIcon;
-  if (charging) Icon = BatteryCharging;
-  else if (percent === null) Icon = Battery;
-  else if (percent >= 90) Icon = BatteryFull;
-  else if (percent >= 55) Icon = BatteryMedium;
-  else if (percent >= 20) Icon = BatteryLow;
-  else Icon = BatteryWarning;
-  return <Icon className={className} aria-hidden />;
+  const maskId = useId();
+  const level = percent === null ? null : Math.min(100, Math.max(0, percent));
+  // Interior runs x=2.5..21.5; keep a sliver visible even at 1%.
+  const fillWidth = level === null || level === 0 ? 0 : Math.max(19 * (level / 100), 2);
+
+  return (
+    <svg viewBox="0 0 28 14" fill="none" className={className} aria-hidden>
+      {charging && (
+        <mask id={maskId} maskUnits="userSpaceOnUse">
+          <rect width="28" height="14" fill="white" />
+          <path
+            d={BOLT_PATH}
+            fill="black"
+            stroke="black"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+        </mask>
+      )}
+      <g mask={charging ? `url(#${maskId})` : undefined}>
+        <rect
+          x="1"
+          y="2.5"
+          width="22"
+          height="9"
+          rx="2.5"
+          stroke="currentColor"
+          className="opacity-40"
+        />
+        <rect
+          x="24"
+          y="5.25"
+          width="2.25"
+          height="3.5"
+          rx="1.125"
+          fill="currentColor"
+          className="opacity-40"
+        />
+        {fillWidth > 0 && (
+          <rect x="2.5" y="4" width={fillWidth} height="6" rx="1.5" fill="currentColor" />
+        )}
+      </g>
+      {charging && <path d={BOLT_PATH} fill="currentColor" />}
+    </svg>
+  );
 }
 
 /** True when the battery is low enough to warn about (and not charging). */
