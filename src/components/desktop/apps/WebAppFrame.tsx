@@ -44,7 +44,13 @@ export function WebAppFrame({
   icon: LucideIcon | string;
   themeColor?: string;
 }) {
-  const [loading, setLoading] = useState(false);
+  // A web app always opens by loading `src`, so start in the loading state to
+  // show the launch splash from the very first frame (no white gap).
+  const [loading, setLoading] = useState(true);
+  // Whether the first page load has completed. Until it has, a full-cover
+  // splash hides the guest's blank white surface; afterwards only the thin
+  // progress bar shows, so later in-app navigations don't re-flash a splash.
+  const [ready, setReady] = useState(false);
   // Chrome tint: the install-time theme color pre-tints the title bar; the
   // live page's reported color takes over once known (webview mode only),
   // falling back to the stored color when a page reports none. The Window
@@ -151,8 +157,13 @@ export function WebAppFrame({
     );
   }
 
+  // Splash tint: the app's (sanitized) theme color when known, so the launch
+  // reads as this specific app rather than a blank rectangle.
+  const splashColor = normalizeThemeColor(pageColor);
+  const splashDark = splashColor ? isDarkThemeColor(splashColor) : false;
+
   return (
-    <div className="relative h-full w-full overflow-hidden bg-white">
+    <div className="relative h-full w-full overflow-hidden bg-background">
       <BrowserView
         ref={viewRef}
         src={src}
@@ -160,11 +171,39 @@ export function WebAppFrame({
         // Nostr login (window.nostr) - the ad-hoc Web Browser does not.
         partition={APP_WEBVIEW_PARTITION}
         onLoadStart={() => setLoading(true)}
-        onLoadEnd={() => setLoading(false)}
+        onLoadEnd={() => {
+          setLoading(false);
+          setReady(true);
+        }}
         onThemeColorChange={onThemeColorChange}
         onNavigate={onNavigate}
       />
-      {loading && (
+      {/* Until the first paint lands, cover the guest's blank white surface
+          with a splash tinted by the app's theme color, so opening an app
+          reads as an intentional launch instead of a broken white flash. It
+          fades out on first load and never returns, so later in-app
+          navigations show only the thin progress bar below. */}
+      <div
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-0 grid place-items-center bg-background transition-opacity duration-300',
+          ready ? 'opacity-0' : 'opacity-100',
+        )}
+        style={splashColor ? { backgroundColor: splashColor } : undefined}
+      >
+        <AppIcon
+          icon={icon}
+          className={cn(
+            'size-14 animate-pulse',
+            splashColor
+              ? splashDark
+                ? 'text-white/90'
+                : 'text-black/80'
+              : 'text-muted-foreground',
+          )}
+        />
+      </div>
+      {ready && loading && (
         <span
           aria-hidden
           className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-primary"

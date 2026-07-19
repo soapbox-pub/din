@@ -10,6 +10,10 @@
         <meta property="og:description" content="A minimal Linux system whose entire UI is a web app.">
         <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https:; font-src 'self' https:; base-uri 'self'; manifest-src 'self'; connect-src 'self' blob: https: wss:; img-src 'self' data: blob: https: crx:; media-src 'self' https:">
         <link rel="manifest" href="/manifest.webmanifest">
+        <!-- Paint the document the native window / wallpaper shade before React and CSS load, so cold start doesn't flash white. -->
+        <style>
+            html { background-color: #0b0f14; }
+        </style>
     </head>
     <body>
         <div id="root"></div>
