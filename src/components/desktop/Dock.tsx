@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/popover';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useAppData } from '@/hooks/useAppData';
+import { registerDockTile } from '@/lib/dockTiles';
 import { cn } from '@/lib/utils';
 import { APPS } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
@@ -144,6 +145,9 @@ export function Dock({
   const registerRef = useCallback((appId: string, el: HTMLDivElement | null) => {
     if (el) itemRefs.current.set(appId, el);
     else itemRefs.current.delete(appId);
+    // Mirror into the module-level registry the genie minimize animation
+    // targets (see src/lib/dockTiles.ts).
+    registerDockTile(appId, el);
   }, []);
 
   // Kept fresh via an every-render effect so the rAF callback sees the

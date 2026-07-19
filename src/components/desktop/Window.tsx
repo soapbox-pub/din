@@ -1,10 +1,12 @@
-import { memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { getDockTileRect } from '@/lib/dockTiles';
+import { animateGenie, type GenieRect } from '@/lib/genie';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
@@ -302,6 +304,88 @@ export const Window = memo(function Window({
       wobblyRef.current = null;
     };
   }, []);
+
+  // Genie minimize/restore (Compiz "magic lamp", macOS genie): when the
+  // minimized flag flips, warp the live window into / out of its app's dock
+  // tile instead of blinking (see src/lib/genie.ts). The window stays
+  // mounted either way, so the animation runs on the real element: a
+  // minimize overrides the React-committed `visibility: hidden` until the
+  // timeline ends, and a restore paints its fully-swallowed first frame in
+  // this layout effect - before the browser can paint - so the full-size
+  // window never flashes. Watching the flag here (rather than wrapping the
+  // minimize/focus actions) covers every trigger: title-bar button, dock
+  // tile clicks, and the dock's window picker.
+  const genieCancel = useRef<(() => void) | null>(null);
+  const prevMinimized = useRef(win.minimized);
+  useLayoutEffect(() => {
+    if (prevMinimized.current === win.minimized) return;
+    prevMinimized.current = win.minimized;
+    const el = sectionRef.current;
+    if (!el) return;
+
+    genieCancel.current?.();
+    genieCancel.current = null;
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    // A dock-initiated minimize can catch a still-jiggling window; the genie
+    // owns the transform from here.
+    stopWobble(false);
+
+    // The rendered rect in workspace coordinates. Offsets rather than the
+    // stored geometry, so maximized/tiled windows - whose layout is
+    // CSS-percentage-driven - measure correctly; visibility:hidden keeps
+    // layout intact, so a just-minimized window still measures.
+    const winRect: GenieRect = {
+      x: el.offsetLeft,
+      y: el.offsetTop,
+      width: el.offsetWidth,
+      height: el.offsetHeight,
+    };
+    if (winRect.width === 0 || winRect.height === 0) return;
+
+    // The app's dock tile, translated into workspace coordinates. An app
+    // always has a tile while it has windows; the bottom-center fallback
+    // covers a transient gap (e.g. the Dock re-mounting).
+    const ws = el.parentElement?.getBoundingClientRect();
+    const wsLeft = ws?.left ?? 0;
+    const wsTop = ws?.top ?? 0;
+    const tile = getDockTileRect(win.appId);
+    const target: GenieRect = tile
+      ? { x: tile.x - wsLeft, y: tile.y - wsTop, width: tile.width, height: tile.height }
+      : {
+          x: (ws?.width ?? window.innerWidth) / 2 - 40,
+          y: ws?.height ?? window.innerHeight,
+          width: 80,
+          height: 80,
+        };
+
+    const minimizing = win.minimized;
+    beginGesture();
+    el.style.pointerEvents = 'none';
+    if (minimizing) el.style.visibility = 'visible';
+
+    genieCancel.current = animateGenie(
+      el,
+      winRect,
+      target,
+      minimizing ? 'minimize' : 'restore',
+      () => {
+        genieCancel.current = null;
+        el.style.transform = '';
+        el.style.transformOrigin = '';
+        el.style.opacity = '';
+        el.style.pointerEvents = '';
+        // Hand visibility back to the React-committed value (hidden while
+        // minimized; the property is absent otherwise).
+        el.style.visibility = minimizing ? 'hidden' : '';
+        endGesture();
+      },
+    );
+  }, [win.minimized, win.appId, beginGesture, endGesture, stopWobble]);
+
+  // The genie loop must not outlive the window either.
+  useEffect(() => () => genieCancel.current?.(), []);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {

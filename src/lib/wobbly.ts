@@ -286,6 +286,40 @@ function basisToPoints(
   return multiply(m, [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]]);
 }
 
+/** A 2D point used as a quad corner. */
+export interface QuadPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * CSS transform warping an element's untransformed (0,0)-(width,height) box
+ * onto the quad given by four corner positions, all relative to the
+ * element's layout position. Apply with `transform-origin: 0 0`. Shared by
+ * the wobbly deformation and the genie minimize effect (src/lib/genie.ts).
+ */
+export function quadTransform(
+  width: number,
+  height: number,
+  tl: QuadPoint,
+  tr: QuadPoint,
+  bl: QuadPoint,
+  br: QuadPoint,
+): string {
+  const source = basisToPoints(0, 0, width, 0, 0, height, width, height);
+  const destination = basisToPoints(tl.x, tl.y, tr.x, tr.y, bl.x, bl.y, br.x, br.y);
+  const h = multiply(destination, adjugate(source));
+
+  // Degenerate quads (never expected from sane inputs) fall back to a plain
+  // translation so the element at least stays visible.
+  if (!h.every(Number.isFinite) || Math.abs(h[8]) < 1e-6) {
+    return `translate3d(${tl.x}px, ${tl.y}px, 0)`;
+  }
+
+  const m = h.map((value) => value / h[8]);
+  return `matrix3d(${m[0]}, ${m[3]}, 0, ${m[6]}, ${m[1]}, ${m[4]}, 0, ${m[7]}, 0, 0, 1, 0, ${m[2]}, ${m[5]}, 0, 1)`;
+}
+
 /**
  * CSS transform warping the window from its layout rectangle (x, y, width,
  * height in workspace coordinates) onto the model's current corner quad.
@@ -304,21 +338,12 @@ export function modelTransform(
   const bl = o[GRID_WIDTH * (GRID_HEIGHT - 1)];
   const br = o[GRID_WIDTH * GRID_HEIGHT - 1];
 
-  const source = basisToPoints(0, 0, width, 0, 0, height, width, height);
-  const destination = basisToPoints(
-    tl.x - x, tl.y - y,
-    tr.x - x, tr.y - y,
-    bl.x - x, bl.y - y,
-    br.x - x, br.y - y,
+  return quadTransform(
+    width,
+    height,
+    { x: tl.x - x, y: tl.y - y },
+    { x: tr.x - x, y: tr.y - y },
+    { x: bl.x - x, y: bl.y - y },
+    { x: br.x - x, y: br.y - y },
   );
-  const h = multiply(destination, adjugate(source));
-
-  // Degenerate quads (never expected from a sane model) fall back to a plain
-  // translation so the window at least stays visible.
-  if (!h.every(Number.isFinite) || Math.abs(h[8]) < 1e-6) {
-    return `translate3d(${tl.x - x}px, ${tl.y - y}px, 0)`;
-  }
-
-  const m = h.map((value) => value / h[8]);
-  return `matrix3d(${m[0]}, ${m[3]}, 0, ${m[6]}, ${m[1]}, ${m[4]}, 0, ${m[7]}, 0, 0, 1, 0, ${m[2]}, ${m[5]}, 0, 1)`;
 }
