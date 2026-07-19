@@ -46,6 +46,16 @@ export const FEATURED_APPS_PACK = {
   identifier: 'k4p5w0n22suf',
 } as const;
 
+/**
+ * Website host of the app pinned to the featured rail's hero slot. The store's
+ * landing page always leads with this app (see FeaturedSection), and the rest
+ * of the pack members' listings fill the shelf behind it. Matched by host —
+ * rather than a `31990:<pubkey>:<d>` address — so the pin survives the listing
+ * being re-published under a new d tag or a different pubkey. Change this to
+ * feature a different app.
+ */
+export const FEATURED_HERO_HOST = 'ditto.pub';
+
 /** A web application parsed from a kind 31990 listing, ready to install. */
 export interface StoreApp {
   /** Address coordinate "31990:<pubkey>:<d>", the app's stable identity. */
@@ -133,4 +143,29 @@ export function dedupeStoreApps(events: NostrEvent[]): StoreApp[] {
     .map(parseStoreApp)
     .filter((app): app is StoreApp => app !== null)
     .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** True when the listing is the pinned hero app (host === FEATURED_HERO_HOST). */
+function isFeaturedHero(app: StoreApp): boolean {
+  try {
+    const host = new URL(app.website).hostname.toLowerCase();
+    return host === FEATURED_HERO_HOST || host.endsWith(`.${FEATURED_HERO_HOST}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Move the pinned hero app (FEATURED_HERO_HOST) to the front so the store's
+ * landing page always leads with it, preserving the newest-first order of the
+ * remaining apps. Returns the list unchanged when the hero app isn't present.
+ */
+export function pinFeaturedHero(apps: StoreApp[]): StoreApp[] {
+  const heroIndex = apps.findIndex(isFeaturedHero);
+  if (heroIndex <= 0) return apps;
+  return [
+    apps[heroIndex],
+    ...apps.slice(0, heroIndex),
+    ...apps.slice(heroIndex + 1),
+  ];
 }

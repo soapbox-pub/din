@@ -4,6 +4,7 @@ import {
   APP_HANDLER_KIND,
   FEATURED_APPS_PACK,
   dedupeStoreApps,
+  pinFeaturedHero,
   type StoreApp,
 } from '@/lib/nostrApps';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
@@ -66,8 +67,11 @@ export function useFeaturedApps() {
         title: pack.tags.find(([name]) => name === 'title')?.[1] ?? 'Featured',
         description: pack.tags.find(([name]) => name === 'description')?.[1],
         image: sanitizeUrl(pack.tags.find(([name]) => name === 'image')?.[1] ?? '') ?? undefined,
-        // Defensive re-filter in case a relay ignores the authors constraint.
-        apps: dedupeStoreApps(events.filter((event) => memberSet.has(event.pubkey))),
+        // Defensive re-filter in case a relay ignores the authors constraint,
+        // then pin the featured hero (Ditto) to the front of the rail.
+        apps: pinFeaturedHero(
+          dedupeStoreApps(events.filter((event) => memberSet.has(event.pubkey))),
+        ),
       };
     },
     staleTime: 5 * 60 * 1000,
