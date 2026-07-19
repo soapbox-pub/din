@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import type { ComponentType } from 'react';
-import { Camera, type LucideIcon } from 'lucide-react';
+import { Camera, Store, type LucideIcon } from 'lucide-react';
 
 // Built-in apps are code-split: each is its own chunk, loaded the first time
 // it's launched (windows render app content inside <Suspense>). Statically
@@ -23,6 +23,9 @@ const Screenshot = lazy(() =>
 );
 const DevTools = lazy(() =>
   import('@/components/desktop/apps/DevTools').then((m) => ({ default: m.DevTools })),
+);
+const AppStore = lazy(() =>
+  import('@/components/desktop/apps/AppStore').then((m) => ({ default: m.AppStore })),
 );
 
 /** Props every windowed app receives from the window manager. */
@@ -87,6 +90,13 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/settings.png',
     component: Settings,
     defaultSize: { width: 720, height: 520 },
+  },
+  {
+    id: 'app-store',
+    name: 'App Store',
+    icon: Store,
+    component: AppStore,
+    defaultSize: { width: 900, height: 640 },
   },
   {
     id: 'screenshot',

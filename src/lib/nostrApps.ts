@@ -1,0 +1,118 @@
+import type { NostrEvent, NostrMetadata } from '@nostrify/nostrify';
+import { sanitizeUrl } from '@/lib/sanitizeUrl';
+
+/**
+ * NIP-89 Handler Information events (kind 31990) announce Nostr applications:
+ * the `content` field carries kind-0-style app metadata (name, picture, about,
+ * website) and platform-named tags list where the app runs. This is the same
+ * discovery mechanism used by app directories like NostrHub, Borkstr and
+ * nostrapp.link, so Din's App Store surfaces the same catalog.
+ */
+export const APP_HANDLER_KIND = 31990;
+
+/**
+ * Common `t` category tags used by real app listings, mirrored from the
+ * NostrHub/Borkstr directories. Many listings only surface via a `#t` filter
+ * (relays cap plain recency queries), so the store ORs this list into its
+ * query to widen discovery.
+ */
+export const APP_CATEGORY_TAGS = [
+  'social', 'tools', 'video', 'pictures', 'marketplace',
+  'music', 'podcast', 'communities', 'messaging', 'dvm',
+  'fitness', 'productivity', 'education', 'image', 'todo',
+  'rideshare', 'ditto', 'mkstack',
+  'relay', 'nostr', 'chat', 'news', 'article', 'blog',
+  'media', 'images', 'hosting', 'code', 'pastebin',
+  'storage', 'blossom', 'upload', 'tool',
+  'zaps', 'goals', 'gigs', 'bounties', 'escrow', 'freelance',
+  'bunker', 'desktop', 'ephemeral', 'password-manager',
+];
+
+/** A web application parsed from a kind 31990 listing, ready to install. */
+export interface StoreApp {
+  /** Address coordinate "31990:<pubkey>:<d>", the app's stable identity. */
+  address: string;
+  pubkey: string;
+  identifier: string;
+  name: string;
+  /** Sanitized https icon URL, if the listing carried a valid one. */
+  picture?: string;
+  about: string;
+  /** Sanitized https start URL — what gets installed. */
+  website: string;
+  /** Category hashtags (`t` tags), lowercased and deduplicated. */
+  hashtags: string[];
+  createdAt: number;
+}
+
+/**
+ * Parse a kind 31990 event into a StoreApp. Returns null for events that
+ * aren't installable web apps: kind 31990 is also used by DVM handlers, bots
+ * and native-only apps, so we require the full metadata set (name, about,
+ * website) plus an https website — matching how other Nostr app directories
+ * filter down to real applications. All event-sourced URLs are sanitized
+ * here, at the trust boundary.
+ */
+export function parseStoreApp(event: NostrEvent): StoreApp | null {
+  if (event.kind !== APP_HANDLER_KIND) return null;
+
+  const identifier = event.tags.find(([name]) => name === 'd')?.[1];
+  if (!identifier) return null;
+
+  let metadata: NostrMetadata = {};
+  if (event.content) {
+    try {
+      metadata = JSON.parse(event.content) as NostrMetadata;
+    } catch {
+      return null;
+    }
+  }
+
+  const name = (metadata.name || metadata.display_name || '').trim();
+  const about = (metadata.about ?? '').trim();
+  if (!name || !about || !metadata.picture || !metadata.website) return null;
+
+  const website = sanitizeUrl(metadata.website);
+  if (!website) return null;
+
+  const hashtags = Array.from(
+    new Set(
+      event.tags
+        .filter(([n, value]) => n === 't' && value)
+        .map(([, value]) => value.toLowerCase()),
+    ),
+  );
+
+  return {
+    address: `${APP_HANDLER_KIND}:${event.pubkey}:${identifier}`,
+    pubkey: event.pubkey,
+    identifier,
+    name,
+    picture: sanitizeUrl(metadata.picture) ?? undefined,
+    about,
+    website,
+    hashtags,
+    createdAt: event.created_at,
+  };
+}
+
+/**
+ * Reduce kind 31990 events to the latest revision per (pubkey, d) address,
+ * parsed into StoreApps and sorted newest first.
+ */
+export function dedupeStoreApps(events: NostrEvent[]): StoreApp[] {
+  const latest = new Map<string, NostrEvent>();
+  for (const event of events) {
+    if (event.kind !== APP_HANDLER_KIND) continue;
+    const d = event.tags.find(([name]) => name === 'd')?.[1];
+    if (!d) continue;
+    const key = `${event.pubkey}:${d}`;
+    const prev = latest.get(key);
+    if (!prev || event.created_at > prev.created_at) latest.set(key, event);
+  }
+
+  return Array.from(latest.values())
+    .map(parseStoreApp)
+    .filter((app): app is StoreApp => app !== null)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
