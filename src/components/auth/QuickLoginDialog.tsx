@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useLoginActions } from '@/hooks/useLoginActions';
+import { getAvatarShape } from '@/lib/avatarShape';
 
 interface QuickLoginDialogProps {
   /** Whether the dialog is open. */
@@ -72,7 +73,7 @@ export function QuickLoginDialog({
             </>
           ) : (
             <>
-              <Avatar className="size-20">
+              <Avatar className="size-20" shape={getAvatarShape(metadata)}>
                 <AvatarImage src={picture} alt={displayName} />
                 <AvatarFallback className="text-xl">
                   {displayName.slice(0, 2).toUpperCase()}

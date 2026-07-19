@@ -2,22 +2,50 @@ import * as React from "react"
 import { Avatar as AvatarPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { type AvatarShape, getAvatarMaskUrl, isValidAvatarShape } from "@/lib/avatarShape"
 
 function Avatar({
   className,
   size = "default",
+  shape,
+  style,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Root> & {
   size?: "default" | "sm" | "lg"
+  /** Avatar mask shape (emoji). Defaults to a circle when absent or invalid. */
+  shape?: AvatarShape
 }) {
+  const hasShape = !!shape && isValidAvatarShape(shape)
+  // Compute the mask URL synchronously — getAvatarMaskUrl renders the emoji
+  // to a canvas once and caches the data-URL, so subsequent calls are instant.
+  const maskUrl = hasShape ? getAvatarMaskUrl(shape) : ''
+
+  const mergedStyle = React.useMemo<React.CSSProperties | undefined>(() => {
+    if (!maskUrl) return style
+    return {
+      ...style,
+      WebkitMaskImage: `url(${maskUrl})`,
+      maskImage: `url(${maskUrl})`,
+      WebkitMaskSize: "contain",
+      maskSize: "contain",
+      WebkitMaskRepeat: "no-repeat",
+      maskRepeat: "no-repeat",
+      WebkitMaskPosition: "center",
+      maskPosition: "center",
+    }
+  }, [maskUrl, style])
+
   return (
     <AvatarPrimitive.Root
       data-slot="avatar"
       data-size={size}
+      data-shaped={maskUrl ? "" : undefined}
       className={cn(
-        "group/avatar relative flex size-8 shrink-0 overflow-hidden rounded-full select-none data-[size=lg]:size-10 data-[size=sm]:size-6",
+        "group/avatar relative flex size-8 shrink-0 overflow-hidden select-none data-[size=lg]:size-10 data-[size=sm]:size-6",
+        !maskUrl && "rounded-full",
         className
       )}
+      style={mergedStyle}
       {...props}
     />
   )
@@ -44,7 +72,7 @@ function AvatarFallback({
     <AvatarPrimitive.Fallback
       data-slot="avatar-fallback"
       className={cn(
-        "flex size-full items-center justify-center rounded-full bg-muted text-sm text-muted-foreground group-data-[size=sm]/avatar:text-xs",
+        "flex size-full items-center justify-center rounded-full bg-muted text-sm text-muted-foreground group-data-[size=sm]/avatar:text-xs group-data-[shaped]/avatar:rounded-none",
         className
       )}
       {...props}

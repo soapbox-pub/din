@@ -3,6 +3,7 @@ import { memo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarShape } from '@/lib/avatarShape';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -322,7 +323,7 @@ const AccountMenuItem = memo(function AccountMenuItem() {
             aria-label="Account"
             className="grid size-7 place-items-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Avatar className="size-4.5">
+            <Avatar className="size-4.5" shape={getAvatarShape(currentUser?.metadata)}>
               <AvatarImage src={currentUser?.metadata.picture} alt="" />
               <AvatarFallback className="text-[9px]">
                 {currentUser?.metadata.name?.charAt(0) ?? '?'}
@@ -434,7 +435,7 @@ function AccountPanel({
   return (
     <div className="flex flex-col gap-1 p-2">
       <div className="flex items-center gap-3 px-2 py-2">
-        <Avatar className="size-10">
+        <Avatar className="size-10" shape={getAvatarShape(currentUser.metadata)}>
           <AvatarImage src={currentUser.metadata.picture} alt="" />
           <AvatarFallback>
             {pending ? (
@@ -481,7 +482,7 @@ function AccountPanel({
             onClick={() => setLogin(user.id)}
             className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Avatar className="size-7">
+            <Avatar className="size-7" shape={getAvatarShape(user.metadata)}>
               <AvatarImage src={user.metadata.picture} alt="" />
               <AvatarFallback className="text-xs">
                 {userPending ? (

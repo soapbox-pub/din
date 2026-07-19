@@ -11,6 +11,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.tsx';
 import { Skeleton } from '@/components/ui/skeleton.tsx';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
+import { getAvatarShape } from '@/lib/avatarShape';
 
 interface AccountSwitcherProps {
   onAddAccountClick: () => void;
@@ -33,7 +34,7 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button className='flex items-center gap-2 h-10 p-1 pr-2.5 rounded-full hover:bg-accent transition-all text-foreground'>
-          <Avatar className='w-8 h-8'>
+          <Avatar className='w-8 h-8' shape={getAvatarShape(currentUser.metadata)}>
             <AvatarImage
               src={currentUser.metadata.picture}
               alt={isCurrentUserPending ? '' : getDisplayName(currentUser)}
@@ -52,7 +53,7 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
       <DropdownMenuContent className='w-56 p-2 animate-scale-in'>
         <DropdownMenuItem asChild className='flex items-center gap-2 cursor-pointer p-2 rounded-md'>
           <Link to={`/${nip19.npubEncode(currentUser.pubkey)}`}>
-            <Avatar className='w-8 h-8'>
+            <Avatar className='w-8 h-8' shape={getAvatarShape(currentUser.metadata)}>
               <AvatarImage
                 src={currentUser.metadata.picture}
                 alt={isCurrentUserPending ? '' : getDisplayName(currentUser)}
@@ -82,7 +83,7 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
               onClick={() => setLogin(user.id)}
               className='flex items-center gap-2 cursor-pointer p-2 rounded-md'
             >
-              <Avatar className='w-8 h-8'>
+              <Avatar className='w-8 h-8' shape={getAvatarShape(user.metadata)}>
                 <AvatarImage
                   src={user.metadata.picture}
                   alt={isPending ? '' : getDisplayName(user)}
