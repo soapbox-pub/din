@@ -1150,30 +1150,105 @@ const TabSurface = memo(function TabSurface({
   );
 });
 
-/** Quick links shown on the new-tab page. Brand-tinted monogram tiles, so
- * no network favicon fetch is needed. */
-const NEW_TAB_LINKS: { label: string; url: string; color: string }[] = [
-  { label: 'Wikipedia', url: HOME_URL, color: '#636466' },
-  { label: 'DuckDuckGo', url: 'https://duckduckgo.com/', color: '#de5833' },
-  { label: 'GitHub', url: 'https://github.com/', color: '#24292f' },
-  { label: 'Hacker News', url: 'https://news.ycombinator.com/', color: '#ff6600' },
-  { label: 'YouTube', url: 'https://www.youtube.com/', color: '#ff0000' },
-  { label: 'Nostr', url: 'https://nostr.com/', color: '#8e30eb' },
+/** Quick links shown on the new-tab page. Icon URLs were resolved from each
+ * site's web-app manifest (the best of manifest icons, apple-touch-icon, and
+ * favicon); the brand color backs a monogram tile if an icon fails to load. */
+const NEW_TAB_LINKS: { label: string; url: string; icon: string; color: string }[] = [
+  {
+    label: 'Soapbox',
+    url: 'https://soapbox.pub/',
+    icon: 'https://soapbox.pub/favicon/android-chrome-512x512.png',
+    color: '#0482d8',
+  },
+  {
+    label: 'Ditto',
+    url: 'https://ditto.pub/',
+    icon: 'https://ditto.pub/icon-512.png',
+    color: '#7c3aed',
+  },
+  {
+    label: 'NostrHub',
+    url: 'https://nostrhub.io/',
+    icon: 'https://nostrhub.io/icon-512.png',
+    color: '#dc2626',
+  },
+  {
+    label: 'Shakespeare',
+    url: 'https://shakespeare.diy/',
+    icon: 'https://shakespeare.diy/shakespeare-512x512.png',
+    color: '#2b0037',
+  },
+  {
+    label: 'Armada',
+    url: 'https://armada.buzz/',
+    icon: 'https://armada.buzz/logo-512.png',
+    color: '#100b15',
+  },
+  {
+    label: 'Agora',
+    url: 'https://agora.spot/',
+    icon: 'https://agora.spot/icon-512.png',
+    color: '#ff6600',
+  },
 ];
+
+/** One quick-link tile: the site's real app icon, degrading to a
+ * brand-colored monogram if the image fails (offline, moved, blocked). */
+function NewTabTile({
+  link,
+  onNavigate,
+}: {
+  link: (typeof NEW_TAB_LINKS)[number];
+  onNavigate: (url: string) => void;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate(link.url)}
+      className="group flex flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {failed ? (
+        <span
+          aria-hidden
+          className="grid size-12 place-items-center rounded-2xl text-lg font-semibold text-white shadow-sm transition-transform group-hover:scale-105"
+          style={{ backgroundColor: link.color }}
+        >
+          {link.label[0]}
+        </span>
+      ) : (
+        <img
+          src={link.icon}
+          alt=""
+          aria-hidden
+          draggable={false}
+          onError={() => setFailed(true)}
+          className="size-12 rounded-2xl object-cover shadow-sm transition-transform group-hover:scale-105"
+        />
+      )}
+      <span className="w-full truncate text-center text-xs text-muted-foreground">
+        {link.label}
+      </span>
+    </button>
+  );
+}
 
 /**
  * The browser's new-tab page: a centered search box over quick-link tiles,
  * shown over a blank tab's surface until the user picks a destination.
  * Styled to match the desktop (the search box and address bar both feed the
  * same `resolveNavigation`, so typing here or in the address bar is
- * equivalent). Deliberately offline: monogram tiles instead of fetched
- * favicons.
+ * equivalent).
  */
 function NewTabPage({ onNavigate }: { onNavigate: (raw: string) => void }) {
   const [query, setQuery] = useState('');
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center overflow-auto bg-gradient-to-b from-background to-muted/40 px-6 py-16 text-foreground">
+    // The opaque bg-background matters: the gradient's translucent end would
+    // otherwise blend with the white about:blank surface underneath, fading
+    // to near-white even in dark mode.
+    <div className="absolute inset-0 flex flex-col items-center overflow-auto bg-background bg-gradient-to-b from-background to-muted/30 px-6 py-16 text-foreground">
       <div className="flex w-full max-w-xl flex-col items-center">
         <div className="mb-8 flex flex-col items-center gap-3">
           <div className="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
@@ -1208,23 +1283,7 @@ function NewTabPage({ onNavigate }: { onNavigate: (raw: string) => void }) {
 
         <div className="mt-10 grid w-full grid-cols-3 gap-4 sm:grid-cols-6">
           {NEW_TAB_LINKS.map((link) => (
-            <button
-              key={link.url}
-              type="button"
-              onClick={() => onNavigate(link.url)}
-              className="group flex flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span
-                aria-hidden
-                className="grid size-12 place-items-center rounded-2xl text-lg font-semibold text-white shadow-sm transition-transform group-hover:scale-105"
-                style={{ backgroundColor: link.color }}
-              >
-                {link.label[0]}
-              </span>
-              <span className="w-full truncate text-center text-xs text-muted-foreground">
-                {link.label}
-              </span>
-            </button>
+            <NewTabTile key={link.url} link={link} onNavigate={onNavigate} />
           ))}
         </div>
       </div>
