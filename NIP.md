@@ -44,6 +44,7 @@ and never publishes plaintext.
 | `computer.din.settings` | `{ "theme": "light" \| "dark" \| "system", "useAppBlossomServers": boolean }` | Desktop settings that roam across devices |
 | `computer.din.pinned-apps` | `string[]` (app IDs) | Apps pinned to the taskbar |
 | `computer.din.web-apps` | `{ "id": string, "name": string, "url": string, "icon"?: string }[]` | Websites installed as desktop apps (PWA-style); `url` and `icon` are https URLs |
+| `computer.din.browser-history` | `{ "url": string, "title": string \| null, "visitedAt": number, "visits": number }[]` | Web browser history (unique https URLs, most recent first; `visitedAt` is Unix seconds), powering address-bar autocomplete |
 
 ### Example event
 

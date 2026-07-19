@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Code,
   Globe,
+  History,
   MonitorDown,
   Plus,
   Puzzle,
@@ -36,6 +37,12 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
+import {
+  bareUrl,
+  matchHistory,
+  useBrowserHistory,
+  type BrowserHistoryEntry,
+} from '@/hooks/useBrowserHistory';
 import {
   BrowserView,
   type BrowserViewHandle,
@@ -174,6 +181,8 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   const crx = getCrxBridge();
   const devtools = getDevtoolsBridge();
   const webviewMode = isWebviewAvailable();
+  // Persistent browsing history (feeds address-bar autocomplete).
+  const { history: browsingHistory, recordVisit, recordTitle } = useBrowserHistory();
   // One docked-pane size per browser window, shared across tabs (like desktop
   // browsers): height for bottom docking, width for right docking. Resized by
   // dragging the pane's separator.
@@ -297,9 +306,13 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         case 'loading':
           updateTab(id, { loading: event.value });
           break;
-        case 'title':
+        case 'title': {
           updateTab(id, { title: event.value || null });
+          // Join the title onto the history entry for the tab's current URL.
+          const tab = tabsRef.current.find((t) => t.id === id);
+          if (tab?.url && event.value) recordTitle(tab.url, event.value);
           break;
+        }
         case 'favicon':
           updateTab(id, { favicon: event.value });
           break;
@@ -313,6 +326,11 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             canBack: event.canBack,
             canForward: event.canForward,
           });
+          // Webview mode sees every committed navigation here (link clicks,
+          // redirects, back/forward); recordVisit ignores non-https URLs
+          // (about:blank, chrome-extension://). The iframe fallback never
+          // fires this event - it records in navigateTab / go instead.
+          recordVisit(event.url);
           break;
         case 'webContentsId': {
           // Answer any pending chrome.tabs.create request now that the
@@ -326,7 +344,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         }
       }
     },
-    [updateTab, crx],
+    [updateTab, crx, recordVisit, recordTitle],
   );
 
   // Report the active tab to the extension system (drives chrome.tabs'
@@ -535,8 +553,10 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         };
       });
       views.current.get(id)?.loadURL(resolved);
+      // The iframe fallback emits no navigate events, so record here.
+      if (!webviewMode) recordVisit(resolved);
     },
-    [updateTab],
+    [updateTab, webviewMode, recordVisit],
   );
 
   const navigate = useCallback(
@@ -561,8 +581,9 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       const url = tab.history[target];
       view.loadURL(url);
       updateTab(activeId, { cursor: target, address: url, url, title: null, favicon: null, themeColor: null });
+      recordVisit(url);
     },
-    [activeId, updateTab, webviewMode],
+    [activeId, updateTab, webviewMode, recordVisit],
   );
 
   const canBack = webviewMode ? activeTab.canBack : activeTab.cursor > 0;
@@ -666,22 +687,14 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           <RotateCw className={cn('size-4', activeTab.loading && 'animate-spin')} />
         </NavButton>
 
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/80" aria-hidden />
-          <input
-            ref={addressRef}
-            type="text"
-            inputMode="url"
-            aria-label="Address and search bar"
-            value={activeTab.address}
-            onChange={(e) => updateTab(activeId, { address: e.target.value })}
-            onFocus={(e) => e.currentTarget.select()}
-            placeholder="Search or type a URL"
-            spellCheck={false}
-            autoComplete="off"
-            className="h-8 w-full rounded-full border border-border/60 bg-secondary/80 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          />
-        </div>
+        <AddressBar
+          inputRef={addressRef}
+          tabId={activeId}
+          value={activeTab.address}
+          history={browsingHistory}
+          onChangeValue={(text) => updateTab(activeId, { address: text })}
+          onNavigate={navigate}
+        />
 
         {crx && <BrowserActionList tabWcId={activeTab.wcId} />}
 
@@ -783,6 +796,150 @@ function UndockedDevToolsReconciler({
   }, [windows, tabsRef, updateTab]);
 
   return null;
+}
+
+/**
+ * The address/search input plus its history-autocomplete dropdown.
+ *
+ * The visible value is the active tab's `address` (owned by the parent);
+ * this component separately tracks the text the user actually *typed*, so
+ * arrowing through suggestions can rewrite the visible value (like desktop
+ * browsers do) while matching stays anchored to the typed text, which is
+ * restored on Escape or when the highlight wraps back around. Enter submits
+ * the surrounding form with whatever the value is - a highlighted
+ * suggestion's URL or the raw typed text - so navigation itself stays in the
+ * parent's onSubmit.
+ */
+function AddressBar({
+  inputRef,
+  tabId,
+  value,
+  history,
+  onChangeValue,
+  onNavigate,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  /** Active tab id; switching tabs dismisses the dropdown. */
+  tabId: string;
+  value: string;
+  history: BrowserHistoryEntry[];
+  onChangeValue: (text: string) => void;
+  onNavigate: (raw: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  /** Keyboard highlight: -1 is the raw typed text, 0.. a suggestion. */
+  const [highlighted, setHighlighted] = useState(-1);
+  const [typed, setTyped] = useState('');
+
+  const suggestions = useMemo(
+    () => (open ? matchHistory(history, typed) : []),
+    [open, history, typed],
+  );
+  const show = open && suggestions.length > 0;
+
+  const dismiss = useCallback(() => {
+    setOpen(false);
+    setHighlighted(-1);
+  }, []);
+
+  // Switching tabs swaps the value out from under the dropdown; dismiss it.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOpen(false);
+    setHighlighted(-1);
+  }, [tabId]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!show) return;
+      e.preventDefault();
+      // Wrap through -1 (the typed text) at either end, Chrome-style.
+      const count = suggestions.length;
+      let next = highlighted + (e.key === 'ArrowDown' ? 1 : -1);
+      if (next < -1) next = count - 1;
+      else if (next >= count) next = -1;
+      setHighlighted(next);
+      onChangeValue(next === -1 ? typed : suggestions[next].url);
+    } else if (e.key === 'Escape' && show) {
+      e.preventDefault();
+      dismiss();
+      onChangeValue(typed);
+    } else if (e.key === 'Enter') {
+      // The surrounding form submits the current value; just close.
+      dismiss();
+    }
+  };
+
+  return (
+    <div className="relative flex-1">
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/80" aria-hidden />
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="url"
+        role="combobox"
+        aria-label="Address and search bar"
+        aria-expanded={show}
+        aria-autocomplete="list"
+        aria-controls="address-bar-suggestions"
+        aria-activedescendant={
+          highlighted >= 0 ? `address-bar-suggestion-${highlighted}` : undefined
+        }
+        value={value}
+        onChange={(e) => {
+          const text = e.target.value;
+          setTyped(text);
+          setHighlighted(-1);
+          setOpen(text.trim().length > 0);
+          onChangeValue(text);
+        }}
+        onKeyDown={onKeyDown}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={dismiss}
+        placeholder="Search or type a URL"
+        spellCheck={false}
+        autoComplete="off"
+        className="h-8 w-full rounded-full border border-border/60 bg-secondary/80 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      />
+      {show && (
+        <ul
+          id="address-bar-suggestions"
+          role="listbox"
+          aria-label="History suggestions"
+          // Keep focus in the input so item clicks land before blur closes.
+          onMouseDown={(e) => e.preventDefault()}
+          className="absolute inset-x-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-border/60 bg-popover py-1 text-popover-foreground shadow-lg"
+        >
+          {suggestions.map((entry, i) => (
+            <li
+              key={entry.url}
+              id={`address-bar-suggestion-${i}`}
+              role="option"
+              aria-selected={i === highlighted}
+              onClick={() => {
+                dismiss();
+                onNavigate(entry.url);
+              }}
+              className={cn(
+                'flex cursor-default items-center gap-2.5 px-3 py-1.5 text-sm',
+                i === highlighted
+                  ? 'bg-accent text-accent-foreground'
+                  : 'hover:bg-accent/50',
+              )}
+            >
+              <History className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 max-w-[50%] truncate">
+                {entry.title ?? hostnameOf(entry.url) ?? entry.url}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                {bareUrl(entry.url)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /**
