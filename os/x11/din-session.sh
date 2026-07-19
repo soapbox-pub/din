@@ -70,6 +70,33 @@ FLAGS=(--enable-unsafe-swiftshader)
 [ "${DIN_NO_GPU:-0}" = "1" ] && FLAGS=(--disable-gpu --enable-unsafe-swiftshader)
 [ -n "${DIN_OZONE:-}" ] && FLAGS+=(--ozone-platform="${DIN_OZONE}")
 
+# Natural ("reverse") scrolling on touchpads. On a bare login session there is
+# no GNOME/settings daemon to apply input preferences, so libinput sits at its
+# default - traditional scrolling - and a trackpad feels backwards to anyone
+# used to natural scroll. Din owns the whole session (same reason it drives
+# xrandr and the lid switch itself), so set it here. Touchpads only, so an
+# external mouse keeps traditional wheel scrolling; a touchpad is the pointer
+# subset that exposes "libinput Tapping Enabled" (mice don't tap). X11 only -
+# xinput talks to the X server; under Wayland the compositor owns scrolling and
+# this is skipped. Entirely best effort: a missing xinput or a device that
+# drops out is ignored so input setup can never wedge login. Set DIN_NATURAL_
+# SCROLL=0 to opt out and keep the libinput default.
+enable_natural_scroll() {
+  [ "${DIN_NATURAL_SCROLL:-1}" = "1" ] || return 0
+  [ "${XDG_SESSION_TYPE:-x11}" = "x11" ] || return 0
+  command -v xinput >/dev/null 2>&1 || return 0
+  xinput list --name-only 2>/dev/null | while IFS= read -r dev; do
+    props="$(xinput list-props "${dev}" 2>/dev/null)" || continue
+    case "${props}" in
+      *"libinput Tapping Enabled"*)
+        xinput set-prop "${dev}" "libinput Natural Scrolling Enabled" 1 \
+          2>/dev/null || true
+        ;;
+    esac
+  done
+}
+enable_natural_scroll || true
+
 # No DIN_DEV_URL -> main.cjs opens the fullscreen kiosk window (see
 # electron/main.cjs: `fullscreen/kiosk: !DEV_URL`).
 #
