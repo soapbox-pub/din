@@ -69,7 +69,14 @@ export interface WindowState {
   minimized: boolean;
   /** Whether the window fills the workspace. */
   maximized: boolean;
-  /** Geometry to restore to when un-maximizing. */
+  /**
+   * Half-workspace edge tile, or null. Like `maximized`, this is a
+   * CSS-driven layout (the window renders at 50% width against the given
+   * edge); the window's own x/y/width/height keep their pre-tile values so
+   * `restore` can return it there.
+   */
+  snapped: 'left' | 'right' | null;
+  /** Geometry to restore to when un-maximizing or un-tiling. */
   restore: { x: number; y: number; width: number; height: number } | null;
 }
 
@@ -115,6 +122,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
           z: maxZ(ws) + 1,
           minimized: false,
           maximized: false,
+          snapped: null,
           restore: null,
         },
       ];
@@ -199,19 +207,52 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   );
 
   /**
-   * Un-maximize a window to an explicit geometry (no-op if not maximized).
-   * Used by the title-bar tear-away drag, which restores the window under
-   * the cursor rather than at its remembered position.
+   * Un-maximize / un-tile a window to an explicit geometry (no-op if neither
+   * maximized nor tiled). Used by the title-bar tear-away drag, which
+   * restores the window under the cursor rather than at its remembered spot.
    */
   const unmaximize = useCallback(
     (id: string, geometry: { x: number; y: number; width: number; height: number }) => {
       setWindows((ws) =>
         ws.map((w) =>
-          w.id === id && w.maximized
-            ? { ...w, ...geometry, maximized: false, restore: null }
+          w.id === id && (w.maximized || w.snapped)
+            ? { ...w, ...geometry, maximized: false, snapped: null, restore: null }
             : w,
         ),
       );
+    },
+    [],
+  );
+
+  /**
+   * Tile a window to the left or right half of the workspace (no-op if
+   * already tiled to that side). `restore` overrides the geometry remembered
+   * for un-tiling - the drag-to-edge snap passes the window's pre-drag spot
+   * so a later restore returns it there. Like `maximize`, the tile is
+   * CSS-driven, so the window's x/y/width/height are left untouched.
+   */
+  const tile = useCallback(
+    (
+      id: string,
+      side: 'left' | 'right',
+      restore?: { x: number; y: number; width: number; height: number },
+    ) => {
+      setWindows((ws) => {
+        const top = maxZ(ws);
+        return ws.map((w) =>
+          w.id === id && w.snapped !== side
+            ? {
+                ...w,
+                snapped: side,
+                maximized: false,
+                restore:
+                  restore ??
+                  w.restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
+                z: top + 1,
+              }
+            : w,
+        );
+      });
     },
     [],
   );
@@ -247,15 +288,18 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
             ...w,
             ...w.restore,
             maximized: false,
+            snapped: null,
             restore: null,
             z: top + 1,
           };
         }
-        // Maximize: remember the current geometry to restore later.
+        // Maximize. A tiled window keeps its pre-tile geometry (w.restore) as
+        // the restore target; a normal window remembers its current geometry.
         return {
           ...w,
           maximized: true,
-          restore: { x: w.x, y: w.y, width: w.width, height: w.height },
+          snapped: null,
+          restore: w.restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
           z: top + 1,
         };
       });
@@ -279,10 +323,11 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       resize,
       maximize,
       unmaximize,
+      tile,
       toggleMaximize,
       cycleFocus,
     }),
-    [open, close, closeApp, minimize, focus, move, resize, maximize, unmaximize, toggleMaximize, cycleFocus],
+    [open, close, closeApp, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

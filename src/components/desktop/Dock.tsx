@@ -220,6 +220,15 @@ export function Dock({
           if (w.minimized) return false;
           // Maximized windows fill the workspace, which reaches the screen bottom.
           if (w.maximized) return workspaceRect.bottom > dockTop;
+          // Edge-tiled windows are CSS-driven (stored x/width are stale): they
+          // span full height against one half of the workspace.
+          if (w.snapped) {
+            if (workspaceRect.bottom <= dockTop) return false;
+            const mid = workspaceRect.left + workspaceRect.width / 2;
+            const tileLeft = w.snapped === 'left' ? workspaceRect.left : mid;
+            const tileRight = w.snapped === 'left' ? mid : workspaceRect.right;
+            return tileLeft < dockRight && tileRight > dockLeft;
+          }
           const left = workspaceRect.left + w.x;
           const top = workspaceRect.top + w.y;
           return (
