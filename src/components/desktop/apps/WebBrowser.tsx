@@ -692,8 +692,12 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       userscriptsBridge
         .fetchText(url)
         .then((code) => setScriptInstall({ code, url }))
-        .catch(() => {
-          toast({ title: "Couldn't download userscript", variant: 'destructive' });
+        .catch((error: unknown) => {
+          toast({
+            title: "Couldn't download userscript",
+            description: error instanceof Error ? error.message : undefined,
+            variant: 'destructive',
+          });
         });
     },
     [userscriptsBridge, toast],
