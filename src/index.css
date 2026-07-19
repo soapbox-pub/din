@@ -191,6 +191,10 @@
 
   body {
     @apply bg-background text-foreground;
+    /* Inter's SF-Pro-like alternates: cv05 = lowercase l with tail,
+       ss03 = round quotes/commas. Fonts without these features (e.g.
+       profile-theme overrides) simply ignore them. */
+    font-feature-settings: 'cv05', 'ss03';
   }
 }
 
