@@ -24,7 +24,9 @@ const Z_COMPACT_THRESHOLD = 5000;
  */
 function raise(ws: WindowState[], id: string): WindowState[] {
   const target = ws.find((w) => w.id === id);
-  if (!target) return ws;
+  // A closing window is already playing its exit animation; resurrecting it
+  // on top of the stack would just have it die focused.
+  if (!target || target.closing) return ws;
   const top = maxZ(ws);
   if (!target.minimized && target.z === top) return ws;
   if (top < Z_COMPACT_THRESHOLD) {
@@ -67,6 +69,13 @@ export interface WindowState {
   z: number;
   /** Whether the window is minimized to the taskbar. */
   minimized: boolean;
+  /**
+   * Whether the window is playing its close animation. close() marks the
+   * window instead of removing it, so the Window component can animate the
+   * farewell on the live element; destroy() then actually removes it.
+   * Closing windows are excluded from focus/stacking and can't be raised.
+   */
+  closing: boolean;
   /** Whether the window fills the workspace. */
   maximized: boolean;
   /**
@@ -121,6 +130,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
           height: size.height,
           z: maxZ(ws) + 1,
           minimized: false,
+          closing: false,
           maximized: false,
           snapped: null,
           restore: null,
@@ -130,15 +140,30 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
     return id;
   }, [getApp]);
 
+  /**
+   * Begin closing a window: it stays mounted, marked `closing`, while the
+   * Window component plays the exit animation; destroy() finishes the job.
+   */
   const close = useCallback((id: string) => {
-    setWindows((ws) => ws.filter((w) => w.id !== id));
+    setWindows((ws) =>
+      ws.some((w) => w.id === id && !w.closing)
+        ? ws.map((w) => (w.id === id ? { ...w, closing: true } : w))
+        : ws,
+    );
   }, []);
 
   const closeApp = useCallback((appId: string) => {
     setWindows((ws) =>
-      ws.some((w) => w.appId === appId)
-        ? ws.filter((w) => w.appId !== appId)
+      ws.some((w) => w.appId === appId && !w.closing)
+        ? ws.map((w) => (w.appId === appId ? { ...w, closing: true } : w))
         : ws,
+    );
+  }, []);
+
+  /** Remove a window for real, once its close animation has finished. */
+  const destroy = useCallback((id: string) => {
+    setWindows((ws) =>
+      ws.some((w) => w.id === id) ? ws.filter((w) => w.id !== id) : ws,
     );
   }, []);
 
@@ -265,7 +290,9 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
    */
   const cycleFocus = useCallback((backward = false) => {
     setWindows((ws) => {
-      const visible = ws.filter((w) => !w.minimized).sort((a, b) => a.z - b.z);
+      const visible = ws
+        .filter((w) => !w.minimized && !w.closing)
+        .sort((a, b) => a.z - b.z);
       if (visible.length < 2) return ws;
       const rotated = backward
         ? [visible[visible.length - 1], ...visible.slice(0, -1)]
@@ -317,6 +344,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       open,
       close,
       closeApp,
+      destroy,
       minimize,
       focus,
       move,
@@ -327,7 +355,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       toggleMaximize,
       cycleFocus,
     }),
-    [open, close, closeApp, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus],
+    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

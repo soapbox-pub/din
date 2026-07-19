@@ -146,7 +146,7 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object or `isTop` changes.
-  const { close, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize } =
+  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize } =
     useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
@@ -456,6 +456,30 @@ export const Window = memo(function Window({
 
   // Neither animation loop may outlive the window (e.g. closed mid-flight).
   useEffect(() => () => animCancel.current?.(), []);
+
+  // Close: close() only marks the window `closing`; the exit animation (a
+  // reverse of the open pop, via the animate-out classes below) plays on the
+  // live element and its animationend calls destroy() for the real removal.
+  // This effect handles the cases with no animation to wait for - reduced
+  // motion, a minimized (invisible) window, or an uninstalled app rendering
+  // null - and arms a safety-net timer so a missed animationend can never
+  // leave an inert ghost window behind.
+  useLayoutEffect(() => {
+    if (!win.closing) return;
+    animCancel.current?.();
+    animCancel.current = null;
+    stopWobble(false);
+    if (
+      !sectionRef.current ||
+      win.minimized ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      destroy(win.id);
+      return;
+    }
+    const timer = window.setTimeout(() => destroy(win.id), 400);
+    return () => window.clearTimeout(timer);
+  }, [win.closing, win.minimized, win.id, destroy, stopWobble]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -796,13 +820,26 @@ export const Window = memo(function Window({
       aria-label={app.name}
       onPointerDown={() => focus(win.id)}
       style={geometry}
+      onAnimationEnd={(e) => {
+        // The exit animation finished: remove the window for real. Guarded
+        // by name and target so enter animations (this window's or a
+        // child's, bubbling) can't destroy a live window.
+        if (win.closing && e.target === e.currentTarget && e.animationName === 'exit') {
+          destroy(win.id);
+        }
+      }}
       className={cn(
         'absolute flex flex-col overflow-hidden bg-card/90 backdrop-blur-xl',
-        // Open animation: a quick macOS-style pop (fade + zoom from 95%),
-        // running once on mount. CSS keyframes take precedence over inline
-        // transforms for their duration, so gestures in the first 200ms are
-        // visually deferred, never broken.
-        'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200',
+        // Open/close animations: a quick macOS-style pop in (fade + zoom
+        // from 95%) on mount, and its reverse on close - swapping the
+        // classes restarts the element's animation as the exit. CSS
+        // keyframes take precedence over inline transforms for their
+        // duration, so gestures in the first 200ms are visually deferred,
+        // never broken. fill-mode-forwards holds the faded-out final frame
+        // until destroy() commits.
+        win.closing
+          ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:duration-150 motion-safe:fill-mode-forwards'
+          : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200',
         flush
           ? 'rounded-none'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',

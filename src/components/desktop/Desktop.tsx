@@ -28,9 +28,10 @@ function DesktopSession() {
   // Shared with the Dock so it can translate window coordinates (which are
   // relative to the workspace) into viewport space for intersection checks.
   const workspaceRef = useRef<HTMLElement>(null);
-  // Focus ring goes to the highest visible window; minimized ones don't count.
+  // Focus ring goes to the highest visible window; minimized and closing
+  // ones don't count.
   const topZ = manager.windows.reduce(
-    (max, w) => (w.minimized ? max : Math.max(max, w.z)),
+    (max, w) => (w.minimized || w.closing ? max : Math.max(max, w.z)),
     0,
   );
 

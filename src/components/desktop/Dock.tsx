@@ -113,7 +113,7 @@ export function Dock({
 
   // The window that currently holds focus: highest z among visible windows.
   const activeWindow = windows.reduce<WindowState | null>(
-    (top, w) => (!w.minimized && (!top || w.z > top.z) ? w : top),
+    (top, w) => (!w.minimized && !w.closing && (!top || w.z > top.z) ? w : top),
     null,
   );
 
