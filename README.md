@@ -36,7 +36,7 @@ Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> Din
 - Node.js (dev servers and builds)
 - Nix (with flakes enabled; the Determinate installer does this by default) —
   only needed for the Aladdin `os:*` commands
-- QEMU (`qemu-system-x86_64`) on the host for `npm run os:run`
+- QEMU (`qemu-system-x86_64`) on the host for the `npm run os:run` demo
 
 ## Usage
 
@@ -45,9 +45,9 @@ npm run dev         # run Din in Electron with live HMR (windowed + DevTools)
 npm run dev:browser # run Din in a plain browser with HMR (http://localhost:8080)
 npm test            # type-check + lint + tests + build
 npm run build       # build the web app into dist/
-npm run os:build    # build the Aladdin VM (./result/bin/run-aladdin-vm)
-npm run os:run      # build the Aladdin VM and boot it in a QEMU window
-npm run os:clean    # remove the VM build output and disk (aladdin.qcow2)
+npm run os:build    # build the installable Aladdin disk image (./result/nixos.img)
+npm run os:run      # demo Aladdin in a QEMU window
+npm run os:clean    # remove the build output and the demo VM disk (aladdin.qcow2)
 ```
 
 `npm run dev` starts Vite, then launches the same `electron/main.cjs` Aladdin
@@ -56,8 +56,17 @@ ships) against the dev server via `DIN_DEV_URL`. This gives you the real
 Electron/`app://` environment with Vite HMR + React fast refresh. Ctrl-C stops
 both processes.
 
-The QEMU window boots Aladdin into Din fullscreen. Boot logs also appear on
-the serial console (your terminal).
+`npm run os:build` produces the real artifact: a raw UEFI disk image meant to
+be installed on a physical machine. Write it to a drive and boot from it:
+
+```sh
+sudo dd if=result/nixos.img of=/dev/sdX bs=4M status=progress conv=fsync
+```
+
+On first boot the root partition grows to fill the disk. `npm run os:run` is
+for demoing: it boots the same system in a QEMU window (software rendering,
+since QEMU provides no GPU), with boot logs mirrored to the serial console
+(your terminal).
 
 ## Layout
 
@@ -67,7 +76,8 @@ the serial console (your terminal).
 - `electron/preload.cjs`, `electron/pty-host.py` — the fs/pty/wifi bridges
   behind Din's Files, Terminal, and Settings apps
 - `os/` — Aladdin, the flagship OS:
-  - `os/flake.nix` — entry point; exposes the VM as `./os#vm` and pulls in
+  - `os/flake.nix` — entry point; exposes the installable disk image as
+    `./os#image` (the default) and the QEMU demo as `./os#vm`, and pulls in
     the Din source tree (the repo root) as an input
   - `os/configuration.nix` — the whole OS definition: cage + Electron
     launcher + Nix build of Din (`buildNpmPackage`)
@@ -83,9 +93,9 @@ Three tiers, fastest first:
    Vite dev server, so it matches Aladdin while staying hot-reloadable. Under
    the hood this just sets `DIN_DEV_URL=http://localhost:8080` for
    `electron/main.cjs`.
-3. **Full VM** (`npm run os:run`): rebuilds the Aladdin image; only changed
-   layers rebuild. The VM disk (`aladdin.qcow2`) persists between boots;
-   `npm run os:clean` resets it.
+3. **Full OS demo** (`npm run os:run`): rebuilds Aladdin and boots it in
+   QEMU; only changed layers rebuild. The demo VM disk (`aladdin.qcow2`)
+   persists between boots; `npm run os:clean` resets it.
 
 ### Updating npm dependencies
 
@@ -114,10 +124,10 @@ files — `git add` new source files before `npm run os:build`.
 - The Settings app manages WiFi through NetworkManager (`nmcli` behind an
   Electron IPC bridge). NetworkManager picks up physical adapters (wired and
   wireless) automatically. Note that QEMU has no wireless hardware, so the
-  WiFi panel will show no networks inside the VM.
-- Electron runs with `--disable-gpu` for reliability in QEMU without virgl.
-  On real hardware, remove it in `os/configuration.nix` and verify GPU
-  acceleration.
+  WiFi panel will show no networks inside the demo VM.
+- On hardware, Din runs GPU-accelerated (Mesa via `hardware.graphics`, plus
+  redistributable firmware). Only the QEMU demo variant passes
+  `--disable-gpu` (no virgl) and falls back to software rendering.
 - Din runs as the unprivileged `web` user with Chromium's sandbox and
   context isolation enabled; the renderer has no Node access.
 - The `app://` protocol handler in `main.cjs` serves only files inside

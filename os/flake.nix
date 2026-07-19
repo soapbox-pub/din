@@ -23,9 +23,26 @@
       };
 
       packages.${system} = {
-        # `nix build ./os#vm` -> ./result/bin/run-aladdin-vm launches QEMU
+        # The real product: an installable disk image for physical machines.
+        # `nix build ./os#image` -> ./result/nixos.img; write it to a drive
+        # (e.g. `dd if=result/nixos.img of=/dev/sdX bs=4M status=progress`)
+        # and boot via UEFI. The root partition grows to fill the disk on
+        # first boot.
+        image = import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
+          inherit (self.nixosConfigurations.aladdin) config pkgs;
+          lib = nixpkgs.lib;
+          format = "raw";
+          partitionTableType = "efi";
+          diskSize = "auto";
+          # An appliance image doesn't need a nixpkgs channel copy on disk.
+          copyChannel = false;
+        };
+
+        # `nix build ./os#vm` -> ./result/bin/run-aladdin-vm demos the same
+        # system in a QEMU window.
         vm = self.nixosConfigurations.aladdin.config.system.build.vm;
-        default = self.packages.${system}.vm;
+
+        default = self.packages.${system}.image;
       };
     };
 }

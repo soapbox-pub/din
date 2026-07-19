@@ -71,24 +71,18 @@ let
   };
 
   # Launcher: Electron running the Din host on Wayland (cage provides the
-  # compositor). --disable-gpu keeps the demo reliable in QEMU without virgl;
-  # remove it on real hardware (and verify acceleration!).
-  # --enable-unsafe-swiftshader: with the GPU disabled, Chromium >=137 refuses
-  # to create even software WebGL contexts without this flag. The Terminal app
-  # needs WebGL for crisp box-drawing glyphs ("unsafe" = SwiftShader is not
-  # security-maintained against untrusted WebGL content; acceptable for this
-  # demo, revisit if the <webview> browser faces hostile sites in earnest).
+  # compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
+  # variant below can swap in software rendering.
   # python3 must be on PATH for the Terminal app's pty host (pty-host.py),
   # nmcli for the Settings app's WiFi bridge, and brightnessctl + gammastep for
   # the Settings/menu-bar brightness bridge (backlight + night light).
-  din-launcher = pkgs.writeShellScriptBin "din" ''
+  makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:$PATH
     exec ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.cjs \
-      --ozone-platform=wayland \
-      --disable-gpu \
-      --enable-unsafe-swiftshader
+      --ozone-platform=wayland ${extraFlags}
   '';
+  din-launcher = makeDinLauncher "";
 in
 {
   networking.hostName = "aladdin";
@@ -126,15 +120,57 @@ in
     noto-fonts-color-emoji
   ];
 
-  # Serial console so `npm run os:run` shows boot logs in the terminal too.
-  boot.kernelParams = [ "console=ttyS0" ];
+  # The disk image (`nix build ./os#image`) is written directly to a drive and
+  # boots via UEFI. systemd-boot installs to the ESP's removable path
+  # (EFI/BOOT/BOOTX64.EFI), so no NVRAM entries are needed on the target
+  # machine.
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = false;
+
+  # The image is built at a minimal size; on first boot the root partition and
+  # filesystem grow to fill whatever disk it was written to.
+  boot.growPartition = true;
+  fileSystems."/" = {
+    device = "/dev/disk/by-label/nixos";
+    fsType = "ext4";
+    autoResize = true;
+  };
+  fileSystems."/boot" = {
+    device = "/dev/disk/by-label/ESP";
+    fsType = "vfat";
+  };
+
+  # Storage controllers commonly found in real machines, so the initrd can
+  # mount the root filesystem wherever the image lands (NVMe, SATA, USB, SD).
+  boot.initrd.availableKernelModules = [
+    "xhci_pci" "ehci_pci" "ahci" "nvme" "usb_storage" "usbhid" "sd_mod"
+    "sdhci_pci"
+  ];
+
+  # GPU acceleration for cage/Electron, plus the firmware real WiFi and
+  # graphics hardware needs.
+  hardware.graphics.enable = true;
+  hardware.enableRedistributableFirmware = true;
 
   # Keep the image lean-ish.
   documentation.enable = false;
   environment.defaultPackages = [ ];
 
-  # VM settings (only apply to the `nix build ./os#vm` variant).
+  # QEMU demo settings — these apply only to the `./os#vm` variant, never to
+  # the disk image.
   virtualisation.vmVariant = {
+    # The demo VM has no GPU (no virgl), so fall back to software rendering.
+    # --enable-unsafe-swiftshader: with the GPU disabled, Chromium >=137
+    # refuses to create even software WebGL contexts without this flag, and
+    # the Terminal app needs WebGL for crisp box-drawing glyphs ("unsafe" =
+    # SwiftShader is not security-maintained against untrusted WebGL content;
+    # acceptable for a demo).
+    services.cage.program = lib.mkForce
+      "${makeDinLauncher "--disable-gpu --enable-unsafe-swiftshader"}/bin/din";
+
+    # Serial console so `npm run os:run` shows boot logs in the terminal too.
+    boot.kernelParams = [ "console=ttyS0" ];
+
     virtualisation = {
       memorySize = 4096;
       cores = 4;
