@@ -285,6 +285,12 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         // attached (see electron/main.cjs); installed apps use their own
         // partition, which is where the Nostr identity bridge is attached.
         partition={partitionRef.current}
+        // Let the guest request new windows (target=_blank / window.open).
+        // Without this, Electron silently drops those requests and the links
+        // appear dead. The main process's setWindowOpenHandler denies the
+        // native popup and re-routes the URL to a browser tab / installed app
+        // instead (see electron/main.cjs).
+        allowpopups={true}
         className="h-full w-full bg-white"
         style={{ display: 'flex' }}
       />
