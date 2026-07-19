@@ -4,7 +4,7 @@
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
-//   - window.display: xrandr screen-resolution control for the Settings app
+//   - window.display: xrandr multi-output arrangement for the Settings app
 //   - window.power: battery/AC status for the menu bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
@@ -118,16 +118,20 @@ contextBridge.exposeInMainWorld('wifi', {
 });
 
 // Display bridge (window.display), backed by the display:* handlers in
-// main.cjs (xrandr). Used by the Settings app to change screen resolution on
-// a bare X11 session. `available: false` where xrandr doesn't apply
-// (Wayland/cage), so the panel can render a fallback.
+// main.cjs (xrandr). Used by the Settings app to arrange the outputs on a bare
+// X11 session: resolution, position, on/off and which one is primary.
+// `available: false` where xrandr doesn't apply (Wayland/cage), so the panel
+// can render a fallback.
 contextBridge.exposeInMainWorld('display', {
-  /** Connected outputs with their available modes. `available: false` = no xrandr. */
+  /** Connected outputs with their available modes/positions. `available: false` = no xrandr. */
   status: () => ipcRenderer.invoke('display:status'),
 
-  /** Set an output's resolution (validated against its reported modes). */
-  setMode: (output, width, height) =>
-    ipcRenderer.invoke('display:setMode', output, width, height),
+  /**
+   * Apply a complete output arrangement in one atomic xrandr call. Each
+   * placement is { output, enabled, primary, x, y, width, height }; every
+   * field is re-validated in the main process against xrandr's own report.
+   */
+  applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
 });
 
 // Power bridge (window.power), backed by the power:* handler in main.cjs

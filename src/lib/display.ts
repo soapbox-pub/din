@@ -4,10 +4,15 @@
  *
  * Backed by xrandr in the main process. It is meaningful only on a bare X11
  * session (the os/x11 standalone launcher), where Din is the whole desktop and
- * nothing else manages screen resolution. Where xrandr doesn't apply
- * (Wayland/cage on Aladdin) or in a plain browser the bridge is absent or
- * `status()` resolves with `available: false`; callers must feature-detect and
- * render a fallback.
+ * nothing else manages the outputs. Where xrandr doesn't apply (Wayland/cage on
+ * Aladdin) or in a plain browser the bridge is absent or `status()` resolves
+ * with `available: false`; callers must feature-detect and render a fallback.
+ *
+ * The bridge models a full multi-output layout: each connected output has a
+ * resolution, a position in the shared virtual screen, an on/off state and a
+ * primary flag. `applyLayout` commits an entire desired arrangement in one
+ * atomic xrandr call, so the desktop never passes through a half-configured
+ * state.
  */
 
 export interface DisplayMode {
@@ -25,8 +30,12 @@ export interface DisplayOutput {
   connected: boolean;
   /** Whether this is the primary output. */
   primary: boolean;
+  /** Whether the output is currently on (driving a mode). */
+  enabled: boolean;
   /** The mode currently in use, or null if the output is off. */
   current: { width: number; height: number } | null;
+  /** Top-left position in the shared virtual screen (px); {0,0} when off. */
+  position: { x: number; y: number };
   /** Available modes, as xrandr reports them (one entry per resolution). */
   modes: DisplayMode[];
 }
@@ -38,11 +47,30 @@ export interface DisplayStatus {
   outputs: DisplayOutput[];
 }
 
+/** One output's slot in a desired layout, as sent to `applyLayout`. */
+export interface DisplayPlacement {
+  output: string;
+  /** Turn the output on (true) or off (false). */
+  enabled: boolean;
+  /** Exactly one enabled output must be primary. */
+  primary: boolean;
+  /** Top-left position in the shared virtual screen (px). Ignored when off. */
+  x: number;
+  y: number;
+  /** Chosen mode. Must be one the output reports. Ignored when off. */
+  width: number;
+  height: number;
+}
+
 export interface DisplayBridge {
   /** Connected outputs with their modes. `available: false` when xrandr is absent. */
   status(): Promise<DisplayStatus>;
-  /** Set an output's resolution (validated in main against its reported modes). */
-  setMode(output: string, width: number, height: number): Promise<void>;
+  /**
+   * Apply a complete output arrangement (resolution + position + on/off +
+   * primary) in a single atomic xrandr invocation. Every field is re-validated
+   * in the main process against xrandr's own report before use.
+   */
+  applyLayout(placements: DisplayPlacement[]): Promise<void>;
 }
 
 declare global {
@@ -67,4 +95,45 @@ export function cleanDisplayError(error: unknown): string {
 /** A stable "1920 × 1200" label for a mode/resolution. */
 export function formatMode(width: number, height: number): string {
   return `${width} \u00d7 ${height}`;
+}
+
+/** A friendlier label for common xrandr output names. */
+export function friendlyOutputName(name: string): string {
+  if (/^(eDP|LVDS|DSI)/i.test(name)) return 'Built-in display';
+  if (/^HDMI/i.test(name)) return 'HDMI display';
+  if (/^(DisplayPort|DP)/i.test(name)) return 'DisplayPort display';
+  if (/^(VGA|DVI)/i.test(name)) return `${name.replace(/-.*/, '')} display`;
+  return name;
+}
+
+/** True for a laptop's built-in panel (the one that goes off when the lid shuts). */
+export function isInternalOutput(name: string): boolean {
+  return /^(eDP|LVDS|DSI)/i.test(name);
+}
+
+/**
+ * Collapse xrandr's per-refresh-rate rows to unique resolutions, largest first,
+ * carrying the current/native flags forward.
+ */
+export function uniqueModes(modes: DisplayMode[]): DisplayMode[] {
+  const byResolution = new Map<string, DisplayMode>();
+  for (const mode of modes) {
+    const key = `${mode.width}x${mode.height}`;
+    const existing = byResolution.get(key);
+    byResolution.set(key, {
+      width: mode.width,
+      height: mode.height,
+      current: (existing?.current ?? false) || mode.current,
+      preferred: (existing?.preferred ?? false) || mode.preferred,
+    });
+  }
+  return [...byResolution.values()].sort((a, b) => b.width - a.width || b.height - a.height);
+}
+
+/** The output's best default mode: preferred, else current, else the largest. */
+export function preferredMode(output: DisplayOutput): DisplayMode | null {
+  const modes = uniqueModes(output.modes);
+  return (
+    modes.find((m) => m.preferred) ?? modes.find((m) => m.current) ?? modes[0] ?? null
+  );
 }

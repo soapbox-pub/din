@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BatteryFull,
   Bomb,
@@ -7,6 +7,7 @@ import {
   Cloud,
   CloudOff,
   EthernetPort,
+  Laptop,
   Loader2,
   Lock,
   Monitor,
@@ -35,9 +36,17 @@ import {
   useWifiNetworks,
   useWifiStatus,
 } from '@/hooks/useWifi';
-import { cleanDisplayError, formatMode, getDisplayBridge } from '@/lib/display';
-import type { DisplayMode, DisplayOutput } from '@/lib/display';
-import { useDisplayStatus, useSetDisplayMode } from '@/hooks/useDisplay';
+import {
+  cleanDisplayError,
+  formatMode,
+  friendlyOutputName,
+  getDisplayBridge,
+  isInternalOutput,
+  preferredMode,
+  uniqueModes,
+} from '@/lib/display';
+import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
+import { useApplyDisplayLayout, useDisplayStatus } from '@/hooks/useDisplay';
 import { formatTimeRemaining, getPowerBridge, summarizePower } from '@/lib/power';
 import type { BatteryInfo } from '@/lib/power';
 import { useBatteryStatus } from '@/hooks/usePower';
@@ -485,24 +494,137 @@ function NetworkListSkeleton() {
 // ---------------------------------------------------------------------------
 
 /**
- * Screen resolution for each connected output, via the xrandr display bridge
+ * A single output's slot in the editable draft layout the Display panel works
+ * on: its chosen mode, position in the shared virtual screen, and on/off +
+ * primary flags. `modes` is de-duplicated to unique resolutions.
+ */
+interface DisplayDraft {
+  name: string;
+  friendly: string;
+  internal: boolean;
+  enabled: boolean;
+  primary: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  modes: DisplayMode[];
+}
+
+/** Seed the editable draft from xrandr's reported outputs. */
+function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
+  return outputs.map((output) => {
+    const modes = uniqueModes(output.modes);
+    const fallback = preferredMode(output) ?? modes[0] ?? null;
+    return {
+      name: output.name,
+      friendly: friendlyOutputName(output.name),
+      internal: isInternalOutput(output.name),
+      enabled: output.enabled,
+      primary: output.primary,
+      x: output.position.x,
+      y: output.position.y,
+      width: output.current?.width ?? fallback?.width ?? 0,
+      height: output.current?.height ?? fallback?.height ?? 0,
+      modes,
+    };
+  });
+}
+
+/** A stable signature of the arrangement, for dirty-checking and re-seeding. */
+function layoutSignature(drafts: DisplayDraft[]): string {
+  return JSON.stringify(
+    drafts.map((d) => [d.name, d.enabled, d.primary, d.x, d.y, d.width, d.height]),
+  );
+}
+
+/** Turn the draft into placements, normalized so the top-left sits at the origin. */
+function toPlacements(drafts: DisplayDraft[]): DisplayPlacement[] {
+  const on = drafts.filter((d) => d.enabled);
+  const minX = on.length ? Math.min(...on.map((d) => d.x)) : 0;
+  const minY = on.length ? Math.min(...on.map((d) => d.y)) : 0;
+  return drafts.map((d) => ({
+    output: d.name,
+    enabled: d.enabled,
+    primary: d.primary,
+    x: d.enabled ? d.x - minX : 0,
+    y: d.enabled ? d.y - minY : 0,
+    width: d.width,
+    height: d.height,
+  }));
+}
+
+/**
+ * The whole multi-output arrangement, via the xrandr display bridge
  * (window.display). Meaningful on the bare-X11 standalone session where Din is
- * the whole desktop; on Wayland/cage or in a plain browser it renders a
- * fallback, since the compositor sizes Din to the display automatically.
+ * the whole desktop: drag displays to position them, pick a resolution, choose
+ * the primary, and switch any output on or off; "Apply" commits the layout in
+ * one atomic xrandr call. On Wayland/cage or in a plain browser it renders a
+ * fallback, since the compositor arranges the outputs automatically.
  */
 function DisplaySection() {
   const bridge = getDisplayBridge();
   const status = useDisplayStatus();
-  const setMode = useSetDisplayMode();
-  // Last failed operation, keyed to the output it concerned.
-  const [opError, setOpError] = useState<{ output: string; message: string } | null>(null);
+  const apply = useApplyDisplayLayout();
+
+  const outputs = status.data?.available ? status.data.outputs : undefined;
+  const baseline = useMemo(() => (outputs ? draftFromOutputs(outputs) : []), [outputs]);
+  const baseSignature = useMemo(() => layoutSignature(baseline), [baseline]);
+
+  const [draft, setDraft] = useState<DisplayDraft[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const seededSignature = useRef<string>('');
+
+  // Re-seed the draft only when the real arrangement changes (first load,
+  // hotplug, an applied layout, or an xrandr change from elsewhere) - not on
+  // every poll, so in-progress edits survive the 5s refetch.
+  useEffect(() => {
+    if (outputs && baseSignature !== seededSignature.current) {
+      seededSignature.current = baseSignature;
+      setDraft(draftFromOutputs(outputs));
+      setError(null);
+    }
+  }, [outputs, baseSignature]);
+
+  const enabledCount = draft.filter((d) => d.enabled).length;
+  const dirty = draft.length > 0 && layoutSignature(draft) !== baseSignature;
+  const canApply = dirty && !apply.isPending;
+
+  const setEnabled = (name: string, enabled: boolean) => {
+    setDraft((ds) => {
+      const next = ds.map((d) => (d.name === name ? { ...d, enabled } : d));
+      // Keep exactly one primary among the outputs that stay on.
+      const on = next.filter((d) => d.enabled);
+      if (on.length > 0 && !on.some((d) => d.primary)) {
+        const promote = on[0].name;
+        return next.map((d) => ({ ...d, primary: d.name === promote }));
+      }
+      return next;
+    });
+  };
+  const setPrimary = (name: string) =>
+    setDraft((ds) => ds.map((d) => ({ ...d, primary: d.name === name })));
+  const setModeFor = (name: string, width: number, height: number) =>
+    setDraft((ds) => ds.map((d) => (d.name === name ? { ...d, width, height } : d)));
+  const moveTo = (name: string, x: number, y: number) =>
+    setDraft((ds) => ds.map((d) => (d.name === name ? { ...d, x, y } : d)));
+
+  const onApply = () => {
+    setError(null);
+    apply.mutate(toPlacements(draft), { onError: (e) => setError(cleanDisplayError(e)) });
+  };
+  const onRevert = () => {
+    if (outputs) setDraft(draftFromOutputs(outputs));
+    setError(null);
+  };
 
   if (!bridge) {
     return (
       <SectionShell title="Display">
         <FallbackCard icon={Monitor}>
           Display settings need the Din desktop shell. A plain browser has no
-          screen resolution to manage.
+          displays to arrange.
         </FallbackCard>
       </SectionShell>
     );
@@ -530,131 +652,315 @@ function DisplaySection() {
         <FallbackCard>Could not read display state: {cleanDisplayError(status.error)}</FallbackCard>
       ) : !status.data?.available ? (
         <FallbackCard icon={Monitor}>
-          Screen resolution can't be changed here. This session uses a Wayland
+          Displays can't be arranged here. This session uses a Wayland
           compositor (cage), which sizes Din to the display automatically.
         </FallbackCard>
-      ) : status.data.outputs.length === 0 ? (
+      ) : draft.length === 0 ? (
         <FallbackCard icon={Monitor}>No connected displays were found.</FallbackCard>
       ) : (
-        <ul className="flex flex-col gap-2" aria-label="Displays">
-          {status.data.outputs.map((output) => (
-            <DisplayRow
-              key={output.name}
-              output={output}
-              pending={setMode.isPending && setMode.variables?.output === output.name}
-              error={opError?.output === output.name ? opError.message : null}
-              onSetMode={(width, height) => {
-                setOpError(null);
-                setMode.mutate(
-                  { output: output.name, width, height },
-                  {
-                    onError: (error) =>
-                      setOpError({ output: output.name, message: cleanDisplayError(error) }),
-                  },
-                );
-              }}
-            />
-          ))}
-        </ul>
+        <div className="flex flex-col gap-4">
+          <p className="text-xs text-muted-foreground">
+            Drag a display to position it. Changes preview below and take effect
+            when you apply them.
+          </p>
+          <DisplayArrange draft={draft} selected={selected} onSelect={setSelected} onMove={moveTo} />
+
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" disabled={!dirty || apply.isPending} onClick={onRevert}>
+              Revert
+            </Button>
+            <Button size="sm" disabled={!canApply} onClick={onApply}>
+              {apply.isPending && <Loader2 className="size-4 animate-spin" aria-hidden />}
+              Apply
+            </Button>
+          </div>
+
+          {error !== null && (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          )}
+
+          <ul className="flex flex-col gap-2" aria-label="Displays">
+            {draft.map((d) => (
+              <DisplayControlRow
+                key={d.name}
+                draft={d}
+                canDisable={enabledCount > 1}
+                selected={selected === d.name}
+                onToggle={setEnabled}
+                onPrimary={setPrimary}
+                onMode={setModeFor}
+              />
+            ))}
+          </ul>
+        </div>
       )}
     </SectionShell>
   );
 }
 
-/** A friendlier label for common xrandr output names. */
-function friendlyOutputName(name: string): string {
-  if (/^(eDP|LVDS)/i.test(name)) return 'Built-in display';
-  if (/^HDMI/i.test(name)) return 'HDMI display';
-  if (/^(DisplayPort|DP)/i.test(name)) return 'DisplayPort display';
-  if (/^(VGA|DVI)/i.test(name)) return `${name.replace(/-.*/, '')} display`;
-  return name;
+/** Nudge an axis onto the nearest candidate edge within `threshold` virtual px. */
+function snapAxis(value: number, edges: number[], threshold: number): number {
+  let best = value;
+  let bestDist = threshold;
+  for (const edge of edges) {
+    const dist = Math.abs(edge - value);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = edge;
+    }
+  }
+  return best;
 }
 
-function DisplayRow({
-  output,
-  pending,
-  error,
-  onSetMode,
-}: {
-  output: DisplayOutput;
-  pending: boolean;
-  error: string | null;
-  onSetMode: (width: number, height: number) => void;
-}) {
-  // Collapse xrandr's per-refresh-rate rows to unique resolutions, largest
-  // first, carrying the current/native flags forward.
-  const modes = useMemo(() => {
-    const byResolution = new Map<string, DisplayMode>();
-    for (const mode of output.modes) {
-      const key = `${mode.width}x${mode.height}`;
-      const existing = byResolution.get(key);
-      byResolution.set(key, {
-        width: mode.width,
-        height: mode.height,
-        current: (existing?.current ?? false) || mode.current,
-        preferred: (existing?.preferred ?? false) || mode.preferred,
-      });
-    }
-    return [...byResolution.values()].sort(
-      (a, b) => b.width - a.width || b.height - a.height,
-    );
-  }, [output.modes]);
+/** Snap a dragged rect's top-left so its edges abut/align with the other rects. */
+function snapPosition(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  others: DisplayDraft[],
+  threshold: number,
+): [number, number] {
+  const xEdges: number[] = [];
+  const yEdges: number[] = [];
+  for (const o of others) {
+    // align left / align right / place to the right / place to the left
+    xEdges.push(o.x, o.x + o.width - w, o.x + o.width, o.x - w);
+    // align top / align bottom / place below / place above
+    yEdges.push(o.y, o.y + o.height - h, o.y + o.height, o.y - h);
+  }
+  return [
+    Math.round(snapAxis(x, xEdges, threshold)),
+    Math.round(snapAxis(y, yEdges, threshold)),
+  ];
+}
 
-  const currentValue = output.current
-    ? `${output.current.width}x${output.current.height}`
-    : '';
-  const friendly = friendlyOutputName(output.name);
-  const selectId = `resolution-${output.name}`;
+const ARRANGE_HEIGHT = 224; // px (h-56)
+const ARRANGE_PAD = 16; // px inset around the scaled arrangement
+
+/**
+ * A scaled, draggable map of the enabled outputs. The arrangement is fit into a
+ * fixed-height box; dragging a display updates its position in the draft, with
+ * edge-snapping against the other displays.
+ */
+function DisplayArrange({
+  draft,
+  selected,
+  onSelect,
+  onMove,
+}: {
+  draft: DisplayDraft[];
+  selected: string | null;
+  onSelect: (name: string) => void;
+  onMove: (name: string, x: number, y: number) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const drag = useRef<{ name: string; px: number; py: number; ox: number; oy: number } | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const on = draft.filter((d) => d.enabled);
+  const minX = on.length ? Math.min(...on.map((d) => d.x)) : 0;
+  const minY = on.length ? Math.min(...on.map((d) => d.y)) : 0;
+  const maxX = on.length ? Math.max(...on.map((d) => d.x + d.width)) : 1;
+  const maxY = on.length ? Math.max(...on.map((d) => d.y + d.height)) : 1;
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const rawScale = Math.min(
+    (width - ARRANGE_PAD * 2) / spanX,
+    (ARRANGE_HEIGHT - ARRANGE_PAD * 2) / spanY,
+  );
+  const scale = Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 0;
+  const offX = (width - spanX * scale) / 2;
+  const offY = (ARRANGE_HEIGHT - spanY * scale) / 2;
+
+  const onPointerDown = (e: React.PointerEvent, d: DisplayDraft) => {
+    onSelect(d.name);
+    if (scale === 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { name: d.name, px: e.clientX, py: e.clientY, ox: d.x, oy: d.y };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const st = drag.current;
+    if (!st || scale === 0) return;
+    const nx = Math.round(st.ox + (e.clientX - st.px) / scale);
+    const ny = Math.round(st.oy + (e.clientY - st.py) / scale);
+    const moving = draft.find((d) => d.name === st.name);
+    if (!moving) return;
+    const others = on.filter((d) => d.name !== st.name);
+    const [sx, sy] = snapPosition(nx, ny, moving.width, moving.height, others, 24 / scale);
+    onMove(st.name, sx, sy);
+  };
+  const endDrag = (e: React.PointerEvent) => {
+    if (!drag.current) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture may already be gone; ignore.
+    }
+    drag.current = null;
+  };
 
   return (
-    <li className="rounded-lg border border-border/60 bg-background/40 p-3">
+    <div
+      ref={containerRef}
+      className="relative w-full rounded-lg border border-border/60 bg-background/40"
+      style={{ height: ARRANGE_HEIGHT, touchAction: 'none' }}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    >
+      {on.length === 0 ? (
+        <p className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+          All displays are off.
+        </p>
+      ) : (
+        on.map((d) => (
+          <button
+            key={d.name}
+            type="button"
+            aria-label={`Position ${d.friendly}`}
+            onPointerDown={(e) => onPointerDown(e, d)}
+            className={cn(
+              'absolute flex select-none flex-col items-center justify-center overflow-hidden rounded-md border text-center',
+              'cursor-grab touch-none active:cursor-grabbing',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              d.primary ? 'border-primary bg-primary/15' : 'border-border bg-foreground/10',
+              selected === d.name && 'ring-2 ring-ring',
+            )}
+            style={{
+              left: offX + (d.x - minX) * scale,
+              top: offY + (d.y - minY) * scale,
+              width: Math.max(d.width * scale, 8),
+              height: Math.max(d.height * scale, 8),
+            }}
+          >
+            <span className="truncate px-1 text-[11px] font-medium text-foreground">
+              {d.friendly}
+            </span>
+            <span className="truncate px-1 text-[10px] text-muted-foreground">
+              {d.width} × {d.height}
+            </span>
+            {d.primary && (
+              <span className="text-[9px] font-medium uppercase tracking-wide text-primary">
+                Primary
+              </span>
+            )}
+          </button>
+        ))
+      )}
+    </div>
+  );
+}
+
+function DisplayControlRow({
+  draft,
+  canDisable,
+  selected,
+  onToggle,
+  onPrimary,
+  onMode,
+}: {
+  draft: DisplayDraft;
+  canDisable: boolean;
+  selected: boolean;
+  onToggle: (name: string, enabled: boolean) => void;
+  onPrimary: (name: string) => void;
+  onMode: (name: string, width: number, height: number) => void;
+}) {
+  const d = draft;
+  const Icon = d.internal ? Laptop : Monitor;
+  const selectId = `resolution-${d.name}`;
+  const currentValue = `${d.width}x${d.height}`;
+
+  return (
+    <li
+      className={cn(
+        'rounded-lg border bg-background/40 p-3',
+        selected ? 'border-ring' : 'border-border/60',
+      )}
+    >
       <div className="flex items-center gap-3">
-        <Monitor className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+        <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 truncate text-sm text-foreground">
-            {friendly}
-            {output.primary && (
+            {d.friendly}
+            {d.primary && (
               <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                 Primary
               </span>
             )}
+            {!d.enabled && (
+              <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                Off
+              </span>
+            )}
           </p>
-          <p className="truncate text-xs text-muted-foreground">{output.name}</p>
+          <p className="truncate text-xs text-muted-foreground">{d.name}</p>
         </div>
         <div className="flex items-center gap-2">
-          {pending && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />}
-          <Label htmlFor={selectId} className="sr-only">
-            Resolution for {friendly}
+          <Label htmlFor={`enabled-${d.name}`} className="text-xs text-muted-foreground">
+            On
           </Label>
-          <select
-            id={selectId}
-            value={currentValue}
-            disabled={pending || modes.length === 0}
-            onChange={(e) => {
-              const [width, height] = e.target.value.split('x').map(Number);
-              if (Number.isFinite(width) && Number.isFinite(height)) onSetMode(width, height);
-            }}
-            className={cn(
-              'h-8 rounded-md border border-border/60 bg-background px-2 text-sm text-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              'disabled:cursor-not-allowed disabled:opacity-60',
-            )}
-          >
-            {currentValue === '' && <option value="">—</option>}
-            {modes.map((mode) => (
-              <option key={`${mode.width}x${mode.height}`} value={`${mode.width}x${mode.height}`}>
-                {formatMode(mode.width, mode.height)}
-                {mode.preferred ? ' (native)' : ''}
-              </option>
-            ))}
-          </select>
+          <Switch
+            id={`enabled-${d.name}`}
+            checked={d.enabled}
+            disabled={d.enabled && !canDisable}
+            onCheckedChange={(value) => onToggle(d.name, value)}
+            aria-label={`Turn ${d.friendly} ${d.enabled ? 'off' : 'on'}`}
+          />
         </div>
       </div>
 
-      {error !== null && (
-        <p role="alert" className="mt-2 text-xs text-destructive">
-          {error}
-        </p>
+      {d.enabled && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant={d.primary ? 'secondary' : 'outline'}
+            size="sm"
+            disabled={d.primary}
+            onClick={() => onPrimary(d.name)}
+          >
+            {d.primary ? 'Primary display' : 'Make primary'}
+          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Label htmlFor={selectId} className="sr-only">
+              Resolution for {d.friendly}
+            </Label>
+            <select
+              id={selectId}
+              value={currentValue}
+              disabled={d.modes.length === 0}
+              onChange={(e) => {
+                const [width, height] = e.target.value.split('x').map(Number);
+                if (Number.isFinite(width) && Number.isFinite(height)) onMode(d.name, width, height);
+              }}
+              className={cn(
+                'h-8 rounded-md border border-border/60 bg-background px-2 text-sm text-foreground',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'disabled:cursor-not-allowed disabled:opacity-60',
+              )}
+            >
+              {d.modes.map((mode) => (
+                <option key={`${mode.width}x${mode.height}`} value={`${mode.width}x${mode.height}`}>
+                  {formatMode(mode.width, mode.height)}
+                  {mode.preferred ? ' (native)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       )}
     </li>
   );

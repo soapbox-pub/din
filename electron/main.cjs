@@ -485,9 +485,11 @@ async function savedWifiConnections() {
 // ---------------------------------------------------------------------------
 // Display bridge (window.display), backed by xrandr. Meaningful only on a bare
 // X11 session (the os/x11 standalone launcher), where Din is the whole desktop
-// and nothing else manages screen resolution. On Wayland/cage (Aladdin) xrandr
-// isn't applicable, so status reports `available: false` and the Settings
-// panel renders a fallback - same shape as the WiFi bridge in QEMU.
+// and nothing else manages the outputs. It models the full multi-output layout
+// - resolution, position, on/off and which output is primary - and applies a
+// whole desired arrangement atomically. On Wayland/cage (Aladdin) xrandr isn't
+// applicable, so status reports `available: false` and the Settings panel
+// renders a fallback - same shape as the WiFi bridge in QEMU.
 //
 // Threat model: same boundaries as the other bridges (strict CSP, sender
 // guard, arguments re-validated). xrandr runs via execFile with an argv array
@@ -520,14 +522,17 @@ function parseXrandr(stdout) {
   let current = null;
   for (const line of stdout.split('\n')) {
     const head = line.match(
-      /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+\d+\+\d+)?/,
+      /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+(\d+)\+(\d+))?/,
     );
     if (head) {
+      const on = Boolean(head[4]);
       current = {
         name: head[1],
         connected: head[2] === 'connected',
         primary: Boolean(head[3]),
-        current: head[4] ? { width: Number(head[4]), height: Number(head[5]) } : null,
+        enabled: on,
+        current: on ? { width: Number(head[4]), height: Number(head[5]) } : null,
+        position: on ? { x: Number(head[6]), y: Number(head[7]) } : { x: 0, y: 0 },
         modes: [],
       };
       outputs.push(current);
@@ -546,40 +551,234 @@ function parseXrandr(stdout) {
   return outputs;
 }
 
+/** Connected outputs, via xrandr. Throws 'xrandr-missing' where xrandr absent. */
+async function queryOutputs() {
+  return parseXrandr(await xrandr(['--query'])).filter((o) => o.connected);
+}
+
+/** Laptop built-in panels (the ones that switch off when the lid shuts). */
+const INTERNAL_OUTPUT = /^(eDP|LVDS|DSI)/i;
+
+/** An output's best default mode: preferred, else current, else the largest. */
+function preferredMode(output) {
+  return (
+    output.modes.find((m) => m.preferred) ||
+    output.modes.find((m) => m.current) ||
+    [...output.modes].sort((a, b) => b.width - a.width || b.height - a.height)[0] ||
+    null
+  );
+}
+
+/**
+ * Run one xrandr call that turns each enabled output on at its mode/position
+ * (marking one primary) and each disabled output off. With no window manager,
+ * follow up by fitting the shell window to the primary's new bounds instead of
+ * waiting on a RandR event. `enabled` items are { name, width, height, x, y,
+ * primary }; `disabled` is a list of output names.
+ */
+async function applyXrandrLayout(enabled, disabled) {
+  const args = [];
+  for (const e of enabled) {
+    args.push('--output', e.name, '--mode', `${e.width}x${e.height}`, '--pos', `${e.x}x${e.y}`);
+    if (e.primary) args.push('--primary');
+  }
+  for (const name of disabled) args.push('--output', name, '--off');
+  await xrandr(args);
+
+  const primary = enabled.find((e) => e.primary);
+  if (primary && shellWindow && !shellWindow.isDestroyed()) {
+    shellWindow.setBounds({
+      x: primary.x,
+      y: primary.y,
+      width: primary.width,
+      height: primary.height,
+    });
+  }
+}
+
 function registerDisplayHandlers() {
   ipcMain.handle('display:status', async (event) => {
     assertShellSender(event);
     try {
-      const outputs = parseXrandr(await xrandr(['--query']));
-      return { available: true, outputs: outputs.filter((o) => o.connected) };
+      return { available: true, outputs: await queryOutputs() };
     } catch (error) {
       if (error.message === 'xrandr-missing') return { available: false, outputs: [] };
       throw error;
     }
   });
 
-  ipcMain.handle('display:setMode', async (event, rawOutput, rawWidth, rawHeight) => {
+  ipcMain.handle('display:applyLayout', async (event, rawPlacements) => {
     assertShellSender(event);
-    // Re-derive the real outputs and only act on a name/mode that xrandr
-    // actually reports - never trust the renderer's strings directly.
-    const outputs = parseXrandr(await xrandr(['--query']));
-    const output = outputs.find((o) => o.connected && o.name === rawOutput);
-    if (!output) throw new Error('Unknown display output');
-    const width = Number(rawWidth);
-    const height = Number(rawHeight);
-    if (!output.modes.some((m) => m.width === width && m.height === height)) {
-      throw new Error('Unsupported mode for this output');
-    }
-    await xrandr(['--output', output.name, '--mode', `${width}x${height}`]);
+    if (!Array.isArray(rawPlacements)) throw new Error('Invalid layout');
 
-    // With no WM, resize the shell to the new mode immediately rather than
-    // waiting on a RandR event (which the display-metrics-changed listener
-    // also handles). Assumes the primary output sits at the origin, which
-    // holds for the single-display standalone session.
-    if (output.primary && shellWindow && !shellWindow.isDestroyed()) {
-      shellWindow.setBounds({ x: 0, y: 0, width, height });
+    // Re-derive the real outputs and only act on names/modes that xrandr
+    // actually reports - never trust the renderer's strings directly.
+    const outputs = await queryOutputs();
+    const byName = new Map(outputs.map((o) => [o.name, o]));
+
+    const enabled = [];
+    const disabled = [];
+    const mentioned = new Set();
+    for (const p of rawPlacements) {
+      const output = byName.get(String(p && p.output));
+      if (!output) throw new Error('Unknown display output');
+      if (mentioned.has(output.name)) throw new Error('Duplicate display output');
+      mentioned.add(output.name);
+      if (!p.enabled) {
+        disabled.push(output.name);
+        continue;
+      }
+      const width = Number(p.width);
+      const height = Number(p.height);
+      if (!output.modes.some((m) => m.width === width && m.height === height)) {
+        throw new Error(`Unsupported mode for ${output.name}`);
+      }
+      enabled.push({
+        name: output.name,
+        width,
+        height,
+        x: Math.max(0, Math.round(Number(p.x)) || 0),
+        y: Math.max(0, Math.round(Number(p.y)) || 0),
+        primary: Boolean(p.primary),
+      });
     }
+    // Any connected output the renderer didn't mention is turned off.
+    for (const o of outputs) if (!mentioned.has(o.name)) disabled.push(o.name);
+
+    if (enabled.length === 0) throw new Error('At least one display must stay on');
+    if (enabled.filter((e) => e.primary).length !== 1) {
+      throw new Error('Exactly one display must be primary');
+    }
+
+    await applyXrandrLayout(enabled, disabled);
+    // A manual arrangement supersedes any automatic lid re-arrangement.
+    lidAutoArranged = false;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Lid switch (bare X11 only). When the laptop is docked to an external display
+// and the lid is closed, the built-in panel should switch off and an external
+// output take over as primary; opening the lid again restores the built-in
+// panel. There is no window manager or logind seat handling this, so the shell
+// watches the ACPI lid state itself and drives xrandr through the same path as
+// the Settings panel. If the lid closes with no external attached we leave the
+// only screen alone rather than blanking the machine.
+// ---------------------------------------------------------------------------
+
+const LID_STATE_DIR = '/proc/acpi/button/lid';
+const LID_POLL_MS = 2_000;
+let lidState = null; // 'open' | 'closed' | null (unknown / no lid)
+let lidAutoArranged = false; // did we auto-disable the built-in panel on close?
+let lidTimer = null;
+
+/** Read the ACPI lid state, or null when the machine has no lid button. */
+async function readLidState() {
+  let entries;
+  try {
+    entries = await fsp.readdir(LID_STATE_DIR);
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    try {
+      const text = await fsp.readFile(path.join(LID_STATE_DIR, entry, 'state'), 'utf8');
+      if (/closed/i.test(text)) return 'closed';
+      if (/open/i.test(text)) return 'open';
+    } catch {
+      // Skip an unreadable lid entry.
+    }
+  }
+  return null;
+}
+
+/**
+ * Lay a set of outputs left-to-right starting at the origin, first one primary,
+ * each at its preferred mode. Returns the { enabled, disabled } pair for
+ * applyXrandrLayout, or null if none can be driven.
+ */
+function packLeftToRight(on, off) {
+  const enabled = [];
+  let x = 0;
+  for (const output of on) {
+    const mode = preferredMode(output);
+    if (!mode) continue;
+    enabled.push({
+      name: output.name,
+      width: mode.width,
+      height: mode.height,
+      x,
+      y: 0,
+      primary: enabled.length === 0,
+    });
+    x += mode.width;
+  }
+  if (enabled.length === 0) return null;
+  return { enabled, disabled: off.map((o) => o.name) };
+}
+
+/** Lid closed: if docked, switch the built-in panel off and hand off to externals. */
+async function onLidClosed() {
+  let outputs;
+  try {
+    outputs = await queryOutputs();
+  } catch {
+    return;
+  }
+  const internal = outputs.filter((o) => INTERNAL_OUTPUT.test(o.name));
+  const external = outputs.filter((o) => !INTERNAL_OUTPUT.test(o.name));
+  // Don't blank the only screen: only act when there's somewhere to hand off to.
+  if (internal.length === 0 || external.length === 0) return;
+
+  const layout = packLeftToRight(external, internal);
+  if (!layout) return;
+  try {
+    await applyXrandrLayout(layout.enabled, layout.disabled);
+    lidAutoArranged = true;
+  } catch {
+    // Leave the current arrangement in place on failure.
+  }
+}
+
+/** Lid opened: undo an automatic close-time hand-off, restoring the built-in panel. */
+async function onLidOpened() {
+  if (!lidAutoArranged) return; // only reverse our own change
+  lidAutoArranged = false;
+  let outputs;
+  try {
+    outputs = await queryOutputs();
+  } catch {
+    return;
+  }
+  const internal = outputs.filter((o) => INTERNAL_OUTPUT.test(o.name));
+  const external = outputs.filter((o) => !INTERNAL_OUTPUT.test(o.name));
+  if (internal.length === 0) return;
+
+  // Built-in panel back as primary at the origin, externals to its right.
+  const layout = packLeftToRight([...internal, ...external], []);
+  if (!layout) return;
+  try {
+    await applyXrandrLayout(layout.enabled, layout.disabled);
+  } catch {
+    // Leave the current arrangement in place on failure.
+  }
+}
+
+/** Poll the ACPI lid state and react to open/close transitions. */
+function registerLidWatch() {
+  const poll = async () => {
+    const next = await readLidState();
+    if (!next || next === lidState) return;
+    const previous = lidState;
+    lidState = next;
+    if (previous === null) return; // establish a baseline without acting
+    if (next === 'closed') await onLidClosed();
+    else await onLidOpened();
+  };
+  poll();
+  lidTimer = setInterval(() => {
+    poll().catch(() => {});
+  }, LID_POLL_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -1453,7 +1652,13 @@ app.whenReady().then(() => {
       screen.removeListener('display-metrics-changed', refit);
       screen.removeListener('display-added', refit);
       screen.removeListener('display-removed', refit);
+      if (lidTimer) clearInterval(lidTimer);
     });
+
+    // Watch the ACPI lid: switch off the built-in panel and hand off to an
+    // external display when the laptop is docked and the lid closes (no-op on
+    // machines with no lid, e.g. desktops or the QEMU VM).
+    registerLidWatch();
   }
 
   win.loadURL(DEV_URL || 'app://din/');
