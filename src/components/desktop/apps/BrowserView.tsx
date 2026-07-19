@@ -307,19 +307,25 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
     return (
       <webview
-        ref={webviewRef}
+        ref={(el: ElectronWebviewElement | null) => {
+          webviewRef.current = el;
+          // Let the guest request new windows (target=_blank / window.open).
+          // Without this, Electron silently drops those requests inside the
+          // guest and every external link appears dead - the main process's
+          // setWindowOpenHandler (which re-routes the URL to a browser tab /
+          // installed app) never even fires. It must be set imperatively:
+          // react-dom drops unknown attributes given a boolean, so the typed
+          // `allowpopups={true}` prop never reached the DOM. The ref callback
+          // runs synchronously at insertion, before Electron attaches the
+          // guest and reads the attribute.
+          el?.setAttribute('allowpopups', '');
+        }}
         src={initialSrc.current}
         // A partition isolates cookies/storage from the shell's own origin.
         // The Web Browser's partition is where the Chrome extension system is
         // attached (see electron/main.cjs); installed apps use their own
         // partition, which is where the Nostr identity bridge is attached.
         partition={partitionRef.current}
-        // Let the guest request new windows (target=_blank / window.open).
-        // Without this, Electron silently drops those requests and the links
-        // appear dead. The main process's setWindowOpenHandler denies the
-        // native popup and re-routes the URL to a browser tab / installed app
-        // instead (see electron/main.cjs).
-        allowpopups={true}
         className="h-full w-full bg-white"
         style={{ display: 'flex' }}
       />
