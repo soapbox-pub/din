@@ -1351,6 +1351,12 @@ function TreeTabRow({
   // null. The top/bottom thirds re-order (sibling before/after), the middle
   // nests (child).
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
+  // Indent the favicon + label one step per nesting level. Top-level parent
+  // tabs get an extra step so their disclosure chevron has room at the far
+  // left; childless top-level tabs stay flush, so there's no dead space. The
+  // chevron itself is absolutely positioned (below) and never consumes label
+  // width, so nested tabs keep their room for the title.
+  const indent = 6 + (depth + (hasChildren && depth === 0 ? 1 : 0)) * 14;
 
   const onDragOver = (e: React.DragEvent) => {
     // Not a valid target: no drag in progress, or this is the dragged row.
@@ -1405,7 +1411,7 @@ function TreeTabRow({
         if (zone) onDrop(zone);
       }}
       title={label}
-      style={{ paddingInlineStart: 4 + depth * 14 }}
+      style={{ paddingInlineStart: indent }}
       className={cn(
         'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -1429,7 +1435,9 @@ function TreeTabRow({
           className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-primary"
         />
       )}
-      {hasChildren ? (
+      {/* Disclosure chevron: sits in the indent gutter, out of the flex flow,
+          so it never steals width from the label. Only parents show it. */}
+      {hasChildren && (
         <button
           type="button"
           aria-label={collapsed ? 'Expand' : 'Collapse'}
@@ -1437,14 +1445,13 @@ function TreeTabRow({
             e.stopPropagation();
             onToggleCollapsed();
           }}
-          className="grid size-4 shrink-0 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          style={{ insetInlineStart: indent - 16 }}
+          className="absolute top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <ChevronRight
             className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
           />
         </button>
-      ) : (
-        <span className="size-4 shrink-0" aria-hidden />
       )}
       {icon ? (
         <img
