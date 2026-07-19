@@ -2,6 +2,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
 } from 'react';
 import { isWebviewAvailable } from '@/lib/isElectron';
@@ -168,7 +169,11 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   ) {
     // The partition is fixed for the element's lifetime (like the initial src).
     const partitionRef = useRef(partition);
-    const webviewRef = useRef<ElectronWebviewElement>(null);
+    // The <webview> is created imperatively (see the mount effect below), so
+    // this starts null and is filled in before any listener effect runs.
+    const webviewRef = useRef<ElectronWebviewElement | null>(null);
+    // Host for the imperatively-created guest.
+    const containerRef = useRef<HTMLDivElement>(null);
     // The initial src is fixed for the element's lifetime; navigations go
     // through loadURL so the guest keeps its own history.
     const initialSrc = useRef(src);
@@ -176,6 +181,40 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // in lockstep with the rest of the desktop (see the zoom-sync effect).
     const { config } = useAppContext();
     const zoomFactor = config.zoomLevel / 100;
+
+    // Create the <webview> imperatively and configure it *before* inserting it
+    // into the DOM. Electron reads a guest's attributes when the element is
+    // connected and the guest attaches; several - notably `allowpopups` - are
+    // silently ignored if set afterwards. React (both its own attribute
+    // handling and ref callbacks) only sets attributes after the element is
+    // already in the document, so a JSX `<webview allowpopups>` never takes
+    // effect: the guest attaches with popups disabled, every target=_blank /
+    // window.open dies inside the guest, and the main process's
+    // setWindowOpenHandler (which re-routes those URLs to a browser tab or
+    // installed app) never even fires. Building the element off-DOM and
+    // appending it fully-configured is the only reliable order. Runs once;
+    // the guest's own history/navigation is driven through the ref handle.
+    useLayoutEffect(() => {
+      const container = containerRef.current;
+      if (!container || webviewRef.current) return;
+      const el = document.createElement('webview') as unknown as ElectronWebviewElement;
+      // A partition isolates cookies/storage from the shell's own origin. The
+      // Web Browser's partition is where the Chrome extension system is
+      // attached (see electron/main.cjs); installed apps use their own
+      // partition, which is where the Nostr identity bridge is attached.
+      el.setAttribute('partition', partitionRef.current);
+      // Enable guest-initiated popups (see the note above).
+      el.setAttribute('allowpopups', 'true');
+      el.setAttribute('src', initialSrc.current);
+      el.className = 'h-full w-full bg-white';
+      el.style.display = 'flex';
+      webviewRef.current = el;
+      container.appendChild(el);
+      return () => {
+        el.remove();
+        webviewRef.current = null;
+      };
+    }, []);
 
     useImperativeHandle(ref, () => ({
       reload: () => webviewRef.current?.reload(),
@@ -305,31 +344,9 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       };
     }, [onWebContentsId]);
 
-    return (
-      <webview
-        ref={(el: ElectronWebviewElement | null) => {
-          webviewRef.current = el;
-          // Let the guest request new windows (target=_blank / window.open).
-          // Without this, Electron silently drops those requests inside the
-          // guest and every external link appears dead - the main process's
-          // setWindowOpenHandler (which re-routes the URL to a browser tab /
-          // installed app) never even fires. It must be set imperatively:
-          // react-dom drops unknown attributes given a boolean, so the typed
-          // `allowpopups={true}` prop never reached the DOM. The ref callback
-          // runs synchronously at insertion, before Electron attaches the
-          // guest and reads the attribute.
-          el?.setAttribute('allowpopups', '');
-        }}
-        src={initialSrc.current}
-        // A partition isolates cookies/storage from the shell's own origin.
-        // The Web Browser's partition is where the Chrome extension system is
-        // attached (see electron/main.cjs); installed apps use their own
-        // partition, which is where the Nostr identity bridge is attached.
-        partition={partitionRef.current}
-        className="h-full w-full bg-white"
-        style={{ display: 'flex' }}
-      />
-    );
+    // Host for the guest built in the mount effect above. The <webview> itself
+    // is not rendered by React so its attributes can be set before insertion.
+    return <div ref={containerRef} className="h-full w-full" style={{ display: 'flex' }} />;
   },
 );
 
