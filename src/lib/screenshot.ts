@@ -52,8 +52,24 @@ export function screenshotFilename(date = new Date()): string {
   return `Screenshot ${day} at ${time}.png`;
 }
 
-/** Decode a PNG `data:` URL into raw bytes for writing to disk. */
-export async function dataUrlToBytes(dataUrl: string): Promise<Uint8Array> {
-  const response = await fetch(dataUrl);
-  return new Uint8Array(await response.arrayBuffer());
+/**
+ * Decode a base64 `data:` URL into raw bytes.
+ *
+ * Deliberately does NOT use `fetch(dataUrl)`: the app's CSP `connect-src` does
+ * not allow the `data:` scheme, so fetching a data URL throws. Decoding the
+ * base64 payload directly avoids the network layer entirely.
+ */
+export function dataUrlToBytes(dataUrl: string): Uint8Array<ArrayBuffer> {
+  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/** Decode a PNG `data:` URL into a Blob (e.g. for the clipboard). */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  return new Blob([dataUrlToBytes(dataUrl)], { type: 'image/png' });
 }
