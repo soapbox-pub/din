@@ -1,10 +1,11 @@
 // Preload for the Din renderer.
 //
-// Exposes six bridges backed by IPC handlers in main.cjs:
+// Exposes seven bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //   - window.display: xrandr screen-resolution control for the Settings app
+//   - window.power: battery/AC status for the menu bar and Settings app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.devtools: docked devtools control for the Web Browser app
 //
@@ -123,6 +124,14 @@ contextBridge.exposeInMainWorld('display', {
   /** Set an output's resolution (validated against its reported modes). */
   setMode: (output, width, height) =>
     ipcRenderer.invoke('display:setMode', output, width, height),
+});
+
+// Power bridge (window.power), backed by the power:* handler in main.cjs
+// (/sys/class/power_supply). Used by the menu-bar battery indicator and the
+// Settings battery panel. `available: false` on machines with no battery.
+contextBridge.exposeInMainWorld('power', {
+  /** Battery/AC state. `available: false` when no battery is present. */
+  status: () => ipcRenderer.invoke('power:status'),
 });
 
 // Chrome extension bridge (window.crx), backed by the crx:* handlers in

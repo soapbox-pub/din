@@ -21,10 +21,13 @@ import AuthDialog from '@/components/auth/AuthDialog';
 import { QuickLoginDialog } from '@/components/auth/QuickLoginDialog';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
+import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
 import { useClock } from '@/hooks/useClock';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
+import { useBatteryStatus } from '@/hooks/usePower';
 import { getWifiBridge } from '@/lib/wifi';
+import { getPowerBridge, summarizePower } from '@/lib/power';
 import { cn } from '@/lib/utils';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -60,6 +63,7 @@ export function MenuBar() {
     >
       <AppsMenu />
       <div className="flex items-center gap-1.5">
+        <BatteryMenuItem />
         <WifiMenuItem />
         <AccountMenuItem />
         <ClockDisplay />
@@ -158,6 +162,53 @@ const AppsMenu = memo(function AppsMenu() {
             </div>
           )}
         </div>
+      </PopoverContent>
+    </Popover>
+  );
+});
+
+/**
+ * Battery status item: glyph + percentage; clicking opens a details popover.
+ * Renders nothing outside the Electron shell or on machines with no battery
+ * (desktops, the VM), like the other hardware indicators.
+ */
+const BatteryMenuItem = memo(function BatteryMenuItem() {
+  const bridge = getPowerBridge();
+  const status = useBatteryStatus();
+
+  if (!bridge || !status.data?.available) return null;
+
+  const summary = summarizePower(status.data);
+  if (!summary) return null;
+
+  const critical = !summary.charging && summary.percent !== null && summary.percent <= 15;
+  const label = `Battery ${summary.percent ?? '?'}%${summary.charging ? ', charging' : ''}`;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={label}
+          title={label}
+          className={cn(
+            'h-7 gap-1 rounded-md px-1.5 hover:bg-foreground/10 hover:text-foreground',
+            critical ? 'text-destructive' : 'text-foreground/90',
+          )}
+        >
+          <BatteryGlyph
+            percent={summary.percent}
+            charging={summary.charging}
+            className="size-4.5"
+          />
+          {summary.percent !== null && (
+            <span className="text-xs font-medium tabular-nums">{summary.percent}%</span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">
+        <BatteryPopoverBody />
       </PopoverContent>
     </Popover>
   );

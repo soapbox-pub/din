@@ -572,6 +572,109 @@ function registerDisplayHandlers() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Power bridge (window.power), backed by /sys/class/power_supply. Read-only
+// sysfs, so it needs no external binary and works on any Linux session (cage
+// on Aladdin or the bare-X11 standalone launcher). Reports `available: false`
+// where there's no battery (desktops, the QEMU VM) so the menu-bar indicator
+// hides and the Settings panel shows a fallback. Sender-guarded like the
+// other bridges.
+// ---------------------------------------------------------------------------
+
+const POWER_SUPPLY_DIR = '/sys/class/power_supply';
+
+/** Read a sysfs attribute, trimmed, or null when it's absent/unreadable. */
+async function readPowerAttr(dir, name) {
+  try {
+    return (await fsp.readFile(path.join(dir, name), 'utf8')).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Map the kernel's battery status string to a small stable enum. */
+function mapBatteryStatus(raw) {
+  switch ((raw || '').toLowerCase()) {
+    case 'charging':
+      return 'charging';
+    case 'discharging':
+      return 'discharging';
+    case 'full':
+      return 'full';
+    case 'not charging':
+      return 'not-charging';
+    default:
+      return 'unknown';
+  }
+}
+
+/** Read one battery directory into { name, percent, status, secondsRemaining }. */
+async function readBattery(dir, name) {
+  const [statusRaw, capacityRaw, energyNow, energyFull, powerNow, chargeNow, chargeFull, currentNow] =
+    await Promise.all([
+      readPowerAttr(dir, 'status'),
+      readPowerAttr(dir, 'capacity'),
+      readPowerAttr(dir, 'energy_now'),
+      readPowerAttr(dir, 'energy_full'),
+      readPowerAttr(dir, 'power_now'),
+      readPowerAttr(dir, 'charge_now'),
+      readPowerAttr(dir, 'charge_full'),
+      readPowerAttr(dir, 'current_now'),
+    ]);
+
+  const status = mapBatteryStatus(statusRaw);
+
+  // Charge level: prefer the kernel's capacity %, else derive from now/full.
+  const now = Number(energyNow ?? chargeNow);
+  const full = Number(energyFull ?? chargeFull);
+  const rate = Number(powerNow ?? currentNow);
+  let percent = capacityRaw !== null ? Number.parseInt(capacityRaw, 10) : NaN;
+  if (Number.isNaN(percent) && Number.isFinite(now) && full > 0) {
+    percent = Math.round((now / full) * 100);
+  }
+  percent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+
+  // Time estimate: energy(µWh)/power(µW) or charge(µAh)/current(µA) -> hours.
+  let secondsRemaining = null;
+  if (rate > 0 && Number.isFinite(now) && Number.isFinite(full)) {
+    if (status === 'charging' && full > now) {
+      secondsRemaining = Math.round(((full - now) / rate) * 3600);
+    } else if (status === 'discharging') {
+      secondsRemaining = Math.round((now / rate) * 3600);
+    }
+  }
+
+  return { name, percent, status, secondsRemaining };
+}
+
+function registerPowerHandlers() {
+  ipcMain.handle('power:status', async (event) => {
+    assertShellSender(event);
+    let names;
+    try {
+      names = await fsp.readdir(POWER_SUPPLY_DIR);
+    } catch {
+      return { available: false, acConnected: false, batteries: [] };
+    }
+
+    const batteries = [];
+    let acConnected = false;
+    for (const name of names.sort()) {
+      const dir = path.join(POWER_SUPPLY_DIR, name);
+      const type = await readPowerAttr(dir, 'type');
+      if (type === 'Battery') {
+        if ((await readPowerAttr(dir, 'present')) === '0') continue;
+        batteries.push(await readBattery(dir, name));
+      } else if (type === 'Mains' || type === 'USB') {
+        // Mains = AC adapter; a USB-C port online means USB-PD is supplying power.
+        if ((await readPowerAttr(dir, 'online')) === '1') acConnected = true;
+      }
+    }
+
+    return { available: batteries.length > 0, acConnected, batteries };
+  });
+}
+
 function registerWifiHandlers() {
   ipcMain.handle('wifi:status', async (event) => {
     assertShellSender(event);
@@ -1054,6 +1157,7 @@ app.whenReady().then(() => {
   registerPtyHandlers();
   registerWifiHandlers();
   registerDisplayHandlers();
+  registerPowerHandlers();
   registerCrxHandlers();
   registerDevtoolsHandlers();
 

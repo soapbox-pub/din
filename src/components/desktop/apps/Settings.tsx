@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  BatteryFull,
   Bomb,
   Bug,
   Check,
@@ -11,6 +12,7 @@ import {
   Moon,
   MousePointer2,
   Palette,
+  Plug,
   RotateCw,
   Sun,
   TriangleAlert,
@@ -34,6 +36,10 @@ import {
 import { cleanDisplayError, formatMode, getDisplayBridge } from '@/lib/display';
 import type { DisplayMode, DisplayOutput } from '@/lib/display';
 import { useDisplayStatus, useSetDisplayMode } from '@/hooks/useDisplay';
+import { formatTimeRemaining, getPowerBridge, summarizePower } from '@/lib/power';
+import type { BatteryInfo } from '@/lib/power';
+import { useBatteryStatus } from '@/hooks/usePower';
+import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -51,11 +57,12 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type SectionId = 'wifi' | 'display' | 'nostr' | 'appearance' | 'developers';
+type SectionId = 'wifi' | 'display' | 'battery' | 'nostr' | 'appearance' | 'developers';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
   { id: 'display', name: 'Display', icon: Monitor },
+  { id: 'battery', name: 'Battery', icon: BatteryFull },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
   { id: 'developers', name: 'Developers', icon: Bug },
@@ -69,7 +76,9 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * disconnect and forget networks. Outside the Electron shell it renders an
  * explanatory fallback. The Display section changes screen resolution through
  * `window.display` (xrandr) for the bare-X11 standalone session; on Wayland it
- * shows a fallback. Nostr & Storage manages Din's encrypted app-data
+ * shows a fallback. The Battery section reads `window.power`
+ * (/sys/class/power_supply) and hides on machines with no battery. Nostr &
+ * Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
@@ -111,6 +120,8 @@ export function Settings(_props: AppComponentProps) {
           <WifiSection />
         ) : section === 'display' ? (
           <DisplaySection />
+        ) : section === 'battery' ? (
+          <BatterySection />
         ) : section === 'nostr' ? (
           <NostrStorageSection />
         ) : section === 'appearance' ? (
@@ -632,6 +643,200 @@ function DisplayListSkeleton() {
           <Skeleton className="h-8 w-28 rounded-md bg-foreground/10" />
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Battery
+// ---------------------------------------------------------------------------
+
+/**
+ * Battery and power state, via the power bridge (window.power, reading
+ * /sys/class/power_supply). Works on any Linux session; hides behind a
+ * fallback on machines with no battery (desktops, the VM) or in a plain
+ * browser.
+ */
+function BatterySection() {
+  const bridge = getPowerBridge();
+  const status = useBatteryStatus();
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Battery">
+        <FallbackCard icon={BatteryFull}>
+          Battery status needs the Din desktop shell; it isn't available in a
+          plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const data = status.data;
+  const summary = data ? summarizePower(data) : null;
+  const critical =
+    summary !== null &&
+    !summary.charging &&
+    summary.percent !== null &&
+    summary.percent <= 15;
+
+  return (
+    <SectionShell
+      title="Battery"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh battery status"
+          title="Refresh battery status"
+          disabled={!data?.available}
+          onClick={() => status.refetch()}
+        >
+          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+        </Button>
+      }
+    >
+      {status.isLoading ? (
+        <BatterySkeleton />
+      ) : status.isError ? (
+        <FallbackCard>Could not read battery state.</FallbackCard>
+      ) : !data?.available ? (
+        <FallbackCard icon={BatteryFull}>
+          No battery was detected. This looks like a desktop or virtual machine.
+        </FallbackCard>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {summary && (
+            <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+              <BatteryGlyph
+                percent={summary.percent}
+                charging={summary.charging}
+                className={cn('size-9 shrink-0', critical ? 'text-destructive' : 'text-foreground')}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-2xl font-semibold tabular-nums text-foreground">
+                  {summary.percent !== null ? `${summary.percent}%` : '—'}
+                </p>
+                <p className={cn('text-sm', critical ? 'text-destructive' : 'text-muted-foreground')}>
+                  {describeBattery(summary, data.acConnected)}
+                </p>
+              </div>
+              {data.acConnected && (
+                <span className="flex items-center gap-1.5 rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                  <Plug className="size-3.5" aria-hidden />
+                  Plugged in
+                </span>
+              )}
+            </div>
+          )}
+
+          <ul className="flex flex-col gap-2" aria-label="Batteries">
+            {data.batteries.map((battery) => (
+              <BatteryDetailRow key={battery.name} battery={battery} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+/** One-line description of the overall power state. */
+function describeBattery(
+  summary: NonNullable<ReturnType<typeof summarizePower>>,
+  acConnected: boolean,
+): string {
+  if (summary.status === 'full' || summary.percent === 100) {
+    return acConnected ? 'Fully charged' : 'Full';
+  }
+  if (summary.charging) {
+    return summary.secondsRemaining !== null
+      ? `Charging · ${formatTimeRemaining(summary.secondsRemaining)} until full`
+      : 'Charging';
+  }
+  if (summary.secondsRemaining !== null) {
+    return `${formatTimeRemaining(summary.secondsRemaining)} remaining`;
+  }
+  return acConnected ? 'Plugged in, not charging' : 'On battery';
+}
+
+/** Per-battery status text for the detail rows. */
+function batteryRowStatus(battery: BatteryInfo): string {
+  switch (battery.status) {
+    case 'charging':
+      return battery.secondsRemaining !== null
+        ? `Charging · ${formatTimeRemaining(battery.secondsRemaining)} until full`
+        : 'Charging';
+    case 'discharging':
+      return battery.secondsRemaining !== null
+        ? `${formatTimeRemaining(battery.secondsRemaining)} remaining`
+        : 'Discharging';
+    case 'full':
+      return 'Full';
+    case 'not-charging':
+      return 'Not charging';
+    default:
+      return 'Unknown';
+  }
+}
+
+function BatteryDetailRow({ battery }: { battery: BatteryInfo }) {
+  const charging = battery.status === 'charging';
+  const critical = !charging && battery.percent !== null && battery.percent <= 15;
+  const percent = battery.percent ?? 0;
+
+  return (
+    <li className="rounded-lg border border-border/60 bg-background/40 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <BatteryGlyph
+            percent={battery.percent}
+            charging={charging}
+            className="size-4.5 shrink-0 text-muted-foreground"
+          />
+          <span className="truncate text-sm text-foreground">{battery.name}</span>
+        </div>
+        <span className="text-sm tabular-nums text-muted-foreground">
+          {battery.percent !== null ? `${battery.percent}%` : '—'}
+        </span>
+      </div>
+
+      <div
+        className="mt-2 h-2 overflow-hidden rounded-full bg-foreground/10"
+        role="progressbar"
+        aria-valuenow={battery.percent ?? undefined}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`${battery.name} charge`}
+      >
+        <div
+          className={cn('h-full rounded-full', critical ? 'bg-destructive' : 'bg-primary')}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+
+      <p className="mt-1.5 text-xs text-muted-foreground">{batteryRowStatus(battery)}</p>
+    </li>
+  );
+}
+
+function BatterySkeleton() {
+  return (
+    <div className="flex flex-col gap-4" aria-hidden>
+      <div className="flex items-center gap-4 rounded-xl border border-border/60 p-4">
+        <Skeleton className="size-9 rounded bg-foreground/10" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-6 w-16 bg-foreground/10" />
+          <Skeleton className="h-3.5 w-32 bg-foreground/10" />
+        </div>
+      </div>
+      <div className="rounded-lg border border-border/60 p-3">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-3.5 w-20 bg-foreground/10" />
+          <Skeleton className="h-3.5 w-8 bg-foreground/10" />
+        </div>
+        <Skeleton className="mt-2 h-2 w-full rounded-full bg-foreground/10" />
+      </div>
     </div>
   );
 }
