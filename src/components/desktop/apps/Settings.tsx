@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BatteryFull,
+  Bell,
   Bomb,
   Bug,
   Check,
@@ -76,6 +77,8 @@ import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
+import { useNotificationSettings } from '@/hooks/useNotificationSettings';
+import { NOTIFICATION_CATEGORY_META, type NotificationPreferences } from '@/lib/notifications';
 import { useToast } from '@/hooks/useToast';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { getFsBridge } from '@/lib/fs';
@@ -96,6 +99,7 @@ type SectionId =
   | 'battery'
   | 'power'
   | 'sound'
+  | 'notifications'
   | 'nostr'
   | 'appearance'
   | 'developers';
@@ -107,6 +111,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'battery', name: 'Battery', icon: BatteryFull },
   { id: 'power', name: 'Power', icon: Gauge },
   { id: 'sound', name: 'Sound', icon: Volume2 },
+  { id: 'notifications', name: 'Notifications', icon: Bell },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
   { id: 'developers', name: 'Developers', icon: Bug },
@@ -198,6 +203,8 @@ export function Settings({ params }: AppComponentProps) {
           <PowerSection />
         ) : section === 'sound' ? (
           <SoundSection />
+        ) : section === 'notifications' ? (
+          <NotificationsSection />
         ) : section === 'nostr' ? (
           <NostrStorageSection />
         ) : section === 'appearance' ? (
@@ -1720,6 +1727,79 @@ function SoundSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+/**
+ * Notification preferences: which Nostr interactions (mentions, comments,
+ * reposts, reactions, zaps) surface as desktop notifications, whether to gate
+ * them to people you follow, and whether to show the transient on-screen
+ * popup. Everything is stored through Din's encrypted app-data layer, so it
+ * roams across devices. The menu-bar bell and the on-screen display read the
+ * same settings.
+ */
+function NotificationsSection() {
+  const { user } = useCurrentUser();
+  const { preferences, setPreferences } = useNotificationSettings();
+
+  if (!user) {
+    return (
+      <SectionShell title="Notifications">
+        <FallbackCard icon={Bell}>
+          Log in with your Nostr account to receive notifications when people
+          mention, react to, repost, comment on, or zap you.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell title="Notifications">
+      <div className="flex flex-col gap-4">
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-foreground">Delivery</h3>
+          <div className="flex flex-col gap-2">
+            <SettingSwitchRow
+              id="notif-osd"
+              label="On-screen alerts"
+              description="Show a popup in the corner when a new notification arrives."
+              checked={preferences.osd}
+              onCheckedChange={(checked) => setPreferences({ osd: checked })}
+            />
+            <SettingSwitchRow
+              id="notif-only-following"
+              label="Only from people you follow"
+              description="Ignore interactions from accounts you don't follow."
+              checked={preferences.onlyFollowing}
+              onCheckedChange={(checked) => setPreferences({ onlyFollowing: checked })}
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-border/60 pt-4">
+          <h3 className="mb-2 text-sm font-medium text-foreground">Notify me about</h3>
+          <div className="flex flex-col gap-2">
+            {NOTIFICATION_CATEGORY_META.map((category) => (
+              <SettingSwitchRow
+                key={category.id}
+                id={`notif-${category.id}`}
+                icon={category.icon}
+                label={category.label}
+                description={category.description}
+                checked={preferences[category.id]}
+                onCheckedChange={(checked) =>
+                  setPreferences({ [category.id]: checked } as Partial<NotificationPreferences>)
+                }
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </SectionShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Nostr & Storage
 // ---------------------------------------------------------------------------
 
@@ -2097,6 +2177,38 @@ function SectionShell({
       </header>
       {children}
     </section>
+  );
+}
+
+/** A labelled toggle row matching the rest of Settings' switch controls. */
+function SettingSwitchRow({
+  id,
+  icon: Icon,
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: {
+  id: string;
+  icon?: LucideIcon;
+  label: string;
+  description: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+      <div className="flex min-w-0 items-start gap-3">
+        {Icon && <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />}
+        <div className="min-w-0">
+          <Label htmlFor={id} className="cursor-pointer text-sm">
+            {label}
+          </Label>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
   );
 }
 

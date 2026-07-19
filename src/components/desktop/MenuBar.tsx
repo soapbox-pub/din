@@ -33,6 +33,7 @@ import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndica
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
 import { BrightnessGlyph, BrightnessPopoverBody } from '@/components/desktop/BrightnessIndicator';
+import { NotificationsMenuItem } from '@/components/desktop/NotificationsIndicator';
 import { useClock } from '@/hooks/useClock';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
@@ -84,6 +85,7 @@ export function MenuBar() {
         <VolumeMenuItem />
         <BatteryMenuItem />
         <WifiMenuItem />
+        <NotificationsMenuItem />
         <AccountMenuItem />
         <ClockDisplay />
       </div>
