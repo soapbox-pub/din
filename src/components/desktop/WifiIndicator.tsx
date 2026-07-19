@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Check,
+  EthernetPort,
   Loader2,
   Lock,
   Settings2,
@@ -15,7 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { PopoverClose } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { cleanWifiError, isSecured } from '@/lib/wifi';
+import { cleanWifiError, isEthernetConnected, isSecured } from '@/lib/wifi';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
   useSavedNetworks,
@@ -36,6 +37,7 @@ export function WifiPopoverBody() {
   const status = useWifiStatus();
   const radioEnabled = status.data?.radioEnabled ?? false;
   const hasAdapter = status.data?.device != null;
+  const ethernet = isEthernetConnected(status.data);
   const networks = useWifiNetworks(radioEnabled && hasAdapter);
   const saved = useSavedNetworks();
   const { connect, disconnect, setRadio } = useWifiMutations();
@@ -69,6 +71,17 @@ export function WifiPopoverBody() {
           onCheckedChange={(checked) => setRadio.mutate(checked)}
         />
       </header>
+
+      {ethernet && (
+        <div className="flex items-center gap-2.5 border-b border-border/60 px-3 py-2">
+          <EthernetPort className="size-4.5 shrink-0 text-primary" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-foreground">Ethernet</span>
+            <span className="block text-xs text-primary">Connected</span>
+          </span>
+          <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
+        </div>
+      )}
 
       <div className="max-h-72 overflow-y-auto p-1.5">
         {!radioEnabled ? (

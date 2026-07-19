@@ -26,6 +26,13 @@ export interface WifiStatus {
   radioEnabled: boolean;
   /** The first WiFi adapter, or null when none exists. */
   device: WifiDeviceStatus | null;
+  /** The first wired (ethernet) adapter, or null when none exists. */
+  ethernet: WifiDeviceStatus | null;
+}
+
+/** Whether a wired ethernet link is currently up. */
+export function isEthernetConnected(status: WifiStatus | undefined): boolean {
+  return status?.ethernet?.state === 'connected';
 }
 
 export interface WifiNetwork {

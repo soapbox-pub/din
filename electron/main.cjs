@@ -466,6 +466,16 @@ async function wifiDevice() {
   return { iface: row[0], state: row[2], connection: row[3] || null };
 }
 
+/** The first wired (ethernet) device known to NetworkManager, or null. */
+async function ethernetDevice() {
+  const rows = terseRows(
+    await nmcli(['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device', 'status']),
+  );
+  const row = rows.find((fields) => fields[1] === 'ethernet');
+  if (!row) return null;
+  return { iface: row[0], state: row[2], connection: row[3] || null };
+}
+
 /** Names of saved WiFi connection profiles. */
 async function savedWifiConnections() {
   const rows = terseRows(await nmcli(['-t', '-f', 'NAME,TYPE', 'connection', 'show']));
@@ -804,14 +814,15 @@ function registerWifiHandlers() {
   ipcMain.handle('wifi:status', async (event) => {
     assertShellSender(event);
     try {
-      const [device, radio] = await Promise.all([
+      const [device, ethernet, radio] = await Promise.all([
         wifiDevice(),
+        ethernetDevice(),
         nmcli(['-t', 'radio', 'wifi']),
       ]);
-      return { available: true, radioEnabled: radio.trim() === 'enabled', device };
+      return { available: true, radioEnabled: radio.trim() === 'enabled', device, ethernet };
     } catch (error) {
       if (error.message === 'nmcli-missing') {
-        return { available: false, radioEnabled: false, device: null };
+        return { available: false, radioEnabled: false, device: null, ethernet: null };
       }
       throw error;
     }

@@ -1,4 +1,4 @@
-import { LayoutGrid, LogOut, Search, Trash2, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { EthernetPort, LayoutGrid, LogOut, Search, Trash2, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
@@ -29,7 +29,7 @@ import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
 import { useBatteryStatus } from '@/hooks/usePower';
 import { useAudioStatus } from '@/hooks/useAudio';
-import { getWifiBridge } from '@/lib/wifi';
+import { getWifiBridge, isEthernetConnected } from '@/lib/wifi';
 import { getPowerBridge, summarizePower } from '@/lib/power';
 import { getAudioBridge } from '@/lib/audio';
 import { cn } from '@/lib/utils';
@@ -266,18 +266,24 @@ const WifiMenuItem = memo(function WifiMenuItem() {
   const status = useWifiStatus();
   const radioEnabled = status.data?.radioEnabled ?? false;
   const hasAdapter = status.data?.device != null;
+  const ethernet = isEthernetConnected(status.data);
   const networks = useWifiNetworks(radioEnabled && hasAdapter);
 
-  if (!bridge || !status.data?.available || !hasAdapter) return null;
+  // Render when there's a Wi-Fi adapter or a live wired link; an ethernet-only
+  // machine still gets a network indicator.
+  if (!bridge || !status.data?.available || (!hasAdapter && !ethernet)) return null;
 
   const current = networks.data?.find((n) => n.inUse) ?? null;
   const connected = radioEnabled && current != null;
 
-  const label = !radioEnabled
-    ? 'Wi-Fi off'
-    : connected
-      ? `Wi-Fi connected to ${current.ssid}`
-      : 'Wi-Fi not connected';
+  // A wired link takes visual priority over Wi-Fi when both are up.
+  const label = ethernet
+    ? 'Connected via Ethernet'
+    : !radioEnabled
+      ? 'Wi-Fi off'
+      : connected
+        ? `Wi-Fi connected to ${current.ssid}`
+        : 'Wi-Fi not connected';
 
   return (
     <Popover>
@@ -289,10 +295,12 @@ const WifiMenuItem = memo(function WifiMenuItem() {
           title={label}
           className={cn(
             'size-7 rounded-md hover:bg-foreground/10 hover:text-foreground',
-            connected ? 'text-foreground/90' : 'text-muted-foreground',
+            ethernet || connected ? 'text-foreground/90' : 'text-muted-foreground',
           )}
         >
-          {!radioEnabled ? (
+          {ethernet ? (
+            <EthernetPort className="size-4.5" />
+          ) : !radioEnabled ? (
             <WifiOff className="size-4.5" />
           ) : connected ? (
             <WifiSignalIcon signal={current.signal} className="size-4.5" />

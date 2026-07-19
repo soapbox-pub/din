@@ -6,6 +6,7 @@ import {
   Check,
   Cloud,
   CloudOff,
+  EthernetPort,
   Loader2,
   Lock,
   Monitor,
@@ -25,7 +26,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
-import { cleanWifiError, getWifiBridge, isSecured } from '@/lib/wifi';
+import { cleanWifiError, getWifiBridge, isEthernetConnected, isSecured } from '@/lib/wifi';
 import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
@@ -159,6 +160,7 @@ function WifiSection() {
   const status = useWifiStatus();
   const radioEnabled = status.data?.radioEnabled ?? false;
   const hasAdapter = status.data?.device != null;
+  const ethernet = isEthernetConnected(status.data);
   const networks = useWifiNetworks(radioEnabled && hasAdapter);
   const saved = useSavedNetworks();
   const { connect, disconnect, forget, setRadio } = useWifiMutations();
@@ -216,6 +218,21 @@ function WifiSection() {
         </>
       }
     >
+      {ethernet && (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-border/60 bg-accent/40 px-3 py-2.5">
+          <EthernetPort className="size-5 shrink-0 text-primary" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">Connected via Ethernet</p>
+            {status.data?.ethernet?.iface && (
+              <p className="truncate text-xs text-muted-foreground">
+                {status.data.ethernet.iface}
+                {status.data.ethernet.connection ? ` · ${status.data.ethernet.connection}` : ''}
+              </p>
+            )}
+          </div>
+          <Check className="size-4 shrink-0 text-primary" aria-hidden />
+        </div>
+      )}
       {status.isLoading ? (
         <NetworkListSkeleton />
       ) : status.isError ? (
