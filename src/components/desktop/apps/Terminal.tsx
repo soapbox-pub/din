@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -8,6 +8,14 @@ import { getPtyBridge } from '@/lib/pty';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { cn } from '@/lib/utils';
 import '@xterm/xterm/css/xterm.css';
 
 /**
@@ -42,20 +50,157 @@ const TERMINAL_THEME = {
 let nextSessionId = 0;
 const newSessionId = () => `term-${nextSessionId++}`;
 
-/** One terminal tab: its identity plus a tab label. */
+let nextTabId = 0;
+const newTabId = () => `termtab-${nextTabId++}`;
+
+let nextSplitId = 0;
+const newSplitId = () => `split-${nextSplitId++}`;
+
+/** Split axis: 'row' places panes side by side, 'column' stacks them. */
+type SplitDir = 'row' | 'column';
+
+/**
+ * A tab's pane layout is a binary tree (Tilix-style): leaves are terminal
+ * sessions, inner nodes are splits with a draggable ratio.
+ */
+interface LeafNode {
+  type: 'leaf';
+  paneId: string;
+}
+interface SplitNode {
+  type: 'split';
+  id: string;
+  dir: SplitDir;
+  /** Fraction of the split's space given to child `a` (0..1). */
+  ratio: number;
+  a: LayoutNode;
+  b: LayoutNode;
+}
+type LayoutNode = LeafNode | SplitNode;
+
+/** One terminal tab: its identity, tab label, and pane layout. */
 interface TermTab {
   id: string;
   /** Sequential number shown in the tab (1-based, stable per tab). */
   index: number;
+  layout: LayoutNode;
+  /** The pane that holds (or should hold) keyboard focus. */
+  activePaneId: string;
+}
+
+/** Replace the leaf `paneId` with a split of itself and a new pane. */
+function splitLeaf(
+  node: LayoutNode,
+  paneId: string,
+  dir: SplitDir,
+  newPaneId: string,
+): LayoutNode {
+  if (node.type === 'leaf') {
+    if (node.paneId !== paneId) return node;
+    return {
+      type: 'split',
+      id: newSplitId(),
+      dir,
+      ratio: 0.5,
+      a: node,
+      b: { type: 'leaf', paneId: newPaneId },
+    };
+  }
+  return {
+    ...node,
+    a: splitLeaf(node.a, paneId, dir, newPaneId),
+    b: splitLeaf(node.b, paneId, dir, newPaneId),
+  };
+}
+
+/** Remove a leaf; its sibling takes the split's place. Null when empty. */
+function removeLeaf(node: LayoutNode, paneId: string): LayoutNode | null {
+  if (node.type === 'leaf') return node.paneId === paneId ? null : node;
+  const a = removeLeaf(node.a, paneId);
+  const b = removeLeaf(node.b, paneId);
+  if (a === null) return b;
+  if (b === null) return a;
+  if (a === node.a && b === node.b) return node;
+  return { ...node, a, b };
+}
+
+function setSplitRatio(node: LayoutNode, splitId: string, ratio: number): LayoutNode {
+  if (node.type === 'leaf') return node;
+  if (node.id === splitId) return { ...node, ratio };
+  return {
+    ...node,
+    a: setSplitRatio(node.a, splitId, ratio),
+    b: setSplitRatio(node.b, splitId, ratio),
+  };
+}
+
+function firstPaneId(node: LayoutNode): string {
+  return node.type === 'leaf' ? node.paneId : firstPaneId(node.a);
+}
+
+/** A rectangle in fractions (0..1) of the tab's area. */
+interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+interface LeafBox {
+  paneId: string;
+  rect: Rect;
+}
+interface DividerBox {
+  splitId: string;
+  dir: SplitDir;
+  /** The whole split's rect — the divider drags within it. */
+  rect: Rect;
+  /** Boundary position as a fraction of the whole tab. */
+  pos: number;
+}
+
+/** Walk the layout tree computing each pane's rect and each divider. */
+function flattenLayout(
+  node: LayoutNode,
+  rect: Rect,
+  leaves: LeafBox[],
+  dividers: DividerBox[],
+): void {
+  if (node.type === 'leaf') {
+    leaves.push({ paneId: node.paneId, rect });
+    return;
+  }
+  if (node.dir === 'row') {
+    const aw = rect.width * node.ratio;
+    flattenLayout(node.a, { ...rect, width: aw }, leaves, dividers);
+    flattenLayout(
+      node.b,
+      { ...rect, left: rect.left + aw, width: rect.width - aw },
+      leaves,
+      dividers,
+    );
+    dividers.push({ splitId: node.id, dir: 'row', rect, pos: rect.left + aw });
+  } else {
+    const ah = rect.height * node.ratio;
+    flattenLayout(node.a, { ...rect, height: ah }, leaves, dividers);
+    flattenLayout(
+      node.b,
+      { ...rect, top: rect.top + ah, height: rect.height - ah },
+      leaves,
+      dividers,
+    );
+    dividers.push({ splitId: node.id, dir: 'column', rect, pos: rect.top + ah });
+  }
 }
 
 /**
  * Terminal - a real interactive shell on the underlying OS.
  *
- * Rendered with xterm.js; each tab owns one pty session over the `window.pty`
+ * Rendered with xterm.js; each pane owns one pty session over the `window.pty`
  * bridge (see src/lib/pty.ts). Sessions run as the unprivileged OS user and
  * die with the window. Multiple tabs share one window: all sessions stay
- * mounted (their xterm state survives) and only the active one is visible.
+ * mounted (their xterm state survives) and only the active tab is visible.
+ * Within a tab, right-click offers Tilix-style tiling: split a pane right or
+ * down into a tree of terminals with draggable dividers.
  * Outside the Electron shell (plain-browser dev) there is no bridge, so a
  * fallback notice renders instead.
  */
@@ -64,15 +209,24 @@ export function Terminal({ windowId }: AppComponentProps) {
   const { close: closeWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
 
-  const [tabs, setTabs] = useState<TermTab[]>(() => [
-    { id: newSessionId(), index: 1 },
-  ]);
+  const [tabs, setTabs] = useState<TermTab[]>(() => {
+    const paneId = newSessionId();
+    return [
+      { id: newTabId(), index: 1, layout: { type: 'leaf', paneId }, activePaneId: paneId },
+    ];
+  });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   // Counter so each new tab gets a stable, increasing "Terminal N" label.
   const nextIndex = useRef(2);
 
   const openTab = useCallback(() => {
-    const tab = { id: newSessionId(), index: nextIndex.current++ };
+    const paneId = newSessionId();
+    const tab: TermTab = {
+      id: newTabId(),
+      index: nextIndex.current++,
+      layout: { type: 'leaf', paneId },
+      activePaneId: paneId,
+    };
     setTabs((ts) => [...ts, tab]);
     setActiveId(tab.id);
   }, []);
@@ -96,6 +250,66 @@ export function Terminal({ windowId }: AppComponentProps) {
     },
     [closeWindow, windowId],
   );
+
+  const splitPane = useCallback((tabId: string, paneId: string, dir: SplitDir) => {
+    const newPaneId = newSessionId();
+    setTabs((ts) =>
+      ts.map((t) =>
+        t.id === tabId
+          ? { ...t, layout: splitLeaf(t.layout, paneId, dir, newPaneId), activePaneId: newPaneId }
+          : t,
+      ),
+    );
+  }, []);
+
+  const closePane = useCallback(
+    (tabId: string, paneId: string) => {
+      setTabs((ts) => {
+        const index = ts.findIndex((t) => t.id === tabId);
+        if (index === -1) return ts;
+        const layout = removeLeaf(ts[index].layout, paneId);
+        // Closing a tab's last pane closes the tab (and maybe the window).
+        if (layout === null) {
+          const next = ts.filter((t) => t.id !== tabId);
+          if (next.length === 0) {
+            closeWindow(windowId);
+            return ts;
+          }
+          setActiveId((current) =>
+            current === tabId ? next[Math.max(0, index - 1)].id : current,
+          );
+          return next;
+        }
+        return ts.map((t) =>
+          t.id === tabId
+            ? {
+                ...t,
+                layout,
+                activePaneId:
+                  t.activePaneId === paneId ? firstPaneId(layout) : t.activePaneId,
+              }
+            : t,
+        );
+      });
+    },
+    [closeWindow, windowId],
+  );
+
+  const focusPane = useCallback((tabId: string, paneId: string) => {
+    setTabs((ts) =>
+      ts.map((t) =>
+        t.id === tabId && t.activePaneId !== paneId ? { ...t, activePaneId: paneId } : t,
+      ),
+    );
+  }, []);
+
+  const resizeSplit = useCallback((tabId: string, splitId: string, ratio: number) => {
+    setTabs((ts) =>
+      ts.map((t) =>
+        t.id === tabId ? { ...t, layout: setSplitRatio(t.layout, splitId, ratio) } : t,
+      ),
+    );
+  }, []);
 
   // Publish the tab strip into the window title bar (Chrome-style), so tabs
   // share a line with the window controls. Cleared on unmount.
@@ -136,13 +350,17 @@ export function Terminal({ windowId }: AppComponentProps) {
 
   return (
     <div className="relative h-full w-full bg-[#0a0a0a]">
-      {/* All sessions stay mounted so background tabs keep their scrollback
+      {/* All tabs stay mounted so background tabs keep their scrollback
           and running programs; only the active one is visible. */}
       {tabs.map((tab) => (
-        <TerminalSession
+        <TerminalTab
           key={tab.id}
+          tab={tab}
           active={tab.id === activeId}
-          onClose={() => closeTab(tab.id)}
+          onSplit={splitPane}
+          onClosePane={closePane}
+          onFocusPane={focusPane}
+          onResizeSplit={resizeSplit}
         />
       ))}
     </div>
@@ -150,16 +368,155 @@ export function Terminal({ windowId }: AppComponentProps) {
 }
 
 /**
+ * One tab's tiled pane layout: renders every pane of the split tree at its
+ * computed rect (a flat list of absolutely-positioned siblings, so splitting
+ * never remounts an existing session) plus a draggable divider per split.
+ */
+const TerminalTab = memo(function TerminalTab({
+  tab,
+  active,
+  onSplit,
+  onClosePane,
+  onFocusPane,
+  onResizeSplit,
+}: {
+  tab: TermTab;
+  active: boolean;
+  onSplit: (tabId: string, paneId: string, dir: SplitDir) => void;
+  onClosePane: (tabId: string, paneId: string) => void;
+  onFocusPane: (tabId: string, paneId: string) => void;
+  onResizeSplit: (tabId: string, splitId: string, ratio: number) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const { leaves, dividers } = useMemo(() => {
+    const leaves: LeafBox[] = [];
+    const dividers: DividerBox[] = [];
+    flattenLayout(tab.layout, { left: 0, top: 0, width: 1, height: 1 }, leaves, dividers);
+    // Stable render order (splits reorder the tree walk); keys prevent
+    // remounts either way, sorting also avoids DOM moves.
+    leaves.sort((a, b) => a.paneId.localeCompare(b.paneId));
+    return { leaves, dividers };
+  }, [tab.layout]);
+
+  const handleSplit = useCallback(
+    (paneId: string, dir: SplitDir) => onSplit(tab.id, paneId, dir),
+    [onSplit, tab.id],
+  );
+  const handleClose = useCallback(
+    (paneId: string) => onClosePane(tab.id, paneId),
+    [onClosePane, tab.id],
+  );
+
+  const startDividerDrag = (d: DividerBox) => (e: React.PointerEvent<HTMLDivElement>) => {
+    const container = containerRef.current;
+    if (!container || e.button !== 0) return;
+    e.preventDefault();
+    const bounds = container.getBoundingClientRect();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const frac =
+        d.dir === 'row'
+          ? ((ev.clientX - bounds.left) / bounds.width - d.rect.left) / d.rect.width
+          : ((ev.clientY - bounds.top) / bounds.height - d.rect.top) / d.rect.height;
+      onResizeSplit(tab.id, d.splitId, Math.min(0.9, Math.max(0.1, frac)));
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute inset-0"
+      // visibility (not display:none) keeps xterm's layout measurements valid
+      // for background tabs, matching how minimized windows stay mounted.
+      style={active ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
+    >
+      {leaves.map((leaf) => (
+        <div
+          key={leaf.paneId}
+          className="absolute"
+          style={{
+            left: `${leaf.rect.left * 100}%`,
+            top: `${leaf.rect.top * 100}%`,
+            width: `${leaf.rect.width * 100}%`,
+            height: `${leaf.rect.height * 100}%`,
+          }}
+          onMouseDownCapture={() => onFocusPane(tab.id, leaf.paneId)}
+        >
+          <TerminalSession
+            paneId={leaf.paneId}
+            active={active}
+            focused={tab.activePaneId === leaf.paneId}
+            onSplit={handleSplit}
+            onClose={handleClose}
+          />
+        </div>
+      ))}
+      {dividers.map((d) => (
+        <div
+          key={d.splitId}
+          role="separator"
+          aria-orientation={d.dir === 'row' ? 'vertical' : 'horizontal'}
+          className={cn(
+            'group absolute z-10 grid place-items-center',
+            d.dir === 'row' ? 'cursor-col-resize' : 'cursor-row-resize',
+          )}
+          style={
+            d.dir === 'row'
+              ? {
+                  left: `calc(${d.pos * 100}% - 3px)`,
+                  top: `${d.rect.top * 100}%`,
+                  height: `${d.rect.height * 100}%`,
+                  width: 6,
+                }
+              : {
+                  top: `calc(${d.pos * 100}% - 3px)`,
+                  left: `${d.rect.left * 100}%`,
+                  width: `${d.rect.width * 100}%`,
+                  height: 6,
+                }
+          }
+          onPointerDown={startDividerDrag(d)}
+        >
+          <div
+            className={cn(
+              'bg-white/15 transition-colors group-hover:bg-white/40',
+              d.dir === 'row' ? 'h-full w-px' : 'h-px w-full',
+            )}
+          />
+        </div>
+      ))}
+    </div>
+  );
+});
+
+/**
  * A single terminal session: one xterm instance bound to one pty. Mounted for
- * the lifetime of its tab. Memoized so another tab's state change doesn't
- * re-run this one's effects.
+ * the lifetime of its pane. Memoized so another pane's state change doesn't
+ * re-run this one's effects. Right-click opens a context menu with clipboard
+ * actions and Tilix-style split/close-pane actions.
  */
 const TerminalSession = memo(function TerminalSession({
+  paneId,
   active,
+  focused,
+  onSplit,
   onClose,
 }: {
+  paneId: string;
+  /** Whether the owning tab is visible. */
   active: boolean;
-  onClose: () => void;
+  /** Whether this pane should hold keyboard focus within its tab. */
+  focused: boolean;
+  onSplit: (paneId: string, dir: SplitDir) => void;
+  onClose: (paneId: string) => void;
 }) {
   const bridge = getPtyBridge();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -280,9 +637,10 @@ const TerminalSession = memo(function TerminalSession({
         if (!disposed) term.write(`Failed to start shell: ${message}\r\n`);
       });
 
-    // Refit on any container size change (window resize/maximize). The rAF
-    // hop coalesces bursts and avoids "ResizeObserver loop" warnings; the
-    // resulting term.onResize event forwards the new size to the pty.
+    // Refit on any container size change (window resize/maximize, pane
+    // splits, divider drags). The rAF hop coalesces bursts and avoids
+    // "ResizeObserver loop" warnings; the resulting term.onResize event
+    // forwards the new size to the pty.
     const observer = new ResizeObserver(() => {
       requestAnimationFrame(() => {
         if (!disposed) fit.fit();
@@ -309,9 +667,9 @@ const TerminalSession = memo(function TerminalSession({
     };
   }, [bridge, epoch]);
 
-  // When this tab becomes active, refit (its container had zero size while
-  // hidden, so xterm's cached dimensions are stale) and re-rasterize the
-  // glyph atlas in case it corrupted while the tab was in the background.
+  // When this pane's tab becomes active, refit (its container had zero size
+  // while hidden, so xterm's cached dimensions are stale) and re-rasterize
+  // the glyph atlas in case it corrupted while the tab was in the background.
   useEffect(() => {
     if (!active) return;
     requestAnimationFrame(() => {
@@ -320,40 +678,80 @@ const TerminalSession = memo(function TerminalSession({
     });
   }, [active]);
 
+  // Keep keyboard focus on the tab's active pane (new splits focus the new
+  // pane; closing a pane moves focus to a survivor).
+  useEffect(() => {
+    if (active && focused) termRef.current?.focus();
+  }, [active, focused]);
+
+  const copySelection = useCallback(() => {
+    const text = termRef.current?.getSelection();
+    if (text) navigator.clipboard.writeText(text).catch(() => {});
+  }, []);
+
+  const pasteClipboard = useCallback(() => {
+    navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (text) termRef.current?.paste(text);
+      })
+      .catch(() => {});
+  }, []);
+
   return (
-    <div
-      className="absolute inset-0"
-      // visibility (not display:none) keeps xterm's layout measurements valid
-      // for background tabs, matching how minimized windows stay mounted.
-      style={active ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
-    >
-      <div ref={containerRef} className="h-full w-full pl-2 pt-1" />
-      {exitCode !== null && (
-        <div className="absolute inset-0 grid place-items-center bg-background/80">
-          <div className="rounded-xl border border-border/60 bg-popover px-6 py-5 text-center shadow-lg">
-            <p className="mb-3 text-sm text-muted-foreground">
-              Session ended{exitCode !== 0 ? ` (exit code ${exitCode})` : ''}.
-            </p>
-            <div className="flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={restart}
-                className="inline-flex items-center gap-2 rounded-lg bg-foreground/10 px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-foreground/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                <RotateCw className="size-4" aria-hidden />
-                New session
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                Close tab
-              </button>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="relative h-full w-full">
+          <div ref={containerRef} className="h-full w-full pl-2 pt-1" />
+          {exitCode !== null && (
+            <div className="absolute inset-0 grid place-items-center bg-background/80">
+              <div className="rounded-xl border border-border/60 bg-popover px-6 py-5 text-center shadow-lg">
+                <p className="mb-3 text-sm text-muted-foreground">
+                  Session ended{exitCode !== 0 ? ` (exit code ${exitCode})` : ''}.
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={restart}
+                    className="inline-flex items-center gap-2 rounded-lg bg-foreground/10 px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-foreground/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  >
+                    <RotateCw className="size-4" aria-hidden />
+                    New session
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onClose(paneId)}
+                    className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
-      )}
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent
+        className="w-44"
+        // Return focus to the terminal (not the wrapper div) after the menu
+        // closes, so e.g. Paste lands keystrokes in the shell immediately.
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          termRef.current?.focus();
+        }}
+      >
+        <ContextMenuItem onSelect={copySelection}>Copy</ContextMenuItem>
+        <ContextMenuItem onSelect={pasteClipboard}>Paste</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => onSplit(paneId, 'row')}>
+          Split right
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onSplit(paneId, 'column')}>
+          Split down
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => onClose(paneId)}>Close pane</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });

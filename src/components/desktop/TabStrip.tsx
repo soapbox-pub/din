@@ -47,7 +47,9 @@ export function TabStrip({
     <div
       role="tablist"
       aria-label={label}
-      className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+      // When tabs overflow they shrink to fit (Chrome-style) rather than
+      // scrolling; overflow-hidden is just a guard for the minimum-width case.
+      className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
     >
       {tabs.map((tab) => (
         <TabButton
@@ -112,7 +114,7 @@ function TabButton({
       }}
       title={tab.title}
       className={cn(
-        'group flex h-7 w-44 min-w-0 shrink-0 cursor-default items-center gap-2 rounded-md border px-2.5 text-xs',
+        'group flex h-7 w-44 min-w-9 shrink cursor-default items-center gap-2 rounded-md border px-2.5 text-xs',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         active
           ? 'border-border/60 bg-background text-foreground shadow-sm'
