@@ -33,7 +33,7 @@ npm run os:run      # demo Aladdin in a QEMU window
 - `/src/contexts/` — React context providers (`AppContext`).
 - `/src/test/` — testing utilities including the `TestApp` wrapper.
 - `/public/` — static assets.
-- `/electron/` — the Electron host: `main.cjs` (serves `dist/` over a custom `app://` protocol with SPA fallback), `preload.cjs` and `pty-host.py` (fs/pty/wifi bridges behind the Files, Terminal, and Settings apps).
+- `/electron/` — the Electron host: `main.mts`, `devtools-bridge.mts`, `userscripts.mts` (TypeScript run directly via Node's native type stripping — no build step, erasable syntax only, checked by `tsconfig.electron.json`), plus `preload.cjs`/`webview-preload.cjs` (sandboxed preloads can't be ESM/TS; plain CommonJS with JSDoc types) and `pty-host.py` (fs/pty/wifi bridges behind the Files, Terminal, and Settings apps).
 - `/os/` — Aladdin, the flagship OS: `flake.nix` (entry point; exposes the installable disk image as `./os#image` and the QEMU demo as `./os#vm`) and `configuration.nix` (the whole OS: cage + Electron launcher + Nix build of Din, targeting real hardware; QEMU-only accommodations live in its `vmVariant`). The Nix build only sees **git-tracked** files — `git add` new files before `npm run os:build` — and pins npm deps via `npmDepsHash` (refresh it after dependency changes; see README).
 - `App.tsx` — **already configured** with `QueryClientProvider`, `NostrProvider`, `UnheadProvider`, `AppProvider`, `NostrLoginProvider`. **Read before editing**; changes are rarely needed.
 - `AppRouter.tsx` — React Router configuration. The catch-all `/:nip19` route handles all NIP-19 identifiers (see the `nip19-routing` skill).

@@ -50,7 +50,7 @@ npm run os:run      # demo Aladdin in a QEMU window
 npm run os:clean    # remove the build output and the demo VM disk (aladdin.qcow2)
 ```
 
-`npm run dev` starts Vite, then launches the same `electron/main.cjs` Aladdin
+`npm run dev` starts Vite, then launches the same `electron/main.mts` Aladdin
 uses (Electron comes from devDependencies, pinned to the version the OS image
 ships) against the dev server via `DIN_DEV_URL`. This gives you the real
 Electron/`app://` environment with Vite HMR + React fast refresh. Ctrl-C stops
@@ -71,7 +71,7 @@ since QEMU provides no GPU), with boot logs mirrored to the serial console
 ## Layout
 
 - `src/` — the Din desktop environment (React, Tailwind, shadcn/ui)
-- `electron/main.cjs` — the Electron host; serves `dist/` over a custom
+- `electron/main.mts` — the Electron host; serves `dist/` over a custom
   `app://` protocol (real origin, SPA fallback for BrowserRouter)
 - `electron/preload.cjs`, `electron/pty-host.py` — the fs/pty/wifi bridges
   behind Din's Files, Terminal, and Settings apps
@@ -92,7 +92,7 @@ Three tiers, fastest first:
    Electron host (`app://` protocol, CSP, download handling) pointed at the
    Vite dev server, so it matches Aladdin while staying hot-reloadable. Under
    the hood this just sets `DIN_DEV_URL=http://localhost:8080` for
-   `electron/main.cjs`.
+   `electron/main.mts`.
 3. **Full OS demo** (`npm run os:run`): rebuilds Aladdin and boots it in
    QEMU; only changed layers rebuild. The demo VM disk (`aladdin.qcow2`)
    persists between boots; `npm run os:clean` resets it.
@@ -130,6 +130,6 @@ files — `git add` new source files before `npm run os:build`.
   `--disable-gpu` (no virgl) and falls back to software rendering.
 - Din runs as the unprivileged `web` user with Chromium's sandbox and
   context isolation enabled; the renderer has no Node access.
-- The `app://` protocol handler in `main.cjs` serves only files inside
+- The `app://` protocol handler in `main.mts` serves only files inside
   `dist/` (path-traversal guarded) and falls back to `index.html` for SPA
   routes.

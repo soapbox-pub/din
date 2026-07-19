@@ -43,6 +43,38 @@ export default defineConfig(
     },
   },
   {
+    // The Electron host: .mts main-process files (run via Node's native type
+    // stripping) and the .cjs preloads (JSDoc-typed; sandboxed preloads
+    // can't be ESM or TypeScript, so require() stays).
+    name: "app/electron",
+    files: ["electron/**/*.{mts,cjs}"],
+    extends: [js.configs.recommended, tseslint.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2023,
+      globals: globals.node,
+    },
+    linterOptions: {
+      reportUnusedDisableDirectives: "error",
+    },
+    plugins: {
+      custom: customRules,
+    },
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
+      ],
+      // The .cjs preloads are CommonJS by necessity.
+      "@typescript-eslint/no-require-imports": "off",
+      "custom/no-placeholder-comments": "error",
+      "no-warning-comments": ["error", { terms: ["fixme"] }],
+    },
+  },
+  {
     name: "app/html",
     files: ["**/*.html"],
     extends: [htmlEslint.configs["flat/recommended"]],

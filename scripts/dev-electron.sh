@@ -2,7 +2,7 @@
 # Launch Din in Electron with live HMR.
 #
 # Starts the Vite dev server, waits for it to come up, then launches Electron
-# pointed at it via DIN_DEV_URL. Electron loads the same main.cjs used in the
+# pointed at it via DIN_DEV_URL. Electron loads the same main.mts used in the
 # VM, so app:// routing / CSP behaviour matches production while React fast
 # refresh + Vite HMR stay live. Ctrl-C tears down both processes.
 #
@@ -68,7 +68,7 @@ if [ "${DIN_NO_GPU:-0}" = "1" ]; then
   GPU_FLAGS=(--disable-gpu --enable-unsafe-swiftshader)
 fi
 
-DIN_DEV_URL="${URL}" "${ELECTRON}" "${ROOT_DIR}/electron/main.cjs" \
+DIN_DEV_URL="${URL}" "${ELECTRON}" "${ROOT_DIR}/electron/main.mts" \
   "${GPU_FLAGS[@]}" &
 ELECTRON_PID=$!
 

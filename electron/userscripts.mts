@@ -6,7 +6,7 @@
 // to userData/userscripts.json so injection works from the first page load
 // after a restart, before any renderer sync arrives.
 //
-// Injection targets browser-tab guests only (main.cjs calls attachUserscripts
+// Injection targets browser-tab guests only (main.mts calls attachUserscripts
 // on webviews in the persist:webbrowser session). Scripts run in the page's
 // main world via webContents.executeJavaScript — the same privilege level as
 // the page itself, never the shell's — wrapped in an IIFE that provides a
@@ -20,20 +20,37 @@
 // executeJavaScript. A per-document window flag makes injection idempotent.
 //
 // Deliberately NOT here: session.webRequest interception (it would silently
-// break chrome.webRequest for extensions — see the warning in main.cjs).
+// break chrome.webRequest for extensions — see the warning in main.mts).
 
-const path = require('node:path');
-const fs = require('node:fs');
-const { app, ipcMain, net } = require('electron');
+import path from 'node:path';
+import fs from 'node:fs';
+import { app, ipcMain, net } from 'electron';
 
 /** Upper bounds keeping a hostile sync/fetch from bloating disk or memory. */
 const MAX_SCRIPTS = 200;
 const MAX_CODE_BYTES = 2 * 1024 * 1024;
 
-/** The current script list (sanitized renderer data). */
-let scripts = [];
+type RunAt = 'document-start' | 'document-end' | 'document-idle';
 
-function storeFile() {
+/** One sanitized Greasemonkey-format script record. */
+interface Userscript {
+  id: string;
+  name: string;
+  namespace: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  runAt: RunAt;
+  matches: string[];
+  includes: string[];
+  excludes: string[];
+  code: string;
+}
+
+/** The current script list (sanitized renderer data). */
+let scripts: Userscript[] = [];
+
+function storeFile(): string {
   return path.join(app.getPath('userData'), 'userscripts.json');
 }
 
@@ -42,16 +59,18 @@ function storeFile() {
  * shell (assertShellSender gates the IPC), but records also round-trip
  * through a JSON file on disk, so shape-check everything defensively.
  */
-function sanitizeScript(raw) {
-  if (!raw || typeof raw !== 'object') return null;
+function sanitizeScript(value: unknown): Userscript | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
   if (typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(raw.id)) return null;
   if (typeof raw.code !== 'string' || raw.code.length > MAX_CODE_BYTES) return null;
   if (typeof raw.name !== 'string' || !raw.name) return null;
-  const strings = (value) =>
-    Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
-  const runAt = ['document-start', 'document-end', 'document-idle'].includes(raw.runAt)
-    ? raw.runAt
-    : 'document-end';
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const runAt: RunAt =
+    raw.runAt === 'document-start' || raw.runAt === 'document-idle' || raw.runAt === 'document-end'
+      ? raw.runAt
+      : 'document-end';
   return {
     id: raw.id,
     name: raw.name,
@@ -67,10 +86,10 @@ function sanitizeScript(raw) {
   };
 }
 
-function sanitizeScripts(list) {
+function sanitizeScripts(list: unknown): Userscript[] {
   if (!Array.isArray(list)) return [];
-  const seen = new Set();
-  const out = [];
+  const seen = new Set<string>();
+  const out: Userscript[] = [];
   for (const raw of list) {
     const script = sanitizeScript(raw);
     if (!script || seen.has(script.id)) continue;
@@ -81,7 +100,7 @@ function sanitizeScripts(list) {
   return out;
 }
 
-function loadFromDisk() {
+function loadFromDisk(): void {
   try {
     scripts = sanitizeScripts(JSON.parse(fs.readFileSync(storeFile(), 'utf8')));
   } catch {
@@ -90,7 +109,7 @@ function loadFromDisk() {
   }
 }
 
-function saveToDisk() {
+function saveToDisk(): void {
   try {
     fs.writeFileSync(storeFile(), JSON.stringify(scripts));
   } catch (error) {
@@ -101,13 +120,13 @@ function saveToDisk() {
 // --- URL matching (Greasemonkey semantics) ---------------------------------
 
 /** Compile a glob (* wildcards) into an anchored RegExp. */
-function globToRegExp(glob) {
+function globToRegExp(glob: string): RegExp {
   const escaped = glob.replace(/[.+^${}()|[\]\\?]/g, '\\$&').replace(/\*/g, '.*');
   return new RegExp(`^${escaped}$`);
 }
 
 /** An @include/@exclude rule: /regex/ when slash-delimited, else a glob. */
-function includeRuleMatches(rule, url) {
+function includeRuleMatches(rule: string, url: string): boolean {
   try {
     if (rule.length > 2 && rule.startsWith('/') && rule.endsWith('/')) {
       return new RegExp(rule.slice(1, -1)).test(url);
@@ -119,8 +138,8 @@ function includeRuleMatches(rule, url) {
 }
 
 /** An @match pattern: scheme://host/path (Chrome match-pattern semantics). */
-function matchPatternMatches(pattern, url) {
-  let target;
+function matchPatternMatches(pattern: string, url: string): boolean {
+  let target: URL;
   try {
     target = new URL(url);
   } catch {
@@ -154,7 +173,7 @@ function matchPatternMatches(pattern, url) {
  * admits. A script with no rules at all runs everywhere (the conventional
  * userscript-manager behavior for headerless targeting).
  */
-function scriptMatchesUrl(script, url) {
+function scriptMatchesUrl(script: Userscript, url: string): boolean {
   for (const rule of script.excludes) {
     if (includeRuleMatches(rule, url)) return false;
   }
@@ -176,7 +195,7 @@ function scriptMatchesUrl(script, url) {
  * in raw (it is the JavaScript to run — a syntax error only breaks that
  * script's own wrapper, reported to the page console).
  */
-function buildInjectionSource(script) {
+function buildInjectionSource(script: Userscript): string {
   const flag = JSON.stringify(`__din_userscript_${script.id}`);
   const label = JSON.stringify(`[userscript ${script.name}]`);
   const prefix = JSON.stringify(`din-userscript:${script.id}:`);
@@ -247,7 +266,7 @@ ${script.code}
  * Inject every enabled script that matches the guest's current URL at the
  * given stage ('ready' = dom-ready, 'idle' = did-finish-load).
  */
-function injectForStage(contents, stage) {
+function injectForStage(contents: Electron.WebContents, stage: 'ready' | 'idle'): void {
   if (contents.isDestroyed() || scripts.length === 0) return;
   const url = contents.getURL();
   if (!/^https?:/i.test(url)) return;
@@ -263,13 +282,13 @@ function injectForStage(contents, stage) {
 }
 
 /** Hook a browser-tab guest so matching userscripts inject on every load. */
-function attachUserscripts(contents) {
+export function attachUserscripts(contents: Electron.WebContents): void {
   contents.on('dom-ready', () => injectForStage(contents, 'ready'));
   contents.on('did-finish-load', () => injectForStage(contents, 'idle'));
 }
 
 /** Whether a URL points at a userscript file (an install link). */
-function isUserscriptInstallUrl(url) {
+export function isUserscriptInstallUrl(url: string): boolean {
   try {
     const { protocol, pathname } = new URL(url);
     return (protocol === 'https:' || protocol === 'http:') && pathname.endsWith('.user.js');
@@ -279,7 +298,9 @@ function isUserscriptInstallUrl(url) {
 }
 
 /** Register the userscripts:* IPC surface and load the persisted store. */
-function registerUserscriptHandlers({ assertShellSender }) {
+export function registerUserscriptHandlers({ assertShellSender }: {
+  assertShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => void;
+}): void {
   loadFromDisk();
 
   // Full-list replacement from the shell (the renderer is authoritative).
@@ -304,9 +325,3 @@ function registerUserscriptHandlers({ assertShellSender }) {
     return text;
   });
 }
-
-module.exports = {
-  registerUserscriptHandlers,
-  attachUserscripts,
-  isUserscriptInstallUrl,
-};

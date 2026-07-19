@@ -30,18 +30,55 @@
 //   - one WebSocket per session at a time (reconnects allowed - the
 //     frontend offers "Reconnect DevTools" if the guest crashes)
 
-const http = require('node:http');
-const crypto = require('node:crypto');
-const { webContents } = require('electron');
+import http from 'node:http';
+import crypto from 'node:crypto';
+import type net from 'node:net';
+import type { Duplex } from 'node:stream';
+import { webContents } from 'electron';
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const DEVTOOLS_ORIGIN = 'devtools://devtools';
 const FRONTEND_URL = 'devtools://devtools/bundled/devtools_app.html';
 
+/** A CDP message in either direction (loosely shaped; the debugger validates). */
+interface CdpMessage {
+  id?: number;
+  method?: string;
+  params?: unknown;
+  result?: unknown;
+  error?: { code: number; message: string };
+  sessionId?: string;
+}
+
+/** One open devtools pane: a token-keyed frontend <-> tab wiring. */
+interface BridgeSession {
+  token: string;
+  targetId: number;
+  hostId: number;
+  /** Send a CDP object to the connected frontend, if any. */
+  send: ((message: CdpMessage) => void) | null;
+  /** Tear down the active WebSocket, if any. */
+  closeSocket: (() => void) | null;
+  /** The frontend enabled Overlay - ready for inspect requests. */
+  overlayReady: boolean;
+  /** Inspect requests queued until the frontend is ready. */
+  pendingInspects: Array<{ x: number; y: number }>;
+  dispose: (() => void) | null;
+}
+
+/** Device-metrics + user-agent overrides for the responsive/device view. */
+export interface EmulationMetrics {
+  width: number;
+  height: number;
+  deviceScaleFactor?: number;
+  mobile?: boolean;
+  userAgent?: string;
+}
+
 /** Frame a text message as a single unmasked WebSocket frame (RFC 6455). */
-function wsEncodeText(text) {
+function wsEncodeText(text: string): Buffer {
   const payload = Buffer.from(text, 'utf8');
-  let header;
+  let header: Buffer;
   if (payload.length < 126) {
     header = Buffer.from([0x81, payload.length]);
   } else if (payload.length < 65536) {
@@ -63,9 +100,12 @@ function wsEncodeText(text) {
  * Handles fragmentation and control frames; calls onMessage with each
  * complete text message and onClose on close frames or malformed input.
  */
-function decodeWsStream(socket, { onMessage, onClose }) {
+function decodeWsStream(
+  socket: net.Socket,
+  { onMessage, onClose }: { onMessage: (message: string) => void; onClose: () => void },
+): void {
   let buffer = Buffer.alloc(0);
-  let fragments = [];
+  let fragments: Buffer[] = [];
 
   socket.on('data', (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
@@ -135,31 +175,35 @@ function decodeWsStream(socket, { onMessage, onClose }) {
   });
 }
 
-class DevtoolsBridge {
+export class DevtoolsBridge {
+  /** Called when a session dies because its tab or pane was destroyed (not
+   *  when closed explicitly via close()) - lets the shell reconcile its
+   *  pane UI. */
+  _onSessionEnded: ((targetId: number) => void) | undefined;
+
+  /** Resolves to the listening port. */
+  _listening: Promise<number> | null;
+
+  /** token -> session */
+  _sessions: Map<string, BridgeSession>;
+
   /**
-   * @param {object} [options]
-   * @param {(targetId: number) => void} [options.onSessionEnded] Called when
-   *   a session dies because its tab or pane was destroyed (not when closed
-   *   explicitly via close()) - lets the shell reconcile its pane UI.
+   * Device-emulation attachments, keyed by target WebContents id. Device
+   * emulation is independent of devtools sessions (the responsive/device
+   * view works with the pane closed), so it keeps its own debugger
+   * attachment when no devtools session already holds one.
    */
-  constructor({ onSessionEnded } = {}) {
+  _emulations: Map<number, { ownsDebugger: boolean }>;
+
+  constructor({ onSessionEnded }: { onSessionEnded?: (targetId: number) => void } = {}) {
     this._onSessionEnded = onSessionEnded;
-    /** @type {Promise<number> | null} resolves to the listening port */
     this._listening = null;
-    /** token -> session */
     this._sessions = new Map();
-    /**
-     * Device-emulation attachments, keyed by target WebContents id. Device
-     * emulation is independent of devtools sessions (the responsive/device
-     * view works with the pane closed), so it keeps its own debugger
-     * attachment when no devtools session already holds one.
-     * @type {Map<number, { ownsDebugger: boolean }>}
-     */
     this._emulations = new Map();
   }
 
   /** Lazily start the loopback server; resolves to its ephemeral port. */
-  _ensureServer() {
+  _ensureServer(): Promise<number> {
     this._listening ??= new Promise((resolve, reject) => {
       const server = http.createServer((_req, res) => {
         // No HTTP surface - the bridge only speaks WebSocket upgrades.
@@ -168,7 +212,9 @@ class DevtoolsBridge {
       });
       server.on('upgrade', (req, socket) => this._handleUpgrade(req, socket));
       server.on('error', reject);
-      server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+      server.listen(0, '127.0.0.1', () => {
+        resolve((server.address() as net.AddressInfo).port);
+      });
     });
     return this._listening;
   }
@@ -179,7 +225,7 @@ class DevtoolsBridge {
    * The caller must have validated `target` (the inspected browser tab)
    * and `host` (the devtools pane guest).
    */
-  async open(target, host) {
+  async open(target: Electron.WebContents, host: Electron.WebContents): Promise<void> {
     // One session per tab: reopening replaces any previous session.
     this.close(target.id);
 
@@ -187,17 +233,13 @@ class DevtoolsBridge {
     if (target.isDestroyed() || host.isDestroyed()) return;
 
     const token = crypto.randomBytes(16).toString('hex');
-    const session = {
+    const session: BridgeSession = {
       token,
       targetId: target.id,
       hostId: host.id,
-      /** Send a CDP object to the connected frontend, if any. */
       send: null,
-      /** Tear down the active WebSocket, if any. */
       closeSocket: null,
-      /** The frontend enabled Overlay - ready for inspect requests. */
       overlayReady: false,
-      /** Inspect requests queued until the frontend is ready. */
       pendingInspects: [],
       dispose: null,
     };
@@ -218,7 +260,7 @@ class DevtoolsBridge {
   }
 
   /** Close the session inspecting the given tab, if any. */
-  close(targetId) {
+  close(targetId: number): void {
     const session = this._sessionForTarget(targetId);
     if (session) this._endSession(session, false);
   }
@@ -227,7 +269,7 @@ class DevtoolsBridge {
    * Reveal the element at page coordinates in the tab's devtools (the
    * context menu's "Inspect"). Queued until the frontend is ready.
    */
-  inspect(targetId, x, y) {
+  inspect(targetId: number, x: number, y: number): void {
     const session = this._sessionForTarget(targetId);
     if (!session) return;
     const point = { x, y };
@@ -240,14 +282,8 @@ class DevtoolsBridge {
    * responsive/device view). `metrics` null clears all overrides. Works
    * whether or not the tab's devtools pane is open: it reuses an existing
    * debugger attachment (from a devtools session) or makes its own.
-   *
-   * @param {number} targetId  Inspected tab's WebContents id.
-   * @param {null | {
-   *   width: number, height: number, deviceScaleFactor?: number,
-   *   mobile?: boolean, userAgent?: string,
-   * }} metrics
    */
-  async emulate(targetId, metrics) {
+  async emulate(targetId: number, metrics: EmulationMetrics | null): Promise<void> {
     const target = webContents.fromId(targetId);
     if (!target || target.isDestroyed()) return;
     const dbg = target.debugger;
@@ -322,21 +358,21 @@ class DevtoolsBridge {
   }
 
   /** The tab a devtools host guest is inspecting, or undefined. */
-  targetIdForHost(hostId) {
+  targetIdForHost(hostId: number): number | undefined {
     for (const session of this._sessions.values()) {
       if (session.hostId === hostId) return session.targetId;
     }
     return undefined;
   }
 
-  _sessionForTarget(targetId) {
+  _sessionForTarget(targetId: number): BridgeSession | undefined {
     for (const session of this._sessions.values()) {
       if (session.targetId === targetId) return session;
     }
     return undefined;
   }
 
-  _endSession(session, notify) {
+  _endSession(session: BridgeSession, notify: boolean): void {
     if (!this._sessions.delete(session.token)) return;
     session.dispose?.();
     session.closeSocket?.();
@@ -359,7 +395,7 @@ class DevtoolsBridge {
   /** Ask the page for the node at (x, y), then make the frontend reveal it
    *  by synthesizing the Overlay.inspectNodeRequested event it listens to
    *  (the same event real inspect-element flows use). */
-  async _inspectNow(session, { x, y }) {
+  async _inspectNow(session: BridgeSession, { x, y }: { x: number; y: number }): Promise<void> {
     const target = webContents.fromId(session.targetId);
     if (!target || target.isDestroyed() || !session.send) return;
     try {
@@ -376,7 +412,9 @@ class DevtoolsBridge {
     }
   }
 
-  _handleUpgrade(req, socket) {
+  _handleUpgrade(req: http.IncomingMessage, rawSocket: Duplex): void {
+    // http 'upgrade' hands over the raw connection, which is a net.Socket.
+    const socket = rawSocket as net.Socket;
     const token = (req.url || '').replace(/^\//, '');
     const session = this._sessions.get(token);
     const key = req.headers['sec-websocket-key'];
@@ -415,7 +453,7 @@ class DevtoolsBridge {
     );
     socket.setNoDelay(true);
 
-    const send = (message) => {
+    const send = (message: CdpMessage) => {
       try {
         socket.write(wsEncodeText(JSON.stringify(message)));
       } catch {
@@ -424,7 +462,12 @@ class DevtoolsBridge {
     };
 
     // Backend -> frontend: protocol events and sub-target session traffic.
-    const onDebuggerMessage = (_event, method, params, sessionId) => {
+    const onDebuggerMessage = (
+      _event: Electron.Event,
+      method: string,
+      params: unknown,
+      sessionId?: string,
+    ) => {
       send(sessionId ? { method, params, sessionId } : { method, params });
     };
     const onDebuggerDetach = () => closeSocket();
@@ -450,7 +493,7 @@ class DevtoolsBridge {
     // manages real protocol ids; we echo the frontend's own ids back).
     decodeWsStream(socket, {
       onMessage: (text) => {
-        let message;
+        let message: CdpMessage;
         try {
           message = JSON.parse(text);
         } catch {
@@ -473,10 +516,13 @@ class DevtoolsBridge {
               }
             }
           })
-          .catch((error) => {
-            const payload = {
+          .catch((error: unknown) => {
+            const payload: CdpMessage = {
               id,
-              error: { code: -32000, message: String(error?.message ?? error) },
+              error: {
+                code: -32000,
+                message: String(error instanceof Error ? error.message : error),
+              },
             };
             send(sessionId ? { ...payload, sessionId } : payload);
           });
@@ -485,5 +531,3 @@ class DevtoolsBridge {
     });
   }
 }
-
-module.exports = { DevtoolsBridge };

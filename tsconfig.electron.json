@@ -1,0 +1,36 @@
+// Type-checks the Electron host (electron/). Separate from the root tsconfig
+// because this code runs under Node/Electron (NodeNext modules, node types),
+// not Vite's bundler resolution.
+//
+// The .mts files run directly in Electron 41+ via Node's native type
+// stripping - there is NO build step, so only erasable TypeScript syntax is
+// allowed (no enums, namespaces, parameter properties), enforced by
+// `erasableSyntaxOnly`. The preload scripts stay plain .cjs (Electron's
+// sandboxed-preload loader doesn't type-strip) and are checked via JSDoc
+// (`checkJs`).
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ESNext", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+
+    /* Native type stripping: imports name the real .mts files. */
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+
+    /* The .cjs preloads are checked too (JSDoc-typed). */
+    "allowJs": true,
+    "checkJs": true,
+
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo-electron"
+  },
+  "include": ["electron"]
+}

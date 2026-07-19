@@ -7,50 +7,68 @@
 //
 // Set DIN_DEV_URL (e.g. http://localhost:8080) to load a Vite dev server
 // (with HMR) instead of the bundled dist/. See `npm run dev`.
+//
+// This file runs as TypeScript directly via Node's native type stripping
+// (Electron 41 embeds Node 24) - no build step, so only erasable TS syntax.
 
-const path = require('node:path');
-const fs = require('node:fs');
-const os = require('node:os');
-const { spawn, execFile } = require('node:child_process');
-const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem } = require('electron');
-const { ElectronChromeExtensions } = require('electron-chrome-extensions');
-const buildChromeContextMenu = require('electron-chrome-context-menu').default;
-const {
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem } from 'electron';
+import { ElectronChromeExtensions } from 'electron-chrome-extensions';
+import {
   installChromeWebStore,
   uninstallExtension,
-} = require('electron-chrome-web-store');
-const { DevtoolsBridge } = require('./devtools-bridge.cjs');
-const {
+} from 'electron-chrome-web-store';
+import { DevtoolsBridge } from './devtools-bridge.mts';
+import {
   registerUserscriptHandlers,
   attachUserscripts,
   isUserscriptInstallUrl,
-} = require('./userscripts.cjs');
+} from './userscripts.mts';
+
+// electron-chrome-context-menu ships CJS only, but exports the builder as a
+// named export too, which Node's ESM-CJS interop resolves statically.
+import { buildChromeContextMenu } from 'electron-chrome-context-menu';
+
+// require.resolve for ensureBrowserActionPreload (no ESM equivalent).
+const require = createRequire(import.meta.url);
+
+/** An IPC event from either ipcMain.on or ipcMain.handle. */
+type IpcEvent = Electron.IpcMainEvent | Electron.IpcMainInvokeEvent;
+
+/** Extract a message from an unknown catch-clause error. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 // Locate the built Vite app. Two supported layouts:
-//   - Aladdin/Nix: main.cjs and dist/ are installed side by side (__dirname/dist)
-//   - repo/standalone launcher (os/x11/din-session.sh): main.cjs lives in
-//     electron/, dist/ sits at the repo root (__dirname/../dist)
+//   - Aladdin/Nix: main.mts and dist/ are installed side by side (dirname/dist)
+//   - repo/standalone launcher (os/x11/din-session.sh): main.mts lives in
+//     electron/, dist/ sits at the repo root (dirname/../dist)
 // DIN_DIST_DIR overrides both. Without this, the standalone session loads
 // app://din/ against a non-existent electron/dist and shows a black screen.
-function resolveDistDir() {
+function resolveDistDir(): string {
   const candidates = [
     process.env.DIN_DIST_DIR,
-    path.join(__dirname, 'dist'),
-    path.join(__dirname, '..', 'dist'),
-  ].filter(Boolean);
+    path.join(import.meta.dirname, 'dist'),
+    path.join(import.meta.dirname, '..', 'dist'),
+  ].filter((dir): dir is string => Boolean(dir));
   for (const dir of candidates) {
     if (fs.existsSync(path.join(dir, 'index.html'))) return path.resolve(dir);
   }
   // Nothing found: fall back to the colocated layout so paths/errors are sane.
-  return path.join(__dirname, 'dist');
+  return path.join(import.meta.dirname, 'dist');
 }
 
 const DIST = resolveDistDir();
 const INDEX = path.join(DIST, 'index.html');
 
 // Must be called before app is ready. NOTE: each call to
-// registerSchemesAsPrivileged REPLACES the full list, and requiring
+// registerSchemesAsPrivileged REPLACES the full list, and importing
 // electron-chrome-extensions above already registered the crx scheme
 // (extension action icons) - so it must be re-declared here.
 protocol.registerSchemesAsPrivileged([
@@ -71,7 +89,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 /** Map a request pathname to a file inside dist/, with SPA fallback. */
-function resolveFile(pathname) {
+function resolveFile(pathname: string): string {
   const candidate = path.normalize(path.join(DIST, decodeURIComponent(pathname)));
 
   // Path traversal guard: never serve anything outside dist/.
@@ -122,7 +140,7 @@ const MAX_READ_BYTES = 16 * 1024 * 1024;
 let shellContentsId = -1;
 
 /** Throw unless the request comes from the shell window's main frame. */
-function assertShellSender(event) {
+function assertShellSender(event: IpcEvent): void {
   if (
     event.sender.id !== shellContentsId ||
     event.senderFrame !== event.sender.mainFrame
@@ -132,26 +150,37 @@ function assertShellSender(event) {
 }
 
 /** Validate and normalize a caller-supplied absolute path. */
-function normalizeAbsolute(p) {
+function normalizeAbsolute(p: unknown): string {
   if (typeof p !== 'string' || p.length === 0 || !path.isAbsolute(p)) {
     throw new Error('An absolute path is required');
   }
   return path.normalize(p);
 }
 
+type FileKind = 'directory' | 'file' | 'other';
+
 /** Classify an fs.Stats as a directory, regular file, or other. */
-function kindOf(stats) {
+function kindOf(stats: fs.Stats): FileKind {
   if (stats.isDirectory()) return 'directory';
   if (stats.isFile()) return 'file';
   return 'other';
 }
 
 /** Plain-object stat summary that survives structured clone. */
-function statSummary(stats) {
+function statSummary(stats: fs.Stats): { kind: FileKind; size: number; mtimeMs: number } {
   return { kind: kindOf(stats), size: stats.size, mtimeMs: stats.mtimeMs };
 }
 
-function registerFsHandlers() {
+/** One rich directory entry as returned by fs:readdir. */
+interface FsDirEntry {
+  name: string;
+  kind: FileKind;
+  symlink: boolean;
+  size: number | null;
+  mtimeMs: number | null;
+}
+
+function registerFsHandlers(): void {
   ipcMain.handle('fs:homedir', (event) => {
     assertShellSender(event);
     return os.homedir();
@@ -172,7 +201,7 @@ function registerFsHandlers() {
 
     const entries = await Promise.all(
       slice.map(async (dirent) => {
-        const entry = {
+        const entry: FsDirEntry = {
           name: dirent.name,
           kind: dirent.isDirectory()
             ? 'directory'
@@ -275,22 +304,22 @@ function registerFsHandlers() {
 // remote web content can't see it.
 // ---------------------------------------------------------------------------
 
-const PTY_HELPER = path.join(__dirname, 'pty-host.py');
+const PTY_HELPER = path.join(import.meta.dirname, 'pty-host.py');
 const MAX_PTY_SESSIONS = 16;
 const MAX_PTY_WRITE_BYTES = 1024 * 1024;
 
 /** id -> ChildProcess running pty-host.py. */
-const ptySessions = new Map();
+const ptySessions = new Map<number, ChildProcess>();
 let nextPtyId = 1;
 
 /** Clamp a caller-supplied terminal dimension to something sane. */
-function clampDimension(value, fallback) {
+function clampDimension(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.min(500, Math.max(2, Math.floor(value)));
 }
 
 /** The login shell of the user we run as (best effort). */
-function userShell() {
+function userShell(): string {
   try {
     const shell = os.userInfo().shell;
     if (shell) return shell;
@@ -300,7 +329,7 @@ function userShell() {
   return process.env.SHELL || '/bin/sh';
 }
 
-function registerPtyHandlers() {
+function registerPtyHandlers(): void {
   ipcMain.handle('pty:spawn', (event, size, cwd) => {
     assertShellSender(event);
     if (ptySessions.size >= MAX_PTY_SESSIONS) {
@@ -324,16 +353,16 @@ function registerPtyHandlers() {
 
     // A write can race the helper's exit (EPIPE); without handlers those
     // stream errors would be unhandled in the main process.
-    proc.stdin.on('error', () => {});
+    proc.stdin?.on('error', () => {});
     proc.stdio[3]?.on('error', () => {});
 
-    const send = (channel, ...args) => {
+    const send = (channel: string, ...args: unknown[]) => {
       if (!sender.isDestroyed()) sender.send(channel, ...args);
     };
 
-    proc.stdout.on('data', (chunk) => send('pty:data', id, chunk));
+    proc.stdout?.on('data', (chunk) => send('pty:data', id, chunk));
     // Helper diagnostics (e.g. exec failures) surface in the terminal too.
-    proc.stderr.on('data', (chunk) => send('pty:data', id, chunk));
+    proc.stderr?.on('data', (chunk) => send('pty:data', id, chunk));
     proc.on('error', (err) => {
       send('pty:data', id, Buffer.from(`pty host failed: ${err.message}\r\n`));
       ptySessions.delete(id);
@@ -351,7 +380,7 @@ function registerPtyHandlers() {
     assertShellSender(event);
     const proc = ptySessions.get(id);
     if (!proc || typeof data !== 'string' || data.length > MAX_PTY_WRITE_BYTES) return;
-    proc.stdin.write(data);
+    proc.stdin?.write(data);
   });
 
   ipcMain.on('pty:resize', (event, id, cols, rows) => {
@@ -359,7 +388,7 @@ function registerPtyHandlers() {
     const proc = ptySessions.get(id);
     if (!proc) return;
     const control = proc.stdio[3];
-    if (control && control.writable) {
+    if (control && 'writable' in control && control.writable) {
       control.write(`resize ${clampDimension(rows, 24)} ${clampDimension(cols, 80)}\n`);
     }
   });
@@ -399,7 +428,7 @@ const NMCLI_CONNECT_TIMEOUT_MS = 60_000;
 const WIFI_TYPE = '802-11-wireless';
 
 /** Run nmcli with an argv array; resolves stdout, rejects with a clean message. */
-function nmcli(args, timeout = NMCLI_TIMEOUT_MS) {
+function nmcli(args: string[], timeout = NMCLI_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       'nmcli',
@@ -419,8 +448,8 @@ function nmcli(args, timeout = NMCLI_TIMEOUT_MS) {
  * Split one line of `nmcli -t` output into fields. Terse mode separates
  * fields with ':' and escapes literal ':' and '\' in values with a backslash.
  */
-function splitTerse(line) {
-  const fields = [];
+function splitTerse(line: string): string[] {
+  const fields: string[] = [];
   let current = '';
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
@@ -438,12 +467,12 @@ function splitTerse(line) {
 }
 
 /** Non-empty lines of nmcli terse output, split into fields. */
-function terseRows(stdout) {
+function terseRows(stdout: string): string[][] {
   return stdout.split('\n').filter((line) => line.length > 0).map(splitTerse);
 }
 
 /** Validate a caller-supplied SSID. */
-function validSsid(ssid) {
+function validSsid(ssid: unknown): string {
   if (
     typeof ssid !== 'string' ||
     ssid.length === 0 ||
@@ -456,7 +485,7 @@ function validSsid(ssid) {
 }
 
 /** Validate an optional caller-supplied WiFi password. */
-function validPassword(password) {
+function validPassword(password: unknown): string | undefined {
   if (password === undefined || password === null || password === '') return undefined;
   if (typeof password !== 'string' || password.length > 256 || password.includes('\0')) {
     throw new Error('Invalid password');
@@ -464,8 +493,15 @@ function validPassword(password) {
   return password;
 }
 
+/** One NetworkManager device row. */
+interface NmDevice {
+  iface: string;
+  state: string;
+  connection: string | null;
+}
+
 /** The first WiFi device known to NetworkManager, or null. */
-async function wifiDevice() {
+async function wifiDevice(): Promise<NmDevice | null> {
   const rows = terseRows(
     await nmcli(['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device', 'status']),
   );
@@ -475,7 +511,7 @@ async function wifiDevice() {
 }
 
 /** The first wired (ethernet) device known to NetworkManager, or null. */
-async function ethernetDevice() {
+async function ethernetDevice(): Promise<NmDevice | null> {
   const rows = terseRows(
     await nmcli(['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device', 'status']),
   );
@@ -485,7 +521,7 @@ async function ethernetDevice() {
 }
 
 /** Names of saved WiFi connection profiles. */
-async function savedWifiConnections() {
+async function savedWifiConnections(): Promise<string[]> {
   const rows = terseRows(await nmcli(['-t', '-f', 'NAME,TYPE', 'connection', 'show']));
   return rows.filter((fields) => fields[1] === WIFI_TYPE).map((fields) => fields[0]);
 }
@@ -508,7 +544,7 @@ async function savedWifiConnections() {
 const XRANDR_TIMEOUT_MS = 15_000;
 
 /** Run xrandr with an argv array; resolves stdout, rejects with a clean message. */
-function xrandr(args, timeout = XRANDR_TIMEOUT_MS) {
+function xrandr(args: string[], timeout = XRANDR_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('xrandr', args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
@@ -519,15 +555,44 @@ function xrandr(args, timeout = XRANDR_TIMEOUT_MS) {
   });
 }
 
+/** One mode line of an xrandr output. */
+interface XrandrMode {
+  width: number;
+  height: number;
+  current: boolean;
+  preferred: boolean;
+}
+
+/** One output of `xrandr --query`. */
+interface XrandrOutput {
+  name: string;
+  connected: boolean;
+  primary: boolean;
+  enabled: boolean;
+  current: { width: number; height: number } | null;
+  position: { x: number; y: number };
+  modes: XrandrMode[];
+}
+
+/** A desired on-state for one output in an xrandr layout call. */
+interface OutputPlacement {
+  name: string;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  primary: boolean;
+}
+
 /**
  * Parse `xrandr --query` into a list of outputs. Each output header looks like
  *   eDP connected primary 1920x1200+0+0 (normal ...) 302mm x 188mm
  * followed by indented mode lines
  *   1920x1200     60.00*+     ('*' = current mode, '+' = preferred/native)
  */
-function parseXrandr(stdout) {
-  const outputs = [];
-  let current = null;
+function parseXrandr(stdout: string): XrandrOutput[] {
+  const outputs: XrandrOutput[] = [];
+  let current: XrandrOutput | null = null;
   for (const line of stdout.split('\n')) {
     const head = line.match(
       /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+(\d+)\+(\d+))?/,
@@ -560,7 +625,7 @@ function parseXrandr(stdout) {
 }
 
 /** Connected outputs, via xrandr. Throws 'xrandr-missing' where xrandr absent. */
-async function queryOutputs() {
+async function queryOutputs(): Promise<XrandrOutput[]> {
   return parseXrandr(await xrandr(['--query'])).filter((o) => o.connected);
 }
 
@@ -568,7 +633,7 @@ async function queryOutputs() {
 const INTERNAL_OUTPUT = /^(eDP|LVDS|DSI)/i;
 
 /** An output's best default mode: preferred, else current, else the largest. */
-function preferredMode(output) {
+function preferredMode(output: XrandrOutput): XrandrMode | null {
   return (
     output.modes.find((m) => m.preferred) ||
     output.modes.find((m) => m.current) ||
@@ -581,11 +646,10 @@ function preferredMode(output) {
  * Run one xrandr call that turns each enabled output on at its mode/position
  * (marking one primary) and each disabled output off. With no window manager,
  * follow up by fitting the shell window to the primary's new bounds instead of
- * waiting on a RandR event. `enabled` items are { name, width, height, x, y,
- * primary }; `disabled` is a list of output names.
+ * waiting on a RandR event.
  */
-async function applyXrandrLayout(enabled, disabled) {
-  const args = [];
+async function applyXrandrLayout(enabled: OutputPlacement[], disabled: string[]): Promise<void> {
+  const args: string[] = [];
   for (const e of enabled) {
     args.push('--output', e.name, '--mode', `${e.width}x${e.height}`, '--pos', `${e.x}x${e.y}`);
     if (e.primary) args.push('--primary');
@@ -604,13 +668,13 @@ async function applyXrandrLayout(enabled, disabled) {
   }
 }
 
-function registerDisplayHandlers() {
+function registerDisplayHandlers(): void {
   ipcMain.handle('display:status', async (event) => {
     assertShellSender(event);
     try {
       return { available: true, outputs: await queryOutputs() };
     } catch (error) {
-      if (error.message === 'xrandr-missing') return { available: false, outputs: [] };
+      if (messageOf(error) === 'xrandr-missing') return { available: false, outputs: [] };
       throw error;
     }
   });
@@ -624,9 +688,9 @@ function registerDisplayHandlers() {
     const outputs = await queryOutputs();
     const byName = new Map(outputs.map((o) => [o.name, o]));
 
-    const enabled = [];
-    const disabled = [];
-    const mentioned = new Set();
+    const enabled: OutputPlacement[] = [];
+    const disabled: string[] = [];
+    const mentioned = new Set<string>();
     for (const p of rawPlacements) {
       const output = byName.get(String(p && p.output));
       if (!output) throw new Error('Unknown display output');
@@ -676,13 +740,13 @@ function registerDisplayHandlers() {
 
 const LID_STATE_DIR = '/proc/acpi/button/lid';
 const LID_POLL_MS = 2_000;
-let lidState = null; // 'open' | 'closed' | null (unknown / no lid)
+let lidState: 'open' | 'closed' | null = null; // null = unknown / no lid
 let lidAutoArranged = false; // did we auto-disable the built-in panel on close?
-let lidTimer = null;
+let lidTimer: NodeJS.Timeout | null = null;
 
 /** Read the ACPI lid state, or null when the machine has no lid button. */
-async function readLidState() {
-  let entries;
+async function readLidState(): Promise<'open' | 'closed' | null> {
+  let entries: string[];
   try {
     entries = await fsp.readdir(LID_STATE_DIR);
   } catch {
@@ -705,8 +769,11 @@ async function readLidState() {
  * each at its preferred mode. Returns the { enabled, disabled } pair for
  * applyXrandrLayout, or null if none can be driven.
  */
-function packLeftToRight(on, off) {
-  const enabled = [];
+function packLeftToRight(
+  on: XrandrOutput[],
+  off: XrandrOutput[],
+): { enabled: OutputPlacement[]; disabled: string[] } | null {
+  const enabled: OutputPlacement[] = [];
   let x = 0;
   for (const output of on) {
     const mode = preferredMode(output);
@@ -726,8 +793,8 @@ function packLeftToRight(on, off) {
 }
 
 /** Lid closed: if docked, switch the built-in panel off and hand off to externals. */
-async function onLidClosed() {
-  let outputs;
+async function onLidClosed(): Promise<void> {
+  let outputs: XrandrOutput[];
   try {
     outputs = await queryOutputs();
   } catch {
@@ -749,10 +816,10 @@ async function onLidClosed() {
 }
 
 /** Lid opened: undo an automatic close-time hand-off, restoring the built-in panel. */
-async function onLidOpened() {
+async function onLidOpened(): Promise<void> {
   if (!lidAutoArranged) return; // only reverse our own change
   lidAutoArranged = false;
-  let outputs;
+  let outputs: XrandrOutput[];
   try {
     outputs = await queryOutputs();
   } catch {
@@ -773,7 +840,7 @@ async function onLidOpened() {
 }
 
 /** Poll the ACPI lid state and react to open/close transitions. */
-function registerLidWatch() {
+function registerLidWatch(): void {
   const poll = async () => {
     const next = await readLidState();
     if (!next || next === lidState) return;
@@ -801,7 +868,7 @@ function registerLidWatch() {
 const POWER_SUPPLY_DIR = '/sys/class/power_supply';
 
 /** Read a sysfs attribute, trimmed, or null when it's absent/unreadable. */
-async function readPowerAttr(dir, name) {
+async function readPowerAttr(dir: string, name: string): Promise<string | null> {
   try {
     return (await fsp.readFile(path.join(dir, name), 'utf8')).trim();
   } catch {
@@ -809,8 +876,10 @@ async function readPowerAttr(dir, name) {
   }
 }
 
+type BatteryStatus = 'charging' | 'discharging' | 'full' | 'not-charging' | 'unknown';
+
 /** Map the kernel's battery status string to a small stable enum. */
-function mapBatteryStatus(raw) {
+function mapBatteryStatus(raw: string | null): BatteryStatus {
   switch ((raw || '').toLowerCase()) {
     case 'charging':
       return 'charging';
@@ -826,7 +895,12 @@ function mapBatteryStatus(raw) {
 }
 
 /** Read one battery directory into { name, percent, status, secondsRemaining }. */
-async function readBattery(dir, name) {
+async function readBattery(dir: string, name: string): Promise<{
+  name: string;
+  percent: number | null;
+  status: BatteryStatus;
+  secondsRemaining: number | null;
+}> {
   const [statusRaw, capacityRaw, energyNow, energyFull, powerNow, chargeNow, chargeFull, currentNow] =
     await Promise.all([
       readPowerAttr(dir, 'status'),
@@ -845,14 +919,14 @@ async function readBattery(dir, name) {
   const now = Number(energyNow ?? chargeNow);
   const full = Number(energyFull ?? chargeFull);
   const rate = Number(powerNow ?? currentNow);
-  let percent = capacityRaw !== null ? Number.parseInt(capacityRaw, 10) : NaN;
+  let percent: number | null = capacityRaw !== null ? Number.parseInt(capacityRaw, 10) : NaN;
   if (Number.isNaN(percent) && Number.isFinite(now) && full > 0) {
     percent = Math.round((now / full) * 100);
   }
-  percent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+  percent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent as number)) : null;
 
   // Time estimate: energy(µWh)/power(µW) or charge(µAh)/current(µA) -> hours.
-  let secondsRemaining = null;
+  let secondsRemaining: number | null = null;
   if (rate > 0 && Number.isFinite(now) && Number.isFinite(full)) {
     if (status === 'charging' && full > now) {
       secondsRemaining = Math.round(((full - now) / rate) * 3600);
@@ -879,7 +953,7 @@ const PPD_IFACE = 'net.hadess.PowerProfiles';
 const BUSCTL_TIMEOUT_MS = 5_000;
 
 /** Run busctl on the system bus; resolves stdout, rejects with a clean message. */
-function busctl(args, timeout = BUSCTL_TIMEOUT_MS) {
+function busctl(args: string[], timeout = BUSCTL_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       'busctl',
@@ -896,15 +970,22 @@ function busctl(args, timeout = BUSCTL_TIMEOUT_MS) {
 }
 
 /** Read one PowerProfiles property as parsed JSON ({ type, data }). */
-async function ppdGetProperty(property) {
+async function ppdGetProperty(property: string): Promise<{ type: string; data: unknown }> {
   const out = await busctl([
     '--json=short', 'get-property', PPD_BUS, PPD_PATH, PPD_IFACE, property,
   ]);
   return JSON.parse(out);
 }
 
+/** The power-profiles state reported to the Settings panel. */
+interface PowerProfilesState {
+  available: boolean;
+  active: string | null;
+  profiles: string[];
+}
+
 /** Current profile state, or available:false when the daemon/busctl is absent. */
-async function readPowerProfiles() {
+async function readPowerProfiles(): Promise<PowerProfilesState> {
   try {
     const [active, profiles] = await Promise.all([
       ppdGetProperty('ActiveProfile'),
@@ -912,10 +993,10 @@ async function readPowerProfiles() {
     ]);
     // Profiles is aa{sv}: [{ Profile: {type,data}, Driver: {...} }, ...],
     // ordered low -> high power by the daemon.
-    const names = Array.isArray(profiles.data)
+    const names: string[] = Array.isArray(profiles.data)
       ? profiles.data
           .map((entry) => entry?.Profile?.data)
-          .filter((name) => typeof name === 'string')
+          .filter((name): name is string => typeof name === 'string')
       : [];
     return {
       available: names.length > 0,
@@ -929,10 +1010,10 @@ async function readPowerProfiles() {
   }
 }
 
-function registerPowerHandlers() {
+function registerPowerHandlers(): void {
   ipcMain.handle('power:status', async (event) => {
     assertShellSender(event);
-    let names;
+    let names: string[];
     try {
       names = await fsp.readdir(POWER_SUPPLY_DIR);
     } catch {
@@ -990,7 +1071,7 @@ const WPCTL_TIMEOUT_MS = 5_000;
 const DEFAULT_SINK = '@DEFAULT_AUDIO_SINK@';
 
 /** Run wpctl with an argv array; resolves stdout, rejects with a clean message. */
-function wpctl(args, timeout = WPCTL_TIMEOUT_MS) {
+function wpctl(args: string[], timeout = WPCTL_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('wpctl', args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
@@ -1002,14 +1083,21 @@ function wpctl(args, timeout = WPCTL_TIMEOUT_MS) {
 }
 
 /** Clamp a caller-supplied percentage to an integer 0..100. */
-function clampVolume(pct) {
+function clampVolume(pct: unknown): number {
   const n = Number(pct);
   if (!Number.isFinite(n)) throw new Error('Invalid volume');
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
+/** The default sink's state as reported to the shell. */
+interface AudioState {
+  available: boolean;
+  volume: number | null;
+  muted: boolean;
+}
+
 /** Default sink volume/mute, or available:false when wpctl is absent. */
-async function audioStatus() {
+async function audioStatus(): Promise<AudioState> {
   try {
     // "Volume: 0.65" or "Volume: 0.65 [MUTED]"
     const out = await wpctl(['get-volume', DEFAULT_SINK]);
@@ -1017,37 +1105,37 @@ async function audioStatus() {
     const volume = match ? Math.round(Number.parseFloat(match[1]) * 100) : null;
     return { available: true, volume, muted: /\[MUTED\]/.test(out) };
   } catch (error) {
-    if (error.message === 'wpctl-missing') {
+    if (messageOf(error) === 'wpctl-missing') {
       return { available: false, volume: null, muted: false };
     }
     throw error;
   }
 }
 
-async function audioSetVolume(pct) {
+async function audioSetVolume(pct: unknown): Promise<AudioState> {
   const v = clampVolume(pct);
   // -l 1.0 caps at 100% so we never push into PipeWire's >1.0 boost range.
   await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${v}%`]);
   return audioStatus();
 }
 
-async function audioSetMuted(muted) {
+async function audioSetMuted(muted: boolean): Promise<AudioState> {
   await wpctl(['set-mute', DEFAULT_SINK, muted ? '1' : '0']);
   return audioStatus();
 }
 
-async function audioAdjust(deltaPct) {
+async function audioAdjust(deltaPct: number): Promise<AudioState> {
   const sign = deltaPct >= 0 ? '+' : '-';
   await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${Math.abs(deltaPct)}%${sign}`]);
   return audioStatus();
 }
 
-async function audioToggleMute() {
+async function audioToggleMute(): Promise<AudioState> {
   await wpctl(['set-mute', DEFAULT_SINK, 'toggle']);
   return audioStatus();
 }
 
-function registerAudioHandlers() {
+function registerAudioHandlers(): void {
   ipcMain.handle('audio:status', async (event) => {
     assertShellSender(event);
     return audioStatus();
@@ -1068,8 +1156,8 @@ function registerAudioHandlers() {
  * the shell so it can show the volume OSD. Harmless when wpctl is absent (the
  * adjust rejects and no OSD is shown).
  */
-function registerMediaKeys() {
-  const push = (statusPromise) =>
+function registerMediaKeys(): void {
+  const push = (statusPromise: Promise<AudioState>) =>
     statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
   globalShortcut.register('VolumeUp', () => push(audioAdjust(5)));
   globalShortcut.register('VolumeDown', () => push(audioAdjust(-5)));
@@ -1101,7 +1189,7 @@ const MIN_TEMPERATURE = 2500;
 const MAX_TEMPERATURE = 6500;
 
 /** Run brightnessctl with an argv array; resolves stdout, rejects with a clean message. */
-function brightnessctl(args, timeout = BRIGHTNESSCTL_TIMEOUT_MS) {
+function brightnessctl(args: string[], timeout = BRIGHTNESSCTL_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('brightnessctl', args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
@@ -1113,21 +1201,21 @@ function brightnessctl(args, timeout = BRIGHTNESSCTL_TIMEOUT_MS) {
 }
 
 /** Clamp a caller-supplied percentage to an integer 1..100 (never fully dark). */
-function clampBrightness(pct) {
+function clampBrightness(pct: unknown): number {
   const n = Number(pct);
   if (!Number.isFinite(n)) throw new Error('Invalid brightness');
   return Math.max(1, Math.min(100, Math.round(n)));
 }
 
 /** Clamp a caller-supplied color temperature to an integer in the useful range. */
-function clampTemperature(kelvin) {
+function clampTemperature(kelvin: unknown): number {
   const n = Number(kelvin);
   if (!Number.isFinite(n)) throw new Error('Invalid temperature');
   return Math.max(MIN_TEMPERATURE, Math.min(MAX_TEMPERATURE, Math.round(n)));
 }
 
 /** Backlight level 0-100 via brightnessctl, null if no backlight device. */
-async function brightnessctlGet() {
+async function brightnessctlGet(): Promise<number | null> {
   // Machine-readable: "device,class,current,40%,max".
   const out = await brightnessctl(['-m', '-c', BACKLIGHT_CLASS, 'info']);
   const line = out
@@ -1142,10 +1230,11 @@ async function brightnessctlGet() {
 // --- Sysfs + logind fallback backend (no brightnessctl on the host). ---
 
 const BACKLIGHT_SYS_DIR = '/sys/class/backlight';
-let backlightBackendPromise = null; // cached probe: 'brightnessctl' | 'sysfs' | null
+type BacklightBackend = 'brightnessctl' | 'sysfs' | null;
+let backlightBackendPromise: Promise<BacklightBackend> | null = null; // cached probe
 
 /** First device under /sys/class/backlight, or null (desktops, VMs). */
-function sysfsBacklightDevice() {
+function sysfsBacklightDevice(): string | null {
   try {
     return fs.readdirSync(BACKLIGHT_SYS_DIR).sort()[0] ?? null;
   } catch {
@@ -1154,7 +1243,7 @@ function sysfsBacklightDevice() {
 }
 
 /** Read a small sysfs integer file; null if missing or non-numeric. */
-function readSysInt(file) {
+function readSysInt(file: string): number | null {
   try {
     const n = Number(fs.readFileSync(file, 'utf8').trim());
     return Number.isFinite(n) ? n : null;
@@ -1164,7 +1253,7 @@ function readSysInt(file) {
 }
 
 /** Backlight level 0-100 straight from sysfs, null if unreadable. */
-function sysfsBacklightGet() {
+function sysfsBacklightGet(): number | null {
   const device = sysfsBacklightDevice();
   if (!device) return null;
   const current = readSysInt(path.join(BACKLIGHT_SYS_DIR, device, 'brightness'));
@@ -1174,8 +1263,8 @@ function sysfsBacklightGet() {
 }
 
 /** Set the backlight to a raw sysfs value via logind's SetBrightness. */
-function logindSetBrightness(device, value) {
-  return new Promise((resolve, reject) => {
+function logindSetBrightness(device: string, value: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     execFile(
       'busctl',
       [
@@ -1200,7 +1289,7 @@ function logindSetBrightness(device, value) {
 }
 
 /** Resolve (and cache) which backlight backend works on this machine. */
-function ensureBacklightBackend() {
+function ensureBacklightBackend(): Promise<BacklightBackend> {
   if (!backlightBackendPromise) {
     backlightBackendPromise = (async () => {
       try {
@@ -1215,7 +1304,7 @@ function ensureBacklightBackend() {
 }
 
 /** Backlight level 0-100 via whichever backend is available, or null. */
-async function backlightGet() {
+async function backlightGet(): Promise<number | null> {
   const backend = await ensureBacklightBackend();
   if (backend === 'brightnessctl') return brightnessctlGet();
   if (backend === 'sysfs') return sysfsBacklightGet();
@@ -1223,7 +1312,7 @@ async function backlightGet() {
 }
 
 /** Set the backlight to a clamped 1-100 percentage via the active backend. */
-async function backlightSet(pct) {
+async function backlightSet(pct: number): Promise<void> {
   const backend = await ensureBacklightBackend();
   if (backend === 'brightnessctl') {
     await brightnessctl(['-c', BACKLIGHT_CLASS, 'set', `${pct}%`]);
@@ -1245,14 +1334,14 @@ async function backlightSet(pct) {
 }
 
 // --- Night light (red shift) state, held in the main process. ---
-let nightLightTool = null; // resolved tool name, or null when none is present
+let nightLightTool: string | null = null; // resolved tool name, or null when none is present
 let nightLightProbed = false; // whether we've looked for a tool yet
-let nightLightProc = null; // the running gamma child, or null when off
+let nightLightProc: ChildProcess | null = null; // the running gamma child, or null when off
 let nightLightEnabled = false;
 let nightLightTemp = 4500;
 
 /** Resolve whether a gamma tool exists (ENOENT = missing); cached after first probe. */
-function probeTool(tool) {
+function probeTool(tool: string): Promise<boolean> {
   return new Promise((resolve) => {
     execFile(tool, ['-V'], { timeout: 3_000 }, (error) => {
       // Any error other than ENOENT (e.g. an unknown flag) still means the
@@ -1263,7 +1352,7 @@ function probeTool(tool) {
 }
 
 /** Find and cache the first available gamma tool (gammastep, then wlsunset). */
-async function ensureNightLightTool() {
+async function ensureNightLightTool(): Promise<string | null> {
   if (nightLightProbed) return nightLightTool;
   nightLightProbed = true;
   for (const tool of NIGHT_LIGHT_TOOLS) {
@@ -1276,7 +1365,7 @@ async function ensureNightLightTool() {
 }
 
 /** Argv that holds a fixed color temperature continuously (so the ramp persists). */
-function nightLightArgs(tool, temp) {
+function nightLightArgs(tool: string, temp: number): string[] {
   if (tool === 'wlsunset') {
     // wlsunset needs night < day and a schedule; pin the schedule so it stays
     // at the night temperature essentially all day.
@@ -1287,7 +1376,7 @@ function nightLightArgs(tool, temp) {
 }
 
 /** Stop the running gamma child, if any. */
-function stopNightLight() {
+function stopNightLight(): void {
   if (nightLightProc) {
     try {
       nightLightProc.kill('SIGTERM');
@@ -1300,7 +1389,7 @@ function stopNightLight() {
 }
 
 /** (Re)start the gamma child at the current temperature. Throws if no tool exists. */
-async function startNightLight() {
+async function startNightLight(): Promise<void> {
   const tool = await ensureNightLightTool();
   if (!tool) throw new Error('night-light-missing');
   stopNightLight();
@@ -1316,7 +1405,14 @@ async function startNightLight() {
   nightLightEnabled = true;
 }
 
-function nightLightStatus() {
+/** The night-light half of the brightness state. */
+interface NightLightState {
+  available: boolean;
+  enabled: boolean;
+  temperature: number;
+}
+
+function nightLightStatus(): NightLightState {
   return {
     available: nightLightTool !== null,
     enabled: nightLightEnabled,
@@ -1324,41 +1420,47 @@ function nightLightStatus() {
   };
 }
 
+/** The full brightness state as reported to the shell. */
+interface BrightnessState {
+  available: boolean;
+  brightness: number | null;
+  nightLight: NightLightState;
+}
+
 /** Backlight level + night-light state; per-half available:false when a tool is absent. */
-async function brightnessStatus() {
+async function brightnessStatus(): Promise<BrightnessState> {
   await ensureNightLightTool();
   let available = false;
-  let brightness = null;
+  let brightness: number | null = null;
   try {
     brightness = await backlightGet();
     available = brightness !== null;
   } catch {
-    // brightnessctl missing or no backlight device: degrade to unavailable.
-    available = false;
-    brightness = null;
+    // brightnessctl missing or no backlight device: keep the unavailable
+    // defaults above.
   }
   return { available, brightness, nightLight: nightLightStatus() };
 }
 
-async function brightnessSet(pct) {
+async function brightnessSet(pct: unknown): Promise<BrightnessState> {
   await backlightSet(clampBrightness(pct));
   return brightnessStatus();
 }
 
 /** Relative backlight nudge for the media keys; read-modify-set so it never hits 0. */
-async function brightnessAdjust(deltaPct) {
+async function brightnessAdjust(deltaPct: number): Promise<BrightnessState> {
   const current = await backlightGet();
   if (current === null) throw new Error('no-backlight');
   return brightnessSet(current + deltaPct);
 }
 
-async function brightnessSetNightLight(enabled) {
+async function brightnessSetNightLight(enabled: boolean): Promise<BrightnessState> {
   if (enabled) await startNightLight();
   else stopNightLight();
   return brightnessStatus();
 }
 
-async function brightnessSetTemperature(kelvin) {
+async function brightnessSetTemperature(kelvin: unknown): Promise<BrightnessState> {
   nightLightTemp = clampTemperature(kelvin);
   if (nightLightEnabled) await startNightLight(); // respawn with the new temp
   return brightnessStatus();
@@ -1373,10 +1475,10 @@ async function brightnessSetTemperature(kelvin) {
  * every webContents, since focus may live inside a <webview> guest - adjust
  * the backlight, and push the new state to the shell for the OSD.
  */
-function attachBrightnessMediaKeys(contents) {
+function attachBrightnessMediaKeys(contents: Electron.WebContents): void {
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
-    let delta = null;
+    let delta: number | null = null;
     if (input.key === 'BrightnessUp' || input.code === 'BrightnessUp') delta = 5;
     if (input.key === 'BrightnessDown' || input.code === 'BrightnessDown') delta = -5;
     if (delta === null) return;
@@ -1387,7 +1489,7 @@ function attachBrightnessMediaKeys(contents) {
   });
 }
 
-function registerBrightnessHandlers() {
+function registerBrightnessHandlers(): void {
   ipcMain.handle('brightness:status', async (event) => {
     assertShellSender(event);
     return brightnessStatus();
@@ -1416,7 +1518,7 @@ function registerBrightnessHandlers() {
 // shows a fallback. Same trust boundary as the other bridges: sender guard.
 // ---------------------------------------------------------------------------
 
-function registerScreenshotHandlers() {
+function registerScreenshotHandlers(): void {
   ipcMain.handle('screenshot:capture', async (event) => {
     assertShellSender(event);
     if (!shellWindow || shellWindow.webContents.isDestroyed()) {
@@ -1433,7 +1535,16 @@ function registerScreenshotHandlers() {
   });
 }
 
-function registerWifiHandlers() {
+/** One WiFi network as listed by wifi:networks. */
+interface WifiNetwork {
+  ssid: string;
+  inUse: boolean;
+  signal: number;
+  security: string;
+  freqMhz: number;
+}
+
+function registerWifiHandlers(): void {
   ipcMain.handle('wifi:status', async (event) => {
     assertShellSender(event);
     try {
@@ -1444,7 +1555,7 @@ function registerWifiHandlers() {
       ]);
       return { available: true, radioEnabled: radio.trim() === 'enabled', device, ethernet };
     } catch (error) {
-      if (error.message === 'nmcli-missing') {
+      if (messageOf(error) === 'nmcli-missing') {
         return { available: false, radioEnabled: false, device: null, ethernet: null };
       }
       throw error;
@@ -1465,10 +1576,10 @@ function registerWifiHandlers() {
     );
 
     // One entry per SSID (strongest signal wins; hidden networks skipped).
-    const bySsid = new Map();
+    const bySsid = new Map<string, WifiNetwork>();
     for (const [inUse, ssid, signal, security, freq] of rows) {
       if (!ssid) continue;
-      const network = {
+      const network: WifiNetwork = {
         ssid,
         inUse: inUse === '*',
         signal: Number.parseInt(signal, 10) || 0,
@@ -1576,26 +1687,26 @@ const WEBBROWSER_PARTITION = 'persist:webbrowser';
 const WEBAPP_PARTITION = 'persist:din-apps';
 
 /** Absolute path to the preload injected into installed web-app <webview>s. */
-const WEBAPP_PRELOAD = path.join(__dirname, 'webview-preload.cjs');
+const WEBAPP_PRELOAD = path.join(import.meta.dirname, 'webview-preload.cjs');
 
 /** The BrowserWindow hosting the shell (set at startup). */
-let shellWindow = null;
+let shellWindow: BrowserWindow | null = null;
 
 /** The extension system for the browser session (set at startup). */
-let chromeExtensions = null;
+let chromeExtensions: ElectronChromeExtensions | null = null;
 
 /** Where Chrome Web Store installs / unpacked extensions live on disk. */
-function extensionsPath() {
+function extensionsPath(): string {
   return path.join(app.getPath('userData'), 'Extensions');
 }
 
 /** The session all browser <webview> tabs run in. */
-function browserSession() {
+function browserSession(): Electron.Session {
   return session.fromPartition(WEBBROWSER_PARTITION);
 }
 
 /** Send an event to the shell renderer, if it's still alive. */
-function sendToShell(channel, payload) {
+function sendToShell(channel: string, payload?: unknown): void {
   if (shellWindow && !shellWindow.webContents.isDestroyed()) {
     shellWindow.webContents.send(channel, payload);
   }
@@ -1606,7 +1717,7 @@ function sendToShell(channel, payload) {
  * Only <webview> guests inside the browser partition qualify; anything else
  * (the shell itself, popups, stale ids) is rejected.
  */
-function browserTabFromId(wcId) {
+function browserTabFromId(wcId: unknown): Electron.WebContents | null {
   if (typeof wcId !== 'number') return null;
   const contents = webContents.fromId(wcId);
   if (!contents || contents.isDestroyed()) return null;
@@ -1616,7 +1727,7 @@ function browserTabFromId(wcId) {
 }
 
 /** The session all installed web-app <webview>s run in. */
-function appSession() {
+function appSession(): Electron.Session {
   return session.fromPartition(WEBAPP_PARTITION);
 }
 
@@ -1626,7 +1737,7 @@ function appSession() {
  * stay storage-isolated by the same-origin policy, so a shared partition is
  * safe; what matters is that browser tabs and the shell are excluded.
  */
-function isAppGuest(contents) {
+function isAppGuest(contents: Electron.WebContents | null | undefined): boolean {
   return (
     !!contents &&
     !contents.isDestroyed() &&
@@ -1640,10 +1751,14 @@ function isAppGuest(contents) {
 // extension / bunker the user logged in with), not here, so each NIP-07 call
 // is relayed to the shell and its answer routed back to the requesting guest.
 let nextNostrRequestId = 1;
-const pendingNostrRequests = new Map();
+const pendingNostrRequests = new Map<number, {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}>();
 const NOSTR_REQUEST_TIMEOUT_MS = 60_000;
 
-function registerNostrBridge() {
+function registerNostrBridge(): void {
   // A guest's window.nostr.* call: verify it's a trusted app guest, then relay
   // to the shell renderer and resolve with whatever it signs/returns.
   ipcMain.handle('nostr-bridge:call', (event, payload) => {
@@ -1693,11 +1808,15 @@ function registerNostrBridge() {
 // UI). Each request gets an id; the renderer answers with the new <webview>
 // guest's WebContents id once it attaches.
 let nextTabRequestId = 1;
-const pendingTabRequests = new Map();
+const pendingTabRequests = new Map<number, {
+  resolve: (tab: Electron.WebContents) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}>();
 const TAB_REQUEST_TIMEOUT_MS = 15_000;
 
 /** Ask the shell to open a browser tab; resolves to the tab's WebContents. */
-function requestShellTab(details) {
+function requestShellTab(details: { url?: string; active?: boolean }): Promise<Electron.WebContents> {
   return new Promise((resolve, reject) => {
     if (!shellWindow || shellWindow.webContents.isDestroyed()) {
       reject(new Error('Shell window unavailable'));
@@ -1724,7 +1843,7 @@ function requestShellTab(details) {
  * the library's self-contained script (its only external require is
  * 'electron', which sandboxed preloads may load) with a call to its export.
  */
-function ensureBrowserActionPreload() {
+function ensureBrowserActionPreload(): string {
   const source = fs.readFileSync(
     require.resolve('electron-chrome-extensions/browser-action'),
     'utf8',
@@ -1734,7 +1853,7 @@ function ensureBrowserActionPreload() {
   return file;
 }
 
-function setupChromeExtensions() {
+function setupChromeExtensions(): void {
   chromeExtensions = new ElectronChromeExtensions({
     // din is AGPL-3.0-or-later, compatible with the library's GPL-3.0.
     license: 'GPL-3.0',
@@ -1742,7 +1861,7 @@ function setupChromeExtensions() {
 
     createTab: async (details) => {
       const contents = await requestShellTab(details);
-      return [contents, shellWindow];
+      return [contents, shellWindow!];
     },
     selectTab: (tab) => {
       sendToShell('crx:selectTab', { wcId: tab.id });
@@ -1755,7 +1874,7 @@ function setupChromeExtensions() {
       // (e.g. a popup the extension opens) become tabs instead.
       const url = Array.isArray(details.url) ? details.url[0] : details.url;
       await requestShellTab({ url, active: true });
-      return shellWindow;
+      return shellWindow!;
     },
   });
 
@@ -1785,7 +1904,7 @@ function setupChromeExtensions() {
   });
 }
 
-function registerCrxHandlers() {
+function registerCrxHandlers(): void {
   // The shell reports which browser tab is active (drives per-tab extension
   // action state and which tab chrome.tabs APIs consider "active").
   ipcMain.on('crx:tabActivated', (event, wcId) => {
@@ -1839,7 +1958,7 @@ function registerCrxHandlers() {
 // Instead, devtools dock inside the browser tab: the shell renders a second
 // <webview> (the "host") below the page, and the host loads the bundled
 // DevTools frontend connected to the inspected tab over a loopback CDP
-// WebSocket bridge (see devtools-bridge.cjs for why the straightforward
+// WebSocket bridge (see devtools-bridge.mts for why the straightforward
 // setDevToolsWebContents wiring can't be used, and for the bridge's
 // security properties).
 //
@@ -1853,7 +1972,7 @@ function registerCrxHandlers() {
 const DEVTOOLS_PARTITION = 'persist:devtools';
 
 /** The session all devtools host <webview>s run in. */
-function devtoolsSession() {
+function devtoolsSession(): Electron.Session {
   return session.fromPartition(DEVTOOLS_PARTITION);
 }
 
@@ -1864,7 +1983,7 @@ const devtoolsBridge = new DevtoolsBridge({
 });
 
 /** Resolve a renderer-supplied id to a devtools host guest, or null. */
-function devtoolsHostFromId(wcId) {
+function devtoolsHostFromId(wcId: unknown): Electron.WebContents | null {
   if (typeof wcId !== 'number') return null;
   const contents = webContents.fromId(wcId);
   if (!contents || contents.isDestroyed()) return null;
@@ -1874,11 +1993,16 @@ function devtoolsHostFromId(wcId) {
 }
 
 /** Whether a before-input-event input is the devtools toggle shortcut. */
-function isDevtoolsToggleInput(input) {
+function isDevtoolsToggleInput(input: Electron.Input): boolean {
   if (input.type !== 'keyDown') return false;
   if (input.key === 'F12') return true;
   return Boolean(input.control && input.shift && input.key.toLowerCase() === 'i');
 }
+
+/** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
+type ShellShortcut =
+  | { action: 'cycle-windows'; backward: boolean }
+  | { action: 'new-tab' | 'close-tab' | 'focus-address' };
 
 /**
  * Map a guest before-input-event to a shell shortcut payload, or null.
@@ -1886,7 +2010,7 @@ function isDevtoolsToggleInput(input) {
  * (window switching, browser tab management) must be intercepted here and
  * forwarded to the shell renderer (see src/lib/shellShortcuts.ts).
  */
-function shellShortcutForInput(input) {
+function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   if (input.type !== 'keyDown') return null;
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
@@ -1900,7 +2024,7 @@ function shellShortcutForInput(input) {
   return null;
 }
 
-function registerDevtoolsHandlers() {
+function registerDevtoolsHandlers(): void {
   // Open a tab's devtools inside a devtools host <webview>.
   ipcMain.handle('devtools:open', async (event, targetWcId, hostWcId) => {
     assertShellSender(event);
@@ -1983,7 +2107,7 @@ app.whenReady().then(() => {
   // Save downloads straight to ~/Downloads instead of popping a native
   // GTK save dialog (there is no desktop environment to host one). Applies
   // to both the shell session and the browser tabs' session.
-  const downloadToHome = (_event, item) => {
+  const downloadToHome = (_event: Electron.Event, item: Electron.DownloadItem) => {
     const dir = app.getPath('downloads');
     fs.mkdirSync(dir, { recursive: true });
     item.setSavePath(path.join(dir, item.getFilename()));
@@ -2037,7 +2161,7 @@ app.whenReady().then(() => {
       sandbox: true,
       nodeIntegration: false,
       // Expose the fs bridge (window.fs) to the shell.
-      preload: path.join(__dirname, 'preload.cjs'),
+      preload: path.join(import.meta.dirname, 'preload.cjs'),
       // Enable <webview> so the in-shell web browser app can load arbitrary
       // sites (a real embedder, unlike an <iframe> which remote sites block
       // via X-Frame-Options / frame-ancestors). The renderer feature-detects
@@ -2120,7 +2244,7 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   // Userscripts (the browser's native script manager,
-  // electron/userscripts.cjs): inject matching scripts as pages load, and
+  // electron/userscripts.mts): inject matching scripts as pages load, and
   // turn navigations to *.user.js files into install prompts in the shell
   // instead of pages of raw source.
   if (isBrowserTab) {

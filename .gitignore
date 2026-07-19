@@ -17,6 +17,7 @@ yarn.lock
 # Tooling caches
 .eslintcache
 .tsbuildinfo
+.tsbuildinfo-electron
 .vite
 .ai/
 

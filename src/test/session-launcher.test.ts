@@ -8,7 +8,7 @@ import { join } from 'node:path';
  *
  * That path runs the *production* Electron shell with no DIN_DEV_URL and is
  * exercised by neither `npm test`'s build nor the Nix/Aladdin image, so it can
- * silently drift when `electron/main.cjs`, the app layout, or the two session
+ * silently drift when `electron/main.mts`, the app layout, or the two session
  * files change. These assertions pin the couplings the launcher relies on.
  */
 
@@ -18,13 +18,13 @@ import { join } from 'node:path';
 const root = process.cwd();
 const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
 
-const main = read('electron/main.cjs');
+const main = read('electron/main.mts');
 const script = read('os/x11/din-session.sh');
 const desktop = read('os/x11/din.desktop');
 
 describe('standalone Din session launcher', () => {
-  it('keeps main.cjs opening a fullscreen kiosk when DIN_DEV_URL is unset', () => {
-    // The launcher deliberately sets no DIN_DEV_URL; main.cjs must still key
+  it('keeps main.mts opening a fullscreen kiosk when DIN_DEV_URL is unset', () => {
+    // The launcher deliberately sets no DIN_DEV_URL; main.mts must still key
     // the fullscreen kiosk off its absence, or the session opens windowed.
     expect(main).toMatch(/DEV_URL\s*=\s*process\.env\.DIN_DEV_URL/);
     expect(main).toMatch(/production\s*=\s*!DEV_URL/);
@@ -34,11 +34,11 @@ describe('standalone Din session launcher', () => {
 
   it('execs paths that actually exist in the tree', () => {
     // The files the launcher runs must live where it looks for them.
-    expect(() => statSync(join(root, 'electron/main.cjs'))).not.toThrow();
+    expect(() => statSync(join(root, 'electron/main.mts'))).not.toThrow();
     expect(script).toContain('node_modules/.bin/electron');
-    expect(script).toContain('electron/main.cjs');
+    expect(script).toContain('electron/main.mts');
     expect(script).toContain('dist/index.html');
-    // It must never *set* DIN_DEV_URL (that flips main.cjs to dev/windowed).
+    // It must never *set* DIN_DEV_URL (that flips main.mts to dev/windowed).
     expect(script).not.toMatch(/^\s*(export\s+)?DIN_DEV_URL=/m);
   });
 

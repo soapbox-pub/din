@@ -45,9 +45,9 @@ ROOT_DIR="${DIN_ROOT:-$(cd "$(dirname "${SELF}")/../.." && pwd)}"
 export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 ELECTRON="${ROOT_DIR}/node_modules/.bin/electron"
-MAIN="${ROOT_DIR}/electron/main.cjs"
+MAIN="${ROOT_DIR}/electron/main.mts"
 
-# main.cjs serves the built app over app://; point it at this checkout's build
+# main.mts serves the built app over app://; point it at this checkout's build
 # explicitly. (It also falls back to __dirname/../dist, but being explicit
 # means the standalone session never depends on that guess.)
 export DIN_DIST_DIR="${ROOT_DIR}/dist"
@@ -97,8 +97,8 @@ enable_natural_scroll() {
 }
 enable_natural_scroll || true
 
-# No DIN_DEV_URL -> main.cjs opens the fullscreen kiosk window (see
-# electron/main.cjs: `fullscreen/kiosk: !DEV_URL`).
+# No DIN_DEV_URL -> main.mts opens the fullscreen kiosk window (see
+# electron/main.mts: `fullscreen/kiosk: !DEV_URL`).
 #
 # Respawn on a crash so a wedged renderer drops back to a fresh Din rather
 # than a black screen - but bail out to the login manager if it crash-loops

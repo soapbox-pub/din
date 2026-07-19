@@ -54,13 +54,19 @@ let
       runHook preInstall
       mkdir -p $out/share/din
       cp -r dist $out/share/din/dist
-      install -m444 electron/main.cjs $out/share/din/main.cjs
+      # The whole Electron host: main.mts and the .mts modules it imports
+      # (run via Node's native type stripping - no build step), the .cjs
+      # preloads, and the pty helper.
+      install -m444 electron/main.mts $out/share/din/main.mts
+      install -m444 electron/devtools-bridge.mts $out/share/din/devtools-bridge.mts
+      install -m444 electron/userscripts.mts $out/share/din/userscripts.mts
       install -m444 electron/preload.cjs $out/share/din/preload.cjs
+      install -m444 electron/webview-preload.cjs $out/share/din/webview-preload.cjs
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
 
-      # Runtime node modules for main.cjs's Chrome extension support
+      # Runtime node modules for main.mts's Chrome extension support
       # (electron-chrome-extensions + electron-chrome-web-store and their
-      # transitive runtime deps). Resolved relative to main.cjs, so they
+      # transitive runtime deps). Resolved relative to main.mts, so they
       # live in a node_modules directory beside it.
       mkdir -p $out/share/din/node_modules
       for dep in electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip; do
@@ -79,7 +85,7 @@ let
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:$PATH
     exec ${pkgs.electron}/bin/electron \
-      ${din-app}/share/din/main.cjs \
+      ${din-app}/share/din/main.mts \
       --ozone-platform=wayland ${extraFlags}
   '';
   din-launcher = makeDinLauncher "";
