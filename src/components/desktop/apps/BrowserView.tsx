@@ -6,6 +6,19 @@ import {
 } from 'react';
 import { isWebviewAvailable } from '@/lib/isElectron';
 
+/**
+ * The Electron session partition for the ad-hoc Web Browser app's tabs. The
+ * Chrome extension system is attached to it (see electron/main.cjs).
+ */
+export const WEBBROWSER_PARTITION = 'persist:webbrowser';
+
+/**
+ * The session partition for installed web apps (WebAppFrame). Guests here get
+ * the NIP-07 identity bridge so they inherit Din's login; browser tabs do not.
+ * Must match WEBAPP_PARTITION in electron/main.cjs.
+ */
+export const APP_WEBVIEW_PARTITION = 'persist:din-apps';
+
 /** Imperative controls a BrowserView surface exposes to its parent. */
 export interface BrowserViewHandle {
   reload: () => void;
@@ -20,6 +33,12 @@ export interface BrowserViewHandle {
 export interface BrowserViewProps {
   /** The URL to display when the surface mounts. */
   src: string;
+  /**
+   * Electron session partition for the guest (webview surface only). Defaults
+   * to the Web Browser's shared partition; installed apps pass
+   * APP_WEBVIEW_PARTITION so they receive the Nostr identity bridge.
+   */
+  partition?: string;
   /** Called when the surface starts loading a page. */
   onLoadStart?: () => void;
   /** Called when the surface finishes loading (success or failure). */
@@ -124,9 +143,21 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
 const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function WebviewSurface(
-    { src, onLoadStart, onLoadEnd, onTitleChange, onFaviconChange, onThemeColorChange, onNavigate, onWebContentsId },
+    {
+      src,
+      partition = WEBBROWSER_PARTITION,
+      onLoadStart,
+      onLoadEnd,
+      onTitleChange,
+      onFaviconChange,
+      onThemeColorChange,
+      onNavigate,
+      onWebContentsId,
+    },
     ref,
   ) {
+    // The partition is fixed for the element's lifetime (like the initial src).
+    const partitionRef = useRef(partition);
     const webviewRef = useRef<ElectronWebviewElement>(null);
     // The initial src is fixed for the element's lifetime; navigations go
     // through loadURL so the guest keeps its own history.
@@ -231,9 +262,10 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         ref={webviewRef}
         src={initialSrc.current}
         // A partition isolates cookies/storage from the shell's own origin.
-        // It is also the session the Chrome extension system is attached to
-        // (see electron/main.cjs) - extensions apply to browser tabs only.
-        partition="persist:webbrowser"
+        // The Web Browser's partition is where the Chrome extension system is
+        // attached (see electron/main.cjs); installed apps use their own
+        // partition, which is where the Nostr identity bridge is attached.
+        partition={partitionRef.current}
         className="h-full w-full bg-white"
         style={{ display: 'flex' }}
       />

@@ -934,6 +934,16 @@ function registerWifiHandlers() {
 
 const WEBBROWSER_PARTITION = 'persist:webbrowser';
 
+// Installed web apps (WebAppFrame) render in their own session, separate from
+// both the shell and the ad-hoc Web Browser's tabs. This partition is the
+// trust boundary for the Nostr identity bridge: only guests in this session
+// get the NIP-07 preload (see registerNostrBridge / will-attach-webview). Must
+// match APP_WEBVIEW_PARTITION in src/components/desktop/apps/BrowserView.tsx.
+const WEBAPP_PARTITION = 'persist:din-apps';
+
+/** Absolute path to the preload injected into installed web-app <webview>s. */
+const WEBAPP_PRELOAD = path.join(__dirname, 'webview-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow = null;
 
@@ -969,6 +979,80 @@ function browserTabFromId(wcId) {
   if (contents.getType() !== 'webview') return null;
   if (contents.session !== browserSession()) return null;
   return contents;
+}
+
+/** The session all installed web-app <webview>s run in. */
+function appSession() {
+  return session.fromPartition(WEBAPP_PARTITION);
+}
+
+/**
+ * Whether a WebContents is an installed web-app guest (the only guests the
+ * Nostr identity bridge answers). Different origins inside this one session
+ * stay storage-isolated by the same-origin policy, so a shared partition is
+ * safe; what matters is that browser tabs and the shell are excluded.
+ */
+function isAppGuest(contents) {
+  return (
+    !!contents &&
+    !contents.isDestroyed() &&
+    contents.getType() === 'webview' &&
+    contents.session === appSession()
+  );
+}
+
+// Nostr identity bridge (window.nostr in installed web apps - see
+// webview-preload.cjs). The signer lives in the shell renderer (the nsec /
+// extension / bunker the user logged in with), not here, so each NIP-07 call
+// is relayed to the shell and its answer routed back to the requesting guest.
+let nextNostrRequestId = 1;
+const pendingNostrRequests = new Map();
+const NOSTR_REQUEST_TIMEOUT_MS = 60_000;
+
+function registerNostrBridge() {
+  // A guest's window.nostr.* call: verify it's a trusted app guest, then relay
+  // to the shell renderer and resolve with whatever it signs/returns.
+  ipcMain.handle('nostr-bridge:call', (event, payload) => {
+    if (!isAppGuest(event.sender)) {
+      throw new Error('Nostr bridge is not available here');
+    }
+    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
+      throw new Error('Din shell is unavailable');
+    }
+    const method = payload && typeof payload.method === 'string' ? payload.method : '';
+    let origin = '';
+    try {
+      origin = new URL(event.sender.getURL()).origin;
+    } catch {
+      // Guests always load an https URL; ignore the rare parse failure.
+    }
+    return new Promise((resolve, reject) => {
+      const requestId = nextNostrRequestId++;
+      const timer = setTimeout(() => {
+        pendingNostrRequests.delete(requestId);
+        reject(new Error('Signing request timed out'));
+      }, NOSTR_REQUEST_TIMEOUT_MS);
+      pendingNostrRequests.set(requestId, { resolve, reject, timer });
+      sendToShell('nostr-bridge:request', {
+        requestId,
+        method,
+        params: payload ? payload.params : undefined,
+        origin,
+      });
+    });
+  });
+
+  // The shell renderer's answer to a relayed request. Only the shell may
+  // resolve these - a guest cannot forge another guest's response.
+  ipcMain.on('nostr-bridge:response', (event, response) => {
+    if (!shellWindow || event.sender !== shellWindow.webContents) return;
+    const pending = response && pendingNostrRequests.get(response.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingNostrRequests.delete(response.requestId);
+    if (response.ok) pending.resolve(response.result);
+    else pending.reject(new Error(response.error || 'Signing failed'));
+  });
 }
 
 // chrome.tabs.create round-trips through the shell renderer (it owns the tab
@@ -1288,6 +1372,7 @@ app.whenReady().then(() => {
   registerScreenshotHandlers();
   registerCrxHandlers();
   registerDevtoolsHandlers();
+  registerNostrBridge();
 
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
@@ -1327,6 +1412,19 @@ app.whenReady().then(() => {
 
   shellContentsId = win.webContents.id;
   shellWindow = win;
+
+  // Attach the NIP-07 preload to installed web-app guests only (keyed on their
+  // session partition), so they inherit the user's Nostr identity. Browser
+  // tabs and devtools hosts attach in other partitions and get nothing. Keep
+  // every guest locked down (sandboxed, no Node) regardless.
+  win.webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    if (params.partition === WEBAPP_PARTITION) {
+      webPreferences.preload = WEBAPP_PRELOAD;
+    }
+  });
 
   // With no window manager, the shell won't follow a resolution change on its
   // own. Refit it to the primary display whenever the display metrics change
@@ -1415,6 +1513,18 @@ app.on('web-contents-created', (_event, contents) => {
       if (!shortcut) return;
       event.preventDefault();
       sendToShell('shortcut', { ...shortcut, wcId: contents.id });
+    });
+  }
+
+  // Installed web-app guests aren't browser tabs, but focus still lands inside
+  // them, so the shell's window-cycling shortcut must be forwarded too.
+  if (isAppGuest(contents)) {
+    contents.on('before-input-event', (event, input) => {
+      const shortcut = shellShortcutForInput(input);
+      if (shortcut?.action === 'cycle-windows') {
+        event.preventDefault();
+        sendToShell('shortcut', shortcut);
+      }
     });
   }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
 import {
+  APP_WEBVIEW_PARTITION,
   BrowserView,
 } from '@/components/desktop/apps/BrowserView';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
@@ -46,6 +47,9 @@ export function WebAppFrame({ url, themeColor }: { url: string; themeColor?: str
     <div className="relative h-full w-full overflow-hidden bg-white">
       <BrowserView
         src={src}
+        // Installed apps run in their own session so they inherit the user's
+        // Nostr login (window.nostr) - the ad-hoc Web Browser does not.
+        partition={APP_WEBVIEW_PARTITION}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => setLoading(false)}
         onThemeColorChange={onThemeColorChange}

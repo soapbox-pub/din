@@ -10,6 +10,8 @@
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.devtools: docked devtools control for the Web Browser app
+//   - window.nostrHost: relays NIP-07 requests from installed web apps to the
+//     signed-in account's signer (see NostrBridgeHost / webview-preload.cjs)
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -279,4 +281,27 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
     ipcRenderer.on('shortcut', handler);
     return () => ipcRenderer.removeListener('shortcut', handler);
   },
+});
+
+// Nostr identity bridge host (window.nostrHost), backed by the
+// nostr-bridge:* handlers in main.cjs. Installed web apps get a NIP-07
+// window.nostr (see webview-preload.cjs) whose calls are relayed here, to the
+// shell renderer, where the signed-in account's signer runs. The renderer
+// subscribes via onRequest and answers each request with respond(). This is
+// the ONLY bridge that serves the user's signer, so it must never be attached
+// to a <webview> - only the shell (see the header note above).
+contextBridge.exposeInMainWorld('nostrHost', {
+  /**
+   * Subscribe to signing requests relayed from installed web-app guests.
+   * The callback receives { requestId, method, params, origin }. Returns an
+   * unsubscribe fn.
+   */
+  onRequest: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('nostr-bridge:request', listener);
+    return () => ipcRenderer.removeListener('nostr-bridge:request', listener);
+  },
+
+  /** Answer a relayed request: { requestId, ok, result?, error? }. */
+  respond: (response) => ipcRenderer.send('nostr-bridge:response', response),
 });
