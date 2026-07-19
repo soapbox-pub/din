@@ -5,6 +5,7 @@ import {
   useRef,
 } from 'react';
 import { isWebviewAvailable } from '@/lib/isElectron';
+import { useAppContext } from '@/hooks/useAppContext';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
 
 /**
@@ -171,6 +172,10 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // The initial src is fixed for the element's lifetime; navigations go
     // through loadURL so the guest keeps its own history.
     const initialSrc = useRef(src);
+    // The shell's interface zoom, applied to the guest so its content scales
+    // in lockstep with the rest of the desktop (see the zoom-sync effect).
+    const { config } = useAppContext();
+    const zoomFactor = config.zoomLevel / 100;
 
     useImperativeHandle(ref, () => ({
       reload: () => webviewRef.current?.reload(),
@@ -256,6 +261,30 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       };
     }, [onNavigate]);
 
+    // Keep the guest's page zoom in lockstep with the shell's interface zoom.
+    // The interface zoom is applied to the shell frame via
+    // webFrame.setZoomFactor (see AppProvider), which - per Electron - only
+    // scales the shell frame and does NOT propagate to <webview> guests.
+    // Beyond the visual mismatch, a shell frame zoomed to anything other than
+    // 1 offsets the guest's mouse hit-testing, so links stop being clickable;
+    // matching the guest's own zoom factor keeps its content scaled *and* its
+    // clicks aligned. Chromium resets a guest's zoom on navigation, so it is
+    // reapplied on every dom-ready as well as when the interface zoom changes.
+    useEffect(() => {
+      const el = webviewRef.current;
+      if (!el) return;
+      const apply = () => {
+        try {
+          el.setZoomFactor(zoomFactor);
+        } catch {
+          // Guest not attached yet; the dom-ready listener retries.
+        }
+      };
+      apply();
+      el.addEventListener('dom-ready', apply);
+      return () => el.removeEventListener('dom-ready', apply);
+    }, [zoomFactor]);
+
     // Report the guest's WebContents id once it attaches (used to register
     // the tab with the Chrome extension system).
     useEffect(() => {
@@ -304,6 +333,7 @@ interface ElectronWebviewElement extends HTMLElement {
   loadURL(url: string): Promise<void>;
   goBack(): void;
   goForward(): void;
+  setZoomFactor(factor: number): void;
   canGoBack(): boolean;
   canGoForward(): boolean;
   getWebContentsId(): number;
