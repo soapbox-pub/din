@@ -65,6 +65,19 @@ export function WebAppFrame({
     return () => setAccent(null);
   }, [pageColor, setAccent]);
 
+  // The window is reused for this single-instance app, so a link routed into
+  // an already-open app (see BrowserExtensionHost) changes the `url` param
+  // without remounting. The webview's src is fixed at mount, so drive the
+  // navigation imperatively. `src` already covers the initial deep link, so
+  // only react to *changes* after mount.
+  const lastNavigated = useRef(src);
+  useEffect(() => {
+    if (src && src !== lastNavigated.current) {
+      lastNavigated.current = src;
+      viewRef.current?.loadURL(src);
+    }
+  }, [src]);
+
   const onThemeColorChange = useCallback(
     (color: string | null) => setPageColor(color ?? themeColor ?? null),
     [themeColor],

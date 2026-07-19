@@ -65,6 +65,10 @@ function webAppToDefinition(webApp: WebApp): AppDefinition {
     icon: webApp.icon ?? Globe,
     component: webAppComponent(webApp),
     defaultSize: WEB_APP_DEFAULT_SIZE,
+    // One window per installed web app: clicking a link that belongs to the
+    // app navigates the existing window (via a changed `url` param) instead
+    // of spawning a duplicate. See WebAppFrame for the deep-link handling.
+    singleInstance: true,
   };
 }
 
