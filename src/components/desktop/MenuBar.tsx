@@ -243,7 +243,7 @@ const BatteryMenuItem = memo(function BatteryMenuItem() {
           <BatteryGlyph
             percent={summary.percent}
             charging={summary.charging}
-            className="size-3.5 w-7"
+            className="size-4 w-6.5"
           />
         </Button>
       </PopoverTrigger>

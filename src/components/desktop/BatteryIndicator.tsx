@@ -13,7 +13,7 @@ import { useBatteryStatus } from '@/hooks/usePower';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 
 /** Bolt overlaid on the battery while charging, macOS style. */
-const BOLT_PATH = 'M13.6 2.4 L9.2 8 h2.7 l-1.5 3.6 l4.4 -5.6 h-2.7 Z';
+const BOLT_PATH = 'M13.1 1.9 L8.7 8.2 h2.8 l-1.5 4.4 l4.6 -6.4 h-2.8 Z';
 
 /**
  * Battery glyph, macOS style: an outlined body with a solid fill that scales
@@ -31,14 +31,14 @@ export function BatteryGlyph({
 }) {
   const maskId = useId();
   const level = percent === null ? null : Math.min(100, Math.max(0, percent));
-  // Interior runs x=2.5..21.5; keep a sliver visible even at 1%.
-  const fillWidth = level === null || level === 0 ? 0 : Math.max(19 * (level / 100), 2);
+  // Interior runs x=2.5..20.5; keep a sliver visible even at 1%.
+  const fillWidth = level === null || level === 0 ? 0 : Math.max(18 * (level / 100), 2);
 
   return (
-    <svg viewBox="0 0 28 14" fill="none" className={className} aria-hidden>
+    <svg viewBox="0 0 26 16" fill="none" className={className} aria-hidden>
       {charging && (
         <mask id={maskId} maskUnits="userSpaceOnUse">
-          <rect width="28" height="14" fill="white" />
+          <rect width="26" height="16" fill="white" />
           <path
             d={BOLT_PATH}
             fill="black"
@@ -52,23 +52,23 @@ export function BatteryGlyph({
         <rect
           x="1"
           y="2.5"
-          width="22"
-          height="9"
-          rx="2.5"
+          width="21"
+          height="11"
+          rx="3"
           stroke="currentColor"
           className="opacity-40"
         />
         <rect
-          x="24"
-          y="5.25"
+          x="23"
+          y="6"
           width="2.25"
-          height="3.5"
+          height="4"
           rx="1.125"
           fill="currentColor"
           className="opacity-40"
         />
         {fillWidth > 0 && (
-          <rect x="2.5" y="4" width={fillWidth} height="6" rx="1.5" fill="currentColor" />
+          <rect x="2.5" y="4" width={fillWidth} height="8" rx="1.75" fill="currentColor" />
         )}
       </g>
       {charging && <path d={BOLT_PATH} fill="currentColor" />}
