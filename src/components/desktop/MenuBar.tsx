@@ -1,6 +1,5 @@
 import { EthernetPort, LayoutGrid, LogOut, Search, Trash2, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarShape } from '@/lib/avatarShape';
@@ -566,7 +565,13 @@ function AccountPanel({
         <div className="mt-3 flex gap-2">
           <PopoverClose asChild>
             <Button asChild variant="secondary" size="sm" className="flex-1">
-              <Link to={`/${npub}`}>View profile</Link>
+              <a
+                href={`https://ditto.pub/${npub}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View profile
+              </a>
             </Button>
           </PopoverClose>
           <PopoverClose asChild>
