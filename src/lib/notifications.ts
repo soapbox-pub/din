@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AtSign, Heart, MessageCircle, Repeat2, Zap, type LucideIcon } from 'lucide-react';
+import { nip19 } from 'nostr-tools';
 import type { NostrEvent } from '@nostrify/nostrify';
 
 /**
@@ -194,4 +195,33 @@ export function getNotificationActor(event: NostrEvent): string {
     }
   }
   return event.pubkey;
+}
+
+/**
+ * The external Nostr URL a notification should open when clicked. Mentions and
+ * comments point at the interaction event itself; reactions, reposts, and zaps
+ * point at the post that was acted on (when known), falling back to the actor's
+ * profile. Uses `ditto.pub` so an installed Ditto app can claim the link (see
+ * `useOpenUrl`); otherwise it opens in the Web Browser app.
+ */
+export function notificationTargetUrl(params: {
+  type: NotificationKind;
+  event: NostrEvent;
+  actor: string;
+  referencedEvent?: NostrEvent;
+}): string {
+  const { type, event, actor, referencedEvent } = params;
+  const target = type === 'mention' || type === 'comment' ? event : referencedEvent;
+  if (target) {
+    try {
+      return `https://ditto.pub/${nip19.neventEncode({ id: target.id, author: target.pubkey })}`;
+    } catch {
+      // fall through to the actor profile
+    }
+  }
+  try {
+    return `https://ditto.pub/${nip19.npubEncode(actor)}`;
+  } catch {
+    return 'https://ditto.pub';
+  }
 }

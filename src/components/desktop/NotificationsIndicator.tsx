@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Popover,
+  PopoverClose,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
@@ -15,6 +16,7 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
 import {
   useHasUnreadNotifications,
   useNotifications,
@@ -22,6 +24,7 @@ import {
 } from '@/hooks/useNotifications';
 import {
   getZapAmountSats,
+  notificationTargetUrl,
   NOTIFICATION_KIND_META,
 } from '@/lib/notifications';
 
@@ -128,26 +131,10 @@ function NotificationsPanel() {
   );
 }
 
-/** The external client URL for a notification's target, for opening in a browser. */
-function targetUrl(item: NotificationItem): string {
-  // Mentions/comments: the event itself is the content. Otherwise link to the
-  // post that was acted on when we have it, else the actor's profile.
-  const event = item.type === 'mention' || item.type === 'comment'
-    ? item.event
-    : item.referencedEvent;
-  if (event) {
-    try {
-      return `https://ditto.pub/${nip19.neventEncode({ id: event.id, author: event.pubkey })}`;
-    } catch {
-      // fall through to profile
-    }
-  }
-  return `https://ditto.pub/${nip19.npubEncode(item.actor)}`;
-}
-
 /** A single notification row: actor avatar, action, and a content preview. */
 function NotificationRow({ item }: { item: NotificationItem }) {
   const author = useAuthor(item.actor);
+  const openUrl = useOpenUrl();
   const metadata = author.data?.metadata;
   const name = metadata?.name?.trim() || genericName(item.actor);
   const picture = metadata?.picture ? sanitizeImageUrl(metadata.picture) ?? undefined : undefined;
@@ -157,44 +144,54 @@ function NotificationRow({ item }: { item: NotificationItem }) {
   const detail = useMemo(() => rowDetail(item), [item]);
 
   return (
-    <a
-      href={targetUrl(item)}
-      target="_blank"
-      rel="noreferrer"
-      className={cn(
-        'flex gap-3 px-4 py-3 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:bg-accent',
-        item.isNew && 'bg-primary/5',
-      )}
-    >
-      <div className="relative shrink-0">
-        <Avatar className="size-9" shape={getAvatarShape(metadata)}>
-          <AvatarImage src={picture} alt="" />
-          <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
-        </Avatar>
-        <span
-          aria-hidden
-          className="absolute -bottom-0.5 -right-0.5 grid size-4.5 place-items-center rounded-full bg-background text-foreground ring-1 ring-border"
-        >
-          <Icon className="size-3" />
-        </span>
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-foreground">
-          <span className="font-medium">{name}</span>{' '}
-          <span className="text-muted-foreground">{meta.verb}</span>
-          {item.isNew && (
-            <span className="ml-1.5 inline-block size-1.5 -translate-y-0.5 rounded-full bg-primary align-middle" aria-label="New" />
-          )}
-        </p>
-        {detail && (
-          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{detail}</p>
+    <PopoverClose asChild>
+      <button
+        type="button"
+        onClick={() =>
+          openUrl(
+            notificationTargetUrl({
+              type: item.type,
+              event: item.event,
+              actor: item.actor,
+              referencedEvent: item.referencedEvent,
+            }),
+          )
+        }
+        className={cn(
+          'flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:bg-accent',
+          item.isNew && 'bg-primary/5',
         )}
-        <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-          {formatRelativeTime(item.event.created_at)}
-        </p>
-      </div>
-    </a>
+      >
+        <div className="relative shrink-0">
+          <Avatar className="size-9" shape={getAvatarShape(metadata)}>
+            <AvatarImage src={picture} alt="" />
+            <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <span
+            aria-hidden
+            className="absolute -bottom-0.5 -right-0.5 grid size-4.5 place-items-center rounded-full bg-background text-foreground ring-1 ring-border"
+          >
+            <Icon className="size-3" />
+          </span>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-foreground">
+            <span className="font-medium">{name}</span>{' '}
+            <span className="text-muted-foreground">{meta.verb}</span>
+            {item.isNew && (
+              <span className="ml-1.5 inline-block size-1.5 -translate-y-0.5 rounded-full bg-primary align-middle" aria-label="New" />
+            )}
+          </p>
+          {detail && (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{detail}</p>
+          )}
+          <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+            {formatRelativeTime(item.event.created_at)}
+          </p>
+        </div>
+      </button>
+    </PopoverClose>
   );
 }
 

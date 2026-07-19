@@ -13,11 +13,13 @@ import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNotificationSettings } from '@/hooks/useNotificationSettings';
 import { useFollowingPubkeys } from '@/hooks/useFollowingPubkeys';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
 import {
   classifyNotification,
   getEnabledNotificationKinds,
   getNotificationActor,
   getZapAmountSats,
+  notificationTargetUrl,
   NOTIFICATION_KIND_META,
   type NotificationKind,
 } from '@/lib/notifications';
@@ -159,6 +161,7 @@ export function NotificationsOsd() {
 /** A single macOS-style notification card. */
 function OsdCard({ toast, onDismiss }: { toast: OsdToast; onDismiss: () => void }) {
   const author = useAuthor(toast.actor);
+  const openUrl = useOpenUrl();
   const metadata = author.data?.metadata;
   const name = metadata?.name?.trim() || genericName(toast.actor);
   const picture = metadata?.picture ? sanitizeImageUrl(metadata.picture) ?? undefined : undefined;
@@ -166,40 +169,53 @@ function OsdCard({ toast, onDismiss }: { toast: OsdToast; onDismiss: () => void 
   const Icon = meta.icon;
   const detail = osdDetail(toast);
 
+  const openTarget = () => {
+    onDismiss();
+    openUrl(
+      notificationTargetUrl({ type: toast.type, event: toast.event, actor: toast.actor }),
+    );
+  };
+
   return (
     <div
       role="status"
       className={cn(
-        'pointer-events-auto flex gap-3 rounded-2xl border border-border/60 bg-background/85 p-3 shadow-lg backdrop-blur-md',
+        'pointer-events-auto flex items-start gap-1 rounded-2xl border border-border/60 bg-background/85 p-3 shadow-lg backdrop-blur-md',
         'motion-safe:animate-in motion-safe:slide-in-from-right-4 motion-safe:fade-in',
       )}
     >
-      <div className="relative shrink-0">
-        <Avatar className="size-9" shape={getAvatarShape(metadata)}>
-          <AvatarImage src={picture} alt="" />
-          <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
-        </Avatar>
-        <span
-          aria-hidden
-          className="absolute -bottom-0.5 -right-0.5 grid size-4.5 place-items-center rounded-full bg-background text-foreground ring-1 ring-border"
-        >
-          <Icon className="size-3" />
-        </span>
-      </div>
+      <button
+        type="button"
+        onClick={openTarget}
+        className="flex min-w-0 flex-1 gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <div className="relative shrink-0">
+          <Avatar className="size-9" shape={getAvatarShape(metadata)}>
+            <AvatarImage src={picture} alt="" />
+            <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <span
+            aria-hidden
+            className="absolute -bottom-0.5 -right-0.5 grid size-4.5 place-items-center rounded-full bg-background text-foreground ring-1 ring-border"
+          >
+            <Icon className="size-3" />
+          </span>
+        </div>
 
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-foreground">
-          <span className="font-medium">{name}</span>{' '}
-          <span className="text-muted-foreground">{meta.verb}</span>
-        </p>
-        {detail && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{detail}</p>}
-      </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-foreground">
+            <span className="font-medium">{name}</span>{' '}
+            <span className="text-muted-foreground">{meta.verb}</span>
+          </p>
+          {detail && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{detail}</p>}
+        </div>
+      </button>
 
       <button
         type="button"
         aria-label="Dismiss"
         onClick={onDismiss}
-        className="-m-1 h-fit shrink-0 rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="shrink-0 rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <X className="size-3.5" />
       </button>
