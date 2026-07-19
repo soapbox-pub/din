@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { resolveNavigation, sanitizeUrl } from '@/lib/sanitizeUrl';
+import { resolveNavigation, sanitizeImageUrl, sanitizeUrl } from '@/lib/sanitizeUrl';
 import { pickBestIcon, type IconCandidate } from '@/lib/appIcon';
 import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
 import {
@@ -1257,7 +1257,7 @@ function TabButton({
   onClose: () => void;
 }) {
   const label = tab.title ?? hostnameOf(tab.url) ?? 'New tab';
-  const icon = tab.favicon ? sanitizeUrl(tab.favicon) : null;
+  const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
 
   return (
     <div
@@ -1490,7 +1490,7 @@ function TreeTabRow({
   onDrop: (position: DropZone) => void;
 }) {
   const label = tab.title ?? hostnameOf(tab.url) ?? 'New tab';
-  const icon = tab.favicon ? sanitizeUrl(tab.favicon) : null;
+  const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
   // The drop indicator to draw while another tab hovers over this row, or
   // null. The top/bottom thirds re-order (sibling before/after), the middle
   // nests (child); on an expanded parent the bottom zone also nests, since
@@ -2308,7 +2308,7 @@ function InstallSiteButton({
       hostname,
       // Prefer the favicon the page reported; fall back to the site root's
       // conventional /favicon.ico (AppIcon degrades to a glyph on 404).
-      icon: (favicon && sanitizeUrl(favicon)) || `${origin}/favicon.ico`,
+      icon: (favicon && sanitizeImageUrl(favicon)) || `${origin}/favicon.ico`,
     };
   }, [url, favicon]);
 

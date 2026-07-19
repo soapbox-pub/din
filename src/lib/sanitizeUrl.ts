@@ -27,6 +27,28 @@ export function sanitizeUrl(input: string): string | null {
 }
 
 /**
+ * Sanitize a URL for safe use as an image `src` (favicons, avatars, banners).
+ *
+ * Broader than {@link sanitizeUrl} because favicons are routinely served as
+ * inline `data:` URIs rather than fetchable `https:` URLs. Allows `https:` and
+ * `data:image/*` (both permitted by the app's `img-src` CSP), and rejects
+ * everything else — notably `javascript:`, `http:`, and non-image `data:`
+ * payloads. Never use this for navigation; use {@link sanitizeUrl} there.
+ */
+export function sanitizeImageUrl(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  // Inline image data URIs are safe as an <img src> and common for favicons.
+  // Restrict to image/* to avoid smuggling scripts through other MIME types.
+  if (/^data:image\/[a-z0-9.+-]+[;,]/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return sanitizeUrl(trimmed);
+}
+
+/**
  * Whether two URLs share the same origin (scheme + host + port). Non-URL
  * inputs are never equal. Used to keep an installed app's logged-in session
  * pinned to its own site when a link is routed into its window.

@@ -11,7 +11,7 @@ import {
   WebAppsSchema,
   type WebApp,
 } from '@/lib/webApps';
-import { sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
+import { sanitizeImageUrl, sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { useAppData } from '@/hooks/useAppData';
 import {
@@ -92,7 +92,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
       installWebApp: ({ name, url, icon, themeColor }) => {
         const safeUrl = sanitizeUrl(url);
         if (!safeUrl) return null;
-        const safeIcon = icon ? (sanitizeUrl(icon) ?? undefined) : undefined;
+        const safeIcon = icon ? (sanitizeImageUrl(icon) ?? undefined) : undefined;
         const safeThemeColor = normalizeThemeColor(themeColor) ?? undefined;
         const trimmedName = name.trim() || new URL(safeUrl).hostname;
         const webApp = createWebApp({

@@ -43,7 +43,7 @@ import { getWifiBridge, isEthernetConnected } from '@/lib/wifi';
 import { getPowerBridge, summarizePower } from '@/lib/power';
 import { getAudioBridge } from '@/lib/audio';
 import { getBrightnessBridge } from '@/lib/brightness';
-import { sanitizeUrl } from '@/lib/sanitizeUrl';
+import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -507,7 +507,7 @@ function AccountPanel({
   const npub = nip19.npubEncode(currentUser.pubkey);
   const shortNpub = `${npub.slice(0, 12)}…${npub.slice(-6)}`;
   const bannerUrl = currentUser.metadata.banner
-    ? sanitizeUrl(currentUser.metadata.banner)
+    ? sanitizeImageUrl(currentUser.metadata.banner)
     : null;
   const about = currentUser.metadata.about?.trim();
 
