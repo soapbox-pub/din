@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawn, execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, Menu, MenuItem } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem } = require('electron');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const buildChromeContextMenu = require('electron-chrome-context-menu').default;
 const {
@@ -675,6 +675,104 @@ function registerPowerHandlers() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Audio bridge (window.audio), backed by wpctl (WirePlumber/PipeWire). Drives
+// the default sink's volume and mute for the menu-bar control, the Settings
+// sound panel, and the media-key OSD. Where wpctl is absent (no PipeWire) it
+// reports available:false and the UI falls back. Same trust boundary as the
+// other bridges: sender guard, argv execFile, volume re-clamped here.
+// ---------------------------------------------------------------------------
+
+const WPCTL_TIMEOUT_MS = 5_000;
+const DEFAULT_SINK = '@DEFAULT_AUDIO_SINK@';
+
+/** Run wpctl with an argv array; resolves stdout, rejects with a clean message. */
+function wpctl(args, timeout = WPCTL_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    execFile('wpctl', args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      if (!error) return resolve(stdout);
+      if (error.code === 'ENOENT') return reject(new Error('wpctl-missing'));
+      const detail = (stderr || error.message || '').trim().split('\n')[0];
+      reject(new Error(detail || 'wpctl failed'));
+    });
+  });
+}
+
+/** Clamp a caller-supplied percentage to an integer 0..100. */
+function clampVolume(pct) {
+  const n = Number(pct);
+  if (!Number.isFinite(n)) throw new Error('Invalid volume');
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/** Default sink volume/mute, or available:false when wpctl is absent. */
+async function audioStatus() {
+  try {
+    // "Volume: 0.65" or "Volume: 0.65 [MUTED]"
+    const out = await wpctl(['get-volume', DEFAULT_SINK]);
+    const match = out.match(/Volume:\s*([\d.]+)/);
+    const volume = match ? Math.round(Number.parseFloat(match[1]) * 100) : null;
+    return { available: true, volume, muted: /\[MUTED\]/.test(out) };
+  } catch (error) {
+    if (error.message === 'wpctl-missing') {
+      return { available: false, volume: null, muted: false };
+    }
+    throw error;
+  }
+}
+
+async function audioSetVolume(pct) {
+  const v = clampVolume(pct);
+  // -l 1.0 caps at 100% so we never push into PipeWire's >1.0 boost range.
+  await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${v}%`]);
+  return audioStatus();
+}
+
+async function audioSetMuted(muted) {
+  await wpctl(['set-mute', DEFAULT_SINK, muted ? '1' : '0']);
+  return audioStatus();
+}
+
+async function audioAdjust(deltaPct) {
+  const sign = deltaPct >= 0 ? '+' : '-';
+  await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${Math.abs(deltaPct)}%${sign}`]);
+  return audioStatus();
+}
+
+async function audioToggleMute() {
+  await wpctl(['set-mute', DEFAULT_SINK, 'toggle']);
+  return audioStatus();
+}
+
+function registerAudioHandlers() {
+  ipcMain.handle('audio:status', async (event) => {
+    assertShellSender(event);
+    return audioStatus();
+  });
+  ipcMain.handle('audio:setVolume', async (event, pct) => {
+    assertShellSender(event);
+    return audioSetVolume(pct);
+  });
+  ipcMain.handle('audio:setMuted', async (event, muted) => {
+    assertShellSender(event);
+    return audioSetMuted(muted === true);
+  });
+}
+
+/**
+ * Global media keys (VolumeUp/Down/Mute). Din owns the whole session, so it
+ * grabs these directly, adjusts the default sink, and pushes the new state to
+ * the shell so it can show the volume OSD. Harmless when wpctl is absent (the
+ * adjust rejects and no OSD is shown).
+ */
+function registerMediaKeys() {
+  const push = (statusPromise) =>
+    statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
+  globalShortcut.register('VolumeUp', () => push(audioAdjust(5)));
+  globalShortcut.register('VolumeDown', () => push(audioAdjust(-5)));
+  globalShortcut.register('VolumeMute', () => push(audioToggleMute()));
+}
+
 function registerWifiHandlers() {
   ipcMain.handle('wifi:status', async (event) => {
     assertShellSender(event);
@@ -1158,6 +1256,8 @@ app.whenReady().then(() => {
   registerWifiHandlers();
   registerDisplayHandlers();
   registerPowerHandlers();
+  registerAudioHandlers();
+  registerMediaKeys();
   registerCrxHandlers();
   registerDevtoolsHandlers();
 
@@ -1225,6 +1325,9 @@ app.whenReady().then(() => {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 });
+
+// Release the media-key grabs (VolumeUp/Down/Mute) when the app exits.
+app.on('will-quit', () => globalShortcut.unregisterAll());
 
 // Harden any <webview> the shell embeds (the web browser app). Keep them
 // sandboxed with no Node integration, and deny requests to spawn native

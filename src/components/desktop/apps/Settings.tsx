@@ -18,6 +18,7 @@ import {
   TriangleAlert,
   Trash2,
   Upload,
+  Volume2,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -40,6 +41,10 @@ import { formatTimeRemaining, getPowerBridge, summarizePower } from '@/lib/power
 import type { BatteryInfo } from '@/lib/power';
 import { useBatteryStatus } from '@/hooks/usePower';
 import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
+import { getAudioBridge } from '@/lib/audio';
+import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
+import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
+import { Slider } from '@/components/ui/slider';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -57,12 +62,20 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 
-type SectionId = 'wifi' | 'display' | 'battery' | 'nostr' | 'appearance' | 'developers';
+type SectionId =
+  | 'wifi'
+  | 'display'
+  | 'battery'
+  | 'sound'
+  | 'nostr'
+  | 'appearance'
+  | 'developers';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
   { id: 'display', name: 'Display', icon: Monitor },
   { id: 'battery', name: 'Battery', icon: BatteryFull },
+  { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
   { id: 'developers', name: 'Developers', icon: Bug },
@@ -77,8 +90,9 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * explanatory fallback. The Display section changes screen resolution through
  * `window.display` (xrandr) for the bare-X11 standalone session; on Wayland it
  * shows a fallback. The Battery section reads `window.power`
- * (/sys/class/power_supply) and hides on machines with no battery. Nostr &
- * Storage manages Din's encrypted app-data
+ * (/sys/class/power_supply) and hides on machines with no battery. The Sound
+ * section drives the default sink's volume/mute through `window.audio`
+ * (wpctl/PipeWire). Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
@@ -122,6 +136,8 @@ export function Settings(_props: AppComponentProps) {
           <DisplaySection />
         ) : section === 'battery' ? (
           <BatterySection />
+        ) : section === 'sound' ? (
+          <SoundSection />
         ) : section === 'nostr' ? (
           <NostrStorageSection />
         ) : section === 'appearance' ? (
@@ -838,6 +854,128 @@ function BatterySkeleton() {
         <Skeleton className="mt-2 h-2 w-full rounded-full bg-foreground/10" />
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sound
+// ---------------------------------------------------------------------------
+
+/**
+ * Output volume and mute, via the audio bridge (window.audio, wpctl/PipeWire).
+ * Works on any Linux session; falls back where PipeWire/wpctl is absent or in
+ * a plain browser. Media keys drive the same sink and show the volume OSD.
+ */
+function SoundSection() {
+  const bridge = getAudioBridge();
+  const status = useAudioStatus();
+  const { setVolume, setMuted } = useAudioMutations();
+
+  const serverVolume = status.data?.volume ?? 0;
+  const muted = status.data?.muted ?? false;
+
+  // Local value for a smooth drag; committed to wpctl on release, re-synced to
+  // the server value (media keys, external wpctl) by adjusting state during
+  // render rather than in an effect.
+  const [value, setValue] = useState(serverVolume);
+  const [lastServer, setLastServer] = useState(serverVolume);
+  if (serverVolume !== lastServer) {
+    setLastServer(serverVolume);
+    setValue(serverVolume);
+  }
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Sound">
+        <FallbackCard icon={Volume2}>
+          Sound settings need the Din desktop shell; volume can't be controlled
+          in a plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell
+      title="Sound"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh sound status"
+          title="Refresh sound status"
+          disabled={!status.data?.available}
+          onClick={() => status.refetch()}
+        >
+          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+        </Button>
+      }
+    >
+      {status.isLoading ? (
+        <div className="h-20 rounded-xl border border-border/60" aria-hidden>
+          <div className="flex h-full items-center gap-4 px-4">
+            <Skeleton className="size-8 rounded bg-foreground/10" />
+            <Skeleton className="h-2 flex-1 rounded-full bg-foreground/10" />
+          </div>
+        </div>
+      ) : !status.data?.available ? (
+        <FallbackCard icon={Volume2}>
+          No audio output was found. PipeWire (wpctl) isn't available on this
+          system, so volume can't be managed here.
+        </FallbackCard>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={muted ? 'Unmute' : 'Mute'}
+              title={muted ? 'Unmute' : 'Mute'}
+              className="size-9 shrink-0 text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
+              onClick={() => setMuted.mutate(!muted)}
+            >
+              <VolumeGlyph
+                volume={value}
+                muted={muted}
+                className={cn('size-6', muted && 'text-muted-foreground')}
+              />
+            </Button>
+            <Slider
+              aria-label="Output volume"
+              value={[muted ? 0 : value]}
+              min={0}
+              max={100}
+              step={1}
+              className="flex-1"
+              onValueChange={([v]) => {
+                if (muted) setMuted.mutate(false);
+                setValue(v);
+              }}
+              onValueCommit={([v]) => setVolume.mutate(v)}
+            />
+            <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
+              {muted ? 'Muted' : `${value}%`}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+            <div className="min-w-0">
+              <Label htmlFor="mute-output" className="cursor-pointer text-sm">
+                Mute
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Silence all output without losing your volume level.
+              </p>
+            </div>
+            <Switch
+              id="mute-output"
+              checked={muted}
+              onCheckedChange={(checked) => setMuted.mutate(checked)}
+            />
+          </div>
+        </div>
+      )}
+    </SectionShell>
   );
 }
 
