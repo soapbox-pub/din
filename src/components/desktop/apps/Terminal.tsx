@@ -164,6 +164,7 @@ const TerminalSession = memo(function TerminalSession({
   const bridge = getPtyBridge();
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const termRef = useRef<XTerm | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
   /** Bumped to tear down the old session/terminal and start fresh. */
   const [epoch, setEpoch] = useState(0);
@@ -200,15 +201,48 @@ const TerminalSession = memo(function TerminalSession({
     // borders in TUI apps. WebGL synthesizes those glyphs pixel-perfectly
     // (customGlyphs). Falls back to the DOM renderer when WebGL is
     // unavailable (e.g. software rendering disabled).
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch (error) {
-      console.warn('Terminal: WebGL renderer unavailable, falling back to DOM renderer', error);
-    }
+    //
+    // The browser can also reclaim the GL context later (context-count
+    // limits, GPU resets, suspend/resume), after which cells paint as black
+    // boxes. Recreate the addon on context loss; after repeated losses give
+    // up and let xterm fall back to the DOM renderer.
+    let contextLosses = 0;
+    const loadWebgl = () => {
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          webgl.dispose();
+          contextLosses += 1;
+          if (disposed) return;
+          if (contextLosses <= 3) {
+            requestAnimationFrame(loadWebgl);
+          } else {
+            console.warn('Terminal: WebGL context lost repeatedly, falling back to DOM renderer');
+            term.refresh(0, term.rows - 1);
+          }
+        });
+        term.loadAddon(webgl);
+      } catch (error) {
+        console.warn('Terminal: WebGL renderer unavailable, falling back to DOM renderer', error);
+      }
+    };
+    loadWebgl();
 
     fit.fit();
+    termRef.current = term;
+
+    // The WebGL glyph atlas can silently corrupt (glyphs render as black
+    // boxes) after GPU resets or OS suspend/resume — a known Chromium/driver
+    // issue. clearTextureAtlas() forces every glyph to be re-rasterized, so
+    // run it whenever the app regains focus or becomes visible again.
+    const clearAtlas = () => {
+      if (!disposed) term.clearTextureAtlas();
+    };
+    const onVisibilityChange = () => {
+      if (!document.hidden) clearAtlas();
+    };
+    window.addEventListener('focus', clearAtlas);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     const offData = bridge.onData((id, data) => {
       if (sessionId === null) {
@@ -264,19 +298,26 @@ const TerminalSession = memo(function TerminalSession({
       disposed = true;
       observer.disconnect();
       container.removeEventListener('mousedown', focus);
+      window.removeEventListener('focus', clearAtlas);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       offData();
       offExit();
       if (sessionId !== null) bridge.kill(sessionId);
       fitRef.current = null;
+      termRef.current = null;
       term.dispose();
     };
   }, [bridge, epoch]);
 
   // When this tab becomes active, refit (its container had zero size while
-  // hidden, so xterm's cached dimensions are stale) and take focus.
+  // hidden, so xterm's cached dimensions are stale) and re-rasterize the
+  // glyph atlas in case it corrupted while the tab was in the background.
   useEffect(() => {
     if (!active) return;
-    requestAnimationFrame(() => fitRef.current?.fit());
+    requestAnimationFrame(() => {
+      fitRef.current?.fit();
+      termRef.current?.clearTextureAtlas();
+    });
   }, [active]);
 
   return (
