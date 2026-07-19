@@ -63,7 +63,7 @@ const newSplitId = () => `split-${nextSplitId++}`;
  * {@link fontSizeListeners} and refit when it changes.
  */
 const FONT_SIZE_KEY = 'din.terminal.fontSize';
-const DEFAULT_FONT_SIZE = 13;
+const DEFAULT_FONT_SIZE = 16;
 const MIN_FONT_SIZE = 6;
 const MAX_FONT_SIZE = 40;
 
