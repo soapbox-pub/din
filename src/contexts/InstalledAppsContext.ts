@@ -22,6 +22,12 @@ export interface InstalledAppsManager {
   uninstallWebApp: (id: string) => void;
   /** Find an installed web app by its exact start URL. */
   findWebAppByUrl: (url: string) => WebApp | undefined;
+  /**
+   * Find an installed web app that owns the given URL's origin (same
+   * scheme + host + port). Used to route a clicked link into its app window
+   * rather than a browser tab.
+   */
+  findWebAppForUrl: (url: string) => WebApp | undefined;
 }
 
 export const InstalledAppsContext = createContext<InstalledAppsManager | undefined>(

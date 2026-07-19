@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { sanitizeUrl } from '@/lib/sanitizeUrl';
+import { sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import {
   APP_WEBVIEW_PARTITION,
@@ -25,14 +25,21 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
  *
  * The URL is sanitized (https-only) even though it was validated at install
  * time — stored data is never trusted blindly.
+ *
+ * `initialUrl` opens the app at a deep link instead of its home URL — used
+ * when a clicked link is routed into the app (see BrowserExtensionHost). It
+ * is honored only when it shares the app's origin, so a stray param can never
+ * point the app's logged-in session at a foreign site.
  */
 export function WebAppFrame({
   url,
+  initialUrl,
   name,
   icon,
   themeColor,
 }: {
   url: string;
+  initialUrl?: string;
   name: string;
   icon: LucideIcon | string;
   themeColor?: string;
@@ -48,7 +55,10 @@ export function WebAppFrame({
   const viewRef = useRef<BrowserViewHandle>(null);
   const setAccent = useWindowAccent();
   const setTitlebar = useWindowTitlebar();
-  const src = sanitizeUrl(url);
+  const home = sanitizeUrl(url);
+  const deepLink = initialUrl ? sanitizeUrl(initialUrl) : null;
+  const src =
+    deepLink && home && sameOrigin(home, deepLink) ? deepLink : home;
 
   useEffect(() => {
     setAccent(pageColor);
