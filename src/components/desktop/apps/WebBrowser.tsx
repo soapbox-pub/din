@@ -393,6 +393,19 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     [],
   );
 
+  /**
+   * Drop a tree-sidebar tab on the empty space below the list: back to the
+   * top level, at the end. The escape hatch that pulls a tab (with its
+   * subtree) out of whatever group it's nested in.
+   */
+  const moveTabToEnd = useCallback((dragId: string) => {
+    setTabs((ts) => {
+      const dragged = ts.find((t) => t.id === dragId);
+      if (!dragged) return ts;
+      return [...ts.filter((t) => t.id !== dragId), { ...dragged, parentId: null }];
+    });
+  }, []);
+
   // Tint the window chrome with the active tab's page theme color, Safari
   // style. The Window sanitizes the raw value; null restores the default.
   const setAccent = useWindowAccent();
@@ -861,6 +874,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             onNewTab={openNewTab}
             onToggleCollapsed={toggleCollapsed}
             onMoveTab={moveTab}
+            onMoveTabToEnd={moveTabToEnd}
           />
         )}
 
@@ -1252,6 +1266,7 @@ function TreeTabStrip({
   onNewTab,
   onToggleCollapsed,
   onMoveTab,
+  onMoveTabToEnd,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -1261,11 +1276,14 @@ function TreeTabStrip({
   onNewTab: () => void;
   onToggleCollapsed: (id: string) => void;
   onMoveTab: (dragId: string, targetId: string, position: DropZone) => void;
+  onMoveTabToEnd: (dragId: string) => void;
 }) {
   const rows = useMemo(() => flattenTabTree(tabs, collapsed), [tabs, collapsed]);
   // The tab currently being dragged, or null. Shared across rows so a row can
   // tell whether it's a valid drop target (and skip itself).
   const [dragId, setDragId] = useState<string | null>(null);
+  // A drag is hovering the trailing (move-to-top-level) drop zone.
+  const [endHover, setEndHover] = useState(false);
   return (
     <div
       role="tablist"
@@ -1309,6 +1327,33 @@ function TreeTabStrip({
         <Plus className="size-4 shrink-0" />
         <span className="truncate">New tab</span>
       </button>
+      {/* Trailing drop zone (only during a drag): dropping in the empty space
+          below the list moves the tab back to the top level, at the end - the
+          way out of a group when there's no row left to drop 'before'. */}
+      {dragId !== null && (
+        <div
+          className="relative min-h-8 flex-1"
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            setEndHover(true);
+          }}
+          onDragLeave={() => setEndHover(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setEndHover(false);
+            if (dragId) onMoveTabToEnd(dragId);
+            setDragId(null);
+          }}
+        >
+          {endHover && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-1 top-0 h-0.5 rounded-full bg-primary"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1349,14 +1394,14 @@ function TreeTabRow({
   const icon = tab.favicon ? sanitizeUrl(tab.favicon) : null;
   // The drop indicator to draw while another tab hovers over this row, or
   // null. The top/bottom thirds re-order (sibling before/after), the middle
-  // nests (child).
+  // nests (child); on an expanded parent the bottom zone also nests, since
+  // that slot visually belongs to the first child (see onDragOver).
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
-  // Indent the favicon + label one step per nesting level. Top-level parent
-  // tabs get an extra step so their disclosure chevron has room at the far
-  // left; childless top-level tabs stay flush, so there's no dead space. The
-  // chevron itself is absolutely positioned (below) and never consumes label
-  // width, so nested tabs keep their room for the title.
-  const indent = 6 + (depth + (hasChildren && depth === 0 ? 1 : 0)) * 14;
+  // Each nesting level shifts the whole row right - narrowing it - so depth
+  // reads directly off the layout. Parents additionally reserve a small
+  // gutter inside the row for the disclosure chevron (absolutely positioned
+  // below, out of the flex flow); childless rows keep their label flush.
+  const gutter = hasChildren ? 20 : 6;
 
   const onDragOver = (e: React.DragEvent) => {
     // Not a valid target: no drag in progress, or this is the dragged row.
@@ -1365,10 +1410,15 @@ function TreeTabRow({
     e.dataTransfer.dropEffect = 'move';
     const rect = e.currentTarget.getBoundingClientRect();
     const offset = e.clientY - rect.top;
+    // The slot just below an expanded parent is visually the first-child
+    // slot ('after' would silently land past the whole subtree), so the
+    // bottom zone nests there too. Dropping after the subtree is done via
+    // the last descendant's bottom zone or the strip's trailing drop zone.
+    const expandedParent = hasChildren && !collapsed;
     const zone: DropZone =
       offset < rect.height * 0.3
         ? 'before'
-        : offset > rect.height * 0.7
+        : offset > rect.height * 0.7 && !expandedParent
           ? 'after'
           : 'inside';
     setDropZone((z) => (z === zone ? z : zone));
@@ -1411,7 +1461,7 @@ function TreeTabRow({
         if (zone) onDrop(zone);
       }}
       title={label}
-      style={{ paddingInlineStart: indent }}
+      style={{ marginInlineStart: depth * 14, paddingInlineStart: gutter }}
       className={cn(
         'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -1435,7 +1485,7 @@ function TreeTabRow({
           className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-primary"
         />
       )}
-      {/* Disclosure chevron: sits in the indent gutter, out of the flex flow,
+      {/* Disclosure chevron: sits in the row's gutter, out of the flex flow,
           so it never steals width from the label. Only parents show it. */}
       {hasChildren && (
         <button
@@ -1445,8 +1495,7 @@ function TreeTabRow({
             e.stopPropagation();
             onToggleCollapsed();
           }}
-          style={{ insetInlineStart: indent - 16 }}
-          className="absolute top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="absolute start-0.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <ChevronRight
             className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
