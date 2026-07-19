@@ -18,7 +18,7 @@ export interface PtySize {
 
 export interface PtyBridge {
   /** Start a shell session; resolves to its session id. */
-  spawn(size: PtySize): Promise<number>;
+  spawn(size: PtySize, cwd?: string): Promise<number>;
   /** Send user keystrokes/paste data to a session. */
   write(id: number, data: string): void;
   /** Inform the session's pty of a new terminal size. */

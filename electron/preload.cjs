@@ -67,7 +67,7 @@ contextBridge.exposeInMainWorld('fs', {
 // raw bytes (Uint8Array out, string in - what xterm.js produces/consumes).
 contextBridge.exposeInMainWorld('pty', {
   /** Start a shell session; resolves to its session id. */
-  spawn: (size) => ipcRenderer.invoke('pty:spawn', size),
+  spawn: (size, cwd) => ipcRenderer.invoke('pty:spawn', size, cwd),
 
   /** Send user keystrokes/paste data to a session. */
   write: (id, data) => ipcRenderer.send('pty:write', id, data),

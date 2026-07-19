@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -66,6 +66,8 @@ type SplitDir = 'row' | 'column';
 interface LeafNode {
   type: 'leaf';
   paneId: string;
+  /** Working directory to start the shell in (inherited from the source pane). */
+  initialCwd?: string;
 }
 interface SplitNode {
   type: 'split';
@@ -94,6 +96,7 @@ function splitLeaf(
   paneId: string,
   dir: SplitDir,
   newPaneId: string,
+  cwd?: string,
 ): LayoutNode {
   if (node.type === 'leaf') {
     if (node.paneId !== paneId) return node;
@@ -103,13 +106,13 @@ function splitLeaf(
       dir,
       ratio: 0.5,
       a: node,
-      b: { type: 'leaf', paneId: newPaneId },
+      b: { type: 'leaf', paneId: newPaneId, initialCwd: cwd },
     };
   }
   return {
     ...node,
-    a: splitLeaf(node.a, paneId, dir, newPaneId),
-    b: splitLeaf(node.b, paneId, dir, newPaneId),
+    a: splitLeaf(node.a, paneId, dir, newPaneId, cwd),
+    b: splitLeaf(node.b, paneId, dir, newPaneId, cwd),
   };
 }
 
@@ -147,6 +150,7 @@ interface Rect {
 }
 interface LeafBox {
   paneId: string;
+  initialCwd?: string;
   rect: Rect;
 }
 interface DividerBox {
@@ -166,7 +170,7 @@ function flattenLayout(
   dividers: DividerBox[],
 ): void {
   if (node.type === 'leaf') {
-    leaves.push({ paneId: node.paneId, rect });
+    leaves.push({ paneId: node.paneId, initialCwd: node.initialCwd, rect });
     return;
   }
   if (node.dir === 'row') {
@@ -218,18 +222,26 @@ export function Terminal({ windowId }: AppComponentProps) {
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   // Counter so each new tab gets a stable, increasing "Terminal N" label.
   const nextIndex = useRef(2);
+  // Tracks last known CWD per pane, updated via OSC 7 from each shell.
+  const panesCwd = useRef<Map<string, string>>(new Map());
+
+  const handleCwdChange = useCallback((paneId: string, cwd: string) => {
+    panesCwd.current.set(paneId, cwd);
+  }, []);
 
   const openTab = useCallback(() => {
     const paneId = newSessionId();
+    const activeTab = tabs.find((t) => t.id === activeId);
+    const initialCwd = activeTab ? panesCwd.current.get(activeTab.activePaneId) : undefined;
     const tab: TermTab = {
       id: newTabId(),
       index: nextIndex.current++,
-      layout: { type: 'leaf', paneId },
+      layout: { type: 'leaf', paneId, initialCwd },
       activePaneId: paneId,
     };
     setTabs((ts) => [...ts, tab]);
     setActiveId(tab.id);
-  }, []);
+  }, [tabs, activeId]);
 
   const closeTab = useCallback(
     (id: string) => {
@@ -253,10 +265,11 @@ export function Terminal({ windowId }: AppComponentProps) {
 
   const splitPane = useCallback((tabId: string, paneId: string, dir: SplitDir) => {
     const newPaneId = newSessionId();
+    const cwd = panesCwd.current.get(paneId);
     setTabs((ts) =>
       ts.map((t) =>
         t.id === tabId
-          ? { ...t, layout: splitLeaf(t.layout, paneId, dir, newPaneId), activePaneId: newPaneId }
+          ? { ...t, layout: splitLeaf(t.layout, paneId, dir, newPaneId, cwd), activePaneId: newPaneId }
           : t,
       ),
     );
@@ -361,6 +374,7 @@ export function Terminal({ windowId }: AppComponentProps) {
           onClosePane={closePane}
           onFocusPane={focusPane}
           onResizeSplit={resizeSplit}
+          onCwdChange={handleCwdChange}
         />
       ))}
     </div>
@@ -379,6 +393,7 @@ const TerminalTab = memo(function TerminalTab({
   onClosePane,
   onFocusPane,
   onResizeSplit,
+  onCwdChange,
 }: {
   tab: TermTab;
   active: boolean;
@@ -386,6 +401,7 @@ const TerminalTab = memo(function TerminalTab({
   onClosePane: (tabId: string, paneId: string) => void;
   onFocusPane: (tabId: string, paneId: string) => void;
   onResizeSplit: (tabId: string, splitId: string, ratio: number) => void;
+  onCwdChange: (paneId: string, cwd: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -454,8 +470,10 @@ const TerminalTab = memo(function TerminalTab({
             paneId={leaf.paneId}
             active={active}
             focused={tab.activePaneId === leaf.paneId}
+            initialCwd={leaf.initialCwd}
             onSplit={handleSplit}
             onClose={handleClose}
+            onCwdChange={onCwdChange}
           />
         </div>
       ))}
@@ -507,16 +525,21 @@ const TerminalSession = memo(function TerminalSession({
   paneId,
   active,
   focused,
+  initialCwd,
   onSplit,
   onClose,
+  onCwdChange,
 }: {
   paneId: string;
   /** Whether the owning tab is visible. */
   active: boolean;
   /** Whether this pane should hold keyboard focus within its tab. */
   focused: boolean;
+  /** Working directory to start the shell in on first spawn (and restarts). */
+  initialCwd?: string;
   onSplit: (paneId: string, dir: SplitDir) => void;
   onClose: (paneId: string) => void;
+  onCwdChange: (paneId: string, cwd: string) => void;
 }) {
   const bridge = getPtyBridge();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -525,6 +548,13 @@ const TerminalSession = memo(function TerminalSession({
   const [exitCode, setExitCode] = useState<number | null>(null);
   /** Bumped to tear down the old session/terminal and start fresh. */
   const [epoch, setEpoch] = useState(0);
+  /** Tracks the shell's current working directory via OSC 7; also used for restarts. */
+  const cwdRef = useRef<string | undefined>(initialCwd);
+  /** Always-fresh reference to onCwdChange so the effect closure never goes stale. */
+  const onCwdChangeRef = useRef(onCwdChange);
+  useLayoutEffect(() => {
+    onCwdChangeRef.current = onCwdChange;
+  });
 
   const restart = useCallback(() => {
     setExitCode(null);
@@ -585,6 +615,24 @@ const TerminalSession = memo(function TerminalSession({
     };
     loadWebgl();
 
+    // OSC 7 ("file://host/path") is emitted by zsh/bash/fish on every
+    // directory change when the shell is configured to do so (or when using
+    // a terminal-aware prompt theme). Capture it to track the pane's CWD so
+    // new tabs and splits can inherit it.
+    const oscHandler = term.parser.registerOscHandler(7, (data) => {
+      try {
+        const url = new URL(data);
+        if (url.protocol === 'file:') {
+          const cwd = decodeURIComponent(url.pathname);
+          cwdRef.current = cwd;
+          onCwdChangeRef.current(paneId, cwd);
+        }
+      } catch {
+        // ignore malformed OSC 7 payloads
+      }
+      return true;
+    });
+
     fit.fit();
     termRef.current = term;
 
@@ -620,7 +668,7 @@ const TerminalSession = memo(function TerminalSession({
     });
 
     bridge
-      .spawn({ cols: term.cols, rows: term.rows })
+      .spawn({ cols: term.cols, rows: term.rows }, cwdRef.current)
       .then((id) => {
         if (disposed) {
           bridge.kill(id);
@@ -660,12 +708,13 @@ const TerminalSession = memo(function TerminalSession({
       document.removeEventListener('visibilitychange', onVisibilityChange);
       offData();
       offExit();
+      oscHandler.dispose();
       if (sessionId !== null) bridge.kill(sessionId);
       fitRef.current = null;
       termRef.current = null;
       term.dispose();
     };
-  }, [bridge, epoch]);
+  }, [bridge, epoch, paneId]);
 
   // When this pane's tab becomes active, refit (its container had zero size
   // while hidden, so xterm's cached dimensions are stale) and re-rasterize

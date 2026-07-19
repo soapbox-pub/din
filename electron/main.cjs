@@ -296,7 +296,7 @@ function userShell() {
 }
 
 function registerPtyHandlers() {
-  ipcMain.handle('pty:spawn', (event, size) => {
+  ipcMain.handle('pty:spawn', (event, size, cwd) => {
     assertShellSender(event);
     if (ptySessions.size >= MAX_PTY_SESSIONS) {
       throw new Error(`Too many terminal sessions (max ${MAX_PTY_SESSIONS})`);
@@ -304,8 +304,11 @@ function registerPtyHandlers() {
     const rows = clampDimension(size?.rows, 24);
     const cols = clampDimension(size?.cols, 80);
 
+    const spawnCwd =
+      typeof cwd === 'string' && cwd.length > 0 && cwd.length <= 4096 ? cwd : os.homedir();
+
     const proc = spawn('python3', [PTY_HELPER, userShell(), String(rows), String(cols)], {
-      cwd: os.homedir(),
+      cwd: spawnCwd,
       // fd 3 is the helper's control channel (resize).
       stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
     });
