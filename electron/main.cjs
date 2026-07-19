@@ -21,6 +21,11 @@ const {
   uninstallExtension,
 } = require('electron-chrome-web-store');
 const { DevtoolsBridge } = require('./devtools-bridge.cjs');
+const {
+  registerUserscriptHandlers,
+  attachUserscripts,
+  isUserscriptInstallUrl,
+} = require('./userscripts.cjs');
 
 // Locate the built Vite app. Two supported layouts:
 //   - Aladdin/Nix: main.cjs and dist/ are installed side by side (__dirname/dist)
@@ -2001,6 +2006,7 @@ app.whenReady().then(() => {
   registerBrightnessHandlers();
   registerScreenshotHandlers();
   registerCrxHandlers();
+  registerUserscriptHandlers({ assertShellSender });
   registerDevtoolsHandlers();
   registerNostrBridge();
 
@@ -2113,8 +2119,24 @@ app.on('web-contents-created', (_event, contents) => {
     chromeExtensions.addTab(contents, shellWindow);
   }
 
+  // Userscripts (the browser's native script manager,
+  // electron/userscripts.cjs): inject matching scripts as pages load, and
+  // turn navigations to *.user.js files into install prompts in the shell
+  // instead of pages of raw source.
+  if (isBrowserTab) {
+    attachUserscripts(contents);
+    contents.on('will-navigate', (event, url) => {
+      if (isUserscriptInstallUrl(url)) {
+        event.preventDefault();
+        sendToShell('userscripts:installRequested', { url, wcId: contents.id });
+      }
+    });
+  }
+
   contents.setWindowOpenHandler(({ url }) => {
-    if (/^(https|chrome-extension):\/\//i.test(url)) {
+    if (isBrowserTab && isUserscriptInstallUrl(url)) {
+      sendToShell('userscripts:installRequested', { url, wcId: contents.id });
+    } else if (/^(https|chrome-extension):\/\//i.test(url)) {
       sendToShell('crx:openTab', { url });
     }
     return { action: 'deny' };

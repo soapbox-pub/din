@@ -1,6 +1,6 @@
 // Preload for the Din renderer.
 //
-// Exposes ten bridges backed by IPC handlers in main.cjs:
+// Exposes bridges backed by IPC handlers in main.cjs:
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
@@ -11,6 +11,8 @@
 //   - window.brightness: backlight + night light for the menu bar, Settings, OSD
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
 //   - window.crx: Chrome extension coordination for the Web Browser app
+//   - window.userscripts: userscript library sync and install
+//     requests for the Web Browser app
 //   - window.devtools: docked devtools control for the Web Browser app
 //   - window.nostrHost: relays NIP-07 requests from installed web apps to the
 //     signed-in account's signer (see NostrBridgeHost / webview-preload.cjs)
@@ -262,6 +264,27 @@ contextBridge.exposeInMainWorld('crx', {
 
   /** Uninstall an installed extension by id. */
   uninstallExtension: (id) => ipcRenderer.invoke('crx:uninstallExtension', id),
+});
+
+// Userscript bridge (window.userscripts), backed by the userscripts:*
+// handlers in main.cjs (electron/userscripts.cjs). The shell renderer owns
+// the script library (localStorage, see src/hooks/useUserscripts.ts) and
+// syncs the full list here so the main process can inject matching scripts
+// into browser-tab guests as pages load. Navigations to *.user.js files are
+// intercepted in main and surfaced back as install requests.
+contextBridge.exposeInMainWorld('userscripts', {
+  /** Replace the main process's script list (the renderer is authoritative). */
+  sync: (scripts) => ipcRenderer.send('userscripts:sync', scripts),
+
+  /** Fetch a userscript's source text over https (size-capped, in main). */
+  fetchText: (url) => ipcRenderer.invoke('userscripts:fetch', url),
+
+  /** Subscribe to *.user.js install requests. Returns an unsubscribe fn. */
+  onInstallRequested: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('userscripts:installRequested', listener);
+    return () => ipcRenderer.removeListener('userscripts:installRequested', listener);
+  },
 });
 
 // DevTools bridge (window.devtools), backed by the devtools:* handlers in

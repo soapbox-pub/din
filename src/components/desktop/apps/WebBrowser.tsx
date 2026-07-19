@@ -19,6 +19,11 @@ import { cn } from '@/lib/utils';
 import { resolveNavigation, sanitizeUrl } from '@/lib/sanitizeUrl';
 import { pickBestIcon, type IconCandidate } from '@/lib/appIcon';
 import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
+import {
+  getUserscriptsBridge,
+  isUserscriptUrl,
+  type Userscript,
+} from '@/lib/userscripts';
 import { getDevtoolsBridge } from '@/lib/devtools';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { consumeTabCommands, consumeBrowserHotkeys } from '@/lib/browserTabBus';
@@ -53,6 +58,12 @@ import {
   type BrowserViewHandle,
 } from '@/components/desktop/apps/BrowserView';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
+import { useUserscripts } from '@/hooks/useUserscripts';
+import {
+  UserscriptsSection,
+  UserscriptInstallDialog,
+  type UserscriptInstallRequest,
+} from '@/components/desktop/apps/UserscriptManager';
 import {
   InspectorToolbar,
   type DockMode,
@@ -207,6 +218,18 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const crx = getCrxBridge();
   const devtools = getDevtoolsBridge();
+  const userscriptsBridge = getUserscriptsBridge();
+  // The userscript library: persisted per-device, synced to the injector in
+  // the main process. The bridge's absence hides all userscript UI.
+  const {
+    scripts: userscriptList,
+    install: installUserscript,
+    remove: removeUserscript,
+    setEnabled: setUserscriptEnabled,
+  } = useUserscripts();
+  // A pending userscript install prompt (source + origin) for the dialog.
+  const [scriptInstall, setScriptInstall] = useState<UserscriptInstallRequest | null>(null);
+  const { toast } = useToast();
   const webviewMode = isWebviewAvailable();
   // Persistent browsing history (feeds address-bar autocomplete).
   const { history: browsingHistory, recordVisit, recordTitle } = useBrowserHistory();
@@ -661,10 +684,63 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     });
   }, [setDock]);
 
+  /** Fetch a .user.js file (in main - the shell can't read cross-origin)
+   * and open the install review dialog. */
+  const promptUserscriptInstall = useCallback(
+    (url: string) => {
+      if (!userscriptsBridge) return;
+      userscriptsBridge
+        .fetchText(url)
+        .then((code) => setScriptInstall({ code, url }))
+        .catch(() => {
+          toast({ title: "Couldn't download userscript", variant: 'destructive' });
+        });
+    },
+    [userscriptsBridge, toast],
+  );
+
+  // *.user.js navigations intercepted by the main process (in-page link
+  // clicks, window.open). Every browser window subscribes; only the one
+  // owning the navigating tab prompts.
+  useEffect(() => {
+    if (!userscriptsBridge) return;
+    return userscriptsBridge.onInstallRequested(({ url, wcId }) => {
+      if (!tabsRef.current.some((t) => t.wcId === wcId)) return;
+      promptUserscriptInstall(url);
+    });
+  }, [userscriptsBridge, promptUserscriptInstall]);
+
+  /** Install from the review dialog; closes it and toasts on success. */
+  const installUserscriptFromDialog = useCallback(
+    (code: string, downloadUrl?: string) => {
+      try {
+        const script = installUserscript(code, downloadUrl);
+        setScriptInstall(null);
+        toast({
+          title: `${script.name} installed`,
+          description: 'It runs on matching pages from their next load.',
+        });
+      } catch (error) {
+        toast({
+          title: "Couldn't install userscript",
+          description: error instanceof Error ? error.message : undefined,
+          variant: 'destructive',
+        });
+      }
+    },
+    [installUserscript, toast],
+  );
+
   const navigateTab = useCallback(
     (id: string, raw: string) => {
       const resolved = resolveNavigation(raw);
       if (!resolved) return;
+      // A .user.js address is a script install, not a page visit (mirrors
+      // the main process's will-navigate intercept for link clicks).
+      if (userscriptsBridge && isUserscriptUrl(resolved)) {
+        promptUserscriptInstall(resolved);
+        return;
+      }
       updateTab(id, (tab) => {
         const trimmed = tab.history.slice(0, tab.cursor + 1);
         return {
@@ -681,7 +757,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       // The iframe fallback emits no navigate events, so record here.
       if (!webviewMode) recordVisit(resolved);
     },
-    [updateTab, webviewMode, recordVisit],
+    [updateTab, webviewMode, recordVisit, userscriptsBridge, promptUserscriptInstall],
   );
 
   const navigate = useCallback(
@@ -826,7 +902,18 @@ export function WebBrowser({ windowId }: AppComponentProps) {
 
         {crx && <BrowserActionList tabWcId={activeTab.wcId} />}
 
-        {crx && <ExtensionsMenu onOpenUrl={(url) => openTab(url)} />}
+        {(crx || userscriptsBridge) && (
+          <ExtensionsMenu
+            onOpenUrl={(url) => openTab(url)}
+            userscripts={userscriptsBridge ? userscriptList : null}
+            onSetUserscriptEnabled={setUserscriptEnabled}
+            onRemoveUserscript={(script) => {
+              removeUserscript(script.id);
+              toast({ title: `${script.name} removed` });
+            }}
+            onAddUserscript={() => setScriptInstall({ code: '' })}
+          />
+        )}
 
         <InstallSiteButton
           url={activeTab.url}
@@ -911,6 +998,14 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         ))}
         </div>
       </div>
+
+      <UserscriptInstallDialog
+        request={scriptInstall}
+        onOpenChange={(open) => {
+          if (!open) setScriptInstall(null);
+        }}
+        onInstall={installUserscriptFromDialog}
+      />
 
       <UndockedDevToolsReconciler tabsRef={tabsRef} updateTab={updateTab} />
     </div>
@@ -1956,10 +2051,24 @@ function BrowserActionList({ tabWcId }: { tabWcId: number | null }) {
 }
 
 /**
- * Toolbar menu managing installed Chrome extensions: lists them with
- * uninstall buttons and links to the Chrome Web Store to install more.
+ * Toolbar menu managing installed Chrome extensions and userscripts:
+ * extensions list with uninstall buttons and a Chrome Web Store link, plus
+ * the userscript library (enable toggles, removal, manual add).
  */
-function ExtensionsMenu({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
+function ExtensionsMenu({
+  onOpenUrl,
+  userscripts,
+  onSetUserscriptEnabled,
+  onRemoveUserscript,
+  onAddUserscript,
+}: {
+  onOpenUrl: (url: string) => void;
+  /** Installed userscripts, or null when the userscript bridge is absent. */
+  userscripts: Userscript[] | null;
+  onSetUserscriptEnabled: (id: string, enabled: boolean) => void;
+  onRemoveUserscript: (script: Userscript) => void;
+  onAddUserscript: () => void;
+}) {
   const crx = getCrxBridge();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -1993,7 +2102,7 @@ function ExtensionsMenu({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
     }
   };
 
-  if (!crx) return null;
+  if (!crx && userscripts === null) return null;
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -2053,16 +2162,30 @@ function ExtensionsMenu({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
             </ul>
           )}
 
-          <Button
-            variant="secondary"
-            className="w-full"
-            onClick={() => {
-              setOpen(false);
-              onOpenUrl(WEB_STORE_URL);
-            }}
-          >
-            Browse the Chrome Web Store
-          </Button>
+          {crx && (
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                setOpen(false);
+                onOpenUrl(WEB_STORE_URL);
+              }}
+            >
+              Browse the Chrome Web Store
+            </Button>
+          )}
+
+          {userscripts !== null && (
+            <UserscriptsSection
+              scripts={userscripts}
+              onSetEnabled={onSetUserscriptEnabled}
+              onRemove={onRemoveUserscript}
+              onAdd={() => {
+                setOpen(false);
+                onAddUserscript();
+              }}
+            />
+          )}
         </div>
       </PopoverContent>
     </Popover>
