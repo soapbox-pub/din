@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
@@ -17,11 +17,11 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
  * Standalone, chrome-less window content for an installed web app: the site
  * fills the whole window with no address bar, like an installed PWA.
  *
- * The only chrome is a pair of back/forward buttons published into the window
- * title bar (alongside the app's icon and name), so the page still fills the
- * body. Back/forward drive the webview's own history and thus only work on the
- * Electron surface; the iframe fallback reports no navigations, so they stay
- * disabled there.
+ * The only chrome is a pair of back/forward carets published into the window
+ * title bar, to the right of the app's icon and name, so the page still fills
+ * the body. Each caret appears only when that move is possible. They drive the
+ * webview's own history and thus only work on the Electron surface; the iframe
+ * fallback reports no navigations, so the carets never appear there.
  *
  * The URL is sanitized (https-only) even though it was validated at install
  * time — stored data is never trusted blindly.
@@ -88,27 +88,31 @@ export function WebAppFrame({
       : 'text-foreground';
 
     setTitlebar(
-      <div className="flex min-w-0 flex-1 items-center gap-1">
-        <NavButton
-          label="Go back"
-          disabled={!nav.canBack}
-          onClick={() => viewRef.current?.goBack()}
-          className={cn(muted, hover)}
-        >
-          <ArrowLeft className="size-4" />
-        </NavButton>
-        <NavButton
-          label="Go forward"
-          disabled={!nav.canForward}
-          onClick={() => viewRef.current?.goForward()}
-          className={cn(muted, hover)}
-        >
-          <ArrowRight className="size-4" />
-        </NavButton>
-        <AppIcon icon={icon} className={cn('ml-1 size-4 shrink-0', muted)} />
-        <span className={cn('flex-1 truncate text-sm font-medium', text)}>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <AppIcon icon={icon} className={cn('size-4 shrink-0', muted)} />
+        <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', text)}>
           {name}
         </span>
+        {/* Carets to the right of the title, shown only when a move is
+            available (webview only reports history depth). */}
+        {nav.canBack && (
+          <NavButton
+            label="Go back"
+            onClick={() => viewRef.current?.goBack()}
+            className={cn(muted, hover)}
+          >
+            <ChevronLeft className="size-4" />
+          </NavButton>
+        )}
+        {nav.canForward && (
+          <NavButton
+            label="Go forward"
+            onClick={() => viewRef.current?.goForward()}
+            className={cn(muted, hover)}
+          >
+            <ChevronRight className="size-4" />
+          </NavButton>
+        )}
       </div>,
     );
     return () => setTitlebar(null);
@@ -151,13 +155,11 @@ export function WebAppFrame({
 function NavButton({
   label,
   onClick,
-  disabled,
   className,
   children,
 }: {
   label: string;
   onClick: () => void;
-  disabled?: boolean;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -167,11 +169,9 @@ function NavButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      disabled={disabled}
       className={cn(
         'grid size-6 shrink-0 place-items-center rounded-md',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
         className,
       )}
     >
