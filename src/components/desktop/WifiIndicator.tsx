@@ -135,7 +135,7 @@ export function WifiPopoverBody() {
             variant="ghost"
             size="sm"
             className="w-full justify-start text-muted-foreground hover:text-foreground"
-            onClick={() => open('settings')}
+            onClick={() => open('settings', { section: 'wifi' })}
           >
             <Settings2 aria-hidden />
             Wi-Fi settings

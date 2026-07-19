@@ -133,8 +133,30 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * Developers holds debug utilities such as intentionally crashing the shell
  * to test the error boundary.
  */
-export function Settings(_props: AppComponentProps) {
-  const [section, setSection] = useState<SectionId>('wifi');
+const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
+
+/** Extract a valid SectionId from launch params, if present. */
+function paramSection(params: AppComponentProps['params']): SectionId | undefined {
+  const s = params?.section;
+  return typeof s === 'string' && SECTION_IDS.has(s) ? (s as SectionId) : undefined;
+}
+
+export function Settings({ params }: AppComponentProps) {
+  const [section, setSection] = useState<SectionId>(
+    () => paramSection(params) ?? 'wifi',
+  );
+
+  // The window is reused for this single-instance app, so a re-launch (e.g.
+  // from a different tray indicator) updates params without remounting.
+  // Follow the requested section when it changes.
+  const requested = paramSection(params);
+  const lastRequested = useRef(requested);
+  useEffect(() => {
+    if (requested && requested !== lastRequested.current) {
+      lastRequested.current = requested;
+      setSection(requested);
+    }
+  }, [requested]);
 
   return (
     <div className="flex h-full w-full">

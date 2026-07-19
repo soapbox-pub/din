@@ -129,7 +129,7 @@ export function BrightnessPopoverBody() {
             variant="ghost"
             size="sm"
             className="w-full justify-start text-muted-foreground hover:text-foreground"
-            onClick={() => open('settings')}
+            onClick={() => open('settings', { section: 'display' })}
           >
             <Settings2 aria-hidden />
             Display settings
