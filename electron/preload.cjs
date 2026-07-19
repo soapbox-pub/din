@@ -5,7 +5,8 @@
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //   - window.display: xrandr multi-output arrangement for the Settings app
-//   - window.power: battery/AC status for the menu bar and Settings app
+//   - window.power: battery/AC status + system power profiles for the menu
+//     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
 //   - window.brightness: backlight + night light for the menu bar, Settings, OSD
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
@@ -135,12 +136,21 @@ contextBridge.exposeInMainWorld('display', {
   applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
 });
 
-// Power bridge (window.power), backed by the power:* handler in main.cjs
-// (/sys/class/power_supply). Used by the menu-bar battery indicator and the
-// Settings battery panel. `available: false` on machines with no battery.
+// Power bridge (window.power), backed by the power:* handlers in main.cjs.
+// `status` reads battery/AC state from /sys/class/power_supply (menu-bar
+// indicator + Settings battery panel; `available: false` with no battery).
+// `profiles`/`setProfile` drive the system power profile through the
+// net.hadess.PowerProfiles D-Bus API (power-profiles-daemon / tuned-ppd);
+// `available: false` when no such daemon is running.
 contextBridge.exposeInMainWorld('power', {
   /** Battery/AC state. `available: false` when no battery is present. */
   status: () => ipcRenderer.invoke('power:status'),
+
+  /** Available power profiles + the active one. `available: false` with no daemon. */
+  profiles: () => ipcRenderer.invoke('power:profiles'),
+
+  /** Switch the active power profile. Resolves to the new profiles state. */
+  setProfile: (name) => ipcRenderer.invoke('power:setProfile', name),
 });
 
 // Audio bridge (window.audio), backed by the audio:* handlers in main.cjs

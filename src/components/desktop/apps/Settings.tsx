@@ -7,6 +7,7 @@ import {
   Cloud,
   CloudOff,
   EthernetPort,
+  Gauge,
   Laptop,
   Loader2,
   Lock,
@@ -47,9 +48,18 @@ import {
 } from '@/lib/display';
 import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
 import { useApplyDisplayLayout, useDisplayStatus } from '@/hooks/useDisplay';
-import { formatTimeRemaining, getPowerBridge, summarizePower } from '@/lib/power';
+import {
+  describePowerProfile,
+  formatTimeRemaining,
+  getPowerBridge,
+  summarizePower,
+} from '@/lib/power';
 import type { BatteryInfo } from '@/lib/power';
-import { useBatteryStatus } from '@/hooks/usePower';
+import {
+  useBatteryStatus,
+  usePowerProfiles,
+  useSetPowerProfile,
+} from '@/hooks/usePower';
 import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
 import { getAudioBridge } from '@/lib/audio';
 import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
@@ -80,6 +90,7 @@ type SectionId =
   | 'display'
   | 'brightness'
   | 'battery'
+  | 'power'
   | 'sound'
   | 'nostr'
   | 'appearance'
@@ -90,6 +101,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'display', name: 'Display', icon: Monitor },
   { id: 'brightness', name: 'Brightness', icon: Sun },
   { id: 'battery', name: 'Battery', icon: BatteryFull },
+  { id: 'power', name: 'Power', icon: Gauge },
   { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
@@ -105,7 +117,10 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * explanatory fallback. The Display section changes screen resolution through
  * `window.display` (xrandr) for the bare-X11 standalone session; on Wayland it
  * shows a fallback. The Battery section reads `window.power`
- * (/sys/class/power_supply) and hides on machines with no battery. The Sound
+ * (/sys/class/power_supply) and hides on machines with no battery. The Power
+ * section switches the system power profile through the same bridge
+ * (net.hadess.PowerProfiles over D-Bus: power-profiles-daemon / tuned-ppd),
+ * falling back where no such daemon runs. The Sound
  * section drives the default sink's volume/mute through `window.audio`
  * (wpctl/PipeWire). Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
@@ -153,6 +168,8 @@ export function Settings(_props: AppComponentProps) {
           <BrightnessSection />
         ) : section === 'battery' ? (
           <BatterySection />
+        ) : section === 'power' ? (
+          <PowerSection />
         ) : section === 'sound' ? (
           <SoundSection />
         ) : section === 'nostr' ? (
@@ -1183,6 +1200,140 @@ function BatterySkeleton() {
         </div>
         <Skeleton className="mt-2 h-2 w-full rounded-full bg-foreground/10" />
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Power
+// ---------------------------------------------------------------------------
+
+/**
+ * System power profile (power-saver / balanced / performance), via the power
+ * bridge (window.power -> net.hadess.PowerProfiles over D-Bus, served by
+ * power-profiles-daemon or tuned-ppd). Independent of battery presence, so it
+ * shows on desktops too. Falls back in a plain browser or where no such daemon
+ * is running.
+ */
+function PowerSection() {
+  const bridge = getPowerBridge();
+  const profiles = usePowerProfiles();
+  const setProfile = useSetPowerProfile();
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Power">
+        <FallbackCard icon={Gauge}>
+          Power profiles need the Din desktop shell; they aren't available in a
+          plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const data = profiles.data;
+  // While a switch is in flight, show the requested profile as selected.
+  const selected = setProfile.isPending ? setProfile.variables : data?.active;
+
+  return (
+    <SectionShell
+      title="Power"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh power profiles"
+          title="Refresh power profiles"
+          disabled={!data?.available}
+          onClick={() => profiles.refetch()}
+        >
+          <RotateCw className={cn('size-4', profiles.isFetching && 'animate-spin')} />
+        </Button>
+      }
+    >
+      {profiles.isLoading ? (
+        <PowerSkeleton />
+      ) : profiles.isError ? (
+        <FallbackCard>Could not read power profiles.</FallbackCard>
+      ) : !data?.available ? (
+        <FallbackCard icon={Gauge}>
+          No power-profile daemon was detected. Enable power-profiles-daemon (or
+          tuned-ppd on Fedora) to switch profiles.
+        </FallbackCard>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div role="radiogroup" aria-label="Power profile" className="flex flex-col gap-2">
+            {data.profiles.map((id) => {
+              const meta = describePowerProfile(id);
+              const active = selected === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={setProfile.isPending}
+                  onClick={() => {
+                    if (id !== data.active) setProfile.mutate(id);
+                  }}
+                  className={cn(
+                    'flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    'disabled:cursor-not-allowed disabled:opacity-60',
+                    active
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border/60 bg-background/40 hover:bg-foreground/5',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border',
+                      active
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-muted-foreground/50',
+                    )}
+                    aria-hidden
+                  >
+                    {active && <Check className="size-3.5" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-foreground">{meta.label}</span>
+                    {meta.description && (
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {meta.description}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {setProfile.isError && (
+            <p className="text-sm text-destructive">
+              {setProfile.error instanceof Error
+                ? setProfile.error.message
+                : 'Could not switch power profile.'}
+            </p>
+          )}
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+function PowerSkeleton() {
+  return (
+    <div className="flex flex-col gap-2" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex items-start gap-3 rounded-xl border border-border/60 p-4">
+          <Skeleton className="size-5 shrink-0 rounded-full bg-foreground/10" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-24 bg-foreground/10" />
+            <Skeleton className="h-3 w-48 bg-foreground/10" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

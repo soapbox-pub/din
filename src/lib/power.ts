@@ -37,9 +37,25 @@ export interface PowerStatus {
   batteries: BatteryInfo[];
 }
 
+export interface PowerProfilesStatus {
+  /**
+   * False when no power-profiles daemon (power-profiles-daemon / tuned-ppd) is
+   * reachable, e.g. in a plain browser or on a session without one.
+   */
+  available: boolean;
+  /** The active profile id (e.g. "balanced"), or null when unavailable. */
+  active: string | null;
+  /** Profile ids offered by the daemon, ordered low -> high power. */
+  profiles: string[];
+}
+
 export interface PowerBridge {
   /** Battery/AC state. `available: false` when no battery is present. */
   status(): Promise<PowerStatus>;
+  /** Available power profiles + the active one. `available: false` with no daemon. */
+  profiles(): Promise<PowerProfilesStatus>;
+  /** Switch the active power profile; resolves to the new profiles state. */
+  setProfile(name: string): Promise<PowerProfilesStatus>;
 }
 
 declare global {
@@ -106,4 +122,40 @@ export function formatTimeRemaining(seconds: number): string {
   if (hours === 0) return `${mins} min`;
   if (mins === 0) return `${hours} hr`;
   return `${hours} hr ${mins} min`;
+}
+
+export interface PowerProfileMeta {
+  id: string;
+  label: string;
+  description: string;
+}
+
+/** Presentation for the three standard power-profiles-daemon profiles. */
+const PROFILE_META: Record<string, Omit<PowerProfileMeta, 'id'>> = {
+  'power-saver': {
+    label: 'Power Saver',
+    description: 'Reduces performance and background activity to extend battery life.',
+  },
+  balanced: {
+    label: 'Balanced',
+    description: 'Standard performance with sensible energy use.',
+  },
+  performance: {
+    label: 'Performance',
+    description: 'Highest performance; uses more energy and may run warmer.',
+  },
+};
+
+/**
+ * Human-readable label + description for a power-profile id. Unknown ids
+ * (a driver could expose others) fall back to a title-cased label.
+ */
+export function describePowerProfile(id: string): PowerProfileMeta {
+  const meta = PROFILE_META[id];
+  if (meta) return { id, ...meta };
+  const label = id
+    .split(/[-_]/)
+    .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word))
+    .join(' ');
+  return { id, label: label || id, description: '' };
 }

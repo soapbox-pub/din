@@ -859,6 +859,71 @@ async function readBattery(dir, name) {
   return { name, percent, status, secondsRemaining };
 }
 
+// Power profiles, via the net.hadess.PowerProfiles D-Bus API. The same
+// interface is served by power-profiles-daemon on most distros and by
+// tuned-ppd on Fedora, so one code path drives both. We speak to it over the
+// system bus with busctl (always present via systemd) rather than opening a
+// long-lived D-Bus connection, keeping this consistent with the other
+// external-tool bridges and adding no dependency. Absent daemon / busctl ->
+// available:false so the Settings panel falls back. Switching the active
+// profile is a plain writable property set, authorized by polkit for the
+// active session (the same path GNOME's toggle uses).
+const PPD_BUS = 'net.hadess.PowerProfiles';
+const PPD_PATH = '/net/hadess/PowerProfiles';
+const PPD_IFACE = 'net.hadess.PowerProfiles';
+const BUSCTL_TIMEOUT_MS = 5_000;
+
+/** Run busctl on the system bus; resolves stdout, rejects with a clean message. */
+function busctl(args, timeout = BUSCTL_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'busctl',
+      ['--system', ...args],
+      { timeout, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (!error) return resolve(stdout);
+        if (error.code === 'ENOENT') return reject(new Error('busctl-missing'));
+        const detail = (stderr || error.message || '').trim().split('\n')[0];
+        reject(new Error(detail || 'busctl failed'));
+      },
+    );
+  });
+}
+
+/** Read one PowerProfiles property as parsed JSON ({ type, data }). */
+async function ppdGetProperty(property) {
+  const out = await busctl([
+    '--json=short', 'get-property', PPD_BUS, PPD_PATH, PPD_IFACE, property,
+  ]);
+  return JSON.parse(out);
+}
+
+/** Current profile state, or available:false when the daemon/busctl is absent. */
+async function readPowerProfiles() {
+  try {
+    const [active, profiles] = await Promise.all([
+      ppdGetProperty('ActiveProfile'),
+      ppdGetProperty('Profiles'),
+    ]);
+    // Profiles is aa{sv}: [{ Profile: {type,data}, Driver: {...} }, ...],
+    // ordered low -> high power by the daemon.
+    const names = Array.isArray(profiles.data)
+      ? profiles.data
+          .map((entry) => entry?.Profile?.data)
+          .filter((name) => typeof name === 'string')
+      : [];
+    return {
+      available: names.length > 0,
+      active: typeof active.data === 'string' ? active.data : null,
+      profiles: names,
+    };
+  } catch {
+    // Daemon not running / not installed / busctl missing: treat as
+    // unavailable rather than surfacing a raw D-Bus error to the panel.
+    return { available: false, active: null, profiles: [] };
+  }
+}
+
 function registerPowerHandlers() {
   ipcMain.handle('power:status', async (event) => {
     assertShellSender(event);
@@ -884,6 +949,27 @@ function registerPowerHandlers() {
     }
 
     return { available: batteries.length > 0, acConnected, batteries };
+  });
+
+  ipcMain.handle('power:profiles', async (event) => {
+    assertShellSender(event);
+    return readPowerProfiles();
+  });
+
+  ipcMain.handle('power:setProfile', async (event, name) => {
+    assertShellSender(event);
+    if (typeof name !== 'string') throw new Error('A profile name is required');
+    // Only accept a profile the daemon actually offers, so a compromised
+    // renderer can't push arbitrary strings into the D-Bus set-property call.
+    const state = await readPowerProfiles();
+    if (!state.available) throw new Error('Power profiles are not available');
+    if (!state.profiles.includes(name)) {
+      throw new Error(`Unknown power profile "${name}"`);
+    }
+    await busctl([
+      'set-property', PPD_BUS, PPD_PATH, PPD_IFACE, 'ActiveProfile', 's', name,
+    ]);
+    return readPowerProfiles();
   });
 }
 
