@@ -202,8 +202,21 @@ export function useNotifications(): NotificationData {
   const hasUnread = newestTimestamp > cursor;
 
   const markAsRead = useCallback(() => {
-    if (newestTimestamp > cursor) setCursor(newestTimestamp);
-  }, [newestTimestamp, cursor, setCursor]);
+    if (newestTimestamp <= cursor) return;
+    // Advance the persisted cursor (roams + propagates to the bell instance
+    // via useAppData's cross-instance broadcast)…
+    setCursor(newestTimestamp);
+    // …and clear the unread dot immediately rather than waiting for the next
+    // relay check. Partial key match covers every kinds/authors variant. We
+    // intentionally don't invalidate: a refetch here could race the cursor
+    // update and re-light the dot (see ditto's markAsRead note).
+    if (user) {
+      queryClient.setQueriesData<boolean>(
+        { queryKey: ['notifications-unread', user.pubkey] },
+        false,
+      );
+    }
+  }, [newestTimestamp, cursor, setCursor, queryClient, user]);
 
   return {
     items,
@@ -240,7 +253,10 @@ export function useHasUnreadNotifications(): boolean {
   const authorsKey = authorsFilter ? authorsFilter.slice().sort().join(',') : 'all';
 
   const { data = false } = useQuery<boolean>({
-    queryKey: ['notifications-unread', user?.pubkey ?? '', kindsKey, authorsKey, cursor],
+    // Cursor is intentionally NOT in the key: it's read inside queryFn, so
+    // advancing it (markAsRead) doesn't spin up a fresh key whose placeholder
+    // data would carry the stale `true` and keep the dot lit.
+    queryKey: ['notifications-unread', user?.pubkey ?? '', kindsKey, authorsKey],
     enabled: !!user,
     placeholderData: (prev) => prev,
     queryFn: async ({ signal }) => {

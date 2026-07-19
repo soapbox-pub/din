@@ -86,6 +86,44 @@ function writeCache<T>(storageKey: string, record: AppDataRecord<T>): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cross-instance write propagation
+//
+// Each `useAppData` call keeps its own React state, so without this a write in
+// one component (e.g. the notifications panel advancing the read cursor) would
+// not reach another mounted instance of the same key (e.g. the menu-bar bell's
+// unread check) until the encrypted relay round-trip completed — making shared
+// state feel laggy. Broadcasting every local write lets sibling instances of
+// the same key adopt it immediately (last-write-wins by `updatedAt`), matching
+// a shared-store model.
+// ---------------------------------------------------------------------------
+
+const valueListeners = new Map<string, Set<(rec: AppDataRecord<unknown>) => void>>();
+
+/** Notify sibling instances of the same key about a fresh local write. */
+function broadcastValue(storageKey: string, rec: AppDataRecord<unknown>): void {
+  const listeners = valueListeners.get(storageKey);
+  if (!listeners) return;
+  for (const listener of listeners) listener(rec);
+}
+
+/** Subscribe to local writes for a storage key. Returns an unsubscribe fn. */
+function subscribeValue(
+  storageKey: string,
+  listener: (rec: AppDataRecord<unknown>) => void,
+): () => void {
+  let listeners = valueListeners.get(storageKey);
+  if (!listeners) {
+    listeners = new Set();
+    valueListeners.set(storageKey, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) valueListeners.delete(storageKey);
+  };
+}
+
 /**
  * Encrypted, local-first app data storage on Nostr (NIP-78 + NIP-44).
  *
@@ -174,6 +212,20 @@ export function useAppData<T>(
     },
   });
 
+  // Adopt fresher writes broadcast from sibling instances of the same key, so
+  // shared state (e.g. the notifications read cursor) propagates instantly
+  // instead of waiting for the encrypted relay round-trip.
+  useEffect(() => {
+    return subscribeValue(storageKey, (rec) => {
+      if (rec.updatedAt <= recordRef.current.updatedAt) return;
+      const parsed = schema.safeParse(rec.value);
+      if (!parsed.success) return;
+      const adopted: AppDataRecord<T> = { value: parsed.data, updatedAt: rec.updatedAt };
+      recordRef.current = adopted;
+      setRecordState(adopted);
+    });
+  }, [storageKey, schema]);
+
   // Merge a newer remote copy into local state (last-write-wins).
   useEffect(() => {
     if (!remote) return;
@@ -257,6 +309,7 @@ export function useAppData<T>(
       recordRef.current = rec;
       setRecordState(rec);
       writeCache(storageKey, rec);
+      broadcastValue(storageKey, rec);
       schedulePublish(rec);
     },
     [storageKey, schedulePublish],
