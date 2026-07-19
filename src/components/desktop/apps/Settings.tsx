@@ -48,6 +48,7 @@ import {
   uniqueModes,
 } from '@/lib/display';
 import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
+import { getZoomBridge } from '@/lib/zoom';
 import { useApplyDisplayLayout, useDisplayStatus } from '@/hooks/useDisplay';
 import {
   describePowerProfile,
@@ -589,15 +590,18 @@ function clampZoom(percent: number): number {
 }
 
 /**
- * Interface zoom - scales the whole desktop up or down like browser zoom. Lives
- * in AppConfig (persisted locally) and is applied to the document root, so it
- * works everywhere Din runs, including the Wayland/cage and browser sessions
- * where the xrandr arrangement below is unavailable.
+ * Interface zoom - DPI-style scaling of the whole desktop through Chromium
+ * page zoom (window.zoom preload bridge). Lives in AppConfig (persisted
+ * locally) and works in every Electron session, including Wayland/cage where
+ * the xrandr arrangement below is unavailable. In a plain browser there is no
+ * bridge, so the control points at the browser's own zoom instead.
  */
 function DisplayZoomControl({
+  available,
   value,
   onChange,
 }: {
+  available: boolean;
   value: number;
   onChange: (percent: number) => void;
 }) {
@@ -614,21 +618,28 @@ function DisplayZoomControl({
           </p>
         </div>
       </div>
-      <div className="flex items-center gap-4">
-        <Slider
-          id="interface-zoom"
-          aria-label="Interface zoom"
-          value={[value]}
-          min={MIN_ZOOM}
-          max={MAX_ZOOM}
-          step={ZOOM_STEP}
-          className="flex-1"
-          onValueChange={([v]) => onChange(clampZoom(v))}
-        />
-        <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
-          {value}%
-        </span>
-      </div>
+      {available ? (
+        <div className="flex items-center gap-4">
+          <Slider
+            id="interface-zoom"
+            aria-label="Interface zoom"
+            value={[value]}
+            min={MIN_ZOOM}
+            max={MAX_ZOOM}
+            step={ZOOM_STEP}
+            className="flex-1"
+            onValueChange={([v]) => onChange(clampZoom(v))}
+          />
+          <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
+            {value}%
+          </span>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Zoom needs the Din desktop shell. In a browser, use the browser's own
+          zoom instead (Ctrl and + / -).
+        </p>
+      )}
     </div>
   );
 }
@@ -706,7 +717,6 @@ function DisplaySection() {
   const arrangement = !bridge ? (
     <FallbackCard icon={Monitor}>
       Displays can't be arranged in a plain browser - it has none to arrange.
-      The zoom control above still works.
     </FallbackCard>
   ) : status.isLoading ? (
     <DisplayListSkeleton />
@@ -775,7 +785,11 @@ function DisplaySection() {
         </Button>
       }
     >
-      <DisplayZoomControl value={config.zoomLevel} onChange={setZoom} />
+      <DisplayZoomControl
+        available={getZoomBridge() !== undefined}
+        value={config.zoomLevel}
+        onChange={setZoom}
+      />
       {arrangement}
     </SectionShell>
   );

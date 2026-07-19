@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { AppContext, type AppConfig, type AppContextType, type Theme, type RelayMetadata, type BlossomServerMetadata } from '@/contexts/AppContext';
 import { ProfileThemeMetadataSchema } from '@/lib/profileTheme';
+import { getZoomBridge } from '@/lib/zoom';
 
 interface AppProviderProps {
   children: ReactNode;
@@ -113,18 +114,17 @@ export function AppProvider(props: AppProviderProps) {
 }
 
 /**
- * Hook to apply the interface zoom level to the document root. The stored
- * value is a percentage (100 = native), applied via the CSS `zoom` property so
- * it scales the whole desktop - windows, coordinates and hit-testing included -
- * everywhere Din runs (Electron, cage, or a plain browser).
+ * Hook to apply the interface zoom level. The stored value is a percentage
+ * (100 = native), applied through Chromium's page zoom via the Electron
+ * preload bridge - true DPI-style scaling where the layout viewport itself
+ * shrinks/grows, so the window manager's pixel math and xterm's cell
+ * measurements stay consistent. No-op in a plain browser (no bridge); CSS
+ * `zoom` is deliberately not a fallback because it scales rendering without
+ * the viewport, overflowing the desktop (see src/lib/zoom.ts).
  */
 function useApplyZoom(zoomLevel: number) {
   useEffect(() => {
-    const root = window.document.documentElement;
-    root.style.zoom = String(zoomLevel / 100);
-    return () => {
-      root.style.zoom = '';
-    };
+    getZoomBridge()?.set(zoomLevel / 100);
   }, [zoomLevel]);
 }
 

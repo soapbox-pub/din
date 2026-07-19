@@ -5,6 +5,7 @@
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //   - window.display: xrandr multi-output arrangement for the Settings app
+//   - window.zoom: Chromium page zoom (interface scale) for the Settings app
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -31,7 +32,7 @@
 // This preload is attached only to the shell's BrowserWindow - never to the
 // <webview>s the web browser app embeds, so remote sites can't see it.
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('fs', {
   /** Absolute path of the shell user's home directory. */
@@ -136,6 +137,19 @@ contextBridge.exposeInMainWorld('display', {
    * field is re-validated in the main process against xrandr's own report.
    */
   applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
+});
+
+// Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -
+// true DPI-style scaling: the layout viewport shrinks/grows so innerWidth,
+// viewport units and canvas measurements all stay consistent (unlike CSS
+// `zoom`, which scales rendering but not layout). Renderer-local via webFrame;
+// no IPC or main-process handler involved.
+contextBridge.exposeInMainWorld('zoom', {
+  /** Set the interface zoom factor (1 = native size). Clamped to 0.5-2. */
+  set: (factor) => {
+    if (!Number.isFinite(factor)) return;
+    webFrame.setZoomFactor(Math.min(2, Math.max(0.5, factor)));
+  },
 });
 
 // Power bridge (window.power), backed by the power:* handlers in main.cjs.

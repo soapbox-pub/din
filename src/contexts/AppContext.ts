@@ -52,9 +52,10 @@ export interface AppConfig {
    */
   wobblyWindows: boolean;
   /**
-   * Interface zoom level, as a percentage (100 = native size). Scales the
-   * entire Din desktop up or down, like browser zoom. Device-specific, so it
-   * is kept local and never synced across machines.
+   * Interface zoom level, as a percentage (100 = native size). Applied via
+   * Chromium page zoom in the Electron shell (DPI-style scaling of the whole
+   * desktop); has no effect in a plain browser, where the browser's own zoom
+   * applies. Device-specific, so it is kept local and never synced.
    */
   zoomLevel: number;
   /**
