@@ -59,6 +59,12 @@ export interface AppDefinition {
    * launch params. E.g. the browser's undocked DevTools window.
    */
   hidden?: boolean;
+  /**
+   * Single-instance apps only ever have one window. Launching one while it's
+   * already open just focuses (and un-minimizes) the existing window instead
+   * of spawning a duplicate. E.g. Settings.
+   */
+  singleInstance?: boolean;
 }
 
 /** All apps installed on the desktop, in launcher order. */
@@ -90,6 +96,7 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/settings.png',
     component: Settings,
     defaultSize: { width: 720, height: 520 },
+    singleInstance: true,
   },
   {
     id: 'app-store',

@@ -464,9 +464,11 @@ const DockItem = memo(function DockItem({
 
   const menu = (
     <ContextMenuContent className="z-[10000] w-52">
-      <ContextMenuItem onSelect={() => open(app.id)}>
-        <Plus aria-hidden /> New window
-      </ContextMenuItem>
+      {!app.singleInstance && (
+        <ContextMenuItem onSelect={() => open(app.id)}>
+          <Plus aria-hidden /> New window
+        </ContextMenuItem>
+      )}
       <ContextMenuItem onSelect={() => onTogglePin(app.id)}>
         {isPinned ? (
           <>

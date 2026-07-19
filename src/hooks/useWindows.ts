@@ -113,6 +113,28 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
     const app = getApp(appId);
     if (!app) return undefined;
 
+    // Single-instance apps (e.g. Settings) reuse their existing window: focus
+    // and un-minimize it, merging in any new launch params, rather than
+    // spawning a duplicate.
+    if (app.singleInstance) {
+      const existing = windows.find((w) => w.appId === appId && !w.closing);
+      if (existing) {
+        setWindows((ws) =>
+          raise(
+            params
+              ? ws.map((w) =>
+                  w.id === existing.id
+                    ? { ...w, params: { ...w.params, ...params } }
+                    : w,
+                )
+              : ws,
+            existing.id,
+          ),
+        );
+        return existing.id;
+      }
+    }
+
     const size = app.defaultSize ?? { width: 800, height: 560 };
     const id = nextWindowId();
 
@@ -138,7 +160,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       ];
     });
     return id;
-  }, [getApp]);
+  }, [getApp, windows]);
 
   /**
    * Begin closing a window: it stays mounted, marked `closing`, while the
