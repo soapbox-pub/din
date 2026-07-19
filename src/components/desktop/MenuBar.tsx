@@ -34,6 +34,7 @@ import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIn
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
 import { BrightnessGlyph, BrightnessPopoverBody } from '@/components/desktop/BrightnessIndicator';
 import { NotificationsMenuItem } from '@/components/desktop/NotificationsIndicator';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useClock } from '@/hooks/useClock';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
@@ -468,6 +469,7 @@ function AccountPanel({
 }) {
   const { currentUser, otherUsers, isLoading, setLogin, removeLogin } =
     useLoggedInAccounts();
+  const openUrl = useOpenUrl();
 
   const displayName = (account: Account): string =>
     account.metadata.name ?? 'Anonymous';
@@ -566,14 +568,13 @@ function AccountPanel({
 
         <div className="mt-3 flex gap-2">
           <PopoverClose asChild>
-            <Button asChild variant="secondary" size="sm" className="flex-1">
-              <a
-                href={`https://ditto.pub/${npub}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                View profile
-              </a>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="flex-1"
+              onClick={() => openUrl(`https://ditto.pub/${npub}`)}
+            >
+              View profile
             </Button>
           </PopoverClose>
           <PopoverClose asChild>
