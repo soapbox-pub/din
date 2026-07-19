@@ -2096,6 +2096,9 @@ app.whenReady().then(() => {
             { role: 'reload' },
             { role: 'forceReload' },
             { role: 'toggleDevTools', accelerator: 'CmdOrCtrl+Alt+I' },
+            { type: 'separator' },
+            // F11: fill the screen without restarting into the kiosk shell.
+            { role: 'togglefullscreen' },
           ],
         },
       ]),
