@@ -256,6 +256,15 @@ export function Dock({
   // and does no layout reads until a reveal is actually in progress, so
   // window drags - which fire pointermove at mouse-report rate - don't pay
   // for a forced reflow per event.
+  //
+  // Coordinate math alone isn't enough, though: <webview> guests and iframes
+  // are foreign surfaces - pointer input over them goes to the guest page and
+  // never reaches this document - so with, say, a maximized Browser window the
+  // pointermove listener is blind across the whole reveal zone. A real DOM
+  // strip at the bottom edge (rendered only while hidden, above the windows)
+  // catches the hover instead, and a pointerleave check on the footer handles
+  // the mirror-image problem of retracting after the pointer re-enters the
+  // guest surface.
   const [revealed, setRevealed] = useState(false);
   // A reveal only means something while the dock is hideable; drop stale
   // reveals as soon as nothing overlaps (adjust-state-during-render pattern).
@@ -288,48 +297,70 @@ export function Dock({
   if (entryIds.length === 0) return null;
 
   return (
-    <footer
-      aria-label="Dock"
-      className={cn(
-        'absolute inset-x-0 bottom-0 z-[9999] flex justify-center',
-        'motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out',
-        hidden && 'pointer-events-none translate-y-full',
+    <>
+      {/* Hot-edge trigger: a thin strip over the very bottom of the screen,
+          present only while the dock is hidden. Unlike the window pointermove
+          listener it's a real element above the windows, so it still sees the
+          pointer when a <webview> or iframe covers the bottom edge. */}
+      {hidden && (
+        <div
+          aria-hidden
+          className="absolute inset-x-0 bottom-0 z-[9999]"
+          style={{ height: REVEAL_ZONE }}
+          onPointerEnter={() => setRevealed(true)}
+        />
       )}
-      onFocus={() => setFocusWithin(true)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-          setFocusWithin(false);
-        }
-      }}
-    >
-      <div
-        ref={stripRef}
-        className="flex items-end"
-        onMouseMove={(e) => scheduleMagnify(e.clientX)}
-        onMouseLeave={() => scheduleMagnify(null)}
+      <footer
+        aria-label="Dock"
+        className={cn(
+          'absolute inset-x-0 bottom-0 z-[9999] flex justify-center',
+          'motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out',
+          hidden && 'pointer-events-none translate-y-full',
+        )}
+        onFocus={() => setFocusWithin(true)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setFocusWithin(false);
+          }
+        }}
+        onPointerLeave={(e) => {
+          // Retract when the pointer crosses into a foreign surface: no
+          // pointermove will ever arrive from over a <webview>/<iframe>, so
+          // the coordinate-based retraction above can't fire. Other exits
+          // (menus, slack zone, plain DOM) keep the pointermove semantics.
+          const into = e.relatedTarget instanceof Element ? e.relatedTarget.tagName : null;
+          if (into === 'WEBVIEW' || into === 'IFRAME') setRevealed(false);
+        }}
       >
-        {entryIds.map((appId) => {
-          const app = getApp(appId);
-          if (!app) return null;
-          return (
-            <DockItem
-              key={appId}
-              app={app}
-              registerRef={registerRef}
-              appWindows={windows.filter((w) => w.appId === appId)}
-              activeWindowId={activeWindow?.id ?? null}
-              isPinned={pinned.includes(appId)}
-              onTogglePin={togglePin}
-              onUninstall={
-                webApps.some((webApp) => webApp.id === appId)
-                  ? uninstall
-                  : undefined
-              }
-            />
-          );
-        })}
-      </div>
-    </footer>
+        <div
+          ref={stripRef}
+          className="flex items-end"
+          onMouseMove={(e) => scheduleMagnify(e.clientX)}
+          onMouseLeave={() => scheduleMagnify(null)}
+        >
+          {entryIds.map((appId) => {
+            const app = getApp(appId);
+            if (!app) return null;
+            return (
+              <DockItem
+                key={appId}
+                app={app}
+                registerRef={registerRef}
+                appWindows={windows.filter((w) => w.appId === appId)}
+                activeWindowId={activeWindow?.id ?? null}
+                isPinned={pinned.includes(appId)}
+                onTogglePin={togglePin}
+                onUninstall={
+                  webApps.some((webApp) => webApp.id === appId)
+                    ? uninstall
+                    : undefined
+                }
+              />
+            );
+          })}
+        </div>
+      </footer>
+    </>
   );
 }
 
