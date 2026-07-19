@@ -7,11 +7,11 @@ import {
   Globe,
   History,
   MonitorDown,
-  PanelLeft,
   Plus,
   Puzzle,
   RotateCw,
   Search,
+  Settings,
   Trash2,
   X,
 } from 'lucide-react';
@@ -28,6 +28,7 @@ import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   Popover,
   PopoverContent,
@@ -788,14 +789,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           }
         />
 
-        <NavButton
-          label={treeTabs ? 'Use horizontal tabs' : 'Use vertical tabs'}
-          title={treeTabs ? 'Horizontal tabs' : 'Vertical tabs'}
-          pressed={treeTabs}
-          onClick={() => setTreeTabs((v) => !v)}
-        >
-          <PanelLeft className="size-4" />
-        </NavButton>
+        <BrowserSettingsMenu treeTabs={treeTabs} onTreeTabsChange={setTreeTabs} />
 
         {devtools && (
           <NavButton
@@ -1210,43 +1204,40 @@ function TreeTabStrip({
 }) {
   const rows = useMemo(() => flattenTabTree(tabs, collapsed), [tabs, collapsed]);
   return (
-    <div className="flex w-60 shrink-0 flex-col border-r border-border/60 bg-background/40">
-      <div className="flex items-center justify-between gap-1 px-2.5 py-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Tabs</span>
-        <button
-          type="button"
-          aria-label="New tab"
-          title="New tab"
-          onClick={onNewTab}
-          className={cn(
-            'grid size-6 shrink-0 place-items-center rounded-md text-foreground/70',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
-      <div
-        role="tablist"
-        aria-label="Browser tabs"
-        aria-orientation="vertical"
-        className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 pb-2"
+    <div
+      role="tablist"
+      aria-label="Browser tabs"
+      aria-orientation="vertical"
+      className="flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/60 bg-background/40 p-1.5"
+    >
+      {rows.map(({ tab, depth, hasChildren }) => (
+        <TreeTabRow
+          key={tab.id}
+          tab={tab}
+          depth={depth}
+          hasChildren={hasChildren}
+          collapsed={collapsed.has(tab.id)}
+          active={tab.id === activeId}
+          onActivate={() => onActivate(tab.id)}
+          onClose={() => onCloseTab(tab.id)}
+          onToggleCollapsed={() => onToggleCollapsed(tab.id)}
+        />
+      ))}
+      {/* The new-tab button sits at the bottom of the tab list (Firefox-style). */}
+      <button
+        type="button"
+        aria-label="New tab"
+        title="New tab"
+        onClick={onNewTab}
+        className={cn(
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border/60 px-2 text-xs text-muted-foreground',
+          'hover:border-border hover:bg-foreground/5 hover:text-foreground',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        )}
       >
-        {rows.map(({ tab, depth, hasChildren }) => (
-          <TreeTabRow
-            key={tab.id}
-            tab={tab}
-            depth={depth}
-            hasChildren={hasChildren}
-            collapsed={collapsed.has(tab.id)}
-            active={tab.id === activeId}
-            onActivate={() => onActivate(tab.id)}
-            onClose={() => onCloseTab(tab.id)}
-            onToggleCollapsed={() => onToggleCollapsed(tab.id)}
-          />
-        ))}
-      </div>
+        <Plus className="size-4 shrink-0" />
+        <span className="truncate">New tab</span>
+      </button>
     </div>
   );
 }
@@ -1294,11 +1285,11 @@ function TreeTabRow({
       title={label}
       style={{ paddingInlineStart: 4 + depth * 14 }}
       className={cn(
-        'group flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md pr-1.5 text-xs',
+        'group flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         active
-          ? 'bg-background text-foreground shadow-sm'
-          : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+          ? 'border-border bg-background text-foreground shadow-sm'
+          : 'border-border/50 bg-background/30 text-muted-foreground hover:border-border hover:bg-foreground/5 hover:text-foreground',
       )}
     >
       {hasChildren ? (
@@ -1897,6 +1888,61 @@ function ExtensionIcon({ id }: { id: string }) {
       className="size-6 shrink-0 rounded-md"
       onError={() => setFailed(true)}
     />
+  );
+}
+
+/**
+ * Toolbar settings menu: a small popover of per-browser preferences. Houses
+ * the vertical (tree) tabs toggle, and is the home for future browser
+ * settings.
+ */
+function BrowserSettingsMenu({
+  treeTabs,
+  onTreeTabsChange,
+}: {
+  treeTabs: boolean;
+  onTreeTabsChange: (value: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Settings"
+          title="Settings"
+          className={cn(
+            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
+            'hover:bg-foreground/10 hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            open && 'bg-foreground/10 text-foreground',
+          )}
+        >
+          <Settings className="size-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} className="w-72">
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium">Settings</h3>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="browser-vertical-tabs" className="text-sm">
+                Vertical tabs
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Show tabs in a sidebar, nested under the tab that opened them.
+              </p>
+            </div>
+            <Switch
+              id="browser-vertical-tabs"
+              checked={treeTabs}
+              onCheckedChange={onTreeTabsChange}
+            />
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
