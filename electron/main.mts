@@ -2338,6 +2338,27 @@ app.on('web-contents-created', (_event, contents) => {
         }
       },
     });
+    // buildChromeContextMenu only offers "Open image in new tab" and "Copy
+    // image address" for images - no way to save the file itself. Insert
+    // Chrome's "Save Image" / "Copy Image" after "Open image in new tab".
+    // Saving reuses downloadURL(), which the will-download handler routes
+    // straight to ~/Downloads.
+    if (params.mediaType === 'image' && params.srcURL) {
+      menu.insert(
+        1,
+        new MenuItem({
+          label: 'Save Image',
+          click: () => contents.downloadURL(params.srcURL),
+        }),
+      );
+      menu.insert(
+        2,
+        new MenuItem({
+          label: 'Copy Image',
+          click: () => contents.copyImageAt(params.x, params.y),
+        }),
+      );
+    }
     // buildChromeContextMenu always appends an "Inspect" item last, wired
     // straight to inspectElement() - which opens devtools in a detached
     // native window (unusable in the single-window kiosk shell). Rebuild the
