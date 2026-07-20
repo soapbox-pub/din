@@ -516,8 +516,23 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           break;
         }
         case 'open': {
-          if (isAllowedTabUrl(command.url)) {
-            openTab(command.url, true, null, activeIdRef.current);
+          if (!isAllowedTabUrl(command.url)) break;
+          const existing = tabsRef.current;
+          // A fresh browser holds a single blank placeholder tab. Load the
+          // link straight into it rather than stacking a new tab on top; only
+          // spawn a separate tab once there's real browsing to preserve.
+          // Either way the link is a top-level tab, never nested under
+          // whatever happens to be active (unlike chrome.tabs.create above).
+          const soloBlank =
+            existing.length === 1 &&
+            existing[0].initialSrc === NEW_TAB_URL &&
+            existing[0].url === '';
+          if (soloBlank) {
+            const tab = createTab(command.url);
+            setTabs([tab]);
+            setActiveId(tab.id);
+          } else {
+            openTab(command.url, true, null, null);
           }
           break;
         }
