@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getAudioBridge } from '@/lib/audio';
-import type { AudioStatus } from '@/lib/audio';
+import type { AudioDevices, AudioStatus, AudioStreams } from '@/lib/audio';
 
 /**
  * TanStack Query hooks over the OS audio bridge (window.audio).
@@ -12,6 +12,8 @@ import type { AudioStatus } from '@/lib/audio';
  */
 
 const AUDIO_STATUS_KEY = ['audio', 'status'] as const;
+const AUDIO_DEVICES_KEY = ['audio', 'devices'] as const;
+const AUDIO_STREAMS_KEY = ['audio', 'streams'] as const;
 
 function requireBridge() {
   const audio = getAudioBridge();
@@ -47,4 +49,63 @@ export function useAudioMutations() {
   });
 
   return { setVolume, setMuted };
+}
+
+/** Output (sink) and input (source) devices (polls every few seconds). */
+export function useAudioDevices() {
+  const audio = getAudioBridge();
+  return useQuery<AudioDevices>({
+    queryKey: AUDIO_DEVICES_KEY,
+    queryFn: () => requireBridge().devices(),
+    enabled: audio !== undefined,
+    refetchInterval: 10_000,
+    retry: false,
+  });
+}
+
+/** Per-application playback streams (polls quickly; apps come and go). */
+export function useAudioStreams() {
+  const audio = getAudioBridge();
+  return useQuery<AudioStreams>({
+    queryKey: AUDIO_STREAMS_KEY,
+    queryFn: () => requireBridge().streams(),
+    enabled: audio !== undefined,
+    refetchInterval: 4_000,
+    retry: false,
+  });
+}
+
+/**
+ * Device selection, per-node volume/mute and the test tone. Writes invalidate
+ * all cached audio state so the panel converges; `setDefault` also primes the
+ * device list from its result to avoid a flash.
+ */
+export function useAudioDeviceMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['audio'] });
+
+  const setDefault = useMutation({
+    mutationFn: (id: number) => requireBridge().setDefault(id),
+    onSuccess: (devices: AudioDevices) =>
+      queryClient.setQueryData(AUDIO_DEVICES_KEY, devices),
+    onSettled: invalidate,
+  });
+
+  const setNodeVolume = useMutation({
+    mutationFn: ({ id, percent }: { id: number; percent: number }) =>
+      requireBridge().setNodeVolume(id, percent),
+    onSettled: invalidate,
+  });
+
+  const setNodeMuted = useMutation({
+    mutationFn: ({ id, muted }: { id: number; muted: boolean }) =>
+      requireBridge().setNodeMuted(id, muted),
+    onSettled: invalidate,
+  });
+
+  const test = useMutation({
+    mutationFn: (id: number) => requireBridge().test(id),
+  });
+
+  return { setDefault, setNodeVolume, setNodeMuted, test };
 }

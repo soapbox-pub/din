@@ -1061,10 +1061,12 @@ function registerPowerHandlers(): void {
 
 // ---------------------------------------------------------------------------
 // Audio bridge (window.audio), backed by wpctl (WirePlumber/PipeWire). Drives
-// the default sink's volume and mute for the menu-bar control, the Settings
-// sound panel, and the media-key OSD. Where wpctl is absent (no PipeWire) it
-// reports available:false and the UI falls back. Same trust boundary as the
-// other bridges: sender guard, argv execFile, volume re-clamped here.
+// the default sink's volume and mute for the menu-bar control, the media-key
+// OSD, and - for the Settings sound panel - output/input device enumeration
+// and selection, per-application (stream) volume, and a test tone played to a
+// chosen sink via pw-play. Where wpctl is absent (no PipeWire) it reports
+// available:false and the UI falls back. Same trust boundary as the other
+// bridges: sender guard, argv execFile, ids and volumes re-validated here.
 // ---------------------------------------------------------------------------
 
 const WPCTL_TIMEOUT_MS = 5_000;
@@ -1135,6 +1137,218 @@ async function audioToggleMute(): Promise<AudioState> {
   return audioStatus();
 }
 
+// --- Device / stream enumeration and per-node control. ---
+
+/** A sink (output) or source (input) device from `wpctl status`. */
+interface AudioDevice {
+  id: number;
+  name: string;
+  /** Volume 0-100 (may exceed 100 where PipeWire is boosted), or null. */
+  volume: number | null;
+  muted: boolean;
+  /** True for the default sink/source (the `*` marker in wpctl). */
+  isDefault: boolean;
+}
+
+/** A per-application playback stream from `wpctl status`. */
+interface AudioStream {
+  id: number;
+  name: string;
+  volume: number;
+  muted: boolean;
+}
+
+interface AudioDevices {
+  available: boolean;
+  sinks: AudioDevice[];
+  sources: AudioDevice[];
+}
+
+/** Pull "[vol: 0.60 MUTED]" out of a node line into a percentage and mute flag. */
+function parseVolumeTag(text: string): { volume: number | null; muted: boolean } {
+  const match = text.match(/\[vol:\s*([\d.]+)(\s+MUTED)?\]/);
+  if (!match) return { volume: null, muted: false };
+  return { volume: Math.round(Number.parseFloat(match[1]) * 100), muted: Boolean(match[2]) };
+}
+
+/**
+ * Parse `wpctl status`, returning the sinks, sources and playback-stream nodes
+ * under the top-level "Audio" tree only. Crucially this skips the "Video" tree,
+ * whose Sinks/Sources are cameras, and the port child rows under Streams (which
+ * carry a " > " link arrow). The `*` column marks the default sink/source.
+ */
+function parseAudioStatus(out: string): {
+  sinks: AudioDevice[];
+  sources: AudioDevice[];
+  streamNodes: { id: number; name: string }[];
+} {
+  const lines = out.split('\n');
+  const sinks: AudioDevice[] = [];
+  const sources: AudioDevice[] = [];
+  const streamNodes: { id: number; name: string }[] = [];
+
+  const start = lines.findIndex((l) => l === 'Audio');
+  if (start === -1) return { sinks, sources, streamNodes };
+
+  let section = '';
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    // Next top-level header ("Video", "Settings") ends the Audio tree.
+    if (/^\S/.test(line)) break;
+
+    const header = line.match(/[├└]─\s*(\w+):/);
+    if (header) {
+      section = header[1];
+      continue;
+    }
+
+    // "<tree chars> [*] <id>. <name>[ vol tag]". The `*` (not a tree char)
+    // sits outside the character class, so it's captured separately.
+    const node = line.match(/^[\s│├└─]*(\*)?\s*(\d+)\.\s+(.+?)\s*$/);
+    if (!node) continue;
+    const isDefault = node[1] === '*';
+    const id = Number.parseInt(node[2], 10);
+    const raw = node[3];
+
+    if (section === 'Sinks' || section === 'Sources') {
+      const { volume, muted } = parseVolumeTag(raw);
+      const device: AudioDevice = {
+        id,
+        name: raw.replace(/\s*\[vol:[^\]]*\]\s*$/, '').trim(),
+        volume,
+        muted,
+        isDefault,
+      };
+      (section === 'Sinks' ? sinks : sources).push(device);
+    } else if (section === 'Streams') {
+      // Port rows ("output_FL > ...:playback_FL") aren't controllable streams.
+      if (/\s>\s/.test(raw)) continue;
+      streamNodes.push({ id, name: raw.trim() });
+    }
+  }
+
+  return { sinks, sources, streamNodes };
+}
+
+/** Validate a caller-supplied wpctl node id as a non-negative integer. */
+function validNodeId(x: unknown): number {
+  const n = Number(x);
+  if (!Number.isInteger(n) || n < 0) throw new Error('Invalid device id');
+  return n;
+}
+
+/** All sinks and sources, or available:false when wpctl is absent. */
+async function audioDevices(): Promise<AudioDevices> {
+  try {
+    const { sinks, sources } = parseAudioStatus(await wpctl(['status']));
+    return { available: true, sinks, sources };
+  } catch (error) {
+    if (messageOf(error) === 'wpctl-missing') {
+      return { available: false, sinks: [], sources: [] };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Per-application playback streams. `wpctl status` doesn't print stream volume,
+ * so each node's level is fetched individually (there are usually only a few).
+ */
+async function audioStreams(): Promise<{ available: boolean; streams: AudioStream[] }> {
+  let nodes: { id: number; name: string }[];
+  try {
+    nodes = parseAudioStatus(await wpctl(['status'])).streamNodes;
+  } catch (error) {
+    if (messageOf(error) === 'wpctl-missing') return { available: false, streams: [] };
+    throw error;
+  }
+
+  const streams = await Promise.all(
+    nodes.map(async ({ id, name }) => {
+      const out = await wpctl(['get-volume', String(id)]).catch(() => '');
+      const match = out.match(/Volume:\s*([\d.]+)/);
+      return {
+        id,
+        name,
+        volume: match ? Math.round(Number.parseFloat(match[1]) * 100) : 100,
+        muted: /MUTED/.test(out),
+      };
+    }),
+  );
+  return { available: true, streams };
+}
+
+/** Make a sink or source the default by node id. */
+async function audioSetDefault(id: unknown): Promise<AudioDevices> {
+  await wpctl(['set-default', String(validNodeId(id))]);
+  return audioDevices();
+}
+
+/** Set any node's volume (0-100) by id - used for per-device and per-app control. */
+async function audioSetNodeVolume(id: unknown, pct: unknown): Promise<void> {
+  const node = validNodeId(id);
+  const v = clampVolume(pct);
+  await wpctl(['set-volume', '-l', '1.0', String(node), `${v}%`]);
+}
+
+/** Mute or unmute any node by id. */
+async function audioSetNodeMuted(id: unknown, muted: boolean): Promise<void> {
+  await wpctl(['set-mute', String(validNodeId(id)), muted ? '1' : '0']);
+}
+
+// --- Test tone (pw-play a short generated sine to a chosen sink). ---
+
+const PW_PLAY_TIMEOUT_MS = 5_000;
+let testTonePath: string | null = null;
+
+/** Lazily write a short 440 Hz sine WAV to a temp file; returns its path. */
+function testToneFile(): string {
+  if (testTonePath && fs.existsSync(testTonePath)) return testTonePath;
+  const sampleRate = 48_000;
+  const frames = Math.floor(sampleRate * 0.6);
+  const pcm = Buffer.alloc(frames * 2);
+  for (let i = 0; i < frames; i++) {
+    // Short linear fade in/out (~20ms) so the tone doesn't click.
+    const env = Math.min(1, Math.min(i, frames - i) / (sampleRate * 0.02));
+    const sample = Math.sin((2 * Math.PI * 440 * i) / sampleRate) * env * 0.3;
+    pcm.writeInt16LE(Math.round(sample * 32767), i * 2);
+  }
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16); // PCM fmt chunk size
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28); // byte rate
+  header.writeUInt16LE(2, 32); // block align
+  header.writeUInt16LE(16, 34); // bits/sample
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+
+  const file = path.join(app.getPath('temp'), 'din-test-tone.wav');
+  fs.writeFileSync(file, Buffer.concat([header, pcm]));
+  testTonePath = file;
+  return file;
+}
+
+/** Play the test tone to a specific sink node via pw-play. */
+function audioTest(id: unknown): Promise<void> {
+  const node = validNodeId(id);
+  const file = testToneFile();
+  return new Promise((resolve, reject) => {
+    execFile('pw-play', ['--target', String(node), file], { timeout: PW_PLAY_TIMEOUT_MS }, (error) => {
+      if (!error) return resolve();
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return reject(new Error('pw-play-missing'));
+      }
+      reject(new Error(messageOf(error).split('\n')[0] || 'pw-play failed'));
+    });
+  });
+}
+
 function registerAudioHandlers(): void {
   ipcMain.handle('audio:status', async (event) => {
     assertShellSender(event);
@@ -1147,6 +1361,30 @@ function registerAudioHandlers(): void {
   ipcMain.handle('audio:setMuted', async (event, muted) => {
     assertShellSender(event);
     return audioSetMuted(muted === true);
+  });
+  ipcMain.handle('audio:devices', async (event) => {
+    assertShellSender(event);
+    return audioDevices();
+  });
+  ipcMain.handle('audio:streams', async (event) => {
+    assertShellSender(event);
+    return audioStreams();
+  });
+  ipcMain.handle('audio:setDefault', async (event, id) => {
+    assertShellSender(event);
+    return audioSetDefault(id);
+  });
+  ipcMain.handle('audio:setNodeVolume', async (event, id, pct) => {
+    assertShellSender(event);
+    return audioSetNodeVolume(id, pct);
+  });
+  ipcMain.handle('audio:setNodeMuted', async (event, id, muted) => {
+    assertShellSender(event);
+    return audioSetNodeMuted(id, muted === true);
+  });
+  ipcMain.handle('audio:test', async (event, id) => {
+    assertShellSender(event);
+    return audioTest(id);
   });
 }
 

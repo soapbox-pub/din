@@ -253,9 +253,11 @@ contextBridge.exposeInMainWorld('power', {
 });
 
 // Audio bridge (window.audio), backed by the audio:* handlers in main.mts
-// (wpctl / PipeWire). Drives the default sink for the menu-bar control, the
-// Settings sound panel, and the media-key OSD. Mutations resolve to the new
-// { available, volume, muted } state. `available: false` when wpctl is absent.
+// (wpctl / PipeWire). Drives the default sink for the menu-bar control and the
+// media-key OSD (status/setVolume/setMuted resolve to { available, volume,
+// muted }), plus the Settings sound panel: device enumeration/selection
+// (devices/setDefault), per-app and per-device control (streams/setNodeVolume/
+// setNodeMuted) and a test tone (test). `available: false` when wpctl is absent.
 contextBridge.exposeInMainWorld('audio', {
   /** Default sink volume/mute. `available: false` when wpctl is absent. */
   status: () => ipcRenderer.invoke('audio:status'),
@@ -271,6 +273,39 @@ contextBridge.exposeInMainWorld('audio', {
    * @param {boolean} muted
    */
   setMuted: (muted) => ipcRenderer.invoke('audio:setMuted', muted),
+
+  /** List output (sink) and input (source) devices. */
+  devices: () => ipcRenderer.invoke('audio:devices'),
+
+  /** List per-application playback streams. */
+  streams: () => ipcRenderer.invoke('audio:streams'),
+
+  /**
+   * Make a device the default sink/source by node id. Resolves to the new
+   * device list.
+   * @param {number} id
+   */
+  setDefault: (id) => ipcRenderer.invoke('audio:setDefault', id),
+
+  /**
+   * Set any node's volume (0-100) by id (per-app streams, per-device).
+   * @param {number} id
+   * @param {number} percent
+   */
+  setNodeVolume: (id, percent) => ipcRenderer.invoke('audio:setNodeVolume', id, percent),
+
+  /**
+   * Mute or unmute any node by id.
+   * @param {number} id
+   * @param {boolean} muted
+   */
+  setNodeMuted: (id, muted) => ipcRenderer.invoke('audio:setNodeMuted', id, muted),
+
+  /**
+   * Play a short test tone to a sink by id.
+   * @param {number} id
+   */
+  test: (id) => ipcRenderer.invoke('audio:test', id),
 
   /**
    * Subscribe to media-key volume changes (VolumeUp/Down/Mute), for the OSD.

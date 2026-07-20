@@ -80,10 +80,12 @@ let
   # compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
   # variant below can swap in software rendering.
   # python3 must be on PATH for the Terminal app's pty host (pty-host.py),
-  # nmcli for the Settings app's WiFi bridge, and brightnessctl + gammastep for
-  # the Settings/menu-bar brightness bridge (backlight + night light).
+  # nmcli for the Settings app's WiFi bridge, brightnessctl + gammastep for the
+  # Settings/menu-bar brightness bridge (backlight + night light), wpctl
+  # (wireplumber) for the Settings sound bridge's device/stream control and
+  # pw-play (pipewire) for its test tone.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:$PATH
     exec ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.mts \
       --ozone-platform=wayland ${extraFlags}
@@ -101,11 +103,12 @@ in
   # Unprivileged user Din runs as. `networkmanager` group membership lets the
   # WiFi settings panel control connections without polkit prompts; `video`
   # lets the brightness bridge write the backlight (via brightnessctl's udev
-  # rules below) without root.
+  # rules below) without root; `audio` grants access to the sound devices the
+  # PipeWire sound bridge drives.
   users.users.web = {
     isNormalUser = true;
     description = "Din desktop user";
-    extraGroups = [ "networkmanager" "video" ];
+    extraGroups = [ "networkmanager" "video" "audio" ];
   };
 
   # brightnessctl ships udev rules that grant the `video` group write access to
@@ -158,6 +161,18 @@ in
   hardware.graphics.enable = true;
   hardware.enableRedistributableFirmware = true;
 
+  # PipeWire + WirePlumber back Din's sound panel (wpctl/pw-play via the
+  # Electron audio bridge): output/input device selection, per-app volume, and
+  # the test tone. rtkit lets the audio threads run at real-time priority.
+  # Socket-activated per user session, so the `web` cage session gets its own
+  # instance with no extra configuration.
+  security.rtkit.enable = true;
+  services.pipewire = {
+    enable = true;
+    alsa.enable = true;
+    pulse.enable = true;
+  };
+
   # Keep the image lean-ish.
   documentation.enable = false;
   environment.defaultPackages = [ ];
@@ -181,6 +196,14 @@ in
       memorySize = 4096;
       cores = 4;
       graphics = true;
+      # Emulated HDA card so the sound panel has a real sink/source to detect
+      # and select. `audiodev none` = a silent host backend (the demo host may
+      # have no audio); the guest device still enumerates and is controllable.
+      qemu.options = [
+        "-audiodev" "none,id=snd0"
+        "-device" "intel-hda"
+        "-device" "hda-duplex,audiodev=snd0"
+      ];
     };
   };
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BatteryFull,
   Bell,
@@ -12,10 +12,12 @@ import {
   Laptop,
   Loader2,
   Lock,
+  Mic,
   Minus,
   Monitor,
   Moon,
   MousePointer2,
+  Play,
   Palette,
   Plug,
   Plus,
@@ -66,8 +68,15 @@ import {
   useSetPowerProfile,
 } from '@/hooks/usePower';
 import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
-import { getAudioBridge } from '@/lib/audio';
-import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
+import { cleanAudioError, getAudioBridge } from '@/lib/audio';
+import type { AudioDevice, AudioStream } from '@/lib/audio';
+import {
+  useAudioDeviceMutations,
+  useAudioDevices,
+  useAudioMutations,
+  useAudioStatus,
+  useAudioStreams,
+} from '@/hooks/useAudio';
 import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
 import { getBrightnessBridge, MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
 import { useBrightnessMutations, useBrightnessStatus } from '@/hooks/useBrightness';
@@ -1608,15 +1617,249 @@ function BrightnessSection() {
   );
 }
 
+/** A small heading that groups a subsection within the Sound panel. */
+function SoundGroupHeading({ icon: Icon, children }: { icon: LucideIcon; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 pt-1 text-sm font-medium text-foreground">
+      <Icon className="size-4 text-muted-foreground" aria-hidden />
+      {children}
+    </div>
+  );
+}
+
 /**
- * Output volume and mute, via the audio bridge (window.audio, wpctl/PipeWire).
- * Works on any Linux session; falls back where PipeWire/wpctl is absent or in
- * a plain browser. Media keys drive the same sink and show the volume OSD.
+ * One selectable output/input device row: a radio to make it the default plus,
+ * for outputs, a button that plays a test tone through it.
+ */
+function AudioDeviceRow({
+  device,
+  kind,
+  onSelect,
+  onTest,
+  testing,
+}: {
+  device: AudioDevice;
+  kind: 'output' | 'input';
+  onSelect: () => void;
+  onTest?: () => void;
+  testing?: boolean;
+}) {
+  const Icon = kind === 'input' ? Mic : Volume2;
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 rounded-md border p-2.5',
+        device.isDefault
+          ? 'border-primary/50 bg-primary/5'
+          : 'border-border/60 bg-background/40',
+      )}
+    >
+      <button
+        type="button"
+        role="radio"
+        aria-checked={device.isDefault}
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span
+          className={cn(
+            'flex size-4 shrink-0 items-center justify-center rounded-full border',
+            device.isDefault ? 'border-primary' : 'border-muted-foreground/50',
+          )}
+          aria-hidden
+        >
+          {device.isDefault && <span className="size-2 rounded-full bg-primary" />}
+        </span>
+        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 truncate text-sm">{device.name}</span>
+        {device.isDefault && (
+          <span className="ml-auto shrink-0 text-xs text-muted-foreground">Default</span>
+        )}
+      </button>
+      {onTest && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 gap-1.5"
+          onClick={onTest}
+          disabled={testing}
+          aria-label={`Test ${device.name}`}
+          title="Play a test tone"
+        >
+          {testing ? (
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          ) : (
+            <Play className="size-3.5" aria-hidden />
+          )}
+          Test
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** A per-application volume row with a smooth local drag committed on release. */
+function AudioStreamRow({
+  stream,
+  onVolume,
+  onMuted,
+}: {
+  stream: AudioStream;
+  onVolume: (percent: number) => void;
+  onMuted: (muted: boolean) => void;
+}) {
+  const [value, setValue] = useState(stream.volume);
+  const [lastServer, setLastServer] = useState(stream.volume);
+  if (stream.volume !== lastServer) {
+    setLastServer(stream.volume);
+    setValue(stream.volume);
+  }
+  const shown = Math.min(100, value);
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0"
+        aria-label={stream.muted ? `Unmute ${stream.name}` : `Mute ${stream.name}`}
+        onClick={() => onMuted(!stream.muted)}
+      >
+        <VolumeGlyph
+          volume={shown}
+          muted={stream.muted}
+          className={cn('size-4', stream.muted && 'text-muted-foreground')}
+        />
+      </Button>
+      <span className="w-28 shrink-0 truncate text-sm" title={stream.name}>
+        {stream.name}
+      </span>
+      <Slider
+        aria-label={`${stream.name} volume`}
+        value={[stream.muted ? 0 : shown]}
+        min={0}
+        max={100}
+        step={1}
+        className="flex-1"
+        onValueChange={([v]) => {
+          if (stream.muted) onMuted(false);
+          setValue(v);
+        }}
+        onValueCommit={([v]) => onVolume(v)}
+      />
+      <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        {stream.muted ? 'Muted' : `${shown}%`}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A live microphone level meter driven by getUserMedia + an AnalyserNode - the
+ * standard web way to test an input. It records the system default source, so
+ * it reflects whichever input is selected above. Errors (no permission, no
+ * device) surface inline rather than throwing.
+ */
+function MicTest() {
+  const [active, setActive] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const stop = useCallback(() => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    void ctxRef.current?.close().catch(() => {});
+    ctxRef.current = null;
+    setLevel(0);
+  }, []);
+
+  useEffect(() => () => stop(), [stop]);
+
+  const start = useCallback(async () => {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const ctx = new AudioContext();
+      ctxRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const buffer = new Uint8Array(analyser.fftSize);
+      const tick = () => {
+        analyser.getByteTimeDomainData(buffer);
+        let peak = 0;
+        for (let i = 0; i < buffer.length; i++) {
+          peak = Math.max(peak, Math.abs(buffer[i] - 128));
+        }
+        setLevel(Math.min(1, peak / 128));
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+      setActive(true);
+    } catch (err) {
+      setError(cleanAudioError(err));
+      setActive(false);
+    }
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
+        <Button
+          variant={active ? 'secondary' : 'ghost'}
+          size="sm"
+          className="shrink-0 gap-1.5"
+          onClick={() => {
+            if (active) {
+              stop();
+              setActive(false);
+            } else {
+              void start();
+            }
+          }}
+        >
+          <Mic className="size-3.5" aria-hidden />
+          {active ? 'Stop' : 'Test mic'}
+        </Button>
+        <div
+          className="h-2 flex-1 overflow-hidden rounded-full bg-muted"
+          role="meter"
+          aria-label="Microphone input level"
+          aria-valuenow={Math.round(level * 100)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-75"
+            style={{ width: `${Math.round(level * 100)}%` }}
+          />
+        </div>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Sound: the default sink's volume/mute plus, when the audio bridge
+ * (window.audio, wpctl/PipeWire) is present, output/input device selection, a
+ * per-output test tone, a microphone level test, and per-application volume.
+ * Falls back where PipeWire/wpctl is absent or in a plain browser. Media keys
+ * drive the same default sink and show the volume OSD.
  */
 function SoundSection() {
   const bridge = getAudioBridge();
+  const { toast } = useToast();
   const status = useAudioStatus();
   const { setVolume, setMuted } = useAudioMutations();
+  const devices = useAudioDevices();
+  const streams = useAudioStreams();
+  const { setDefault, setNodeVolume, setNodeMuted, test } = useAudioDeviceMutations();
 
   const serverVolume = status.data?.volume ?? 0;
   const muted = status.data?.muted ?? false;
@@ -1631,6 +1874,16 @@ function SoundSection() {
     setValue(serverVolume);
   }
 
+  const runTest = (device: AudioDevice) =>
+    test.mutate(device.id, {
+      onError: (err) =>
+        toast({
+          title: 'Test tone failed',
+          description: cleanAudioError(err),
+          variant: 'destructive',
+        }),
+    });
+
   if (!bridge) {
     return (
       <SectionShell title="Sound">
@@ -1642,6 +1895,10 @@ function SoundSection() {
     );
   }
 
+  const sinks = devices.data?.sinks ?? [];
+  const sources = devices.data?.sources ?? [];
+  const appStreams = streams.data?.streams ?? [];
+
   return (
     <SectionShell
       title="Sound"
@@ -1652,9 +1909,19 @@ function SoundSection() {
           aria-label="Refresh sound status"
           title="Refresh sound status"
           disabled={!status.data?.available}
-          onClick={() => status.refetch()}
+          onClick={() => {
+            void status.refetch();
+            void devices.refetch();
+            void streams.refetch();
+          }}
         >
-          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+          <RotateCw
+            className={cn(
+              'size-4',
+              (status.isFetching || devices.isFetching || streams.isFetching) &&
+                'animate-spin',
+            )}
+          />
         </Button>
       }
     >
@@ -1720,6 +1987,63 @@ function SoundSection() {
               onCheckedChange={(checked) => setMuted.mutate(checked)}
             />
           </div>
+
+          {/* Output devices */}
+          <SoundGroupHeading icon={Volume2}>Output device</SoundGroupHeading>
+          {sinks.length > 0 ? (
+            <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Output device">
+              {sinks.map((device) => (
+                <AudioDeviceRow
+                  key={device.id}
+                  device={device}
+                  kind="output"
+                  onSelect={() => setDefault.mutate(device.id)}
+                  onTest={() => runTest(device)}
+                  testing={test.isPending && test.variables === device.id}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No output devices found.</p>
+          )}
+
+          {/* Input devices */}
+          <SoundGroupHeading icon={Mic}>Input device</SoundGroupHeading>
+          {sources.length > 0 ? (
+            <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Input device">
+              {sources.map((device) => (
+                <AudioDeviceRow
+                  key={device.id}
+                  device={device}
+                  kind="input"
+                  onSelect={() => setDefault.mutate(device.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No input devices found.</p>
+          )}
+          <MicTest />
+
+          {/* Per-application volume */}
+          <SoundGroupHeading icon={Volume2}>App volume</SoundGroupHeading>
+          {appStreams.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              {appStreams.map((stream) => (
+                <AudioStreamRow
+                  key={stream.id}
+                  stream={stream}
+                  onVolume={(percent) => setNodeVolume.mutate({ id: stream.id, percent })}
+                  onMuted={(m) => setNodeMuted.mutate({ id: stream.id, muted: m })}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Nothing is playing. Apps appear here with their own volume while
+              they play audio.
+            </p>
+          )}
         </div>
       )}
     </SectionShell>
