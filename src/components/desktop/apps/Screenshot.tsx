@@ -1,22 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Camera,
-  Copy,
-  Crop,
-  Download,
-  ImageIcon,
-  Loader2,
-  MonitorOff,
-  Save,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { Camera, Copy, Crop, Download, Loader2, MonitorOff, Save, X } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { getFsBridge, cleanFsError, joinPath } from '@/lib/fs';
+import { GENIE_DURATION_MS } from '@/lib/genie';
 import {
   cleanScreenshotError,
   dataUrlToBlob,
@@ -44,27 +34,33 @@ const MIN_SELECTION = 0.01;
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
 /**
- * Resolve after the browser has painted the next frame(s). Used to let the
- * compositor commit our window's hidden state before the shell is captured.
+ * Resolve once the desktop has visually settled after this window minimizes:
+ * the genie animation has fully swallowed the window into the dock and the
+ * compositor has painted the result. Without waiting out the full genie
+ * timeline, the capture catches the window mid-animation.
  */
-function nextPaint(delayMs = 90): Promise<void> {
+function awaitHidden(): Promise<void> {
+  const animMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ? 0
+    : GENIE_DURATION_MS;
   return new Promise((resolve) => {
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => setTimeout(resolve, delayMs)),
-    );
+    setTimeout(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 50)));
+    }, animMs);
   });
 }
 
 /**
- * A minimal screenshot tool: capture the Din desktop as a PNG, preview it,
- * optionally crop to a drag-selected region, then copy it to the clipboard,
- * save it to ~/Pictures, or download it.
+ * A minimal screenshot tool in the spirit of Budgie's: a compact launcher
+ * with a delay picker and one capture button, then a clean preview where the
+ * shot can be cropped (drag a region), copied, saved to ~/Pictures, or
+ * downloaded.
  *
  * Capture is backed by the Electron shell's screenshot bridge
- * (webContents.capturePage). The tool minimizes its own window for the capture
- * so it stays out of the shot; an optional delay lets the user arrange other
- * windows first. Outside the Electron shell (a plain browser) there is no
- * bridge, so the app shows a short fallback instead.
+ * (webContents.capturePage). The tool minimizes its own window and waits out
+ * the genie animation so it never appears in the shot. Outside the Electron
+ * shell (a plain browser) there is no bridge, so the app shows a short
+ * fallback instead.
  */
 export function Screenshot({ windowId }: AppComponentProps) {
   const { toast } = useToast();
@@ -89,11 +85,11 @@ export function Screenshot({ windowId }: AppComponentProps) {
     setError(null);
     setSelection(null);
     setBusy(true);
-    // Hide our own window so it isn't part of the capture, then wait for the
-    // compositor to paint the hidden state before snapping the shell.
+    // Hide our own window so it isn't part of the capture, and wait for its
+    // genie animation to finish so it isn't caught mid-flight either.
     minimize(windowId);
     try {
-      await nextPaint();
+      await awaitHidden();
       setImage(await b.capture());
     } catch (e) {
       setError(cleanScreenshotError(e));
@@ -255,6 +251,77 @@ export function Screenshot({ windowId }: AppComponentProps) {
   }
 
   const capturing = busy || countdown !== null;
+
+  // --- Launcher (no capture yet) -------------------------------------------
+
+  if (!image) {
+    return (
+      <div className="grid h-full w-full place-items-center bg-background p-6">
+        <div className="flex w-full max-w-xs flex-col items-center gap-6 text-center">
+          <div className="grid size-16 place-items-center rounded-2xl bg-muted">
+            {countdown !== null ? (
+              <span
+                aria-live="polite"
+                className="text-3xl font-semibold tabular-nums text-foreground"
+              >
+                {countdown}
+              </span>
+            ) : (
+              <Camera className="size-8 text-muted-foreground" aria-hidden />
+            )}
+          </div>
+
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+
+          <div
+            className="flex items-center gap-1 rounded-lg bg-muted p-1"
+            role="group"
+            aria-label="Capture delay"
+          >
+            {DELAYS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDelay(d)}
+                disabled={capturing}
+                aria-pressed={delay === d}
+                className={cn(
+                  'rounded-md px-3 py-1 text-sm font-medium transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'disabled:opacity-50',
+                  delay === d
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {d === 0 ? 'No delay' : `${d}s`}
+              </button>
+            ))}
+          </div>
+
+          <Button size="lg" className="w-full" onClick={capture} disabled={capturing}>
+            {busy ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <Camera className="size-4" aria-hidden />
+            )}
+            {countdown !== null
+              ? `Capturing in ${countdown}…`
+              : busy
+                ? 'Capturing…'
+                : 'Take Screenshot'}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Preview -------------------------------------------------------------
+
   const sel = selection && {
     left: `${Math.min(selection.x0, selection.x1) * 100}%`,
     top: `${Math.min(selection.y0, selection.y1) * 100}%`,
@@ -264,160 +331,75 @@ export function Screenshot({ windowId }: AppComponentProps) {
 
   return (
     <div className="flex h-full w-full flex-col bg-background text-foreground">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
-        <div className="mr-auto flex items-center gap-2 font-medium">
-          <Camera className="size-5 text-muted-foreground" aria-hidden />
-          <span>Screenshot</span>
-        </div>
-
+      <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4">
         <div
-          className="flex items-center gap-1 rounded-lg bg-muted p-1"
-          role="group"
-          aria-label="Capture delay"
+          className="relative inline-block cursor-crosshair touch-none select-none"
+          onPointerDown={onSelectDown}
+          onPointerMove={onSelectMove}
+          onPointerUp={onSelectUp}
         >
-          {DELAYS.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setDelay(d)}
-              disabled={capturing}
-              aria-pressed={delay === d}
-              className={cn(
-                'rounded-md px-2.5 py-1 text-sm font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                'disabled:opacity-50',
-                delay === d
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {d === 0 ? 'No delay' : `${d}s`}
-            </button>
-          ))}
-        </div>
-
-        <Button onClick={capture} disabled={capturing}>
-          {capturing ? (
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-          ) : (
-            <Camera className="size-4" aria-hidden />
+          <img
+            ref={imgRef}
+            src={image.dataUrl}
+            alt={`Screenshot, ${image.width} by ${image.height} pixels`}
+            width={image.width}
+            height={image.height}
+            draggable={false}
+            className="h-auto max-w-full rounded-lg border border-border shadow-lg"
+          />
+          {sel && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute border-2 border-dashed border-primary bg-primary/10"
+              style={sel}
+            />
           )}
-          {countdown !== null
-            ? `Capturing in ${countdown}…`
-            : busy
-              ? 'Capturing…'
-              : image
-                ? 'New screenshot'
-                : 'Capture'}
-        </Button>
+        </div>
       </div>
 
-      {/* Preview / empty state */}
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {error ? (
-          <div className="grid h-full place-items-center text-center">
-            <div className="max-w-sm space-y-2">
-              <p className="text-sm font-medium text-destructive">Capture failed</p>
-              <p className="text-sm text-muted-foreground">{error}</p>
-            </div>
-          </div>
-        ) : image ? (
-          <div className="flex flex-col items-center gap-2">
-            <div
-              className="relative inline-block cursor-crosshair touch-none select-none"
-              onPointerDown={onSelectDown}
-              onPointerMove={onSelectMove}
-              onPointerUp={onSelectUp}
-            >
-              <img
-                ref={imgRef}
-                src={image.dataUrl}
-                alt={`Screenshot, ${image.width} by ${image.height} pixels`}
-                width={image.width}
-                height={image.height}
-                draggable={false}
-                className="h-auto max-w-full rounded-lg border border-border shadow-lg"
-              />
-              {sel && (
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute border-2 border-dashed border-primary bg-primary/10"
-                  style={sel}
-                />
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Drag on the image to select a region to crop.
-            </p>
-          </div>
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2">
+        <span className="mr-auto text-xs text-muted-foreground">
+          {image.width} &times; {image.height}
+          {!selection && <span className="max-sm:hidden"> &middot; drag to crop</span>}
+        </span>
+        {selection ? (
+          <>
+            <Button size="sm" onClick={cropToSelection}>
+              <Crop className="size-4" aria-hidden />
+              Crop
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelection(null)}>
+              <X className="size-4" aria-hidden />
+              Cancel
+            </Button>
+          </>
         ) : (
-          <div className="grid h-full place-items-center">
-            <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
-              <ImageIcon
-                className="mx-auto mb-3 size-8 text-muted-foreground"
-                aria-hidden
-              />
-              <p className="text-sm text-muted-foreground">
-                Capture your whole desktop as an image, then crop, copy, or save
-                it. The Screenshot window hides itself while capturing.
-              </p>
-            </div>
-          </div>
+          <>
+            <Button size="sm" variant="ghost" onClick={copy}>
+              <Copy className="size-4" aria-hidden />
+              Copy
+            </Button>
+            {fs && (
+              <Button size="sm" variant="ghost" onClick={save} disabled={saving}>
+                {saving ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : (
+                  <Save className="size-4" aria-hidden />
+                )}
+                Save
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={download}>
+              <Download className="size-4" aria-hidden />
+              Download
+            </Button>
+            <Button size="sm" onClick={() => setImage(null)} disabled={capturing}>
+              <Camera className="size-4" aria-hidden />
+              New
+            </Button>
+          </>
         )}
       </div>
-
-      {/* Action bar (only with a capture) */}
-      {image && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">
-          <span className="mr-auto text-sm text-muted-foreground">
-            {image.width} &times; {image.height}
-          </span>
-          {selection ? (
-            <>
-              <Button variant="secondary" onClick={cropToSelection}>
-                <Crop className="size-4" aria-hidden />
-                Crop to selection
-              </Button>
-              <Button variant="ghost" onClick={() => setSelection(null)}>
-                <X className="size-4" aria-hidden />
-                Clear
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="secondary" onClick={copy}>
-                <Copy className="size-4" aria-hidden />
-                Copy
-              </Button>
-              {fs && (
-                <Button onClick={save} disabled={saving}>
-                  {saving ? (
-                    <Loader2 className="size-4 animate-spin" aria-hidden />
-                  ) : (
-                    <Save className="size-4" aria-hidden />
-                  )}
-                  Save to Pictures
-                </Button>
-              )}
-              <Button variant="outline" onClick={download}>
-                <Download className="size-4" aria-hidden />
-                Download
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setImage(null);
-                  setError(null);
-                }}
-              >
-                <Trash2 className="size-4" aria-hidden />
-                Discard
-              </Button>
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }

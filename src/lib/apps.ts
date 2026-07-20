@@ -110,7 +110,7 @@ export const APPS: readonly AppDefinition[] = [
     name: 'Screenshot',
     icon: Camera,
     component: Screenshot,
-    defaultSize: { width: 720, height: 560 },
+    defaultSize: { width: 560, height: 460 },
   },
   {
     // The Web Browser's "undock into separate window" inspector. Hidden from
