@@ -647,6 +647,9 @@ const TerminalSession = memo(function TerminalSession({
     openUrlRef.current = openUrl;
   });
 
+  /** Heals the WebGL renderer (atlas clear or full rebuild); set while the session is live. */
+  const recoverRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!bridge || !container) return;
@@ -681,10 +684,16 @@ const TerminalSession = memo(function TerminalSession({
     // up and let xterm fall back to the DOM renderer.
     let contextLosses = 0;
     let lossResetTimer: number | undefined;
+    let activeWebgl: WebglAddon | null = null;
+    let activeGl: WebGL2RenderingContext | null = null;
     const loadWebgl = () => {
       try {
         const webgl = new WebglAddon();
         webgl.onContextLoss(() => {
+          if (activeWebgl === webgl) {
+            activeWebgl = null;
+            activeGl = null;
+          }
           webgl.dispose();
           window.clearTimeout(lossResetTimer);
           contextLosses += 1;
@@ -697,6 +706,17 @@ const TerminalSession = memo(function TerminalSession({
           }
         });
         term.loadAddon(webgl);
+        activeWebgl = webgl;
+        // The addon only notices context loss via the webglcontextlost DOM
+        // event, but a GPU reset can kill the context without that event ever
+        // firing — the addon then keeps drawing into a dead context (black
+        // pixelation that survives refocus and atlas clears). The context
+        // isn't public, so reach into the renderer's private field to let
+        // recoverRenderer() poll isContextLost() directly; if a future addon
+        // version renames it we just lose the probe, not the renderer.
+        activeGl =
+          (webgl as unknown as { _renderer?: { _gl?: WebGL2RenderingContext } })
+            ._renderer?._gl ?? null;
         // Force a full repaint onto the fresh context/atlas.
         term.refresh(0, term.rows - 1);
         // Losses that happen hours apart are independent GPU hiccups, not a
@@ -826,26 +846,45 @@ const TerminalSession = memo(function TerminalSession({
       }
     });
 
-    // The WebGL glyph atlas can silently corrupt (glyphs render as black
-    // boxes) after GPU resets or OS suspend/resume — a known Chromium/driver
-    // issue. clearTextureAtlas() forces every glyph to be re-rasterized, so
-    // run it whenever the app regains focus or becomes visible again.
-    const clearAtlas = () => {
-      if (!disposed) term.clearTextureAtlas();
+    // Two flavors of GPU-side corruption, two remedies:
+    //  - The glyph atlas silently corrupts (black boxes) after GPU resets or
+    //    suspend/resume; clearTextureAtlas() re-rasterizes every glyph.
+    //  - The GL context itself dies without webglcontextlost ever firing,
+    //    which makes atlas clears no-ops — only a full addon rebuild (fresh
+    //    canvas + context) recovers.
+    const recoverRenderer = () => {
+      if (disposed) return;
+      if (activeWebgl && activeGl?.isContextLost()) {
+        const dead = activeWebgl;
+        activeWebgl = null;
+        activeGl = null;
+        dead.dispose();
+        loadWebgl();
+      } else {
+        term.clearTextureAtlas();
+      }
     };
+    recoverRef.current = recoverRenderer;
     const onVisibilityChange = () => {
-      if (!document.hidden) clearAtlas();
+      if (!document.hidden) recoverRenderer();
     };
-    window.addEventListener('focus', clearAtlas);
+    window.addEventListener('focus', recoverRenderer);
     document.addEventListener('visibilitychange', onVisibilityChange);
     // In fullscreen kiosk mode (Aladdin) the window never blurs and the
-    // document never hides, so neither trigger above ever fires — yet the
-    // atlas still decays over long sessions (glyphs degrade into black
-    // pixelation). Clear it on a timer as a backstop; re-rasterization is
-    // lazy, so a clear over an intact atlas costs nothing visible.
-    const atlasInterval = window.setInterval(() => {
-      if (!document.hidden) clearAtlas();
-    }, 60_000);
+    // document never hides, so neither trigger above ever fires. Poll as a
+    // backstop: the isContextLost() probe is free, so run it every few
+    // seconds; the atlas clear forces a repaint, so throttle it to about a
+    // minute.
+    let healthTicks = 0;
+    const healthInterval = window.setInterval(() => {
+      if (disposed || document.hidden) return;
+      healthTicks += 1;
+      if (activeWebgl && activeGl?.isContextLost()) {
+        recoverRenderer();
+      } else if (healthTicks % 12 === 0) {
+        term.clearTextureAtlas();
+      }
+    }, 5_000);
 
     const offData = bridge.onData((id, data) => {
       if (sessionId === null) {
@@ -907,10 +946,11 @@ const TerminalSession = memo(function TerminalSession({
       fontSizeListeners.delete(applyFontSize);
       container.removeEventListener('wheel', onWheel, { capture: true });
       container.removeEventListener('mousedown', focus);
-      window.removeEventListener('focus', clearAtlas);
+      window.removeEventListener('focus', recoverRenderer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.clearInterval(atlasInterval);
+      window.clearInterval(healthInterval);
       window.clearTimeout(lossResetTimer);
+      recoverRef.current = null;
       offData();
       offExit();
       oscHandler.dispose();
@@ -923,13 +963,13 @@ const TerminalSession = memo(function TerminalSession({
   }, [bridge, paneId]);
 
   // When this pane's tab becomes active, refit (its container had zero size
-  // while hidden, so xterm's cached dimensions are stale) and re-rasterize
-  // the glyph atlas in case it corrupted while the tab was in the background.
+  // while hidden, so xterm's cached dimensions are stale) and heal the
+  // renderer in case it corrupted while the tab was in the background.
   useEffect(() => {
     if (!active) return;
     requestAnimationFrame(() => {
       fitRef.current?.fit();
-      termRef.current?.clearTextureAtlas();
+      recoverRef.current?.();
     });
   }, [active]);
 
