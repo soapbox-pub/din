@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { Bell, CheckCheck } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import type { NostrEvent } from '@nostrify/nostrify';
@@ -33,8 +33,9 @@ import {
  *
  * The bell shows a badge dot while unread interactions exist (a cheap
  * one-event relay check). Clicking it opens a popover with the grouped
- * notification list; opening the popover marks everything currently loaded as
- * read. Renders nothing when signed out — notifications are per-account.
+ * notification list; unread rows stay highlighted while it's open and the read
+ * cursor advances when it closes, so viewing the list dismisses the badge.
+ * Renders nothing when signed out — notifications are per-account.
  */
 export const NotificationsMenuItem = memo(function NotificationsMenuItem() {
   const { user } = useCurrentUser();
@@ -77,6 +78,17 @@ export const NotificationsMenuItem = memo(function NotificationsMenuItem() {
 function NotificationsPanel() {
   const { items, isLoading, hasFetched, hasNextPage, isFetchingNextPage, fetchNextPage, hasUnread, markAsRead } =
     useNotifications();
+
+  // Dismiss-on-view: unread rows stay highlighted while the panel is open, and
+  // the read cursor advances when it closes. The panel only mounts while the
+  // popover is open, so its unmount cleanup is exactly "the user dismissed the
+  // list". A ref keeps the latest markAsRead so the once-only cleanup still
+  // closes over the freshest cursor/newest-timestamp.
+  const markAsReadRef = useRef(markAsRead);
+  useEffect(() => {
+    markAsReadRef.current = markAsRead;
+  }, [markAsRead]);
+  useEffect(() => () => markAsReadRef.current(), []);
 
   return (
     <div className="flex max-h-[70vh] flex-col">
