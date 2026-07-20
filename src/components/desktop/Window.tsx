@@ -9,6 +9,7 @@ import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
+import { WindowFocusContext } from '@/contexts/WindowFocusContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import {
   createModel,
@@ -868,16 +869,15 @@ export const Window = memo(function Window({
       ref={sectionRef}
       aria-label={app.name}
       onPointerDown={() => focus(win.id)}
-      // Clicking a window's content should raise it. onPointerDown alone
-      // handles plain DOM app content (pointer events bubble to here), but
-      // <webview> guests and iframes (Browser, installed web apps) are foreign
-      // surfaces: pointer input over them goes to the guest and never reaches
-      // this document, so a click inside them would never raise the window.
-      // Clicking into such a surface does move focus to its host element,
-      // which fires a bubbling focusin - and React's onFocus is built on
-      // focusin, so it fires here too. This one handler covers webview,
-      // iframe, and focusable DOM content alike. focus() early-returns when
-      // the window is already on top, so redundant focusins are cheap.
+      // Raise when focus lands anywhere inside the window (React's onFocus is
+      // the bubbling focusin), so keyboard users tabbing into a window's
+      // content bring it forward. Note this does NOT cover clicks into
+      // <webview>/<iframe> guests: those are foreign surfaces whose input
+      // never reaches this document, and their host elements don't reliably
+      // fire focus events either (Electron webviews in particular, and
+      // guest-to-guest focus moves fire nothing here at all). Clicks into web
+      // content raise the window via GuestClickShield overlays instead, whose
+      // pointerdown bubbles to the handler above.
       onFocus={() => focus(win.id)}
       style={geometry}
       onAnimationEnd={(e) => {
@@ -975,17 +975,22 @@ export const Window = memo(function Window({
       </header>
 
       <div className="relative flex-1 overflow-hidden bg-background/80">
-        <WindowTitlebarContext.Provider value={setTitlebar}>
-          <WindowAccentContext.Provider value={setAccent}>
-            {/* Built-in apps are code-split (React.lazy); the fallback shows
-                while an app's chunk loads on its first launch. */}
-            <Suspense
-              fallback={<div className="size-full animate-pulse bg-muted/40" />}
-            >
-              <WindowContent component={app.component} windowId={win.id} params={win.params} />
-            </Suspense>
-          </WindowAccentContext.Provider>
-        </WindowTitlebarContext.Provider>
+        {/* isTop lets guest surfaces (webview/iframe) shield themselves while
+            the window is stacked behind another, so clicking into web content
+            raises the window (see GuestClickShield). */}
+        <WindowFocusContext.Provider value={isTop}>
+          <WindowTitlebarContext.Provider value={setTitlebar}>
+            <WindowAccentContext.Provider value={setAccent}>
+              {/* Built-in apps are code-split (React.lazy); the fallback shows
+                  while an app's chunk loads on its first launch. */}
+              <Suspense
+                fallback={<div className="size-full animate-pulse bg-muted/40" />}
+              >
+                <WindowContent component={app.component} windowId={win.id} params={win.params} />
+              </Suspense>
+            </WindowAccentContext.Provider>
+          </WindowTitlebarContext.Provider>
+        </WindowFocusContext.Provider>
       </div>
 
       {!flush &&

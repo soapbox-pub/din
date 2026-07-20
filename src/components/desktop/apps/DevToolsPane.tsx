@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { getDevtoolsBridge } from '@/lib/devtools';
+import { GuestClickShield } from '@/components/desktop/GuestClickShield';
 
 /**
  * The docked Chrome DevTools surface for one browser tab.
@@ -70,16 +71,22 @@ export function DevToolsPane({
   }, [targetWcId, onReady]);
 
   return (
-    <webview
-      ref={webviewRef}
-      // A blank start page; the main process navigates the guest to the
-      // devtools frontend once devtools.open() wires the session up.
-      src="about:blank"
-      // See DEVTOOLS_PARTITION in electron/main.cjs.
-      partition="persist:devtools"
-      className="h-full w-full bg-white"
-      style={{ display: 'flex' }}
-    />
+    // The wrapper hosts GuestClickShield: while this pane's window is not on
+    // top, the shield covers the devtools guest so a click into it raises the
+    // window (guest input never reaches this document).
+    <div className="relative h-full w-full" style={{ display: 'flex' }}>
+      <webview
+        ref={webviewRef}
+        // A blank start page; the main process navigates the guest to the
+        // devtools frontend once devtools.open() wires the session up.
+        src="about:blank"
+        // See DEVTOOLS_PARTITION in electron/main.cjs.
+        partition="persist:devtools"
+        className="h-full w-full bg-white"
+        style={{ display: 'flex' }}
+      />
+      <GuestClickShield />
+    </div>
   );
 }
 

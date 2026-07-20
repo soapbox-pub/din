@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { useAppContext } from '@/hooks/useAppContext';
+import { GuestClickShield } from '@/components/desktop/GuestClickShield';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
 
 /**
@@ -101,10 +102,18 @@ export interface BrowserViewProps {
  */
 export const BrowserView = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function BrowserView(props, ref) {
-    return isWebviewAvailable() ? (
-      <WebviewSurface ref={ref} {...props} />
-    ) : (
-      <IframeSurface ref={ref} {...props} />
+    return (
+      // The wrapper hosts GuestClickShield: while this surface's window is
+      // not on top, the shield covers the guest so a click into its content
+      // raises the window (guest input never reaches this document).
+      <div className="relative h-full w-full">
+        {isWebviewAvailable() ? (
+          <WebviewSurface ref={ref} {...props} />
+        ) : (
+          <IframeSurface ref={ref} {...props} />
+        )}
+        <GuestClickShield />
+      </div>
     );
   },
 );
