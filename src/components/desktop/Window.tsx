@@ -868,6 +868,17 @@ export const Window = memo(function Window({
       ref={sectionRef}
       aria-label={app.name}
       onPointerDown={() => focus(win.id)}
+      // Clicking a window's content should raise it. onPointerDown alone
+      // handles plain DOM app content (pointer events bubble to here), but
+      // <webview> guests and iframes (Browser, installed web apps) are foreign
+      // surfaces: pointer input over them goes to the guest and never reaches
+      // this document, so a click inside them would never raise the window.
+      // Clicking into such a surface does move focus to its host element,
+      // which fires a bubbling focusin - and React's onFocus is built on
+      // focusin, so it fires here too. This one handler covers webview,
+      // iframe, and focusable DOM content alike. focus() early-returns when
+      // the window is already on top, so redundant focusins are cheap.
+      onFocus={() => focus(win.id)}
       style={geometry}
       onAnimationEnd={(e) => {
         // The exit animation finished: remove the window for real. Guarded
