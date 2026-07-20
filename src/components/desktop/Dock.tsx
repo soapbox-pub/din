@@ -312,10 +312,16 @@ export function Dock({
       )}
       <footer
         aria-label="Dock"
+        // pointer-events-none: the footer is a full-width flex shim that only
+        // exists to center the strip, but it sits above every window - left
+        // as-is, its transparent side regions would swallow clicks on window
+        // content in the bottom band (e.g. an app's compose bar). Only the
+        // strip re-enables hit-testing; boundary events (onPointerLeave) and
+        // bubbling focus events still reach the footer from the strip.
         className={cn(
-          'absolute inset-x-0 bottom-0 z-[9999] flex justify-center',
+          'pointer-events-none absolute inset-x-0 bottom-0 z-[9999] flex justify-center',
           'motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out',
-          hidden && 'pointer-events-none translate-y-full',
+          hidden && 'translate-y-full',
         )}
         onFocus={() => setFocusWithin(true)}
         onBlur={(e) => {
@@ -334,7 +340,10 @@ export function Dock({
       >
         <div
           ref={stripRef}
-          className="flex items-end"
+          // Explicit auto punches through the footer's none; while hidden the
+          // strip goes inert itself (a parent's none no longer covers it), so
+          // a mid-slide dock can't catch clicks.
+          className={cn('flex items-end', hidden ? 'pointer-events-none' : 'pointer-events-auto')}
           onMouseMove={(e) => scheduleMagnify(e.clientX)}
           onMouseLeave={() => scheduleMagnify(null)}
         >
