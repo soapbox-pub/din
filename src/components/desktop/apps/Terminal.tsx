@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
+import { Terminal as XTerm, type ILink } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { SquareTerminal } from 'lucide-react';
@@ -7,6 +7,7 @@ import type { AppComponentProps } from '@/lib/apps';
 import { getPtyBridge } from '@/lib/pty';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { TabStrip } from '@/components/desktop/TabStrip';
 import {
   ContextMenu,
@@ -55,6 +56,14 @@ const newTabId = () => `termtab-${nextTabId++}`;
 
 let nextSplitId = 0;
 const newSplitId = () => `split-${nextSplitId++}`;
+
+/**
+ * Matches http/https URLs printed in terminal output (e.g. a dev server's
+ * "Local: http://localhost:8080/"). Deliberately conservative: stops at
+ * whitespace and characters that commonly wrap a URL in prose, so the match
+ * doesn't swallow a trailing bracket or quote.
+ */
+const TERMINAL_URL_REGEX = /https?:\/\/[^\s"'`<>()[\]{}]+/g;
 
 /**
  * Terminal font size ("zoom"), shared across every pane and tab and persisted
@@ -619,6 +628,7 @@ const TerminalSession = memo(function TerminalSession({
   onTabShortcut: (action: TabShortcut) => void;
 }) {
   const bridge = getPtyBridge();
+  const openUrl = useOpenUrl();
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -629,10 +639,12 @@ const TerminalSession = memo(function TerminalSession({
   const onCwdChangeRef = useRef(onCwdChange);
   const onCloseRef = useRef(onClose);
   const onTabShortcutRef = useRef(onTabShortcut);
+  const openUrlRef = useRef(openUrl);
   useLayoutEffect(() => {
     onCwdChangeRef.current = onCwdChange;
     onCloseRef.current = onClose;
     onTabShortcutRef.current = onTabShortcut;
+    openUrlRef.current = openUrl;
   });
 
   useEffect(() => {
@@ -705,6 +717,42 @@ const TerminalSession = memo(function TerminalSession({
         // ignore malformed OSC 7 payloads
       }
       return true;
+    });
+
+    // Linkify http/https URLs in the output. xterm has no link detection of
+    // its own; this provider scans each line for URLs and, on Ctrl/Cmd+click
+    // (Tilix/VS Code convention — a plain click still selects text), routes
+    // the URL through the desktop's opener so it lands in the Web Browser (or
+    // an installed web app that owns the origin).
+    const linkProvider = term.registerLinkProvider({
+      provideLinks(lineNumber, callback) {
+        const line = term.buffer.active.getLine(lineNumber - 1);
+        if (!line) {
+          callback(undefined);
+          return;
+        }
+        const text = line.translateToString(true);
+        const links: ILink[] = [];
+        TERMINAL_URL_REGEX.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = TERMINAL_URL_REGEX.exec(text)) !== null) {
+          // Drop trailing punctuation that's more likely sentence than URL.
+          const url = match[0].replace(/[.,;:!?]+$/, '');
+          if (!url) continue;
+          const startX = match.index + 1; // xterm columns are 1-based
+          links.push({
+            text: url,
+            range: {
+              start: { x: startX, y: lineNumber },
+              end: { x: startX + url.length - 1, y: lineNumber },
+            },
+            activate: (event, href) => {
+              if (event.ctrlKey || event.metaKey) openUrlRef.current(href);
+            },
+          });
+        }
+        callback(links.length ? links : undefined);
+      },
     });
 
     fit.fit();
@@ -845,6 +893,7 @@ const TerminalSession = memo(function TerminalSession({
       offData();
       offExit();
       oscHandler.dispose();
+      linkProvider.dispose();
       if (sessionId !== null) bridge.kill(sessionId);
       fitRef.current = null;
       termRef.current = null;

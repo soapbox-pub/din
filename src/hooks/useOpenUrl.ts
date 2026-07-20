@@ -1,12 +1,12 @@
 import { useCallback } from 'react';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { sanitizeUrl } from '@/lib/sanitizeUrl';
+import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
 
 /**
- * Open an https URL the way the rest of the desktop routes links: if an
+ * Open an http/https URL the way the rest of the desktop routes links: if an
  * installed web app owns the URL's origin, deep-link into that app's window
  * (e.g. a `ditto.pub` link opens in the installed Ditto app); otherwise open
  * it as a tab in the Web Browser app, launching a browser window first when
@@ -24,7 +24,7 @@ export function useOpenUrl(): (url: string) => void {
 
   return useCallback(
     (rawUrl: string) => {
-      const url = sanitizeUrl(rawUrl);
+      const url = sanitizeNavigationUrl(rawUrl);
       if (!url) return;
 
       // Route into an installed web app that owns this origin.

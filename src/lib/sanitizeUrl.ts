@@ -27,6 +27,41 @@ export function sanitizeUrl(input: string): string | null {
 }
 
 /**
+ * Sanitize a URL for top-level navigation — the Web Browser address bar and
+ * terminal link clicks — where the destination is loaded as a real page in the
+ * Electron `<webview>` (or a new host-browser tab), not injected into the app's
+ * DOM.
+ *
+ * Broader than {@link sanitizeUrl}: it also permits `http:` so users can reach
+ * local dev servers (`http://localhost:8080`) and plain-http sites. Script- and
+ * data-bearing schemes (`javascript:`, `data:`, `file:`, `blob:`, …) are still
+ * rejected. This is safe because the `<webview>` is a separate embedder outside
+ * the app's page and CSP. Never use it for an iframe/img `src` of event-sourced
+ * data — use {@link sanitizeUrl} / {@link sanitizeImageUrl} there. (The app CSP
+ * `frame-src` is https-only, so the plain-browser iframe fallback simply won't
+ * load an `http:` result.)
+ */
+export function sanitizeNavigationUrl(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+
+  return url.toString();
+}
+
+/**
  * Sanitize a URL for safe use as an image `src` (favicons, avatars, banners).
  *
  * Broader than {@link sanitizeUrl} because favicons are routinely served as
@@ -62,19 +97,26 @@ export function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
- * Turn a query-or-URL string into a navigable https URL. If it looks like a
- * bare search term, hand it to a search engine instead.
+ * Turn a query-or-URL string into a navigable http/https URL. If it looks like
+ * a bare search term, hand it to a search engine instead. Bare loopback
+ * addresses (`localhost:8080`, `127.0.0.1:3000`, `[::1]:8080`) default to
+ * `http:` since that's what dev servers speak; every other schemeless input
+ * defaults to `https:`.
  */
 export function resolveNavigation(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  const looksLikeUrl =
-    /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ||
-    /^[^\s]+\.[^\s]{2,}(\/.*)?$/i.test(trimmed);
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
+  const isLoopback =
+    /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[?::1\]?)(:\d+)?(\/.*)?$/i.test(trimmed);
+  const looksLikeDomain = /^[^\s]+\.[^\s]{2,}(\/.*)?$/i.test(trimmed);
 
-  if (looksLikeUrl) {
-    const sanitized = sanitizeUrl(trimmed);
+  if (hasScheme || isLoopback || looksLikeDomain) {
+    const candidate = hasScheme
+      ? trimmed
+      : `${isLoopback ? 'http' : 'https'}://${trimmed}`;
+    const sanitized = sanitizeNavigationUrl(candidate);
     if (sanitized) return sanitized;
   }
 
