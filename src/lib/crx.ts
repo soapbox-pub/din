@@ -74,15 +74,23 @@ export function getCrxBridge(): CrxBridge | undefined {
 }
 
 /**
- * Whether a URL may be loaded in a browser tab. Regular navigation is
- * https-only (see `sanitizeUrl`); extension pages (an extension's options or
- * dashboard, opened via chrome.tabs.create) are additionally allowed since
- * they only exist inside the browser session's extension system.
+ * Whether a URL may be loaded in a browser tab. Mirrors the top-level
+ * navigation policy (see `sanitizeNavigationUrl`): `https:` plus `http:` so
+ * dev servers and plain-http sites reachable from the address bar are equally
+ * reachable when a tab is opened for you (terminal link clicks, target=_blank,
+ * chrome.tabs.create). Safe because tabs load in the out-of-CSP `<webview>`,
+ * not the app DOM. `chrome-extension:` is additionally allowed for extension
+ * pages (options/dashboard), which only exist inside the browser's extension
+ * system.
  */
 export function isAllowedTabUrl(url: string): boolean {
   try {
     const { protocol } = new URL(url);
-    return protocol === 'https:' || protocol === 'chrome-extension:';
+    return (
+      protocol === 'https:' ||
+      protocol === 'http:' ||
+      protocol === 'chrome-extension:'
+    );
   } catch {
     return false;
   }
