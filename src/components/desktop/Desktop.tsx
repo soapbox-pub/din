@@ -11,6 +11,7 @@ import { FilePickerProvider } from './FilePickerProvider';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
 import { BrowserExtensionHost } from './BrowserExtensionHost';
 import { NostrBridgeHost } from './NostrBridgeHost';
+import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
@@ -44,6 +45,7 @@ function DesktopSession() {
         <FilePickerProvider>
           <BrowserExtensionHost />
           <NostrBridgeHost />
+          <HighlightBridgeHost />
           <DesktopHotkeys />
           <Wallpaper>
             <MenuBar />

@@ -1927,6 +1927,14 @@ const WEBAPP_PARTITION = 'persist:din-apps';
 /** Absolute path to the preload injected into installed web-app <webview>s. */
 const WEBAPP_PRELOAD = path.join(import.meta.dirname, 'webview-preload.cjs');
 
+/**
+ * Absolute path to the preload injected into the ad-hoc Web Browser's tabs.
+ * Adds the NIP-84 "Highlight" affordance (text selection -> kind 9802). Unlike
+ * WEBAPP_PRELOAD it exposes no window.nostr / signer surface to the page - it
+ * only relays an explicit highlight click to the shell (see din-highlight:*).
+ */
+const HIGHLIGHT_PRELOAD = path.join(import.meta.dirname, 'browser-highlight-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow: BrowserWindow | null = null;
 
@@ -2039,6 +2047,85 @@ function registerNostrBridge(): void {
     pendingNostrRequests.delete(response.requestId);
     if (response.ok) pending.resolve(response.result);
     else pending.reject(new Error(response.error || 'Signing failed'));
+  });
+}
+
+// NIP-84 highlight bridge (browser-highlight-preload.cjs). A browser tab's
+// highlight click carries only the selected text + surrounding context; the
+// source URL is read here from the guest's own WebContents (never the page's
+// report) so a page can't forge a highlight for a URL it doesn't serve. The
+// event is built and signed in the shell with the signed-in account's signer -
+// this bridge deliberately exposes no general signing surface to browsed sites.
+let nextHighlightRequestId = 1;
+const pendingHighlightRequests = new Map<number, {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}>();
+const HIGHLIGHT_REQUEST_TIMEOUT_MS = 60_000;
+
+/** Query params dropped when cleaning a URL for a highlight source (NIP-84). */
+const TRACKING_PARAM = /^(utm_|fbclid$|gclid$|dclid$|msclkid$|mc_|ref$|ref_src$|igshid$|yclid$|_hsenc$|_hsmi$|vero_|oly_|wickedid$)/i;
+
+/** Strip tracking params + fragment from a page URL for use as a highlight `r`-tag. */
+function cleanHighlightUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    for (const key of [...url.searchParams.keys()]) {
+      if (TRACKING_PARAM.test(key)) url.searchParams.delete(key);
+    }
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+function registerHighlightBridge(): void {
+  ipcMain.handle('din-highlight:publish', (event, payload) => {
+    // Only browser-tab guests may reach this; the URL comes from the tab, not
+    // the payload, and only text/context are honored from the page.
+    const contents = browserTabFromId(event.sender.id);
+    if (!contents || contents !== event.sender) {
+      throw new Error('Highlighting is not available here');
+    }
+    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
+      throw new Error('Din shell is unavailable');
+    }
+    const url = cleanHighlightUrl(event.sender.getURL());
+    if (!url) throw new Error('This page cannot be highlighted');
+
+    const text = payload && typeof payload.text === 'string' ? payload.text.trim() : '';
+    if (!text) throw new Error('Nothing selected to highlight');
+    if (text.length > 5000) throw new Error('Selection is too long to highlight');
+
+    let context: string | undefined;
+    if (payload && typeof payload.context === 'string' && payload.context.length <= 8000) {
+      context = payload.context;
+    }
+
+    return new Promise((resolve, reject) => {
+      const requestId = nextHighlightRequestId++;
+      const timer = setTimeout(() => {
+        pendingHighlightRequests.delete(requestId);
+        reject(new Error('Publishing timed out'));
+      }, HIGHLIGHT_REQUEST_TIMEOUT_MS);
+      pendingHighlightRequests.set(requestId, { resolve, reject, timer });
+      sendToShell('din-highlight:request', { requestId, url, text, context });
+    });
+  });
+
+  // The shell's answer to a relayed highlight publish. Only the shell may
+  // resolve these.
+  ipcMain.on('din-highlight:response', (event, response) => {
+    if (!shellWindow || event.sender !== shellWindow.webContents) return;
+    const pending = response && pendingHighlightRequests.get(response.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingHighlightRequests.delete(response.requestId);
+    if (response.ok) pending.resolve(response.result);
+    else pending.reject(new Error(response.error || 'Failed to publish highlight'));
   });
 }
 
@@ -2374,6 +2461,7 @@ app.whenReady().then(() => {
   registerUserscriptHandlers({ assertShellSender });
   registerDevtoolsHandlers();
   registerNostrBridge();
+  registerHighlightBridge();
 
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
@@ -2424,6 +2512,10 @@ app.whenReady().then(() => {
     webPreferences.sandbox = true;
     if (params.partition === WEBAPP_PARTITION) {
       webPreferences.preload = WEBAPP_PRELOAD;
+    } else if (params.partition === WEBBROWSER_PARTITION) {
+      // Ad-hoc browser tabs get the highlight preload (no signer surface, just
+      // the NIP-84 highlight affordance; see HIGHLIGHT_PRELOAD).
+      webPreferences.preload = HIGHLIGHT_PRELOAD;
     }
   });
 

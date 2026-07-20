@@ -18,6 +18,8 @@
 //   - window.devtools: docked devtools control for the Web Browser app
 //   - window.nostrHost: relays NIP-07 requests from installed web apps to the
 //     signed-in account's signer (see NostrBridgeHost / webview-preload.cjs)
+//   - window.highlightHost: relays NIP-84 highlight clicks from browser tabs to
+//     the signer (see HighlightBridgeHost / browser-highlight-preload.cjs)
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -635,4 +637,34 @@ contextBridge.exposeInMainWorld('nostrHost', {
    * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string }} response
    */
   respond: (response) => ipcRenderer.send('nostr-bridge:response', response),
+});
+
+// Highlight bridge host (window.highlightHost), backed by the din-highlight:*
+// handlers in main.mts. A browser tab's NIP-84 highlight click (see
+// browser-highlight-preload.cjs) is relayed here, to the shell renderer, where
+// HighlightBridgeHost builds and publishes a kind 9802 event with the signed-in
+// account's signer. Unlike nostrHost this carries no arbitrary signing surface -
+// only { url, text, context } for a fixed highlight kind.
+contextBridge.exposeInMainWorld('highlightHost', {
+  /**
+   * Subscribe to highlight-publish requests relayed from browser tabs. The
+   * callback receives { requestId, url, text, context }. Returns an
+   * unsubscribe fn.
+   * @param {(request: { requestId: number, url: string, text: string, context?: string }) => void} callback
+   */
+  onRequest: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number, url: string, text: string, context?: string }} request
+     */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('din-highlight:request', listener);
+    return () => ipcRenderer.removeListener('din-highlight:request', listener);
+  },
+
+  /**
+   * Answer a relayed highlight request: { requestId, ok, result?, error? }.
+   * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string }} response
+   */
+  respond: (response) => ipcRenderer.send('din-highlight:response', response),
 });

@@ -75,6 +75,16 @@ export default defineConfig(
     },
   },
   {
+    // The browser-tab highlight preload runs in the guest renderer and drives
+    // the page DOM directly (window/document/Element/requestAnimationFrame), so
+    // it needs browser globals on top of the electron block's node globals.
+    name: "app/electron-dom-preload",
+    files: ["electron/browser-highlight-preload.cjs"],
+    languageOptions: {
+      globals: globals.browser,
+    },
+  },
+  {
     name: "app/html",
     files: ["**/*.html"],
     extends: [htmlEslint.configs["flat/recommended"]],
