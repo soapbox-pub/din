@@ -680,13 +680,11 @@ const TerminalSession = memo(function TerminalSession({
     // boxes. Recreate the addon on context loss; after repeated losses give
     // up and let xterm fall back to the DOM renderer.
     let contextLosses = 0;
-    let lossResetTimer: number | undefined;
     const loadWebgl = () => {
       try {
         const webgl = new WebglAddon();
         webgl.onContextLoss(() => {
           webgl.dispose();
-          window.clearTimeout(lossResetTimer);
           contextLosses += 1;
           if (disposed) return;
           if (contextLosses <= 3) {
@@ -697,15 +695,6 @@ const TerminalSession = memo(function TerminalSession({
           }
         });
         term.loadAddon(webgl);
-        // Force a full repaint onto the fresh context/atlas.
-        term.refresh(0, term.rows - 1);
-        // Losses that happen hours apart are independent GPU hiccups, not a
-        // death spiral: once the new context survives for a minute, forget
-        // the count so a long-lived session never exhausts its retry budget.
-        window.clearTimeout(lossResetTimer);
-        lossResetTimer = window.setTimeout(() => {
-          contextLosses = 0;
-        }, 60_000);
       } catch (error) {
         console.warn('Terminal: WebGL renderer unavailable, falling back to DOM renderer', error);
       }
@@ -838,14 +827,6 @@ const TerminalSession = memo(function TerminalSession({
     };
     window.addEventListener('focus', clearAtlas);
     document.addEventListener('visibilitychange', onVisibilityChange);
-    // In fullscreen kiosk mode (Aladdin) the window never blurs and the
-    // document never hides, so neither trigger above ever fires — yet the
-    // atlas still decays over long sessions (glyphs degrade into black
-    // pixelation). Clear it on a timer as a backstop; re-rasterization is
-    // lazy, so a clear over an intact atlas costs nothing visible.
-    const atlasInterval = window.setInterval(() => {
-      if (!document.hidden) clearAtlas();
-    }, 60_000);
 
     const offData = bridge.onData((id, data) => {
       if (sessionId === null) {
@@ -909,8 +890,6 @@ const TerminalSession = memo(function TerminalSession({
       container.removeEventListener('mousedown', focus);
       window.removeEventListener('focus', clearAtlas);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.clearInterval(atlasInterval);
-      window.clearTimeout(lossResetTimer);
       offData();
       offExit();
       oscHandler.dispose();
