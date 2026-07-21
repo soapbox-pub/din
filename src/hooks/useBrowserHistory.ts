@@ -141,5 +141,9 @@ export function useBrowserHistory() {
     [setHistory],
   );
 
-  return { history, recordVisit, recordTitle };
+  const clearHistory = useCallback(() => {
+    setHistory(() => EMPTY_HISTORY);
+  }, [setHistory]);
+
+  return { history, recordVisit, recordTitle, clearHistory };
 }

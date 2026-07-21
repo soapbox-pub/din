@@ -419,6 +419,16 @@ contextBridge.exposeInMainWorld('browser', {
    */
   trustCertificate: (host, fingerprint, wcId, url) =>
     ipcRenderer.invoke('browser:trustCertificate', host, fingerprint, wcId, url),
+
+  /**
+   * Clear Chromium-side browsing data for the persistent browser session.
+   * `cache` wipes the HTTP cache; `cookies` wipes cookies plus all site
+   * storage (localStorage, IndexedDB, service workers, ...). Resolves when
+   * done. The app's own address-bar history is separate (cleared in-app).
+   * @param {{ cache?: boolean, cookies?: boolean }} options
+   */
+  clearBrowsingData: (options) =>
+    ipcRenderer.invoke('browser:clearBrowsingData', options),
 });
 
 /**

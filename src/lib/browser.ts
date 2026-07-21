@@ -40,6 +40,16 @@ export interface BrowserBridge {
     wcId: number,
     url: string,
   ): Promise<void>;
+  /**
+   * Clear Chromium-side browsing data for the persistent browser session.
+   * `cache` wipes the HTTP cache; `cookies` wipes cookies plus all site
+   * storage (localStorage, IndexedDB, service workers, ...). The app's own
+   * address-bar history is separate and cleared in-app. Resolves when done.
+   */
+  clearBrowsingData(options: {
+    cache?: boolean;
+    cookies?: boolean;
+  }): Promise<void>;
 }
 
 declare global {

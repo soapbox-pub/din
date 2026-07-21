@@ -29,13 +29,26 @@ import {
   type Userscript,
 } from '@/lib/userscripts';
 import { getDevtoolsBridge } from '@/lib/devtools';
-import { getBrowserBridge, type CertificateErrorInfo } from '@/lib/browser';
+import {
+  getBrowserBridge,
+  type BrowserBridge,
+  type CertificateErrorInfo,
+} from '@/lib/browser';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { consumeTabCommands, consumeBrowserHotkeys } from '@/lib/browserTabBus';
 import { consumeInspectorDock } from '@/lib/inspectorBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -255,10 +268,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   } = useUserscripts();
   // A pending userscript install prompt (source + origin) for the dialog.
   const [scriptInstall, setScriptInstall] = useState<UserscriptInstallRequest | null>(null);
+  // Whether the "Clear browsing data" dialog is open (non-private windows).
+  const [clearDataOpen, setClearDataOpen] = useState(false);
   const { toast } = useToast();
   const webviewMode = isWebviewAvailable();
   // Persistent browsing history (feeds address-bar autocomplete).
-  const { history: browsingHistory, recordVisit, recordTitle } = useBrowserHistory();
+  const { history: browsingHistory, recordVisit, recordTitle, clearHistory } =
+    useBrowserHistory();
   // One docked-pane size per browser window, shared across tabs (like desktop
   // browsers): height for bottom docking, width for right docking. Resized by
   // dragging the pane's separator.
@@ -1058,6 +1074,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onToggleDevtools={() => toggleDevtools(activeId)}
           onNewWindow={() => openWindow('web-browser')}
           onNewPrivateWindow={() => openWindow('web-browser', { private: true })}
+          showClearData={!isPrivate}
+          onClearBrowsingData={() => setClearDataOpen(true)}
         />
 
         {activeTab.loading && (
@@ -1131,6 +1149,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           if (!open) setScriptInstall(null);
         }}
         onInstall={installUserscriptFromDialog}
+      />
+
+      <ClearBrowsingDataDialog
+        open={clearDataOpen}
+        onOpenChange={setClearDataOpen}
+        bridge={browserBridge}
+        onClearHistory={clearHistory}
       />
 
       <UndockedDevToolsReconciler tabsRef={tabsRef} updateTab={updateTab} />
@@ -2345,6 +2370,8 @@ function BrowserMenu({
   onToggleDevtools,
   onNewWindow,
   onNewPrivateWindow,
+  showClearData,
+  onClearBrowsingData,
 }: {
   /** Show the extensions + userscripts section (hidden in private windows). */
   showExtensions: boolean;
@@ -2363,6 +2390,9 @@ function BrowserMenu({
   onToggleDevtools: () => void;
   onNewWindow: () => void;
   onNewPrivateWindow: () => void;
+  /** Show the "Clear browsing data" item (hidden in private windows). */
+  showClearData: boolean;
+  onClearBrowsingData: () => void;
 }) {
   const [open, setOpen] = useState(false);
   /** Run an action and dismiss the menu. */
@@ -2408,6 +2438,13 @@ function BrowserMenu({
               active={devtoolsActive}
               disabled={devtoolsDisabled}
               onClick={() => run(onToggleDevtools)}
+            />
+          )}
+          {showClearData && (
+            <BrowserMenuItem
+              icon={Trash2}
+              label="Clear browsing data…"
+              onClick={() => run(onClearBrowsingData)}
             />
           )}
         </div>
@@ -2487,6 +2524,146 @@ function BrowserMenuItem({
       <span className="flex-1 text-left">{label}</span>
       {shortcut && <span className="text-xs text-muted-foreground">{shortcut}</span>}
     </button>
+  );
+}
+
+/**
+ * "Clear browsing data" dialog. Purges the app's own address-bar history
+ * (encrypted Nostr app data) and/or Chromium-side state for the persistent
+ * browser session - cookies + site storage, and the HTTP cache. Only offered
+ * in non-private windows; the private session is ephemeral and self-clears
+ * when its last window closes.
+ *
+ * Outside the Electron shell (`dev:browser`) there's no bridge, so the
+ * Chromium-side options are disabled; clearing history still works.
+ */
+function ClearBrowsingDataDialog({
+  open,
+  onOpenChange,
+  bridge,
+  onClearHistory,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  bridge: BrowserBridge | undefined;
+  onClearHistory: () => void;
+}) {
+  const { toast } = useToast();
+  const [history, setHistory] = useState(true);
+  // The Chromium-side options need the shell bridge; default them off when it's
+  // absent so the user can't arm a purge that can't run.
+  const [cookies, setCookies] = useState(!!bridge);
+  const [cache, setCache] = useState(!!bridge);
+  const [clearing, setClearing] = useState(false);
+
+  const nothingSelected = !history && !cookies && !cache;
+
+  const handleClear = async () => {
+    setClearing(true);
+    try {
+      if (history) onClearHistory();
+      if (bridge && (cookies || cache)) {
+        await bridge.clearBrowsingData({ cookies, cache });
+      }
+      toast({ title: 'Browsing data cleared' });
+      onOpenChange(false);
+    } catch {
+      toast({
+        title: "Couldn't clear browsing data",
+        variant: 'destructive',
+      });
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Clear browsing data</DialogTitle>
+          <DialogDescription>
+            Choose what to remove. This can't be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <ClearDataOption
+            id="clear-history"
+            label="Browsing history"
+            description="Sites in this browser's address-bar suggestions."
+            checked={history}
+            onCheckedChange={setHistory}
+          />
+          <ClearDataOption
+            id="clear-cookies"
+            label="Cookies and site data"
+            description="Signs you out of most sites and clears their stored data."
+            checked={cookies}
+            onCheckedChange={setCookies}
+            disabled={!bridge}
+          />
+          <ClearDataOption
+            id="clear-cache"
+            label="Cached files and images"
+            description="Frees up space; sites may load more slowly next time."
+            checked={cache}
+            onCheckedChange={setCache}
+            disabled={!bridge}
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={clearing}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={handleClear}
+            disabled={nothingSelected || clearing}
+          >
+            Clear data
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** One labelled checkbox row in the {@link ClearBrowsingDataDialog}. */
+function ClearDataOption({
+  id,
+  label,
+  description,
+  checked,
+  onCheckedChange,
+  disabled,
+}: {
+  id: string;
+  label: string;
+  description: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className={cn('flex items-start gap-3', disabled && 'opacity-50')}>
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={(value) => onCheckedChange(value === true)}
+        disabled={disabled}
+        className="mt-0.5"
+      />
+      <div className="space-y-0.5">
+        <Label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+    </div>
   );
 }
 

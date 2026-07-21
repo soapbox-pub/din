@@ -1960,6 +1960,20 @@ function browserSession(): Electron.Session {
   return session.fromPartition(WEBBROWSER_PARTITION);
 }
 
+/**
+ * The ephemeral session shared by every private ("incognito") browser tab.
+ * Kept in memory only (non-`persist:` partition), so it's discarded once the
+ * last private window closes.
+ */
+function privateBrowserSession(): Electron.Session {
+  return session.fromPartition(WEBBROWSER_PRIVATE_PARTITION);
+}
+
+/** Whether a session is one of the two the browser runs tabs in. */
+function isBrowserTabSession(s: Electron.Session): boolean {
+  return s === browserSession() || s === privateBrowserSession();
+}
+
 /** Send an event to the shell renderer, if it's still alive. */
 function sendToShell(channel: string, payload?: unknown): void {
   if (shellWindow && !shellWindow.webContents.isDestroyed()) {
@@ -1978,6 +1992,21 @@ function browserTabFromId(wcId: unknown): Electron.WebContents | null {
   if (!contents || contents.isDestroyed()) return null;
   if (contents.getType() !== 'webview') return null;
   if (contents.session !== browserSession()) return null;
+  return contents;
+}
+
+/**
+ * Like {@link browserTabFromId}, but accepts guests in *either* browser session
+ * (persistent or the ephemeral private one). Used by the TLS-trust path, which
+ * applies to private tabs too; the crx handlers keep the stricter resolver
+ * above since extensions never run in the private session.
+ */
+function anyBrowserTabFromId(wcId: unknown): Electron.WebContents | null {
+  if (typeof wcId !== 'number') return null;
+  const contents = webContents.fromId(wcId);
+  if (!contents || contents.isDestroyed()) return null;
+  if (contents.getType() !== 'webview') return null;
+  if (!isBrowserTabSession(contents.session)) return null;
   return contents;
 }
 
@@ -2246,10 +2275,14 @@ function setupChromeExtensions(): void {
 // "proceed anyway" interstitial - the tab just fails to load. We add one: on a
 // certificate error inside a browser tab we reject the load and surface the
 // details to the shell, which shows a warning. If the user chooses to proceed
-// we pin that exact (host, fingerprint) pair - persisted across restarts - and
-// reload; the next verification for that pinned cert is trusted. Scoped to the
-// browser session only, so the shell and installed web apps keep strict
-// verification.
+// we pin that exact (host, fingerprint) pair and reload; the next verification
+// for that pinned cert is trusted. Scoped to the two browser sessions only, so
+// the shell and installed web apps keep strict verification.
+//
+// Private ("incognito") tabs get the same interstitial, but their exceptions
+// are pinned in memory only (privateTrustedCerts) - never written to disk - so
+// they're discarded with the ephemeral session, like the rest of a private
+// window's state. Persistent tabs pin to trustedCerts (saved across restarts).
 // ---------------------------------------------------------------------------
 
 /** Where accepted (host, fingerprint) cert exceptions are persisted. */
@@ -2260,6 +2293,13 @@ function trustedCertsPath(): string {
 /** Accepted cert exceptions, keyed by `host\u0000fingerprint`. */
 const trustedCerts = new Set<string>();
 let trustedCertsLoaded = false;
+
+/**
+ * Cert exceptions accepted from *private* tabs, keyed the same way. Kept in
+ * memory only (never persisted) so they vanish with the ephemeral private
+ * session - a private window shouldn't leave trust state behind on disk.
+ */
+const privateTrustedCerts = new Set<string>();
 
 /** Identity key for a pinned certificate exception. */
 function certKey(host: string, fingerprint: string): string {
@@ -2317,22 +2357,28 @@ function registerCertificateHandling(): void {
   // Approve pinned certs *before* Chromium raises an error, so a trusted
   // self-signed host loads cleanly - no error page, no reload dance. Every
   // other cert defers to Chromium's own verification (-3), so valid public
-  // certs are still checked normally and unknown bad certs still fail.
-  browserSession().setCertificateVerifyProc((request, callback) => {
-    const fingerprint = request.certificate?.fingerprint || '';
-    if (
-      request.hostname &&
-      fingerprint &&
-      trustedCerts.has(certKey(request.hostname, fingerprint))
-    ) {
-      callback(0);
-      return;
-    }
-    callback(-3);
-  });
+  // certs are still checked normally and unknown bad certs still fail. Each
+  // browser session consults its own exception set (persistent vs. the private
+  // window's in-memory set).
+  const installVerifyProc = (s: Electron.Session, pinned: Set<string>): void => {
+    s.setCertificateVerifyProc((request, callback) => {
+      const fingerprint = request.certificate?.fingerprint || '';
+      if (
+        request.hostname &&
+        fingerprint &&
+        pinned.has(certKey(request.hostname, fingerprint))
+      ) {
+        callback(0);
+        return;
+      }
+      callback(-3);
+    });
+  };
+  installVerifyProc(browserSession(), trustedCerts);
+  installVerifyProc(privateBrowserSession(), privateTrustedCerts);
 
   // A cert Chromium rejected (unpinned self-signed / private-CA host) fires
-  // this on the browser session. Reject the load and, for the top-level frame,
+  // this on a browser session. Reject the load and, for the top-level frame,
   // hand the details to the shell so it can offer "proceed anyway".
   app.on(
     'certificate-error',
@@ -2340,15 +2386,21 @@ function registerCertificateHandling(): void {
       if (
         !contents ||
         contents.isDestroyed() ||
-        contents.session !== browserSession()
+        !isBrowserTabSession(contents.session)
       ) {
         // Not a browser tab (shell, installed web app, ...): leave Chromium's
         // strict verification in place by not overriding it.
         return;
       }
+      // Private tabs check the in-memory exception set; persistent tabs the
+      // saved one.
+      const pinned =
+        contents.session === privateBrowserSession()
+          ? privateTrustedCerts
+          : trustedCerts;
       const host = hostOf(url);
       const fingerprint = certificate.fingerprint || '';
-      if (host && fingerprint && trustedCerts.has(certKey(host, fingerprint))) {
+      if (host && fingerprint && pinned.has(certKey(host, fingerprint))) {
         // Pinned (belt-and-suspenders with the verify proc above): trust it.
         event.preventDefault();
         callback(true);
@@ -2387,10 +2439,16 @@ function registerCertificateHandling(): void {
       ) {
         throw new Error('Invalid certificate exception');
       }
-      loadTrustedCerts();
-      trustedCerts.add(certKey(host, fingerprint));
-      saveTrustedCerts();
-      const tab = browserTabFromId(wcId);
+      const tab = anyBrowserTabFromId(wcId);
+      if (tab && tab.session === privateBrowserSession()) {
+        // Private window: pin in memory only, so the exception is discarded
+        // with the ephemeral session and never touches disk.
+        privateTrustedCerts.add(certKey(host, fingerprint));
+      } else {
+        loadTrustedCerts();
+        trustedCerts.add(certKey(host, fingerprint));
+        saveTrustedCerts();
+      }
       if (tab) {
         if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
           tab.loadURL(url).catch(() => {});
@@ -2400,6 +2458,35 @@ function registerCertificateHandling(): void {
       }
     },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Clear browsing data for the Web Browser app.
+//
+// Wipes Chromium-side state for the persistent browser session on request:
+// the HTTP cache and/or cookies + all site storage (localStorage, IndexedDB,
+// service workers, cache storage, ...). The app's own address-bar history is
+// separate (encrypted Nostr app data) and cleared in the renderer.
+//
+// The private session isn't touched: it's already ephemeral and vanishes when
+// the last private window closes, so there's nothing persistent to purge.
+// ---------------------------------------------------------------------------
+function registerBrowserDataHandlers(): void {
+  ipcMain.handle('browser:clearBrowsingData', async (event, options) => {
+    assertShellSender(event);
+    const opts =
+      options && typeof options === 'object'
+        ? (options as { cache?: unknown; cookies?: unknown })
+        : {};
+    const s = browserSession();
+    if (opts.cache === true) {
+      await s.clearCache();
+    }
+    if (opts.cookies === true) {
+      // No `storages` filter: clear every storage type (cookies included).
+      await s.clearStorageData();
+    }
+  });
 }
 
 function registerCrxHandlers(): void {
@@ -2633,6 +2720,7 @@ app.whenReady().then(() => {
   registerScreenshotHandlers();
   registerCrxHandlers();
   registerCertificateHandling();
+  registerBrowserDataHandlers();
   registerUserscriptHandlers({ assertShellSender });
   registerDevtoolsHandlers();
   registerNostrBridge();
