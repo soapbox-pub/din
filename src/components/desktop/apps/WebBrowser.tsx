@@ -4,6 +4,7 @@ import {
   ArrowRight,
   ChevronRight,
   Code,
+  EllipsisVertical,
   Globe,
   History,
   MonitorDown,
@@ -11,10 +12,12 @@ import {
   Puzzle,
   RotateCw,
   Search,
-  Settings,
   ShieldAlert,
+  SquarePlus,
   Trash2,
+  VenetianMask,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveNavigation, sanitizeImageUrl, sanitizeUrl } from '@/lib/sanitizeUrl';
@@ -57,8 +60,10 @@ import {
 } from '@/hooks/useBrowserHistory';
 import {
   BrowserView,
+  WEBBROWSER_PRIVATE_PARTITION,
   type BrowserViewHandle,
 } from '@/components/desktop/apps/BrowserView';
+import { Separator } from '@/components/ui/separator';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 import { useUserscripts } from '@/hooks/useUserscripts';
 import {
@@ -74,6 +79,15 @@ import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
 
 const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
 const WEB_STORE_URL = 'https://chromewebstore.google.com/';
+
+/**
+ * Chrome tint for private ("incognito") windows: a fixed dark indigo used for
+ * the toolbar and window accent regardless of the page's own theme color, so a
+ * private window always reads as private (a browser keeps incognito chrome
+ * dark no matter the site). Fed through the same theme-color pipeline as a
+ * page's reported color.
+ */
+const PRIVATE_CHROME_COLOR = '#2a2540';
 
 /**
  * A blank new tab. The underlying surface loads about:blank (a real,
@@ -189,7 +203,17 @@ type TabEvent =
  * toggled from the toolbar, F12 / Ctrl+Shift+I, or the context menu's
  * "Inspect" - see the devtools bridge (src/lib/devtools.ts).
  */
-export function WebBrowser({ windowId }: AppComponentProps) {
+export function WebBrowser({ windowId, params }: AppComponentProps) {
+  // A private ("incognito") window: its tabs render in a non-persistent
+  // session (see WEBBROWSER_PRIVATE_PARTITION), nothing is written to browsing
+  // history, extensions are hidden, and the chrome is tinted private. Opened
+  // via the browser menu's "New private window" (open('web-browser',
+  // { private: true })).
+  const isPrivate = params?.private === true;
+  // Session partition threaded to every tab surface. Normal windows use the
+  // BrowserView default (the shared persistent browser session); private
+  // windows use the ephemeral private partition.
+  const tabPartition = isPrivate ? WEBBROWSER_PRIVATE_PARTITION : undefined;
   // Actions only: subscribing to window state here would re-render the whole
   // browser (tab strip, toolbar, every BrowserView host) on every desktop
   // commit. The one thing that needs window state - reconciling undocked
@@ -431,13 +455,19 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     });
   }, []);
 
-  // Tint the window chrome with the active tab's page theme color, Safari
-  // style. The Window sanitizes the raw value; null restores the default.
+  // The color that drives the window/toolbar chrome: a private window is
+  // always tinted with the fixed private color (so it stays visibly private
+  // whatever the site reports); a normal window follows the active page's
+  // theme color, Safari style.
+  const chromeColor = isPrivate ? PRIVATE_CHROME_COLOR : activeTab.themeColor;
+
+  // Tint the window chrome with the chrome color. The Window sanitizes the raw
+  // value; null restores the default.
   const setAccent = useWindowAccent();
   useEffect(() => {
-    setAccent(activeTab.themeColor);
+    setAccent(chromeColor);
     return () => setAccent(null);
-  }, [activeTab.themeColor, setAccent]);
+  }, [chromeColor, setAccent]);
 
   /** Register/unregister a tab surface's imperative handle. */
   const registerView = useCallback((id: string, handle: BrowserViewHandle | null) => {
@@ -471,8 +501,9 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         case 'title': {
           updateTab(id, { title: event.value || null });
           // Join the title onto the history entry for the tab's current URL.
+          // Private windows never touch browsing history.
           const tab = tabsRef.current.find((t) => t.id === id);
-          if (tab?.url && event.value) recordTitle(tab.url, event.value);
+          if (!isPrivate && tab?.url && event.value) recordTitle(tab.url, event.value);
           break;
         }
         case 'favicon':
@@ -496,7 +527,8 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           // redirects, back/forward); recordVisit ignores non-https URLs
           // (about:blank, chrome-extension://). The iframe fallback never
           // fires this event - it records in navigateTab / go instead.
-          recordVisit(event.url);
+          // Private windows keep no history.
+          if (!isPrivate) recordVisit(event.url);
           break;
         case 'webContentsId': {
           // Answer any pending chrome.tabs.create request now that the
@@ -510,7 +542,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         }
       }
     },
-    [updateTab, crx, recordVisit, recordTitle, clearCertError],
+    [updateTab, crx, recordVisit, recordTitle, clearCertError, isPrivate],
   );
 
   // Surface untrusted-TLS reports from the main process on the offending tab.
@@ -835,10 +867,11 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         };
       });
       views.current.get(id)?.loadURL(resolved);
-      // The iframe fallback emits no navigate events, so record here.
-      if (!webviewMode) recordVisit(resolved);
+      // The iframe fallback emits no navigate events, so record here (never
+      // in a private window).
+      if (!webviewMode && !isPrivate) recordVisit(resolved);
     },
-    [updateTab, webviewMode, recordVisit, userscriptsBridge, promptUserscriptInstall],
+    [updateTab, webviewMode, recordVisit, userscriptsBridge, promptUserscriptInstall, isPrivate],
   );
 
   const navigate = useCallback(
@@ -863,9 +896,9 @@ export function WebBrowser({ windowId }: AppComponentProps) {
       const url = tab.history[target];
       view.loadURL(url);
       updateTab(activeId, { cursor: target, address: url, url, title: null, favicon: null, themeColor: null });
-      recordVisit(url);
+      if (!isPrivate) recordVisit(url);
     },
-    [activeId, updateTab, webviewMode, recordVisit],
+    [activeId, updateTab, webviewMode, recordVisit, isPrivate],
   );
 
   const canBack = webviewMode ? activeTab.canBack : activeTab.cursor > 0;
@@ -877,7 +910,7 @@ export function WebBrowser({ windowId }: AppComponentProps) {
   // bar (the Window tints it from the same value via useWindowAccent). The
   // theme tokens are mapped with `@theme inline`, so overriding them locally
   // re-themes every toolbar control to keep contrast on the arbitrary color.
-  const accent = normalizeThemeColor(activeTab.themeColor);
+  const accent = normalizeThemeColor(chromeColor);
   const accentDark = accent !== null && isDarkThemeColor(accent);
   const toolbarTint = accent
     ? ({
@@ -981,19 +1014,18 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           onNavigate={navigate}
         />
 
-        {crx && <BrowserActionList tabWcId={activeTab.wcId} />}
+        {/* Extension action icons are hidden in private windows (extensions
+            don't run in the ephemeral private session). */}
+        {crx && !isPrivate && <BrowserActionList tabWcId={activeTab.wcId} />}
 
-        {(crx || userscriptsBridge) && (
-          <ExtensionsMenu
-            onOpenUrl={(url) => openTab(url)}
-            userscripts={userscriptsBridge ? userscriptList : null}
-            onSetUserscriptEnabled={setUserscriptEnabled}
-            onRemoveUserscript={(script) => {
-              removeUserscript(script.id);
-              toast({ title: `${script.name} removed` });
-            }}
-            onAddUserscript={() => setScriptInstall({ code: '' })}
-          />
+        {isPrivate && (
+          <span
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-secondary/60 px-2.5 py-1 text-xs font-medium text-foreground/80"
+            title="Private window - history and cookies are discarded when it closes"
+          >
+            <VenetianMask className="size-3.5" aria-hidden />
+            Private
+          </span>
         )}
 
         <InstallSiteButton
@@ -1006,19 +1038,27 @@ export function WebBrowser({ windowId }: AppComponentProps) {
           }
         />
 
-        <BrowserSettingsMenu treeTabs={treeTabs} onTreeTabsChange={setTreeTabs} />
-
-        {devtools && (
-          <NavButton
-            label="Developer tools"
-            title="Developer tools (F12)"
-            pressed={activeTab.dock !== 'closed'}
-            disabled={activeTab.wcId === null}
-            onClick={() => toggleDevtools(activeId)}
-          >
-            <Code className="size-4" />
-          </NavButton>
-        )}
+        {/* One overflow menu gathers the browser's less-frequent controls:
+            new/private windows, developer tools, extensions, and settings. */}
+        <BrowserMenu
+          showExtensions={!isPrivate && (!!crx || !!userscriptsBridge)}
+          onOpenUrl={(url) => openTab(url)}
+          userscripts={userscriptsBridge ? userscriptList : null}
+          onSetUserscriptEnabled={setUserscriptEnabled}
+          onRemoveUserscript={(script) => {
+            removeUserscript(script.id);
+            toast({ title: `${script.name} removed` });
+          }}
+          onAddUserscript={() => setScriptInstall({ code: '' })}
+          treeTabs={treeTabs}
+          onTreeTabsChange={setTreeTabs}
+          hasDevtools={!!devtools}
+          devtoolsActive={activeTab.dock !== 'closed'}
+          devtoolsDisabled={activeTab.wcId === null}
+          onToggleDevtools={() => toggleDevtools(activeId)}
+          onNewWindow={() => openWindow('web-browser')}
+          onNewPrivateWindow={() => openWindow('web-browser', { private: true })}
+        />
 
         {activeTab.loading && (
           <span
@@ -1055,6 +1095,8 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             key={tab.id}
             id={tab.id}
             initialSrc={tab.initialSrc}
+            partition={tabPartition}
+            isPrivate={isPrivate}
             active={tab.id === activeId}
             // A blank tab (empty url) shows the custom new-tab page overlaid
             // on its (about:blank) surface until the user navigates.
@@ -1820,6 +1862,8 @@ function CertificateWarning({
 const TabSurface = memo(function TabSurface({
   id,
   initialSrc,
+  partition,
+  isPrivate,
   active,
   isNewTab,
   onNavigate: onNavigateToUrl,
@@ -1842,6 +1886,10 @@ const TabSurface = memo(function TabSurface({
 }: {
   id: string;
   initialSrc: string;
+  /** Session partition for this tab's surface (private windows override it). */
+  partition?: string;
+  /** Whether this tab lives in a private window (styles the new-tab page). */
+  isPrivate: boolean;
   active: boolean;
   /** Show the custom new-tab page over the surface (blank tab). */
   isNewTab: boolean;
@@ -1964,6 +2012,7 @@ const TabSurface = memo(function TabSurface({
         <BrowserView
           ref={ref}
           src={initialSrc}
+          partition={partition}
           onLoadStart={onLoadStart}
           onLoadEnd={onLoadEnd}
           onTitleChange={onTitleChange}
@@ -1976,7 +2025,10 @@ const TabSurface = memo(function TabSurface({
       {/* The custom new-tab page sits over the (blank) surface until the
           user picks a destination; navigating swaps in the real page. */}
       {isNewTab && (
-        <NewTabPage onNavigate={(raw) => onNavigateToUrl(id, raw)} />
+        <NewTabPage
+          isPrivate={isPrivate}
+          onNavigate={(raw) => onNavigateToUrl(id, raw)}
+        />
       )}
       {/* Untrusted-TLS warning, over the failed page until the user decides. */}
       {certError && (
@@ -2158,7 +2210,13 @@ function NewTabTile({
  * same `resolveNavigation`, so typing here or in the address bar is
  * equivalent).
  */
-function NewTabPage({ onNavigate }: { onNavigate: (raw: string) => void }) {
+function NewTabPage({
+  isPrivate,
+  onNavigate,
+}: {
+  isPrivate: boolean;
+  onNavigate: (raw: string) => void;
+}) {
   const [query, setQuery] = useState('');
 
   return (
@@ -2168,10 +2226,30 @@ function NewTabPage({ onNavigate }: { onNavigate: (raw: string) => void }) {
     <div className="absolute inset-0 flex flex-col items-center overflow-auto bg-background bg-gradient-to-b from-background to-muted/30 px-6 py-16 text-foreground">
       <div className="flex w-full max-w-xl flex-col items-center">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
-            <Globe className="size-7" aria-hidden />
+          <div
+            className={cn(
+              'grid size-14 place-items-center rounded-2xl ring-1',
+              isPrivate
+                ? 'bg-foreground/10 text-foreground/80 ring-foreground/15'
+                : 'bg-primary/10 text-primary ring-primary/20',
+            )}
+          >
+            {isPrivate ? (
+              <VenetianMask className="size-7" aria-hidden />
+            ) : (
+              <Globe className="size-7" aria-hidden />
+            )}
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">New Tab</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {isPrivate ? 'Private window' : 'New Tab'}
+          </h1>
+          {isPrivate && (
+            <p className="max-w-sm text-center text-sm text-muted-foreground">
+              Pages you open here won't be saved to your history, and cookies
+              and site data are discarded when you close the last private
+              window.
+            </p>
+          )}
         </div>
 
         <form
@@ -2198,11 +2276,15 @@ function NewTabPage({ onNavigate }: { onNavigate: (raw: string) => void }) {
           />
         </form>
 
-        <div className="mt-10 grid w-full grid-cols-3 gap-4 sm:grid-cols-6">
-          {NEW_TAB_LINKS.map((link) => (
-            <NewTabTile key={link.url} link={link} onNavigate={onNavigate} />
-          ))}
-        </div>
+        {/* Quick links are omitted in private windows - a curated dashboard of
+            sites clashes with the point of an ephemeral window. */}
+        {!isPrivate && (
+          <div className="mt-10 grid w-full grid-cols-3 gap-4 sm:grid-cols-6">
+            {NEW_TAB_LINKS.map((link) => (
+              <NewTabTile key={link.url} link={link} onNavigate={onNavigate} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2242,11 +2324,179 @@ function BrowserActionList({ tabWcId }: { tabWcId: number | null }) {
 }
 
 /**
- * Toolbar menu managing installed Chrome extensions and userscripts:
- * extensions list with uninstall buttons and a Chrome Web Store link, plus
- * the userscript library (enable toggles, removal, manual add).
+ * The browser's overflow menu (the toolbar's ⋮ button): one popover that
+ * gathers the controls that don't each warrant a toolbar button - opening a
+ * new or private window, toggling developer tools, managing extensions and
+ * userscripts, and per-browser settings (vertical tabs). Consolidating them
+ * here keeps the toolbar to the essentials (navigation + address bar).
  */
-function ExtensionsMenu({
+function BrowserMenu({
+  showExtensions,
+  onOpenUrl,
+  userscripts,
+  onSetUserscriptEnabled,
+  onRemoveUserscript,
+  onAddUserscript,
+  treeTabs,
+  onTreeTabsChange,
+  hasDevtools,
+  devtoolsActive,
+  devtoolsDisabled,
+  onToggleDevtools,
+  onNewWindow,
+  onNewPrivateWindow,
+}: {
+  /** Show the extensions + userscripts section (hidden in private windows). */
+  showExtensions: boolean;
+  onOpenUrl: (url: string) => void;
+  /** Installed userscripts, or null when the userscript bridge is absent. */
+  userscripts: Userscript[] | null;
+  onSetUserscriptEnabled: (id: string, enabled: boolean) => void;
+  onRemoveUserscript: (script: Userscript) => void;
+  onAddUserscript: () => void;
+  treeTabs: boolean;
+  onTreeTabsChange: (value: boolean) => void;
+  /** Whether the docked-devtools control is available (webview mode). */
+  hasDevtools: boolean;
+  devtoolsActive: boolean;
+  devtoolsDisabled: boolean;
+  onToggleDevtools: () => void;
+  onNewWindow: () => void;
+  onNewPrivateWindow: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  /** Run an action and dismiss the menu. */
+  const run = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Browser menu"
+          title="Menu"
+          className={cn(
+            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
+            'hover:bg-foreground/10 hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            open && 'bg-foreground/10 text-foreground',
+          )}
+        >
+          <EllipsisVertical className="size-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} className="w-72 p-0">
+        <div className="p-1">
+          <BrowserMenuItem
+            icon={SquarePlus}
+            label="New window"
+            onClick={() => run(onNewWindow)}
+          />
+          <BrowserMenuItem
+            icon={VenetianMask}
+            label="New private window"
+            onClick={() => run(onNewPrivateWindow)}
+          />
+          {hasDevtools && (
+            <BrowserMenuItem
+              icon={Code}
+              label="Developer tools"
+              shortcut="F12"
+              active={devtoolsActive}
+              disabled={devtoolsDisabled}
+              onClick={() => run(onToggleDevtools)}
+            />
+          )}
+        </div>
+
+        {showExtensions && (
+          <>
+            <Separator />
+            <div className="p-3">
+              <ExtensionsSection
+                onOpenUrl={(url) => run(() => onOpenUrl(url))}
+                userscripts={userscripts}
+                onSetUserscriptEnabled={onSetUserscriptEnabled}
+                onRemoveUserscript={onRemoveUserscript}
+                onAddUserscript={() => run(onAddUserscript)}
+              />
+            </div>
+          </>
+        )}
+
+        <Separator />
+        <div className="space-y-3 p-3">
+          <h3 className="text-sm font-medium">Settings</h3>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="browser-vertical-tabs" className="text-sm">
+                Vertical tabs
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Show tabs in a sidebar, nested under the tab that opened them.
+              </p>
+            </div>
+            <Switch
+              id="browser-vertical-tabs"
+              checked={treeTabs}
+              onCheckedChange={onTreeTabsChange}
+            />
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** A single action row in the {@link BrowserMenu}. */
+function BrowserMenuItem({
+  icon: Icon,
+  label,
+  shortcut,
+  active,
+  disabled,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  /** Right-aligned shortcut hint (e.g. "F12"). */
+  shortcut?: string;
+  /** Toggle-item state (e.g. developer tools while its pane is open). */
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-foreground',
+        'hover:bg-accent hover:text-accent-foreground',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent',
+        active && 'bg-accent/60',
+      )}
+    >
+      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="flex-1 text-left">{label}</span>
+      {shortcut && <span className="text-xs text-muted-foreground">{shortcut}</span>}
+    </button>
+  );
+}
+
+/**
+ * The extensions + userscripts body of the {@link BrowserMenu}: installed
+ * Chrome extensions (with per-item uninstall and a Chrome Web Store link) plus
+ * the userscript library (enable toggles, removal, manual add). Refreshes its
+ * extension list each time it mounts - i.e. whenever the menu opens.
+ */
+function ExtensionsSection({
   onOpenUrl,
   userscripts,
   onSetUserscriptEnabled,
@@ -2254,7 +2504,6 @@ function ExtensionsMenu({
   onAddUserscript,
 }: {
   onOpenUrl: (url: string) => void;
-  /** Installed userscripts, or null when the userscript bridge is absent. */
   userscripts: Userscript[] | null;
   onSetUserscriptEnabled: (id: string, enabled: boolean) => void;
   onRemoveUserscript: (script: Userscript) => void;
@@ -2262,7 +2511,6 @@ function ExtensionsMenu({
 }) {
   const crx = getCrxBridge();
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
   const [extensions, setExtensions] = useState<CrxExtension[] | null>(null);
 
   const refresh = useCallback(async () => {
@@ -2274,10 +2522,12 @@ function ExtensionsMenu({
     }
   }, [crx]);
 
-  const onOpenChange = (next: boolean) => {
-    setOpen(next);
-    if (next) refresh();
-  };
+  useEffect(() => {
+    // refresh() only setState()s after an await (an async IPC round-trip), so
+    // this can't cascade synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refresh();
+  }, [refresh]);
 
   const uninstall = async (extension: CrxExtension) => {
     if (!crx) return;
@@ -2293,93 +2543,68 @@ function ExtensionsMenu({
     }
   };
 
-  if (!crx && userscripts === null) return null;
-
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Extensions"
-          title="Extensions"
-          className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium">Extensions</h3>
+        <p className="text-xs text-muted-foreground">
+          Extensions run on the sites you browse in this app.
+        </p>
+      </div>
+
+      {crx &&
+        (extensions === null ? null : extensions.length === 0 ? (
+          <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+            No extensions installed yet.
+          </p>
+        ) : (
+          <ul className="max-h-64 space-y-1 overflow-y-auto">
+            {extensions.map((extension) => (
+              <li key={extension.id} className="flex items-center gap-2 rounded-md px-1 py-1">
+                <ExtensionIcon id={extension.id} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">{extension.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {extension.version}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-label={`Remove ${extension.name}`}
+                  title={`Remove ${extension.name}`}
+                  onClick={() => uninstall(extension)}
+                  className={cn(
+                    'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60',
+                    'hover:bg-destructive/10 hover:text-destructive',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  )}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ))}
+
+      {crx && (
+        <Button
+          variant="secondary"
+          className="w-full"
+          onClick={() => onOpenUrl(WEB_STORE_URL)}
         >
-          <Puzzle className="size-4" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-80">
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <h3 className="text-sm font-medium">Extensions</h3>
-            <p className="text-xs text-muted-foreground">
-              Extensions run on the sites you browse in this app.
-            </p>
-          </div>
+          Browse the Chrome Web Store
+        </Button>
+      )}
 
-          {extensions === null ? null : extensions.length === 0 ? (
-            <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-              No extensions installed yet.
-            </p>
-          ) : (
-            <ul className="max-h-64 space-y-1 overflow-y-auto">
-              {extensions.map((extension) => (
-                <li key={extension.id} className="flex items-center gap-2 rounded-md px-1 py-1">
-                  <ExtensionIcon id={extension.id} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{extension.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {extension.version}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${extension.name}`}
-                    title={`Remove ${extension.name}`}
-                    onClick={() => uninstall(extension)}
-                    className={cn(
-                      'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60',
-                      'hover:bg-destructive/10 hover:text-destructive',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    )}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {crx && (
-            <Button
-              variant="secondary"
-              className="w-full"
-              onClick={() => {
-                setOpen(false);
-                onOpenUrl(WEB_STORE_URL);
-              }}
-            >
-              Browse the Chrome Web Store
-            </Button>
-          )}
-
-          {userscripts !== null && (
-            <UserscriptsSection
-              scripts={userscripts}
-              onSetEnabled={onSetUserscriptEnabled}
-              onRemove={onRemoveUserscript}
-              onAdd={() => {
-                setOpen(false);
-                onAddUserscript();
-              }}
-            />
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+      {userscripts !== null && (
+        <UserscriptsSection
+          scripts={userscripts}
+          onSetEnabled={onSetUserscriptEnabled}
+          onRemove={onRemoveUserscript}
+          onAdd={onAddUserscript}
+        />
+      )}
+    </div>
   );
 }
 
@@ -2401,61 +2626,6 @@ function ExtensionIcon({ id }: { id: string }) {
       className="size-6 shrink-0 rounded-md"
       onError={() => setFailed(true)}
     />
-  );
-}
-
-/**
- * Toolbar settings menu: a small popover of per-browser preferences. Houses
- * the vertical (tree) tabs toggle, and is the home for future browser
- * settings.
- */
-function BrowserSettingsMenu({
-  treeTabs,
-  onTreeTabsChange,
-}: {
-  treeTabs: boolean;
-  onTreeTabsChange: (value: boolean) => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Settings"
-          title="Settings"
-          className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            open && 'bg-foreground/10 text-foreground',
-          )}
-        >
-          <Settings className="size-4" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-72">
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium">Settings</h3>
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0 space-y-0.5">
-              <Label htmlFor="browser-vertical-tabs" className="text-sm">
-                Vertical tabs
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Show tabs in a sidebar, nested under the tab that opened them.
-              </p>
-            </div>
-            <Switch
-              id="browser-vertical-tabs"
-              checked={treeTabs}
-              onCheckedChange={onTreeTabsChange}
-            />
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }
 

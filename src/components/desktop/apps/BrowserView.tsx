@@ -17,6 +17,18 @@ import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
 export const WEBBROWSER_PARTITION = 'persist:webbrowser';
 
 /**
+ * The session partition for private ("incognito") browser windows. Unlike the
+ * others it is deliberately NOT prefixed with `persist:`, so Electron keeps it
+ * in memory only: cookies, storage, and cache live for the life of the session
+ * and are discarded once the last private tab closes. Shared by every private
+ * window (like a browser's single incognito profile). The Chrome extension
+ * system and NIP-07/highlight bridges are bound to the persistent sessions, so
+ * private tabs get none of them - just a hardened, ephemeral surface. Must
+ * match WEBBROWSER_PRIVATE_PARTITION in electron/main.mts.
+ */
+export const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
+
+/**
  * The session partition for installed web apps (WebAppFrame). Guests here get
  * the NIP-07 identity bridge so they inherit Din's login; browser tabs do not.
  * Must match WEBAPP_PARTITION in electron/main.cjs.

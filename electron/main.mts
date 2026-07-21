@@ -1924,6 +1924,15 @@ const WEBBROWSER_PARTITION = 'persist:webbrowser';
 // match APP_WEBVIEW_PARTITION in src/components/desktop/apps/BrowserView.tsx.
 const WEBAPP_PARTITION = 'persist:din-apps';
 
+// Private ("incognito") browser windows run their tabs in this partition.
+// Deliberately NOT prefixed with `persist:`, so Electron keeps it in memory
+// only - cookies/storage/cache are discarded once the last private tab closes.
+// Guests here are hardened like every other <webview> (see will-attach-webview)
+// but get no extension system, NIP-07, highlight, or userscript wiring, which
+// is bound to the persistent browser session. Must match
+// WEBBROWSER_PRIVATE_PARTITION in src/components/desktop/apps/BrowserView.tsx.
+const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
+
 /** Absolute path to the preload injected into installed web-app <webview>s. */
 const WEBAPP_PRELOAD = path.join(import.meta.dirname, 'webview-preload.cjs');
 
@@ -2606,6 +2615,7 @@ app.whenReady().then(() => {
   };
   session.defaultSession.on('will-download', downloadToHome);
   browserSession().on('will-download', downloadToHome);
+  session.fromPartition(WEBBROWSER_PRIVATE_PARTITION).on('will-download', downloadToHome);
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
