@@ -2857,7 +2857,10 @@ app.on('web-contents-created', (_event, contents) => {
     if (isBrowserTab && isUserscriptInstallUrl(url)) {
       sendToShell('userscripts:installRequested', { url, wcId: contents.id });
     } else if (/^(https|chrome-extension):\/\//i.test(url)) {
-      sendToShell('crx:openTab', { url });
+      // Tag the popup with its opener so the shell opens the new tab in the
+      // same window/session - keeps private-window links out of the
+      // persistent, authenticated session (and vice versa).
+      sendToShell('crx:openTab', { url, openerWcId: contents.id });
     }
     return { action: 'deny' };
   });
@@ -2927,7 +2930,7 @@ app.on('web-contents-created', (_event, contents) => {
           : [],
       openLink: (url) => {
         if (/^(https|chrome-extension):\/\//i.test(url)) {
-          sendToShell('crx:openTab', { url });
+          sendToShell('crx:openTab', { url, openerWcId: contents.id });
         }
       },
     });

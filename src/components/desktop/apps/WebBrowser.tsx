@@ -657,7 +657,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           break;
         }
       }
-    });
+    }, (wcId) => tabsRef.current.some((t) => t.wcId === wcId));
   }, [openTab, closeTab]);
 
   /**

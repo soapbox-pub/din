@@ -11,20 +11,55 @@ import type { CrxTabCommand } from '@/lib/crx';
  * publishes commands here; the WebBrowser component consumes them, draining
  * anything queued while it was closed.
  *
- * When multiple browser windows are open, the most recently mounted one
- * receives commands (consumers form a stack).
+ * A command that references a specific tab (a page-opened link's opener, or
+ * the target of chrome.tabs.update/remove) is routed to the browser window
+ * that owns that tab, so a new tab always opens in the same window - and thus
+ * the same session - as its opener. This keeps private-window links out of the
+ * persistent, authenticated session (and vice versa). Commands with no such
+ * reference (chrome.tabs.create, desktop link clicks) go to the most recently
+ * mounted window (consumers form a stack).
  */
 
-type Consumer = (command: CrxTabCommand) => void;
+interface Consumer {
+  /** Apply a tab command to this browser window's tabs. */
+  handle: (command: CrxTabCommand) => void;
+  /** Whether this window hosts the tab with the given WebContents id. */
+  ownsTab: (wcId: number) => boolean;
+}
 
 const consumers: Consumer[] = [];
 const queue: CrxTabCommand[] = [];
 
-/** Deliver a tab command to the active consumer, or queue it for the next. */
+/**
+ * The WebContents id a command is bound to, if it references a specific tab:
+ * an `open`'s opener, or a `select`/`close` target. Such commands must reach
+ * the window that owns that tab; others (`create`) have no binding.
+ */
+function boundWcId(command: CrxTabCommand): number | undefined {
+  switch (command.type) {
+    case 'open':
+      return command.openerWcId;
+    case 'select':
+    case 'close':
+      return command.wcId;
+    default:
+      return undefined;
+  }
+}
+
+/** The consumer that should handle a command: its tab owner, else top-of-stack. */
+function targetFor(command: CrxTabCommand): Consumer | undefined {
+  const wcId = boundWcId(command);
+  const owner =
+    wcId !== undefined ? consumers.find((c) => c.ownsTab(wcId)) : undefined;
+  return owner ?? consumers[consumers.length - 1];
+}
+
+/** Deliver a tab command to the owning (or active) consumer, or queue it. */
 export function publishTabCommand(command: CrxTabCommand): void {
-  const consumer = consumers[consumers.length - 1];
+  const consumer = targetFor(command);
   if (consumer) {
-    consumer(command);
+    consumer.handle(command);
   } else {
     queue.push(command);
   }
@@ -36,14 +71,20 @@ export function hasTabConsumer(): boolean {
 }
 
 /**
- * Register the mounted Web Browser as the consumer of tab commands. Any
- * queued commands are delivered immediately. Returns an unsubscribe fn.
+ * Register a mounted Web Browser as a consumer of tab commands. `ownsTab`
+ * reports whether this window hosts a given tab, so commands route to the
+ * right window. Any queued commands (issued while no browser was open, hence
+ * ownerless) are delivered immediately. Returns an unsubscribe fn.
  */
-export function consumeTabCommands(consumer: Consumer): () => void {
+export function consumeTabCommands(
+  handle: Consumer['handle'],
+  ownsTab: Consumer['ownsTab'],
+): () => void {
+  const consumer: Consumer = { handle, ownsTab };
   consumers.push(consumer);
   if (consumers[consumers.length - 1] === consumer) {
     while (queue.length > 0) {
-      consumer(queue.shift() as CrxTabCommand);
+      consumer.handle(queue.shift() as CrxTabCommand);
     }
   }
   return () => {

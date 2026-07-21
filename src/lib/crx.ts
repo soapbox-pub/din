@@ -35,6 +35,14 @@ export type CrxTabCommand =
       /** target=_blank / window.open from a page: open a tab. */
       type: 'open';
       url: string;
+      /**
+       * WebContents id of the tab that opened the link, when the command came
+       * from a page (absent for desktop-initiated opens like terminal links).
+       * Routes the new tab into the *same* browser window - and therefore the
+       * same session - as its opener, so a private-window link never lands in
+       * the persistent, authenticated session (or vice versa).
+       */
+      openerWcId?: number;
     }
   | {
       /** chrome.tabs.update({ active: true }): activate the matching tab. */

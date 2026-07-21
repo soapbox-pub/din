@@ -435,7 +435,7 @@ contextBridge.exposeInMainWorld('browser', {
  * An extension-initiated tab command surfaced to the browser app.
  * @typedef {(
  *   { type: 'create', requestId: number, url?: string, active: boolean } |
- *   { type: 'open', url: string } |
+ *   { type: 'open', url: string, openerWcId?: number } |
  *   { type: 'select', wcId: number } |
  *   { type: 'close', wcId: number }
  * )} CrxTabCommand
@@ -478,9 +478,10 @@ contextBridge.exposeInMainWorld('crx', {
       callback({ type: 'create', requestId: d.requestId, url: d.url, active: d.active });
     /**
      * @param {Electron.IpcRendererEvent} _event
-     * @param {{ url: string }} d
+     * @param {{ url: string, openerWcId?: number }} d
      */
-    const open = (_event, d) => callback({ type: 'open', url: d.url });
+    const open = (_event, d) =>
+      callback({ type: 'open', url: d.url, openerWcId: d.openerWcId });
     /**
      * @param {Electron.IpcRendererEvent} _event
      * @param {{ wcId: number }} d
