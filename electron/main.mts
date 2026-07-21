@@ -2229,6 +2229,170 @@ function setupChromeExtensions(): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// TLS trust for the Web Browser app.
+//
+// A self-signed / private-CA host (e.g. a device on the local network)
+// fails Chromium's default certificate check, and Electron ships no built-in
+// "proceed anyway" interstitial - the tab just fails to load. We add one: on a
+// certificate error inside a browser tab we reject the load and surface the
+// details to the shell, which shows a warning. If the user chooses to proceed
+// we pin that exact (host, fingerprint) pair - persisted across restarts - and
+// reload; the next verification for that pinned cert is trusted. Scoped to the
+// browser session only, so the shell and installed web apps keep strict
+// verification.
+// ---------------------------------------------------------------------------
+
+/** Where accepted (host, fingerprint) cert exceptions are persisted. */
+function trustedCertsPath(): string {
+  return path.join(app.getPath('userData'), 'browser-trusted-certs.json');
+}
+
+/** Accepted cert exceptions, keyed by `host\u0000fingerprint`. */
+const trustedCerts = new Set<string>();
+let trustedCertsLoaded = false;
+
+/** Identity key for a pinned certificate exception. */
+function certKey(host: string, fingerprint: string): string {
+  return `${host}\u0000${fingerprint}`;
+}
+
+/** Load persisted cert exceptions once (lazy; needs a ready app for userData). */
+function loadTrustedCerts(): void {
+  if (trustedCertsLoaded) return;
+  trustedCertsLoaded = true;
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(trustedCertsPath(), 'utf8'));
+    if (!Array.isArray(parsed)) return;
+    for (const entry of parsed) {
+      if (
+        entry &&
+        typeof entry === 'object' &&
+        typeof (entry as { host?: unknown }).host === 'string' &&
+        typeof (entry as { fingerprint?: unknown }).fingerprint === 'string'
+      ) {
+        const { host, fingerprint } = entry as { host: string; fingerprint: string };
+        trustedCerts.add(certKey(host, fingerprint));
+      }
+    }
+  } catch {
+    // No file yet (or unreadable/corrupt): start with no exceptions.
+  }
+}
+
+/** Persist the current cert exceptions (best-effort). */
+function saveTrustedCerts(): void {
+  const entries = [...trustedCerts].map((key) => {
+    const [host, fingerprint] = key.split('\u0000');
+    return { host, fingerprint };
+  });
+  try {
+    fs.writeFileSync(trustedCertsPath(), JSON.stringify(entries, null, 2));
+  } catch {
+    // Non-fatal: the exception just won't survive a restart.
+  }
+}
+
+/** Hostname of a URL, or null if it can't be parsed. */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function registerCertificateHandling(): void {
+  loadTrustedCerts();
+
+  // Approve pinned certs *before* Chromium raises an error, so a trusted
+  // self-signed host loads cleanly - no error page, no reload dance. Every
+  // other cert defers to Chromium's own verification (-3), so valid public
+  // certs are still checked normally and unknown bad certs still fail.
+  browserSession().setCertificateVerifyProc((request, callback) => {
+    const fingerprint = request.certificate?.fingerprint || '';
+    if (
+      request.hostname &&
+      fingerprint &&
+      trustedCerts.has(certKey(request.hostname, fingerprint))
+    ) {
+      callback(0);
+      return;
+    }
+    callback(-3);
+  });
+
+  // A cert Chromium rejected (unpinned self-signed / private-CA host) fires
+  // this on the browser session. Reject the load and, for the top-level frame,
+  // hand the details to the shell so it can offer "proceed anyway".
+  app.on(
+    'certificate-error',
+    (event, contents, url, error, certificate, callback, isMainFrame) => {
+      if (
+        !contents ||
+        contents.isDestroyed() ||
+        contents.session !== browserSession()
+      ) {
+        // Not a browser tab (shell, installed web app, ...): leave Chromium's
+        // strict verification in place by not overriding it.
+        return;
+      }
+      const host = hostOf(url);
+      const fingerprint = certificate.fingerprint || '';
+      if (host && fingerprint && trustedCerts.has(certKey(host, fingerprint))) {
+        // Pinned (belt-and-suspenders with the verify proc above): trust it.
+        event.preventDefault();
+        callback(true);
+        return;
+      }
+      // Reject, and (for the top-level load) ask the shell to warn the user.
+      event.preventDefault();
+      callback(false);
+      if (isMainFrame && host) {
+        sendToShell('browser:certificateError', {
+          wcId: contents.id,
+          url,
+          host,
+          error,
+          fingerprint,
+        });
+      }
+    },
+  );
+
+  // The shell reports the user chose to proceed: pin the (host, fingerprint)
+  // pair and reload the tab. The reload is issued here, from the main process
+  // (a browser-initiated navigation), rather than from the renderer's
+  // <webview> element - reloading the chrome-error page through the element is
+  // blocked by Blink as a cross-origin navigation ("Domains, protocols and
+  // ports must match").
+  ipcMain.handle(
+    'browser:trustCertificate',
+    (event, host, fingerprint, wcId, url) => {
+      assertShellSender(event);
+      if (
+        typeof host !== 'string' ||
+        typeof fingerprint !== 'string' ||
+        !host ||
+        !fingerprint
+      ) {
+        throw new Error('Invalid certificate exception');
+      }
+      loadTrustedCerts();
+      trustedCerts.add(certKey(host, fingerprint));
+      saveTrustedCerts();
+      const tab = browserTabFromId(wcId);
+      if (tab) {
+        if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+          tab.loadURL(url).catch(() => {});
+        } else {
+          tab.reloadIgnoringCache();
+        }
+      }
+    },
+  );
+}
+
 function registerCrxHandlers(): void {
   // The shell reports which browser tab is active (drives per-tab extension
   // action state and which tab chrome.tabs APIs consider "active").
@@ -2458,6 +2622,7 @@ app.whenReady().then(() => {
   registerBrightnessHandlers();
   registerScreenshotHandlers();
   registerCrxHandlers();
+  registerCertificateHandling();
   registerUserscriptHandlers({ assertShellSender });
   registerDevtoolsHandlers();
   registerNostrBridge();

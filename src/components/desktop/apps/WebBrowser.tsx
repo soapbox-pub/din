@@ -12,6 +12,7 @@ import {
   RotateCw,
   Search,
   Settings,
+  ShieldAlert,
   Trash2,
   X,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ import {
   type Userscript,
 } from '@/lib/userscripts';
 import { getDevtoolsBridge } from '@/lib/devtools';
+import { getBrowserBridge, type CertificateErrorInfo } from '@/lib/browser';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { consumeTabCommands, consumeBrowserHotkeys } from '@/lib/browserTabBus';
 import { consumeInspectorDock } from '@/lib/inspectorBus';
@@ -443,6 +445,23 @@ export function WebBrowser({ windowId }: AppComponentProps) {
     else views.current.delete(id);
   }, []);
 
+  // Untrusted-TLS interstitials, keyed by the offending tab guest's wcId. The
+  // main process rejects the load of a self-signed / private-CA host and
+  // reports it here (webview mode only; see src/lib/browser.ts).
+  const browserBridge = useMemo(() => getBrowserBridge(), []);
+  const [certErrors, setCertErrors] = useState<Map<number, CertificateErrorInfo>>(
+    () => new Map(),
+  );
+  const clearCertError = useCallback((wcId: number | null) => {
+    if (wcId === null) return;
+    setCertErrors((prev) => {
+      if (!prev.has(wcId)) return prev;
+      const next = new Map(prev);
+      next.delete(wcId);
+      return next;
+    });
+  }, []);
+
   const onTabEvent = useCallback(
     (id: string, event: TabEvent) => {
       switch (event.kind) {
@@ -469,6 +488,10 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             canBack: event.canBack,
             canForward: event.canForward,
           });
+          // A committed navigation means the load succeeded, so any pending
+          // certificate warning for this tab no longer applies (a rejected
+          // load never commits). Clear it.
+          clearCertError(tabsRef.current.find((t) => t.id === id)?.wcId ?? null);
           // Webview mode sees every committed navigation here (link clicks,
           // redirects, back/forward); recordVisit ignores non-https URLs
           // (about:blank, chrome-extension://). The iframe fallback never
@@ -487,7 +510,46 @@ export function WebBrowser({ windowId }: AppComponentProps) {
         }
       }
     },
-    [updateTab, crx, recordVisit, recordTitle],
+    [updateTab, crx, recordVisit, recordTitle, clearCertError],
+  );
+
+  // Surface untrusted-TLS reports from the main process on the offending tab.
+  useEffect(() => {
+    if (!browserBridge) return;
+    return browserBridge.onCertificateError((info) => {
+      setCertErrors((prev) => new Map(prev).set(info.wcId, info));
+    });
+  }, [browserBridge]);
+
+  // Proceed past a certificate warning: pin the cert; the main process then
+  // reloads the tab (a browser-initiated navigation - reloading the
+  // chrome-error page through the <webview> element is blocked by Blink).
+  const trustCertificate = useCallback(
+    async (info: CertificateErrorInfo) => {
+      if (!browserBridge) return;
+      try {
+        await browserBridge.trustCertificate(
+          info.host,
+          info.fingerprint,
+          info.wcId,
+          info.url,
+        );
+      } catch {
+        return;
+      }
+      clearCertError(info.wcId);
+    },
+    [browserBridge, clearCertError],
+  );
+
+  // Dismiss a certificate warning without trusting (back off the failed host).
+  const dismissCertError = useCallback(
+    (tabId: string) => {
+      const tab = tabsRef.current.find((t) => t.id === tabId);
+      clearCertError(tab?.wcId ?? null);
+      views.current.get(tabId)?.goBack();
+    },
+    [clearCertError],
   );
 
   // Report the active tab to the extension system (drives chrome.tabs'
@@ -1013,6 +1075,9 @@ export function WebBrowser({ windowId }: AppComponentProps) {
             onSelectDevice={setDevice}
             onRegister={registerView}
             onEvent={onTabEvent}
+            certError={tab.wcId != null ? certErrors.get(tab.wcId) ?? null : null}
+            onTrustCertificate={trustCertificate}
+            onDismissCertError={dismissCertError}
           />
         ))}
         </div>
@@ -1662,6 +1727,96 @@ function TreeTabRow({
  *    viewport of the device's CSS dimensions (the actual metrics/user-agent
  *    override is applied over CDP; this is just the visual frame + scroll).
  */
+/**
+ * Full-surface interstitial shown when a tab's TLS certificate can't be
+ * trusted (self-signed / private-CA host). Mirrors a browser's "your
+ * connection isn't private" page: the risky "proceed" path is gated behind a
+ * second confirm so it can't be hit by a stray click.
+ */
+function CertificateWarning({
+  info,
+  onProceed,
+  onBack,
+}: {
+  info: CertificateErrorInfo;
+  onProceed: () => void;
+  onBack: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const code = info.error.replace(/^net::/, '');
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-muted/95 p-6 backdrop-blur-sm">
+      <div className="w-full max-w-md space-y-5 rounded-xl border bg-background p-6 shadow-lg">
+        <div className="flex items-start gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+            <ShieldAlert className="size-5" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold leading-tight">
+              Your connection isn't private
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Din couldn't verify the identity of{' '}
+              <span className="break-all font-medium text-foreground">{info.host}</span>.
+              Its security certificate isn't trusted (self-signed or issued by a
+              private authority).
+            </p>
+          </div>
+        </div>
+
+        <dl className="space-y-1.5 rounded-lg bg-muted/60 p-3 text-xs">
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Error</dt>
+            <dd className="font-mono">{code}</dd>
+          </div>
+          <div className="flex min-w-0 justify-between gap-3">
+            <dt className="shrink-0 text-muted-foreground">Fingerprint</dt>
+            <dd className="truncate font-mono" title={info.fingerprint}>
+              {info.fingerprint}
+            </dd>
+          </div>
+        </dl>
+
+        {!confirming ? (
+          <div className="flex flex-col gap-2">
+            <Button className="w-full" onClick={onBack}>
+              Back to safety
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full text-muted-foreground"
+              onClick={() => setConfirming(true)}
+            >
+              Proceed anyway
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Only continue if you trust this host and expected a private
+              certificate. An attacker could be impersonating{' '}
+              <span className="break-all font-medium text-foreground">{info.host}</span>{' '}
+              to steal your data. Din will remember this certificate next time.
+            </p>
+            <div className="flex flex-col gap-2">
+              <Button variant="destructive" className="w-full" onClick={onProceed}>
+                Trust this certificate and continue
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => setConfirming(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const TabSurface = memo(function TabSurface({
   id,
   initialSrc,
@@ -1681,6 +1836,9 @@ const TabSurface = memo(function TabSurface({
   onSelectDevice,
   onRegister,
   onEvent,
+  certError,
+  onTrustCertificate,
+  onDismissCertError,
 }: {
   id: string;
   initialSrc: string;
@@ -1706,6 +1864,12 @@ const TabSurface = memo(function TabSurface({
   onSelectDevice: (id: string, deviceId: string | null) => void;
   onRegister: (id: string, handle: BrowserViewHandle | null) => void;
   onEvent: (id: string, event: TabEvent) => void;
+  /** Pending untrusted-TLS warning for this tab, or null. */
+  certError: CertificateErrorInfo | null;
+  /** Proceed past the warning: pin the cert and reload. */
+  onTrustCertificate: (info: CertificateErrorInfo) => void;
+  /** Dismiss the warning without trusting. */
+  onDismissCertError: (id: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
@@ -1813,6 +1977,14 @@ const TabSurface = memo(function TabSurface({
           user picks a destination; navigating swaps in the real page. */}
       {isNewTab && (
         <NewTabPage onNavigate={(raw) => onNavigateToUrl(id, raw)} />
+      )}
+      {/* Untrusted-TLS warning, over the failed page until the user decides. */}
+      {certError && (
+        <CertificateWarning
+          info={certError}
+          onProceed={() => onTrustCertificate(certError)}
+          onBack={() => onDismissCertError(id)}
+        />
       )}
     </div>
   );

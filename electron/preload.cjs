@@ -12,6 +12,7 @@
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
 //   - window.brightness: backlight + night light for the menu bar, Settings, OSD
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
+//   - window.browser: TLS certificate exceptions for the Web Browser app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.userscripts: userscript library sync and install
 //     requests for the Web Browser app
@@ -378,6 +379,46 @@ contextBridge.exposeInMainWorld('brightness', {
 contextBridge.exposeInMainWorld('screenshot', {
   /** Capture the desktop; resolves to { dataUrl, width, height } (PNG). */
   capture: () => ipcRenderer.invoke('screenshot:capture'),
+});
+
+/**
+ * Details of a rejected TLS certificate for a browser tab.
+ * @typedef {{ wcId: number, url: string, host: string, error: string, fingerprint: string }} CertificateErrorInfo
+ */
+
+// Browser bridge (window.browser), backed by the browser:* handlers in
+// main.mts. A browser tab that hits an untrusted TLS certificate (self-signed
+// or private-CA host) has its load rejected; the details arrive here so the
+// Web Browser app can show a "proceed anyway" warning. Accepting pins that
+// exact (host, fingerprint) pair in the main process (persisted) so the
+// following reload is trusted. Scoped to the browser session only.
+contextBridge.exposeInMainWorld('browser', {
+  /**
+   * Subscribe to rejected-certificate reports for browser tabs. The callback
+   * receives { wcId, url, host, error, fingerprint }. Returns an unsubscribe
+   * fn.
+   * @param {(info: CertificateErrorInfo) => void} callback
+   */
+  onCertificateError: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {CertificateErrorInfo} info
+     */
+    const listener = (_event, info) => callback(info);
+    ipcRenderer.on('browser:certificateError', listener);
+    return () => ipcRenderer.removeListener('browser:certificateError', listener);
+  },
+
+  /**
+   * Pin a (host, fingerprint) pair as trusted, then reload the offending tab
+   * (`wcId`) to `url` from the main process. Resolves once pinned.
+   * @param {string} host
+   * @param {string} fingerprint
+   * @param {number} wcId
+   * @param {string} url
+   */
+  trustCertificate: (host, fingerprint, wcId, url) =>
+    ipcRenderer.invoke('browser:trustCertificate', host, fingerprint, wcId, url),
 });
 
 /**
