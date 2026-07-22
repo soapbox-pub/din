@@ -115,6 +115,20 @@ in
   # /sys/class/backlight, so the Settings brightness panel works unprivileged.
   services.udev.packages = [ pkgs.brightnessctl ];
 
+  # Let a docked USB keyboard/mouse wake the machine from suspend. Laptops arm
+  # only the lid switch as a wake source by default, so when docked (lid shut)
+  # and asleep, bumping an external mouse does nothing - you have to crack the
+  # lid to wake it. Marking USB devices and their host controllers wake-capable
+  # arms them as ACPI wake sources: the `usb` rule covers the input devices and
+  # hubs, and the `pci` rule (class 0x0c03xx = USB controllers: xHCI/EHCI/etc.)
+  # enables the controller's GPE so a wake actually propagates. Harmless where
+  # unsupported - the attribute just won't exist. `add|change` so it applies on
+  # both cold-plug and hot-plug (e.g. plugging into the dock while running).
+  services.udev.extraRules = ''
+    ACTION=="add|change", SUBSYSTEM=="usb", ATTR{power/wakeup}="enabled"
+    ACTION=="add|change", SUBSYSTEM=="pci", ATTR{class}=="0x0c03*", ATTR{power/wakeup}="enabled"
+  '';
+
   # cage: a Wayland compositor that runs exactly one fullscreen application.
   # This is the entire graphical stack - no X11, no display manager, no desktop.
   services.cage = {

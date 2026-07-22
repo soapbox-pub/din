@@ -51,11 +51,18 @@ function DesktopSession() {
             <MenuBar />
 
             {/* Workspace area - windows render here. The Dock overlays its
-                bottom edge and auto-hides, so windows can use the full height. */}
+                bottom edge and auto-hides, so windows can use the full height.
+                `isolate` gives the window stack its own stacking context so
+                each window's inline z-index (a counter that only climbs as
+                windows are raised) stays contained here. Without it, a window
+                whose z grew past a menu's z-50 or the top bar's z-20 would
+                paint over the portaled app/menu-bar dropdowns and the top bar
+                itself; isolation keeps those layers - and the Dock - on top no
+                matter how high the window counter climbs. */}
             <main
               ref={workspaceRef}
               aria-label="Desktop"
-              className="relative flex-1 overflow-hidden"
+              className="relative isolate flex-1 overflow-hidden"
             >
               {manager.windows.map((win) => (
                 <Window
