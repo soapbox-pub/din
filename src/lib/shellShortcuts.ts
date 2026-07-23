@@ -9,6 +9,8 @@
  *
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
  *   - Print Screen            -> { action: 'screenshot' }
+ *   - Shift+Print Screen, or the laptop box-select key
+ *                             -> { action: 'screenshot-area' }
  *   - Ctrl+T in a browser tab -> { action: 'new-tab', wcId }
  *   - Ctrl+W in a browser tab -> { action: 'close-tab', wcId }
  *   - Ctrl+L in a browser tab -> { action: 'focus-address', wcId }
@@ -37,8 +39,16 @@ export type ShellShortcut =
       backward: boolean;
     }
   | {
-      /** Print Screen pressed inside a guest: open the Screenshot app's area-select capture. */
+      /** Print Screen pressed inside a guest: full-screen capture. */
       action: 'screenshot';
+    }
+  | {
+      /**
+       * Area-select capture: Shift+Print Screen inside a guest, or the
+       * dedicated box-select key on newer laptops (read from evdev by the
+       * main process, since Chromium can't identify its keysym).
+       */
+      action: 'screenshot-area';
     }
   | {
       /** Ctrl+T pressed inside a browser tab: open a new tab. */

@@ -104,11 +104,15 @@ in
   # WiFi settings panel control connections without polkit prompts; `video`
   # lets the brightness bridge write the backlight (via brightnessctl's udev
   # rules below) without root; `audio` grants access to the sound devices the
-  # PipeWire sound bridge drives.
+  # PipeWire sound bridge drives. `input` lets the Electron host read keyboard
+  # event nodes directly for the laptop box-select screenshot key
+  # (KEY_SELECTIVE_SCREENSHOT), whose keysym Chromium can't identify - see
+  # electron/main.mts. The main process already observes every keystroke via
+  # before-input-event; nothing new is exposed to renderers.
   users.users.web = {
     isNormalUser = true;
     description = "Din desktop user";
-    extraGroups = [ "networkmanager" "video" "audio" ];
+    extraGroups = [ "networkmanager" "video" "audio" "input" ];
   };
 
   # brightnessctl ships udev rules that grant the `video` group write access to

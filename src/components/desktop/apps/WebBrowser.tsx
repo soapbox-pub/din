@@ -1157,8 +1157,14 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     const bridge = getShellShortcuts();
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
-      // Window cycling and Print Screen are desktop-wide; DesktopHotkeys owns them.
-      if (shortcut.action === 'cycle-windows' || shortcut.action === 'screenshot') return;
+      // Window cycling and screenshot keys are desktop-wide; DesktopHotkeys owns them.
+      if (
+        shortcut.action === 'cycle-windows' ||
+        shortcut.action === 'screenshot' ||
+        shortcut.action === 'screenshot-area'
+      ) {
+        return;
+      }
       const tab = tabsRef.current.find((t) => t.wcId === shortcut.wcId);
       if (!tab) return;
       switch (shortcut.action) {

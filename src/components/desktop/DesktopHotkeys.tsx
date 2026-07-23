@@ -17,10 +17,12 @@ const SCREENSHOT_APP_ID = 'screenshot';
  *
  * - Alt+Tab / Alt+Shift+Tab cycle focus through the open (non-minimized)
  *   windows.
- * - Print Screen opens the Screenshot app straight into area-select mode
- *   (the laptop screenshot function key). Ignored while a capture session
- *   is already running, so it can't re-raise the deliberately hidden
- *   window mid-shot.
+ * - Print Screen opens the Screenshot app for a full-screen capture, and
+ *   Shift+Print Screen for an area grab (the laptop screenshot function
+ *   keys; the dedicated box-select key on newer laptops reaches the shell
+ *   as the 'screenshot-area' bridge shortcut instead - see electron/main.mts).
+ *   Both are ignored while a capture session is already running, so they
+ *   can't re-raise the deliberately hidden window mid-shot.
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
@@ -78,19 +80,17 @@ export function DesktopHotkeys() {
     const guests = isWebviewAvailable();
 
     const onKeyDown = (e: KeyboardEvent) => {
-      // Print Screen: open the Screenshot app in area-select mode. The
-      // session flag guards against a press mid-capture, when the app's
-      // window is deliberately minimized out of the shot.
-      if (
-        e.key === 'PrintScreen' &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        !e.metaKey &&
-        !e.shiftKey
-      ) {
+      // Print Screen: full-screen capture. Shift+Print Screen: select an
+      // area (the same session the dedicated box-select key starts via the
+      // Electron host's evdev watch). The session flag guards against a
+      // press mid-capture, when the app's window is deliberately minimized
+      // out of the shot.
+      if (e.key === 'PrintScreen' && !e.ctrlKey && !e.altKey && !e.metaKey) {
         if (!isScreenshotSessionActive()) {
           e.preventDefault();
-          actionsRef.current.open(SCREENSHOT_APP_ID, { start: 'area' });
+          actionsRef.current.open(SCREENSHOT_APP_ID, {
+            start: e.shiftKey ? 'area' : 'screen',
+          });
         }
         return;
       }
@@ -177,9 +177,11 @@ export function DesktopHotkeys() {
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
       if (shortcut.action === 'cycle-windows') cycleFocus(shortcut.backward);
-      else if (shortcut.action === 'screenshot') {
+      else if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {
         if (!isScreenshotSessionActive()) {
-          actionsRef.current.open(SCREENSHOT_APP_ID, { start: 'area' });
+          actionsRef.current.open(SCREENSHOT_APP_ID, {
+            start: shortcut.action === 'screenshot-area' ? 'area' : 'screen',
+          });
         }
       }
     });

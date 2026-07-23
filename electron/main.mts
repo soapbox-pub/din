@@ -1773,6 +1773,82 @@ function registerScreenshotHandlers(): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// The laptop "box select" screenshot key. Newer laptop keyboards carry a
+// dedicated area-screenshot key (dashed-box icon) next to Print Screen; the
+// kernel delivers it as evdev KEY_SELECTIVE_SCREENSHOT, which XKB turns into
+// the XF86SelectiveScreenshot keysym. Chromium has no DOM mapping for that
+// keysym, so before-input-event can only report it as "Unidentified" -
+// indistinguishable from any other unmapped key. GNOME/KDE handle the key at
+// the evdev level; do the same: read the keyboard event nodes directly and
+// forward presses to the shell as the 'screenshot-area' shortcut.
+//
+// Reading /dev/input needs the `input` group (Aladdin grants it to the
+// desktop user); anywhere else the watcher just stays off. The main process
+// already observes every keystroke via before-input-event, and nothing here
+// is exposed to renderers, so no new capability crosses a trust boundary.
+// ---------------------------------------------------------------------------
+
+const EV_KEY = 0x01;
+const KEY_SELECTIVE_SCREENSHOT = 0x27a;
+/** struct input_event on 64-bit Linux: 16-byte timeval + type + code + value. */
+const INPUT_EVENT_SIZE = 24;
+
+/** The /dev/input/event* nodes of keyboard devices, per /proc/bus/input/devices. */
+function keyboardEventNodes(): string[] {
+  let data: string;
+  try {
+    data = fs.readFileSync('/proc/bus/input/devices', 'utf8');
+  } catch {
+    return [];
+  }
+  const nodes: string[] = [];
+  for (const block of data.split('\n\n')) {
+    // Only devices with the "kbd" handler report key events (mice etc. don't).
+    const handlers = /^H: Handlers=(.*)$/m.exec(block)?.[1] ?? '';
+    if (!/(^|\s)kbd(\s|$)/.test(handlers)) continue;
+    for (const m of handlers.matchAll(/event\d+/g)) nodes.push(`/dev/input/${m[0]}`);
+  }
+  return nodes;
+}
+
+function watchSelectiveScreenshotKey(): void {
+  if (process.platform !== 'linux') return;
+  const watched = new Set<string>();
+  const scan = () => {
+    for (const node of keyboardEventNodes()) {
+      if (watched.has(node)) continue;
+      watched.add(node);
+      let leftover: Buffer = Buffer.alloc(0);
+      const stream = fs.createReadStream(node);
+      stream.on('data', (chunk: string | Buffer) => {
+        const data = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        const buf = leftover.length > 0 ? Buffer.concat([leftover, data]) : data;
+        const full = buf.length - (buf.length % INPUT_EVENT_SIZE);
+        for (let off = 0; off < full; off += INPUT_EVENT_SIZE) {
+          // value 1 = press (0 = release, 2 = autorepeat).
+          if (
+            buf.readUInt16LE(off + 16) === EV_KEY &&
+            buf.readUInt16LE(off + 18) === KEY_SELECTIVE_SCREENSHOT &&
+            buf.readInt32LE(off + 20) === 1
+          ) {
+            sendToShell('shortcut', { action: 'screenshot-area' });
+          }
+        }
+        leftover = buf.subarray(full);
+      });
+      const unwatch = () => watched.delete(node);
+      // Unreadable (permissions) or unplugged: drop it so the next rescan
+      // can retry (or pick up a replacement keyboard).
+      stream.on('error', unwatch);
+      stream.on('close', unwatch);
+    }
+  };
+  scan();
+  // Keyboards come and go (docks, USB/BT keyboards): rescan periodically.
+  setInterval(scan, 10_000).unref();
+}
+
 /** One WiFi network as listed by wifi:networks. */
 interface WifiNetwork {
   ssid: string;
@@ -2728,7 +2804,7 @@ function isDevtoolsToggleInput(input: Electron.Input): boolean {
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
-  | { action: 'screenshot' }
+  | { action: 'screenshot' | 'screenshot-area' }
   | { action: 'new-tab' | 'close-tab' | 'focus-address' | 'find' | 'back' | 'forward' }
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
@@ -2743,16 +2819,13 @@ type ShellShortcut =
  */
 function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   if (input.type !== 'keyDown') return null;
-  // Print Screen (the laptop screenshot function key): open the Screenshot
-  // app's area-select capture.
-  if (
-    input.key === 'PrintScreen' &&
-    !input.alt &&
-    !input.control &&
-    !input.meta &&
-    !input.shift
-  ) {
-    return { action: 'screenshot' };
+  // Print Screen (the laptop screenshot key): full-screen capture;
+  // Shift+Print Screen: select an area. The dedicated box-select key on
+  // newer laptops can't reach here - Chromium reports its keysym as
+  // "Unidentified" - so it's read from evdev directly instead (see
+  // watchSelectiveScreenshotKey).
+  if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
+    return { action: input.shift ? 'screenshot-area' : 'screenshot' };
   }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
@@ -2900,6 +2973,7 @@ app.whenReady().then(() => {
   registerMediaKeys();
   registerBrightnessHandlers();
   registerScreenshotHandlers();
+  watchSelectiveScreenshotKey();
   registerCrxHandlers();
   registerCertificateHandling();
   registerBrowserDataHandlers();
@@ -3065,7 +3139,11 @@ app.on('web-contents-created', (_event, contents) => {
         return;
       }
       const shortcut = shellShortcutForInput(input);
-      if (shortcut?.action === 'cycle-windows' || shortcut?.action === 'screenshot') {
+      if (
+        shortcut?.action === 'cycle-windows' ||
+        shortcut?.action === 'screenshot' ||
+        shortcut?.action === 'screenshot-area'
+      ) {
         event.preventDefault();
         sendToShell('shortcut', shortcut);
       }
@@ -3107,7 +3185,11 @@ app.on('web-contents-created', (_event, contents) => {
   if (isAppGuest(contents)) {
     contents.on('before-input-event', (event, input) => {
       const shortcut = shellShortcutForInput(input);
-      if (shortcut?.action === 'cycle-windows' || shortcut?.action === 'screenshot') {
+      if (
+        shortcut?.action === 'cycle-windows' ||
+        shortcut?.action === 'screenshot' ||
+        shortcut?.action === 'screenshot-area'
+      ) {
         event.preventDefault();
         sendToShell('shortcut', shortcut);
       }

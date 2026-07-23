@@ -171,6 +171,11 @@ function CaptureOverlay({
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
+    // Portal events bubble through the REACT tree, not the DOM tree: without
+    // this, the click reaches the Window section's raise-on-pointerdown
+    // handler and un-minimizes the app window mid-selection (straight into
+    // the shot).
+    e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     origin.current = { x: e.clientX, y: e.clientY };
     setDrag(null);
@@ -178,12 +183,14 @@ function CaptureOverlay({
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!origin.current) return;
+    e.stopPropagation();
     setDrag(rectFrom(origin.current, { x: e.clientX, y: e.clientY }));
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
     const o = origin.current;
     if (!o) return;
+    e.stopPropagation();
     origin.current = null;
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     const rect = rectFrom(o, { x: e.clientX, y: e.clientY });
@@ -252,8 +259,9 @@ function CaptureOverlay({
  * timer expires, which races the genie animation under load), then overlays
  * the desktop for the region drag. The delay counts down after the
  * selection, so menus and hover states can still be arranged before the
- * shot fires. The desktop's Print Screen hotkey launches the app straight
- * into area-select mode (see DesktopHotkeys).
+ * shot fires. Hotkeys launch sessions directly (see DesktopHotkeys): Print
+ * Screen grabs the whole screen; Shift+Print Screen - or the dedicated
+ * box-select key found on newer laptop keyboards - starts an area grab.
  *
  * Capture is backed by the Electron shell's screenshot bridge
  * (webContents.capturePage). Outside the shell (a plain browser) there is
@@ -463,41 +471,30 @@ export function Screenshot({ windowId, params }: AppComponentProps) {
             />
           </div>
 
-          <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
-            <span className="mr-auto px-1 text-[11px] text-muted-foreground tabular-nums">
+          <div className="flex items-center gap-1 border-t border-border px-3 py-2">
+            <span className="mr-auto px-1 text-xs text-muted-foreground tabular-nums">
               {image.width} &times; {image.height}
             </span>
-            <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={copy}>
-              <Copy className="size-3.5" aria-hidden />
+            <Button size="sm" variant="ghost" onClick={copy}>
+              <Copy aria-hidden />
               Copy
             </Button>
             {fs && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1.5 px-2 text-xs"
-                onClick={save}
-                disabled={saving}
-              >
+              <Button size="sm" variant="ghost" onClick={save} disabled={saving}>
                 {saving ? (
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                  <Loader2 className="animate-spin" aria-hidden />
                 ) : (
-                  <Save className="size-3.5" aria-hidden />
+                  <Save aria-hidden />
                 )}
                 Save
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 gap-1.5 px-2 text-xs"
-              onClick={download}
-            >
-              <Download className="size-3.5" aria-hidden />
+            <Button size="sm" variant="ghost" onClick={download}>
+              <Download aria-hidden />
               Download
             </Button>
-            <Button size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={() => setImage(null)}>
-              <Camera className="size-3.5" aria-hidden />
+            <Button size="sm" onClick={() => setImage(null)}>
+              <Camera aria-hidden />
               New
             </Button>
           </div>
@@ -505,9 +502,9 @@ export function Screenshot({ windowId, params }: AppComponentProps) {
       ) : (
         // --- Launcher ------------------------------------------------------
         <div ref={rootRef} className="grid h-full w-full place-items-center bg-background p-4">
-          <div className="flex w-full max-w-60 flex-col items-stretch gap-2.5">
+          <div className="flex w-full max-w-72 flex-col items-stretch gap-3">
             <div
-              className="flex gap-0.5 rounded-lg bg-muted p-0.5"
+              className="flex gap-1 rounded-lg bg-muted p-1"
               role="group"
               aria-label="Capture mode"
             >
@@ -519,7 +516,7 @@ export function Screenshot({ windowId, params }: AppComponentProps) {
                   disabled={busy}
                   aria-pressed={mode === id}
                   className={cn(
-                    'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                    'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     'disabled:opacity-50',
                     mode === id
@@ -527,14 +524,14 @@ export function Screenshot({ windowId, params }: AppComponentProps) {
                       : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  <Icon className="size-3.5" aria-hidden />
+                  <Icon className="size-4" aria-hidden />
                   {name}
                 </button>
               ))}
             </div>
 
             <div
-              className="flex gap-0.5 rounded-lg bg-muted p-0.5"
+              className="flex gap-1 rounded-lg bg-muted p-1"
               role="group"
               aria-label="Capture delay"
             >
@@ -546,7 +543,7 @@ export function Screenshot({ windowId, params }: AppComponentProps) {
                   disabled={busy}
                   aria-pressed={delay === d}
                   className={cn(
-                    'flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                    'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     'disabled:opacity-50',
                     delay === d
@@ -566,7 +563,7 @@ export function Screenshot({ windowId, params }: AppComponentProps) {
             )}
 
             <Button
-              className="mt-1 w-full"
+              className="w-full"
               onClick={() => void startSession(mode)}
               disabled={busy}
             >
@@ -578,8 +575,9 @@ export function Screenshot({ windowId, params }: AppComponentProps) {
               Take Screenshot
             </Button>
 
-            <p className="text-center text-[11px] leading-snug text-muted-foreground">
-              Tip: press Print Screen anytime to grab an area.
+            <p className="text-center text-xs leading-snug text-muted-foreground">
+              Print Screen grabs the screen &middot; Shift+Print Screen grabs an
+              area
             </p>
           </div>
         </div>
