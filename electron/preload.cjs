@@ -710,6 +710,7 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
   /**
    * Subscribe to forwarded shortcuts. Returns an unsubscribe fn. Payloads:
    *   { action: 'cycle-windows', backward }   (Alt+Tab / Alt+Shift+Tab)
+   *   { action: 'screenshot' }                (Print Screen)
    *   { action: 'new-tab', wcId }             (Ctrl+T in a browser tab)
    *   { action: 'close-tab', wcId }           (Ctrl+W in a browser tab)
    *   { action: 'focus-address', wcId }       (Ctrl+L in a browser tab)

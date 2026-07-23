@@ -1,192 +1,390 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Copy, Crop, Download, Loader2, MonitorOff, Save, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import {
+  Camera,
+  Copy,
+  Download,
+  Loader2,
+  Monitor,
+  MonitorOff,
+  Save,
+  SquareDashedMousePointer,
+} from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { getFsBridge, cleanFsError, joinPath } from '@/lib/fs';
-import { GENIE_DURATION_MS } from '@/lib/genie';
 import {
   cleanScreenshotError,
   dataUrlToBlob,
   dataUrlToBytes,
   getScreenshotBridge,
   screenshotFilename,
+  setScreenshotSessionActive,
   type Screenshot as Capture,
 } from '@/lib/screenshot';
 
-/** Seconds to wait before capturing, so the user can arrange the desktop. */
+/** Capture modes: the whole desktop, or a region dragged out on it first. */
+const MODES = [
+  { id: 'screen', name: 'Screen', icon: Monitor },
+  { id: 'area', name: 'Area', icon: SquareDashedMousePointer },
+] as const;
+type Mode = (typeof MODES)[number]['id'];
+
+/** Seconds to wait between selection and capture, so hover states and menus can be arranged. */
 const DELAYS = [0, 3, 5] as const;
 type Delay = (typeof DELAYS)[number];
 
-/** A drag-selected region, as fractions (0..1) of the image's own size. */
-interface Selection {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
+/** A rectangle in viewport (CSS pixel) coordinates. */
+interface ViewportRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
-/** Ignore selections smaller than this fraction on a side (a stray click). */
-const MIN_SELECTION = 0.01;
-
-const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+/** Ignore drags smaller than this on a side (a stray click, not a selection). */
+const MIN_DRAG_PX = 4;
 
 /**
- * Resolve once the desktop has visually settled after this window minimizes:
- * the genie animation has fully swallowed the window into the dock and the
- * compositor has painted the result. Without waiting out the full genie
- * timeline, the capture catches the window mid-animation.
+ * The live capture session, while our window sits minimized out of the shot:
+ * dragging the region on the desktop, then counting down the chosen delay.
  */
-function awaitHidden(): Promise<void> {
-  const animMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ? 0
-    : GENIE_DURATION_MS;
+type Session =
+  | { phase: 'select' }
+  | { phase: 'countdown'; left: number; region: ViewportRect | null };
+
+/**
+ * Resolve once two animation frames have painted plus a vsync cushion, so the
+ * compositor has presented the latest DOM state before capturePage snapshots
+ * it (a hidden window or a dismissed overlay must reach the screen first).
+ */
+function paintSettled(): Promise<void> {
   return new Promise((resolve) => {
-    setTimeout(() => {
-      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 50)));
-    }, animMs);
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 100)));
   });
 }
 
 /**
- * A minimal screenshot tool in the spirit of Budgie's: a compact launcher
- * with a delay picker and one capture button, then a clean preview where the
- * shot can be cropped (drag a region), copied, saved to ~/Pictures, or
+ * Resolve once this app's own window has finished minimizing out of view.
+ * Polling the window element's computed visibility is exact where a fixed
+ * timer is not: the genie timeline only starts when React commits the
+ * minimized state (which can lag under load), and hands visibility back when
+ * the window is fully swallowed; with reduced motion the window is hidden
+ * synchronously at commit. A generous deadline guards against hanging if the
+ * window was closed mid-wait.
+ */
+async function awaitWindowHidden(root: HTMLElement | null): Promise<void> {
+  const section = root?.closest('section');
+  if (section) {
+    const deadline = Date.now() + 3000;
+    while (getComputedStyle(section).visibility !== 'hidden' && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 32));
+    }
+  }
+  await paintSettled();
+}
+
+/** The drag rectangle between two viewport points, clamped to the viewport. */
+function rectFrom(a: { x: number; y: number }, b: { x: number; y: number }): ViewportRect {
+  const x0 = Math.max(0, Math.min(a.x, b.x));
+  const y0 = Math.max(0, Math.min(a.y, b.y));
+  const x1 = Math.min(window.innerWidth, Math.max(a.x, b.x));
+  const y1 = Math.min(window.innerHeight, Math.max(a.y, b.y));
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
+/**
+ * Crop a full-desktop capture to the selected region. The selection is in
+ * viewport CSS pixels while the capture is in device pixels; the shell
+ * window fills the viewport, so the two relate by a plain per-axis scale.
+ */
+async function cropCapture(shot: Capture, region: ViewportRect): Promise<Capture> {
+  const sx = shot.width / window.innerWidth;
+  const sy = shot.height / window.innerHeight;
+  const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+  const x = clamp(Math.round(region.x * sx), 0, shot.width - 1);
+  const y = clamp(Math.round(region.y * sy), 0, shot.height - 1);
+  const width = clamp(Math.round(region.width * sx), 1, shot.width - x);
+  const height = clamp(Math.round(region.height * sy), 1, shot.height - y);
+  if (x === 0 && y === 0 && width === shot.width && height === shot.height) return shot;
+
+  const img = new Image();
+  img.src = shot.dataUrl;
+  await img.decode();
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return shot;
+  // The image is loaded from a data: URL (same-origin), so the canvas isn't
+  // tainted and toDataURL() works.
+  ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
+  return { dataUrl: canvas.toDataURL('image/png'), width, height };
+}
+
+/**
+ * The full-viewport capture overlay, portaled to <body> so it floats above
+ * every desktop layer (dock included) while our window is minimized. The
+ * 'select' phase dims the desktop and takes a drag rectangle (releasing a
+ * sub-threshold drag just re-arms; Esc cancels). The 'countdown' phase is
+ * pointer-transparent, so the user can keep arranging the desktop - hover
+ * states, open menus - until the delayed shot fires. The overlay always
+ * unmounts before capturePage runs, so it never appears in the shot.
+ */
+function CaptureOverlay({
+  session,
+  onSelect,
+}: {
+  session: Session;
+  onSelect: (region: ViewportRect) => void;
+}) {
+  const [drag, setDrag] = useState<ViewportRect | null>(null);
+  const origin = useRef<{ x: number; y: number } | null>(null);
+
+  if (session.phase === 'countdown') {
+    return createPortal(
+      <div aria-live="polite" className="pointer-events-none fixed inset-0 z-[10000]">
+        {session.region && (
+          <div
+            aria-hidden
+            className="absolute rounded-sm border-2 border-primary"
+            style={{
+              left: session.region.x,
+              top: session.region.y,
+              width: session.region.width,
+              height: session.region.height,
+            }}
+          />
+        )}
+        <div className="absolute left-1/2 top-5 -translate-x-1/2 rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur">
+          Capturing in <span className="font-semibold tabular-nums">{session.left}</span>s
+          <span className="text-muted-foreground"> &middot; Esc to cancel</span>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    origin.current = { x: e.clientX, y: e.clientY };
+    setDrag(null);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!origin.current) return;
+    setDrag(rectFrom(origin.current, { x: e.clientX, y: e.clientY }));
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    const o = origin.current;
+    if (!o) return;
+    origin.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    const rect = rectFrom(o, { x: e.clientX, y: e.clientY });
+    // A sub-threshold drag is a stray click: re-arm instead of capturing a
+    // sliver. Esc is the way out.
+    if (rect.width >= MIN_DRAG_PX && rect.height >= MIN_DRAG_PX) onSelect(rect);
+    else setDrag(null);
+  };
+
+  const onPointerCancel = () => {
+    origin.current = null;
+    setDrag(null);
+  };
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Select an area to capture"
+      className="fixed inset-0 z-[10000] cursor-crosshair touch-none select-none"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {/* Once a drag is live, the selection's oversized box-shadow dims
+          everything BUT the rectangle, keeping the pick bright. */}
+      {!drag && <div aria-hidden className="absolute inset-0 bg-black/25" />}
+      {drag && (
+        <div
+          aria-hidden
+          className="absolute border border-white/90 shadow-[0_0_0_100vmax_rgba(0,0,0,0.3)]"
+          style={{ left: drag.x, top: drag.y, width: drag.width, height: drag.height }}
+        >
+          <div
+            className={cn(
+              'absolute right-0 rounded bg-black/75 px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums',
+              drag.y + drag.height + 24 > window.innerHeight
+                ? 'bottom-full mb-1'
+                : 'top-full mt-1',
+            )}
+          >
+            {Math.round(drag.width)} &times; {Math.round(drag.height)}
+          </div>
+        </div>
+      )}
+      {!drag && (
+        <div className="pointer-events-none absolute left-1/2 top-5 -translate-x-1/2 whitespace-nowrap rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur">
+          Drag to select an area<span className="text-muted-foreground"> &middot; Esc to cancel</span>
+        </div>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * A minimal screenshot tool in the spirit of GNOME's: a compact launcher
+ * (whole screen or a drag-selected area, with an optional delay), then a
+ * clean preview where the shot can be copied, saved to ~/Pictures, or
  * downloaded.
  *
+ * Selection happens BEFORE capture on the live desktop: the app minimizes
+ * its own window, waits until it's verifiably hidden (not just until a
+ * timer expires, which races the genie animation under load), then overlays
+ * the desktop for the region drag. The delay counts down after the
+ * selection, so menus and hover states can still be arranged before the
+ * shot fires. The desktop's Print Screen hotkey launches the app straight
+ * into area-select mode (see DesktopHotkeys).
+ *
  * Capture is backed by the Electron shell's screenshot bridge
- * (webContents.capturePage). The tool minimizes its own window and waits out
- * the genie animation so it never appears in the shot. Outside the Electron
- * shell (a plain browser) there is no bridge, so the app shows a short
- * fallback instead.
+ * (webContents.capturePage). Outside the shell (a plain browser) there is
+ * no bridge, so the app shows a short fallback instead.
  */
-export function Screenshot({ windowId }: AppComponentProps) {
+export function Screenshot({ windowId, params }: AppComponentProps) {
   const { toast } = useToast();
   const { minimize, focus } = useWindowActions();
   const bridge = getScreenshotBridge();
   const fs = getFsBridge();
 
   const [image, setImage] = useState<Capture | null>(null);
+  const [mode, setMode] = useState<Mode>('area');
   const [delay, setDelay] = useState<Delay>(0);
-  const [countdown, setCountdown] = useState<number | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selection, setSelection] = useState<Selection | null>(null);
 
-  const imgRef = useRef<HTMLImageElement>(null);
-  const dragging = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Mirror of "a capture session is running" for re-entrancy guards; state
+  // alone can't cover the gaps between the session's async steps.
+  const activeRef = useRef(false);
 
-  const runCapture = useCallback(async () => {
-    const b = getScreenshotBridge();
-    if (!b) return;
-    setError(null);
-    setSelection(null);
-    setBusy(true);
-    // Hide our own window so it isn't part of the capture, and wait for its
-    // genie animation to finish so it isn't caught mid-flight either.
-    minimize(windowId);
-    try {
-      await awaitHidden();
-      setImage(await b.capture());
-    } catch (e) {
-      setError(cleanScreenshotError(e));
-    } finally {
-      focus(windowId); // restore + raise our window to show the result
-      setBusy(false);
-    }
-  }, [windowId, minimize, focus]);
+  const captureRegion = useCallback(
+    async (region: ViewportRect | null) => {
+      const b = getScreenshotBridge();
+      if (!b) return;
+      // Every overlay must be gone from the page before the snapshot.
+      setSession(null);
+      await paintSettled();
+      try {
+        const shot = await b.capture();
+        setImage(region ? await cropCapture(shot, region) : shot);
+      } catch (e) {
+        setError(cleanScreenshotError(e));
+      } finally {
+        activeRef.current = false;
+        setScreenshotSessionActive(false);
+        setBusy(false);
+        focus(windowId); // restore + raise our window to show the result
+      }
+    },
+    [focus, windowId],
+  );
 
-  const capture = useCallback(() => {
-    if (delay <= 0) {
-      void runCapture();
-    } else {
-      setCountdown(delay);
-    }
-  }, [delay, runCapture]);
+  const cancelSession = useCallback(() => {
+    if (!activeRef.current) return;
+    activeRef.current = false;
+    setScreenshotSessionActive(false);
+    setBusy(false);
+    setSession(null);
+    focus(windowId);
+  }, [focus, windowId]);
+
+  const startSession = useCallback(
+    async (m: Mode) => {
+      if (activeRef.current || !getScreenshotBridge()) return;
+      activeRef.current = true;
+      setScreenshotSessionActive(true);
+      setBusy(true);
+      setError(null);
+      // Hide our own window so it's neither in the shot nor in the way of
+      // the area selection, and wait until it's actually gone.
+      minimize(windowId);
+      await awaitWindowHidden(rootRef.current);
+      if (m === 'area') {
+        setSession({ phase: 'select' });
+      } else if (delay > 0) {
+        setSession({ phase: 'countdown', left: delay, region: null });
+      } else {
+        await captureRegion(null);
+      }
+    },
+    [delay, minimize, windowId, captureRegion],
+  );
+
+  const onRegionSelected = useCallback(
+    (region: ViewportRect) => {
+      if (delay > 0) setSession({ phase: 'countdown', left: delay, region });
+      else void captureRegion(region);
+    },
+    [delay, captureRegion],
+  );
 
   // Tick the countdown down once a second; on the final tick, fire the
-  // capture. The state change happens in the timer callback (not synchronously
-  // in the effect body) so it doesn't cascade renders.
+  // capture. The state change happens in the timer callback (not
+  // synchronously in the effect body) so it doesn't cascade renders.
   useEffect(() => {
-    if (countdown === null || countdown <= 0) return;
+    if (session?.phase !== 'countdown') return;
     const t = setTimeout(() => {
-      if (countdown <= 1) {
-        setCountdown(null);
-        void runCapture();
-      } else {
-        setCountdown(countdown - 1);
-      }
+      if (session.left <= 1) void captureRegion(session.region);
+      else setSession({ phase: 'countdown', left: session.left - 1, region: session.region });
     }, 1000);
     return () => clearTimeout(t);
-  }, [countdown, runCapture]);
+  }, [session, captureRegion]);
 
-  // --- Region selection (drag a rectangle over the preview) ----------------
-
-  const pointFrac = useCallback((e: React.PointerEvent) => {
-    const el = imgRef.current;
-    if (!el) return { x: 0, y: 0 };
-    const rect = el.getBoundingClientRect();
-    return {
-      x: clamp01((e.clientX - rect.left) / rect.width),
-      y: clamp01((e.clientY - rect.top) / rect.height),
-    };
-  }, []);
-
-  const onSelectDown = useCallback(
-    (e: React.PointerEvent) => {
-      if (!image || busy) return;
+  // Esc backs out of a session at any point.
+  useEffect(() => {
+    if (!session) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
       e.preventDefault();
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      dragging.current = true;
-      const p = pointFrac(e);
-      setSelection({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+      cancelSession();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [session, cancelSession]);
+
+  // Launch params (e.g. the desktop's Print Screen hotkey) start a session
+  // directly. Single-instance reopens re-merge the params object on every
+  // press, so consume each object once, by identity.
+  const consumedParams = useRef<AppComponentProps['params']>(null);
+  useEffect(() => {
+    if (!params || consumedParams.current === params) return;
+    consumedParams.current = params;
+    const start = params.start;
+    if (start !== 'area' && start !== 'screen') return;
+    if (!getScreenshotBridge() || activeRef.current) return;
+    setMode(start);
+    void startSession(start);
+  }, [params, startSession]);
+
+  // If the window dies mid-session, don't leave the desktop-wide flag set
+  // (it guards the Print Screen hotkey against re-entry).
+  useEffect(
+    () => () => {
+      if (activeRef.current) setScreenshotSessionActive(false);
     },
-    [image, busy, pointFrac],
+    [],
   );
-
-  const onSelectMove = useCallback(
-    (e: React.PointerEvent) => {
-      if (!dragging.current) return;
-      const p = pointFrac(e);
-      setSelection((s) => (s ? { ...s, x1: p.x, y1: p.y } : s));
-    },
-    [pointFrac],
-  );
-
-  const onSelectUp = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return;
-    dragging.current = false;
-    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    // Drop a too-small selection (treat it as a plain click).
-    setSelection((s) =>
-      s && Math.abs(s.x1 - s.x0) >= MIN_SELECTION && Math.abs(s.y1 - s.y0) >= MIN_SELECTION
-        ? s
-        : null,
-    );
-  }, []);
-
-  const cropToSelection = useCallback(() => {
-    const el = imgRef.current;
-    if (!image || !selection || !el) return;
-    const sx = Math.round(Math.min(selection.x0, selection.x1) * image.width);
-    const sy = Math.round(Math.min(selection.y0, selection.y1) * image.height);
-    const sw = Math.max(1, Math.round(Math.abs(selection.x1 - selection.x0) * image.width));
-    const sh = Math.max(1, Math.round(Math.abs(selection.y1 - selection.y0) * image.height));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = sw;
-    canvas.height = sh;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    // The <img> is loaded from a data: URL (same-origin), so the canvas isn't
-    // tainted and toDataURL() works.
-    ctx.drawImage(el, sx, sy, sw, sh, 0, 0, sw, sh);
-    setImage({ dataUrl: canvas.toDataURL('image/png'), width: sw, height: sh });
-    setSelection(null);
-  }, [image, selection]);
 
   // --- Output --------------------------------------------------------------
 
@@ -250,156 +448,144 @@ export function Screenshot({ windowId }: AppComponentProps) {
     );
   }
 
-  const capturing = busy || countdown !== null;
-
-  // --- Launcher (no capture yet) -------------------------------------------
-
-  if (!image) {
-    return (
-      <div className="grid h-full w-full place-items-center bg-background p-6">
-        <div className="flex w-full max-w-xs flex-col items-center gap-6 text-center">
-          <div className="grid size-16 place-items-center rounded-2xl bg-muted">
-            {countdown !== null ? (
-              <span
-                aria-live="polite"
-                className="text-3xl font-semibold tabular-nums text-foreground"
-              >
-                {countdown}
-              </span>
-            ) : (
-              <Camera className="size-8 text-muted-foreground" aria-hidden />
-            )}
-          </div>
-
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-
-          <div
-            className="flex items-center gap-1 rounded-lg bg-muted p-1"
-            role="group"
-            aria-label="Capture delay"
-          >
-            {DELAYS.map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setDelay(d)}
-                disabled={capturing}
-                aria-pressed={delay === d}
-                className={cn(
-                  'rounded-md px-3 py-1 text-sm font-medium transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  'disabled:opacity-50',
-                  delay === d
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {d === 0 ? 'No delay' : `${d}s`}
-              </button>
-            ))}
-          </div>
-
-          <Button size="lg" className="w-full" onClick={capture} disabled={capturing}>
-            {busy ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-            ) : (
-              <Camera className="size-4" aria-hidden />
-            )}
-            {countdown !== null
-              ? `Capturing in ${countdown}…`
-              : busy
-                ? 'Capturing…'
-                : 'Take Screenshot'}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // --- Preview -------------------------------------------------------------
-
-  const sel = selection && {
-    left: `${Math.min(selection.x0, selection.x1) * 100}%`,
-    top: `${Math.min(selection.y0, selection.y1) * 100}%`,
-    width: `${Math.abs(selection.x1 - selection.x0) * 100}%`,
-    height: `${Math.abs(selection.y1 - selection.y0) * 100}%`,
-  };
-
   return (
-    <div className="flex h-full w-full flex-col bg-background text-foreground">
-      <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4">
-        <div
-          className="relative inline-block cursor-crosshair touch-none select-none"
-          onPointerDown={onSelectDown}
-          onPointerMove={onSelectMove}
-          onPointerUp={onSelectUp}
-        >
-          <img
-            ref={imgRef}
-            src={image.dataUrl}
-            alt={`Screenshot, ${image.width} by ${image.height} pixels`}
-            width={image.width}
-            height={image.height}
-            draggable={false}
-            className="h-auto max-w-full rounded-lg border border-border shadow-lg"
-          />
-          {sel && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute border-2 border-dashed border-primary bg-primary/10"
-              style={sel}
+    <>
+      {image ? (
+        // --- Preview -------------------------------------------------------
+        <div ref={rootRef} className="flex h-full w-full flex-col bg-background text-foreground">
+          <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-3">
+            <img
+              src={image.dataUrl}
+              alt={`Screenshot, ${image.width} by ${image.height} pixels`}
+              width={image.width}
+              height={image.height}
+              className="h-auto max-w-full rounded-md border border-border shadow-md"
             />
-          )}
-        </div>
-      </div>
+          </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2">
-        <span className="mr-auto text-xs text-muted-foreground">
-          {image.width} &times; {image.height}
-          {!selection && <span className="max-sm:hidden"> &middot; drag to crop</span>}
-        </span>
-        {selection ? (
-          <>
-            <Button size="sm" onClick={cropToSelection}>
-              <Crop className="size-4" aria-hidden />
-              Crop
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setSelection(null)}>
-              <X className="size-4" aria-hidden />
-              Cancel
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button size="sm" variant="ghost" onClick={copy}>
-              <Copy className="size-4" aria-hidden />
+          <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
+            <span className="mr-auto px-1 text-[11px] text-muted-foreground tabular-nums">
+              {image.width} &times; {image.height}
+            </span>
+            <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={copy}>
+              <Copy className="size-3.5" aria-hidden />
               Copy
             </Button>
             {fs && (
-              <Button size="sm" variant="ghost" onClick={save} disabled={saving}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1.5 px-2 text-xs"
+                onClick={save}
+                disabled={saving}
+              >
                 {saving ? (
-                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden />
                 ) : (
-                  <Save className="size-4" aria-hidden />
+                  <Save className="size-3.5" aria-hidden />
                 )}
                 Save
               </Button>
             )}
-            <Button size="sm" variant="ghost" onClick={download}>
-              <Download className="size-4" aria-hidden />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={download}
+            >
+              <Download className="size-3.5" aria-hidden />
               Download
             </Button>
-            <Button size="sm" onClick={() => setImage(null)} disabled={capturing}>
-              <Camera className="size-4" aria-hidden />
+            <Button size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={() => setImage(null)}>
+              <Camera className="size-3.5" aria-hidden />
               New
             </Button>
-          </>
-        )}
-      </div>
-    </div>
+          </div>
+        </div>
+      ) : (
+        // --- Launcher ------------------------------------------------------
+        <div ref={rootRef} className="grid h-full w-full place-items-center bg-background p-4">
+          <div className="flex w-full max-w-60 flex-col items-stretch gap-2.5">
+            <div
+              className="flex gap-0.5 rounded-lg bg-muted p-0.5"
+              role="group"
+              aria-label="Capture mode"
+            >
+              {MODES.map(({ id, name, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setMode(id)}
+                  disabled={busy}
+                  aria-pressed={mode === id}
+                  className={cn(
+                    'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    'disabled:opacity-50',
+                    mode === id
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Icon className="size-3.5" aria-hidden />
+                  {name}
+                </button>
+              ))}
+            </div>
+
+            <div
+              className="flex gap-0.5 rounded-lg bg-muted p-0.5"
+              role="group"
+              aria-label="Capture delay"
+            >
+              {DELAYS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDelay(d)}
+                  disabled={busy}
+                  aria-pressed={delay === d}
+                  className={cn(
+                    'flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    'disabled:opacity-50',
+                    delay === d
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {d === 0 ? 'No delay' : `${d}s`}
+                </button>
+              ))}
+            </div>
+
+            {error && (
+              <p role="alert" className="text-center text-xs text-destructive">
+                {error}
+              </p>
+            )}
+
+            <Button
+              className="mt-1 w-full"
+              onClick={() => void startSession(mode)}
+              disabled={busy}
+            >
+              {busy ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Camera className="size-4" aria-hidden />
+              )}
+              Take Screenshot
+            </Button>
+
+            <p className="text-center text-[11px] leading-snug text-muted-foreground">
+              Tip: press Print Screen anytime to grab an area.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {session && <CaptureOverlay session={session} onSelect={onRegionSelected} />}
+    </>
   );
 }

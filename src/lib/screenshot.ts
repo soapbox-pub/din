@@ -35,6 +35,22 @@ export function getScreenshotBridge(): ScreenshotBridge | undefined {
   return window.screenshot;
 }
 
+/**
+ * Whether the Screenshot app has a capture session in progress (its window
+ * minimized, the area-select/countdown overlay up). Desktop hotkeys read
+ * this so a Print Screen press mid-session doesn't re-open and re-raise the
+ * deliberately hidden window. Set by the Screenshot app itself.
+ */
+let sessionActive = false;
+
+export function setScreenshotSessionActive(active: boolean): void {
+  sessionActive = active;
+}
+
+export function isScreenshotSessionActive(): boolean {
+  return sessionActive;
+}
+
 /** Strip Electron's IPC error prefix so users see just the underlying message. */
 export function cleanScreenshotError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);

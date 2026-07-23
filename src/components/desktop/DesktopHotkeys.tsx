@@ -2,17 +2,25 @@ import { useEffect, useRef } from 'react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { publishBrowserHotkey, type BrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
+import { isScreenshotSessionActive } from '@/lib/screenshot';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import type { WindowState } from '@/hooks/useWindows';
 
 /** The built-in Web Browser's app id (see src/lib/apps.ts). */
 const WEB_BROWSER_APP_ID = 'web-browser';
 
+/** The built-in Screenshot tool's app id (see src/lib/apps.ts). */
+const SCREENSHOT_APP_ID = 'screenshot';
+
 /**
  * Desktop-wide keyboard shortcuts. Renders nothing.
  *
  * - Alt+Tab / Alt+Shift+Tab cycle focus through the open (non-minimized)
  *   windows.
+ * - Print Screen opens the Screenshot app straight into area-select mode
+ *   (the laptop screenshot function key). Ignored while a capture session
+ *   is already running, so it can't re-raise the deliberately hidden
+ *   window mid-shot.
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
@@ -35,8 +43,9 @@ const WEB_BROWSER_APP_ID = 'web-browser';
  *    Web Browser app).
  *
  * Note: when Din runs windowed inside a desktop environment, the host
- * window manager usually consumes Alt+Tab first; in the Aladdin kiosk
- * (cage) and the plain-browser dev loop the shortcut reaches us.
+ * window manager usually consumes Alt+Tab (and the OS may grab Print
+ * Screen) first; in the Aladdin kiosk (cage) and the plain-browser dev
+ * loop the shortcuts reach us.
  */
 export function DesktopHotkeys() {
   const { windows, actions } = useWindowManager();
@@ -48,6 +57,13 @@ export function DesktopHotkeys() {
   useEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
+
+  // Same for the actions: `open` changes identity whenever the window list
+  // (or installed apps) changes, but the hotkey listener must stay bound.
+  const actionsRef = useRef(actions);
+  useEffect(() => {
+    actionsRef.current = actions;
+  }, [actions]);
 
   useEffect(() => {
     /** The focused window: highest z among non-minimized (as the Dock). */
@@ -62,6 +78,23 @@ export function DesktopHotkeys() {
     const guests = isWebviewAvailable();
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // Print Screen: open the Screenshot app in area-select mode. The
+      // session flag guards against a press mid-capture, when the app's
+      // window is deliberately minimized out of the shot.
+      if (
+        e.key === 'PrintScreen' &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        !e.shiftKey
+      ) {
+        if (!isScreenshotSessionActive()) {
+          e.preventDefault();
+          actionsRef.current.open(SCREENSHOT_APP_ID, { start: 'area' });
+        }
+        return;
+      }
+
       if (e.key === 'Tab' && e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -144,6 +177,11 @@ export function DesktopHotkeys() {
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
       if (shortcut.action === 'cycle-windows') cycleFocus(shortcut.backward);
+      else if (shortcut.action === 'screenshot') {
+        if (!isScreenshotSessionActive()) {
+          actionsRef.current.open(SCREENSHOT_APP_ID, { start: 'area' });
+        }
+      }
     });
   }, [cycleFocus]);
 

@@ -2728,6 +2728,7 @@ function isDevtoolsToggleInput(input: Electron.Input): boolean {
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
+  | { action: 'screenshot' }
   | { action: 'new-tab' | 'close-tab' | 'focus-address' | 'find' | 'back' | 'forward' }
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
@@ -2742,6 +2743,17 @@ type ShellShortcut =
  */
 function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   if (input.type !== 'keyDown') return null;
+  // Print Screen (the laptop screenshot function key): open the Screenshot
+  // app's area-select capture.
+  if (
+    input.key === 'PrintScreen' &&
+    !input.alt &&
+    !input.control &&
+    !input.meta &&
+    !input.shift
+  ) {
+    return { action: 'screenshot' };
+  }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
   }
@@ -3041,8 +3053,8 @@ app.on('web-contents-created', (_event, contents) => {
 
   // Devtools hosts: pressing the toggle shortcut while focus is inside the
   // devtools pane closes it (routed to its inspected tab). Alt+Tab still
-  // switches desktop windows. No Chrome context menu either - the devtools
-  // frontend manages its own menus.
+  // switches desktop windows, and Print Screen still starts a capture. No
+  // Chrome context menu either - the devtools frontend manages its own menus.
   if (contents.session === devtoolsSession()) {
     contents.on('before-input-event', (event, input) => {
       if (isDevtoolsToggleInput(input)) {
@@ -3053,7 +3065,7 @@ app.on('web-contents-created', (_event, contents) => {
         return;
       }
       const shortcut = shellShortcutForInput(input);
-      if (shortcut?.action === 'cycle-windows') {
+      if (shortcut?.action === 'cycle-windows' || shortcut?.action === 'screenshot') {
         event.preventDefault();
         sendToShell('shortcut', shortcut);
       }
@@ -3090,11 +3102,12 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   // Installed web-app guests aren't browser tabs, but focus still lands inside
-  // them, so the shell's window-cycling shortcut must be forwarded too.
+  // them, so the shell's window-cycling and screenshot shortcuts must be
+  // forwarded too.
   if (isAppGuest(contents)) {
     contents.on('before-input-event', (event, input) => {
       const shortcut = shellShortcutForInput(input);
-      if (shortcut?.action === 'cycle-windows') {
+      if (shortcut?.action === 'cycle-windows' || shortcut?.action === 'screenshot') {
         event.preventDefault();
         sendToShell('shortcut', shortcut);
       }

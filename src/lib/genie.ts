@@ -44,11 +44,7 @@ export interface GenieRect {
   height: number;
 }
 
-/**
- * Genie timeline length. Progress over it is linear, like Compiz. Exported so
- * callers that need the desktop visually settled (e.g. the Screenshot app
- * hiding its own window before a capture) can wait out the animation.
- */
+/** Genie timeline length. Progress over it is linear, like Compiz. */
 export const GENIE_DURATION_MS = 400;
 
 /** Portion of the timeline that morphs the rectangle into the lamp shape. */

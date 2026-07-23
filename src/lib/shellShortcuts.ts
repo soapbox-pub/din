@@ -8,6 +8,7 @@
  * `before-input-event` and forwards them to the shell:
  *
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
+ *   - Print Screen            -> { action: 'screenshot' }
  *   - Ctrl+T in a browser tab -> { action: 'new-tab', wcId }
  *   - Ctrl+W in a browser tab -> { action: 'close-tab', wcId }
  *   - Ctrl+L in a browser tab -> { action: 'focus-address', wcId }
@@ -34,6 +35,10 @@ export type ShellShortcut =
       /** Alt+Tab pressed inside a guest: cycle window focus. */
       action: 'cycle-windows';
       backward: boolean;
+    }
+  | {
+      /** Print Screen pressed inside a guest: open the Screenshot app's area-select capture. */
+      action: 'screenshot';
     }
   | {
       /** Ctrl+T pressed inside a browser tab: open a new tab. */

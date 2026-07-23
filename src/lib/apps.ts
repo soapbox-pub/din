@@ -110,7 +110,10 @@ export const APPS: readonly AppDefinition[] = [
     name: 'Screenshot',
     icon: Camera,
     component: Screenshot,
-    defaultSize: { width: 560, height: 460 },
+    defaultSize: { width: 420, height: 380 },
+    // One shot at a time: the Print Screen hotkey re-opens with launch
+    // params, which merge into the existing window instead of stacking up.
+    singleInstance: true,
   },
   {
     // The Web Browser's "undock into separate window" inspector. Hidden from
