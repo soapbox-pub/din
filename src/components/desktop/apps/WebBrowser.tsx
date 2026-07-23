@@ -517,32 +517,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // switching tabs re-issues the current query in the newly active tab.
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState('');
+  // Mirror of findText for handlers that must not re-subscribe per keystroke.
+  const findTextRef = useRef('');
   const [findResult, setFindResult] = useState<Pick<
     FindResult,
     'matches' | 'activeMatchOrdinal'
   > | null>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
-
-  /** Open (or re-focus) the find bar - Ctrl+F. Webview mode only. */
-  const openFind = useCallback(() => {
-    if (!webviewMode || !browserBridge) return;
-    setFindOpen(true);
-    // Wait a frame for the bar to mount, then drop the cursor in.
-    requestAnimationFrame(() => {
-      const input = findInputRef.current;
-      if (!input) return;
-      input.focus();
-      input.select();
-    });
-  }, [webviewMode, browserBridge]);
-
-  /** Close the find bar and clear the active tab's highlight. */
-  const closeFind = useCallback(() => {
-    setFindOpen(false);
-    setFindResult(null);
-    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
-    if (tab?.wcId != null) browserBridge?.stopFindInPage(tab.wcId).catch(() => {});
-  }, [browserBridge]);
 
   /** Issue a find query against the active tab (empty text clears it). */
   const queryFind = useCallback(
@@ -556,11 +537,56 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
 
   const changeFindText = useCallback(
     (text: string) => {
+      findTextRef.current = text;
       setFindText(text);
       queryFind(text);
     },
     [queryFind],
   );
+
+  /**
+   * Open (or re-focus) the find bar - Ctrl+F. Webview mode only. Opens
+   * already searching, Chrome-style: pre-filled with the page's current
+   * selection when there is one, otherwise re-running any existing query so
+   * a re-opened bar never sits stale waiting for Enter.
+   */
+  const openFind = useCallback(() => {
+    if (!webviewMode || !browserBridge) return;
+    setFindOpen(true);
+    // Wait a frame for the bar to mount, then drop the cursor in.
+    requestAnimationFrame(() => {
+      const input = findInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.select();
+    });
+    const view = views.current.get(activeIdRef.current);
+    const existing = findTextRef.current;
+    view
+      ?.getSelectionText()
+      .then((selection) => {
+        const text = selection.trim().slice(0, 200);
+        if (text) {
+          // Don't clobber anything the user typed while the selection was
+          // being fetched.
+          if (findTextRef.current !== existing) return;
+          changeFindText(text);
+        } else if (existing) {
+          queryFind(existing);
+        }
+      })
+      .catch(() => {
+        if (existing) queryFind(existing);
+      });
+  }, [webviewMode, browserBridge, queryFind, changeFindText]);
+
+  /** Close the find bar and clear the active tab's highlight. */
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindResult(null);
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (tab?.wcId != null) browserBridge?.stopFindInPage(tab.wcId).catch(() => {});
+  }, [browserBridge]);
 
   // Match counts stream back from the main process; display them when they
   // belong to the active tab.
@@ -1591,7 +1617,6 @@ function FindBar({
         autoComplete="off"
         className={cn(
           'h-7 w-44 rounded-md bg-transparent px-1.5 text-sm outline-none placeholder:text-muted-foreground',
-          'focus-visible:ring-2 focus-visible:ring-ring/50',
           noMatches && 'text-destructive',
         )}
       />

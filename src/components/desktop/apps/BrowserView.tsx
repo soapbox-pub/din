@@ -52,6 +52,11 @@ export interface BrowserViewHandle {
    * Webview only; the iframe fallback resolves to an empty list.
    */
   collectIcons: () => Promise<IconCandidate[]>;
+  /**
+   * The page's current selection text (for pre-filling the find bar).
+   * Webview only; the iframe fallback resolves to an empty string.
+   */
+  getSelectionText: () => Promise<string>;
 }
 
 export interface BrowserViewProps {
@@ -158,6 +163,7 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       goForward: () => {},
       // The iframe fallback can't reach into cross-origin guest DOM.
       collectIcons: () => Promise.resolve([]),
+      getSelectionText: () => Promise.resolve(''),
     }), [onLoadStart]);
 
     // An <iframe> has no reliable "load started" event, so signal start once
@@ -263,6 +269,18 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           return Array.isArray(result) ? (result as IconCandidate[]) : [];
         } catch {
           return [];
+        }
+      },
+      getSelectionText: async () => {
+        const el = webviewRef.current;
+        if (!el) return '';
+        try {
+          const result = await el.executeJavaScript(
+            'window.getSelection ? String(window.getSelection()) : ""',
+          );
+          return typeof result === 'string' ? result : '';
+        } catch {
+          return '';
         }
       },
     }), []);
