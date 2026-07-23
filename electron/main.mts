@@ -3008,10 +3008,10 @@ app.whenReady().then(() => {
       : { width: 1280, height: 800 }),
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
-    // Stay hidden until the renderer has painted its first frame. With no
-    // window manager (cage on Aladdin, bare X11 otherwise), showing early
-    // presents an unpainted surface — a white/pixelated glitch frame. The
-    // renderer then fades the login screen in from black.
+    // Stay hidden until the renderer reports its first frame is ready (the
+    // shell:bootReady gate below). With no window manager (cage on Aladdin,
+    // bare X11 otherwise), showing early presents an unpainted surface — a
+    // white/pixelated glitch frame. The renderer then fades in from black.
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -3072,10 +3072,21 @@ app.whenReady().then(() => {
     registerLidWatch();
   }
 
-  // Present only once the first real frame is on screen (see `show: false`).
-  win.once('ready-to-show', () => {
-    if (!win.isDestroyed()) win.show();
+  // Present only once the shell renderer reports it has mounted beneath the
+  // black boot veil (electron/preload.cjs -> src/components/desktop/
+  // BootVeil.tsx). ready-to-show fires on the first paint of ANYTHING -
+  // including the white initial about:blank - and mapping the window that
+  // early presents an unpainted (white/pixelated) buffer on bare X11. The
+  // short warm-up lets the hidden window composite complete black frames
+  // before it maps; the veil then fades in from black. The fallback ensures
+  // a crashed renderer can never leave the kiosk on a permanent black screen.
+  const reveal = () => {
+    if (!win.isDestroyed() && !win.isVisible()) win.show();
+  };
+  ipcMain.once('shell:bootReady', (event) => {
+    if (event.sender === win.webContents) setTimeout(reveal, 400);
   });
+  setTimeout(reveal, 10000);
 
   win.loadURL(DEV_URL || 'app://din/');
 

@@ -2,6 +2,7 @@
 // Preload for the Din renderer.
 //
 // Exposes bridges backed by IPC handlers in main.mts:
+//   - window.boot: first-frame readiness for the hidden-until-ready shell window
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
@@ -41,6 +42,15 @@
 // loader, which does not support ESM or TypeScript - typed via JSDoc instead.
 
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
+
+// Boot bridge (window.boot): the renderer reports that the app has mounted
+// beneath the black boot veil; main.mts keeps the shell window hidden until
+// this arrives so the window never maps onto an unpainted (white/garbage)
+// surface on bare X11.
+contextBridge.exposeInMainWorld('boot', {
+  /** Signal that the shell's first frame is ready to be shown. */
+  ready: () => ipcRenderer.send('shell:bootReady'),
+});
 
 contextBridge.exposeInMainWorld('fs', {
   /** Absolute path of the shell user's home directory. */
