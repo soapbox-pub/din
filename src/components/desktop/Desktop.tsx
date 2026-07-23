@@ -10,6 +10,7 @@ import { Window } from './Window';
 import { FilePickerProvider } from './FilePickerProvider';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
 import { BrowserExtensionHost } from './BrowserExtensionHost';
+import { ExtensionPopupHost } from './ExtensionPopupHost';
 import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { useWindows } from '@/hooks/useWindows';
@@ -44,6 +45,7 @@ function DesktopSession() {
       <WindowActionsContext.Provider value={manager.actions}>
         <FilePickerProvider>
           <BrowserExtensionHost />
+          <ExtensionPopupHost />
           <NostrBridgeHost />
           <HighlightBridgeHost />
           <DesktopHotkeys />

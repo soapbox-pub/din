@@ -2268,6 +2268,102 @@ function setupChromeExtensions(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Extension action popups, rendered in-shell.
+//
+// electron-chrome-extensions opens chrome.action popups (e.g. Bitwarden's
+// unlock bubble) as a separate native frameless BrowserWindow positioned
+// next to the action button. That suits a windowing desktop, but Din is a
+// single-window kiosk: a popup toplevel detaches from the shell (under a
+// kiosk compositor like cage it can't be positioned at all) instead of
+// hugging the toolbar the way Chrome's in-window bubble does. So the
+// browserAction activateClick handler is overridden to route popup requests
+// to the shell renderer, which hosts the popup page in an overlay <webview>
+// anchored to the action button (ExtensionPopupHost). The anchor rect is
+// already in shell-viewport CSS pixels (the browser-action element's
+// getBoundingClientRect), so no coordinate translation is needed.
+// ---------------------------------------------------------------------------
+
+/** The action popup currently shown in the shell (drives toggle-close). */
+let openActionPopup: { extensionId: string } | null = null;
+
+/** Shape of the BrowserActionAPI internals the popup override relies on. */
+interface BrowserActionApiInternals {
+  activateClick(details: {
+    eventType?: string;
+    extensionId: string;
+    tabId: number;
+    anchorRect: { x: number; y: number; width: number; height: number };
+    alignment?: string;
+  }): void;
+  getPopupUrl(extensionId: string, tabId: number): string | undefined;
+  ctx: {
+    store: {
+      getTabById(id: number): Electron.WebContents | undefined;
+      getActiveTabOfCurrentWindow(): Electron.WebContents | undefined;
+      tabDetailsCache: Map<number, unknown>;
+    };
+    router: {
+      sendEvent(extensionId: string, name: string, ...args: unknown[]): void;
+    };
+  };
+}
+
+function overrideActionPopup(): void {
+  if (!chromeExtensions) return;
+  const api = (
+    chromeExtensions as unknown as {
+      api: { browserAction: BrowserActionApiInternals };
+    }
+  ).api.browserAction;
+  if (
+    !api ||
+    typeof api.activateClick !== 'function' ||
+    typeof api.getPopupUrl !== 'function' ||
+    !api.ctx
+  ) {
+    return;
+  }
+  const fallback = api.activateClick.bind(api);
+  api.activateClick = (details) => {
+    try {
+      const { extensionId, tabId, anchorRect } = details;
+      // Toggle: a second click on the same action closes its popup (mirrors
+      // the stock handler's PopupView toggle).
+      if (openActionPopup) {
+        const same = openActionPopup.extensionId === extensionId;
+        openActionPopup = null;
+        sendToShell('crx:closeActionPopup');
+        if (same) return;
+      }
+      const tab =
+        tabId >= 0
+          ? api.ctx.store.getTabById(tabId)
+          : api.ctx.store.getActiveTabOfCurrentWindow();
+      if (!tab) return;
+      const popupUrl = api.getPopupUrl(extensionId, tab.id);
+      if (popupUrl && anchorRect) {
+        openActionPopup = { extensionId };
+        sendToShell('crx:openActionPopup', {
+          extensionId,
+          url: popupUrl,
+          anchorRect,
+        });
+        return;
+      }
+      // No popup page: dispatch onClicked, as the stock handler does.
+      api.ctx.router.sendEvent(
+        extensionId,
+        'browserAction.onClicked',
+        api.ctx.store.tabDetailsCache.get(tab.id),
+      );
+    } catch {
+      // Internal API drift: degrade to the library's native popup window.
+      fallback(details);
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // TLS trust for the Web Browser app.
 //
 // A self-signed / private-CA host (e.g. a device on the local network)
@@ -2547,6 +2643,14 @@ function registerCrxHandlers(): void {
     else pending.reject(new Error('Tab creation failed'));
   });
 
+  // The shell dismissed the in-shell action popup (outside click, Escape, a
+  // tab opening from it): reset the toggle state so the next action click
+  // opens fresh rather than toggling closed.
+  ipcMain.on('crx:actionPopupClosed', (event) => {
+    assertShellSender(event);
+    openActionPopup = null;
+  });
+
   // Installed-extension listing for the browser's extensions menu.
   ipcMain.handle('crx:listExtensions', (event) => {
     assertShellSender(event);
@@ -2796,6 +2900,9 @@ app.whenReady().then(() => {
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
   setupChromeExtensions();
+
+  // Route chrome.action popups into the shell instead of native windows.
+  overrideActionPopup();
 
   // Production runs with no window manager (cage on Aladdin, or a bare X11
   // login session via os/x11). cage force-fills the one app, but bare X11 has

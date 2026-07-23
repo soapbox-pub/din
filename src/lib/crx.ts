@@ -55,6 +55,28 @@ export type CrxTabCommand =
       wcId: number;
     };
 
+/** The bounding rect of an extension action button, in shell-viewport CSS px. */
+export interface CrxPopupAnchorRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * An action-popup command from the main process: open the given popup URL in
+ * an in-shell overlay anchored to the action button, or close the open one.
+ * See ExtensionPopupHost and the activateClick override in electron/main.mts.
+ */
+export type CrxActionPopupCommand =
+  | {
+      type: 'open';
+      extensionId: string;
+      url: string;
+      anchorRect: CrxPopupAnchorRect;
+    }
+  | { type: 'close' };
+
 export interface CrxBridge {
   /** Report the active browser tab's webContents id. */
   tabActivated(wcId: number): void;
@@ -66,6 +88,13 @@ export interface CrxBridge {
   listExtensions(): Promise<CrxExtension[]>;
   /** Uninstall an installed extension by id. */
   uninstallExtension(id: string): Promise<void>;
+  /**
+   * Subscribe to action-popup open/close requests (chrome.action popups
+   * hosted in-shell). Returns an unsubscribe fn.
+   */
+  onActionPopup(callback: (command: CrxActionPopupCommand) => void): () => void;
+  /** Report the in-shell action popup was dismissed by the user. */
+  actionPopupClosed(): void;
 }
 
 declare global {

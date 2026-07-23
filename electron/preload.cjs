@@ -547,6 +547,36 @@ contextBridge.exposeInMainWorld('crx', {
    * @param {string} id
    */
   uninstallExtension: (id) => ipcRenderer.invoke('crx:uninstallExtension', id),
+
+  /**
+   * Subscribe to extension action-popup open/close requests (chrome.action
+   * popups hosted in-shell - see ExtensionPopupHost). An 'open' command
+   * carries { extensionId, url, anchorRect }. Returns an unsubscribe fn.
+   * @param {(command: { type: 'open', extensionId: string, url: string, anchorRect: { x: number, y: number, width: number, height: number } } | { type: 'close' }) => void} callback
+   */
+  onActionPopup: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ extensionId: string, url: string, anchorRect: { x: number, y: number, width: number, height: number } }} d
+     */
+    const open = (_event, d) =>
+      callback({
+        type: 'open',
+        extensionId: d.extensionId,
+        url: d.url,
+        anchorRect: d.anchorRect,
+      });
+    const close = () => callback({ type: 'close' });
+    ipcRenderer.on('crx:openActionPopup', open);
+    ipcRenderer.on('crx:closeActionPopup', close);
+    return () => {
+      ipcRenderer.removeListener('crx:openActionPopup', open);
+      ipcRenderer.removeListener('crx:closeActionPopup', close);
+    };
+  },
+
+  /** Report the in-shell action popup was dismissed by the user. */
+  actionPopupClosed: () => ipcRenderer.send('crx:actionPopupClosed'),
 });
 
 // Userscript bridge (window.userscripts), backed by the userscripts:*
