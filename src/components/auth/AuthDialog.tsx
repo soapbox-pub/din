@@ -716,13 +716,14 @@ const NsecLoginForm: React.FC<NsecLoginFormProps> = ({
     <div className="relative">
       <Input
         type="password"
+        name="password"
         value={loginInput}
         onChange={(e) => {
           setLoginInput(e.target.value);
           if (loginError) setLoginError('');
         }}
         placeholder="nsec1… or bunker://…"
-        autoComplete="off"
+        autoComplete="current-password"
         className={`pr-10 ${
           loginError ? 'border-destructive focus-visible:ring-destructive' : ''
         }`}
