@@ -42,6 +42,14 @@ export function LoginScreen() {
       <footer className="relative pb-6 text-center text-sm font-medium tracking-widest text-white/40 uppercase">
         Din
       </footer>
+
+      {/* Boot veil: fades the login screen in from black. Masks the
+          wallpaper decode and font swap on the first painted frame, and
+          plays again whenever the session returns to the login screen. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-50 animate-veil-out bg-black motion-reduce:animate-none motion-reduce:opacity-0"
+      />
     </Wallpaper>
   );
 }

@@ -3008,6 +3008,11 @@ app.whenReady().then(() => {
       : { width: 1280, height: 800 }),
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
+    // Stay hidden until the renderer has painted its first frame. With no
+    // window manager (cage on Aladdin, bare X11 otherwise), showing early
+    // presents an unpainted surface — a white/pixelated glitch frame. The
+    // renderer then fades the login screen in from black.
+    show: false,
     webPreferences: {
       contextIsolation: true,
       sandbox: true,
@@ -3066,6 +3071,11 @@ app.whenReady().then(() => {
     // machines with no lid, e.g. desktops or the QEMU VM).
     registerLidWatch();
   }
+
+  // Present only once the first real frame is on screen (see `show: false`).
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) win.show();
+  });
 
   win.loadURL(DEV_URL || 'app://din/');
 
