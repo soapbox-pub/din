@@ -38,6 +38,8 @@ export const APP_WEBVIEW_PARTITION = 'persist:din-apps';
 /** Imperative controls a BrowserView surface exposes to its parent. */
 export interface BrowserViewHandle {
   reload: () => void;
+  /** Reload bypassing the cache (Ctrl+Shift+R / Shift+F5). */
+  reloadIgnoringCache: () => void;
   /** Navigate the surface to a new URL. */
   loadURL: (url: string) => void;
   /** Go back in the surface's own history (webview only; no-op in iframe). */
@@ -141,6 +143,12 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         if (iframeRef.current) iframeRef.current.src = currentSrc.current;
         onLoadStart?.();
       },
+      // The iframe fallback has no cache-bypassing reload; re-requesting the
+      // URL is the closest available.
+      reloadIgnoringCache: () => {
+        if (iframeRef.current) iframeRef.current.src = currentSrc.current;
+        onLoadStart?.();
+      },
       loadURL: (url: string) => {
         currentSrc.current = url;
         if (iframeRef.current) iframeRef.current.src = url;
@@ -239,6 +247,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
     useImperativeHandle(ref, () => ({
       reload: () => webviewRef.current?.reload(),
+      reloadIgnoringCache: () => webviewRef.current?.reloadIgnoringCache(),
       loadURL: (url: string) => {
         webviewRef.current?.loadURL(url).catch(() => {
           // Aborted/failed loads reject; the did-fail-load path handles UI.
@@ -374,6 +383,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 /** Minimal typing for the Electron <webview> element methods we use. */
 interface ElectronWebviewElement extends HTMLElement {
   reload(): void;
+  reloadIgnoringCache(): void;
   loadURL(url: string): Promise<void>;
   goBack(): void;
   goForward(): void;

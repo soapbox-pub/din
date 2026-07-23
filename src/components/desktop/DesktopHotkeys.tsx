@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
-import { publishBrowserHotkey } from '@/lib/browserTabBus';
+import { publishBrowserHotkey, type BrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
+import { isWebviewAvailable } from '@/lib/isElectron';
 import type { WindowState } from '@/hooks/useWindows';
 
 /** The built-in Web Browser's app id (see src/lib/apps.ts). */
@@ -16,6 +17,13 @@ const WEB_BROWSER_APP_ID = 'web-browser';
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
  *   delete-word in a terminal shell).
+ * - Inside the Electron shell (webview mode), the rest of the browser's
+ *   shortcut set is also scoped to a focused Web Browser window: Ctrl+F
+ *   (find bar), Ctrl+R / F5 and Ctrl+Shift+R / Shift+F5 (reload),
+ *   Ctrl+Tab / Ctrl+Shift+Tab (cycle tabs), Ctrl+1..9 (tab by position),
+ *   and Alt+Left/Right (history). These are NOT intercepted in the
+ *   plain-browser dev loop, where the host browser needs them itself
+ *   (its own find bar, reload, tab and history navigation).
  *
  * Each action is fed from two sources:
  *  - a window-level keydown listener (capture phase, so it wins over app
@@ -49,6 +57,10 @@ export function DesktopHotkeys() {
         null,
       );
 
+    // Shortcuts that would fight the host browser (find, reload, tab and
+    // history navigation) are only intercepted inside the Electron shell.
+    const guests = isWebviewAvailable();
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Tab' && e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
@@ -57,17 +69,69 @@ export function DesktopHotkeys() {
         return;
       }
 
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-        const key = e.key.toLowerCase();
-        if (key !== 't' && key !== 'w' && key !== 'l') return;
-        const top = topWindow();
-        if (!top || top.appId !== WEB_BROWSER_APP_ID) return;
+      // Everything below acts on the focused window's browser tabs, so it
+      // only applies when a Web Browser window is on top.
+      const top = topWindow();
+      if (!top || top.appId !== WEB_BROWSER_APP_ID) return;
+      const publish = (hotkey: Omit<BrowserHotkey, 'windowId'>) => {
         e.preventDefault();
         e.stopPropagation();
-        publishBrowserHotkey({
-          windowId: top.id,
-          action: key === 't' ? 'new-tab' : key === 'w' ? 'close-tab' : 'focus-address',
-        });
+        publishBrowserHotkey({ windowId: top.id, ...hotkey });
+      };
+
+      if (!guests) {
+        // Plain-browser dev loop: only tab management is intercepted (the
+        // host browser keeps find / reload / tab & history navigation).
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+          const key = e.key.toLowerCase();
+          if (key === 't') publish({ action: 'new-tab' });
+          else if (key === 'w') publish({ action: 'close-tab' });
+          else if (key === 'l') publish({ action: 'focus-address' });
+        }
+        return;
+      }
+
+      // F5 / Shift+F5 (no Ctrl): reload.
+      if (e.key === 'F5' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        publish({ action: e.shiftKey ? 'force-reload' : 'reload' });
+        return;
+      }
+      // Alt+Left/Right: history navigation.
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+      ) {
+        publish({ action: e.key === 'ArrowLeft' ? 'back' : 'forward' });
+        return;
+      }
+      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs.
+      if (e.ctrlKey && !e.altKey && !e.metaKey && e.key === 'Tab') {
+        publish({ action: 'cycle-tab', backward: e.shiftKey });
+        return;
+      }
+      // Ctrl+Shift+R: cache-bypassing reload.
+      if (
+        e.ctrlKey &&
+        e.shiftKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        e.key.toLowerCase() === 'r'
+      ) {
+        publish({ action: 'force-reload' });
+        return;
+      }
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        const key = e.key.toLowerCase();
+        if (key === 't') publish({ action: 'new-tab' });
+        else if (key === 'w') publish({ action: 'close-tab' });
+        else if (key === 'l') publish({ action: 'focus-address' });
+        else if (key === 'f') publish({ action: 'find' });
+        else if (key === 'r') publish({ action: 'reload' });
+        else if (/^[1-9]$/.test(e.key)) {
+          publish({ action: 'goto-tab', digit: Number(e.key) });
+        }
       }
     };
 

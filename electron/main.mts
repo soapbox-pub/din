@@ -2489,6 +2489,43 @@ function registerBrowserDataHandlers(): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Find-in-page for the Web Browser app (Ctrl+F).
+//
+// Chromium's find-in-page is per-WebContents and driven from the main
+// process: the shell sends the query here, and match results stream back via
+// the guest's `found-in-page` event (wired in web-contents-created). Applies
+// to both browser sessions (persistent + private) via anyBrowserTabFromId.
+// ---------------------------------------------------------------------------
+function registerFindHandlers(): void {
+  ipcMain.handle('browser:findInPage', (event, wcId, text, options) => {
+    assertShellSender(event);
+    if (typeof text !== 'string') throw new Error('Invalid find text');
+    const tab = anyBrowserTabFromId(wcId);
+    if (!tab) return;
+    // An empty query clears the highlight instead of matching everything.
+    if (text.length === 0) {
+      tab.stopFindInPage('clearSelection');
+      return;
+    }
+    const opts =
+      options && typeof options === 'object'
+        ? (options as { forward?: unknown; findNext?: unknown; matchCase?: unknown })
+        : {};
+    tab.findInPage(text, {
+      forward: opts.forward !== false,
+      findNext: opts.findNext === true,
+      matchCase: opts.matchCase === true,
+    });
+  });
+
+  ipcMain.handle('browser:stopFindInPage', (event, wcId) => {
+    assertShellSender(event);
+    const tab = anyBrowserTabFromId(wcId);
+    if (tab) tab.stopFindInPage('clearSelection');
+  });
+}
+
 function registerCrxHandlers(): void {
   // The shell reports which browser tab is active (drives per-tab extension
   // action state and which tab chrome.tabs APIs consider "active").
@@ -2587,24 +2624,53 @@ function isDevtoolsToggleInput(input: Electron.Input): boolean {
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
-  | { action: 'new-tab' | 'close-tab' | 'focus-address' };
+  | { action: 'new-tab' | 'close-tab' | 'focus-address' | 'find' | 'back' | 'forward' }
+  | { action: 'reload'; force: boolean }
+  | { action: 'cycle-tab'; backward: boolean }
+  | { action: 'goto-tab'; digit: number };
 
 /**
  * Map a guest before-input-event to a shell shortcut payload, or null.
  * Keyboard focus lives inside <webview> guests, so shell-level shortcuts
  * (window switching, browser tab management) must be intercepted here and
- * forwarded to the shell renderer (see src/lib/shellShortcuts.ts).
+ * forwarded to the shell renderer (see src/lib/shellShortcuts.ts). Mirrors
+ * the shell-DOM half in DesktopHotkeys.tsx - keep the two in sync.
  */
 function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   if (input.type !== 'keyDown') return null;
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
   }
+  // Alt+Left/Right: history navigation (Chrome behavior).
+  if (
+    input.alt &&
+    !input.control &&
+    !input.meta &&
+    (input.key === 'ArrowLeft' || input.key === 'ArrowRight')
+  ) {
+    return { action: input.key === 'ArrowLeft' ? 'back' : 'forward' };
+  }
+  // F5 / Shift+F5.
+  if (input.key === 'F5' && !input.control && !input.alt && !input.meta) {
+    return { action: 'reload', force: Boolean(input.shift) };
+  }
+  if (input.control && !input.alt && !input.meta && input.key === 'Tab') {
+    return { action: 'cycle-tab', backward: Boolean(input.shift) };
+  }
+  if (input.control && input.shift && !input.alt && !input.meta) {
+    if (input.key.toLowerCase() === 'r') return { action: 'reload', force: true };
+    return null;
+  }
   if (input.control && !input.shift && !input.alt && !input.meta) {
     const key = input.key.toLowerCase();
     if (key === 't') return { action: 'new-tab' };
     if (key === 'w') return { action: 'close-tab' };
     if (key === 'l') return { action: 'focus-address' };
+    if (key === 'f') return { action: 'find' };
+    if (key === 'r') return { action: 'reload', force: false };
+    if (/^[1-9]$/.test(input.key)) {
+      return { action: 'goto-tab', digit: Number(input.key) };
+    }
   }
   return null;
 }
@@ -2721,6 +2787,7 @@ app.whenReady().then(() => {
   registerCrxHandlers();
   registerCertificateHandling();
   registerBrowserDataHandlers();
+  registerFindHandlers();
   registerUserscriptHandlers({ assertShellSender });
   registerDevtoolsHandlers();
   registerNostrBridge();
@@ -2903,6 +2970,16 @@ app.on('web-contents-created', (_event, contents) => {
       event.preventDefault();
       sendToShell('shortcut', { ...shortcut, wcId: contents.id });
     });
+
+    // Stream find-in-page match results to the shell's find bar.
+    contents.on('found-in-page', (_event, result) => {
+      sendToShell('browser:findResult', {
+        wcId: contents.id,
+        matches: result.matches,
+        activeMatchOrdinal: result.activeMatchOrdinal,
+        finalUpdate: result.finalUpdate,
+      });
+    });
   }
 
   // Installed web-app guests aren't browser tabs, but focus still lands inside
@@ -2977,7 +3054,17 @@ app.on('web-contents-created', (_event, contents) => {
       );
       menu = replaced;
     }
-    menu.popup({ window: shellWindow ?? undefined });
+    // Pop the menu up on the next tick, not synchronously inside the
+    // context-menu handler: the right-button press that fired this event is
+    // still being processed (the guest grabs focus/pointer for it), and a
+    // menu opened mid-press dismisses itself instantly - the "right-click
+    // menu flashes and never opens" glitch. Deferring lets the press finish
+    // so the popup survives to be used.
+    setImmediate(() => {
+      if (shellWindow && !shellWindow.isDestroyed()) {
+        menu.popup({ window: shellWindow });
+      }
+    });
   });
 });
 

@@ -102,7 +102,21 @@ export function consumeTabCommands(
 export interface BrowserHotkey {
   /** Desktop window id of the target browser instance. */
   windowId: string;
-  action: 'new-tab' | 'close-tab' | 'focus-address';
+  action:
+    | 'new-tab'
+    | 'close-tab'
+    | 'focus-address'
+    | 'find'
+    | 'reload'
+    | 'force-reload'
+    | 'cycle-tab'
+    | 'goto-tab'
+    | 'back'
+    | 'forward';
+  /** Direction for 'cycle-tab' (Ctrl+Shift+Tab). */
+  backward?: boolean;
+  /** Pressed digit for 'goto-tab' (1-9; 9 = last tab). */
+  digit?: number;
 }
 
 type HotkeyConsumer = (hotkey: BrowserHotkey) => void;

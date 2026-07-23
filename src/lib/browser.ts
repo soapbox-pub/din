@@ -9,6 +9,9 @@
  * the exact (host, fingerprint) pair in the main process - persisted across
  * restarts - and reloads the tab, which is then trusted.
  *
+ * Also carries Chromium's find-in-page: the app sends queries for a tab's
+ * WebContents id, and match results stream back via onFindResult.
+ *
  * In a plain browser (`npm run dev:browser`) the bridge is absent; callers
  * must feature-detect via `getBrowserBridge()`.
  */
@@ -25,6 +28,28 @@ export interface CertificateErrorInfo {
   error: string;
   /** The certificate's fingerprint (the pinned identity). */
   fingerprint: string;
+}
+
+/** A find-in-page match report for a browser tab. */
+export interface FindResult {
+  /** The searched tab guest's WebContents id (matches Tab.wcId). */
+  wcId: number;
+  /** Total matches for the current query. */
+  matches: number;
+  /** 1-based ordinal of the active match. */
+  activeMatchOrdinal: number;
+  /** Whether this is the last update for the current find request. */
+  finalUpdate: boolean;
+}
+
+/** Options for a find-in-page query. */
+export interface FindOptions {
+  /** Search direction (default true = forward). */
+  forward?: boolean;
+  /** Continue the current search (Enter / Shift+Enter repeats). */
+  findNext?: boolean;
+  /** Case-sensitive search. */
+  matchCase?: boolean;
 }
 
 export interface BrowserBridge {
@@ -50,6 +75,15 @@ export interface BrowserBridge {
     cache?: boolean;
     cookies?: boolean;
   }): Promise<void>;
+  /**
+   * Search a tab (`wcId`) for `text`. An empty text clears the highlight.
+   * Match counts arrive via onFindResult.
+   */
+  findInPage(wcId: number, text: string, options?: FindOptions): Promise<void>;
+  /** Clear a tab's find-in-page highlight (find bar closed). */
+  stopFindInPage(wcId: number): Promise<void>;
+  /** Subscribe to find-in-page match results. Returns an unsubscribe fn. */
+  onFindResult(callback: (result: FindResult) => void): () => void;
 }
 
 declare global {

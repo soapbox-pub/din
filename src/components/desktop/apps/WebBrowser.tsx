@@ -2,7 +2,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Code,
   EllipsisVertical,
   Globe,
@@ -33,6 +35,7 @@ import {
   getBrowserBridge,
   type BrowserBridge,
   type CertificateErrorInfo,
+  type FindResult,
 } from '@/lib/browser';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { consumeTabCommands, consumeBrowserHotkeys } from '@/lib/browserTabBus';
@@ -231,7 +234,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // browser (tab strip, toolbar, every BrowserView host) on every desktop
   // commit. The one thing that needs window state - reconciling undocked
   // DevTools windows - lives in <UndockedDevToolsReconciler /> below.
-  const { close: closeWindow, open: openWindow } = useWindowActions();
+  const { close: closeWindow, open: openWindow, focus: focusWindow } =
+    useWindowActions();
   const setTitlebar = useWindowTitlebar();
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab(NEW_TAB_URL)]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
@@ -508,6 +512,80 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     });
   }, []);
 
+  // --- Find-in-page (Ctrl+F) ----------------------------------------------
+  // The find bar's state. The query is shared across tabs (Firefox-style);
+  // switching tabs re-issues the current query in the newly active tab.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findText, setFindText] = useState('');
+  const [findResult, setFindResult] = useState<Pick<
+    FindResult,
+    'matches' | 'activeMatchOrdinal'
+  > | null>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+
+  /** Open (or re-focus) the find bar - Ctrl+F. Webview mode only. */
+  const openFind = useCallback(() => {
+    if (!webviewMode || !browserBridge) return;
+    setFindOpen(true);
+    // Wait a frame for the bar to mount, then drop the cursor in.
+    requestAnimationFrame(() => {
+      const input = findInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.select();
+    });
+  }, [webviewMode, browserBridge]);
+
+  /** Close the find bar and clear the active tab's highlight. */
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindResult(null);
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (tab?.wcId != null) browserBridge?.stopFindInPage(tab.wcId).catch(() => {});
+  }, [browserBridge]);
+
+  /** Issue a find query against the active tab (empty text clears it). */
+  const queryFind = useCallback(
+    (text: string, opts?: { forward?: boolean; findNext?: boolean }) => {
+      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      if (tab?.wcId == null || !browserBridge) return;
+      browserBridge.findInPage(tab.wcId, text, opts).catch(() => {});
+    },
+    [browserBridge],
+  );
+
+  const changeFindText = useCallback(
+    (text: string) => {
+      setFindText(text);
+      queryFind(text);
+    },
+    [queryFind],
+  );
+
+  // Match counts stream back from the main process; display them when they
+  // belong to the active tab.
+  useEffect(() => {
+    if (!browserBridge) return;
+    return browserBridge.onFindResult((result) => {
+      const tab = tabsRef.current.find((t) => t.wcId === result.wcId);
+      if (!tab || tab.id !== activeIdRef.current) return;
+      setFindResult({
+        matches: result.matches,
+        activeMatchOrdinal: result.activeMatchOrdinal,
+      });
+    });
+  }, [browserBridge]);
+
+  // Switching tabs while the bar is open re-issues the query in the new tab
+  // (an empty query just clears that tab's highlight).
+  useEffect(() => {
+    if (!findOpen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFindResult(null);
+    queryFind(findText);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
   const onTabEvent = useCallback(
     (id: string, event: TabEvent) => {
       switch (event.kind) {
@@ -623,6 +701,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // window.open come from the foreground tab; nest the new tab under
           // it (drives the tree sidebar, ignored by the horizontal strip).
           openTab(url, command.active, command.requestId, activeIdRef.current);
+          // A foreground tab request raises the desktop window too -
+          // otherwise the new tab opens invisibly while the browser sits
+          // buried under other windows (or minimized).
+          if (command.active) focusWindow(windowId);
           break;
         }
         case 'open': {
@@ -644,6 +726,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           } else {
             openTab(command.url, true, null, null);
           }
+          // A link opened in this window (target=_blank, a desktop link
+          // click) must bring it forward - the user clicked expecting to
+          // look at the result, not to hunt for the window.
+          focusWindow(windowId);
           break;
         }
         case 'select': {
@@ -658,7 +744,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         }
       }
     }, (wcId) => tabsRef.current.some((t) => t.wcId === wcId));
-  }, [openTab, closeTab]);
+  }, [openTab, closeTab, focusWindow, windowId]);
 
   /**
    * Move a tab's inspector to a dock position, or close it ('closed').
@@ -895,9 +981,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [navigateTab, activeId],
   );
 
-  const go = useCallback(
-    (delta: number) => {
-      const view = views.current.get(activeId);
+  /** Move a tab through its history by `delta` (-1 back, +1 forward). */
+  const goTab = useCallback(
+    (id: string, delta: number) => {
+      const view = views.current.get(id);
       if (!view) return;
       if (webviewMode) {
         // The guest owns its history; state syncs via `navigate` events.
@@ -905,17 +992,46 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         else view.goForward();
         return;
       }
-      const tab = tabsRef.current.find((t) => t.id === activeId);
+      const tab = tabsRef.current.find((t) => t.id === id);
       if (!tab) return;
       const target = tab.cursor + delta;
       if (target < 0 || target >= tab.history.length) return;
       const url = tab.history[target];
       view.loadURL(url);
-      updateTab(activeId, { cursor: target, address: url, url, title: null, favicon: null, themeColor: null });
+      updateTab(id, { cursor: target, address: url, url, title: null, favicon: null, themeColor: null });
       if (!isPrivate) recordVisit(url);
     },
-    [activeId, updateTab, webviewMode, recordVisit, isPrivate],
+    [updateTab, webviewMode, recordVisit, isPrivate],
   );
+
+  const go = useCallback(
+    (delta: number) => goTab(activeId, delta),
+    [goTab, activeId],
+  );
+
+  /** Reload a tab; `force` bypasses the cache (Ctrl+Shift+R / Shift+F5). */
+  const reloadTab = useCallback((id: string, force: boolean) => {
+    const view = views.current.get(id);
+    if (!view) return;
+    if (force) view.reloadIgnoringCache();
+    else view.reload();
+  }, []);
+
+  /** Activate the next/previous tab (Ctrl+Tab / Ctrl+Shift+Tab), wrapping. */
+  const cycleTab = useCallback((backward: boolean) => {
+    const ts = tabsRef.current;
+    if (ts.length < 2) return;
+    const index = ts.findIndex((t) => t.id === activeIdRef.current);
+    const next = (index + (backward ? -1 : 1) + ts.length) % ts.length;
+    setActiveId(ts[next].id);
+  }, []);
+
+  /** Activate a tab by 1-based position; 9 jumps to the last tab (Chrome). */
+  const gotoTabDigit = useCallback((digit: number) => {
+    const ts = tabsRef.current;
+    const tab = digit === 9 ? ts[ts.length - 1] : ts[digit - 1];
+    if (tab) setActiveId(tab.id);
+  }, []);
 
   const canBack = webviewMode ? activeTab.canBack : activeTab.cursor > 0;
   const canForward = webviewMode
@@ -957,40 +1073,108 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [devtools, toggleDevtools, activeId],
   );
 
-  // Ctrl+T / Ctrl+W / Ctrl+L pressed while this window is focused (keyboard
-  // focus in the shell DOM): routed here by DesktopHotkeys, scoped by
-  // window id.
+  // Browser hotkeys pressed while this window is focused (keyboard focus in
+  // the shell DOM): routed here by DesktopHotkeys, scoped by window id.
   useEffect(() => {
     return consumeBrowserHotkeys((hotkey) => {
       if (hotkey.windowId !== windowId) return;
-      if (hotkey.action === 'new-tab') openNewTab();
-      else if (hotkey.action === 'close-tab') closeTab(activeId);
-      else focusAddress();
+      switch (hotkey.action) {
+        case 'new-tab':
+          openNewTab();
+          break;
+        case 'close-tab':
+          closeTab(activeIdRef.current);
+          break;
+        case 'focus-address':
+          focusAddress();
+          break;
+        case 'find':
+          openFind();
+          break;
+        case 'reload':
+          reloadTab(activeIdRef.current, false);
+          break;
+        case 'force-reload':
+          reloadTab(activeIdRef.current, true);
+          break;
+        case 'cycle-tab':
+          cycleTab(hotkey.backward === true);
+          break;
+        case 'goto-tab':
+          if (hotkey.digit) gotoTabDigit(hotkey.digit);
+          break;
+        case 'back':
+          goTab(activeIdRef.current, -1);
+          break;
+        case 'forward':
+          goTab(activeIdRef.current, 1);
+          break;
+      }
     });
-  }, [windowId, openNewTab, closeTab, focusAddress, activeId]);
+  }, [
+    windowId,
+    openNewTab,
+    closeTab,
+    focusAddress,
+    openFind,
+    reloadTab,
+    cycleTab,
+    gotoTabDigit,
+    goTab,
+  ]);
 
-  // Ctrl+T / Ctrl+W / Ctrl+L pressed inside a page: forwarded by the main
-  // process with the guest's WebContents id (focus lives in the guest,
-  // invisible to the shell). Every browser window subscribes; only the one
-  // owning the tab acts.
+  // The same shortcuts pressed inside a page: forwarded by the main process
+  // with the guest's WebContents id (focus lives in the guest, invisible to
+  // the shell). Every browser window subscribes; only the one owning the tab
+  // acts.
   useEffect(() => {
     const bridge = getShellShortcuts();
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
-      if (
-        shortcut.action !== 'new-tab' &&
-        shortcut.action !== 'close-tab' &&
-        shortcut.action !== 'focus-address'
-      ) {
-        return;
-      }
+      // Window cycling is desktop-wide; DesktopHotkeys owns it.
+      if (shortcut.action === 'cycle-windows') return;
       const tab = tabsRef.current.find((t) => t.wcId === shortcut.wcId);
       if (!tab) return;
-      if (shortcut.action === 'new-tab') openNewTab();
-      else if (shortcut.action === 'close-tab') closeTab(tab.id);
-      else focusAddress();
+      switch (shortcut.action) {
+        case 'new-tab':
+          openNewTab();
+          break;
+        case 'close-tab':
+          closeTab(tab.id);
+          break;
+        case 'focus-address':
+          focusAddress();
+          break;
+        case 'find':
+          openFind();
+          break;
+        case 'reload':
+          reloadTab(tab.id, shortcut.force);
+          break;
+        case 'cycle-tab':
+          cycleTab(shortcut.backward);
+          break;
+        case 'goto-tab':
+          gotoTabDigit(shortcut.digit);
+          break;
+        case 'back':
+          goTab(tab.id, -1);
+          break;
+        case 'forward':
+          goTab(tab.id, 1);
+          break;
+      }
     });
-  }, [openNewTab, closeTab, focusAddress]);
+  }, [
+    openNewTab,
+    closeTab,
+    focusAddress,
+    openFind,
+    reloadTab,
+    cycleTab,
+    gotoTabDigit,
+    goTab,
+  ]);
 
   return (
     <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
@@ -1055,7 +1239,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         />
 
         {/* One overflow menu gathers the browser's less-frequent controls:
-            new/private windows, developer tools, extensions, and settings. */}
+            new/private windows, find-in-page, developer tools, extensions,
+            and settings. */}
         <BrowserMenu
           showExtensions={!isPrivate && (!!crx || !!userscriptsBridge)}
           onOpenUrl={(url) => openTab(url)}
@@ -1068,6 +1253,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onAddUserscript={() => setScriptInstall({ code: '' })}
           treeTabs={treeTabs}
           onTreeTabsChange={setTreeTabs}
+          showFind={webviewMode}
+          findDisabled={activeTab.wcId === null}
+          onFind={openFind}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -1140,6 +1328,17 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onDismissCertError={dismissCertError}
           />
         ))}
+        {findOpen && webviewMode && (
+          <FindBar
+            inputRef={findInputRef}
+            text={findText}
+            result={findResult}
+            onChangeText={changeFindText}
+            onNext={() => queryFind(findText, { forward: true, findNext: true })}
+            onPrev={() => queryFind(findText, { forward: false, findNext: true })}
+            onClose={closeFind}
+          />
+        )}
         </div>
       </div>
 
@@ -1337,6 +1536,115 @@ function AddressBar({
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * The find-in-page bar (Ctrl+F): a floating box at the top-right of the page
+ * area, Chrome-style. Queries run against the active tab's guest through the
+ * browser bridge (Chromium's findInPage); match counts stream back via
+ * onFindResult. Enter / Shift+Enter step through matches; Escape closes.
+ */
+function FindBar({
+  inputRef,
+  text,
+  result,
+  onChangeText,
+  onNext,
+  onPrev,
+  onClose,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  text: string;
+  result: { matches: number; activeMatchOrdinal: number } | null;
+  onChangeText: (text: string) => void;
+  onNext: () => void;
+  onPrev: () => void;
+  onClose: () => void;
+}) {
+  const noMatches = text.length > 0 && result !== null && result.matches === 0;
+  return (
+    <div
+      role="search"
+      aria-label="Find in page"
+      className="absolute right-3 top-2 z-30 flex items-center gap-0.5 rounded-lg border border-border/60 bg-popover px-1.5 py-1 text-popover-foreground shadow-lg"
+    >
+      <input
+        ref={inputRef}
+        type="text"
+        value={text}
+        onChange={(e) => onChangeText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            if (e.shiftKey) onPrev();
+            else onNext();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+        placeholder="Find in page"
+        aria-label="Find in page"
+        spellCheck={false}
+        autoComplete="off"
+        className={cn(
+          'h-7 w-44 rounded-md bg-transparent px-1.5 text-sm outline-none placeholder:text-muted-foreground',
+          'focus-visible:ring-2 focus-visible:ring-ring/50',
+          noMatches && 'text-destructive',
+        )}
+      />
+      <span
+        aria-live="polite"
+        className={cn(
+          'min-w-9 shrink-0 text-center text-xs',
+          noMatches ? 'text-destructive' : 'text-muted-foreground',
+        )}
+      >
+        {text && result ? `${result.activeMatchOrdinal}/${result.matches}` : ''}
+      </span>
+      <FindBarButton label="Previous match" disabled={!text} onClick={onPrev}>
+        <ChevronUp className="size-4" />
+      </FindBarButton>
+      <FindBarButton label="Next match" disabled={!text} onClick={onNext}>
+        <ChevronDown className="size-4" />
+      </FindBarButton>
+      <FindBarButton label="Close find bar" onClick={onClose}>
+        <X className="size-4" />
+      </FindBarButton>
+    </div>
+  );
+}
+
+/** A small icon button inside the {@link FindBar}. */
+function FindBarButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'grid size-6 shrink-0 place-items-center rounded-md text-foreground/80',
+        'hover:bg-foreground/10 hover:text-foreground',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -2364,6 +2672,9 @@ function BrowserMenu({
   onAddUserscript,
   treeTabs,
   onTreeTabsChange,
+  showFind,
+  findDisabled,
+  onFind,
   hasDevtools,
   devtoolsActive,
   devtoolsDisabled,
@@ -2383,6 +2694,10 @@ function BrowserMenu({
   onAddUserscript: () => void;
   treeTabs: boolean;
   onTreeTabsChange: (value: boolean) => void;
+  /** Show the find-in-page item (webview mode). */
+  showFind: boolean;
+  findDisabled: boolean;
+  onFind: () => void;
   /** Whether the docked-devtools control is available (webview mode). */
   hasDevtools: boolean;
   devtoolsActive: boolean;
@@ -2430,6 +2745,15 @@ function BrowserMenu({
             label="New private window"
             onClick={() => run(onNewPrivateWindow)}
           />
+          {showFind && (
+            <BrowserMenuItem
+              icon={Search}
+              label="Find in page…"
+              shortcut="Ctrl+F"
+              disabled={findDisabled}
+              onClick={() => run(onFind)}
+            />
+          )}
           {hasDevtools && (
             <BrowserMenuItem
               icon={Code}

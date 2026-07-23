@@ -12,7 +12,8 @@
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
 //   - window.brightness: backlight + night light for the menu bar, Settings, OSD
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
-//   - window.browser: TLS certificate exceptions for the Web Browser app
+//   - window.browser: TLS certificate exceptions, browsing-data clearing, and
+//     find-in-page for the Web Browser app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.userscripts: userscript library sync and install
 //     requests for the Web Browser app
@@ -429,6 +430,40 @@ contextBridge.exposeInMainWorld('browser', {
    */
   clearBrowsingData: (options) =>
     ipcRenderer.invoke('browser:clearBrowsingData', options),
+
+  /**
+   * Search a browser tab (`wcId`) for `text`. `options.forward` (default
+   * true) sets direction; `options.findNext` continues the current search
+   * (Enter/Shift+Enter); `options.matchCase` makes it case-sensitive. An
+   * empty text clears the highlight. Match counts arrive via onFindResult.
+   * @param {number} wcId
+   * @param {string} text
+   * @param {{ forward?: boolean, findNext?: boolean, matchCase?: boolean }} [options]
+   */
+  findInPage: (wcId, text, options) =>
+    ipcRenderer.invoke('browser:findInPage', wcId, text, options),
+
+  /**
+   * Clear a browser tab's find-in-page highlight (find bar closed).
+   * @param {number} wcId
+   */
+  stopFindInPage: (wcId) => ipcRenderer.invoke('browser:stopFindInPage', wcId),
+
+  /**
+   * Subscribe to find-in-page match results. The callback receives
+   * { wcId, matches, activeMatchOrdinal, finalUpdate }. Returns an
+   * unsubscribe fn.
+   * @param {(result: { wcId: number, matches: number, activeMatchOrdinal: number, finalUpdate: boolean }) => void} callback
+   */
+  onFindResult: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, matches: number, activeMatchOrdinal: number, finalUpdate: boolean }} result
+     */
+    const listener = (_event, result) => callback(result);
+    ipcRenderer.on('browser:findResult', listener);
+    return () => ipcRenderer.removeListener('browser:findResult', listener);
+  },
 });
 
 /**
@@ -644,10 +679,16 @@ contextBridge.exposeInMainWorld('devtools', {
 contextBridge.exposeInMainWorld('shellShortcuts', {
   /**
    * Subscribe to forwarded shortcuts. Returns an unsubscribe fn. Payloads:
-   *   { action: 'cycle-windows', backward } (Alt+Tab / Alt+Shift+Tab)
-   *   { action: 'new-tab', wcId }           (Ctrl+T in a browser tab)
-   *   { action: 'close-tab', wcId }         (Ctrl+W in a browser tab)
-   * @param {(data: { action: string, wcId?: number, backward?: boolean }) => void} callback
+   *   { action: 'cycle-windows', backward }   (Alt+Tab / Alt+Shift+Tab)
+   *   { action: 'new-tab', wcId }             (Ctrl+T in a browser tab)
+   *   { action: 'close-tab', wcId }           (Ctrl+W in a browser tab)
+   *   { action: 'focus-address', wcId }       (Ctrl+L in a browser tab)
+   *   { action: 'find', wcId }                (Ctrl+F in a browser tab)
+   *   { action: 'reload', force, wcId }       (Ctrl+R / F5, Ctrl+Shift+R / Shift+F5)
+   *   { action: 'cycle-tab', backward, wcId } (Ctrl+Tab / Ctrl+Shift+Tab)
+   *   { action: 'goto-tab', digit, wcId }     (Ctrl+1..9 in a browser tab)
+   *   { action: 'back' | 'forward', wcId }    (Alt+Left / Alt+Right)
+   * @param {(data: { action: string, wcId?: number, backward?: boolean, force?: boolean, digit?: number }) => void} callback
    */
   onShortcut: (callback) => {
     /**
