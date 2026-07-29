@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import { cleanWifiError, getWifiBridge, isEthernetConnected, isSecured } from '@/lib/wifi';
 import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
+import { VpnControls } from '@/components/desktop/VpnControls';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
   useSavedNetworks,
@@ -361,6 +362,7 @@ function WifiSection() {
           ))}
         </ul>
       )}
+      <VpnControls />
     </SectionShell>
   );
 }

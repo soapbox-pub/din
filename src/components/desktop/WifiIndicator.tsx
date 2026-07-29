@@ -25,6 +25,7 @@ import {
   useWifiStatus,
 } from '@/hooks/useWifi';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { VpnControls } from '@/components/desktop/VpnControls';
 
 /** Signal-strength icon (0-100), shared with the Settings Wi-Fi section. */
 export function WifiSignalIcon({ signal, className }: { signal: number; className?: string }) {
@@ -128,6 +129,8 @@ export function WifiPopoverBody() {
           </ul>
         )}
       </div>
+
+      <VpnControls compact />
 
       <footer className="border-t border-border/60 p-1.5">
         <PopoverClose asChild>

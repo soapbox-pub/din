@@ -6,6 +6,7 @@
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
+//   - window.vpn: VPN/WireGuard profile toggles for the network selector
 //   - window.display: xrandr multi-output arrangement for the Settings app
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
 //   - window.power: battery/AC status + system power profiles for the menu
@@ -210,6 +211,26 @@ contextBridge.exposeInMainWorld('wifi', {
    * @param {boolean} enabled
    */
   setRadio: (enabled) => ipcRenderer.invoke('wifi:setRadio', enabled),
+});
+
+// VPN bridge (window.vpn), backed by the vpn:* handlers in main.mts (nmcli /
+// NetworkManager). Toggles existing VPN/WireGuard profiles from the network
+// selector; profiles are created out of band (imported config / Terminal).
+contextBridge.exposeInMainWorld('vpn', {
+  /** Saved VPN/WireGuard profiles with their active state. `[]` when NetworkManager is absent. */
+  list: () => ipcRenderer.invoke('vpn:list'),
+
+  /**
+   * Bring a saved VPN profile up.
+   * @param {string} name
+   */
+  connect: (name) => ipcRenderer.invoke('vpn:connect', name),
+
+  /**
+   * Bring a saved VPN profile down.
+   * @param {string} name
+   */
+  disconnect: (name) => ipcRenderer.invoke('vpn:disconnect', name),
 });
 
 // Display bridge (window.display), backed by the display:* handlers in

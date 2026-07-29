@@ -526,6 +526,43 @@ async function savedWifiConnections(): Promise<string[]> {
   return rows.filter((fields) => fields[1] === WIFI_TYPE).map((fields) => fields[0]);
 }
 
+/** Connection types NetworkManager exposes as a VPN in the network menu. */
+const VPN_TYPES = new Set(['vpn', 'wireguard']);
+
+/**
+ * Validate a caller-supplied NetworkManager connection name. Names transit
+ * argv (no shell), so the concern is only well-formedness, not injection.
+ */
+function validConnName(name: unknown): string {
+  if (
+    typeof name !== 'string' ||
+    name.length === 0 ||
+    name.length > 128 ||
+    name.includes('\0')
+  ) {
+    throw new Error('Invalid connection name');
+  }
+  return name;
+}
+
+/** One saved VPN profile and whether its tunnel is currently up. */
+interface VpnConnection {
+  name: string;
+  /** "vpn" (OpenVPN, IKEv2, ...) or "wireguard". */
+  type: string;
+  active: boolean;
+}
+
+/** Saved VPN/WireGuard connection profiles with their active state. */
+async function savedVpnConnections(): Promise<VpnConnection[]> {
+  const rows = terseRows(
+    await nmcli(['-t', '-f', 'NAME,TYPE,ACTIVE', 'connection', 'show']),
+  );
+  return rows
+    .filter((fields) => VPN_TYPES.has(fields[1]))
+    .map((fields) => ({ name: fields[0], type: fields[1], active: fields[2] === 'yes' }));
+}
+
 // ---------------------------------------------------------------------------
 // Display bridge (window.display), backed by xrandr. Meaningful only on a bare
 // X11 session (the os/x11 standalone launcher), where Din is the whole desktop
@@ -1968,6 +2005,41 @@ function registerWifiHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
+// VPN bridge (window.vpn - see preload.cjs / the network selector).
+//
+// Same nmcli/NetworkManager substrate as the WiFi bridge, scoped to VPN and
+// WireGuard connection profiles. The menu can only toggle profiles that
+// already exist (imported via `nmcli connection import` / a .ovpn/.conf, or
+// the Terminal); it deliberately doesn't create or edit them, which would
+// mean handling credentials and per-provider config. `vpn:list` reports [] on
+// a machine without NetworkManager so the UI simply shows no VPN section.
+// ---------------------------------------------------------------------------
+
+function registerVpnHandlers(): void {
+  ipcMain.handle('vpn:list', async (event) => {
+    assertShellSender(event);
+    try {
+      return await savedVpnConnections();
+    } catch (error) {
+      if (messageOf(error) === 'nmcli-missing') return [];
+      throw error;
+    }
+  });
+
+  ipcMain.handle('vpn:connect', async (event, rawName) => {
+    assertShellSender(event);
+    const name = validConnName(rawName);
+    await nmcli(['connection', 'up', 'id', name], NMCLI_CONNECT_TIMEOUT_MS);
+  });
+
+  ipcMain.handle('vpn:disconnect', async (event, rawName) => {
+    assertShellSender(event);
+    const name = validConnName(rawName);
+    await nmcli(['connection', 'down', 'id', name]);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Chrome extension support (the web browser app).
 //
 // electron-chrome-extensions implements the chrome.* extension APIs that
@@ -2967,6 +3039,7 @@ app.whenReady().then(() => {
   registerFsHandlers();
   registerPtyHandlers();
   registerWifiHandlers();
+  registerVpnHandlers();
   registerDisplayHandlers();
   registerPowerHandlers();
   registerAudioHandlers();
