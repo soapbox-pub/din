@@ -3185,7 +3185,29 @@ app.on('web-contents-created', (_event, contents) => {
   // holds focus (shell or any guest), so hook them everywhere.
   attachBrightnessMediaKeys(contents);
 
-  if (contents.getType() !== 'webview') return;
+  if (contents.getType() !== 'webview') {
+    // The shell renderer (address bar, inputs, etc.) gets no context menu by
+    // default. Add Cut/Copy/Paste/Select All for editable fields.
+    contents.on('context-menu', (_e, params) => {
+      if (!params.isEditable) return;
+      const { editFlags } = params;
+      const menu = new Menu();
+      if (editFlags.canCut) menu.append(new MenuItem({ role: 'cut' }));
+      if (editFlags.canCopy) menu.append(new MenuItem({ role: 'copy' }));
+      if (editFlags.canPaste) menu.append(new MenuItem({ role: 'paste' }));
+      if (menu.items.length > 0) {
+        menu.append(new MenuItem({ type: 'separator' }));
+        menu.append(new MenuItem({ role: 'selectAll' }));
+      }
+      if (menu.items.length === 0) return;
+      setImmediate(() => {
+        if (shellWindow && !shellWindow.isDestroyed()) {
+          menu.popup({ window: shellWindow });
+        }
+      });
+    });
+    return;
+  }
 
   const isBrowserTab = contents.session === browserSession();
 
