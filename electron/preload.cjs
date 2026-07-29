@@ -411,6 +411,14 @@ contextBridge.exposeInMainWorld('brightness', {
 contextBridge.exposeInMainWorld('screenshot', {
   /** Capture the desktop; resolves to { dataUrl, width, height } (PNG). */
   capture: () => ipcRenderer.invoke('screenshot:capture'),
+
+  /**
+   * Capture just one window's on-screen rectangle (CSS pixels, relative to
+   * the shell content's top-left), for the genie minimize/restore animation.
+   * Resolves to { dataUrl, width, height } (PNG at device resolution).
+   * @param {{ x: number, y: number, width: number, height: number }} rect
+   */
+  captureRegion: (rect) => ipcRenderer.invoke('screenshot:captureRegion', rect),
 });
 
 /**

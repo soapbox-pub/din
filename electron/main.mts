@@ -1808,6 +1808,36 @@ function registerScreenshotHandlers(): void {
     // <img> / fetch() in the renderer (see src/lib/screenshot.ts).
     return { dataUrl: image.toDataURL(), width, height };
   });
+
+  // Capture just one window's on-screen rectangle, for the genie
+  // minimize/restore animation: warping a full-screen <webview> with a
+  // projective transform can't be a compositor-only op (the guest surface
+  // re-rasterizes every frame), so the renderer snapshots the window to a
+  // bitmap and warps that cheap <img> instead (see src/components/desktop/
+  // Window.tsx). The rect is in CSS pixels relative to the shell content's
+  // top-left; capturePage returns it at device resolution.
+  ipcMain.handle('screenshot:captureRegion', async (event, rect) => {
+    assertShellSender(event);
+    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
+      throw new Error('Shell window unavailable');
+    }
+    const [contentW, contentH] = shellWindow.getContentSize();
+    const clamp = (value: unknown, lo: number, hi: number): number => {
+      const n = Math.round(Number(value));
+      if (!Number.isFinite(n)) throw new Error('Invalid capture region');
+      return Math.max(lo, Math.min(hi, n));
+    };
+    const x = clamp(rect?.x, 0, contentW);
+    const y = clamp(rect?.y, 0, contentH);
+    const width = clamp(rect?.width, 1, contentW - x);
+    const height = clamp(rect?.height, 1, contentH - y);
+    const image = await shellWindow.webContents.capturePage({ x, y, width, height });
+    const size = image.getSize();
+    if (size.width === 0 || size.height === 0) {
+      throw new Error('Captured an empty image');
+    }
+    return { dataUrl: image.toDataURL(), width: size.width, height: size.height };
+  });
 }
 
 // ---------------------------------------------------------------------------

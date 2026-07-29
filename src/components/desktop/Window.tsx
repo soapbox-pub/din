@@ -7,6 +7,7 @@ import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
+import { getScreenshotBridge } from '@/lib/screenshot';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
 import { WindowFocusContext } from '@/contexts/WindowFocusContext';
@@ -195,6 +196,12 @@ export const Window = memo(function Window({
   // the drop position, where the window visually sat (drags don't commit
   // geometry until release).
   const paintedRect = useRef<GenieRect | null>(null);
+  // The window's own bitmap, captured on minimize and replayed (reversed) on
+  // restore: a minimized window is off-screen, so it can't be re-captured for
+  // the restore warp. `null` until the first minimize, or whenever no shell
+  // capture bridge is available (a plain browser), in which case the genie
+  // falls back to warping the live element.
+  const snapshotRef = useRef<string | null>(null);
 
   // Custom title-bar content published by the hosted app (e.g. the browser's
   // tab strip), rendered inline with the window controls. `null` shows the
@@ -318,15 +325,22 @@ export const Window = memo(function Window({
   }, []);
 
   // Genie minimize/restore (Compiz "magic lamp", macOS genie): when the
-  // minimized flag flips, warp the live window into / out of its app's dock
-  // tile instead of blinking (see src/lib/genie.ts). The window stays
-  // mounted either way, so the animation runs on the real element: a
-  // minimize overrides the React-committed `visibility: hidden` until the
-  // timeline ends, and a restore paints its fully-swallowed first frame in
-  // this layout effect - before the browser can paint - so the full-size
-  // window never flashes. Watching the flag here (rather than wrapping the
+  // minimized flag flips, warp the window into / out of its app's dock tile
+  // instead of blinking (see src/lib/genie.ts). The window stays mounted
+  // either way. Watching the flag here (rather than wrapping the
   // minimize/focus actions) covers every trigger: title-bar button, dock
   // tile clicks, and the dock's window picker.
+  //
+  // Inside the Electron shell the warp runs on a *bitmap snapshot* of the
+  // window, not the live element: the section wraps a <webview>/WebGL guest
+  // surface, and a projective transform can't composite a guest cheaply - it
+  // re-rasterizes the whole surface every frame, which is what made the genie
+  // crawl on full-screen windows. A raster <img> warps as a plain compositor
+  // layer, and (unlike the guest) actually follows the perspective mesh. The
+  // minimize snapshot is cached so restore - whose window is off-screen and
+  // can't be re-captured - can replay it reversed. Outside the shell (a plain
+  // browser: no capture bridge) the genie falls back to warping the live
+  // element, as before.
   const prevMinimized = useRef(win.minimized);
   useLayoutEffect(() => {
     if (prevMinimized.current === win.minimized) return;
@@ -358,7 +372,8 @@ export const Window = memo(function Window({
     // The app's dock tile, translated into workspace coordinates. An app
     // always has a tile while it has windows; the bottom-center fallback
     // covers a transient gap (e.g. the Dock re-mounting).
-    const ws = el.parentElement?.getBoundingClientRect();
+    const parent = el.parentElement;
+    const ws = parent?.getBoundingClientRect();
     const wsLeft = ws?.left ?? 0;
     const wsTop = ws?.top ?? 0;
     const tile = getDockTileRect(win.appId);
@@ -372,16 +387,14 @@ export const Window = memo(function Window({
         };
 
     const minimizing = win.minimized;
-    beginGesture();
-    el.style.pointerEvents = 'none';
-    if (minimizing) el.style.visibility = 'visible';
 
-    animCancel.current = animateGenie(
-      el,
-      winRect,
-      target,
-      minimizing ? 'minimize' : 'restore',
-      () => {
+    // Warp the live element directly (the pre-snapshot behaviour). Used
+    // outside the shell and as a fallback when a capture fails.
+    const runLiveGenie = () => {
+      beginGesture();
+      el.style.pointerEvents = 'none';
+      if (minimizing) el.style.visibility = 'visible';
+      animCancel.current = animateGenie(el, winRect, target, minimizing ? 'minimize' : 'restore', () => {
         animCancel.current = null;
         el.style.transform = '';
         el.style.transformOrigin = '';
@@ -391,9 +404,86 @@ export const Window = memo(function Window({
         // minimized; the property is absent otherwise).
         el.style.visibility = minimizing ? 'hidden' : '';
         endGesture();
-      },
-    );
-  }, [win.minimized, win.appId, beginGesture, endGesture, stopWobble]);
+      });
+    };
+
+    // Warp a bitmap overlay <img>, hiding the live section behind it for the
+    // whole timeline. Returns a cleanup that removes the overlay and hands
+    // the section's styles back to React - shared by onDone and cancel
+    // (which onDone never covers).
+    const warpImage = (dataUrl: string) => {
+      if (!parent) return runLiveGenie();
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.draggable = false;
+      img.decoding = 'sync';
+      img.style.position = 'absolute';
+      img.style.left = `${winRect.x}px`;
+      img.style.top = `${winRect.y}px`;
+      img.style.width = `${winRect.width}px`;
+      img.style.height = `${winRect.height}px`;
+      img.style.transformOrigin = '0 0';
+      img.style.pointerEvents = 'none';
+      img.style.willChange = 'transform';
+      img.style.zIndex = String(win.z);
+      parent.appendChild(img);
+
+      el.style.visibility = 'hidden';
+      el.style.pointerEvents = 'none';
+
+      const finish = () => {
+        img.remove();
+        el.style.pointerEvents = '';
+        el.style.visibility = minimizing ? 'hidden' : '';
+      };
+      const cancel = animateGenie(img, winRect, target, minimizing ? 'minimize' : 'restore', () => {
+        animCancel.current = null;
+        finish();
+      });
+      animCancel.current = () => {
+        cancel();
+        finish();
+      };
+    };
+
+    const bridge = getScreenshotBridge();
+    const captureRegion = bridge?.captureRegion?.bind(bridge);
+
+    if (minimizing && captureRegion) {
+      // Snapshot the window at rest, then warp the bitmap. Keep the live
+      // section visible for the capture (React just committed it hidden); the
+      // overlay takes over the instant the capture resolves.
+      el.style.visibility = 'visible';
+      el.style.pointerEvents = 'none';
+      const r = el.getBoundingClientRect();
+      let cancelled = false;
+      animCancel.current = () => {
+        cancelled = true;
+        el.style.pointerEvents = '';
+        el.style.visibility = 'hidden';
+      };
+      captureRegion({ x: r.left, y: r.top, width: r.width, height: r.height })
+        .then((shot) => {
+          if (cancelled) return;
+          snapshotRef.current = shot.dataUrl;
+          warpImage(shot.dataUrl);
+        })
+        .catch(() => {
+          if (!cancelled) runLiveGenie();
+        });
+      return;
+    }
+
+    // Restore replays the cached minimize bitmap reversed; the fully-swallowed
+    // first frame is painted synchronously (animateGenie's contract), so the
+    // full-size window never flashes before the warp grows it out of the dock.
+    if (!minimizing && captureRegion && snapshotRef.current) {
+      warpImage(snapshotRef.current);
+      return;
+    }
+
+    runLiveGenie();
+  }, [win.minimized, win.appId, win.z, beginGesture, endGesture, stopWobble]);
 
   // Maximize/restore/tile transitions FLIP from the previous committed rect
   // to the new one: React swaps the geometry instantly (CSS percentages or

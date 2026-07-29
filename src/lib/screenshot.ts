@@ -17,9 +17,23 @@ export interface Screenshot {
   height: number;
 }
 
+/** A window's on-screen rectangle in CSS pixels, relative to the viewport. */
+export interface CaptureRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface ScreenshotBridge {
   /** Capture the desktop as a PNG. */
   capture(): Promise<Screenshot>;
+  /**
+   * Capture just one window's on-screen rectangle as a PNG, for the genie
+   * minimize/restore animation (see src/components/desktop/Window.tsx). Older
+   * shell builds predate this method, so callers must feature-detect it.
+   */
+  captureRegion?(rect: CaptureRegion): Promise<Screenshot>;
 }
 
 declare global {
