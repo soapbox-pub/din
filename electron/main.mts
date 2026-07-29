@@ -2128,6 +2128,16 @@ let shellWindow: BrowserWindow | null = null;
 /** The extension system for the browser session (set at startup). */
 let chromeExtensions: ElectronChromeExtensions | null = null;
 
+/**
+ * The `src` of the <webview> guest currently being attached. Electron emits
+ * `will-attach-webview` immediately before it constructs the guest's
+ * WebContents, so the `web-contents-created` hook can read the URL the guest
+ * is about to load - `contents.getURL()` is still empty that early, and the
+ * guest's initial URL is what decides whether it's a browser tab (see
+ * isExtensionPageGuest).
+ */
+let attachingGuestSrc = '';
+
 /** Where Chrome Web Store installs / unpacked extensions live on disk. */
 function extensionsPath(): string {
   return path.join(app.getPath('userData'), 'Extensions');
@@ -3138,14 +3148,20 @@ app.whenReady().then(() => {
   // tabs and devtools hosts attach in other partitions and get nothing. Keep
   // every guest locked down (sandboxed, no Node) regardless.
   win.webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+    // Handed to the web-contents-created hook, which Electron runs next.
+    attachingGuestSrc = typeof params.src === 'string' ? params.src : '';
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
     if (params.partition === WEBAPP_PARTITION) {
       webPreferences.preload = WEBAPP_PRELOAD;
-    } else if (params.partition === WEBBROWSER_PARTITION) {
+    } else if (
+      params.partition === WEBBROWSER_PARTITION &&
+      !attachingGuestSrc.startsWith('chrome-extension://')
+    ) {
       // Ad-hoc browser tabs get the highlight preload (no signer surface, just
-      // the NIP-84 highlight affordance; see HIGHLIGHT_PRELOAD).
+      // the NIP-84 highlight affordance; see HIGHLIGHT_PRELOAD). Extension
+      // pages in this session (the action popup) are not web content.
       webPreferences.preload = HIGHLIGHT_PRELOAD;
     }
   });
@@ -3241,15 +3257,30 @@ app.on('web-contents-created', (_event, contents) => {
 
   const isBrowserTab = contents.session === browserSession();
 
-  if (chromeExtensions && shellWindow && isBrowserTab) {
+  // Guests that start on a chrome-extension:// URL are extension pages, not
+  // web content: the in-shell action popup (ExtensionPopupHost) and any
+  // extension page the browser opens as a tab (an options page). Consume the
+  // src handed over by will-attach-webview above.
+  const isExtensionPageGuest = attachingGuestSrc.startsWith('chrome-extension://');
+  attachingGuestSrc = '';
+
+  // Register web-content tabs with the extension system (chrome.tabs sees
+  // them; content scripts inject). Extension pages are deliberately left out:
+  // store.addTab treats each added tab as activated, so registering the action
+  // popup made the extension's own popup the "active tab" the moment it opened
+  // - a popup then matched itself (chrome-extension://...) instead of the page
+  // behind it, and the real active tab stayed lost after the popup closed.
+  // Extension pages the browser does open as tabs arrive through
+  // chrome.tabs.create, which registers them itself.
+  if (chromeExtensions && shellWindow && isBrowserTab && !isExtensionPageGuest) {
     chromeExtensions.addTab(contents, shellWindow);
   }
 
   // Userscripts (the browser's native script manager,
   // electron/userscripts.mts): inject matching scripts as pages load, and
   // turn navigations to *.user.js files into install prompts in the shell
-  // instead of pages of raw source.
-  if (isBrowserTab) {
+  // instead of pages of raw source. Extension pages are off limits.
+  if (isBrowserTab && !isExtensionPageGuest) {
     attachUserscripts(contents);
     contents.on('will-navigate', (event, url) => {
       if (isUserscriptInstallUrl(url)) {
