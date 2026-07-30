@@ -35,6 +35,16 @@ export const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
  */
 export const APP_WEBVIEW_PARTITION = 'persist:din-apps';
 
+/** A failed navigation reported by the surface (network-level load error). */
+export interface LoadErrorInfo {
+  /** The URL whose load failed. */
+  url: string;
+  /** Chromium's numeric error code (e.g. -105 for ERR_NAME_NOT_RESOLVED). */
+  errorCode: number;
+  /** Chromium's error string (e.g. `ERR_NAME_NOT_RESOLVED`). */
+  errorDescription: string;
+}
+
 /** Imperative controls a BrowserView surface exposes to its parent. */
 export interface BrowserViewHandle {
   reload: () => void;
@@ -72,6 +82,14 @@ export interface BrowserViewProps {
   onLoadStart?: () => void;
   /** Called when the surface finishes loading (success or failure). */
   onLoadEnd?: () => void;
+  /**
+   * Called when a main-frame navigation fails at the network level (DNS
+   * failure, connection refused, timeout, ...), with the failed URL and
+   * Chromium's error code/description. Not fired for aborted loads (a link
+   * clicked mid-load, or a navigation that turned into a download) or for
+   * subframe failures. Only available on the Electron <webview> surface.
+   */
+  onLoadError?: (info: LoadErrorInfo) => void;
   /**
    * Called when the loaded page reports its title.
    * Only available on the Electron <webview> surface.
@@ -194,6 +212,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       partition = WEBBROWSER_PARTITION,
       onLoadStart,
       onLoadEnd,
+      onLoadError,
       onTitleChange,
       onFaviconChange,
       onThemeColorChange,
@@ -297,6 +316,39 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         el.removeEventListener('did-stop-loading', stop);
       };
     }, [onLoadStart, onLoadEnd]);
+
+    // Network-level load failures (DNS, connection refused, timeout, ...).
+    // Chromium would otherwise swap in its own generic error page; the browser
+    // app renders a branded interstitial over the surface instead. Subframe
+    // failures and aborts (errorCode -3 / ERR_ABORTED - e.g. a load cancelled
+    // because the user navigated again, or because the response turned into a
+    // download) are ignored: they aren't page-level errors worth surfacing.
+    useEffect(() => {
+      const el = webviewRef.current;
+      if (!el) return;
+      const failed = (e: Event) => {
+        const {
+          errorCode,
+          errorDescription,
+          validatedURL,
+          isMainFrame,
+        } = e as Event & {
+          errorCode?: number;
+          errorDescription?: string;
+          validatedURL?: string;
+          isMainFrame?: boolean;
+        };
+        if (isMainFrame === false || errorCode === -3) return;
+        onLoadError?.({
+          url: typeof validatedURL === 'string' ? validatedURL : '',
+          errorCode: typeof errorCode === 'number' ? errorCode : 0,
+          errorDescription:
+            typeof errorDescription === 'string' ? errorDescription : '',
+        });
+      };
+      el.addEventListener('did-fail-load', failed);
+      return () => el.removeEventListener('did-fail-load', failed);
+    }, [onLoadError]);
 
     // Page metadata (title / favicon), reported only by the Electron webview.
     useEffect(() => {

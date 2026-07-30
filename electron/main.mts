@@ -17,7 +17,7 @@ import os from 'node:os';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, shell } from 'electron';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import {
   installChromeWebStore,
@@ -2859,6 +2859,100 @@ function registerCertificateHandling(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Downloads for the Web Browser app.
+//
+// There is no desktop environment to host a native save dialog, so every
+// download is written straight to ~/Downloads. The browser sessions also
+// report the download to the Web Browser app so it can show a download shelf
+// with progress and open / show-in-folder actions - otherwise a file link
+// would save silently and leave a blank tab, with no sign anything happened.
+// ---------------------------------------------------------------------------
+
+let nextDownloadId = 1;
+
+/**
+ * A path in ~/Downloads for `filename`, suffixed ` (n)` before the extension
+ * if needed so a new download never clobbers an existing file. The download
+ * directory is created if missing; the filename is basenamed so a
+ * server-supplied name can't escape it.
+ */
+function uniqueDownloadPath(filename: string): string {
+  const dir = app.getPath('downloads');
+  fs.mkdirSync(dir, { recursive: true });
+  const safe = path.basename(filename) || 'download';
+  const ext = path.extname(safe);
+  const stem = safe.slice(0, safe.length - ext.length) || 'download';
+  let candidate = path.join(dir, safe);
+  for (let n = 1; fs.existsSync(candidate); n++) {
+    candidate = path.join(dir, `${stem} (${n})${ext}`);
+  }
+  return candidate;
+}
+
+/** Whether `p` is a real path inside ~/Downloads (guards the open/show IPC). */
+function isDownloadsPath(p: unknown): p is string {
+  if (typeof p !== 'string' || !p) return false;
+  const dir = path.resolve(app.getPath('downloads'));
+  const resolved = path.resolve(p);
+  return resolved === dir || resolved.startsWith(dir + path.sep);
+}
+
+/**
+ * Attach the reporting `will-download` handler to both browser sessions and
+ * register the open / show-in-folder IPC the download shelf calls. Each
+ * download is tagged with the initiating guest's WebContents id so the app can
+ * route it to the window/tab that started it (matches Tab.wcId).
+ */
+function registerBrowserDownloadHandlers(): void {
+  const onWillDownload = (
+    _event: Electron.Event,
+    item: Electron.DownloadItem,
+    contents: Electron.WebContents,
+  ) => {
+    const savePath = uniqueDownloadPath(item.getFilename());
+    item.setSavePath(savePath);
+    const id = nextDownloadId++;
+    const wcId = contents && !contents.isDestroyed() ? contents.id : -1;
+    const url = item.getURL();
+    const filename = path.basename(savePath);
+    const report = (state: string) => {
+      sendToShell('browser:download', {
+        id,
+        wcId,
+        url,
+        filename,
+        savePath,
+        state,
+        paused: item.isPaused(),
+        receivedBytes: item.getReceivedBytes(),
+        totalBytes: item.getTotalBytes(),
+      });
+    };
+    report('progressing');
+    item.on('updated', (_e, state) =>
+      report(state === 'interrupted' ? 'interrupted' : 'progressing'),
+    );
+    item.once('done', (_e, state) => report(state));
+  };
+  browserSession().on('will-download', onWillDownload);
+  privateBrowserSession().on('will-download', onWillDownload);
+
+  // Open a completed download with the OS default handler, or reveal it in the
+  // file manager. Both are restricted to files under ~/Downloads so the shell
+  // can't be coaxed into opening an arbitrary path.
+  ipcMain.handle('browser:openDownload', async (event, filePath) => {
+    assertShellSender(event);
+    if (!isDownloadsPath(filePath) || !fs.existsSync(filePath)) return;
+    await shell.openPath(filePath);
+  });
+  ipcMain.handle('browser:showDownload', (event, filePath) => {
+    assertShellSender(event);
+    if (!isDownloadsPath(filePath) || !fs.existsSync(filePath)) return;
+    shell.showItemInFolder(filePath);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Clear browsing data for the Web Browser app.
 //
 // Wipes Chromium-side state for the persistent browser session on request:
@@ -3174,16 +3268,14 @@ app.whenReady().then(() => {
   }
 
   // Save downloads straight to ~/Downloads instead of popping a native
-  // GTK save dialog (there is no desktop environment to host one). Applies
-  // to both the shell session and the browser tabs' session.
+  // GTK save dialog (there is no desktop environment to host one). The shell's
+  // own session saves silently; the browser sessions additionally report
+  // progress to the Web Browser app (see registerBrowserDownloadHandlers).
   const downloadToHome = (_event: Electron.Event, item: Electron.DownloadItem) => {
-    const dir = app.getPath('downloads');
-    fs.mkdirSync(dir, { recursive: true });
-    item.setSavePath(path.join(dir, item.getFilename()));
+    item.setSavePath(uniqueDownloadPath(item.getFilename()));
   };
   session.defaultSession.on('will-download', downloadToHome);
-  browserSession().on('will-download', downloadToHome);
-  session.fromPartition(WEBBROWSER_PRIVATE_PARTITION).on('will-download', downloadToHome);
+  registerBrowserDownloadHandlers();
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);

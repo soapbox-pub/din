@@ -6,7 +6,9 @@ import {
   ChevronRight,
   ChevronUp,
   Code,
+  Download,
   EllipsisVertical,
+  FolderOpen,
   Globe,
   History,
   MonitorDown,
@@ -18,6 +20,7 @@ import {
   SquarePlus,
   Trash2,
   VenetianMask,
+  WifiOff,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -35,6 +38,7 @@ import {
   getBrowserBridge,
   type BrowserBridge,
   type CertificateErrorInfo,
+  type DownloadInfo,
   type FindResult,
 } from '@/lib/browser';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
@@ -78,6 +82,7 @@ import {
   BrowserView,
   WEBBROWSER_PRIVATE_PARTITION,
   type BrowserViewHandle,
+  type LoadErrorInfo,
 } from '@/components/desktop/apps/BrowserView';
 import { Separator } from '@/components/ui/separator';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
@@ -199,6 +204,7 @@ type TabEvent =
   | { kind: 'favicon'; value: string | null }
   | { kind: 'themeColor'; value: string | null }
   | { kind: 'navigate'; url: string; canBack: boolean; canForward: boolean }
+  | { kind: 'loadError'; value: LoadErrorInfo }
   | { kind: 'webContentsId'; value: number };
 
 /**
@@ -512,6 +518,31 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     });
   }, []);
 
+  // Network-level load failures (DNS, connection refused, timeout, ...), keyed
+  // by tab id. Reported by the tab surface's did-fail-load; a branded error
+  // page is shown over the surface until the next load starts (see
+  // LoadErrorPage). Distinct from certErrors, which are keyed by wcId because
+  // they originate in the main process.
+  const [loadErrors, setLoadErrors] = useState<Map<string, LoadErrorInfo>>(
+    () => new Map(),
+  );
+  const clearLoadError = useCallback((id: string) => {
+    setLoadErrors((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  // Active/recent downloads for this window's tabs, newest first. Every
+  // download is saved to ~/Downloads by the main process; the shelf gives the
+  // otherwise-silent save visible feedback plus open / show-in-folder actions.
+  const [downloads, setDownloads] = useState<DownloadInfo[]>([]);
+  const dismissDownload = useCallback((id: number) => {
+    setDownloads((prev) => prev.filter((d) => d.id !== id));
+  }, []);
+
   // --- Find-in-page (Ctrl+F) ----------------------------------------------
   // The find bar's state. The query is shared across tabs (Firefox-style);
   // switching tabs re-issues the current query in the newly active tab.
@@ -617,6 +648,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       switch (event.kind) {
         case 'loading':
           updateTab(id, { loading: event.value });
+          // A fresh load starting (including a retry) clears any stale
+          // load-error page; a genuine failure re-reports via 'loadError'
+          // after this, since did-start-loading precedes did-fail-load.
+          if (event.value) clearLoadError(id);
           break;
         case 'title': {
           updateTab(id, { title: event.value || null });
@@ -643,12 +678,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // certificate warning for this tab no longer applies (a rejected
           // load never commits). Clear it.
           clearCertError(tabsRef.current.find((t) => t.id === id)?.wcId ?? null);
+          // A committed navigation also supersedes any load-error page.
+          clearLoadError(id);
           // Webview mode sees every committed navigation here (link clicks,
           // redirects, back/forward); recordVisit ignores non-https URLs
           // (about:blank, chrome-extension://). The iframe fallback never
           // fires this event - it records in navigateTab / go instead.
           // Private windows keep no history.
           if (!isPrivate) recordVisit(event.url);
+          break;
+        case 'loadError':
+          // Ignore the error for a URL the tab has already navigated past
+          // (a late did-fail-load for a superseded load); otherwise show it.
+          setLoadErrors((prev) => new Map(prev).set(id, event.value));
+          updateTab(id, { loading: false });
           break;
         case 'webContentsId': {
           // Answer any pending chrome.tabs.create request now that the
@@ -662,14 +705,42 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         }
       }
     },
-    [updateTab, crx, recordVisit, recordTitle, clearCertError, isPrivate],
+    [updateTab, crx, recordVisit, recordTitle, clearCertError, clearLoadError, isPrivate],
   );
+
+  // Retry a failed load: re-request the failed URL through the tab's surface.
+  // did-start-loading then clears the error page; if it fails again,
+  // did-fail-load re-reports. loadURL (a fresh navigation) works from the
+  // error page, unlike reload().
+  const retryLoad = useCallback((id: string) => {
+    const info = loadErrors.get(id);
+    if (!info) return;
+    views.current.get(id)?.loadURL(info.url);
+  }, [loadErrors]);
 
   // Surface untrusted-TLS reports from the main process on the offending tab.
   useEffect(() => {
     if (!browserBridge) return;
     return browserBridge.onCertificateError((info) => {
       setCertErrors((prev) => new Map(prev).set(info.wcId, info));
+    });
+  }, [browserBridge]);
+
+  // Track downloads started by this window's own tabs (the initiating guest's
+  // wcId routes each report to the right browser window). Updates replace the
+  // matching entry in place; the newest sit at the front, capped so a long
+  // session's shelf can't grow unbounded.
+  useEffect(() => {
+    if (!browserBridge) return;
+    return browserBridge.onDownload((info) => {
+      if (!tabsRef.current.some((t) => t.wcId === info.wcId)) return;
+      setDownloads((prev) => {
+        const idx = prev.findIndex((d) => d.id === info.id);
+        if (idx === -1) return [info, ...prev].slice(0, 20);
+        const next = prev.slice();
+        next[idx] = info;
+        return next;
+      });
     });
   }, [browserBridge]);
 
@@ -1358,6 +1429,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             certError={tab.wcId != null ? certErrors.get(tab.wcId) ?? null : null}
             onTrustCertificate={trustCertificate}
             onDismissCertError={dismissCertError}
+            loadError={loadErrors.get(tab.id) ?? null}
+            onRetryLoad={retryLoad}
           />
         ))}
         {findOpen && webviewMode && (
@@ -1373,6 +1446,15 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         )}
         </div>
       </div>
+
+      {downloads.length > 0 && (
+        <DownloadShelf
+          downloads={downloads}
+          bridge={browserBridge}
+          onDismiss={dismissDownload}
+          onClearAll={() => setDownloads([])}
+        />
+      )}
 
       <UserscriptInstallDialog
         request={scriptInstall}
@@ -2223,6 +2305,237 @@ function CertificateWarning({
   );
 }
 
+/**
+ * Map a failed load to a friendly headline + explanation. Falls back to a
+ * generic message carrying Chromium's raw error string for anything unmapped.
+ */
+function describeLoadError(info: LoadErrorInfo): {
+  title: string;
+  detail: string;
+  offline: boolean;
+} {
+  let host: string | null = null;
+  try {
+    host = new URL(info.url).host || null;
+  } catch {
+    // Malformed URL: fall back to the generic "this site" phrasing.
+  }
+  switch (info.errorDescription) {
+    case 'ERR_NAME_NOT_RESOLVED':
+    case 'ERR_NAME_RESOLUTION_FAILED':
+      return {
+        title: "This site can't be reached",
+        detail: `We couldn't find the server for ${host ?? 'this address'}. Check the address for typos.`,
+        offline: false,
+      };
+    case 'ERR_INTERNET_DISCONNECTED':
+      return {
+        title: "You're offline",
+        detail: 'There is no internet connection. Check your network and try again.',
+        offline: true,
+      };
+    case 'ERR_CONNECTION_REFUSED':
+    case 'ERR_CONNECTION_RESET':
+    case 'ERR_CONNECTION_CLOSED':
+    case 'ERR_CONNECTION_FAILED':
+      return {
+        title: "This site can't be reached",
+        detail: `${host ?? 'The server'} refused to connect.`,
+        offline: false,
+      };
+    case 'ERR_CONNECTION_TIMED_OUT':
+    case 'ERR_TIMED_OUT':
+      return {
+        title: 'This site took too long to respond',
+        detail: `${host ?? 'The server'} didn't respond in time. It may be down or too busy.`,
+        offline: false,
+      };
+    case 'ERR_ADDRESS_UNREACHABLE':
+    case 'ERR_NETWORK_CHANGED':
+      return {
+        title: "This site can't be reached",
+        detail: `The network path to ${host ?? 'the server'} is unavailable.`,
+        offline: false,
+      };
+    default:
+      return {
+        title: "This page couldn't load",
+        detail: `Something went wrong loading ${host ?? 'this page'}.`,
+        offline: false,
+      };
+  }
+}
+
+/**
+ * Full-surface interstitial shown when a tab's main-frame load fails at the
+ * network level (DNS failure, connection refused, timeout, offline, ...).
+ * Chromium would otherwise show its own generic error page; this branded one
+ * offers a Retry that re-requests the failed URL.
+ */
+function LoadErrorPage({
+  info,
+  onRetry,
+}: {
+  info: LoadErrorInfo;
+  onRetry: () => void;
+}) {
+  const { title, detail, offline } = describeLoadError(info);
+  const code = info.errorDescription || `Error ${info.errorCode}`;
+  const Icon = offline ? WifiOff : Globe;
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-background p-6">
+      <div className="w-full max-w-md space-y-5 text-center">
+        <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Icon className="size-7" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl font-semibold leading-tight">{title}</h2>
+          <p className="text-sm text-muted-foreground">{detail}</p>
+          {info.url && (
+            <p className="break-all font-mono text-xs text-muted-foreground/80">
+              {info.url}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-col items-center gap-3">
+          <Button onClick={onRetry} className="min-w-32">
+            <RotateCw className="mr-2 size-4" />
+            Reload
+          </Button>
+          <span className="font-mono text-xs text-muted-foreground/70">{code}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Human-readable byte size (e.g. "2.4 MB"). */
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  const v = n / 1024 ** i;
+  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
+/**
+ * A Chrome-style shelf pinned to the bottom of the browser, listing this
+ * window's downloads. Files are already being saved to ~/Downloads by the
+ * main process; the shelf makes that visible and offers open / show-in-folder
+ * once a download completes.
+ */
+function DownloadShelf({
+  downloads,
+  bridge,
+  onDismiss,
+  onClearAll,
+}: {
+  downloads: DownloadInfo[];
+  bridge: BrowserBridge | undefined;
+  onDismiss: (id: number) => void;
+  onClearAll: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-t bg-background/95 px-2 py-1.5">
+      <Download className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+        {downloads.map((d) => (
+          <DownloadChip
+            key={d.id}
+            download={d}
+            bridge={bridge}
+            onDismiss={() => onDismiss(d.id)}
+          />
+        ))}
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 shrink-0 text-muted-foreground"
+        onClick={onClearAll}
+      >
+        Clear all
+      </Button>
+    </div>
+  );
+}
+
+/** One download's chip in the shelf: name, progress, and completed actions. */
+function DownloadChip({
+  download,
+  bridge,
+  onDismiss,
+}: {
+  download: DownloadInfo;
+  bridge: BrowserBridge | undefined;
+  onDismiss: () => void;
+}) {
+  const { state, filename, receivedBytes, totalBytes, savePath } = download;
+  const done = state === 'completed';
+  const failed = state === 'cancelled' || state === 'interrupted';
+  const pct =
+    totalBytes > 0 ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100)) : null;
+  const subtitle = done
+    ? formatBytes(receivedBytes)
+    : failed
+      ? state === 'cancelled'
+        ? 'Canceled'
+        : 'Failed'
+      : pct !== null
+        ? `${pct}% of ${formatBytes(totalBytes)}`
+        : formatBytes(receivedBytes);
+  return (
+    <div className="flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border bg-card px-2.5 py-1">
+      <div
+        className={cn(
+          'flex size-8 shrink-0 items-center justify-center rounded-md',
+          failed ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary',
+        )}
+      >
+        <Download className="size-4" />
+      </div>
+      <button
+        type="button"
+        className="min-w-0 flex-1 text-left disabled:cursor-default"
+        disabled={!done}
+        onClick={() => {
+          if (done) bridge?.openDownload(savePath).catch(() => {});
+        }}
+        title={done ? `Open ${filename}` : filename}
+      >
+        <div className="truncate text-xs font-medium">{filename}</div>
+        <div className="truncate text-[11px] text-muted-foreground">{subtitle}</div>
+        {!done && !failed && pct !== null && (
+          <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-[width]"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        )}
+      </button>
+      {done && (
+        <button
+          type="button"
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Show in folder"
+          onClick={() => bridge?.showDownload(savePath).catch(() => {})}
+        >
+          <FolderOpen className="size-3.5" />
+        </button>
+      )}
+      <button
+        type="button"
+        className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        title="Dismiss"
+        onClick={onDismiss}
+      >
+        <X className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
 const TabSurface = memo(function TabSurface({
   id,
   initialSrc,
@@ -2247,6 +2560,8 @@ const TabSurface = memo(function TabSurface({
   certError,
   onTrustCertificate,
   onDismissCertError,
+  loadError,
+  onRetryLoad,
 }: {
   id: string;
   initialSrc: string;
@@ -2282,6 +2597,10 @@ const TabSurface = memo(function TabSurface({
   onTrustCertificate: (info: CertificateErrorInfo) => void;
   /** Dismiss the warning without trusting. */
   onDismissCertError: (id: string) => void;
+  /** Pending network-level load failure for this tab, or null. */
+  loadError: LoadErrorInfo | null;
+  /** Retry the failed load. */
+  onRetryLoad: (id: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState(false);
@@ -2292,6 +2611,10 @@ const TabSurface = memo(function TabSurface({
   );
   const onLoadEnd = useCallback(
     () => onEvent(id, { kind: 'loading', value: false }),
+    [id, onEvent],
+  );
+  const onLoadError = useCallback(
+    (info: LoadErrorInfo) => onEvent(id, { kind: 'loadError', value: info }),
     [id, onEvent],
   );
   const onTitleChange = useCallback(
@@ -2379,6 +2702,7 @@ const TabSurface = memo(function TabSurface({
           partition={partition}
           onLoadStart={onLoadStart}
           onLoadEnd={onLoadEnd}
+          onLoadError={onLoadError}
           onTitleChange={onTitleChange}
           onFaviconChange={onFaviconChange}
           onThemeColorChange={onThemeColorChange}
@@ -2401,6 +2725,10 @@ const TabSurface = memo(function TabSurface({
           onProceed={() => onTrustCertificate(certError)}
           onBack={() => onDismissCertError(id)}
         />
+      )}
+      {/* Network-level load error page (a cert warning takes precedence). */}
+      {loadError && !certError && (
+        <LoadErrorPage info={loadError} onRetry={() => onRetryLoad(id)} />
       )}
     </div>
   );

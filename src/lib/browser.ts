@@ -42,6 +42,35 @@ export interface FindResult {
   finalUpdate: boolean;
 }
 
+/** The lifecycle state of a browser download. */
+export type DownloadState =
+  | 'progressing'
+  | 'completed'
+  | 'cancelled'
+  | 'interrupted';
+
+/** A progress report for a file a browser tab is downloading to ~/Downloads. */
+export interface DownloadInfo {
+  /** Stable id for this download across its updates. */
+  id: number;
+  /** The initiating tab guest's WebContents id (matches Tab.wcId). */
+  wcId: number;
+  /** The download's source URL. */
+  url: string;
+  /** The final (de-duplicated) file name on disk. */
+  filename: string;
+  /** Absolute path the file is being written to (under ~/Downloads). */
+  savePath: string;
+  /** Current lifecycle state. */
+  state: DownloadState;
+  /** Bytes received so far. */
+  receivedBytes: number;
+  /** Total bytes, or 0 when the server didn't report a length. */
+  totalBytes: number;
+  /** Whether the download is currently paused. */
+  paused?: boolean;
+}
+
 /** Options for a find-in-page query. */
 export interface FindOptions {
   /** Search direction (default true = forward). */
@@ -84,6 +113,16 @@ export interface BrowserBridge {
   stopFindInPage(wcId: number): Promise<void>;
   /** Subscribe to find-in-page match results. Returns an unsubscribe fn. */
   onFindResult(callback: (result: FindResult) => void): () => void;
+  /**
+   * Subscribe to download progress for browser tabs. Every download saves to
+   * ~/Downloads; updates arrive keyed by a stable `id`, tagged with the
+   * initiating tab's `wcId`. Returns an unsubscribe fn.
+   */
+  onDownload(callback: (info: DownloadInfo) => void): () => void;
+  /** Open a completed download with the OS default handler. */
+  openDownload(savePath: string): Promise<void>;
+  /** Reveal a completed download in the file manager. */
+  showDownload(savePath: string): Promise<void>;
 }
 
 declare global {

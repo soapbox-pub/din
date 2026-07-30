@@ -14,8 +14,8 @@
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
 //   - window.brightness: backlight + night light for the menu bar, Settings, OSD
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
-//   - window.browser: TLS certificate exceptions, browsing-data clearing, and
-//     find-in-page for the Web Browser app
+//   - window.browser: TLS certificate exceptions, browsing-data clearing,
+//     find-in-page, and download progress for the Web Browser app
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.userscripts: userscript library sync and install
 //     requests for the Web Browser app
@@ -505,6 +505,39 @@ contextBridge.exposeInMainWorld('browser', {
     ipcRenderer.on('browser:findResult', listener);
     return () => ipcRenderer.removeListener('browser:findResult', listener);
   },
+
+  /**
+   * Subscribe to download progress for browser tabs. Every download is saved
+   * to ~/Downloads; each update carries { id, wcId, url, filename, savePath,
+   * state, receivedBytes, totalBytes, paused }, where `state` is
+   * 'progressing' | 'completed' | 'cancelled' | 'interrupted'. The app filters
+   * by `wcId` to route the download to the window/tab that started it. Returns
+   * an unsubscribe fn.
+   * @param {(info: import('../src/lib/browser').DownloadInfo) => void} callback
+   */
+  onDownload: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {import('../src/lib/browser').DownloadInfo} info
+     */
+    const listener = (_event, info) => callback(info);
+    ipcRenderer.on('browser:download', listener);
+    return () => ipcRenderer.removeListener('browser:download', listener);
+  },
+
+  /**
+   * Open a completed download with the OS default handler. Restricted to
+   * files under ~/Downloads in the main process.
+   * @param {string} savePath
+   */
+  openDownload: (savePath) => ipcRenderer.invoke('browser:openDownload', savePath),
+
+  /**
+   * Reveal a completed download in the file manager. Restricted to files
+   * under ~/Downloads in the main process.
+   * @param {string} savePath
+   */
+  showDownload: (savePath) => ipcRenderer.invoke('browser:showDownload', savePath),
 });
 
 /**
