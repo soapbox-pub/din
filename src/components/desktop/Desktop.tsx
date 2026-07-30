@@ -8,6 +8,7 @@ import { BrightnessOsd } from './BrightnessOsd';
 import { NotificationsOsd } from './NotificationsOsd';
 import { Window } from './Window';
 import { FilePickerProvider } from './FilePickerProvider';
+import { FilePickerBridgeHost } from './FilePickerBridgeHost';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
 import { BrowserExtensionHost } from './BrowserExtensionHost';
 import { ExtensionPopupHost } from './ExtensionPopupHost';
@@ -44,6 +45,7 @@ function DesktopSession() {
     <WindowManagerContext.Provider value={manager}>
       <WindowActionsContext.Provider value={manager.actions}>
         <FilePickerProvider>
+          <FilePickerBridgeHost />
           <BrowserExtensionHost />
           <ExtensionPopupHost />
           <NostrBridgeHost />

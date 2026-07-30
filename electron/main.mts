@@ -2355,6 +2355,120 @@ function registerHighlightBridge(): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Webview file-chooser interception (the in-Din file picker for uploads).
+//
+// A native <input type=file> click inside a guest would otherwise pop the host
+// GTK/X11 file dialog - which makes no sense in the Din desktop: production
+// often has no desktop environment to host such a dialog, and it breaks the
+// "file selection happens inside Din" model the FilePickerProvider is built
+// on. Instead we intercept the chooser over CDP (Page.setInterceptFileChooser-
+// Dialog) on every web-content guest, relay the request to the shell renderer
+// (which opens the in-Din FilePickerDialog via useFilePicker), and hand the
+// chosen absolute path back to the page with DOM.setFileInputFiles. Chromium
+// reads the file bytes from disk itself, so no file contents ever cross the
+// process boundary here - only a path the user explicitly selected.
+// ---------------------------------------------------------------------------
+
+/** How long a relayed file-pick request waits on the shell before it's dropped. */
+const FILE_PICKER_REQUEST_TIMEOUT_MS = 5 * 60_000;
+let nextFilePickerRequestId = 1;
+interface PendingFilePick {
+  contents: Electron.WebContents;
+  /** The intercepted <input type=file> node, per Page.fileChooserOpened. */
+  backendNodeId: number;
+  timer: NodeJS.Timeout;
+}
+const pendingFilePicks = new Map<number, PendingFilePick>();
+
+function registerFilePickerBridge(): void {
+  // The shell's answer to a relayed file-chooser request. Only the shell may
+  // resolve these, and it only ever returns a path the user picked in-Din
+  // (or null on cancel) - never a page-supplied one.
+  ipcMain.on('filepicker:response', (event, response) => {
+    if (!shellWindow || event.sender !== shellWindow.webContents) return;
+    const requestId = response && (response as { requestId?: unknown }).requestId;
+    const pending = typeof requestId === 'number' && pendingFilePicks.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingFilePicks.delete(requestId as number);
+
+    const { contents, backendNodeId } = pending;
+    if (contents.isDestroyed()) return;
+
+    // A non-empty path means the user chose a file; anything else is a cancel.
+    // Either way the intercepted chooser must be answered so the input isn't
+    // left hanging - an empty file list is the "cancelled" answer.
+    const path = (response as { path?: unknown }).path;
+    const files = typeof path === 'string' && path ? [path] : [];
+    contents.debugger
+      .sendCommand('DOM.setFileInputFiles', { files, backendNodeId })
+      .catch(() => {
+        // Node gone (page navigated) or DOM agent unavailable - nothing to do.
+      });
+  });
+}
+
+/**
+ * Attach CDP file-chooser interception to a web-content guest. Idempotent per
+ * WebContents: re-runs (e.g. after devtools closing detaches the shared
+ * debugger) simply re-enable interception. Silently no-ops if another client
+ * holds the debugger and won't yield.
+ */
+function attachFileChooserInterception(contents: Electron.WebContents): void {
+  const dbg = contents.debugger;
+
+  const enable = () => {
+    if (contents.isDestroyed()) return;
+    try {
+      if (!dbg.isAttached()) dbg.attach('1.3');
+    } catch {
+      return; // another client owns the debugger; leave it alone
+    }
+    // Page domain must be enabled to receive fileChooserOpened.
+    dbg.sendCommand('Page.enable').catch(() => {});
+    dbg
+      .sendCommand('Page.setInterceptFileChooserDialog', { enabled: true })
+      .catch(() => {});
+  };
+
+  const onMessage = (_e: Electron.Event, method: string, params: unknown) => {
+    if (method !== 'Page.fileChooserOpened') return;
+    if (!shellWindow || shellWindow.webContents.isDestroyed()) return;
+    const backendNodeId = (params as { backendNodeId?: unknown }).backendNodeId;
+    if (typeof backendNodeId !== 'number') return;
+
+    const requestId = nextFilePickerRequestId++;
+    const timer = setTimeout(() => {
+      pendingFilePicks.delete(requestId);
+    }, FILE_PICKER_REQUEST_TIMEOUT_MS);
+    pendingFilePicks.set(requestId, { contents, backendNodeId, timer });
+
+    let origin = '';
+    try {
+      origin = new URL(contents.getURL()).host;
+    } catch {
+      // Opaque/blank URL - the picker just omits the origin in its title.
+    }
+    sendToShell('filepicker:request', { requestId, origin });
+  };
+
+  // devtools closing detaches the shared debugger (see devtools-bridge.mts);
+  // re-attach so uploads keep routing to the in-Din picker afterwards.
+  const onDetach = () => {
+    if (!contents.isDestroyed()) setTimeout(enable, 0);
+  };
+
+  dbg.on('message', onMessage);
+  dbg.on('detach', onDetach);
+  contents.once('destroyed', () => {
+    dbg.removeListener('message', onMessage);
+    dbg.removeListener('detach', onDetach);
+  });
+
+  enable();
+}
+
 // chrome.tabs.create round-trips through the shell renderer (it owns the tab
 // UI). Each request gets an id; the renderer answers with the new <webview>
 // guest's WebContents id once it attaches.
@@ -3095,6 +3209,7 @@ app.whenReady().then(() => {
   registerDevtoolsHandlers();
   registerNostrBridge();
   registerHighlightBridge();
+  registerFilePickerBridge();
 
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
@@ -3274,6 +3389,17 @@ app.on('web-contents-created', (_event, contents) => {
   // src handed over by will-attach-webview above.
   const isExtensionPageGuest = attachingGuestSrc.startsWith('chrome-extension://');
   attachingGuestSrc = '';
+
+  // Route native <input type=file> clicks to the in-Din file picker instead of
+  // the host OS dialog. Real web content only - browser tabs (persistent and
+  // private) and installed web-app guests; extension pages and devtools hosts
+  // are left with their default behavior.
+  if (
+    !isExtensionPageGuest &&
+    (isBrowserTabSession(contents.session) || contents.session === appSession())
+  ) {
+    attachFileChooserInterception(contents);
+  }
 
   // Register web-content tabs with the extension system (chrome.tabs sees
   // them; content scripts inject). Extension pages are deliberately left out:

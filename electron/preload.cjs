@@ -24,6 +24,8 @@
 //     signed-in account's signer (see NostrBridgeHost / webview-preload.cjs)
 //   - window.highlightHost: relays NIP-84 highlight clicks from browser tabs to
 //     the signer (see HighlightBridgeHost / browser-highlight-preload.cjs)
+//   - window.filePickerHost: relays <input type=file> clicks from guests to the
+//     in-Din file picker (see FilePickerBridgeHost)
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -831,4 +833,34 @@ contextBridge.exposeInMainWorld('highlightHost', {
    * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string }} response
    */
   respond: (response) => ipcRenderer.send('din-highlight:response', response),
+});
+
+// File-picker bridge host (window.filePickerHost), backed by the filepicker:*
+// handlers in main.mts. A native <input type=file> click inside a browser or
+// web-app guest is intercepted over CDP and relayed here, to the shell
+// renderer, where FilePickerBridgeHost opens the in-Din FilePickerDialog and
+// answers with the chosen absolute path (or null on cancel). The page never
+// supplies the path - it only triggers the request.
+contextBridge.exposeInMainWorld('filePickerHost', {
+  /**
+   * Subscribe to relayed file-chooser requests. The callback receives
+   * { requestId, origin }. Returns an unsubscribe fn.
+   * @param {(request: { requestId: number, origin: string }) => void} callback
+   */
+  onRequest: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number, origin: string }} request
+     */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('filepicker:request', listener);
+    return () => ipcRenderer.removeListener('filepicker:request', listener);
+  },
+
+  /**
+   * Answer a relayed request: { requestId, path } where path is the chosen
+   * absolute path, or null when the user cancelled.
+   * @param {{ requestId: number, path: string | null }} response
+   */
+  respond: (response) => ipcRenderer.send('filepicker:response', response),
 });
