@@ -619,6 +619,24 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     if (tab?.wcId != null) browserBridge?.stopFindInPage(tab.wcId).catch(() => {});
   }, [browserBridge]);
 
+  /**
+   * Reset the shared find query and hide the bar. Called when the active tab
+   * commits a navigation: the matches belonged to the previous page, so a bar
+   * left open would sit showing stale results (and re-running the old query
+   * against unrelated content). Clearing the query text too means a re-opened
+   * bar starts fresh rather than resurrecting the last page's search.
+   */
+  const resetFind = useCallback(() => {
+    if (findTextRef.current) {
+      findTextRef.current = '';
+      setFindText('');
+      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      if (tab?.wcId != null) browserBridge?.stopFindInPage(tab.wcId).catch(() => {});
+    }
+    setFindResult(null);
+    setFindOpen(false);
+  }, [browserBridge]);
+
   // Match counts stream back from the main process; display them when they
   // belong to the active tab.
   useEffect(() => {
@@ -680,6 +698,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           clearCertError(tabsRef.current.find((t) => t.id === id)?.wcId ?? null);
           // A committed navigation also supersedes any load-error page.
           clearLoadError(id);
+          // The new page invalidates the find-in-page results; clear the bar
+          // (only when it's the foreground tab navigating - a background tab's
+          // redirect shouldn't disturb the search the user is looking at).
+          if (id === activeIdRef.current) resetFind();
           // Webview mode sees every committed navigation here (link clicks,
           // redirects, back/forward); recordVisit ignores non-https URLs
           // (about:blank, chrome-extension://). The iframe fallback never
@@ -705,7 +727,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         }
       }
     },
-    [updateTab, crx, recordVisit, recordTitle, clearCertError, clearLoadError, isPrivate],
+    [updateTab, crx, recordVisit, recordTitle, clearCertError, clearLoadError, resetFind, isPrivate],
   );
 
   // Retry a failed load: re-request the failed URL through the tab's surface.
@@ -817,9 +839,16 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             command.openerWcId != null
               ? existing.find((t) => t.wcId === command.openerWcId)?.id ?? null
               : null;
+          // Middle-click / Ctrl+Cmd-click and "Open link in new tab" open in
+          // the background: spawn the tab but leave the current one focused and
+          // don't raise the window. Plain target=_blank / window.open stay in
+          // the foreground.
+          const background = command.background === true;
           // A fresh browser holds a single blank placeholder tab. Load the
           // link straight into it rather than stacking a new tab on top; only
-          // spawn a separate tab once there's real browsing to preserve.
+          // spawn a separate tab once there's real browsing to preserve. (A
+          // background open still has to fill the sole blank tab - there's
+          // nothing to sit behind.)
           const soloBlank =
             existing.length === 1 &&
             existing[0].initialSrc === NEW_TAB_URL &&
@@ -829,12 +858,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             setTabs([tab]);
             setActiveId(tab.id);
           } else {
-            openTab(command.url, true, null, parentId);
+            openTab(command.url, !background, null, parentId);
           }
-          // A link opened in this window (target=_blank, a desktop link
-          // click) must bring it forward - the user clicked expecting to
-          // look at the result, not to hunt for the window.
-          focusWindow(windowId);
+          // A foreground link opened in this window (target=_blank, a desktop
+          // link click) must bring it forward - the user clicked expecting to
+          // look at the result, not to hunt for the window. Background opens
+          // deliberately leave the window where it is.
+          if (!background || soloBlank) focusWindow(windowId);
           break;
         }
         case 'select': {

@@ -3519,14 +3519,20 @@ app.on('web-contents-created', (_event, contents) => {
     });
   }
 
-  contents.setWindowOpenHandler(({ url }) => {
+  contents.setWindowOpenHandler(({ url, disposition }) => {
     if (isBrowserTab && isUserscriptInstallUrl(url)) {
       sendToShell('userscripts:installRequested', { url, wcId: contents.id });
     } else if (/^(https|chrome-extension):\/\//i.test(url)) {
       // Tag the popup with its opener so the shell opens the new tab in the
       // same window/session - keeps private-window links out of the
-      // persistent, authenticated session (and vice versa).
-      sendToShell('crx:openTab', { url, openerWcId: contents.id });
+      // persistent, authenticated session (and vice versa). Middle-click and
+      // Ctrl/Cmd-click arrive as 'background-tab': open the tab behind the
+      // current page without stealing focus or raising the window, Chrome-style.
+      sendToShell('crx:openTab', {
+        url,
+        openerWcId: contents.id,
+        background: disposition === 'background-tab',
+      });
     }
     return { action: 'deny' };
   });
@@ -3613,9 +3619,15 @@ app.on('web-contents-created', (_event, contents) => {
         chromeExtensions && isBrowserTab
           ? chromeExtensions.getContextMenuItems(contents, params)
           : [],
-      openLink: (url) => {
+      openLink: (url, disposition) => {
         if (/^(https|chrome-extension):\/\//i.test(url)) {
-          sendToShell('crx:openTab', { url, openerWcId: contents.id });
+          // "Open link/image in new tab" (disposition 'default') opens in the
+          // background like Chrome; "Open in new window" stays foreground.
+          sendToShell('crx:openTab', {
+            url,
+            openerWcId: contents.id,
+            background: disposition === 'default' || disposition === 'background-tab',
+          });
         }
       },
     });

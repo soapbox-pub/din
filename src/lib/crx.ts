@@ -43,6 +43,13 @@ export type CrxTabCommand =
        * the persistent, authenticated session (or vice versa).
        */
       openerWcId?: number;
+      /**
+       * Open the tab in the background, Chrome-style: don't activate it or
+       * raise the window. Set for middle-click / Ctrl+Cmd-click opens and the
+       * "Open link in new tab" context-menu item; absent (foreground) for
+       * plain target=_blank, window.open, and desktop-initiated opens.
+       */
+      background?: boolean;
     }
   | {
       /** chrome.tabs.update({ active: true }): activate the matching tab. */
