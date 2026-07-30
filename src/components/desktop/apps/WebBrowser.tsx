@@ -807,11 +807,19 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'open': {
           if (!isAllowedTabUrl(command.url)) break;
           const existing = tabsRef.current;
+          // When a page spawns the link (middle-click, target=_blank,
+          // window.open) the command carries its opener's WebContents id;
+          // nest the new tab under that parent so the tree sidebar shows the
+          // relationship (ignored by the horizontal strip). Desktop-initiated
+          // opens (terminal/desktop link clicks) carry no opener and stay
+          // top-level.
+          const parentId =
+            command.openerWcId != null
+              ? existing.find((t) => t.wcId === command.openerWcId)?.id ?? null
+              : null;
           // A fresh browser holds a single blank placeholder tab. Load the
           // link straight into it rather than stacking a new tab on top; only
           // spawn a separate tab once there's real browsing to preserve.
-          // Either way the link is a top-level tab, never nested under
-          // whatever happens to be active (unlike chrome.tabs.create above).
           const soloBlank =
             existing.length === 1 &&
             existing[0].initialSrc === NEW_TAB_URL &&
@@ -821,7 +829,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             setTabs([tab]);
             setActiveId(tab.id);
           } else {
-            openTab(command.url, true, null, null);
+            openTab(command.url, true, null, parentId);
           }
           // A link opened in this window (target=_blank, a desktop link
           // click) must bring it forward - the user clicked expecting to
