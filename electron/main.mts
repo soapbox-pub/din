@@ -3155,14 +3155,25 @@ app.whenReady().then(() => {
     webPreferences.sandbox = true;
     if (params.partition === WEBAPP_PARTITION) {
       webPreferences.preload = WEBAPP_PRELOAD;
-    } else if (
-      params.partition === WEBBROWSER_PARTITION &&
-      !attachingGuestSrc.startsWith('chrome-extension://')
-    ) {
-      // Ad-hoc browser tabs get the highlight preload (no signer surface, just
-      // the NIP-84 highlight affordance; see HIGHLIGHT_PRELOAD). Extension
-      // pages in this session (the action popup) are not web content.
-      webPreferences.preload = HIGHLIGHT_PRELOAD;
+    } else if (params.partition === WEBBROWSER_PARTITION) {
+      // Load frame preloads into sub-frames, not just the top document, so the
+      // chrome.* API preload (session-registered by electron-chrome-extensions
+      // as type:'frame') reaches extension web_accessible_resource iframes -
+      // e.g. Bitwarden's inline-autofill overlay, a chrome-extension:// iframe
+      // the content script embeds in the page. Without this the overlay's own
+      // bundle has no chrome.runtime and the fill prompt never renders. The
+      // guest stays sandboxed with no Node, so this only widens preload reach.
+      // Scoped to the browser session on purpose: the web-app partition's
+      // NIP-07 signer preload must never fan out into a page's iframes.
+      webPreferences.nodeIntegrationInSubFrames = true;
+      if (!attachingGuestSrc.startsWith('chrome-extension://')) {
+        // Ad-hoc browser tabs get the highlight preload (no signer surface,
+        // just the NIP-84 highlight affordance; see HIGHLIGHT_PRELOAD).
+        // Extension pages in this session (the action popup) are not web
+        // content. The preload now loads in sub-frames too, but guards itself
+        // to the top frame (it would otherwise duplicate in every iframe).
+        webPreferences.preload = HIGHLIGHT_PRELOAD;
+      }
     }
   });
 

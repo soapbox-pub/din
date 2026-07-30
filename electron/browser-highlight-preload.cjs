@@ -336,7 +336,14 @@ function onSelectionChange() {
   debounceTimer = setTimeout(schedule, SELECTION_DEBOUNCE_MS);
 }
 
-document.addEventListener('selectionchange', onSelectionChange);
-// Reposition immediately (no debounce) so a shown button tracks the selection.
-window.addEventListener('scroll', schedule, true);
-window.addEventListener('resize', schedule);
+// The guest enables nodeIntegrationInSubFrames (so the extension chrome.* API
+// preload reaches inline-autofill overlay iframes), which also loads this
+// preload in every sub-frame. The highlight affordance is a top-document
+// concern, so stay inert in iframes rather than attaching duplicate selection
+// listeners or floating buttons inside embedded frames and ads.
+if (window.top === window.self) {
+  document.addEventListener('selectionchange', onSelectionChange);
+  // Reposition immediately (no debounce) so a shown button tracks the selection.
+  window.addEventListener('scroll', schedule, true);
+  window.addEventListener('resize', schedule);
+}
