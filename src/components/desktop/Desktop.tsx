@@ -7,6 +7,7 @@ import { VolumeOsd } from './VolumeOsd';
 import { BrightnessOsd } from './BrightnessOsd';
 import { NotificationsOsd } from './NotificationsOsd';
 import { Window } from './Window';
+import { WindowSwitcher } from './WindowSwitcher';
 import { FilePickerProvider } from './FilePickerProvider';
 import { FilePickerBridgeHost } from './FilePickerBridgeHost';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
@@ -78,6 +79,7 @@ function DesktopSession() {
             </main>
 
             <Dock workspaceRef={workspaceRef} />
+            <WindowSwitcher />
             <VolumeOsd />
             <BrightnessOsd />
             <NotificationsOsd />

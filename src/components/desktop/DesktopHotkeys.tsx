@@ -4,6 +4,7 @@ import { publishBrowserHotkey, type BrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { isScreenshotSessionActive } from '@/lib/screenshot';
 import { isWebviewAvailable } from '@/lib/isElectron';
+import { isWindowSwitcherActive } from '@/lib/windowSwitcherState';
 import type { WindowState } from '@/hooks/useWindows';
 
 /** The built-in Web Browser's app id (see src/lib/apps.ts). */
@@ -15,8 +16,10 @@ const SCREENSHOT_APP_ID = 'screenshot';
 /**
  * Desktop-wide keyboard shortcuts. Renders nothing.
  *
- * - Alt+Tab / Alt+Shift+Tab cycle focus through the open (non-minimized)
- *   windows.
+ * (Alt+Tab / Alt+Shift+Tab window switching lives in its sibling
+ * WindowSwitcher, which owns the keyboard for the duration of the gesture;
+ * this component stands down while it's active.)
+ *
  * - Print Screen opens the Screenshot app for a full-screen capture, and
  *   Shift+Print Screen for an area grab (the laptop screenshot function
  *   keys; the dedicated box-select key on newer laptops reaches the shell
@@ -51,7 +54,6 @@ const SCREENSHOT_APP_ID = 'screenshot';
  */
 export function DesktopHotkeys() {
   const { windows, actions } = useWindowManager();
-  const { cycleFocus } = actions;
 
   // The keydown handler needs the current window list without re-binding
   // the listener on every desktop commit.
@@ -80,6 +82,11 @@ export function DesktopHotkeys() {
     const guests = isWebviewAvailable();
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // The window switcher owns the keyboard while an Alt+Tab gesture is
+      // open (its own listener handles navigation/commit); stand down so we
+      // don't, e.g., read its Alt+Arrow selection as browser history.
+      if (isWindowSwitcherActive()) return;
+
       // Print Screen: full-screen capture. Shift+Print Screen: select an
       // area (the same session the dedicated box-select key starts via the
       // Electron host's evdev watch). The session flag guards against a
@@ -92,13 +99,6 @@ export function DesktopHotkeys() {
             start: e.shiftKey ? 'area' : 'screen',
           });
         }
-        return;
-      }
-
-      if (e.key === 'Tab' && e.altKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleFocus(e.shiftKey);
         return;
       }
 
@@ -170,14 +170,15 @@ export function DesktopHotkeys() {
 
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [cycleFocus]);
+  }, []);
 
   useEffect(() => {
     const bridge = getShellShortcuts();
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
-      if (shortcut.action === 'cycle-windows') cycleFocus(shortcut.backward);
-      else if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {
+      // Alt+Tab from a guest is handled by the WindowSwitcher's own bridge
+      // subscription; here we only service screenshot captures.
+      if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {
         if (!isScreenshotSessionActive()) {
           actionsRef.current.open(SCREENSHOT_APP_ID, {
             start: shortcut.action === 'screenshot-area' ? 'area' : 'screen',
@@ -185,7 +186,7 @@ export function DesktopHotkeys() {
         }
       }
     });
-  }, [cycleFocus]);
+  }, []);
 
   return null;
 }
