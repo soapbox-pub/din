@@ -246,8 +246,8 @@ export function NsiteBridgeHost() {
           kind: 'error',
           code: 'bad-url',
           message:
-            'Expected nsite://<domain>/<site>/ — use /~/ for the root site, ' +
-            'or /@name/<site>/ for a specific NIP-05 name.',
+            'Expected nsite://<domain>/ for a root site, nsite://<domain>+<site>/ ' +
+            'for a named one, or a name in front: nsite://mk@<domain>+<site>/.',
         };
       }
 

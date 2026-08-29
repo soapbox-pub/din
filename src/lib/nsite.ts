@@ -1,48 +1,47 @@
 /**
  * nsite:// URL grammar (NIP-5A static websites).
  *
- * Two URL spaces, both valid URLs, with different jobs:
+ * Three spellings of the same site, each with one job:
  *
- * - **Canonical** — what actually serves bytes, and what the browser origin is.
- *   The host is NIP-5A's canonical label verbatim, so an nsite origin maps 1:1
- *   onto `<label>.nsite-host.com` on any gateway:
+ * **Display** — what the address bar shows, what "Copy link" emits, what you
+ * type. Din owns this string end to end; it never goes near Chromium's URL
+ * parser, so it can look however it should look:
  *
- *       nsite://<npub1…>/<path>            root site   (kind 15128)
- *       nsite://<pubkeyB36><dtag>/<path>   named site  (kind 35128)
+ *     nsite://soapbox.pub+armada/notifications   d=armada under _@soapbox.pub
+ *     nsite://mk@ditto.pub+polaroids/            d=polaroids under mk@ditto.pub
+ *     nsite://soapbox.pub/home                   root site of _@soapbox.pub
  *
- *   Because the host is derived from the pubkey, every site gets its own
- *   Chromium origin — separate localStorage, IndexedDB, cookies, and service
- *   worker — and a name repointing at a different key can never inherit the
- *   old key's storage.
+ * The `d` tag rides in the host after `+`, so the path is just the site's own
+ * path — a root site's `/home` and a named site's `/home` are spelled the same
+ * way, and an SPA's routes need no escaping.
  *
- * - **Alias** — human-readable, resolved and 302'd to canonical, never serves
- *   a byte:
+ * **Alias** — the same thing, but as a URL Chromium will parse, used for the
+ * navigation itself and for links inside pages. Identical to the display form
+ * except that a non-default NIP-05 name is joined with `+` rather than `@`:
  *
- *       nsite://<domain>/[@<name>/]<site>/<path>
- *       nsite://<naddr1…>/<path>
+ *     nsite://mk+ditto.pub+polaroids/
  *
- *   where `<site>` is a NIP-5A `d` tag, or `~` for the pubkey's root site, and
- *   `<name>` is the NIP-05 local part (default `_`). A missing `<site>` means
- *   `~`, so `nsite://soapbox.pub/` is the root site of `_@soapbox.pub`.
+ * That one substitution exists because `@` is URL userinfo, and Chromium
+ * strips credentials before a request reaches `protocol.handle` (verified —
+ * they are gone from `will-navigate` too). A page-authored
+ * `nsite://mk@ditto.pub+polaroids/` would arrive as `_@ditto.pub`'s polaroids:
+ * the wrong pubkey, with no error. `mk+ditto.pub+polaroids` survives intact.
+ * Din normalizes `@` to `+` on the way in, so typing the pretty form always
+ * works; the ugly spelling is transient and never displayed.
  *
- *       nsite://soapbox.pub/armada/notifications   d=armada under _@soapbox.pub
- *       nsite://soapbox.pub/~/blog/post            root site, path /blog/post
- *       nsite://ditto.pub/@mk/polaroids/           d=polaroids under mk@ditto.pub
- *       nsite://ditto.pub/@mk/                     root site of mk@ditto.pub
+ * **Canonical** — what actually serves bytes, and what the browser origin is.
+ * NIP-5A's host verbatim, so an nsite origin maps 1:1 onto
+ * `<label>.nsite-host.com` on any gateway:
  *
- * Since the alias origin never hosts a document, an SPA can't escape its site
- * by pushState: by the time the page runs, its base URL is canonical, so
- * relative links, history, `fetch`, and service-worker scope are all confined
- * to the one site.
+ *     nsite://<npub1…>/<path>            root site   (kind 15128)
+ *     nsite://<pubkeyB36><dtag>/<path>   named site  (kind 35128)
  *
- * Note `@` is spelled as a *path* segment, not URL userinfo. Chromium strips
- * credentials before a request reaches the protocol handler (verified — they
- * are gone from both `protocol.handle` and `will-navigate`), so
- * `nsite://mk@ditto.pub/…` would silently resolve to `_@ditto.pub`: the wrong
- * pubkey, with no error. It is still accepted as address-bar *input* and
- * rewritten to the `/@mk/` form before navigating (see
- * {@link normalizeNsiteInput}), which is safe because that rewrite happens in
- * Din, before Chromium ever sees the string.
+ * Because the host is derived from the pubkey, every site gets its own
+ * Chromium origin — separate localStorage, IndexedDB, cookies, and service
+ * worker — and a name repointing at a different key can never inherit the old
+ * key's storage. Aliases 302 here and never serve a document themselves, so an
+ * SPA can't pushState its way out of its own site: by the time page code runs,
+ * its base URL is canonical.
  */
 
 import { nip19 } from 'nostr-tools';
@@ -55,8 +54,8 @@ export const NSITE_ROOT_KIND = 15128;
 /** Addressable event kind for a named site under a pubkey (NIP-5A). */
 export const NSITE_NAMED_KIND = 35128;
 
-/** The alias path segment that selects a pubkey's root site. */
-export const ROOT_SITE_SEGMENT = '~';
+/** The NIP-05 name used when an alias names no one in particular. */
+const DEFAULT_NIP05_NAME = '_';
 
 /** A NIP-5A `d` tag usable in a canonical host: 1-13 chars, never trailing `-`. */
 const DTAG_RE = /^[a-z0-9-]{1,13}$/;
@@ -107,6 +106,11 @@ export function base36ToPubkey(label: string): string | null {
   return value.toString(16).padStart(64, '0');
 }
 
+/** Whether a `d` tag can appear in a canonical host (NIP-5A's charset rules). */
+export function isValidDtag(dtag: string): boolean {
+  return DTAG_RE.test(dtag) && !dtag.endsWith('-');
+}
+
 /**
  * The canonical host for a site: `npub1…` for a root site, `<pubkeyB36><dtag>`
  * for a named one. This string is the origin, so it must be derived only from
@@ -128,11 +132,6 @@ export function canonicalNsiteUrl(
 ): string {
   const suffix = path.startsWith('/') ? path : `/${path}`;
   return `${NSITE_PROTOCOL}//${canonicalNsiteHost(pubkey, dtag)}${suffix}`;
-}
-
-/** Whether a `d` tag can appear in a canonical host (NIP-5A's charset rules). */
-export function isValidDtag(dtag: string): boolean {
-  return DTAG_RE.test(dtag) && !dtag.endsWith('-');
 }
 
 /** A site resolved from a canonical nsite host. */
@@ -180,28 +179,75 @@ export interface NsiteAlias {
   authority: NsiteAliasAuthority;
   /** The `d` tag being addressed, or null for the pubkey's root site. */
   dtag: string | null;
-  /** The path *within* the site, always starting with `/`. */
+  /** The path within the site, verbatim, including any query and fragment. */
   path: string;
 }
 
+/** One reading of an alias host, before the parts have been validated. */
+interface HostReading {
+  name: string;
+  domain: string;
+  dtag: string | null;
+}
+
 /**
- * Parse an alias URL. Returns null for anything that is not one — including
- * canonical URLs, which callers should try first via
+ * Rewrite a display-form `name@host` authority into the wire form `name+host`,
+ * purely textually.
+ *
+ * This cannot go through `URL`. Chromium drops userinfo outright when parsing
+ * a scheme registered with `registerSchemesAsPrivileged` — verified:
+ * `new URL('nsite://mk@ditto.pub+polaroids/')` yields
+ * `nsite://ditto.pub+polaroids/` with an empty `username`, while the same
+ * string under `https:` keeps `mk`. So the name has to be moved out of the
+ * userinfo slot before any URL parser touches it, or it is simply gone.
+ *
+ * Returns null for a malformed authority. That matters: handing the original
+ * string back would let the parser quietly drop the `@…` and resolve
+ * `nsite://mk@@ditto.pub/` to `_@ditto.pub` — a different site than anyone
+ * asked for. Failing is the only safe answer.
+ */
+function rewriteNsiteUserinfo(rawUrl: string): string | null {
+  const prefix = `${NSITE_PROTOCOL}//`;
+  if (!rawUrl.toLowerCase().startsWith(prefix)) return rawUrl;
+
+  const rest = rawUrl.slice(prefix.length);
+  const end = rest.search(/[/?#]/);
+  const authority = end === -1 ? rest : rest.slice(0, end);
+  const tail = end === -1 ? '' : rest.slice(end);
+
+  const at = authority.indexOf('@');
+  if (at === -1) return rawUrl;
+  if (authority.indexOf('@', at + 1) !== -1) return null;
+
+  const name = authority.slice(0, at);
+  const host = authority.slice(at + 1);
+  if (!name || !host) return null;
+
+  return `${prefix}${name}+${host}${tail}`;
+}
+
+/**
+ * Parse an alias URL — display (`@`) or wire (`+`) spelling, they differ only
+ * in how the name is joined. Returns null for anything that is not an alias,
+ * including canonical URLs, which callers should try first via
  * {@link parseCanonicalNsiteHost}.
  */
 export function parseNsiteAlias(rawUrl: string): NsiteAlias | null {
+  // Fold `name@host` down to `name+host` first; the `@` spelling would
+  // otherwise be silently discarded by the URL parser.
+  const source = rewriteNsiteUserinfo(rawUrl);
+  if (source === null) return null;
+
   let url: URL;
   try {
-    url = new URL(rawUrl);
+    url = new URL(source);
   } catch {
     return null;
   }
   if (url.protocol !== NSITE_PROTOCOL) return null;
 
   const host = url.hostname.toLowerCase();
-
-  let authority: NsiteAliasAuthority | null = null;
-  let naddrDtag: string | null = null;
+  const path = `${url.pathname || '/'}${url.search}${url.hash}`;
 
   if (host.startsWith('naddr1')) {
     try {
@@ -209,62 +255,73 @@ export function parseNsiteAlias(rawUrl: string): NsiteAlias | null {
       if (decoded.type !== 'naddr') return null;
       const { pubkey, kind, identifier, relays } = decoded.data;
       if (kind !== NSITE_ROOT_KIND && kind !== NSITE_NAMED_KIND) return null;
-      authority = {
-        type: 'naddr',
-        pubkey,
-        kind,
-        identifier,
-        relays: relays ?? [],
+      return {
+        authority: { type: 'naddr', pubkey, kind, identifier, relays: relays ?? [] },
+        dtag: kind === NSITE_NAMED_KIND ? identifier : null,
+        path,
       };
-      naddrDtag = kind === NSITE_NAMED_KIND ? identifier : null;
     } catch {
       return null;
     }
-  } else if (DOMAIN_RE.test(host)) {
-    authority = { type: 'nip05', domain: host, name: '_' };
   }
 
-  if (!authority) return null;
+  const parts = host.split('+');
+  if (parts.length > 3 || parts.some((part) => part.length === 0)) return null;
 
-  // URL already normalized `..` and `.` away, so this is the effective path.
-  const trailingSlash = url.pathname.endsWith('/');
-  const segments = url.pathname.split('/').filter((segment) => segment.length > 0);
-
-  // Optional `/@name/`, only meaningful for a NIP-05 authority.
-  if (segments[0]?.startsWith('@')) {
-    const name = decodeURIComponent(segments[0].slice(1)).toLowerCase();
-    if (authority.type !== 'nip05' || !NIP05_NAME_RE.test(name)) return null;
-    authority = { ...authority, name };
-    segments.shift();
-  }
-
-  // An naddr already names the site, so it takes no `<site>` segment.
-  let dtag: string | null;
-  let rest: string[];
-  if (authority.type === 'naddr') {
-    dtag = naddrDtag;
-    rest = segments;
+  // A `d` tag can never contain a dot and a domain must, so at most one
+  // reading of a `+`-joined host can be valid. Try them in that order.
+  const readings: HostReading[] = [];
+  if (parts.length === 1) {
+    readings.push({ name: '', domain: parts[0], dtag: null });
+  } else if (parts.length === 2) {
+    readings.push({ name: '', domain: parts[0], dtag: parts[1] });
+    readings.push({ name: parts[0], domain: parts[1], dtag: null });
   } else {
-    const site = segments.length > 0 ? decodeURIComponent(segments[0]) : ROOT_SITE_SEGMENT;
-    if (site === ROOT_SITE_SEGMENT) {
-      dtag = null;
-    } else if (isValidDtag(site)) {
-      dtag = site;
-    } else {
-      // Not a site selector — e.g. `nsite://soapbox.pub/index.html`. Refusing
-      // is the only safe reading: guessing "root site" here would make the
-      // same path mean two different sites depending on its spelling.
-      return null;
-    }
-    rest = segments.slice(1);
+    readings.push({ name: parts[0], domain: parts[1], dtag: parts[2] });
   }
 
-  const suffix = rest.length > 0 ? `/${rest.join('/')}${trailingSlash ? '/' : ''}` : '/';
+  for (const reading of readings) {
+    if (!DOMAIN_RE.test(reading.domain)) continue;
+    if (reading.dtag !== null && !isValidDtag(reading.dtag)) continue;
+    const name = reading.name || DEFAULT_NIP05_NAME;
+    if (!NIP05_NAME_RE.test(name)) continue;
+    return {
+      authority: { type: 'nip05', domain: reading.domain, name },
+      dtag: reading.dtag,
+      path,
+    };
+  }
 
-  return { authority, dtag, path: `${suffix}${url.search}${url.hash}` };
+  return null;
 }
 
-/** Whether a string is an nsite URL of either space. */
+/** The host of an alias, with the name joined by `separator`. */
+function aliasHost(
+  authority: Extract<NsiteAliasAuthority, { type: 'nip05' }>,
+  dtag: string | null,
+  separator: string,
+): string {
+  const name = authority.name === DEFAULT_NIP05_NAME ? '' : `${authority.name}${separator}`;
+  return `${name}${authority.domain}${dtag ? `+${dtag}` : ''}`;
+}
+
+/**
+ * The wire spelling of an alias: what gets handed to Chromium. Same as the
+ * display form except that a name is joined with `+`, so it survives the
+ * credential stripping that would otherwise silently drop it.
+ */
+export function nsiteAliasUrl(alias: NsiteAlias): string | null {
+  if (alias.authority.type !== 'nip05') return null;
+  return `${NSITE_PROTOCOL}//${aliasHost(alias.authority, alias.dtag, '+')}${alias.path}`;
+}
+
+/** The display spelling of an alias: the one with `@` in it. */
+function nsiteAliasDisplay(alias: NsiteAlias): string | null {
+  if (alias.authority.type !== 'nip05') return null;
+  return `${NSITE_PROTOCOL}//${aliasHost(alias.authority, alias.dtag, '@')}${alias.path}`;
+}
+
+/** Whether a string is an nsite URL of any spelling. */
 export function isNsiteUrl(rawUrl: string): boolean {
   try {
     return new URL(rawUrl).protocol === NSITE_PROTOCOL;
@@ -275,75 +332,55 @@ export function isNsiteUrl(rawUrl: string): boolean {
 
 /**
  * Normalize address-bar input into a navigable nsite URL, or null if it isn't
- * one. This is where the `name@domain` spelling is accepted and rewritten into
- * the `/@name/` path form — safe here because it happens inside Din, before
- * Chromium can strip the userinfo.
+ * one. This is where `mk@ditto.pub+polaroids` becomes `mk+ditto.pub+polaroids`
+ * — safe here because it happens inside Din, before Chromium can strip the
+ * userinfo, and invisible because the address bar re-displays the `@` form.
  *
- *     mk@ditto.pub/polaroids       -> nsite://ditto.pub/@mk/polaroids
- *     nsite://mk@ditto.pub/~/home  -> nsite://ditto.pub/@mk/~/home
- *     naddr1…                      -> nsite://naddr1…/
- *     npub1…                       -> nsite://npub1…/
+ *     nsite://soapbox.pub+armada/x   -> unchanged (no name to rewrite)
+ *     nsite://mk@ditto.pub/          -> nsite://mk+ditto.pub/
+ *     naddr1…                        -> nsite://naddr1…/
+ *     npub1…                         -> nsite://npub1…/
  */
 export function normalizeNsiteInput(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  const body = trimmed.toLowerCase().startsWith(NSITE_PROTOCOL)
-    ? trimmed.slice(NSITE_PROTOCOL.length).replace(/^\/\//, '')
-    : trimmed;
   const explicitScheme = trimmed.toLowerCase().startsWith(NSITE_PROTOCOL);
+  // Move any `name@` out of the userinfo slot before parsing - see
+  // rewriteNsiteUserinfo for why this can't wait until after `new URL`.
+  const candidate = rewriteNsiteUserinfo(
+    explicitScheme ? trimmed : `${NSITE_PROTOCOL}//${trimmed.replace(/^\/\//, '')}`,
+  );
+  if (candidate === null) return null;
 
-  // Split authority from path before touching `@`, so a path-borne `@name`
-  // segment is never mistaken for userinfo.
-  const slash = body.indexOf('/');
-  const authority = (slash === -1 ? body : body.slice(0, slash)).toLowerCase();
-  const path = slash === -1 ? '' : body.slice(slash);
-
-  let host = authority;
-  let namePrefix = '';
-
-  const at = authority.indexOf('@');
-  if (at !== -1) {
-    // Exactly one `@`, a valid NIP-05 local part, and a real domain to its
-    // right - anything else is not addressing an nsite.
-    if (authority.indexOf('@', at + 1) !== -1) return null;
-    const name = authority.slice(0, at);
-    const domain = authority.slice(at + 1);
-    if (!NIP05_NAME_RE.test(name) || !DOMAIN_RE.test(domain)) return null;
-    host = domain;
-    namePrefix = `/@${name}`;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
   }
 
-  const isCanonical = !!parseCanonicalNsiteHost(host);
-  const isAliasAuthority =
-    host.startsWith('naddr1') || DOMAIN_RE.test(host) || isCanonical;
-  if (!isAliasAuthority) return null;
+  // A canonical host is already navigable and takes no name.
+  if (parseCanonicalNsiteHost(url.hostname.toLowerCase())) {
+    return url.toString();
+  }
 
   // Schemeless input is only nsite input when it can't be anything else: a
   // bare `example.com` still belongs to the https address bar, and a bare
   // `mk@ditto.pub` is far more likely to be an email address than a site.
-  // `npub1…`, `naddr1…`, and canonical hosts are unambiguous.
-  if (!explicitScheme && !host.startsWith('naddr1') && !isCanonical) {
+  // `npub1…` and `naddr1…` are unambiguous.
+  if (!explicitScheme && !url.hostname.toLowerCase().startsWith('naddr1')) {
     return null;
   }
-  // Canonical hosts take no `@name` prefix - the key already names the owner.
-  if (namePrefix && isCanonical) return null;
 
-  const suffix = `${namePrefix}${path}` || '/';
-  const candidate = `${NSITE_PROTOCOL}//${host}${suffix.startsWith('/') ? suffix : `/${suffix}`}`;
-
-  // Round-trip through the parsers so callers never get an unnavigable URL.
-  try {
-    const url = new URL(candidate);
-    if (parseCanonicalNsiteHost(url.hostname)) return url.toString();
-  } catch {
-    return null;
-  }
-  return parseNsiteAlias(candidate) ? new URL(candidate).toString() : null;
+  const alias = parseNsiteAlias(candidate);
+  if (!alias) return null;
+  if (alias.authority.type === 'naddr') return url.toString();
+  return nsiteAliasUrl(alias);
 }
 
 /**
- * Alias prefixes Din has actually resolved, keyed by canonical host. Only
+ * Alias spellings Din has actually resolved, keyed by canonical host. Only
  * names that were really looked up land here — the address bar must never
  * invent a human-readable name for an origin, because the host is the security
  * boundary and a name Din didn't verify would be a lie about who owns the page.
@@ -357,32 +394,35 @@ export function rememberNsiteAlias(aliasUrl: string, canonicalUrl: string): void
   // display alias; only a NIP-05 name does.
   if (!alias || alias.authority.type !== 'nip05') return;
   try {
-    const host = new URL(canonicalUrl).hostname;
-    const name = alias.authority.name === '_' ? '' : `/@${alias.authority.name}`;
-    const site = `/${alias.dtag ?? ROOT_SITE_SEGMENT}`;
-    resolvedAliases.set(
-      host,
-      `${NSITE_PROTOCOL}//${alias.authority.domain}${name}${site}`,
-    );
+    const host = new URL(canonicalUrl).hostname.toLowerCase();
+    resolvedAliases.set(host, aliasHost(alias.authority, alias.dtag, '@'));
   } catch {
     // Not a URL; nothing to remember.
   }
 }
 
 /**
- * The address-bar spelling of an nsite URL: the alias it was reached through
- * when Din resolved one, otherwise the canonical URL unchanged. The result is
- * always a URL the address bar can navigate back to, so retyping what's shown
+ * The address-bar spelling of an nsite URL: the name it was reached through
+ * when Din resolved one, otherwise the URL unchanged. The result is always
+ * something the address bar can navigate back to, so retyping what's shown
  * lands on the same site.
  */
 export function nsiteDisplayUrl(rawUrl: string): string {
+  let url: URL;
   try {
-    const url = new URL(rawUrl);
-    if (url.protocol !== NSITE_PROTOCOL) return rawUrl;
-    const prefix = resolvedAliases.get(url.hostname);
-    if (!prefix) return rawUrl;
-    return `${prefix}${url.pathname}${url.search}${url.hash}`;
+    url = new URL(rawUrl);
   } catch {
     return rawUrl;
   }
+  if (url.protocol !== NSITE_PROTOCOL) return rawUrl;
+
+  const remembered = resolvedAliases.get(url.hostname.toLowerCase());
+  if (remembered) {
+    return `${NSITE_PROTOCOL}//${remembered}${url.pathname}${url.search}${url.hash}`;
+  }
+
+  // Not yet resolved (or never was): if this is itself an alias, show its
+  // pretty spelling rather than the wire one.
+  const alias = parseNsiteAlias(rawUrl);
+  return (alias && nsiteAliasDisplay(alias)) ?? rawUrl;
 }

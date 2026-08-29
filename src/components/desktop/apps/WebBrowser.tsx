@@ -1099,7 +1099,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       updateTab(id, (tab) => {
         const trimmed = tab.history.slice(0, tab.cursor + 1);
         return {
-          address: resolved,
+          // `resolved` is the wire spelling; show the pretty one while the
+          // load is in flight so a typed nsite name doesn't flicker.
+          address: nsiteDisplayUrl(resolved),
           url: resolved,
           title: null,
           favicon: null,
