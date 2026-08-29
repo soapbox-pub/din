@@ -35,9 +35,14 @@ const MAX_SERIALIZED_LENGTH = 48_000;
 const MAX_URL_LENGTH = 1024;
 const MAX_TITLE_LENGTH = 160;
 
-/** Whether a URL belongs in history: real https destinations only. */
+/**
+ * Whether a URL belongs in history: real https destinations, plus nsite://
+ * sites, whose canonical URLs are key-derived and so stay meaningful (and
+ * private — history is NIP-44 encrypted to the user).
+ */
 function isRecordable(url: string): boolean {
-  return url.startsWith('https://') && url.length <= MAX_URL_LENGTH;
+  if (url.length > MAX_URL_LENGTH) return false;
+  return url.startsWith('https://') || url.startsWith('nsite://');
 }
 
 /** Enforce the entry count and serialized-size caps, dropping oldest first. */
@@ -51,7 +56,7 @@ function trimHistory(entries: BrowserHistoryEntry[]): BrowserHistoryEntry[] {
 
 /** Scheme and `www.` stripped, for user-friendly matching and display. */
 export function bareUrl(url: string): string {
-  return url.replace(/^https:\/\/(www\.)?/i, '');
+  return url.replace(/^(https|nsite):\/\/(www\.)?/i, '');
 }
 
 /**

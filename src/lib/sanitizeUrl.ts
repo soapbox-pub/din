@@ -1,3 +1,5 @@
+import { normalizeNsiteInput, NSITE_PROTOCOL } from '@/lib/nsite';
+
 /**
  * Sanitize a user-entered URL for safe use as an iframe `src`.
  *
@@ -33,13 +35,15 @@ export function sanitizeUrl(input: string): string | null {
  * DOM.
  *
  * Broader than {@link sanitizeUrl}: it also permits `http:` so users can reach
- * local dev servers (`http://localhost:8080`) and plain-http sites. Script- and
- * data-bearing schemes (`javascript:`, `data:`, `file:`, `blob:`, …) are still
- * rejected. This is safe because the `<webview>` is a separate embedder outside
- * the app's page and CSP. Never use it for an iframe/img `src` of event-sourced
- * data — use {@link sanitizeUrl} / {@link sanitizeImageUrl} there. (The app CSP
- * `frame-src` is https-only, so the plain-browser iframe fallback simply won't
- * load an `http:` result.)
+ * local dev servers (`http://localhost:8080`) and plain-http sites, and
+ * `nsite:` for NIP-5A sites served by Din itself (see `src/lib/nsite.ts`).
+ * Script- and data-bearing schemes (`javascript:`, `data:`, `file:`, `blob:`,
+ * …) are still rejected. This is safe because the `<webview>` is a separate
+ * embedder outside the app's page and CSP. Never use it for an iframe/img
+ * `src` of event-sourced data — use {@link sanitizeUrl} /
+ * {@link sanitizeImageUrl} there. (The app CSP `frame-src` is https-only, so
+ * the plain-browser iframe fallback simply won't load an `http:` result, and
+ * `nsite:` has no handler outside the Electron shell at all.)
  */
 export function sanitizeNavigationUrl(input: string): string | null {
   const trimmed = input.trim();
@@ -56,7 +60,13 @@ export function sanitizeNavigationUrl(input: string): string | null {
     return null;
   }
 
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  if (
+    url.protocol !== 'https:' &&
+    url.protocol !== 'http:' &&
+    url.protocol !== NSITE_PROTOCOL
+  ) {
+    return null;
+  }
 
   return url.toString();
 }
@@ -97,8 +107,8 @@ export function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
- * Turn a query-or-URL string into a navigable http/https URL. If it looks like
- * a bare search term, hand it to a search engine instead. Bare loopback
+ * Turn a query-or-URL string into a navigable http/https/nsite URL. If it looks
+ * like a bare search term, hand it to a search engine instead. Bare loopback
  * addresses (`localhost:8080`, `127.0.0.1:3000`, `[::1]:8080`) default to
  * `http:` since that's what dev servers speak; every other schemeless input
  * defaults to `https:`.
@@ -106,6 +116,13 @@ export function sameOrigin(a: string, b: string): boolean {
 export function resolveNavigation(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
+
+  // nsite addresses first, so `nsite://soapbox.pub/armada` isn't mistaken for
+  // a search term. This also accepts the `name@domain` spelling and rewrites
+  // it into the path form the protocol handler can actually see — Chromium
+  // strips URL credentials before a request ever reaches it.
+  const nsite = normalizeNsiteInput(trimmed);
+  if (nsite) return nsite;
 
   const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
   const isLoopback =

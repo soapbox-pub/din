@@ -26,6 +26,8 @@
 //     the signer (see HighlightBridgeHost / browser-highlight-preload.cjs)
 //   - window.filePickerHost: relays <input type=file> clicks from guests to the
 //     in-Din file picker (see FilePickerBridgeHost)
+//   - window.nsiteHost: relays nsite:// manifest lookups to the renderer's
+//     Nostr client (see NsiteBridgeHost / electron/nsite.mts)
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -871,6 +873,36 @@ contextBridge.exposeInMainWorld('highlightHost', {
    * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string }} response
    */
   respond: (response) => ipcRenderer.send('din-highlight:response', response),
+});
+
+// nsite resolution host (window.nsiteHost), backed by the nsite:* handlers in
+// main.mts. The nsite:// protocol handler needs Nostr lookups - NIP-19
+// decoding, a NIP-05 fetch, and a relay query for the NIP-5A manifest - and
+// the main process has no Nostr client, so each lookup is relayed here, to the
+// shell renderer, where Nostrify and the user's relay list live (see
+// NsiteBridgeHost). This carries no signing surface: it only turns a URL into
+// a manifest or a redirect.
+contextBridge.exposeInMainWorld('nsiteHost', {
+  /**
+   * Subscribe to nsite resolution requests. The callback receives
+   * { requestId, url }. Returns an unsubscribe fn.
+   * @param {(request: { requestId: number, url: string }) => void} callback
+   */
+  onRequest: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number, url: string }} request
+     */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('nsite:request', listener);
+    return () => ipcRenderer.removeListener('nsite:request', listener);
+  },
+
+  /**
+   * Answer a relayed lookup: { requestId, resolution }.
+   * @param {{ requestId: number, resolution: unknown }} response
+   */
+  respond: (response) => ipcRenderer.send('nsite:response', response),
 });
 
 // File-picker bridge host (window.filePickerHost), backed by the filepicker:*

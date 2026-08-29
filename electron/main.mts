@@ -29,6 +29,12 @@ import {
   attachUserscripts,
   isUserscriptInstallUrl,
 } from './userscripts.mts';
+import {
+  NSITE_SCHEME,
+  registerNsiteProtocol,
+  clearNsiteManifestCache,
+  clearNsiteBlobCache,
+} from './nsite.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
 // named export too, which Node's ESM-CJS interop resolves statically.
@@ -84,6 +90,23 @@ protocol.registerSchemesAsPrivileged([
     scheme: 'crx',
     privileges: {
       bypassCSP: true,
+    },
+  },
+  {
+    // NIP-5A static websites (electron/nsite.mts). Each site gets its own
+    // origin, so it needs the full set of a web origin's powers: `standard`
+    // for real origins and relative URLs, `secure` for a secure context
+    // (crypto.subtle, service workers), `stream` + `supportFetchAPI` for
+    // on-demand blob delivery and Range requests, and `allowServiceWorkers`
+    // because published nsites ship one (Armada's /sw.js, for instance).
+    scheme: NSITE_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+      allowServiceWorkers: true,
     },
   },
 ]);
@@ -2297,7 +2320,18 @@ const TRACKING_PARAM = /^(utm_|fbclid$|gclid$|dclid$|msclkid$|mc_|ref$|ref_src$|
 function cleanHighlightUrl(raw: string): string {
   try {
     const url = new URL(raw);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    // nsite:// is allowed alongside http(s): a canonical nsite URL is derived
+    // from the author's pubkey, so it names the highlighted site as durably as
+    // a domain does - more so, since no one can repoint it. Other clients
+    // can't follow it yet; publishing a gateway URL instead would put a
+    // trusted third party into a link the whole design avoids.
+    if (
+      url.protocol !== 'http:' &&
+      url.protocol !== 'https:' &&
+      url.protocol !== `${NSITE_SCHEME}:`
+    ) {
+      return '';
+    }
     for (const key of [...url.searchParams.keys()]) {
       if (TRACKING_PARAM.test(key)) url.searchParams.delete(key);
     }
@@ -2973,6 +3007,10 @@ function registerBrowserDataHandlers(): void {
     const s = browserSession();
     if (opts.cache === true) {
       await s.clearCache();
+      // nsite blobs and manifests live outside Chromium's HTTP cache, so
+      // clearing that alone would leave a site's files on disk.
+      clearNsiteManifestCache();
+      await clearNsiteBlobCache();
     }
     if (opts.cookies === true) {
       // No `storages` filter: clear every storage type (cookies included).
@@ -3303,6 +3341,16 @@ app.whenReady().then(() => {
   registerHighlightBridge();
   registerFilePickerBridge();
 
+  // nsite:// in both browser sessions. This process has no Nostr client, so
+  // manifest lookups are relayed to the shell renderer (NsiteBridgeHost),
+  // which owns Nostrify, the relay list, and the query cache.
+  registerNsiteProtocol({
+    sessions: [browserSession(), privateBrowserSession()],
+    sendToShell,
+    isShellSender: (event) =>
+      event.sender.id === shellContentsId && event.senderFrame === event.sender.mainFrame,
+  });
+
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
   setupChromeExtensions();
@@ -3522,7 +3570,7 @@ app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(({ url, disposition }) => {
     if (isBrowserTab && isUserscriptInstallUrl(url)) {
       sendToShell('userscripts:installRequested', { url, wcId: contents.id });
-    } else if (/^(https|chrome-extension):\/\//i.test(url)) {
+    } else if (/^(https|chrome-extension|nsite):\/\//i.test(url)) {
       // Tag the popup with its opener so the shell opens the new tab in the
       // same window/session - keeps private-window links out of the
       // persistent, authenticated session (and vice versa). Middle-click and

@@ -15,6 +15,7 @@ import { BrowserExtensionHost } from './BrowserExtensionHost';
 import { ExtensionPopupHost } from './ExtensionPopupHost';
 import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
+import { NsiteBridgeHost } from './NsiteBridgeHost';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
@@ -51,6 +52,7 @@ function DesktopSession() {
           <ExtensionPopupHost />
           <NostrBridgeHost />
           <HighlightBridgeHost />
+          <NsiteBridgeHost />
           <DesktopHotkeys />
           <Wallpaper>
             <MenuBar />

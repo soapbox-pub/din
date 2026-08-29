@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { resolveNavigation, sanitizeImageUrl, sanitizeUrl } from '@/lib/sanitizeUrl';
+import { nsiteDisplayUrl } from '@/lib/nsite';
 import { pickBestIcon, type IconCandidate } from '@/lib/appIcon';
 import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
 import {
@@ -688,7 +689,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'navigate':
           updateTab(id, {
             url: event.url === NEW_TAB_URL ? '' : event.url,
-            address: event.url === NEW_TAB_URL ? '' : event.url,
+            // An nsite's committed URL is its canonical, key-derived host; the
+            // address bar shows the name it was reached through when Din
+            // resolved one (and the canonical host when it didn't).
+            address:
+              event.url === NEW_TAB_URL ? '' : nsiteDisplayUrl(event.url),
             canBack: event.canBack,
             canForward: event.canForward,
           });
