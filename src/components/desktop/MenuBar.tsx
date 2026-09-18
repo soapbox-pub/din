@@ -49,6 +49,8 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
+import type { AppDefinition } from '@/lib/apps';
+import type { WebApp } from '@/lib/webApps';
 
 /**
  * macOS-style menu bar along the top of the desktop.
@@ -108,10 +110,21 @@ const AppsMenu = memo(function AppsMenu() {
     uninstallWebApp(appId);
   };
 
-  const launcherApps = apps.filter(
-    (app) =>
-      !app.hidden && app.name.toLowerCase().includes(query.trim().toLowerCase()),
-  );
+  // Native apps also match on their desktop entry's Keywords and Categories,
+  // so "browser" finds Firefox and "photo" finds an image editor.
+  const needle = query.trim().toLowerCase();
+  const launcherApps = apps.filter((app) => {
+    if (app.hidden) return false;
+    if (!needle) return true;
+    return (
+      app.name.toLowerCase().includes(needle) ||
+      (app.keywords ?? []).some((keyword) => keyword.toLowerCase().includes(needle))
+    );
+  });
+  // Din's own apps lead; the host system's installed apps follow in their own
+  // section, since there are typically hundreds of them.
+  const dinApps = launcherApps.filter((app) => !app.native);
+  const nativeApps = launcherApps.filter((app) => app.native);
 
   return (
     <Popover>
@@ -149,45 +162,83 @@ const AppsMenu = memo(function AppsMenu() {
               No apps match “{query}”.
             </p>
           ) : (
-            <div className="grid grid-cols-4 gap-1">
-              {launcherApps.map((app) => (
-                <ContextMenu key={app.id}>
-                  <ContextMenuTrigger asChild>
-                    <PopoverClose asChild>
-                      <button
-                        type="button"
-                        onClick={() => open(app.id)}
-                        className="flex flex-col items-center gap-2 rounded-xl p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <AppIcon icon={app.icon} className="size-9 text-foreground" />
-                        <span className="line-clamp-2 text-xs leading-tight text-foreground">
-                          {app.name}
-                        </span>
-                      </button>
-                    </PopoverClose>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-52">
-                    <ContextMenuItem onSelect={() => open(app.id)}>
-                      Open
-                    </ContextMenuItem>
-                    {webApps.some((webApp) => webApp.id === app.id) && (
-                      <ContextMenuItem
-                        variant="destructive"
-                        onSelect={() => uninstall(app.id)}
-                      >
-                        <Trash2 aria-hidden /> Uninstall
-                      </ContextMenuItem>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>
-              ))}
-            </div>
+            <>
+              <AppGrid
+                apps={dinApps}
+                onOpen={open}
+                onUninstall={uninstall}
+                webApps={webApps}
+              />
+              {nativeApps.length > 0 && (
+                <>
+                  {dinApps.length > 0 && (
+                    <h2 className="px-2 pb-1 pt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      System
+                    </h2>
+                  )}
+                  <AppGrid
+                    apps={nativeApps}
+                    onOpen={open}
+                    onUninstall={uninstall}
+                    webApps={webApps}
+                  />
+                </>
+              )}
+            </>
           )}
         </div>
       </PopoverContent>
     </Popover>
   );
 });
+
+/** One section of launcher tiles. */
+function AppGrid({
+  apps,
+  onOpen,
+  onUninstall,
+  webApps,
+}: {
+  apps: AppDefinition[];
+  onOpen: (appId: string) => void;
+  onUninstall: (appId: string) => void;
+  /** Installed web apps, the only kind the launcher can uninstall. */
+  webApps: readonly WebApp[];
+}) {
+  return (
+    <div className="grid grid-cols-4 gap-1">
+      {apps.map((app) => (
+        <ContextMenu key={app.id}>
+          <ContextMenuTrigger asChild>
+            <PopoverClose asChild>
+              <button
+                type="button"
+                onClick={() => onOpen(app.id)}
+                className="flex flex-col items-center gap-2 rounded-xl p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <AppIcon icon={app.icon} className="size-9 text-foreground" />
+                <span className="line-clamp-2 text-xs leading-tight text-foreground">
+                  {app.name}
+                </span>
+              </button>
+            </PopoverClose>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-52">
+            <ContextMenuItem onSelect={() => onOpen(app.id)}>Open</ContextMenuItem>
+            {webApps.some((webApp) => webApp.id === app.id) && (
+              <ContextMenuItem
+                variant="destructive"
+                onSelect={() => onUninstall(app.id)}
+              >
+                <Trash2 aria-hidden /> Uninstall
+              </ContextMenuItem>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Brightness status item: sun glyph; clicking opens a backlight slider plus a

@@ -49,10 +49,26 @@ export interface AppDefinition {
    * directly.
    */
   icon: LucideIcon | string;
-  /** The component rendered inside the app's window. */
-  component: ComponentType<AppComponentProps>;
+  /**
+   * The component rendered inside the app's window. Absent for native Linux
+   * apps, which have no Din window at all: they're separate X11 clients the
+   * host window manager stacks above the shell, and Din only acts as their
+   * launcher and taskbar (see src/lib/nativeApps.ts).
+   */
+  component?: ComponentType<AppComponentProps>;
+  /**
+   * True for an app owned by the host system rather than by Din. Launching
+   * one starts a real process instead of opening a Din window, and the
+   * windows its Dock tile groups are the host's, tracked over EWMH.
+   */
+  native?: boolean;
   /** Default window size when the app is launched. */
   defaultSize?: { width: number; height: number };
+  /**
+   * Extra terms the launcher search matches besides the name — a native
+   * app's desktop-entry Keywords and Categories, so "browser" finds Firefox.
+   */
+  keywords?: string[];
   /**
    * Hidden apps are resolvable by id (so a window can host them) but never
    * shown in the launcher or taskbar; they're opened programmatically with

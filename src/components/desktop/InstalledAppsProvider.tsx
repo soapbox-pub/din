@@ -1,8 +1,10 @@
 import { useMemo } from 'react';
 import type { ComponentType, ReactNode } from 'react';
-import { Globe } from 'lucide-react';
+import { AppWindow, Globe } from 'lucide-react';
 import { APPS } from '@/lib/apps';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
+import { useNativeApps } from '@/hooks/useNativeApps';
+import type { NativeApp } from '@/lib/nativeApps';
 import {
   createWebApp,
   DEFAULT_WEB_APPS,
@@ -73,8 +75,27 @@ function webAppToDefinition(webApp: WebApp): AppDefinition {
 }
 
 /**
- * Provides the desktop app registry: the static built-in apps merged with
- * the user's installed web apps (persisted + roamed via encrypted app data).
+ * Convert an installed Linux app into a launchable desktop app.
+ *
+ * There's no component: native apps run in their own X11 windows, above
+ * Din's, and the registry entry exists so they can be launched, searched and
+ * given a Dock tile like any other app. The icon is a data URL resolved from
+ * the icon theme by the main process, falling back to a generic glyph.
+ */
+function nativeAppToDefinition(app: NativeApp): AppDefinition {
+  return {
+    id: app.id,
+    name: app.name,
+    icon: app.icon ?? AppWindow,
+    native: true,
+    keywords: [...app.keywords, ...app.categories],
+  };
+}
+
+/**
+ * Provides the desktop app registry: the static built-in apps, the user's
+ * installed web apps (persisted + roamed via encrypted app data), and the
+ * Linux apps installed on the host system.
  */
 export function InstalledAppsProvider({ children }: { children: ReactNode }) {
   const [webApps, setWebApps] = useAppData<WebApp[]>(
@@ -82,9 +103,16 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
     WebAppsSchema,
     DEFAULT_WEB_APPS,
   );
+  // Empty in a plain browser, and in any session without an X11 window
+  // manager for Din to hand native windows to.
+  const { apps: nativeApps } = useNativeApps();
 
   const value = useMemo<InstalledAppsManager>(() => {
-    const apps: AppDefinition[] = [...APPS, ...webApps.map(webAppToDefinition)];
+    const apps: AppDefinition[] = [
+      ...APPS,
+      ...webApps.map(webAppToDefinition),
+      ...nativeApps.map(nativeAppToDefinition),
+    ];
 
     return {
       apps,
@@ -112,7 +140,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         setWebApps((prev) => prev.filter((webApp) => webApp.id !== id));
       },
     };
-  }, [webApps, setWebApps]);
+  }, [webApps, setWebApps, nativeApps]);
 
   return (
     <InstalledAppsContext.Provider value={value}>

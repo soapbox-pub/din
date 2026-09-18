@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { AppDefinition } from '@/lib/apps';
+import { launchNativeApp } from '@/lib/nativeApps';
 
 /** Highest z among the given windows (0 if none). */
 function maxZ(windows: WindowState[]): number {
@@ -112,6 +113,16 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   const open = useCallback((appId: string, params?: WindowParams) => {
     const app = getApp(appId);
     if (!app) return undefined;
+
+    // A native Linux app has no Din window to open: it's a separate X11
+    // client, started as a real process and then managed by the host window
+    // manager (which stacks it above the shell). Routing it here means every
+    // launcher on the desktop - Dock, apps menu, search - launches it without
+    // knowing the difference.
+    if (app.native) {
+      launchNativeApp(appId);
+      return undefined;
+    }
 
     // Single-instance apps (e.g. Settings) reuse their existing window: focus
     // and un-minimize it, merging in any new launch params, rather than

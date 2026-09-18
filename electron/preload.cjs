@@ -255,6 +255,60 @@ contextBridge.exposeInMainWorld('display', {
   applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
 });
 
+// Native-app bridge (window.nativeApps), backed by the native-apps:* handlers
+// in main.mts (XDG desktop entries + EWMH over a raw X11 connection; see
+// electron/native-apps.mts). Din acts as the taskbar for ordinary Linux apps:
+// it lists and launches them, and tracks/steers their toplevel windows, which
+// the host window manager stacks above the shell's own window.
+// `available: false` without an X11 session, so the Dock and launcher can
+// simply leave them out.
+contextBridge.exposeInMainWorld('nativeApps', {
+  /** Installed desktop entries, with icons inlined as data URLs. */
+  list: () => ipcRenderer.invoke('native-apps:list'),
+
+  /** The session's current toplevel windows. */
+  windows: () => ipcRenderer.invoke('native-apps:windows'),
+
+  /**
+   * Start an app by its registry id ("native:org.gnome.Calculator").
+   * @param {string} appId
+   */
+  launch: (appId) => ipcRenderer.invoke('native-apps:launch', appId),
+
+  /**
+   * Raise a window and give it the keyboard focus (un-minimizing it first).
+   * @param {number} windowId
+   */
+  activate: (windowId) => ipcRenderer.invoke('native-apps:activate', windowId),
+
+  /**
+   * Minimize a window.
+   * @param {number} windowId
+   */
+  minimize: (windowId) => ipcRenderer.invoke('native-apps:minimize', windowId),
+
+  /**
+   * Ask a window to close (the app may still prompt to save).
+   * @param {number} windowId
+   */
+  close: (windowId) => ipcRenderer.invoke('native-apps:close', windowId),
+
+  /**
+   * Subscribe to window-list changes (opened, closed, renamed, minimized,
+   * focused). Returns an unsubscribe fn.
+   * @param {(windows: Array<{ id: number, appId: string | null, title: string, minimized: boolean, active: boolean }>) => void} callback
+   */
+  onWindows: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {Array<{ id: number, appId: string | null, title: string, minimized: boolean, active: boolean }>} windows
+     */
+    const handler = (_event, windows) => callback(windows);
+    ipcRenderer.on('native-apps:windows', handler);
+    return () => ipcRenderer.removeListener('native-apps:windows', handler);
+  },
+});
+
 // Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -
 // true DPI-style scaling: the layout viewport shrinks/grows so innerWidth,
 // viewport units and canvas measurements all stay consistent (unlike CSS

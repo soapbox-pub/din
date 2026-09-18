@@ -35,6 +35,10 @@ import {
   clearNsiteManifestCache,
   clearNsiteBlobCache,
 } from './nsite.mts';
+import {
+  registerNativeAppHandlers,
+  stopNativeAppTracking,
+} from './native-apps.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
 // named export too, which Node's ESM-CJS interop resolves statically.
@@ -3340,6 +3344,7 @@ app.whenReady().then(() => {
   registerNostrBridge();
   registerHighlightBridge();
   registerFilePickerBridge();
+  registerNativeAppHandlers({ assertShellSender, sendToShell });
 
   // nsite:// in both browser sessions. This process has no Nostr client, so
   // manifest lookups are relayed to the shell renderer (NsiteBridgeHost),
@@ -3480,11 +3485,13 @@ app.whenReady().then(() => {
   }
 });
 
-// Release the media-key grabs (VolumeUp/Down/Mute) and stop the night-light
-// gamma child when the app exits.
+// Release the media-key grabs (VolumeUp/Down/Mute), stop the night-light
+// gamma child, and drop the X11 connection behind the native-app taskbar
+// when the app exits.
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   stopNightLight();
+  stopNativeAppTracking();
 });
 
 // Harden any <webview> the shell embeds (the web browser app). Keep them
