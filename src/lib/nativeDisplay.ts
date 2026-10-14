@@ -87,6 +87,11 @@ type WorkerMessage =
 
 interface NativeDisplayBridge {
   connect(): void;
+  /** Draw a GPU-rendered window into this canvas (electron/native-gpu.mts). */
+  attachCanvas(id: number, canvas: HTMLCanvasElement): void;
+  detachCanvas(id: number): void;
+  /** Called once per GPU present batch, after drawing. */
+  onPresented(callback: () => void): void;
 }
 
 declare global {
@@ -136,6 +141,8 @@ export function startNativeDisplay(): void {
     port = event.ports[0];
     port.onmessage = (e: MessageEvent<WorkerMessage>) => onMessage(e.data);
   });
+  // GPU frames are drawn by the preload; acking them is what paces the apps.
+  window.nativeDisplay?.onPresented(() => ackOnNextFrame('wayland'));
   window.nativeDisplay?.connect();
 }
 
@@ -160,6 +167,16 @@ function emit(event: NativeDisplayEvent): void {
 
 function send(message: unknown): void {
   port?.postMessage(message);
+}
+
+/**
+ * Ack a batch once it's actually on screen: at the shell's next animation
+ * frame. Acks are what release apps' frame callbacks (their vsync), so acking
+ * as soon as a batch was drawn let an app like Firefox render far faster than
+ * any display refreshes; tied to rAF, apps run at the real refresh rate.
+ */
+function ackOnNextFrame(source: string | undefined): void {
+  requestAnimationFrame(() => send({ type: 'ack', source }));
 }
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
@@ -202,7 +219,7 @@ function onMessage(message: WorkerMessage): void {
           new Uint8ClampedArray(update.data.buffer, update.data.byteOffset, update.data.byteLength),
         );
       }
-      send({ type: 'ack', source: message.source });
+      ackOnNextFrame(message.source);
       return;
     }
     case 'frame-stream':
@@ -230,6 +247,7 @@ function onMessage(message: WorkerMessage): void {
         drawUpdate(surface.id, early.x, early.y, early.width, early.height, early.pixels);
       }
       earlyUpdates.delete(surface.id);
+      window.nativeDisplay?.attachCanvas(surface.id, surface.canvas);
       // A re-announce (after a shell reload) of a window that already has a
       // Din window must not open a second one.
       if (!existing) emit({ type: message.type, surface });
@@ -239,6 +257,7 @@ function onMessage(message: WorkerMessage): void {
       const surface = surfaces.get(message.id);
       if (!surface) return;
       surfaces.delete(message.id);
+      window.nativeDisplay?.detachCanvas(message.id);
       emit({ type: 'close', surface });
       return;
     }
@@ -339,7 +358,7 @@ function connectFrameStream(url: string): void {
       drawUpdate(id, x, y, width, height, new Uint8ClampedArray(buffer, offset, length));
       offset += length;
     }
-    send({ type: 'ack', source: 'wayland' });
+    ackOnNextFrame('wayland');
   };
   frameStream = ws;
 }

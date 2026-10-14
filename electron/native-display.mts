@@ -10,8 +10,9 @@
 //
 // Apps that speak Wayland run on a Wayland compositor instead
 // (native/din-compositor, started by the worker beside the X server; see
-// wayland-bridge.mts), which streams frames faster and paces apps by what
-// Din actually shows. Xvfb stays for X-only apps, and for everything when
+// wayland-bridge.mts), which renders on the GPU when there is one (frames
+// reach this process as shared buffers; see native-gpu.mts) and paces apps
+// by what Din actually shows. Xvfb stays for X-only apps, and for everything when
 // the compositor isn't built.
 //
 // Why Xvfb for X apps rather than XEmbed into the host: it ships everywhere
@@ -35,6 +36,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electron';
+import { connectGpuBuffers, dinFd } from './native-gpu.mts';
 
 const WORKER = path.join(import.meta.dirname, 'native-display-worker.mts');
 
@@ -75,6 +77,8 @@ let server: ChildProcess | null = null;
 let worker: Electron.UtilityProcess | null = null;
 let starting: Promise<EmbeddedDisplay | null> | null = null;
 let current: EmbeddedDisplay | null = null;
+/** The shell's WebContents, for GPU frames (set at registration). */
+let shellContents: () => Electron.WebContents | null = () => null;
 
 /** Resolve a binary against PATH. */
 function which(command: string): string | null {
@@ -189,9 +193,19 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
     stdio: 'inherit',
   });
   const ok = await new Promise<boolean>((resolve) => {
-    child.on('message', (message: { type?: string; message?: string; wayland?: string | null }) => {
+    child.on('message', (message: {
+      type?: string;
+      message?: string;
+      wayland?: string | null;
+      buffers?: string | null;
+    }) => {
       if (message?.type === 'ready') {
         display.wayland = message.wayland ?? null;
+        // Wayland windows rendered on the GPU come to this process as
+        // buffers (native-gpu.mts), not through the worker.
+        if (message.buffers && !connectGpuBuffers(message.buffers, shellContents)) {
+          console.error('native-display: could not connect to the GPU buffer socket');
+        }
         resolve(true);
       }
       if (message?.type === 'error') {
@@ -200,7 +214,14 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
       }
     });
     child.once('exit', () => resolve(false));
-    child.postMessage({ type: 'start', ...display, compositor: compositorBinary() });
+    // The compositor renders on the GPU only if this process can receive
+    // its buffers, which takes the din-fd addon.
+    child.postMessage({
+      type: 'start',
+      ...display,
+      compositor: compositorBinary(),
+      gpu: dinFd() !== null,
+    });
   });
   if (!ok) return false;
   child.once('exit', () => {
@@ -356,7 +377,9 @@ export async function connectToWorker(): Promise<Electron.MessagePortMain | null
  */
 export function registerNativeDisplayHandlers(options: {
   assertShellSender: (event: Electron.IpcMainEvent) => void;
+  shell: () => Electron.WebContents | null;
 }): void {
+  shellContents = options.shell;
   ipcMain.on('native-display:connect', async (event) => {
     try {
       options.assertShellSender(event);

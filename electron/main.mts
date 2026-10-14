@@ -3343,7 +3343,10 @@ app.whenReady().then(() => {
   registerHighlightBridge();
   registerFilePickerBridge();
   registerNativeAppHandlers({ assertShellSender });
-  registerNativeDisplayHandlers({ assertShellSender });
+  registerNativeDisplayHandlers({
+    assertShellSender,
+    shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
+  });
 
   // nsite:// in both browser sessions. This process has no Nostr client, so
   // manifest lookups are relayed to the shell renderer (NsiteBridgeHost),

@@ -8,12 +8,13 @@
 // whichever server it lives on. Wayland window ids start at 0x40000001,
 // clear of X resource ids, which is how messages are routed back.
 //
-// Window pixels don't pass through here: the compositor streams them
-// straight to the renderer over a token-guarded localhost WebSocket (see
-// native/din-compositor/src/frames.rs), because Node in the frame path -
-// reassembling pipe chunks, then a MessagePort deep-copying the result -
-// capped a full-window repaint at ~130 MB/s. What remains is control:
-// announcements, input, geometry, focus, clipboard, cursors.
+// Window pixels don't pass through here. With a GPU they're shared buffers
+// that Din's main process imports directly (native-gpu.mts); without one the
+// compositor streams them straight to the renderer over a token-guarded
+// localhost WebSocket (native/din-compositor/src/frames.rs), because Node in
+// the frame path - reassembling pipe chunks, then a MessagePort deep-copying
+// the result - capped a full-window repaint at ~130 MB/s. What remains here
+// is control: announcements, input, geometry, focus, clipboard, cursors.
 //
 // Wire format (see native/din-compositor/src/wire.rs): each record is a u32
 // little-endian length, a kind byte, and a payload. JSON both ways, plus
@@ -49,12 +50,21 @@ export class WaylandBridge {
 
   /**
    * Start the compositor; resolves with the bridge, its socket name (for
-   * WAYLAND_DISPLAY) and its frame-stream URL, or null if it can't run.
+   * WAYLAND_DISPLAY), and where its pixels go - the buffer socket for Din's
+   * main process when it renders on the GPU, else the renderer's frame-stream
+   * URL - or null if it can't run. `gpu: false` keeps it on the CPU path
+   * (Din's main process can't receive GPU buffers without native/din-fd).
    */
   static start(
     binary: string,
     screen: { width: number; height: number },
-  ): Promise<{ bridge: WaylandBridge; socket: string; frames: string } | null> {
+    gpu: boolean,
+  ): Promise<{
+    bridge: WaylandBridge;
+    socket: string;
+    frames: string | null;
+    buffers: string | null;
+  } | null> {
     return new Promise((resolve) => {
       let child: ChildProcess;
       try {
@@ -63,6 +73,7 @@ export class WaylandBridge {
             ...process.env,
             DIN_SCREEN_WIDTH: String(screen.width),
             DIN_SCREEN_HEIGHT: String(screen.height),
+            ...(gpu ? {} : { DIN_COMPOSITOR_GPU: '0' }),
           },
           stdio: ['pipe', 'pipe', 'inherit'],
         });
@@ -76,13 +87,16 @@ export class WaylandBridge {
         resolve(null);
       }, 10_000);
       bridge.onShell = (message) => {
-        const m = message as { type?: string; socket?: string; frames?: string };
-        if (m.type !== 'ready' || typeof m.socket !== 'string' || typeof m.frames !== 'string') {
-          return;
-        }
+        const m = message as { type?: string; socket?: string; frames?: string; buffers?: string };
+        if (m.type !== 'ready' || typeof m.socket !== 'string') return;
         clearTimeout(timer);
         bridge.onShell = null;
-        resolve({ bridge, socket: m.socket, frames: m.frames });
+        resolve({
+          bridge,
+          socket: m.socket,
+          frames: typeof m.frames === 'string' ? m.frames : null,
+          buffers: typeof m.buffers === 'string' ? m.buffers : null,
+        });
       };
       child.once('error', () => {
         clearTimeout(timer);

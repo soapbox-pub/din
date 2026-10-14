@@ -8,9 +8,12 @@
 use std::{io::Read, os::fd::OwnedFd, sync::Arc, time::Instant};
 
 use smithay::{
-    backend::renderer::{pixman::PixmanRenderer, utils::on_commit_buffer_handler},
-    delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_output,
-    delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
+    backend::{
+        allocator::dmabuf::Dmabuf,
+        renderer::{ImportDma, pixman::PixmanRenderer, utils::on_commit_buffer_handler},
+    },
+    delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_dmabuf,
+    delegate_output, delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{PopupKind, PopupManager, Window},
     input::{Seat, SeatHandler, SeatState, keyboard::XkbConfig, pointer::CursorImageStatus},
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
@@ -31,6 +34,7 @@ use smithay::{
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorHandler, CompositorState, get_parent},
         cursor_shape::CursorShapeManagerState,
+        dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         output::{OutputHandler, OutputManagerState},
         selection::{
             SelectionHandler, SelectionSource, SelectionTarget,
@@ -48,7 +52,13 @@ use smithay::{
     },
 };
 
-use crate::{canvas::Canvas, frames::FrameServer, stats::Stats, wire::Wire};
+use crate::{
+    canvas::Canvas,
+    frames::FrameServer,
+    gpu::{BufferChannel, Gpu, Target},
+    stats::Stats,
+    wire::Wire,
+};
 
 /// Window ids start here, clear of X11 resource ids (29-bit), so the shell
 /// can tell the two servers' windows apart.
@@ -74,6 +84,7 @@ pub struct Toplevel {
     pub pos: Point<i32, Logical>,
     pub announced: bool,
     pub canvas: Option<Canvas>,
+    pub target: Option<Target>,
     pub dirty: bool,
     pub title: String,
     /// The size the shell knows the window to be, from either side.
@@ -97,6 +108,7 @@ pub struct Popup {
     pub grab: bool,
     pub announced: bool,
     pub canvas: Option<Canvas>,
+    pub target: Option<Target>,
     pub dirty: bool,
 }
 
@@ -114,7 +126,13 @@ pub struct State {
     _cursor_shape_state: CursorShapeManagerState,
     pub seat: Seat<State>,
     pub output: Output,
+    /// Software renderer: the CPU path, and cursor images in either path.
     pub renderer: PixmanRenderer,
+    /// The GPU path, when there is a GPU (see gpu.rs).
+    pub gpu: Option<Gpu>,
+    pub buffers: Option<BufferChannel>,
+    pub dmabuf_state: DmabufState,
+    _dmabuf_global: Option<DmabufGlobal>,
     pub popup_manager: PopupManager,
     pub toplevels: Vec<Toplevel>,
     pub popups: Vec<Popup>,
@@ -140,6 +158,8 @@ impl State {
         dh: &DisplayHandle,
         screen: Size<i32, Logical>,
         frames: FrameServer,
+        gpu: Option<Gpu>,
+        buffers: Option<BufferChannel>,
         clipboard_tx: Sender<String>,
     ) -> Self {
         let compositor_state = CompositorState::new::<Self>(dh);
@@ -150,6 +170,15 @@ impl State {
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let decoration_state = XdgDecorationState::new::<Self>(dh);
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(dh);
+
+        // linux-dmabuf only with a GPU: clients then render on the GPU and
+        // hand over GPU buffers, which the GPU path composites directly.
+        let mut dmabuf_state = DmabufState::new();
+        let dmabuf_global = gpu.as_ref().and_then(|gpu| {
+            let formats = smithay::backend::renderer::ImportDma::dmabuf_formats(&gpu.renderer);
+            let feedback = DmabufFeedbackBuilder::new(gpu.device, formats).build().ok()?;
+            Some(dmabuf_state.create_global_with_default_feedback::<Self>(dh, &feedback))
+        });
 
         let mut seat = seat_state.new_wl_seat(dh, "seat0");
         // Clients repeat held keys themselves at this rate (the shell drops
@@ -187,6 +216,10 @@ impl State {
             seat,
             output,
             renderer: PixmanRenderer::new().expect("pixman"),
+            gpu,
+            buffers,
+            dmabuf_state,
+            _dmabuf_global: dmabuf_global,
             popup_manager: PopupManager::default(),
             toplevels: Vec::new(),
             popups: Vec::new(),
@@ -227,6 +260,13 @@ impl State {
         let origin = parent.map(|p| self.geometry_origin(&p)).unwrap_or_default();
         let target = Rectangle::new((-origin.x, -origin.y).into(), self.screen);
         positioner.get_unconstrained_geometry(target)
+    }
+
+    /// Tell Din a window's GPU buffers are gone.
+    pub fn release_target(&mut self, target: &mut Option<Target>) {
+        if let (Some(target), Some(buffers)) = (target.take(), self.buffers.as_mut()) {
+            target.release(buffers);
+        }
     }
 
     pub fn now_ms(&self) -> u32 {
@@ -311,6 +351,7 @@ impl XdgShellHandler for State {
             pos: (80 + offset, 80 + offset).into(),
             announced: false,
             canvas: None,
+            target: None,
             dirty: false,
             title: String::new(),
             known_size: None,
@@ -319,7 +360,8 @@ impl XdgShellHandler for State {
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(index) = self.toplevels.iter().position(|t| t.surface() == surface.wl_surface()) {
-            let t = self.toplevels.remove(index);
+            let mut t = self.toplevels.remove(index);
+            self.release_target(&mut t.target);
             if t.announced {
                 self.wire.json(serde_json::json!({ "type": "close", "id": t.id }));
             }
@@ -346,6 +388,7 @@ impl XdgShellHandler for State {
             grab: false,
             announced: false,
             canvas: None,
+            target: None,
             dirty: false,
         });
     }
@@ -376,7 +419,8 @@ impl XdgShellHandler for State {
 
     fn popup_destroyed(&mut self, surface: PopupSurface) {
         if let Some(index) = self.popups.iter().position(|p| p.kind.wl_surface() == surface.wl_surface()) {
-            let p = self.popups.remove(index);
+            let mut p = self.popups.remove(index);
+            self.release_target(&mut p.target);
             if p.announced {
                 self.wire.json(serde_json::json!({ "type": "close", "id": p.id }));
             }
@@ -437,6 +481,21 @@ impl SeatHandler for State {
 }
 
 impl TabletSeatHandler for State {}
+
+impl DmabufHandler for State {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf_state
+    }
+
+    fn dmabuf_imported(&mut self, _global: &DmabufGlobal, dmabuf: Dmabuf, notifier: ImportNotifier) {
+        let imported = self.gpu.as_mut().is_some_and(|gpu| gpu.renderer.import_dmabuf(&dmabuf, None).is_ok());
+        if imported {
+            let _ = notifier.successful::<Self>();
+        } else {
+            notifier.failed();
+        }
+    }
+}
 
 impl SelectionHandler for State {
     type SelectionUserData = Arc<String>;
@@ -504,3 +563,4 @@ delegate_seat!(State);
 delegate_data_device!(State);
 delegate_output!(State);
 delegate_cursor_shape!(State);
+delegate_dmabuf!(State);

@@ -46,7 +46,7 @@
 // Stays plain CommonJS (.cjs): sandboxed preloads run through Electron's own
 // loader, which does not support ESM or TypeScript - typed via JSDoc instead.
 
-const { contextBridge, ipcRenderer, webFrame } = require('electron');
+const { contextBridge, ipcRenderer, sharedTexture, webFrame } = require('electron');
 
 // Boot bridge (window.boot): the renderer reports that the app has mounted
 // beneath the black boot veil; main.mts keeps the shell window hidden until
@@ -287,9 +287,93 @@ contextBridge.exposeInMainWorld('nativeApps', {
 ipcRenderer.on('native-display:port', (event) => {
   globalThis.postMessage('din:native-display-port', globalThis.location.origin, event.ports);
 });
+// Wayland windows rendered on the GPU (electron/native-gpu.mts) arrive as
+// shared textures, imported once per buffer by the main process, then as
+// "window W is in buffer B" presents. The textures can only be used in this
+// isolated world, so drawing happens here: the page attaches each window's
+// canvas, and every present is a GPU-side drawImage into it - no pixel ever
+// passes through JavaScript.
+
+/** @type {Map<number, Electron.SharedTextureImported>} buffer id -> texture */
+const gpuTextures = new Map();
+/** @type {Map<number, HTMLCanvasElement>} window id -> canvas */
+const gpuCanvases = new Map();
+/** @type {Map<number, number>} window id -> the buffer it's showing */
+const gpuShowing = new Map();
+/** @type {(() => void) | null} the page's ack, once per present batch */
+let gpuPresented = null;
+
+/**
+ * Draw a window's current buffer into its canvas, if both have arrived.
+ * @param {number} id
+ */
+function gpuDraw(id) {
+  const canvas = gpuCanvases.get(id);
+  const texture = gpuTextures.get(/** @type {number} */ (gpuShowing.get(id)));
+  if (!canvas || !texture) return;
+  const frame = texture.getVideoFrame();
+  try {
+    canvas.getContext('2d')?.drawImage(frame, 0, 0);
+  } finally {
+    frame.close();
+  }
+}
+
+sharedTexture.setSharedTextureReceiver(async ({ importedSharedTexture }, buffer) => {
+  gpuTextures.set(buffer, importedSharedTexture);
+  // A present can beat its buffer here; draw whoever was waiting on it.
+  for (const [id, showing] of gpuShowing) if (showing === buffer) gpuDraw(id);
+});
+
+ipcRenderer.on('native-display:drop', (_event, buffer) => {
+  gpuTextures.get(buffer)?.release();
+  gpuTextures.delete(buffer);
+});
+
+ipcRenderer.on(
+  'native-display:present',
+  /**
+   * @param {Electron.IpcRendererEvent} _event
+   * @param {{ id: number, buffer: number }[]} windows
+   */
+  (_event, windows) => {
+    for (const { id, buffer } of windows) {
+      gpuShowing.set(id, buffer);
+      gpuDraw(id);
+    }
+    gpuPresented?.();
+  },
+);
+
 contextBridge.exposeInMainWorld('nativeDisplay', {
   /** Request a port; it arrives as a 'din:native-display-port' message. */
   connect: () => ipcRenderer.send('native-display:connect'),
+
+  /**
+   * Show a GPU-rendered window in this canvas (from now on, and its current
+   * frame right away).
+   * @param {number} id
+   * @param {HTMLCanvasElement} canvas
+   */
+  attachCanvas: (id, canvas) => {
+    gpuCanvases.set(id, canvas);
+    gpuDraw(id);
+  },
+
+  /** @param {number} id */
+  detachCanvas: (id) => {
+    gpuCanvases.delete(id);
+    gpuShowing.delete(id);
+  },
+
+  /**
+   * Called once per present batch, after drawing: the page acks it to the
+   * compositor, which is what paces the apps.
+   * @param {() => void} callback
+   */
+  onPresented: (callback) => {
+    gpuPresented = callback;
+  },
 });
 
 // Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -

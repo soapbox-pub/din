@@ -13,6 +13,7 @@
 
 mod canvas;
 mod frames;
+mod gpu;
 mod logic;
 mod state;
 mod stats;
@@ -47,8 +48,24 @@ fn main() {
     let (connected_tx, connected_rx) = channel::channel::<()>();
     let frames = frames::FrameServer::start(connected_tx).expect("frame stream");
     let frames_url = frames.url.clone();
-    let mut state = State::new(&dh, screen, frames, clipboard_tx);
+    let gpu = gpu::Gpu::open();
+    let buffers = gpu.as_ref().and_then(|_| gpu::BufferChannel::bind().ok());
+    let buffers_path = buffers.as_ref().map(|b| b.path.to_string_lossy().into_owned());
+    let listener = buffers.as_ref().and_then(|b| b.listener.try_clone().ok());
+    let mut state = State::new(&dh, screen, frames, gpu, buffers, clipboard_tx);
     let handle = event_loop.handle();
+
+    // Din's main process connects here to receive GPU buffers (gpu.rs).
+    if let Some(listener) = listener {
+        handle
+            .insert_source(Generic::new(listener, Interest::READ, Mode::Level), |_, _, state| {
+                if state.buffers.as_mut().is_some_and(|b| b.accept()) {
+                    state.stream_connected();
+                }
+                Ok(PostAction::Continue)
+            })
+            .expect("buffer socket source");
+    }
 
     handle
         .insert_source(connected_rx, |event, _, state| {
@@ -110,7 +127,9 @@ fn main() {
     state.wire.json(serde_json::json!({
         "type": "ready",
         "socket": socket_name,
-        "frames": frames_url,
+        // One path or the other: buffers with a GPU, the stream without.
+        "frames": if buffers_path.is_some() { None } else { Some(frames_url) },
+        "buffers": buffers_path,
     }));
     state.wire.flush();
 

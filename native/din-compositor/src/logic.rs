@@ -34,7 +34,13 @@ use crate::{
 };
 
 /// Batches in flight before rendering pauses; damage accumulates meanwhile.
-const MAX_IN_FLIGHT: u32 = 2;
+/// The CPU path overlaps two, since producing a batch takes a while. On the
+/// GPU, rendering takes about a millisecond, and one batch per display frame
+/// is the goal: a second would only show the same frame twice, while apps
+/// whose surfaces commit separately (Firefox's video subsurface) would be
+/// paced at double the refresh rate.
+const MAX_IN_FLIGHT_CPU: u32 = 2;
+const MAX_IN_FLIGHT_GPU: u32 = 1;
 
 /// Linux input button codes, by X button number (1 left, 2 middle, 3 right,
 /// 8 back, 9 forward) - the numbering the shell speaks for both servers.
@@ -196,8 +202,19 @@ impl State {
         // With no renderer to draw for, damage just accumulates; apps wait
         // on their frame callbacks meanwhile, which is right for an unseen
         // window.
-        if !self.streaming || self.in_flight >= MAX_IN_FLIGHT {
+        // The GPU path draws for Din's main process, the CPU path for the
+        // renderer's frame stream.
+        let connected = match &self.buffers {
+            Some(buffers) => buffers.connected(),
+            None => self.streaming,
+        };
+        let max_in_flight = if self.gpu.is_some() { MAX_IN_FLIGHT_GPU } else { MAX_IN_FLIGHT_CPU };
+        if !connected || self.in_flight >= max_in_flight {
             self.wire.flush();
+            return;
+        }
+        if self.gpu.is_some() {
+            self.flush_gpu();
             return;
         }
 
@@ -241,6 +258,62 @@ impl State {
         self.wire.flush();
     }
 
+    /// The GPU path: render dirty windows into their shared buffers and tell
+    /// Din which buffer each is now in.
+    fn flush_gpu(&mut self) {
+        let started = self.stats.as_ref().map(|_| std::time::Instant::now());
+        let mut presents = Vec::new();
+        let mut idle = Vec::new();
+        let mut waiting = Vec::new();
+        let mut pixels = 0usize;
+        let State { toplevels, popups, gpu, buffers, .. } = self;
+        let (Some(gpu), Some(buffers)) = (gpu.as_mut(), buffers.as_mut()) else { return };
+        let windows = toplevels
+            .iter_mut()
+            .filter(|t| t.announced && t.dirty)
+            .map(|t| {
+                let geometry = t.window.geometry();
+                (t.id, t.surface().clone(), geometry, &mut t.dirty, &mut t.target)
+            })
+            .chain(popups.iter_mut().filter(|p| p.announced && p.dirty).map(|p| {
+                let geometry = popup_geometry(&p.kind);
+                (p.id, p.kind.wl_surface().clone(), geometry, &mut p.dirty, &mut p.target)
+            }));
+        for (id, surface, geometry, dirty, target) in windows {
+            *dirty = false;
+            match gpu.render(target, &surface, geometry, buffers) {
+                Some(buffer) => {
+                    pixels += (geometry.size.w * geometry.size.h) as usize;
+                    presents.push(json!({ "id": id, "buffer": buffer }));
+                    waiting.push(surface);
+                }
+                None => idle.push(surface),
+            }
+        }
+        if !presents.is_empty() {
+            buffers.send(&json!({ "type": "present", "windows": presents }), None);
+            self.in_flight += 1;
+            if let (Some(stats), Some(started)) = (self.stats.as_mut(), started) {
+                stats.record(pixels * 4, started.elapsed());
+            }
+        }
+        for surface in &idle {
+            self.frame_done(surface);
+        }
+        self.awaiting_frame.extend(waiting);
+        self.wire.flush();
+    }
+
+    /// Drop every window's GPU buffers; they're reallocated (and announced
+    /// to Din afresh) on the next render.
+    fn release_all_targets(&mut self) {
+        let mut targets: Vec<_> = self.toplevels.iter_mut().map(|t| t.target.take()).collect();
+        targets.extend(self.popups.iter_mut().map(|p| p.target.take()));
+        for mut target in targets {
+            self.release_target(&mut target);
+        }
+    }
+
     /// The shell put a batch on screen: apps that drew into it may draw again.
     fn ack(&mut self) {
         self.in_flight = self.in_flight.saturating_sub(1);
@@ -262,6 +335,8 @@ impl State {
         for p in &mut self.popups {
             p.announced = false;
         }
+        // A fresh page holds no imported buffers.
+        self.release_all_targets();
     }
 
     /// A renderer connected to the frame stream: it has no pixels yet, so
@@ -270,6 +345,7 @@ impl State {
         self.streaming = true;
         self.in_flight = 0;
         self.ack();
+        self.release_all_targets();
         for t in &mut self.toplevels {
             t.canvas = None;
             t.dirty = true;

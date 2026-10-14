@@ -269,6 +269,7 @@ async function start(
   display: string,
   xauthority: string,
   compositor: string | null,
+  gpu: boolean,
 ): Promise<void> {
   const client = await X11Client.connect({ display, xauthority });
   if (!client) throw new Error(`Cannot connect to ${display}`);
@@ -324,7 +325,7 @@ async function start(
   // Wayland apps get a compositor of their own beside the X server; X stays
   // for the apps that only speak X.
   const started = compositor
-    ? await WaylandBridge.start(compositor, { width: x.screenWidth, height: x.screenHeight })
+    ? await WaylandBridge.start(compositor, { width: x.screenWidth, height: x.screenHeight }, gpu)
     : null;
   if (started) {
     wayland = started.bridge;
@@ -338,7 +339,7 @@ async function start(
   ready = true;
   if (pendingPort) connectShell(pendingPort);
   pendingPort = null;
-  toMain({ type: 'ready', wayland: started?.socket ?? null });
+  toMain({ type: 'ready', wayland: started?.socket ?? null, buffers: started?.buffers ?? null });
 }
 
 /**
@@ -1098,9 +1099,10 @@ process.parentPort.on('message', (event) => {
     display?: string;
     xauthority?: string;
     compositor?: string | null;
+    gpu?: boolean;
   };
   if (data.type === 'start' && data.display && data.xauthority) {
-    start(data.display, data.xauthority, data.compositor ?? null).catch((error: unknown) => {
+    start(data.display, data.xauthority, data.compositor ?? null, data.gpu === true).catch((error: unknown) => {
       toMain({ type: 'error', message: error instanceof Error ? error.message : String(error) });
       process.exit(1);
     });
