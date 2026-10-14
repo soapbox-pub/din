@@ -27,7 +27,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electron';
 
 const WORKER = path.join(import.meta.dirname, 'native-display-worker.mts');
@@ -201,14 +201,79 @@ export function embeddedDisplay(): Promise<EmbeddedDisplay | null> {
   return starting;
 }
 
+/** The user's session environment, read once (see sessionEnvironment). */
+let sessionEnv: Promise<Record<string, string>> | null = null;
+
 /**
- * Environment for a process that should appear inside Din: pointed at the
- * embedded display, and steered off Wayland, so toolkits that would rather
- * talk to a compositor (GTK, Qt, SDL, Electron/Chromium) pick X11.
+ * The login session's environment, as the systemd user manager holds it -
+ * which is where GNOME, KDE and friends publish it for the apps they start.
+ *
+ * Din's own environment can't be trusted to be a full session's: it may be
+ * started from a shell that dropped variables, a script, or a display
+ * manager's minimal environment. Apps notice. Without
+ * DBUS_SESSION_BUS_ADDRESS, Chromium-based apps (Signal, Element, Brave)
+ * can't find the keyring and fall back to a different password store, so
+ * they can't decrypt their own data - and Chromium answers a failed keyring
+ * lookup by storing a fresh key, which risks replacing the real one.
  */
-export function embeddedDisplayEnv(display: EmbeddedDisplay): NodeJS.ProcessEnv {
+function sessionEnvironment(): Promise<Record<string, string>> {
+  sessionEnv ??= new Promise((resolve) => {
+    execFile('systemctl', ['--user', 'show-environment'], { timeout: 3_000 }, (error, stdout) => {
+      const env: Record<string, string> = {};
+      if (!error) {
+        for (const line of stdout.split('\n')) {
+          const eq = line.indexOf('=');
+          // $'...' values are C-escaped (control characters, newlines);
+          // nothing an app needs from the session looks like that.
+          if (eq <= 0 || line.startsWith("$'", eq + 1)) continue;
+          env[line.slice(0, eq)] = line.slice(eq + 1);
+        }
+      }
+      // The bus is at a well-known path even where systemd isn't asked.
+      const runtimeDir = env.XDG_RUNTIME_DIR ?? process.env.XDG_RUNTIME_DIR;
+      if (!env.DBUS_SESSION_BUS_ADDRESS && runtimeDir) {
+        const bus = path.join(runtimeDir, 'bus');
+        if (fs.existsSync(bus)) env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${bus}`;
+      }
+      resolve(env);
+    });
+  });
+  return sessionEnv;
+}
+
+/**
+ * The environment Din was started with, before Chromium edited it.
+ *
+ * Chromium rewrites its own process environment at startup, and every edit
+ * would otherwise reach the apps Din launches: NO_AT_BRIDGE=1 switches their
+ * accessibility off, CHROME_DESKTOP and GDK_BACKEND are Chromium's own, and
+ * a missing bus address becomes DBUS_SESSION_BUS_ADDRESS=disabled:, which
+ * leaves Chromium-based apps without their keyring. /proc keeps the original.
+ */
+function launchEnvironment(): NodeJS.ProcessEnv {
+  try {
+    const env: NodeJS.ProcessEnv = {};
+    for (const entry of fs.readFileSync('/proc/self/environ', 'utf8').split('\0')) {
+      const eq = entry.indexOf('=');
+      if (eq > 0) env[entry.slice(0, eq)] = entry.slice(eq + 1);
+    }
+    return env;
+  } catch {
+    return { ...process.env };
+  }
+}
+
+/**
+ * Environment for a process that should appear inside Din: the one Din was
+ * started with, with the user's session environment filling in whatever
+ * that lacks, pointed at the embedded display, and steered off Wayland, so
+ * toolkits that would rather talk to a compositor (GTK, Qt, SDL,
+ * Electron/Chromium) pick X11.
+ */
+export async function embeddedDisplayEnv(display: EmbeddedDisplay): Promise<NodeJS.ProcessEnv> {
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...(await sessionEnvironment()),
+    ...launchEnvironment(),
     DISPLAY: display.display,
     XAUTHORITY: display.xauthority,
     XDG_SESSION_TYPE: 'x11',

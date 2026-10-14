@@ -717,7 +717,7 @@ async function launch(appId: string): Promise<void> {
   // Electron's own Node/Chromium variables would otherwise leak into every
   // app the user starts (ELECTRON_RUN_AS_NODE in particular turns an
   // Electron-based app into a bare Node process).
-  const env = embeddedDisplayEnv(display);
+  const env = await embeddedDisplayEnv(display);
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.NODE_OPTIONS;
   delete env.CHROME_DESKTOP;
