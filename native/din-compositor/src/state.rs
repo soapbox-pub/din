@@ -45,6 +45,8 @@ use smithay::{
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         output::{OutputHandler, OutputManagerState},
+        pointer_constraints::PointerConstraintsState,
+        relative_pointer::RelativePointerManagerState,
         selection::{
             SelectionHandler, SelectionSource, SelectionTarget,
             data_device::{
@@ -289,6 +291,15 @@ pub struct State {
     pub xwm: Option<X11Wm>,
     /// Text last put on (or read from) the X clipboard.
     pub x11_clipboard: Option<Arc<String>>,
+    /// The surface under the pointer and its root origin.
+    pub pointer_focus: Option<(WlSurface, Point<f64, Logical>)>,
+    /// The window the shell was told holds a pointer lock (0: none).
+    pub pointer_lock: u32,
+    /// The user ended a lock; constraints wait for their next click.
+    pub constraint_released: bool,
+    // Held only so their globals stay advertised.
+    _relative_pointer_state: RelativePointerManagerState,
+    _pointer_constraints_state: PointerConstraintsState,
 }
 
 impl State {
@@ -379,6 +390,11 @@ impl State {
             xwayland_shell_state,
             xwm: None,
             x11_clipboard: None,
+            pointer_focus: None,
+            pointer_lock: 0,
+            constraint_released: false,
+            _relative_pointer_state: RelativePointerManagerState::new::<Self>(dh),
+            _pointer_constraints_state: PointerConstraintsState::new::<Self>(dh),
         }
     }
 

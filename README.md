@@ -123,6 +123,11 @@ servers whose windows Din composites into its own:
   X11 apps fall back to a private Xvfb, managed and composited by
   `electron/native-display-worker.mts` (software rendering).
 
+The compositor also speaks relative-pointer and pointer-constraints, for
+mouse-look in games (Wayland or X11 via Xwayland): an app's pointer lock
+becomes DOM Pointer Lock on its window, Escape releases it, and the next click
+in the window lets the app take it again.
+
 Build both crates with `npm run build:native`. Without the compositor, every
 app runs on Xvfb; without din-fd, the compositor stays on the CPU path.
 `DIN_NATIVE_DISPLAY=x11` forces X and `DIN_COMPOSITOR_GPU=0` the CPU path,

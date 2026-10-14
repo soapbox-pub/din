@@ -963,7 +963,11 @@ type ShellMessage =
   | { type: 'focus'; id: number }
   | { type: 'raise'; id: number }
   | { type: 'close'; id: number }
-  | { type: 'motion'; id: number; x: number; y: number }
+  | { type: 'motion'; id: number; x: number; y: number; dx?: number; dy?: number }
+  /** Movement while the shell holds a pointer lock (Wayland only). */
+  | { type: 'relative'; id: number; dx: number; dy: number }
+  /** The shell's pointer lock ended (Wayland only). */
+  | { type: 'pointer-unlock'; id: number }
   | { type: 'button'; id: number; x: number; y: number; button: number; down: boolean }
   | { type: 'key'; keycode: number; down: boolean }
   | { type: 'leave' }

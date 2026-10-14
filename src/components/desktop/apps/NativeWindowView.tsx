@@ -12,6 +12,8 @@ import {
   sendNativeKey,
   sendNativeLeave,
   sendNativeMotion,
+  sendNativePointerUnlock,
+  sendNativeRelative,
   sendNativeWheel,
   setNativeFocus,
   setNativeGeometry,
@@ -44,6 +46,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const { windows } = useWindowManager();
   const { resize } = useWindowActions();
   const [title, setTitle] = useState(() => getNativeSurface(xid)?.title ?? '');
+  /** Whether the app holds a pointer lock, which the canvas mirrors. */
+  const lockedRef = useRef(false);
   const app = getApp(appId);
 
   /** Report where the canvas is (viewport) and how big its box is. */
@@ -100,6 +104,19 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       subscribeNativeDisplay((event) => {
         if (event.surface.id !== xid) return;
         if (event.type === 'title') setTitle(event.surface.title);
+        if (event.type === 'pointer-lock') {
+          lockedRef.current = event.locked;
+          const host = hostRef.current;
+          if (event.locked && host) {
+            void lockPointer(host).then((locked) => {
+              // Refused: the app is told the lock is over.
+              if (!locked && lockedRef.current) {
+                lockedRef.current = false;
+                sendNativePointerUnlock(xid);
+              }
+            });
+          } else if (!event.locked && document.pointerLockElement === host) document.exitPointerLock();
+        }
         const win = currentRef.current;
         if (event.type === 'configure' && win && !win.maximized && !win.snapped) {
           resize(windowId, {
@@ -125,6 +142,24 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     );
     return () => setTitlebar(null);
   }, [setTitlebar, title, app]);
+
+  // The lock ended on the shell's side (Escape, or focus went elsewhere):
+  // the app lets go too, until the user clicks back in.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !xid) return;
+    const onChange = () => {
+      if (document.pointerLockElement !== host && lockedRef.current) {
+        lockedRef.current = false;
+        sendNativePointerUnlock(xid);
+      }
+    };
+    document.addEventListener('pointerlockchange', onChange);
+    return () => {
+      document.removeEventListener('pointerlockchange', onChange);
+      if (document.pointerLockElement === host) document.exitPointerLock();
+    };
+  }, [xid]);
 
   // Wheel needs a non-passive listener to keep the page from scrolling.
   useEffect(() => {
@@ -157,8 +192,13 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         if (!event.currentTarget.hasPointerCapture(event.pointerId)) sendNativeLeave();
       }}
       onPointerMove={(event) => {
+        // Locked, the pointer stays put and only its movement counts.
+        if (document.pointerLockElement === event.currentTarget) {
+          sendNativeRelative(xid, event.movementX, event.movementY);
+          return;
+        }
         const [x, y] = localPoint(event.currentTarget, event);
-        sendNativeMotion(xid, x, y);
+        sendNativeMotion(xid, x, y, { dx: event.movementX, dy: event.movementY });
       }}
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -185,6 +225,26 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       }}
     />
   );
+}
+
+/**
+ * Mirror an app's pointer lock with the DOM's: the cursor hides and the
+ * canvas gets raw movement, unaccelerated where the platform offers it, as
+ * games expect. Resolves whether the lock took.
+ */
+async function lockPointer(host: HTMLElement): Promise<boolean> {
+  if (document.pointerLockElement === host) return true;
+  try {
+    await host.requestPointerLock({ unadjustedMovement: true });
+    return true;
+  } catch {
+    try {
+      await host.requestPointerLock();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 /** A pointer position relative to an element, in its untransformed pixels. */

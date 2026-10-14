@@ -45,7 +45,9 @@ export type NativeDisplayEvent =
   | { type: 'close'; surface: NativeSurface }
   | { type: 'title'; surface: NativeSurface }
   | { type: 'configure'; surface: NativeSurface }
-  | { type: 'activate'; surface: NativeSurface };
+  | { type: 'activate'; surface: NativeSurface }
+  /** The app locked the pointer (mouse-look) or let it go. */
+  | { type: 'pointer-lock'; surface: NativeSurface; locked: boolean };
 
 interface WindowInfo {
   id: number;
@@ -76,6 +78,7 @@ type WorkerMessage =
   | { type: 'title'; id: number; title: string }
   | { type: 'configure'; id: number; x: number; y: number; width: number; height: number }
   | { type: 'activate'; id: number }
+  | { type: 'pointer-lock'; id: number; locked: boolean }
   /** `source` names the server (X or Wayland) that wants the ack. */
   | { type: 'frames'; source?: string; updates: FrameUpdate[] }
   | { type: 'cursor'; width: number; height: number; xhot: number; yhot: number; data: Uint8Array<ArrayBuffer> }
@@ -284,6 +287,11 @@ function onMessage(message: WorkerMessage): void {
       if (surface) emit({ type: 'activate', surface });
       return;
     }
+    case 'pointer-lock': {
+      const surface = surfaces.get(message.id);
+      if (surface) emit({ type: 'pointer-lock', surface, locked: message.locked === true });
+      return;
+    }
     case 'cursor':
       return setCursor(message);
     case 'clipboard':
@@ -463,8 +471,30 @@ let keyQueue: Promise<void> = Promise.resolve();
 /** DOM mouse button -> X button. */
 const BUTTONS = [1, 2, 3, 8, 9];
 
-export function sendNativeMotion(id: number, x: number, y: number): void {
-  send({ type: 'motion', id, x, y });
+/**
+ * The pointer moved to (x, y). `movement` is the DOM's own movementX/Y,
+ * which apps that read relative motion get as is.
+ */
+export function sendNativeMotion(
+  id: number,
+  x: number,
+  y: number,
+  movement?: { dx: number; dy: number },
+): void {
+  send({ type: 'motion', id, x, y, ...movement });
+}
+
+/** Movement while the window holds a pointer lock: the pointer stays put. */
+export function sendNativeRelative(id: number, dx: number, dy: number): void {
+  if (dx !== 0 || dy !== 0) send({ type: 'relative', id, dx, dy });
+}
+
+/**
+ * The window's pointer lock ended (Escape, or focus went elsewhere): the app
+ * gets it back only on the user's next click in the window.
+ */
+export function sendNativePointerUnlock(id: number): void {
+  send({ type: 'pointer-unlock', id });
 }
 
 export function sendNativeButton(

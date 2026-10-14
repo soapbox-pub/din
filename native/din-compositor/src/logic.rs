@@ -235,6 +235,7 @@ impl State {
     /// Announce, then render and send whatever changed.
     pub fn flush(&mut self) {
         self.announce();
+        self.report_pointer_lock();
         // With no renderer to draw for, damage just accumulates; apps wait
         // on their frame callbacks meanwhile, which is right for an unseen
         // window.
@@ -548,14 +549,45 @@ impl State {
         (local, None)
     }
 
-    fn motion(&mut self, id: u32, x: f64, y: f64) -> bool {
-        let (location, focus) = self.hit(id, x, y);
+    /// Move the pointer to a point the shell reports. `delta` is the DOM's
+    /// own movement (relative motion for apps that want it); without one,
+    /// it's the distance moved.
+    fn motion(&mut self, id: u32, x: f64, y: f64, delta: Option<(f64, f64)>) -> bool {
+        let (location, mut focus) = self.hit(id, x, y);
         let hit = focus.is_some();
         let Some(pointer) = self.seat.get_pointer() else { return hit };
+        let previous = pointer.current_location();
+        let (dx, dy) = delta.unwrap_or((location.x - previous.x, location.y - previous.y));
+        let location = match self.constrain(location) {
+            // Locked: the pointer stays put; apps get the movement only.
+            None => {
+                self.relative_motion(dx, dy);
+                pointer.frame(self);
+                return hit;
+            }
+            Some(clamped) => {
+                // Confined: it stays on the confining surface, however far
+                // the real pointer goes.
+                if clamped != location {
+                    focus = self.pointer_focus.clone();
+                }
+                clamped
+            }
+        };
         let event = MotionEvent { location, serial: SERIAL_COUNTER.next_serial(), time: self.now_ms() };
-        pointer.motion(self, focus, &event);
+        pointer.motion(self, focus.clone(), &event);
+        self.pointer_focus = focus;
+        self.relative_motion(dx, dy);
         pointer.frame(self);
+        self.activate_constraint();
         hit
+    }
+
+    /// Movement while the shell holds a pointer lock: relative only.
+    fn locked_motion(&mut self, dx: f64, dy: f64) {
+        let Some(pointer) = self.seat.get_pointer() else { return };
+        self.relative_motion(dx, dy);
+        pointer.frame(self);
     }
 
     fn dismiss_menus(&mut self) {
@@ -568,7 +600,7 @@ impl State {
     }
 
     fn button(&mut self, id: u32, x: f64, y: f64, button: u32, down: bool) {
-        let hit = self.motion(id, x, y);
+        let hit = self.motion(id, x, y, None);
         // A click on the shield outside every popup closes the open menus.
         if id == 0 && !hit {
             if down {
@@ -604,6 +636,9 @@ impl State {
         };
         pointer.button(self, &event);
         pointer.frame(self);
+        if down {
+            self.constraint_click();
+        }
     }
 
     fn leave(&mut self) {
@@ -611,6 +646,7 @@ impl State {
         let location = pointer.current_location();
         let event = MotionEvent { location, serial: SERIAL_COUNTER.next_serial(), time: self.now_ms() };
         pointer.motion(self, None, &event);
+        self.pointer_focus = None;
         pointer.frame(self);
     }
 
@@ -659,8 +695,11 @@ impl State {
             "focus" => self.set_focus(id),
             "close" => self.close(id),
             "motion" => {
-                self.motion(id, num("x"), num("y"));
+                let delta = message.get("dx").is_some().then(|| (num("dx"), num("dy")));
+                self.motion(id, num("x"), num("y"), delta);
             }
+            "relative" => self.locked_motion(num("dx"), num("dy")),
+            "pointer-unlock" => self.release_constraint(),
             "button" => self.button(id, num("x"), num("y"), num("button") as u32, message["down"] == true),
             "key" => self.key(num("keycode") as u32, message["down"] == true),
             "leave" => self.leave(),

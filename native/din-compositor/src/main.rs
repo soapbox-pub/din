@@ -13,6 +13,7 @@
 //! Spawned by electron/wayland-bridge.mts; exits when stdin closes.
 
 mod canvas;
+mod constraints;
 mod frames;
 mod gpu;
 mod logic;
