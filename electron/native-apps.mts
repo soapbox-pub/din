@@ -1,37 +1,28 @@
 // Ordinary Linux apps on the Din desktop.
 //
-// Din's own apps live inside its single Electron window. Native apps can't:
-// they're separate X11 clients with their own toplevel windows. Rather than
-// try to embed them (XEmbed reparenting is a well-known source of misery -
-// broken menus, wrong sizes, crashed clients taking the shell's window tree
-// with them), Din leaves them to the host window manager, which stacks them
-// above the shell exactly as it would above any other window. Din then acts
-// as their taskbar: it lists installed apps in the launcher and the Dock,
-// starts them, and tracks/raises/minimizes/closes their windows over EWMH
-// (see x11.mts).
+// Native apps run on Din's embedded display (native-display.mts): a private
+// X server whose windows Din composites into its own, so a Linux app gets a
+// Din window like any other - chrome, Dock tile, Alt+Tab, wobbly and all.
 //
-// Three jobs live here:
+// Two jobs live here:
 //
 //   1. Discovery - parse XDG desktop entries into launchable app records,
 //      with icons resolved through the icon-theme spec and inlined as data
 //      URLs (the shell's CSP allows `img-src data:`, and adding a custom
 //      scheme for icons would mean widening it).
-//   2. Launching - spawn a desktop entry's Exec line, detached from the
-//      shell, remembering the pid so its windows can be matched back to it.
-//   3. Window tracking - keep a live model of the session's toplevel
-//      windows, matched to the app that owns them, pushed to the shell
-//      renderer on every change.
+//   2. Launching - spawn a desktop entry's Exec line onto the embedded
+//      display, detached from the shell, remembering the pid so its windows
+//      can be matched back to the app that owns them.
 //
-// Everything degrades to "unavailable" off X11 (a Wayland-only session, or
-// Aladdin's cage, which has no window manager at all and shows exactly one
-// window by design).
+// Everything degrades to "unavailable" where the embedded display can't run
+// (no Xvfb installed).
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ipcMain, nativeImage } from 'electron';
-import { ICONIC_STATE, X11Client, type WindowId } from './x11.mts';
+import { embeddedDisplay, embeddedDisplayEnv } from './native-display.mts';
 
 /** An installed native application, as the shell sees it. */
 export interface NativeApp {
@@ -48,18 +39,6 @@ export interface NativeApp {
   categories: string[];
   /** Extra search terms from the entry's Keywords. */
   keywords: string[];
-}
-
-/** One toplevel window of a native app. */
-export interface NativeWindow {
-  /** X11 window id; the handle for activate/minimize/close. */
-  id: number;
-  /** The owning app's registry id, when it could be matched. */
-  appId: string | null;
-  title: string;
-  minimized: boolean;
-  /** Whether this is the session's focused window. */
-  active: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -617,54 +596,14 @@ async function resolveIcon(iconName: string | null): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// The live app + window model
+// Launching and window matching
 // ---------------------------------------------------------------------------
 
 /** Registry id prefix, keeping native apps clear of Din's own app ids. */
 const NATIVE_PREFIX = 'native:';
 
-/** How long to coalesce window changes before pushing to the renderer. */
-const PUSH_DEBOUNCE_MS = 60;
-
 /** Re-scan installed apps no more often than this. */
 const SCAN_TTL_MS = 30_000;
-
-/** Interned atoms, resolved once per connection. */
-interface Atoms {
-  clientList: number;
-  activeWindow: number;
-  netWmName: number;
-  wmName: number;
-  wmClass: number;
-  netWmPid: number;
-  netWmState: number;
-  stateHidden: number;
-  stateSkipTaskbar: number;
-  windowType: number;
-  typeNormal: number;
-  typeDialog: number;
-  utf8String: number;
-  wmChangeState: number;
-  closeWindow: number;
-}
-
-/** What Din tracks about one toplevel window. */
-interface TrackedWindow {
-  id: WindowId;
-  title: string;
-  wmClass: string[];
-  pid: number | null;
-  minimized: boolean;
-  /** False for desktops, docks, panels and anything asking to be skipped. */
-  taskbar: boolean;
-}
-
-let client: X11Client | null = null;
-let atoms: Atoms | null = null;
-let tracked = new Map<WindowId, TrackedWindow>();
-let activeWindow: WindowId = 0;
-let pushTimer: NodeJS.Timeout | null = null;
-let pushWindows: (() => void) | null = null;
 
 /** Desktop entries, cached with a TTL so newly installed apps show up. */
 let entryCache: { at: number; entries: Map<string, DesktopEntry> } | null = null;
@@ -688,15 +627,10 @@ function entries(): Promise<Map<string, DesktopEntry>> {
     entryCache = { at: Date.now(), entries: scanned };
     wmClassIndex = buildWmClassIndex(scanned);
     entryScan = null;
-    // Windows read before the first scan landed have no app id yet; now that
-    // the index exists they can be matched, so re-push.
-    schedulePush();
     return scanned;
   });
   return entryScan;
 }
-
-
 
 /**
  * Index the hints that can tie a window's WM_CLASS back to a desktop entry,
@@ -760,8 +694,9 @@ const TERMINALS = [
 ];
 
 /**
- * Launch an app by registry id. Throws when the id is unknown, so the shell
- * can surface a real error instead of a silently dead click.
+ * Launch an app by registry id onto Din's embedded display. Throws when the
+ * id is unknown, so the shell can surface a real error instead of a silently
+ * dead click.
  */
 async function launch(appId: string): Promise<void> {
   const desktopId = appId.startsWith(NATIVE_PREFIX)
@@ -769,6 +704,8 @@ async function launch(appId: string): Promise<void> {
     : appId;
   const entry = (await entries()).get(desktopId);
   if (!entry) throw new Error(`Unknown application: ${appId}`);
+  const display = await embeddedDisplay();
+  if (!display) throw new Error('The embedded display is unavailable');
 
   let argv = entry.argv;
   if (entry.terminal) {
@@ -777,10 +714,10 @@ async function launch(appId: string): Promise<void> {
     argv = [...terminal, ...argv];
   }
 
-  // Hand the app a clean environment: Electron's own Node/Chromium variables
-  // would otherwise leak into every app the user starts (ELECTRON_RUN_AS_NODE
-  // in particular turns an Electron-based app into a bare Node process).
-  const env = { ...process.env };
+  // Electron's own Node/Chromium variables would otherwise leak into every
+  // app the user starts (ELECTRON_RUN_AS_NODE in particular turns an
+  // Electron-based app into a bare Node process).
+  const env = embeddedDisplayEnv(display);
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.NODE_OPTIONS;
   delete env.CHROME_DESKTOP;
@@ -791,8 +728,7 @@ async function launch(appId: string): Promise<void> {
     detached: true,
     stdio: 'ignore',
   });
-  // Detached and unreferenced: the app outlives Din's own lifetime and never
-  // holds the event loop open.
+  // Detached and unreferenced: never holds the event loop open.
   child.unref();
   child.on('error', () => {
     if (child.pid) launchedPids.delete(child.pid);
@@ -825,331 +761,50 @@ function parentPid(pid: number): number | null {
   }
 }
 
-/** Whether a pid is Din itself (its window must never appear in its own Dock). */
-function isOwnProcess(pid: number | null): boolean {
-  let current = pid;
-  for (let depth = 0; current && current > 1 && depth < 12; depth += 1) {
-    if (current === process.pid) return true;
-    current = parentPid(current);
-  }
-  return false;
-}
-
-/** Match a tracked window to an installed app. */
-function appIdForWindow(window: TrackedWindow): string | null {
-  const byPid = appIdForPid(window.pid);
+/**
+ * The installed app a window belongs to: by launched-pid ancestry first
+ * (exact), then by WM_CLASS (a good guess for apps that re-exec or hand off
+ * to an already-running instance).
+ */
+async function appIdForWindow(pid: number | null, wmClass: string[]): Promise<string | null> {
+  const byPid = appIdForPid(pid);
   if (byPid) return byPid;
-  for (const name of window.wmClass) {
+  await entries();
+  for (const name of wmClass) {
     const appId = wmClassIndex.get(name.toLowerCase());
     if (appId) return appId;
   }
   return null;
 }
 
-/** The window list handed to the shell. */
-function listWindows(): NativeWindow[] {
-  const out: NativeWindow[] = [];
-  for (const window of tracked.values()) {
-    if (!window.taskbar) continue;
-    out.push({
-      id: window.id,
-      appId: appIdForWindow(window),
-      title: window.title,
-      minimized: window.minimized,
-      active: window.id === activeWindow,
-    });
-  }
-  return out;
-}
-
-/** Read everything Din tracks about a window. */
-async function readWindow(id: WindowId): Promise<TrackedWindow | null> {
-  const x = client;
-  const a = atoms;
-  if (!x || !a) return null;
-  try {
-    const [netName, wmName, wmClass, pids, state, type] = await Promise.all([
-      x.getText(id, a.netWmName, a.utf8String),
-      x.getText(id, a.wmName, a.utf8String),
-      x.getText(id, a.wmClass, a.utf8String),
-      x.getCardinals(id, a.netWmPid, 1),
-      x.getCardinals(id, a.netWmState, 64),
-      x.getCardinals(id, a.windowType, 8),
-    ]);
-    const pid = pids[0] ?? null;
-    // WM_CLASS is a pair of NUL-terminated strings: instance, then class.
-    const classes = (wmClass ?? '').split('\0').filter(Boolean);
-    // An absent type means "normal" per EWMH. Anything that isn't a normal
-    // window or a dialog is chrome (desktop, dock, panel, splash) and has no
-    // place in a taskbar.
-    const taskbarType =
-      type.length === 0 || type.some((t) => t === a.typeNormal || t === a.typeDialog);
-    return {
-      id,
-      title: (netName ?? wmName ?? '').replace(/\0.*$/, ''),
-      wmClass: classes,
-      pid,
-      minimized: state.includes(a.stateHidden),
-      taskbar: taskbarType && !state.includes(a.stateSkipTaskbar) && !isOwnProcess(pid),
-    };
-  } catch {
-    // The window died between being listed and being read.
-    return null;
-  }
-}
-
-/** Coalesce a burst of X events into one push to the renderer. */
-function schedulePush(): void {
-  if (pushTimer) return;
-  pushTimer = setTimeout(() => {
-    pushTimer = null;
-    pushWindows?.();
-  }, PUSH_DEBOUNCE_MS);
-}
-
-/** Reconcile the tracked set against _NET_CLIENT_LIST. */
-async function refreshWindowList(): Promise<void> {
-  const x = client;
-  const a = atoms;
-  if (!x || !a) return;
-  const ids = await x.getCardinals(x.root, a.clientList, 4096);
-  const live = new Set(ids);
-
-  let changed = false;
-  for (const id of tracked.keys()) {
-    if (!live.has(id)) {
-      tracked.delete(id);
-      changed = true;
-    }
-  }
-  for (const id of ids) {
-    if (tracked.has(id)) continue;
-    const window = await readWindow(id);
-    if (!window) continue;
-    // Watch it before recording it: title and minimize state change often,
-    // and a missed early event would leave a stale tile in the Dock.
-    x.watchProperties(id);
-    tracked.set(id, window);
-    changed = true;
-  }
-  if (changed) schedulePush();
-}
-
-/** Re-read one window's properties after a PropertyNotify. */
-async function refreshWindow(id: WindowId): Promise<void> {
-  if (!tracked.has(id)) return;
-  const window = await readWindow(id);
-  if (!window) {
-    tracked.delete(id);
-    schedulePush();
-    return;
-  }
-  const previous = tracked.get(id);
-  tracked.set(id, window);
-  if (
-    !previous ||
-    previous.title !== window.title ||
-    previous.minimized !== window.minimized ||
-    previous.taskbar !== window.taskbar
-  ) {
-    schedulePush();
-  }
-}
-
-/**
- * Whether an EWMH-speaking window manager is running.
- *
- * The spec's own handshake: the root window's _NET_SUPPORTING_WM_CHECK points
- * at a window the window manager owns, whose copy of the same property points
- * back at itself. Din's whole approach here rests on there being a window
- * manager to hand native windows to - production Din runs as the only window
- * on a bare X session, where there is none, and everything below (client
- * lists, iconifying, activation) would silently do nothing.
- */
-async function hasWindowManager(x: X11Client): Promise<boolean> {
-  try {
-    const check = await x.atom('_NET_SUPPORTING_WM_CHECK');
-    const [owner] = await x.getCardinals(x.root, check, 1);
-    if (!owner) return false;
-    const [confirm] = await x.getCardinals(owner, check, 1);
-    return confirm === owner;
-  } catch {
-    return false;
-  }
-}
-
-/** Connect to X11 and start tracking windows. Safe to call repeatedly. */
-async function startTracking(): Promise<boolean> {
-  if (client?.connected) return true;
-  const x = await X11Client.connect();
-  if (!x) return false;
-  if (!(await hasWindowManager(x))) {
-    // Leave the socket closed; a later call retries, so a window manager
-    // started after Din (or a session Din is not itself the shell of) is
-    // picked up on the next look.
-    x.close();
-    return false;
-  }
-
-  const name = (n: string) => x.atom(n);
-  const [
-    clientList, activeWin, netWmName, wmName, wmClass, netWmPid, netWmState,
-    stateHidden, stateSkipTaskbar, windowType, typeNormal, typeDialog,
-    utf8String, wmChangeState, closeWindow,
-  ] = await Promise.all([
-    name('_NET_CLIENT_LIST'), name('_NET_ACTIVE_WINDOW'), name('_NET_WM_NAME'),
-    name('WM_NAME'), name('WM_CLASS'), name('_NET_WM_PID'), name('_NET_WM_STATE'),
-    name('_NET_WM_STATE_HIDDEN'), name('_NET_WM_STATE_SKIP_TASKBAR'),
-    name('_NET_WM_WINDOW_TYPE'), name('_NET_WM_WINDOW_TYPE_NORMAL'),
-    name('_NET_WM_WINDOW_TYPE_DIALOG'), name('UTF8_STRING'),
-    name('WM_CHANGE_STATE'), name('_NET_CLOSE_WINDOW'),
-  ]);
-
-  client = x;
-  atoms = {
-    clientList, activeWindow: activeWin, netWmName, wmName, wmClass, netWmPid,
-    netWmState, stateHidden, stateSkipTaskbar, windowType, typeNormal,
-    typeDialog, utf8String, wmChangeState, closeWindow,
-  };
-
-  x.onPropertyNotify = (event) => {
-    const a = atoms;
-    if (!a) return;
-    if (event.window === x.root) {
-      if (event.atom === a.clientList) void refreshWindowList();
-      else if (event.atom === a.activeWindow) void refreshActive();
-      return;
-    }
-    if (
-      event.atom === a.netWmName ||
-      event.atom === a.wmName ||
-      event.atom === a.netWmState ||
-      event.atom === a.windowType
-    ) {
-      void refreshWindow(event.window);
-    }
-  };
-  x.onClose = () => {
-    client = null;
-    atoms = null;
-    tracked = new Map();
-    activeWindow = 0;
-    schedulePush();
-  };
-
-  x.watchRoot();
-  // Warm the desktop-entry scan: window -> app matching reads its index, and
-  // the first windows arrive from the refresh below.
-  void entries();
-  await refreshWindowList();
-  await refreshActive();
-  return true;
-}
-
-/** Re-read which window the window manager considers focused. */
-async function refreshActive(): Promise<void> {
-  const x = client;
-  const a = atoms;
-  if (!x || !a) return;
-  const [next] = await x.getCardinals(x.root, a.activeWindow, 1);
-  const resolved = next ?? 0;
-  if (resolved !== activeWindow) {
-    activeWindow = resolved;
-    schedulePush();
-  }
-}
-
-/** Raise a window and give it the keyboard focus, un-minimizing it first. */
-function activate(id: WindowId): void {
-  const x = client;
-  const a = atoms;
-  if (!x || !a || !tracked.has(id)) return;
-  // Source indication 2 = "pager", which is what Din is here: window managers
-  // trust pager requests over an application's own focus grabs.
-  x.sendClientMessage(id, a.activeWindow, [2, x.lastTimestamp, 0]);
-}
-
-/** Minimize (iconify) a window, ICCCM style. */
-function minimize(id: WindowId): void {
-  const x = client;
-  const a = atoms;
-  if (!x || !a || !tracked.has(id)) return;
-  x.sendClientMessage(id, a.wmChangeState, [ICONIC_STATE]);
-}
-
-/** Ask a window to close (the app may still prompt to save). */
-function closeWindow(id: WindowId): void {
-  const x = client;
-  const a = atoms;
-  if (!x || !a || !tracked.has(id)) return;
-  x.sendClientMessage(id, a.closeWindow, [x.lastTimestamp, 2]);
-}
-
-/** Validate a renderer-supplied window id against the tracked set. */
-function requireWindow(id: unknown): WindowId {
-  if (typeof id !== 'number' || !Number.isInteger(id) || !tracked.has(id)) {
-    throw new Error('Unknown window');
-  }
-  return id;
-}
-
 /**
  * Register the native-app IPC surface (window.nativeApps in the preload).
  *
- * Tracking starts lazily, on the shell's first call, so a session with no X
- * server never opens a socket - and so the cost isn't paid during boot.
+ * The embedded display starts on the shell's first call, so the cost isn't
+ * paid during boot, and a machine without Xvfb never tries.
  */
 export function registerNativeAppHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
-  sendToShell: (channel: string, payload?: unknown) => void;
 }): void {
-  const { assertShellSender, sendToShell } = options;
-
-  pushWindows = () => sendToShell('native-apps:windows', listWindows());
+  const { assertShellSender } = options;
 
   ipcMain.handle('native-apps:list', async (event) => {
     assertShellSender(event);
-    const available = await startTracking();
-    // Without a window manager Din can list apps but can't track or steer
-    // their windows, which makes for a broken Dock - so the whole feature
-    // reports unavailable rather than half-working.
+    const available = (await embeddedDisplay()) !== null;
     return { available, apps: available ? await listApps() : [] };
-  });
-
-  ipcMain.handle('native-apps:windows', async (event) => {
-    assertShellSender(event);
-    if (!(await startTracking())) return [];
-    return listWindows();
   });
 
   ipcMain.handle('native-apps:launch', async (event, appId) => {
     assertShellSender(event);
     if (typeof appId !== 'string') throw new Error('An app id is required');
-    await startTracking();
     await launch(appId);
   });
 
-  ipcMain.handle('native-apps:activate', (event, id) => {
+  ipcMain.handle('native-apps:resolve', async (event, pid, wmClass) => {
     assertShellSender(event);
-    activate(requireWindow(id));
+    const classes = Array.isArray(wmClass)
+      ? wmClass.filter((c): c is string => typeof c === 'string').slice(0, 4)
+      : [];
+    return appIdForWindow(Number.isInteger(pid) ? pid : null, classes);
   });
-
-  ipcMain.handle('native-apps:minimize', (event, id) => {
-    assertShellSender(event);
-    minimize(requireWindow(id));
-  });
-
-  ipcMain.handle('native-apps:close', (event, id) => {
-    assertShellSender(event);
-    closeWindow(requireWindow(id));
-  });
-}
-
-/** Close the X connection (shutdown). */
-export function stopNativeAppTracking(): void {
-  if (pushTimer) clearTimeout(pushTimer);
-  pushTimer = null;
-  client?.close();
-  client = null;
-  atoms = null;
 }

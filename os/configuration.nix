@@ -83,9 +83,10 @@ let
   # nmcli for the Settings app's WiFi bridge, brightnessctl + gammastep for the
   # Settings/menu-bar brightness bridge (backlight + night light), wpctl
   # (wireplumber) for the Settings sound bridge's device/stream control and
-  # pw-play (pipewire) for its test tone.
+  # pw-play (pipewire) for its test tone, and Xvfb for the embedded display
+  # native Linux apps run on (electron/native-display.mts).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.xorg.xvfb}/bin:$PATH
     exec ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.mts \
       --ozone-platform=wayland ${extraFlags}

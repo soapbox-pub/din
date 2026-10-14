@@ -1,21 +1,15 @@
-// A minimal X11 client, spoken over the wire, for EWMH window management.
+// A minimal X11 client, spoken over the wire.
 //
-// Din needs to see and steer the windows of ordinary Linux apps (see
-// native-apps.mts): which ones exist, what they're called, which is focused,
-// and the ability to raise/minimize/close them. That is exactly the
-// EWMH/ICCCM surface a taskbar uses.
+// Din's embedded display (native-display-worker.mts) is a window manager and
+// compositor for a private X server, and talks to it with this: connection
+// setup with MIT-MAGIC-COOKIE-1 auth, sequenced requests with promised
+// replies, InternAtom/GetProperty/QueryExtension helpers, and a raw event
+// hook. The requests themselves are encoded in x11-requests.mts.
 //
-// Why raw protocol instead of shelling out to wmctrl/xdotool, as the wifi and
-// display bridges shell out to nmcli/xrandr: a taskbar needs a live event
-// stream, not a poll loop, and neither tool is reliably installed (this box
-// has xdotool but no wmctrl). Talking to the display socket directly costs
-// ~300 lines, adds no runtime dependency - nothing to add to Aladdin's Nix
-// closure later - and gives us PropertyNotify events for free.
-//
-// The scope is deliberately tiny: connection setup with MIT-MAGIC-COOKIE-1
-// auth, InternAtom, GetProperty, ChangeWindowAttributes (to select events)
-// and SendEvent (to post client messages to the root window). No drawing, no
-// extensions, no XCB-style cookies.
+// Why raw protocol instead of a native binding (xcb via an addon): no
+// Electron-ABI rebuild in the Nix build, no runtime dependency, nothing to
+// add to Aladdin's closure, and the protocol surface a compositor needs is
+// small. Replies arrive on the event loop like any other socket data.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -29,23 +23,15 @@ import path from 'node:path';
 const OP_CHANGE_WINDOW_ATTRIBUTES = 2;
 const OP_INTERN_ATOM = 16;
 const OP_GET_PROPERTY = 20;
-const OP_SEND_EVENT = 25;
+const OP_QUERY_EXTENSION = 98;
 
 /** Event codes (the low 7 bits of an event's first byte). */
 const EVENT_PROPERTY_NOTIFY = 28;
-
-/** Event mask bits. */
-const SUBSTRUCTURE_NOTIFY = 1 << 19;
-const SUBSTRUCTURE_REDIRECT = 1 << 20;
-const PROPERTY_CHANGE = 1 << 22;
+/** XGE GenericEvent: variable length, like a reply. */
+const EVENT_GENERIC = 35;
 
 /** CW value-mask bit for the event mask. */
 const CW_EVENT_MASK = 1 << 11;
-
-/** ICCCM WM_STATE values. */
-export const WITHDRAWN_STATE = 0;
-export const NORMAL_STATE = 1;
-export const ICONIC_STATE = 3;
 
 /** A window id. Plain number - X resource ids are 29-bit. */
 export type WindowId = number;
@@ -116,9 +102,9 @@ function parseXAuthority(file: string): XAuthEntry[] {
  * 256 = FamilyLocal, or FamilyLocalHost). Match loosely: any cookie for the
  * right display number, preferring a local-family entry.
  */
-function magicCookie(displayNumber: string): Buffer | null {
+function magicCookie(displayNumber: string, xauthority?: string): Buffer | null {
   const file =
-    process.env.XAUTHORITY ?? path.join(os.homedir(), '.Xauthority');
+    xauthority ?? process.env.XAUTHORITY ?? path.join(os.homedir(), '.Xauthority');
   const entries = parseXAuthority(file).filter(
     (e) => e.name === 'MIT-MAGIC-COOKIE-1' && e.display === displayNumber,
   );
@@ -141,14 +127,6 @@ interface Pending {
   reject: (error: Error) => void;
 }
 
-/** Events surfaced to callers. */
-export interface PropertyNotifyEvent {
-  window: WindowId;
-  atom: number;
-  /** 0 = NewValue, 1 = Deleted. */
-  state: number;
-}
-
 /**
  * A connection to the X server.
  *
@@ -161,7 +139,13 @@ export interface PropertyNotifyEvent {
  */
 export class X11Client {
   private socket: net.Socket;
-  private buffer: Buffer = Buffer.alloc(0);
+  /**
+   * Unparsed input, as the socket delivered it. Kept as a chunk list rather
+   * than one growing Buffer: a window-sized GetImage reply arrives in dozens
+   * of 64 KiB reads, and re-concatenating on each would be quadratic.
+   */
+  private chunks: Buffer[] = [];
+  private queued = 0;
   private sequence = 0;
   private pending = new Map<number, Pending>();
   private atoms = new Map<string, Promise<number>>();
@@ -170,23 +154,38 @@ export class X11Client {
   /** The root window of screen 0. */
   root: WindowId;
 
-  /** Called for every PropertyNotify on a window we've selected events on. */
-  onPropertyNotify: ((event: PropertyNotifyEvent) => void) | null = null;
-
   /**
    * The most recent server timestamp seen on an event, or 0 (CurrentTime).
    *
-   * EWMH messages that change focus want the timestamp of the user action
-   * behind them, so window managers can apply focus-stealing prevention.
-   * Din's requests come from clicks it observes in its own renderer, whose
-   * timestamps are not X timestamps - but every PropertyNotify carries one,
-   * and the root window is chatty, so the last one seen is a close enough
-   * "now" for mutter et al. to accept the request.
+   * ICCCM messages like WM_TAKE_FOCUS want the timestamp of the user action
+   * behind them. Din's input comes from its own renderer, whose timestamps
+   * are not X timestamps - but every PropertyNotify carries one, and the
+   * root window is chatty, so the last one seen is a close enough "now".
    */
   lastTimestamp = 0;
 
   /** Called once when the connection drops (server exit, socket error). */
   onClose: (() => void) | null = null;
+
+  /**
+   * Called for every event with its code (SendEvent bit masked off) and the
+   * raw packet.
+   */
+  onEvent: ((code: number, packet: Buffer) => void) | null = null;
+
+  /** Errors from no-reply requests: (error code, major opcode, minor opcode). */
+  onError: ((code: number, major: number, minor: number) => void) | null = null;
+
+  /** Visual and depth of the root window, from the setup reply. */
+  rootDepth = 24;
+  /** Width and height of screen 0 in pixels. */
+  screenWidth = 0;
+  screenHeight = 0;
+
+  /** Next client-allocated resource id (windows, damages, ...). */
+  private nextResource = 1;
+  private resourceBase = 0;
+  private resourceMask = 0;
 
   private constructor(socket: net.Socket, root: WindowId) {
     this.socket = socket;
@@ -203,8 +202,10 @@ export class X11Client {
    * Only unix-socket displays are supported - Din runs on the machine it
    * manages, and a remote X server has no local apps to list.
    */
-  static async connect(): Promise<X11Client | null> {
-    const display = process.env.DISPLAY;
+  static async connect(
+    options: { display?: string; xauthority?: string } = {},
+  ): Promise<X11Client | null> {
+    const display = options.display ?? process.env.DISPLAY;
     if (!display) return null;
     // ":1", "localhost:1.0", ":1.0" -> display number "1".
     const match = /^[^:]*:(\d+)(?:\.\d+)?$/.exec(display);
@@ -213,7 +214,7 @@ export class X11Client {
     const socketPath = `/tmp/.X11-unix/X${displayNumber}`;
     if (!fs.existsSync(socketPath)) return null;
 
-    const cookie = magicCookie(displayNumber);
+    const cookie = magicCookie(displayNumber, options.xauthority);
     const socket = await new Promise<net.Socket | null>((resolve) => {
       const s = net.connect(socketPath);
       s.once('connect', () => resolve(s));
@@ -245,12 +246,27 @@ export class X11Client {
       socket.destroy();
       return null;
     }
-    const root = parseRootWindow(setup);
-    if (root === null) {
+    const screen = parseScreen(setup);
+    if (screen === null) {
       socket.destroy();
       return null;
     }
-    return new X11Client(socket, root);
+    const client = new X11Client(socket, screen.root);
+    client.rootDepth = screen.depth;
+    client.screenWidth = screen.width;
+    client.screenHeight = screen.height;
+    client.resourceBase = setup.readUInt32LE(12);
+    client.resourceMask = setup.readUInt32LE(16);
+    return client;
+  }
+
+  /** Allocate a fresh resource id for a window, damage, etc. */
+  allocateId(): number {
+    // The mask's lowest set bit is the id increment.
+    const step = this.resourceMask & -this.resourceMask;
+    const id = (this.resourceBase | ((this.nextResource * step) & this.resourceMask)) >>> 0;
+    this.nextResource += 1;
+    return id;
   }
 
   /** Whether the connection is still usable. */
@@ -274,7 +290,7 @@ export class X11Client {
   }
 
   /** Send a request; resolve with its reply, or reject on an X error. */
-  private request(opcode: number, data: number, body: Buffer): Promise<Buffer> {
+  request(opcode: number, data: number, body: Buffer): Promise<Buffer> {
     if (this.closed) return Promise.reject(new Error('X11 connection closed'));
     const seq = this.nextSequence();
     const header = Buffer.alloc(4);
@@ -288,7 +304,7 @@ export class X11Client {
   }
 
   /** Send a request that produces no reply (errors arrive asynchronously). */
-  private requestNoReply(opcode: number, data: number, body: Buffer): void {
+  requestNoReply(opcode: number, data: number, body: Buffer): void {
     if (this.closed) return;
     this.nextSequence();
     const header = Buffer.alloc(4);
@@ -390,57 +406,71 @@ export class X11Client {
     this.requestNoReply(OP_CHANGE_WINDOW_ATTRIBUTES, 0, body);
   }
 
-  /** Ask the server to report property changes on a window. */
-  watchProperties(window: WindowId): void {
-    this.selectInput(window, PROPERTY_CHANGE);
-  }
-
-  /** Watch the root window for both its own properties and child changes. */
-  watchRoot(): void {
-    this.selectInput(this.root, PROPERTY_CHANGE | SUBSTRUCTURE_NOTIFY);
-  }
-
   /**
-   * Post a ClientMessage to the root window - how EWMH asks the window
-   * manager to do something (activate, close, iconify). `data` is up to five
-   * 32-bit words; the rest are zero-filled.
+   * Look up an extension: its major opcode and first event code, or null
+   * when the server doesn't have it.
    */
-  sendClientMessage(window: WindowId, type: number, data: number[]): void {
-    const event = Buffer.alloc(32);
-    event.writeUInt8(33, 0); // ClientMessage
-    event.writeUInt8(32, 1); // format
-    event.writeUInt16LE(0, 2); // sequence (ignored)
-    event.writeUInt32LE(window, 4);
-    event.writeUInt32LE(type, 8);
-    for (let i = 0; i < 5; i += 1) {
-      // >>> 0: timestamps and ids are conceptually unsigned 32-bit, but
-      // arrive here as JS numbers that may have gone negative.
-      event.writeUInt32LE((data[i] ?? 0) >>> 0, 12 + i * 4);
-    }
-    const body = Buffer.alloc(8 + 32);
-    body.writeUInt32LE(this.root, 0);
-    body.writeUInt32LE(SUBSTRUCTURE_NOTIFY | SUBSTRUCTURE_REDIRECT, 4);
-    event.copy(body, 8);
-    this.requestNoReply(OP_SEND_EVENT, 0, body);
+  async queryExtension(
+    name: string,
+  ): Promise<{ opcode: number; firstEvent: number; firstError: number } | null> {
+    const body = Buffer.alloc(4 + name.length + pad4(name.length));
+    body.writeUInt16LE(name.length, 0);
+    body.write(name, 4, 'latin1');
+    const reply = await this.request(OP_QUERY_EXTENSION, 0, body);
+    if (!reply.readUInt8(8)) return null;
+    return {
+      opcode: reply.readUInt8(9),
+      firstEvent: reply.readUInt8(10),
+      firstError: reply.readUInt8(11),
+    };
   }
 
   /** Accumulate socket data and dispatch whole replies/errors/events. */
   private ingest(chunk: Buffer): void {
-    this.buffer =
-      this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
+    this.chunks.push(chunk);
+    this.queued += chunk.length;
     // Every packet is at least 32 bytes; replies may carry more.
-    while (this.buffer.length >= 32) {
-      const kind = this.buffer.readUInt8(0);
+    while (this.queued >= 32) {
+      const head = this.peek(8);
+      const kind = head.readUInt8(0);
       let size = 32;
-      if (kind === 1) {
-        // Reply: an extra `length` 4-byte units follow the fixed 32.
-        size = 32 + this.buffer.readUInt32LE(4) * 4;
-        if (this.buffer.length < size) return;
+      if (kind === 1 || (kind & 0x7f) === EVENT_GENERIC) {
+        // Reply (or XGE event): `length` 4-byte units follow the fixed 32.
+        size = 32 + head.readUInt32LE(4) * 4;
+        if (this.queued < size) return;
       }
-      const packet = this.buffer.subarray(0, size);
-      this.buffer = this.buffer.subarray(size);
-      this.dispatch(kind, packet);
+      this.dispatch(kind, this.take(size));
     }
+  }
+
+  /** The first `n` queued bytes, contiguous (n is always small). */
+  private peek(n: number): Buffer {
+    if (this.chunks[0].length < n) {
+      this.chunks = [Buffer.concat(this.chunks)];
+    }
+    return this.chunks[0];
+  }
+
+  /** Remove and return the next `n` queued bytes. */
+  private take(n: number): Buffer {
+    this.queued -= n;
+    const first = this.chunks[0];
+    if (first.length >= n) {
+      if (first.length === n) this.chunks.shift();
+      else this.chunks[0] = first.subarray(n);
+      return first.subarray(0, n);
+    }
+    const out = Buffer.allocUnsafe(n);
+    let offset = 0;
+    while (offset < n) {
+      const chunk = this.chunks[0];
+      const count = Math.min(chunk.length, n - offset);
+      chunk.copy(out, offset, 0, count);
+      offset += count;
+      if (count === chunk.length) this.chunks.shift();
+      else this.chunks[0] = chunk.subarray(count);
+    }
+    return out;
   }
 
   private dispatch(kind: number, packet: Buffer): void {
@@ -454,6 +484,8 @@ export class X11Client {
       if (p) {
         this.pending.delete(seq);
         p.reject(new Error(`X11 error ${code}`));
+      } else {
+        this.onError?.(code, packet.readUInt8(10), packet.readUInt16LE(8));
       }
       return;
     }
@@ -467,14 +499,9 @@ export class X11Client {
       return;
     }
     // Events: the high bit marks a SendEvent-generated event; mask it off.
-    if ((kind & 0x7f) === EVENT_PROPERTY_NOTIFY) {
-      this.lastTimestamp = packet.readUInt32LE(12);
-      this.onPropertyNotify?.({
-        window: packet.readUInt32LE(4),
-        atom: packet.readUInt32LE(8),
-        state: packet.readUInt8(20),
-      });
-    }
+    const code = kind & 0x7f;
+    if (code === EVENT_PROPERTY_NOTIFY) this.lastTimestamp = packet.readUInt32LE(12);
+    this.onEvent?.(code, packet);
   }
 }
 
@@ -513,15 +540,22 @@ function readSetupReply(socket: net.Socket): Promise<Buffer | null> {
 }
 
 /**
- * The root window of the first screen, dug out of the setup reply.
+ * The first screen's root window, size and depth, dug out of the setup reply.
  *
  * The screen list sits after the variable-length vendor string and the pixmap
  * format list, so its offset has to be computed rather than hardcoded.
  */
-function parseRootWindow(setup: Buffer): WindowId | null {
+function parseScreen(
+  setup: Buffer,
+): { root: WindowId; width: number; height: number; depth: number } | null {
   const vendorLength = setup.readUInt16LE(24);
   const numFormats = setup.readUInt8(29);
   const offset = 40 + vendorLength + pad4(vendorLength) + numFormats * 8;
-  if (offset + 4 > setup.length) return null;
-  return setup.readUInt32LE(offset);
+  if (offset + 40 > setup.length) return null;
+  return {
+    root: setup.readUInt32LE(offset),
+    width: setup.readUInt16LE(offset + 20),
+    height: setup.readUInt16LE(offset + 22),
+    depth: setup.readUInt8(offset + 38),
+  };
 }

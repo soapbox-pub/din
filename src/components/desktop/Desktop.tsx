@@ -16,6 +16,7 @@ import { ExtensionPopupHost } from './ExtensionPopupHost';
 import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { NsiteBridgeHost } from './NsiteBridgeHost';
+import { NativeDisplayHost } from './NativeDisplayHost';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
@@ -85,6 +86,7 @@ function DesktopSession() {
             <VolumeOsd />
             <BrightnessOsd />
             <NotificationsOsd />
+            <NativeDisplayHost />
           </Wallpaper>
         </FilePickerProvider>
       </WindowActionsContext.Provider>

@@ -16,27 +16,15 @@ import {
 } from '@/components/ui/popover';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useAppData } from '@/hooks/useAppData';
-import { useNativeWindows } from '@/hooks/useNativeApps';
 import { registerDockTile } from '@/lib/dockTiles';
 import { cn } from '@/lib/utils';
 import { APPS } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
-import {
-  activateNativeWindow,
-  closeNativeWindow,
-  launchNativeApp,
-  minimizeNativeWindow,
-} from '@/lib/nativeApps';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import type { WindowState } from '@/hooks/useWindows';
 
-/**
- * One window in a Dock tile, whichever world it lives in: a Din window on
- * the workspace, or a native app's toplevel window owned by the host window
- * manager. Ids are strings so both can share the tile's UI (native ids are
- * X11 window ids).
- */
+/** One window in a Dock tile. */
 interface DockWindow {
   id: string;
   /** Label for the multi-window picker. */
@@ -55,21 +43,6 @@ interface DockControls {
   /** Close every window of the app. */
   closeAll: (appId: string, windows: DockWindow[]) => void;
 }
-
-/**
- * Controls for native apps. Module-level so the identity is stable: the
- * bridge functions are fire-and-forget and hold no React state, and a fresh
- * object each render would defeat memo(DockItem).
- */
-const NATIVE_CONTROLS: DockControls = {
-  open: launchNativeApp,
-  focus: (id) => activateNativeWindow(Number(id)),
-  minimize: (id) => minimizeNativeWindow(Number(id)),
-  close: (id) => closeNativeWindow(Number(id)),
-  closeAll: (_appId, windows) => {
-    for (const window of windows) closeNativeWindow(Number(window.id));
-  },
-};
 
 /** Apps kept in the Dock out of the box. */
 const DEFAULT_PINNED = APPS.filter((app) => !app.hidden).map((app) => app.id);
@@ -120,9 +93,6 @@ export function Dock({
   const dinActions = useWindowActions();
   const { closeApp } = dinActions;
   const { getApp, webApps, uninstallWebApp } = useInstalledApps();
-  // Native apps' windows belong to the host window manager, not to Din; they
-  // arrive here as a live list pushed from the main process.
-  const nativeWindows = useNativeWindows();
   // Pinned apps roam across devices via Din's encrypted app-data layer,
   // seeded from the pre-sync localStorage key on first run.
   const [pinned, setPinned] = useAppData<string[]>(
@@ -168,14 +138,8 @@ export function Dock({
   );
 
   // One dock tile per app: pinned apps first in pin order, then any
-  // running apps that aren't pinned, in launch order. "Running" spans both
-  // worlds - a launched native app earns a tile exactly like a Din app.
-  const running = [
-    ...new Set([
-      ...windows.map((w) => w.appId),
-      ...nativeWindows.map((w) => w.appId).filter((id): id is string => id !== null),
-    ]),
-  ];
+  // running apps that aren't pinned, in launch order.
+  const running = [...new Set(windows.map((w) => w.appId))];
   const entryIds = [
     ...pinned,
     ...running.filter((id) => !pinned.includes(id)),
@@ -186,10 +150,6 @@ export function Dock({
     (top, w) => (!w.minimized && !w.closing && (!top || w.z > top.z) ? w : top),
     null,
   );
-  // The focused native window, per the window manager. At most one of the
-  // two can be set: while a native window has focus, the X server reports
-  // Din's own window as inactive, and vice versa.
-  const activeNativeWindow = nativeWindows.find((w) => w.active) ?? null;
 
   // Magnification is pointer-driven eye candy; skip it entirely for users
   // who prefer reduced motion (tiles then behave like plain buttons).
@@ -424,37 +384,21 @@ export function Dock({
           {entryIds.map((appId) => {
             const app = getApp(appId);
             if (!app) return null;
-            const appWindows = app.native
-              ? nativeWindows
-                  .filter((w) => w.appId === appId)
-                  // A window with no title of its own (some apps set it late)
-                  // still needs a label in the picker.
-                  .map((w) => ({
-                    id: String(w.id),
-                    title: w.title || app.name,
-                    minimized: w.minimized,
-                  }))
-              : windows
-                  .filter((w) => w.appId === appId)
-                  .map((w, i) => ({
-                    id: w.id,
-                    title: `${app.name} ${i + 1}`,
-                    minimized: w.minimized,
-                  }));
+            const appWindows = windows
+              .filter((w) => w.appId === appId)
+              .map((w, i) => ({
+                id: w.id,
+                title: `${app.name} ${i + 1}`,
+                minimized: w.minimized,
+              }));
             return (
               <DockItem
                 key={appId}
                 app={app}
                 registerRef={registerRef}
                 appWindows={appWindows}
-                activeWindowId={
-                  app.native
-                    ? activeNativeWindow && activeNativeWindow.appId === appId
-                      ? String(activeNativeWindow.id)
-                      : null
-                    : (activeWindow?.id ?? null)
-                }
-                controls={app.native ? NATIVE_CONTROLS : dinControls}
+                activeWindowId={activeWindow?.id ?? null}
+                controls={dinControls}
                 isPinned={pinned.includes(appId)}
                 onTogglePin={togglePin}
                 onUninstall={
@@ -480,10 +424,6 @@ export function Dock({
  * - middle-click always opens a new window
  * - right-click: new window, pin/unpin, close all, uninstall
  *
- * The same tile serves Din apps and native Linux apps; which one it is only
- * shows in the `controls` it dispatches through (Din's window manager, or
- * EWMH messages to the host's).
- *
  * Memoized: the dock re-renders on every window commit, but a tile (and its
  * Radix context-menu/popover tree) only re-renders when its own app's
  * windows, active state, or pin state actually changed. `appWindows` is
@@ -504,7 +444,7 @@ const DockItem = memo(function DockItem({
   registerRef: (appId: string, el: HTMLDivElement | null) => void;
   appWindows: DockWindow[];
   activeWindowId: string | null;
-  /** Din's window manager for built-in apps, EWMH for native ones. */
+  /** The window manager's actions, in the shape a tile consumes. */
   controls: DockControls;
   isPinned: boolean;
   onTogglePin: (appId: string) => void;

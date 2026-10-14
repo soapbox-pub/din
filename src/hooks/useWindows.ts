@@ -1,6 +1,13 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AppDefinition } from '@/lib/apps';
 import { launchNativeApp } from '@/lib/nativeApps';
+import { closeNativeWindow, isNativeWindowOpen } from '@/lib/nativeDisplay';
+
+/** The X window a Din window hosts, if it hosts a live one. */
+function liveNativeWindow(w: WindowState | undefined): number | null {
+  const xid = w?.params?.xid;
+  return typeof xid === 'number' && isNativeWindowOpen(xid) ? xid : null;
+}
 
 /** Highest z among the given windows (0 if none). */
 function maxZ(windows: WindowState[]): number {
@@ -105,6 +112,12 @@ const nextWindowId = () => `win-${nextId++}`;
  */
 export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   const [windows, setWindows] = useState<WindowState[]>([]);
+  // For actions that must look before they leap without re-binding on every
+  // commit (close, which asks native apps instead of deciding for them).
+  const windowsRef = useRef(windows);
+  useEffect(() => {
+    windowsRef.current = windows;
+  }, [windows]);
 
   const focus = useCallback((id: string) => {
     setWindows((ws) => raise(ws, id));
@@ -114,12 +127,12 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
     const app = getApp(appId);
     if (!app) return undefined;
 
-    // A native Linux app has no Din window to open: it's a separate X11
-    // client, started as a real process and then managed by the host window
-    // manager (which stacks it above the shell). Routing it here means every
-    // launcher on the desktop - Dock, apps menu, search - launches it without
-    // knowing the difference.
-    if (app.native) {
+    // Launching a native Linux app starts its process; its windows open Din
+    // windows of their own as the app maps them (with an `xid` param, see
+    // NativeDisplayHost). Routing it here means every launcher on the
+    // desktop - Dock, apps menu, search - launches it without knowing the
+    // difference.
+    if (app.native && typeof params?.xid !== 'number') {
       launchNativeApp(appId);
       return undefined;
     }
@@ -146,7 +159,11 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       }
     }
 
-    const size = app.defaultSize ?? { width: 800, height: 560 };
+    // A native window opens at the size its app asked for.
+    const size =
+      typeof params?.width === 'number' && typeof params?.height === 'number'
+        ? { width: Math.max(MIN_WIDTH, params.width), height: Math.max(MIN_HEIGHT, params.height) }
+        : (app.defaultSize ?? { width: 800, height: 560 });
     const id = nextWindowId();
 
     setWindows((ws) => {
@@ -176,8 +193,16 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   /**
    * Begin closing a window: it stays mounted, marked `closing`, while the
    * Window component plays the exit animation; destroy() finishes the job.
+   *
+   * A native window is the app's to close: it's asked to (and may prompt to
+   * save, or refuse), and its Din window closes when the X window goes away.
    */
   const close = useCallback((id: string) => {
+    const xid = liveNativeWindow(windowsRef.current.find((w) => w.id === id));
+    if (xid !== null) {
+      closeNativeWindow(xid);
+      return;
+    }
     setWindows((ws) =>
       ws.some((w) => w.id === id && !w.closing)
         ? ws.map((w) => (w.id === id ? { ...w, closing: true } : w))
@@ -186,9 +211,15 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   }, []);
 
   const closeApp = useCallback((appId: string) => {
+    for (const w of windowsRef.current) {
+      const xid = w.appId === appId ? liveNativeWindow(w) : null;
+      if (xid !== null) closeNativeWindow(xid);
+    }
     setWindows((ws) =>
-      ws.some((w) => w.appId === appId && !w.closing)
-        ? ws.map((w) => (w.appId === appId ? { ...w, closing: true } : w))
+      ws.some((w) => w.appId === appId && !w.closing && liveNativeWindow(w) === null)
+        ? ws.map((w) =>
+            w.appId === appId && liveNativeWindow(w) === null ? { ...w, closing: true } : w,
+          )
         : ws,
     );
   }, []);

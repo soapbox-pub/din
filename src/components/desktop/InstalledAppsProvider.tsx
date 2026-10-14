@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { AppWindow, Globe } from 'lucide-react';
-import { APPS } from '@/lib/apps';
+import { APPS, NativeWindowView } from '@/lib/apps';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import type { NativeApp } from '@/lib/nativeApps';
@@ -77,16 +77,16 @@ function webAppToDefinition(webApp: WebApp): AppDefinition {
 /**
  * Convert an installed Linux app into a launchable desktop app.
  *
- * There's no component: native apps run in their own X11 windows, above
- * Din's, and the registry entry exists so they can be launched, searched and
- * given a Dock tile like any other app. The icon is a data URL resolved from
- * the icon theme by the main process, falling back to a generic glyph.
+ * Every window it maps on Din's embedded display opens a Din window around
+ * NativeWindowView. The icon is a data URL resolved from the icon theme by
+ * the main process, falling back to a generic glyph.
  */
 function nativeAppToDefinition(app: NativeApp): AppDefinition {
   return {
     id: app.id,
     name: app.name,
     icon: app.icon ?? AppWindow,
+    component: NativeWindowView,
     native: true,
     keywords: [...app.keywords, ...app.categories],
   };
@@ -103,8 +103,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
     WebAppsSchema,
     DEFAULT_WEB_APPS,
   );
-  // Empty in a plain browser, and in any session without an X11 window
-  // manager for Din to hand native windows to.
+  // Empty in a plain browser, and wherever Din's embedded display can't run.
   const { apps: nativeApps } = useNativeApps();
 
   const value = useMemo<InstalledAppsManager>(() => {

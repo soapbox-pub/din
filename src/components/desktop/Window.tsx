@@ -915,10 +915,8 @@ export const Window = memo(function Window({
     [resize, win.id, endGesture],
   );
 
-  // Native apps have no component: they render in their own X11 window, not
-  // in one of Din's. Nothing should ever open a Din window for them, so this
-  // is purely defensive.
-  if (!app?.component) return null;
+  // An app uninstalled while its window is open renders nothing.
+  if (!app) return null;
 
   // maximized/tiled are CSS-driven (the window's own x/y/width/height keep
   // their pre-snap values); a normal window renders at its stored geometry.

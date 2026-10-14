@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import type { ComponentType } from 'react';
-import { Camera, Store, type LucideIcon } from 'lucide-react';
+import { AppWindow, Camera, Store, type LucideIcon } from 'lucide-react';
 
 // Built-in apps are code-split: each is its own chunk, loaded the first time
 // it's launched (windows render app content inside <Suspense>). Statically
@@ -27,6 +27,12 @@ const DevTools = lazy(() =>
 const AppStore = lazy(() =>
   import('@/components/desktop/apps/AppStore').then((m) => ({ default: m.AppStore })),
 );
+/** The window body of every native Linux app (see src/lib/nativeDisplay.ts). */
+export const NativeWindowView = lazy(() =>
+  import('@/components/desktop/apps/NativeWindowView').then((m) => ({
+    default: m.NativeWindowView,
+  })),
+);
 
 /** Props every windowed app receives from the window manager. */
 export interface AppComponentProps {
@@ -49,17 +55,13 @@ export interface AppDefinition {
    * directly.
    */
   icon: LucideIcon | string;
+  /** The component rendered inside the app's window. */
+  component: ComponentType<AppComponentProps>;
   /**
-   * The component rendered inside the app's window. Absent for native Linux
-   * apps, which have no Din window at all: they're separate X11 clients the
-   * host window manager stacks above the shell, and Din only acts as their
-   * launcher and taskbar (see src/lib/nativeApps.ts).
-   */
-  component?: ComponentType<AppComponentProps>;
-  /**
-   * True for an app owned by the host system rather than by Din. Launching
-   * one starts a real process instead of opening a Din window, and the
-   * windows its Dock tile groups are the host's, tracked over EWMH.
+   * True for an installed Linux app. Launching one starts a real process on
+   * Din's embedded display instead of opening a window; each X window it
+   * maps then opens a Din window of its own, with an `xid` launch param
+   * (see src/lib/nativeDisplay.ts).
    */
   native?: boolean;
   /** Default window size when the app is launched. */
@@ -141,6 +143,16 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/devtools.png',
     component: DevTools,
     defaultSize: { width: 720, height: 560 },
+    hidden: true,
+  },
+  {
+    // Hosts native windows that no installed app claims (a helper process,
+    // an app started from a terminal). Opened only by the embedded display.
+    id: 'native-window',
+    name: 'Application',
+    icon: AppWindow,
+    component: NativeWindowView,
+    native: true,
     hidden: true,
   },
 ];

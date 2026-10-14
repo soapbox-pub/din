@@ -256,18 +256,13 @@ contextBridge.exposeInMainWorld('display', {
 });
 
 // Native-app bridge (window.nativeApps), backed by the native-apps:* handlers
-// in main.mts (XDG desktop entries + EWMH over a raw X11 connection; see
-// electron/native-apps.mts). Din acts as the taskbar for ordinary Linux apps:
-// it lists and launches them, and tracks/steers their toplevel windows, which
-// the host window manager stacks above the shell's own window.
-// `available: false` without an X11 session, so the Dock and launcher can
-// simply leave them out.
+// in electron/native-apps.mts: lists installed XDG desktop entries and
+// launches them onto Din's embedded display, whose windows Din composites
+// into its own. `available: false` where that display can't run, so the Dock
+// and launcher can simply leave native apps out.
 contextBridge.exposeInMainWorld('nativeApps', {
   /** Installed desktop entries, with icons inlined as data URLs. */
   list: () => ipcRenderer.invoke('native-apps:list'),
-
-  /** The session's current toplevel windows. */
-  windows: () => ipcRenderer.invoke('native-apps:windows'),
 
   /**
    * Start an app by its registry id ("native:org.gnome.Calculator").
@@ -276,37 +271,25 @@ contextBridge.exposeInMainWorld('nativeApps', {
   launch: (appId) => ipcRenderer.invoke('native-apps:launch', appId),
 
   /**
-   * Raise a window and give it the keyboard focus (un-minimizing it first).
-   * @param {number} windowId
+   * The installed app a window belongs to, by owner pid and WM_CLASS.
+   * @param {number | null} pid
+   * @param {string[]} wmClass
    */
-  activate: (windowId) => ipcRenderer.invoke('native-apps:activate', windowId),
+  resolve: (pid, wmClass) => ipcRenderer.invoke('native-apps:resolve', pid, wmClass),
+});
 
-  /**
-   * Minimize a window.
-   * @param {number} windowId
-   */
-  minimize: (windowId) => ipcRenderer.invoke('native-apps:minimize', windowId),
-
-  /**
-   * Ask a window to close (the app may still prompt to save).
-   * @param {number} windowId
-   */
-  close: (windowId) => ipcRenderer.invoke('native-apps:close', windowId),
-
-  /**
-   * Subscribe to window-list changes (opened, closed, renamed, minimized,
-   * focused). Returns an unsubscribe fn.
-   * @param {(windows: Array<{ id: number, appId: string | null, title: string, minimized: boolean, active: boolean }>) => void} callback
-   */
-  onWindows: (callback) => {
-    /**
-     * @param {Electron.IpcRendererEvent} _event
-     * @param {Array<{ id: number, appId: string | null, title: string, minimized: boolean, active: boolean }>} windows
-     */
-    const handler = (_event, windows) => callback(windows);
-    ipcRenderer.on('native-apps:windows', handler);
-    return () => ipcRenderer.removeListener('native-apps:windows', handler);
-  },
+// Embedded display (src/lib/nativeDisplay.ts): pixels and input travel on a
+// MessagePort straight between the shell and the compositor process
+// (electron/native-display-worker.mts), never through the main process. A
+// MessagePort can't cross contextBridge, so it's handed to the page with
+// window.postMessage, the documented pattern for isolated preloads; the page
+// asks for one with nativeDisplay.connect(), again after every reload.
+ipcRenderer.on('native-display:port', (event) => {
+  globalThis.postMessage('din:native-display-port', globalThis.location.origin, event.ports);
+});
+contextBridge.exposeInMainWorld('nativeDisplay', {
+  /** Request a port; it arrives as a 'din:native-display-port' message. */
+  connect: () => ipcRenderer.send('native-display:connect'),
 });
 
 // Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -
