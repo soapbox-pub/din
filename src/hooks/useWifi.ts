@@ -17,14 +17,17 @@ function requireBridge() {
   return wifi;
 }
 
-/** Adapter/radio/connection state (polls every few seconds). */
+/**
+ * Adapter/radio/connection state. Refreshed on NetworkManager change events
+ * (SystemEventsHost); the poll is only a fallback.
+ */
 export function useWifiStatus() {
   const wifi = getWifiBridge();
   return useQuery<WifiStatus>({
     queryKey: ['wifi', 'status'],
     queryFn: () => requireBridge().status(),
     enabled: wifi !== undefined,
-    refetchInterval: 5_000,
+    refetchInterval: 30_000,
     retry: false,
   });
 }

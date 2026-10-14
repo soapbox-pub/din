@@ -5,8 +5,9 @@ import type { AudioDevices, AudioStatus, AudioStreams } from '@/lib/audio';
 /**
  * TanStack Query hooks over the OS audio bridge (window.audio).
  *
- * Status polls on a short interval so the menu-bar control and Settings panel
- * track volume changes made elsewhere (media keys, wpctl in the Terminal).
+ * Status refreshes on PipeWire change events (SystemEventsHost), so the
+ * menu-bar control and Settings panel track volume changes made elsewhere
+ * (media keys, wpctl in the Terminal); a slow poll backs that up.
  * Mutations resolve to the new state and write it straight into the cache so
  * the UI updates without waiting for the next poll.
  */
@@ -21,14 +22,16 @@ function requireBridge() {
   return audio;
 }
 
-/** Default sink volume/mute (polls every few seconds). */
+/** Default sink volume/mute. */
 export function useAudioStatus() {
   const audio = getAudioBridge();
   return useQuery<AudioStatus>({
     queryKey: AUDIO_STATUS_KEY,
     queryFn: () => requireBridge().status(),
     enabled: audio !== undefined,
-    refetchInterval: 5_000,
+    // Refreshed on PipeWire change events (SystemEventsHost); the poll is
+    // only a fallback.
+    refetchInterval: 30_000,
     retry: false,
   });
 }
@@ -51,26 +54,26 @@ export function useAudioMutations() {
   return { setVolume, setMuted };
 }
 
-/** Output (sink) and input (source) devices (polls every few seconds). */
+/** Output (sink) and input (source) devices. */
 export function useAudioDevices() {
   const audio = getAudioBridge();
   return useQuery<AudioDevices>({
     queryKey: AUDIO_DEVICES_KEY,
     queryFn: () => requireBridge().devices(),
     enabled: audio !== undefined,
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
     retry: false,
   });
 }
 
-/** Per-application playback streams (polls quickly; apps come and go). */
+/** Per-application playback streams (refreshed as apps come and go). */
 export function useAudioStreams() {
   const audio = getAudioBridge();
   return useQuery<AudioStreams>({
     queryKey: AUDIO_STREAMS_KEY,
     queryFn: () => requireBridge().streams(),
     enabled: audio !== undefined,
-    refetchInterval: 4_000,
+    refetchInterval: 30_000,
     retry: false,
   });
 }

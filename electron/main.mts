@@ -14,7 +14,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { spawn, execFile, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, shell } from 'electron';
@@ -37,6 +37,7 @@ import {
 } from './nsite.mts';
 import { registerNativeAppHandlers } from './native-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
+import { CommandError, runCommand, watchCommand } from './system.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
 // named export too, which Node's ESM-CJS interop resolves statically.
@@ -448,25 +449,36 @@ app.on('will-quit', () => {
 // processes of the same user); acceptable for this single-user demo.
 // ---------------------------------------------------------------------------
 
+/**
+ * Run a system tool to completion, off the main process (system.mts):
+ * resolves stdout; rejects with `<tool>-missing` when it isn't installed,
+ * else with the first line of its error output.
+ */
+async function tool(
+  file: string,
+  args: string[],
+  timeout: number,
+  maxBuffer = 1024 * 1024,
+): Promise<string> {
+  try {
+    return (await runCommand(file, args, { timeout, maxBuffer })).stdout;
+  } catch (error) {
+    if (error instanceof CommandError && error.code === 'ENOENT') {
+      throw new Error(`${file}-missing`, { cause: error });
+    }
+    const stderr = error instanceof CommandError ? error.stderr : '';
+    const detail = (stderr || messageOf(error)).trim().split('\n')[0];
+    throw new Error(detail || `${file} failed`, { cause: error });
+  }
+}
+
 const NMCLI_TIMEOUT_MS = 15_000;
 const NMCLI_CONNECT_TIMEOUT_MS = 60_000;
 const WIFI_TYPE = '802-11-wireless';
 
 /** Run nmcli with an argv array; resolves stdout, rejects with a clean message. */
 function nmcli(args: string[], timeout = NMCLI_TIMEOUT_MS): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'nmcli',
-      args,
-      { timeout, maxBuffer: 4 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (!error) return resolve(stdout);
-        if (error.code === 'ENOENT') return reject(new Error('nmcli-missing'));
-        const detail = (stderr || error.message || '').trim().split('\n')[0];
-        reject(new Error(detail || 'nmcli failed'));
-      },
-    );
-  });
+  return tool('nmcli', args, timeout, 4 * 1024 * 1024);
 }
 
 /**
@@ -607,14 +619,7 @@ const XRANDR_TIMEOUT_MS = 15_000;
 
 /** Run xrandr with an argv array; resolves stdout, rejects with a clean message. */
 function xrandr(args: string[], timeout = XRANDR_TIMEOUT_MS): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('xrandr', args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (!error) return resolve(stdout);
-      if (error.code === 'ENOENT') return reject(new Error('xrandr-missing'));
-      const detail = (stderr || error.message || '').trim().split('\n')[0];
-      reject(new Error(detail || 'xrandr failed'));
-    });
-  });
+  return tool('xrandr', args, timeout, 4 * 1024 * 1024);
 }
 
 /** One mode line of an xrandr output. */
@@ -686,9 +691,16 @@ function parseXrandr(stdout: string): XrandrOutput[] {
   return outputs;
 }
 
-/** Connected outputs, via xrandr. Throws 'xrandr-missing' where xrandr absent. */
-async function queryOutputs(): Promise<XrandrOutput[]> {
-  return parseXrandr(await xrandr(['--query'])).filter((o) => o.connected);
+/**
+ * Connected outputs, via xrandr. Throws 'xrandr-missing' where xrandr absent.
+ *
+ * `probe` asks the X server to re-probe every connector first (--query),
+ * which can stall it for ~10 ms - fine before changing the layout, not for
+ * the Settings panel's status poll, which reads the state the server already
+ * keeps current from hotplug events (--current).
+ */
+async function queryOutputs(probe = false): Promise<XrandrOutput[]> {
+  return parseXrandr(await xrandr([probe ? '--query' : '--current'])).filter((o) => o.connected);
 }
 
 /** Laptop built-in panels (the ones that switch off when the lid shuts). */
@@ -747,7 +759,7 @@ function registerDisplayHandlers(): void {
 
     // Re-derive the real outputs and only act on names/modes that xrandr
     // actually reports - never trust the renderer's strings directly.
-    const outputs = await queryOutputs();
+    const outputs = await queryOutputs(true);
     const byName = new Map(outputs.map((o) => [o.name, o]));
 
     const enabled: OutputPlacement[] = [];
@@ -858,7 +870,7 @@ function packLeftToRight(
 async function onLidClosed(): Promise<void> {
   let outputs: XrandrOutput[];
   try {
-    outputs = await queryOutputs();
+    outputs = await queryOutputs(true);
   } catch {
     return;
   }
@@ -883,7 +895,7 @@ async function onLidOpened(): Promise<void> {
   lidAutoArranged = false;
   let outputs: XrandrOutput[];
   try {
-    outputs = await queryOutputs();
+    outputs = await queryOutputs(true);
   } catch {
     return;
   }
@@ -1016,19 +1028,7 @@ const BUSCTL_TIMEOUT_MS = 5_000;
 
 /** Run busctl on the system bus; resolves stdout, rejects with a clean message. */
 function busctl(args: string[], timeout = BUSCTL_TIMEOUT_MS): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'busctl',
-      ['--system', ...args],
-      { timeout, maxBuffer: 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (!error) return resolve(stdout);
-        if (error.code === 'ENOENT') return reject(new Error('busctl-missing'));
-        const detail = (stderr || error.message || '').trim().split('\n')[0];
-        reject(new Error(detail || 'busctl failed'));
-      },
-    );
-  });
+  return tool('busctl', ['--system', ...args], timeout);
 }
 
 /** Read one PowerProfiles property as parsed JSON ({ type, data }). */
@@ -1136,14 +1136,7 @@ const DEFAULT_SINK = '@DEFAULT_AUDIO_SINK@';
 
 /** Run wpctl with an argv array; resolves stdout, rejects with a clean message. */
 function wpctl(args: string[], timeout = WPCTL_TIMEOUT_MS): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('wpctl', args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-      if (!error) return resolve(stdout);
-      if (error.code === 'ENOENT') return reject(new Error('wpctl-missing'));
-      const detail = (stderr || error.message || '').trim().split('\n')[0];
-      reject(new Error(detail || 'wpctl failed'));
-    });
-  });
+  return tool('wpctl', args, timeout);
 }
 
 /** Clamp a caller-supplied percentage to an integer 0..100. */
@@ -1397,18 +1390,9 @@ function testToneFile(): string {
 }
 
 /** Play the test tone to a specific sink node via pw-play. */
-function audioTest(id: unknown): Promise<void> {
+async function audioTest(id: unknown): Promise<void> {
   const node = validNodeId(id);
-  const file = testToneFile();
-  return new Promise((resolve, reject) => {
-    execFile('pw-play', ['--target', String(node), file], { timeout: PW_PLAY_TIMEOUT_MS }, (error) => {
-      if (!error) return resolve();
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return reject(new Error('pw-play-missing'));
-      }
-      reject(new Error(messageOf(error).split('\n')[0] || 'pw-play failed'));
-    });
-  });
+  await tool('pw-play', ['--target', String(node), testToneFile()], PW_PLAY_TIMEOUT_MS);
 }
 
 function registerAudioHandlers(): void {
@@ -1447,6 +1431,41 @@ function registerAudioHandlers(): void {
   ipcMain.handle('audio:test', async (event, id) => {
     assertShellSender(event);
     return audioTest(id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// System change events. The menu bar's network and audio indicators used to
+// poll every few seconds; now long-running monitors (via the system worker,
+// see system.mts) report changes as they happen, and the shell refreshes on
+// those, keeping only a slow poll as a fallback where a monitor is missing.
+// ---------------------------------------------------------------------------
+
+/** Coalescing window: monitors print bursts of lines for one change. */
+const SYSTEM_EVENT_DEBOUNCE_MS = 250;
+
+/**
+ * `pactl subscribe` reports every object PipeWire's Pulse layer has; only
+ * these affect what the shell shows (default sink/source volume, devices,
+ * per-app streams). Client and module churn is ignored.
+ */
+const AUDIO_EVENT = /on (sink|source|server|card|sink-input) /;
+
+function registerSystemEvents(): void {
+  const timers = new Map<string, NodeJS.Timeout>();
+  const changed = (topic: 'network' | 'audio') => {
+    if (timers.has(topic)) return;
+    timers.set(
+      topic,
+      setTimeout(() => {
+        timers.delete(topic);
+        sendToShell('system:changed', topic);
+      }, SYSTEM_EVENT_DEBOUNCE_MS),
+    );
+  };
+  watchCommand('network', 'nmcli', ['monitor'], () => changed('network'));
+  watchCommand('audio', 'pactl', ['subscribe'], (line) => {
+    if (AUDIO_EVENT.test(line)) changed('audio');
   });
 }
 
@@ -1490,14 +1509,7 @@ const MAX_TEMPERATURE = 6500;
 
 /** Run brightnessctl with an argv array; resolves stdout, rejects with a clean message. */
 function brightnessctl(args: string[], timeout = BRIGHTNESSCTL_TIMEOUT_MS): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('brightnessctl', args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-      if (!error) return resolve(stdout);
-      if (error.code === 'ENOENT') return reject(new Error('brightnessctl-missing'));
-      const detail = (stderr || error.message || '').trim().split('\n')[0];
-      reject(new Error(detail || 'brightnessctl failed'));
-    });
-  });
+  return tool('brightnessctl', args, timeout);
 }
 
 /** Clamp a caller-supplied percentage to an integer 1..100 (never fully dark). */
@@ -1563,29 +1575,22 @@ function sysfsBacklightGet(): number | null {
 }
 
 /** Set the backlight to a raw sysfs value via logind's SetBrightness. */
-function logindSetBrightness(device: string, value: number): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    execFile(
-      'busctl',
-      [
-        'call',
-        'org.freedesktop.login1',
-        '/org/freedesktop/login1/session/auto',
-        'org.freedesktop.login1.Session',
-        'SetBrightness',
-        'ssu',
-        BACKLIGHT_CLASS,
-        device,
-        String(value),
-      ],
-      { timeout: BRIGHTNESSCTL_TIMEOUT_MS },
-      (error, _stdout, stderr) => {
-        if (!error) return resolve();
-        const detail = (stderr || error.message || '').trim().split('\n')[0];
-        reject(new Error(detail || 'busctl failed'));
-      },
-    );
-  });
+async function logindSetBrightness(device: string, value: number): Promise<void> {
+  await tool(
+    'busctl',
+    [
+      'call',
+      'org.freedesktop.login1',
+      '/org/freedesktop/login1/session/auto',
+      'org.freedesktop.login1.Session',
+      'SetBrightness',
+      'ssu',
+      BACKLIGHT_CLASS,
+      device,
+      String(value),
+    ],
+    BRIGHTNESSCTL_TIMEOUT_MS,
+  );
 }
 
 /** Resolve (and cache) which backlight backend works on this machine. */
@@ -1603,8 +1608,15 @@ function ensureBacklightBackend(): Promise<BacklightBackend> {
   return backlightBackendPromise;
 }
 
-/** Backlight level 0-100 via whichever backend is available, or null. */
+/**
+ * Backlight level 0-100, or null. Read from sysfs whenever it's readable
+ * (it's world-readable on Linux): the menu bar polls this, and a file read
+ * costs nothing next to running brightnessctl. brightnessctl stays the way
+ * to *change* the level where the sysfs file isn't writable.
+ */
 async function backlightGet(): Promise<number | null> {
+  const direct = sysfsBacklightGet();
+  if (direct !== null) return direct;
   const backend = await ensureBacklightBackend();
   if (backend === 'brightnessctl') return brightnessctlGet();
   if (backend === 'sysfs') return sysfsBacklightGet();
@@ -1641,14 +1653,15 @@ let nightLightEnabled = false;
 let nightLightTemp = 4500;
 
 /** Resolve whether a gamma tool exists (ENOENT = missing); cached after first probe. */
-function probeTool(tool: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile(tool, ['-V'], { timeout: 3_000 }, (error) => {
-      // Any error other than ENOENT (e.g. an unknown flag) still means the
-      // binary is present and runnable.
-      resolve(!error || error.code !== 'ENOENT');
-    });
-  });
+async function probeTool(name: string): Promise<boolean> {
+  try {
+    await tool(name, ['-V'], 3_000);
+    return true;
+  } catch (error) {
+    // Any error other than a missing binary (e.g. an unknown flag) still
+    // means the tool is present and runnable.
+    return messageOf(error) !== `${name}-missing`;
+  }
 }
 
 /** Find and cache the first available gamma tool (gammastep, then wlsunset). */
@@ -3330,6 +3343,7 @@ app.whenReady().then(() => {
   registerPowerHandlers();
   registerAudioHandlers();
   registerMediaKeys();
+  registerSystemEvents();
   registerBrightnessHandlers();
   registerScreenshotHandlers();
   watchSelectiveScreenshotKey();

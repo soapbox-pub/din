@@ -412,6 +412,27 @@ contextBridge.exposeInMainWorld('power', {
   setProfile: (name) => ipcRenderer.invoke('power:setProfile', name),
 });
 
+// System change events (window.systemEvents): the main process watches
+// NetworkManager and PipeWire for changes (`nmcli monitor`, `pactl
+// subscribe`) and says which area changed, so the menu bar and Settings
+// refresh on events instead of polling every few seconds.
+contextBridge.exposeInMainWorld('systemEvents', {
+  /**
+   * Subscribe to change notices ('network' | 'audio'). Returns an
+   * unsubscribe fn.
+   * @param {(topic: string) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string} topic
+     */
+    const handler = (_event, topic) => callback(topic);
+    ipcRenderer.on('system:changed', handler);
+    return () => ipcRenderer.removeListener('system:changed', handler);
+  },
+});
+
 // Audio bridge (window.audio), backed by the audio:* handlers in main.mts
 // (wpctl / PipeWire). Drives the default sink for the menu-bar control and the
 // media-key OSD (status/setVolume/setMuted resolve to { available, volume,

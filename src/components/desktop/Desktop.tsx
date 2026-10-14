@@ -17,6 +17,7 @@ import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { NsiteBridgeHost } from './NsiteBridgeHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
+import { SystemEventsHost } from './SystemEventsHost';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
@@ -55,6 +56,7 @@ function DesktopSession() {
           <HighlightBridgeHost />
           <NsiteBridgeHost />
           <DesktopHotkeys />
+          <SystemEventsHost />
           <Wallpaper>
             <MenuBar />
 

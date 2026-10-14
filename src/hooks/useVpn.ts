@@ -23,7 +23,9 @@ export function useVpnConnections() {
     queryKey: ['vpn', 'list'],
     queryFn: () => requireBridge().list(),
     enabled: vpn !== undefined,
-    refetchInterval: 5_000,
+    // Refreshed on NetworkManager change events (SystemEventsHost); the
+    // poll is only a fallback.
+    refetchInterval: 30_000,
     retry: false,
   });
 }
