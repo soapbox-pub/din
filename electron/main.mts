@@ -37,6 +37,7 @@ import {
 } from './nsite.mts';
 import { registerNativeAppHandlers } from './native-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
+import { registerKeyboardHandlers } from './keyboard.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
@@ -3357,6 +3358,7 @@ app.whenReady().then(() => {
   registerHighlightBridge();
   registerFilePickerBridge();
   registerNativeAppHandlers({ assertShellSender });
+  registerKeyboardHandlers({ assertShellSender });
   registerNativeDisplayHandlers({
     assertShellSender,
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),

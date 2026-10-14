@@ -13,7 +13,7 @@ use smithay::{
         utils::{bbox_from_surface_tree, send_frames_surface_tree, under_from_surface_tree, with_surfaces_surface_tree},
     },
     input::{
-        keyboard::FilterResult,
+        keyboard::{FilterResult, XkbConfig},
         pointer::{AxisFrame, ButtonEvent, CursorImageSurfaceData, MotionEvent},
     },
     reexports::{
@@ -659,6 +659,23 @@ impl State {
         });
     }
 
+    /// Switch the keyboard layout. Every client gets the new keymap,
+    /// Xwayland included, which applies it to its X keyboard.
+    fn set_keymap(&mut self, message: &Value) {
+        let Some(keyboard) = self.seat.get_keyboard() else { return };
+        let field = |key: &str| message.get(key).and_then(Value::as_str).unwrap_or("");
+        let config = XkbConfig {
+            rules: field("rules"),
+            model: field("model"),
+            layout: field("layout"),
+            variant: field("variant"),
+            options: Some(field("options").to_string()),
+        };
+        if keyboard.set_xkb_config(self, config).is_err() {
+            eprintln!("din-compositor: could not compile keymap {message}");
+        }
+    }
+
     fn close(&mut self, id: u32) {
         let Some(t) = self.toplevels.iter().find(|t| t.id == id) else { return };
         match (t.window.toplevel(), t.x11()) {
@@ -702,6 +719,7 @@ impl State {
             "pointer-unlock" => self.release_constraint(),
             "button" => self.button(id, num("x"), num("y"), num("button") as u32, message["down"] == true),
             "key" => self.key(num("keycode") as u32, message["down"] == true),
+            "keymap" => self.set_keymap(message),
             "leave" => self.leave(),
             "clipboard" => {
                 if let Some(text) = message.get("text").and_then(Value::as_str) {

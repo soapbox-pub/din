@@ -9,6 +9,7 @@ import {
   CloudOff,
   EthernetPort,
   Gauge,
+  Keyboard,
   Laptop,
   Loader2,
   Lock,
@@ -22,6 +23,7 @@ import {
   Plug,
   Plus,
   RotateCw,
+  Search,
   Sun,
   TriangleAlert,
   Trash2,
@@ -79,6 +81,12 @@ import {
   useAudioStreams,
 } from '@/hooks/useAudio';
 import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
+import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
+import {
+  useKeyboardLayouts,
+  useKeyboardStatus,
+  useSetKeyboardLayout,
+} from '@/hooks/useKeyboardLayout';
 import { getBrightnessBridge, MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
 import { useBrightnessMutations, useBrightnessStatus } from '@/hooks/useBrightness';
 import { BrightnessGlyph } from '@/components/desktop/BrightnessIndicator';
@@ -109,6 +117,7 @@ type SectionId =
   | 'battery'
   | 'power'
   | 'sound'
+  | 'keyboard'
   | 'notifications'
   | 'nostr'
   | 'appearance'
@@ -121,6 +130,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'battery', name: 'Battery', icon: BatteryFull },
   { id: 'power', name: 'Power', icon: Gauge },
   { id: 'sound', name: 'Sound', icon: Volume2 },
+  { id: 'keyboard', name: 'Keyboard', icon: Keyboard },
   { id: 'notifications', name: 'Notifications', icon: Bell },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
@@ -141,7 +151,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * (net.hadess.PowerProfiles over D-Bus: power-profiles-daemon / tuned-ppd),
  * falling back where no such daemon runs. The Sound
  * section drives the default sink's volume/mute through `window.audio`
- * (wpctl/PipeWire). Nostr & Storage manages Din's encrypted app-data
+ * (wpctl/PipeWire). Keyboard picks the layout native Linux apps type with
+ * through `window.keyboard`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
@@ -213,6 +224,8 @@ export function Settings({ params }: AppComponentProps) {
           <PowerSection />
         ) : section === 'sound' ? (
           <SoundSection />
+        ) : section === 'keyboard' ? (
+          <KeyboardSection />
         ) : section === 'notifications' ? (
           <NotificationsSection />
         ) : section === 'nostr' ? (
@@ -2048,6 +2061,188 @@ function SoundSection() {
           )}
         </div>
       )}
+    </SectionShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard
+// ---------------------------------------------------------------------------
+
+/**
+ * The keyboard layout native Linux apps type with (window.keyboard). Din
+ * sends them physical keys, and their display servers apply this layout:
+ * the OS's by default, or one picked from xkeyboard-config's list. Din's own
+ * windows get characters from the system Din runs on, so they keep its
+ * layout either way.
+ */
+function KeyboardSection() {
+  const bridge = getKeyboardBridge();
+  const status = useKeyboardStatus();
+  const layouts = useKeyboardLayouts();
+  const setLayout = useSetKeyboardLayout();
+  const [query, setQuery] = useState('');
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  // While a change is in flight, show the requested choice.
+  const selected = setLayout.isPending ? setLayout.variables : status.data?.selected ?? null;
+  const selectedKey = selected ? layoutKey(selected) : null;
+
+  const filtered = useMemo(() => {
+    const all = layouts.data ?? [];
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return all;
+    return all.filter((entry) => {
+      const haystack = `${entry.name} ${entry.layout} ${entry.variant}`.toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    });
+  }, [layouts.data, query]);
+
+  // Bring the picked layout into view when the list first appears.
+  const showList = selectedKey !== null && Boolean(layouts.data);
+  useEffect(() => {
+    if (showList) selectedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [showList]);
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Keyboard">
+        <FallbackCard icon={Keyboard}>
+          Keyboard layouts need the Din desktop shell; they aren't available in
+          a plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  if (status.isLoading) {
+    return (
+      <SectionShell title="Keyboard">
+        <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3" aria-hidden>
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-32 bg-foreground/10" />
+            <Skeleton className="h-3 w-56 bg-foreground/10" />
+          </div>
+          <Skeleton className="h-5 w-9 rounded-full bg-foreground/10" />
+        </div>
+      </SectionShell>
+    );
+  }
+
+  if (status.isError || !status.data) {
+    return (
+      <SectionShell title="Keyboard">
+        <FallbackCard>Could not read the keyboard layout.</FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const system = status.data.system;
+
+  return (
+    <SectionShell title="Keyboard">
+      <SettingSwitchRow
+        id="keyboard-follow-system"
+        icon={Keyboard}
+        label="Use the system layout"
+        description={`Your system is set to ${system.name}.`}
+        checked={selected === null}
+        onCheckedChange={(checked) =>
+          // Start from the system's layout, so turning this off changes nothing
+          // until a layout is picked.
+          setLayout.mutate(checked ? null : { layout: system.layout, variant: system.variant })
+        }
+      />
+
+      {selected !== null && (
+        <div className="flex flex-col gap-2">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search layouts"
+              aria-label="Search keyboard layouts"
+              className="pl-8"
+            />
+          </div>
+
+          {layouts.isLoading ? (
+            <div className="flex flex-col gap-1" aria-hidden>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-9 w-full bg-foreground/10" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <FallbackCard>
+              {layouts.data?.length
+                ? 'No layouts match your search.'
+                : 'No keyboard layouts were found. Install xkeyboard-config to choose one.'}
+            </FallbackCard>
+          ) : (
+            <div
+              role="radiogroup"
+              aria-label="Keyboard layout"
+              className="flex max-h-80 flex-col gap-0.5 overflow-y-auto rounded-md border bg-muted/20 p-1"
+            >
+              {filtered.map((entry) => {
+                const key = layoutKey(entry);
+                const active = key === selectedKey;
+                return (
+                  <button
+                    key={key}
+                    ref={active ? selectedRef : undefined}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => {
+                      if (!active) setLayout.mutate({ layout: entry.layout, variant: entry.variant });
+                    }}
+                    className={cn(
+                      'flex items-center gap-3 rounded-md px-2 py-1.5 text-left',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      active ? 'bg-primary/10' : 'hover:bg-foreground/5',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex size-4 shrink-0 items-center justify-center rounded-full border',
+                        active
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-muted-foreground/50',
+                      )}
+                      aria-hidden
+                    >
+                      {active && <Check className="size-3" />}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">{entry.name}</span>
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                      {entry.variant ? `${entry.layout}(${entry.variant})` : entry.layout}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {setLayout.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {setLayout.error instanceof Error
+            ? setLayout.error.message
+            : 'Could not change the keyboard layout.'}
+        </p>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        Native Linux apps type with this layout. Din's own windows use the layout
+        of the system Din runs on.
+      </p>
     </SectionShell>
   );
 }

@@ -39,6 +39,7 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import { execFile } from 'node:child_process';
 import { X11Client, type WindowId } from './x11.mts';
 import {
   changeProperty,
@@ -71,6 +72,7 @@ import {
   type Extension,
 } from './x11-requests.mts';
 import { FIRST_WAYLAND_ID, WaylandBridge } from './wayland-bridge.mts';
+import type { Keymap } from './keyboard.mts';
 
 /** Core event codes. */
 const EV_DESTROY_NOTIFY = 17;
@@ -266,11 +268,39 @@ async function internAtoms(): Promise<Atoms> {
   };
 }
 
+/** The X server, for setxkbmap. */
+let xServer: { display: string; xauthority: string } | null = null;
+
+/**
+ * Give both servers the user's keyboard layout (electron/keyboard.mts): the
+ * shell sends physical keys, and each server maps them to characters.
+ */
+function setKeymap(keymap: Keymap): void {
+  wayland?.send({ type: 'keymap', ...keymap });
+  if (!xServer) return;
+  const args = ['-display', xServer.display];
+  if (keymap.rules) args.push('-rules', keymap.rules);
+  if (keymap.model) args.push('-model', keymap.model);
+  args.push('-layout', keymap.layout);
+  if (keymap.variant) args.push('-variant', keymap.variant);
+  args.push('-option', '');
+  if (keymap.options) args.push('-option', keymap.options);
+  execFile(
+    'setxkbmap',
+    args,
+    { env: { ...process.env, XAUTHORITY: xServer.xauthority }, timeout: 10_000 },
+    (error) => {
+      if (error) console.error('native-display: setxkbmap failed:', error.message);
+    },
+  );
+}
+
 async function start(
   display: string,
   xauthority: string,
   compositor: string | null,
   gpu: boolean,
+  keymap: Keymap | null,
 ): Promise<void> {
   const client = await X11Client.connect({ display, xauthority });
   if (!client) throw new Error(`Cannot connect to ${display}`);
@@ -336,6 +366,8 @@ async function start(
       wayland = null;
     };
   }
+  xServer = { display, xauthority };
+  if (keymap) setKeymap(keymap);
 
   ready = true;
   if (pendingPort) connectShell(pendingPort);
@@ -1112,12 +1144,17 @@ process.parentPort.on('message', (event) => {
     xauthority?: string;
     compositor?: string | null;
     gpu?: boolean;
+    keymap?: Keymap | null;
   };
   if (data.type === 'start' && data.display && data.xauthority) {
-    start(data.display, data.xauthority, data.compositor ?? null, data.gpu === true).catch((error: unknown) => {
-      toMain({ type: 'error', message: error instanceof Error ? error.message : String(error) });
-      process.exit(1);
-    });
+    start(data.display, data.xauthority, data.compositor ?? null, data.gpu === true, data.keymap ?? null).catch(
+      (error: unknown) => {
+        toMain({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+        process.exit(1);
+      },
+    );
+  } else if (data.type === 'keymap' && data.keymap) {
+    setKeymap(data.keymap);
   } else if (data.type === 'port' && event.ports[0]) {
     if (ready) connectShell(event.ports[0]);
     else pendingPort = event.ports[0];

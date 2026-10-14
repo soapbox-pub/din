@@ -37,6 +37,7 @@ import path from 'node:path';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electron';
 import { connectGpuBuffers, dinFd } from './native-gpu.mts';
+import { keyboardKeymap, onKeymapChange } from './keyboard.mts';
 
 const WORKER = path.join(import.meta.dirname, 'native-display-worker.mts');
 
@@ -193,6 +194,7 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
 
 /** Fork the window manager / compositor against the server. */
 async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
+  const keymap = await keyboardKeymap();
   const child = utilityProcess.fork(WORKER, [], {
     serviceName: 'Din native display',
     stdio: 'inherit',
@@ -228,6 +230,7 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
       ...display,
       compositor: compositorBinary(),
       gpu: dinFd() !== null,
+      keymap,
     });
   });
   if (!ok) return false;
@@ -391,6 +394,8 @@ export function registerNativeDisplayHandlers(options: {
   shell: () => Electron.WebContents | null;
 }): void {
   shellContents = options.shell;
+  // Apps type with the user's layout (see keyboard.mts), and switch with it.
+  onKeymapChange((keymap) => worker?.postMessage({ type: 'keymap', keymap }));
   ipcMain.on('native-display:connect', async (event) => {
     try {
       options.assertShellSender(event);

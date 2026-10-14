@@ -9,6 +9,7 @@
 //   - window.vpn: VPN/WireGuard profile toggles for the network selector
 //   - window.display: xrandr multi-output arrangement for the Settings app
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
+//   - window.keyboard: the keyboard layout native apps use, for Settings
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -374,6 +375,23 @@ contextBridge.exposeInMainWorld('nativeDisplay', {
   onPresented: (callback) => {
     gpuPresented = callback;
   },
+});
+
+// Keyboard bridge (window.keyboard), backed by the keyboard:* handlers in
+// electron/keyboard.mts: the layout native apps type with - the OS's, or
+// one picked in Settings from xkeyboard-config's list.
+contextBridge.exposeInMainWorld('keyboard', {
+  /** The OS's layout ({ layout, variant, name }) and the one picked, if any. */
+  status: () => ipcRenderer.invoke('keyboard:status'),
+
+  /** Every layout and variant there is: { layout, variant, name }[]. */
+  layouts: () => ipcRenderer.invoke('keyboard:layouts'),
+
+  /**
+   * Use a layout for native apps, or null to follow the OS.
+   * @param {{ layout: string, variant: string } | null} choice
+   */
+  set: (choice) => ipcRenderer.invoke('keyboard:set', choice),
 });
 
 // Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -

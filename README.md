@@ -128,6 +128,12 @@ mouse-look in games (Wayland or X11 via Xwayland): an app's pointer lock
 becomes DOM Pointer Lock on its window, Escape releases it, and the next click
 in the window lets the app take it again.
 
+Apps type with the OS's keyboard layout (`electron/keyboard.mts` reads it from
+`XKB_DEFAULT_*`, GNOME or KDE settings, the host X server, or the system
+keyboard config), or with one picked in Settings → Keyboard. Din sends them
+physical keys and both servers apply the layout; the Xvfb fallback needs
+`setxkbmap` for it.
+
 Build both crates with `npm run build:native`. Without the compositor, every
 app runs on Xvfb; without din-fd, the compositor stays on the CPU path.
 `DIN_NATIVE_DISPLAY=x11` forces X and `DIN_COMPOSITOR_GPU=0` the CPU path,
