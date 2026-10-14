@@ -76,9 +76,14 @@ type WorkerMessage =
   | { type: 'title'; id: number; title: string }
   | { type: 'configure'; id: number; x: number; y: number; width: number; height: number }
   | { type: 'activate'; id: number }
-  | { type: 'frames'; updates: FrameUpdate[] }
+  /** `source` names the server (X or Wayland) that wants the ack. */
+  | { type: 'frames'; source?: string; updates: FrameUpdate[] }
   | { type: 'cursor'; width: number; height: number; xhot: number; yhot: number; data: Uint8Array<ArrayBuffer> }
-  | { type: 'clipboard'; text: string };
+  /** A named cursor (Wayland cursor-shape: CSS cursor names). */
+  | { type: 'cursor'; name: string }
+  | { type: 'clipboard'; text: string }
+  /** Where the Wayland compositor streams its pixels (see connectFrameStream). */
+  | { type: 'frame-stream'; url: string };
 
 interface NativeDisplayBridge {
   connect(): void;
@@ -188,19 +193,20 @@ function onMessage(message: WorkerMessage): void {
   switch (message.type) {
     case 'frames': {
       for (const update of message.updates) {
-        const surface = surfaces.get(update.id);
-        const ctx = surface?.canvas.getContext('2d');
-        if (!ctx) continue;
-        const pixels = new Uint8ClampedArray(
-          update.data.buffer,
-          update.data.byteOffset,
-          update.data.byteLength,
+        drawUpdate(
+          update.id,
+          update.x,
+          update.y,
+          update.width,
+          update.height,
+          new Uint8ClampedArray(update.data.buffer, update.data.byteOffset, update.data.byteLength),
         );
-        ctx.putImageData(new ImageData(pixels, update.width, update.height), update.x, update.y);
       }
-      send({ type: 'ack' });
+      send({ type: 'ack', source: message.source });
       return;
     }
+    case 'frame-stream':
+      return connectFrameStream(message.url);
     case 'open':
     case 'popup': {
       const existing = surfaces.get(message.id);
@@ -220,6 +226,10 @@ function onMessage(message: WorkerMessage): void {
       };
       resizeCanvas(surface.canvas, surface.width, surface.height);
       surfaces.set(surface.id, surface);
+      for (const early of earlyUpdates.get(surface.id) ?? []) {
+        drawUpdate(surface.id, early.x, early.y, early.width, early.height, early.pixels);
+      }
+      earlyUpdates.delete(surface.id);
       // A re-announce (after a shell reload) of a window that already has a
       // Din window must not open a second one.
       if (!existing) emit({ type: message.type, surface });
@@ -264,8 +274,85 @@ function onMessage(message: WorkerMessage): void {
   }
 }
 
+/**
+ * Patches for windows not announced yet. Wayland pixels and announcements
+ * travel on different channels (see connectFrameStream), so a window's first
+ * frame can beat its 'open'.
+ */
+const earlyUpdates = new Map<
+  number,
+  { x: number; y: number; width: number; height: number; pixels: Uint8ClampedArray<ArrayBuffer> }[]
+>();
+/** Cap on windows with early patches held (a stuck id mustn't leak). */
+const MAX_EARLY_WINDOWS = 16;
+
+function drawUpdate(
+  id: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  pixels: Uint8ClampedArray<ArrayBuffer>,
+): void {
+  const surface = surfaces.get(id);
+  if (!surface) {
+    const held = earlyUpdates.get(id);
+    if (held) held.push({ x, y, width, height, pixels });
+    else if (earlyUpdates.size < MAX_EARLY_WINDOWS) earlyUpdates.set(id, [{ x, y, width, height, pixels }]);
+    return;
+  }
+  surface.canvas.getContext('2d')?.putImageData(new ImageData(pixels, width, height), x, y);
+}
+
+let frameStream: WebSocket | null = null;
+
+/**
+ * Receive Wayland pixels straight from the compositor (native/din-compositor
+ * /src/frames.rs) instead of through the display worker: Node and the
+ * MessagePort in between cost two full copies of every frame, and capped a
+ * full-window repaint at ~130 MB/s; a WebSocket delivers each batch as one
+ * ArrayBuffer. The URL is localhost-only and carries a per-session token.
+ *
+ * Each message is a batch: u32 count, then per patch u32 id, i32 x, i32 y,
+ * u32 width, u32 height (little-endian) and the RGBA bytes. Batches are
+ * acked on the control channel, which is what paces the apps.
+ */
+function connectFrameStream(url: string): void {
+  if (!/^ws:\/\/127\.0\.0\.1:\d+\/[0-9a-f]+$/.test(url)) return;
+  frameStream?.close();
+  const ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+    const buffer = event.data;
+    const view = new DataView(buffer);
+    const count = view.getUint32(0, true);
+    let offset = 4;
+    for (let i = 0; i < count && offset + 20 <= buffer.byteLength; i += 1) {
+      const id = view.getUint32(offset, true);
+      const x = view.getInt32(offset + 4, true);
+      const y = view.getInt32(offset + 8, true);
+      const width = view.getUint32(offset + 12, true);
+      const height = view.getUint32(offset + 16, true);
+      const length = width * height * 4;
+      offset += 20;
+      if (offset + length > buffer.byteLength) break;
+      drawUpdate(id, x, y, width, height, new Uint8ClampedArray(buffer, offset, length));
+      offset += length;
+    }
+    send({ type: 'ack', source: 'wayland' });
+  };
+  frameStream = ws;
+}
+
 /** Mirror the app's cursor onto every native canvas, via a CSS variable. */
 function setCursor(cursor: Extract<WorkerMessage, { type: 'cursor' }>): void {
+  if ('name' in cursor) {
+    // Cursor-shape names are CSS cursor names; anything else is untrusted
+    // text headed for a style property, so only plain names pass.
+    const name = /^[a-z-]+$/.test(cursor.name) ? cursor.name : 'default';
+    document.documentElement.style.setProperty(NATIVE_CURSOR_VAR, name);
+    return;
+  }
   if (cursor.width === 0 || cursor.height === 0) return;
   const canvas = document.createElement('canvas');
   canvas.width = cursor.width;

@@ -8,7 +8,13 @@
 // own (native-display-worker.mts does the window management and compositing;
 // src/lib/nativeDisplay.ts draws them).
 //
-// Why Xvfb rather than a nested compositor or XEmbed: it ships everywhere
+// Apps that speak Wayland run on a Wayland compositor instead
+// (native/din-compositor, started by the worker beside the X server; see
+// wayland-bridge.mts), which streams frames faster and paces apps by what
+// Din actually shows. Xvfb stays for X-only apps, and for everything when
+// the compositor isn't built.
+//
+// Why Xvfb for X apps rather than XEmbed into the host: it ships everywhere
 // Xorg does, needs no GPU, supports every extension the compositor uses
 // (Composite, DAMAGE, XTEST, XFIXES), and keeps apps entirely out of the
 // host session - their windows can't escape Din's, and a misbehaving app
@@ -32,12 +38,37 @@ import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electr
 
 const WORKER = path.join(import.meta.dirname, 'native-display-worker.mts');
 
-/** The X server and how to reach it. */
+/** The embedded display's servers and how to reach them. */
 export interface EmbeddedDisplay {
   /** "$DISPLAY" value, e.g. ":100". */
   display: string;
   /** Path of the Xauthority file holding the server's cookie. */
   xauthority: string;
+  /** "$WAYLAND_DISPLAY" of the Wayland compositor, when it runs. */
+  wayland: string | null;
+}
+
+/**
+ * The Wayland compositor binary (native/din-compositor), or null to run X
+ * alone: when it isn't built, or DIN_NATIVE_DISPLAY=x11 asks for X only
+ * (handy for comparing the two).
+ */
+function compositorBinary(): string | null {
+  if (process.env.DIN_NATIVE_DISPLAY === 'x11') return null;
+  const candidates = [
+    process.env.DIN_COMPOSITOR,
+    path.join(import.meta.dirname, '..', 'native/din-compositor/target/release/din-compositor'),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // try the next
+    }
+  }
+  return null;
 }
 
 let server: ChildProcess | null = null;
@@ -148,7 +179,7 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
     }
   });
   server = child;
-  return { display: `:${displayNumber}`, xauthority };
+  return { display: `:${displayNumber}`, xauthority, wayland: null };
 }
 
 /** Fork the window manager / compositor against the server. */
@@ -158,15 +189,18 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
     stdio: 'inherit',
   });
   const ok = await new Promise<boolean>((resolve) => {
-    child.on('message', (message: { type?: string; message?: string }) => {
-      if (message?.type === 'ready') resolve(true);
+    child.on('message', (message: { type?: string; message?: string; wayland?: string | null }) => {
+      if (message?.type === 'ready') {
+        display.wayland = message.wayland ?? null;
+        resolve(true);
+      }
       if (message?.type === 'error') {
         console.error('native-display:', message.message);
         resolve(false);
       }
     });
     child.once('exit', () => resolve(false));
-    child.postMessage({ type: 'start', ...display });
+    child.postMessage({ type: 'start', ...display, compositor: compositorBinary() });
   });
   if (!ok) return false;
   child.once('exit', () => {
@@ -266,9 +300,13 @@ function launchEnvironment(): NodeJS.ProcessEnv {
 /**
  * Environment for a process that should appear inside Din: the one Din was
  * started with, with the user's session environment filling in whatever
- * that lacks, pointed at the embedded display, and steered off Wayland, so
- * toolkits that would rather talk to a compositor (GTK, Qt, SDL,
- * Electron/Chromium) pick X11.
+ * that lacks, pointed at the embedded display.
+ *
+ * With the Wayland compositor running, toolkits are steered to it first and
+ * to the X server second (GTK, Qt and SDL take a fallback list; Firefox and
+ * Electron go by XDG_SESSION_TYPE), and X-only apps find DISPLAY as before.
+ * Without it, everything is pinned to X - including off any Wayland desktop
+ * Din itself may be running on, which those apps would otherwise escape to.
  */
 export async function embeddedDisplayEnv(display: EmbeddedDisplay): Promise<NodeJS.ProcessEnv> {
   const env: NodeJS.ProcessEnv = {
@@ -276,12 +314,26 @@ export async function embeddedDisplayEnv(display: EmbeddedDisplay): Promise<Node
     ...launchEnvironment(),
     DISPLAY: display.display,
     XAUTHORITY: display.xauthority,
-    XDG_SESSION_TYPE: 'x11',
-    GDK_BACKEND: 'x11',
-    QT_QPA_PLATFORM: 'xcb',
-    SDL_VIDEODRIVER: 'x11',
   };
-  delete env.WAYLAND_DISPLAY;
+  if (display.wayland) {
+    Object.assign(env, {
+      WAYLAND_DISPLAY: display.wayland,
+      XDG_SESSION_TYPE: 'wayland',
+      GDK_BACKEND: 'wayland,x11',
+      QT_QPA_PLATFORM: 'wayland;xcb',
+      SDL_VIDEODRIVER: 'wayland,x11',
+      MOZ_ENABLE_WAYLAND: '1',
+      ELECTRON_OZONE_PLATFORM_HINT: 'auto',
+    });
+  } else {
+    Object.assign(env, {
+      XDG_SESSION_TYPE: 'x11',
+      GDK_BACKEND: 'x11',
+      QT_QPA_PLATFORM: 'xcb',
+      SDL_VIDEODRIVER: 'x11',
+    });
+    delete env.WAYLAND_DISPLAY;
+  }
   return env;
 }
 

@@ -1,0 +1,16 @@
+[package]
+name = "din-compositor"
+version = "0.1.0"
+edition = "2024"
+description = "Headless Wayland compositor that streams native app windows into Din"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+smithay = { version = "=0.7.0", default-features = false, features = ["wayland_frontend", "desktop", "renderer_pixman"] }
+tungstenite = "0.27"
+
+[profile.release]
+debug = 1

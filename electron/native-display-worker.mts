@@ -1,6 +1,11 @@
 // The embedded display's window manager and compositor, run as an Electron
 // utility process (see native-display.mts, which owns the X server).
 //
+// It also hosts the Wayland half (wayland-bridge.mts): apps that speak
+// Wayland run on din-compositor beside the X server, and this process routes
+// the shell's messages to whichever server owns the window (Wayland ids
+// start at 0x40000001). Most of this file is the X half.
+//
 // Native Linux apps are X11 clients of a private, headless X server (Xvfb)
 // that only Din can see. This process connects to it and is, at once:
 //
@@ -64,6 +69,7 @@ import {
   xfixesSelectSelectionInput,
   type Extension,
 } from './x11-requests.mts';
+import { FIRST_WAYLAND_ID, WaylandBridge } from './wayland-bridge.mts';
 
 /** Core event codes. */
 const EV_DESTROY_NOTIFY = 17;
@@ -259,7 +265,11 @@ async function internAtoms(): Promise<Atoms> {
   };
 }
 
-async function start(display: string, xauthority: string): Promise<void> {
+async function start(
+  display: string,
+  xauthority: string,
+  compositor: string | null,
+): Promise<void> {
   const client = await X11Client.connect({ display, xauthority });
   if (!client) throw new Error(`Cannot connect to ${display}`);
   x = client;
@@ -311,10 +321,24 @@ async function start(display: string, xauthority: string): Promise<void> {
   xfixesSelectCursorInput(x, xfixes, x.root);
   xfixesSelectSelectionInput(x, xfixes, wmWindow, atoms.clipboard);
 
+  // Wayland apps get a compositor of their own beside the X server; X stays
+  // for the apps that only speak X.
+  const started = compositor
+    ? await WaylandBridge.start(compositor, { width: x.screenWidth, height: x.screenHeight })
+    : null;
+  if (started) {
+    wayland = started.bridge;
+    waylandFrames = started.frames;
+    wayland.onShell = onWaylandMessage;
+    wayland.onExit = () => {
+      wayland = null;
+    };
+  }
+
   ready = true;
   if (pendingPort) connectShell(pendingPort);
   pendingPort = null;
-  toMain({ type: 'ready' });
+  toMain({ type: 'ready', wayland: started?.socket ?? null });
 }
 
 /**
@@ -927,7 +951,7 @@ function onEvent(code: number, packet: Buffer): void {
 
 /** Messages from the shell renderer. */
 type ShellMessage =
-  | { type: 'ack' }
+  | { type: 'ack'; source?: string }
   | { type: 'geometry'; id: number; x: number; y: number; width: number; height: number }
   | { type: 'focus'; id: number }
   | { type: 'raise'; id: number }
@@ -994,7 +1018,7 @@ function connectShell(next: Electron.MessagePortMain): void {
   inFlight = 0;
   port.on('message', (event) => {
     try {
-      onShellMessage(event.data as ShellMessage);
+      route(event.data as ShellMessage);
     } catch (error) {
       console.error('native-display: shell message failed', error);
     }
@@ -1002,12 +1026,81 @@ function connectShell(next: Electron.MessagePortMain): void {
   port.start();
   // A fresh renderer knows nothing: re-announce every window.
   for (const surface of surfaces.values()) void announce(surface);
+  wayland?.send({ type: 'reset' });
+  // Wayland pixels come on a stream of their own (wayland-bridge.mts).
+  if (waylandFrames) toShell({ type: 'frame-stream', url: waylandFrames });
+}
+
+// ---------------------------------------------------------------------------
+// The Wayland compositor beside the X server (wayland-bridge.mts)
+// ---------------------------------------------------------------------------
+
+let wayland: WaylandBridge | null = null;
+/** The compositor's frame-stream URL, for the renderer to connect to. */
+let waylandFrames: string | null = null;
+/** Open Wayland menus: a click on the shell's menu shield belongs to them. */
+const waylandMenus = new Set<number>();
+/** Whether the keyboard belongs to a Wayland window (else an X one). */
+let keyboardOnWayland = false;
+
+function isWaylandId(id: unknown): boolean {
+  return typeof id === 'number' && id >= FIRST_WAYLAND_ID;
+}
+
+function onWaylandMessage(message: unknown): void {
+  const m = message as { type?: string; id?: number; kind?: string };
+  if (m.type === 'popup' && m.kind === 'POPUP_MENU' && m.id) waylandMenus.add(m.id);
+  if (m.type === 'close' && m.id) waylandMenus.delete(m.id);
+  toShell(message);
+}
+
+/** Send a shell message to whichever server it concerns. */
+function route(message: ShellMessage): void {
+  const bridge = wayland;
+  if (!bridge) return onShellMessage(message);
+  switch (message.type) {
+    case 'ack':
+      if (message.source === 'wayland') bridge.send(message);
+      else onShellMessage(message);
+      return;
+    case 'focus':
+      // One keyboard: the window that has it is on one server, and the
+      // other server's windows all lose it.
+      keyboardOnWayland = isWaylandId(message.id);
+      bridge.send({ type: 'focus', id: keyboardOnWayland ? message.id : 0 });
+      onShellMessage({ type: 'focus', id: keyboardOnWayland ? 0 : message.id });
+      return;
+    case 'key':
+      if (keyboardOnWayland) bridge.send(message);
+      else onShellMessage(message);
+      return;
+    case 'leave':
+    case 'clipboard':
+      bridge.send(message);
+      onShellMessage(message);
+      return;
+    case 'motion':
+    case 'button':
+      // id 0 is the menu shield, in root coordinates: it belongs to
+      // whichever server has a menu open.
+      if (message.id === 0 ? waylandMenus.size > 0 : isWaylandId(message.id)) bridge.send(message);
+      else onShellMessage(message);
+      return;
+    default:
+      if (isWaylandId(message.id)) bridge.send(message);
+      else onShellMessage(message);
+  }
 }
 
 process.parentPort.on('message', (event) => {
-  const data = event.data as { type: string; display?: string; xauthority?: string };
+  const data = event.data as {
+    type: string;
+    display?: string;
+    xauthority?: string;
+    compositor?: string | null;
+  };
   if (data.type === 'start' && data.display && data.xauthority) {
-    start(data.display, data.xauthority).catch((error: unknown) => {
+    start(data.display, data.xauthority, data.compositor ?? null).catch((error: unknown) => {
       toMain({ type: 'error', message: error instanceof Error ? error.message : String(error) });
       process.exit(1);
     });
