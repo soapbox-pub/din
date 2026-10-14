@@ -36,7 +36,7 @@ Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> Din
 - Node.js (dev servers and builds)
 - Xvfb, for running native Linux apps inside Din; optionally Rust (cargo), to
   build the Wayland compositor that hosts the apps able to use it (and draws
-  them on the GPU)
+  them on the GPU), plus Xwayland, to put X11 apps there too
 - Nix (with flakes enabled; the Determinate installer does this by default) —
   only needed for the Aladdin `os:*` commands
 - QEMU (`qemu-system-x86_64`) on the host for the `npm run os:run` demo
@@ -117,11 +117,14 @@ servers whose windows Din composites into its own:
   copy - apps get linux-dmabuf and render on the GPU too. Without one, pixels
   stream to the shell over a token-guarded localhost WebSocket. Either way,
   apps are paced by the shell's display refresh.
-- **X11** — a private Xvfb, managed and composited by
-  `electron/native-display-worker.mts`, for apps that only speak X.
+- **X11** — the compositor's rootless Xwayland, which it manages as the X
+  window manager, so X11 apps take the same (GPU) path as Wayland ones and get
+  hardware OpenGL. Where Xwayland isn't installed, or without the compositor,
+  X11 apps fall back to a private Xvfb, managed and composited by
+  `electron/native-display-worker.mts` (software rendering).
 
 Build both crates with `npm run build:native`. Without the compositor, every
-app runs on X; without din-fd, the compositor stays on the CPU path.
+app runs on Xvfb; without din-fd, the compositor stays on the CPU path.
 `DIN_NATIVE_DISPLAY=x11` forces X and `DIN_COMPOSITOR_GPU=0` the CPU path,
 for comparisons, and `DIN_COMPOSITOR_STATS=1` logs the compositor's frame
 rate.

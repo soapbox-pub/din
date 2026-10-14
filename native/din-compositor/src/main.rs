@@ -7,7 +7,8 @@
 //! windows. Din's display worker drives everything else over stdin/stdout
 //! (wire.rs): window announcements, input, geometry, focus, clipboard. Apps
 //! are paced by the renderer's acks: frame callbacks go out only once Din
-//! has shown the last frame.
+//! has shown the last frame. X11 apps come in through a rootless Xwayland
+//! the compositor manages (xwayland.rs).
 //!
 //! Spawned by electron/wayland-bridge.mts; exits when stdin closes.
 
@@ -18,6 +19,7 @@ mod logic;
 mod state;
 mod stats;
 mod wire;
+mod xwayland;
 
 use std::{
     io::Read,
@@ -39,12 +41,12 @@ fn env_size(name: &str, fallback: i32) -> i32 {
 }
 
 fn main() {
-    let mut event_loop: EventLoop<State> = EventLoop::try_new().expect("event loop");
+    let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("event loop");
     let display: Display<State> = Display::new().expect("wayland display");
     let dh = display.handle();
     let screen = (env_size("DIN_SCREEN_WIDTH", 1920), env_size("DIN_SCREEN_HEIGHT", 1080)).into();
 
-    let (clipboard_tx, clipboard_rx) = channel::channel::<String>();
+    let (clipboard_tx, clipboard_rx) = channel::channel::<(String, bool)>();
     let (connected_tx, connected_rx) = channel::channel::<()>();
     let frames = frames::FrameServer::start(connected_tx).expect("frame stream");
     let frames_url = frames.url.clone();
@@ -52,8 +54,8 @@ fn main() {
     let buffers = gpu.as_ref().and_then(|_| gpu::BufferChannel::bind().ok());
     let buffers_path = buffers.as_ref().map(|b| b.path.to_string_lossy().into_owned());
     let listener = buffers.as_ref().and_then(|b| b.listener.try_clone().ok());
-    let mut state = State::new(&dh, screen, frames, gpu, buffers, clipboard_tx);
     let handle = event_loop.handle();
+    let mut state = State::new(&dh, handle.clone(), screen, frames, gpu, buffers, clipboard_tx);
 
     // Din's main process connects here to receive GPU buffers (gpu.rs).
     if let Some(listener) = listener {
@@ -118,15 +120,23 @@ fn main() {
 
     handle
         .insert_source(clipboard_rx, |event, _, state| {
-            if let channel::Event::Msg(text) = event {
+            if let channel::Event::Msg((text, from_x11)) = event {
+                // So the text coming back from Din leaves the X app owning it.
+                if from_x11 {
+                    state.x11_clipboard = Some(Arc::new(text.clone()));
+                }
                 state.wire.json(serde_json::json!({ "type": "clipboard", "text": text }));
             }
         })
         .expect("clipboard source");
 
+    let xdisplay = xwayland::start(&mut state);
+
     state.wire.json(serde_json::json!({
         "type": "ready",
         "socket": socket_name,
+        // DISPLAY for X11 apps, when Xwayland runs.
+        "xwayland": xdisplay.map(|n| format!(":{n}")),
         // One path or the other: buffers with a GPU, the stream without.
         "frames": if buffers_path.is_some() { None } else { Some(frames_url) },
         "buffers": buffers_path,

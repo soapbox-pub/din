@@ -48,6 +48,11 @@ export interface EmbeddedDisplay {
   xauthority: string;
   /** "$WAYLAND_DISPLAY" of the Wayland compositor, when it runs. */
   wayland: string | null;
+  /**
+   * "$DISPLAY" of the compositor's Xwayland, when it runs: X11 apps go there
+   * instead, onto the compositor's GPU path. No cookie; see embeddedDisplayEnv.
+   */
+  xwayland: string | null;
 }
 
 /**
@@ -183,7 +188,7 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
     }
   });
   server = child;
-  return { display: `:${displayNumber}`, xauthority, wayland: null };
+  return { display: `:${displayNumber}`, xauthority, wayland: null, xwayland: null };
 }
 
 /** Fork the window manager / compositor against the server. */
@@ -198,9 +203,11 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
       message?: string;
       wayland?: string | null;
       buffers?: string | null;
+      xwayland?: string | null;
     }) => {
       if (message?.type === 'ready') {
         display.wayland = message.wayland ?? null;
+        display.xwayland = message.xwayland ?? null;
         // Wayland windows rendered on the GPU come to this process as
         // buffers (native-gpu.mts), not through the worker.
         if (message.buffers && !connectGpuBuffers(message.buffers, shellContents)) {
@@ -324,8 +331,9 @@ function launchEnvironment(): NodeJS.ProcessEnv {
  * that lacks, pointed at the embedded display.
  *
  * With the Wayland compositor running, toolkits are steered to it first and
- * to the X server second (GTK, Qt and SDL take a fallback list; Firefox and
- * Electron go by XDG_SESSION_TYPE), and X-only apps find DISPLAY as before.
+ * to X second (GTK, Qt and SDL take a fallback list; Firefox and Electron go
+ * by XDG_SESSION_TYPE), and X-only apps find DISPLAY. That's the compositor's
+ * Xwayland when it has one, else the Xvfb server.
  * Without it, everything is pinned to X - including off any Wayland desktop
  * Din itself may be running on, which those apps would otherwise escape to.
  */
@@ -333,9 +341,12 @@ export async function embeddedDisplayEnv(display: EmbeddedDisplay): Promise<Node
   const env: NodeJS.ProcessEnv = {
     ...(await sessionEnvironment()),
     ...launchEnvironment(),
-    DISPLAY: display.display,
+    DISPLAY: display.xwayland ?? display.display,
     XAUTHORITY: display.xauthority,
   };
+  // Xwayland has no cookie (it admits only this user; see the compositor's
+  // xwayland.rs), and a stale XAUTHORITY would only send clients looking.
+  if (display.xwayland) delete env.XAUTHORITY;
   if (display.wayland) {
     Object.assign(env, {
       WAYLAND_DISPLAY: display.wayland,

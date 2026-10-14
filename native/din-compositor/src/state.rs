@@ -5,7 +5,7 @@
 //! tiled on every side (so toolkits drop their shadows and rounded corners)
 //! and to use server-side decorations (Din draws the title bar).
 
-use std::{io::Read, os::fd::OwnedFd, sync::Arc, time::Instant};
+use std::{borrow::Cow, io::Read, os::fd::OwnedFd, sync::Arc, time::Instant};
 
 use smithay::{
     backend::{
@@ -14,11 +14,16 @@ use smithay::{
     },
     delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_dmabuf,
     delegate_output, delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
-    desktop::{PopupKind, PopupManager, Window},
-    input::{Seat, SeatHandler, SeatState, keyboard::XkbConfig, pointer::CursorImageStatus},
+    delegate_xwayland_shell,
+    desktop::{PopupKind, PopupManager, Window, utils::bbox_from_surface_tree},
+    input::{
+        Seat, SeatHandler, SeatState,
+        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState, XkbConfig},
+        pointer::CursorImageStatus,
+    },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
-        calloop::channel::Sender,
+        calloop::{LoopHandle, channel::Sender},
         wayland_protocols::xdg::{
             decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
             shell::server::xdg_toplevel,
@@ -29,8 +34,12 @@ use smithay::{
             protocol::{wl_buffer, wl_seat, wl_surface::WlSurface},
         },
     },
-    utils::{Logical, Point, Rectangle, Serial, Size, Transform},
+    backend::input::KeyState,
+    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size, Transform},
+    xwayland::{X11Surface, X11Wm, XWaylandClientData},
     wayland::{
+        seat::WaylandFocus,
+        xwayland_shell::{XWaylandShellHandler, XWaylandShellState},
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorHandler, CompositorState, get_parent},
         cursor_shape::CursorShapeManagerState,
@@ -65,7 +74,7 @@ use crate::{
 const FIRST_ID: u32 = 0x4000_0001;
 
 /// Clipboard text larger than this isn't bridged.
-const MAX_CLIPBOARD_BYTES: u64 = 256 * 1024;
+pub const MAX_CLIPBOARD_BYTES: u64 = 256 * 1024;
 
 #[derive(Default)]
 pub struct ClientState {
@@ -77,6 +86,7 @@ impl ClientData for ClientState {
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
 }
 
+/// An xdg toplevel, or an X11 window managed through Xwayland (xwayland.rs).
 pub struct Toplevel {
     pub id: u32,
     pub window: Window,
@@ -92,24 +102,145 @@ pub struct Toplevel {
 }
 
 impl Toplevel {
-    pub fn surface(&self) -> &WlSurface {
-        self.window.toplevel().expect("wayland window").wl_surface()
+    pub fn new(id: u32, window: Window, pos: Point<i32, Logical>) -> Self {
+        Self {
+            id,
+            window,
+            pos,
+            announced: false,
+            canvas: None,
+            target: None,
+            dirty: false,
+            title: String::new(),
+            known_size: None,
+        }
     }
+
+    /// The window's surface; an X11 window has none until Xwayland
+    /// associates one.
+    pub fn wl_surface(&self) -> Option<WlSurface> {
+        self.window.wl_surface().map(|s| s.into_owned())
+    }
+
+    pub fn x11(&self) -> Option<&X11Surface> {
+        self.window.x11_surface()
+    }
+}
+
+/// What a popup is on the protocol side.
+pub enum PopupShell {
+    /// An xdg popup, placed relative to its parent by its positioner.
+    Xdg { kind: PopupKind, parent: WlSurface },
+    /// An X11 override-redirect window (a menu, a tooltip), which places
+    /// itself in root coordinates.
+    X11(X11Surface),
 }
 
 pub struct Popup {
     pub id: u32,
-    pub kind: PopupKind,
-    pub parent: WlSurface,
+    pub shell: PopupShell,
     /// Position relative to the parent's window geometry, from the positioner.
     pub rel: Point<i32, Logical>,
     /// Root position of the popup's window geometry corner.
     pub pos: Point<i32, Logical>,
+    /// A menu: it closes when clicked outside.
     pub grab: bool,
     pub announced: bool,
     pub canvas: Option<Canvas>,
     pub target: Option<Target>,
     pub dirty: bool,
+}
+
+impl Popup {
+    pub fn new(id: u32, shell: PopupShell, pos: Point<i32, Logical>, grab: bool) -> Self {
+        Self { id, shell, rel: (0, 0).into(), pos, grab, announced: false, canvas: None, target: None, dirty: false }
+    }
+
+    pub fn wl_surface(&self) -> Option<WlSurface> {
+        match &self.shell {
+            PopupShell::Xdg { kind, .. } => Some(kind.wl_surface().clone()),
+            PopupShell::X11(x11) => x11.wl_surface(),
+        }
+    }
+
+    /// The popup's window geometry, relative to its surface.
+    pub fn geometry(&self) -> Rectangle<i32, Logical> {
+        match &self.shell {
+            PopupShell::Xdg { kind, .. } => {
+                let geometry = kind.geometry();
+                if geometry.size.w > 0 && geometry.size.h > 0 {
+                    geometry
+                } else {
+                    bbox_from_surface_tree(kind.wl_surface(), (0, 0))
+                }
+            }
+            PopupShell::X11(x11) => Rectangle::from_size(x11.geometry().size),
+        }
+    }
+}
+
+/// Whoever has the keyboard. An X11 window must be focused on the X side too
+/// (SetInputFocus, WM_TAKE_FOCUS), which its own KeyboardTarget does.
+#[derive(Debug, Clone, PartialEq)]
+pub enum KeyboardFocus {
+    Wayland(WlSurface),
+    X11(X11Surface),
+}
+
+impl WaylandFocus for KeyboardFocus {
+    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
+        match self {
+            Self::Wayland(surface) => Some(Cow::Borrowed(surface)),
+            Self::X11(x11) => x11.wl_surface().map(Cow::Owned),
+        }
+    }
+}
+
+impl IsAlive for KeyboardFocus {
+    fn alive(&self) -> bool {
+        match self {
+            Self::Wayland(surface) => surface.alive(),
+            Self::X11(x11) => x11.alive(),
+        }
+    }
+}
+
+impl KeyboardTarget<State> for KeyboardFocus {
+    fn enter(&self, seat: &Seat<State>, data: &mut State, keys: Vec<KeysymHandle<'_>>, serial: Serial) {
+        match self {
+            Self::Wayland(surface) => KeyboardTarget::enter(surface, seat, data, keys, serial),
+            Self::X11(x11) => KeyboardTarget::enter(x11, seat, data, keys, serial),
+        }
+    }
+
+    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
+        match self {
+            Self::Wayland(surface) => KeyboardTarget::leave(surface, seat, data, serial),
+            Self::X11(x11) => KeyboardTarget::leave(x11, seat, data, serial),
+        }
+    }
+
+    fn key(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        key: KeysymHandle<'_>,
+        state: KeyState,
+        serial: Serial,
+        time: u32,
+    ) {
+        match self {
+            Self::Wayland(surface) => KeyboardTarget::key(surface, seat, data, key, state, serial, time),
+            Self::X11(x11) => KeyboardTarget::key(x11, seat, data, key, state, serial, time),
+        }
+    }
+
+    fn modifiers(&self, seat: &Seat<State>, data: &mut State, modifiers: ModifiersState, serial: Serial) {
+        match self {
+            Self::Wayland(surface) => KeyboardTarget::modifiers(surface, seat, data, modifiers, serial),
+            Self::X11(x11) => KeyboardTarget::modifiers(x11, seat, data, modifiers, serial),
+        }
+    }
 }
 
 pub struct State {
@@ -150,17 +281,26 @@ pub struct State {
     /// The toplevel the shell gave the keyboard (0: none).
     pub focused: u32,
     pub cursor_surface: Option<WlSurface>,
-    pub clipboard_tx: Sender<String>,
+    /// Clipboard text apps copied, and whether it came from X.
+    pub clipboard_tx: Sender<(String, bool)>,
+    pub handle: LoopHandle<'static, State>,
+    pub xwayland_shell_state: XWaylandShellState,
+    /// The X11 window manager, once Xwayland is up (xwayland.rs).
+    pub xwm: Option<X11Wm>,
+    /// Text last put on (or read from) the X clipboard.
+    pub x11_clipboard: Option<Arc<String>>,
 }
 
 impl State {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dh: &DisplayHandle,
+        handle: LoopHandle<'static, State>,
         screen: Size<i32, Logical>,
         frames: FrameServer,
         gpu: Option<Gpu>,
         buffers: Option<BufferChannel>,
-        clipboard_tx: Sender<String>,
+        clipboard_tx: Sender<(String, bool)>,
     ) -> Self {
         let compositor_state = CompositorState::new::<Self>(dh);
         let xdg_shell_state = XdgShellState::new::<Self>(dh);
@@ -170,6 +310,7 @@ impl State {
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let decoration_state = XdgDecorationState::new::<Self>(dh);
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(dh);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
 
         // linux-dmabuf only with a GPU: clients then render on the GPU and
         // hand over GPU buffers, which the GPU path composites directly.
@@ -234,6 +375,10 @@ impl State {
             focused: 0,
             cursor_surface: None,
             clipboard_tx,
+            handle,
+            xwayland_shell_state,
+            xwm: None,
+            x11_clipboard: None,
         }
     }
 
@@ -245,13 +390,46 @@ impl State {
 
     /// Root position of a surface's window geometry corner (toplevel or popup).
     pub fn geometry_origin(&self, surface: &WlSurface) -> Point<i32, Logical> {
-        if let Some(t) = self.toplevels.iter().find(|t| t.surface() == surface) {
+        if let Some(t) = self.toplevel_for(surface) {
             return t.pos;
         }
-        if let Some(p) = self.popups.iter().find(|p| p.kind.wl_surface() == surface) {
+        if let Some(p) = self.popup_for(surface) {
             return p.pos;
         }
         (0, 0).into()
+    }
+
+    pub fn toplevel_for(&self, surface: &WlSurface) -> Option<&Toplevel> {
+        self.toplevels.iter().find(|t| t.wl_surface().as_ref() == Some(surface))
+    }
+
+    pub fn popup_for(&self, surface: &WlSurface) -> Option<&Popup> {
+        self.popups.iter().find(|p| p.wl_surface().as_ref() == Some(surface))
+    }
+
+    /// Forget a toplevel (destroyed or unmapped), telling the shell.
+    pub fn remove_toplevel(&mut self, index: usize) {
+        let mut t = self.toplevels.remove(index);
+        self.release_target(&mut t.target);
+        if t.announced {
+            self.wire.json(serde_json::json!({ "type": "close", "id": t.id }));
+        }
+        if self.focused == t.id {
+            self.focused = 0;
+        }
+    }
+
+    /// Forget a popup, telling the shell.
+    pub fn remove_popup(&mut self, index: usize) {
+        let mut p = self.popups.remove(index);
+        self.release_target(&mut p.target);
+        if p.announced {
+            self.wire.json(serde_json::json!({ "type": "close", "id": p.id }));
+        }
+        // An xdg menu took the keyboard; X menus grab it on the X side.
+        if p.grab && matches!(p.shell, PopupShell::Xdg { .. }) {
+            self.restore_keyboard_focus();
+        }
     }
 
     /// Place a popup inside the screen, per its positioner.
@@ -289,6 +467,9 @@ impl CompositorHandler for State {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        if let Some(xwayland) = client.get_data::<XWaylandClientData>() {
+            return &xwayland.compositor_state;
+        }
         &client.get_data::<ClientState>().expect("client state").compositor_state
     }
 
@@ -301,15 +482,16 @@ impl CompositorHandler for State {
             self.render_cursor();
             return;
         }
-        if let Some(t) = self.toplevels.iter_mut().find(|t| t.surface() == &root) {
+        if let Some(t) = self.toplevels.iter_mut().find(|t| t.wl_surface().as_ref() == Some(&root)) {
             t.window.on_commit();
-            let toplevel = t.window.toplevel().expect("wayland window");
-            if !toplevel.is_initial_configure_sent() {
-                toplevel.send_configure();
+            if let Some(toplevel) = t.window.toplevel() {
+                if !toplevel.is_initial_configure_sent() {
+                    toplevel.send_configure();
+                }
             }
             t.dirty = true;
-        } else if let Some(p) = self.popups.iter_mut().find(|p| p.kind.wl_surface() == &root) {
-            if let PopupKind::Xdg(xdg) = &p.kind {
+        } else if let Some(p) = self.popups.iter_mut().find(|p| p.wl_surface().as_ref() == Some(&root)) {
+            if let PopupShell::Xdg { kind: PopupKind::Xdg(xdg), .. } = &p.shell {
                 if !xdg.is_initial_configure_sent() {
                     let _ = xdg.send_configure();
                 }
@@ -345,29 +527,14 @@ impl XdgShellHandler for State {
         let id = self.allocate_id();
         // Cascade until the shell places it; only popup placement reads this.
         let offset = 40 * (self.toplevels.len() as i32 % 8);
-        self.toplevels.push(Toplevel {
-            id,
-            window: Window::new_wayland_window(surface),
-            pos: (80 + offset, 80 + offset).into(),
-            announced: false,
-            canvas: None,
-            target: None,
-            dirty: false,
-            title: String::new(),
-            known_size: None,
-        });
+        let pos = (80 + offset, 80 + offset).into();
+        self.toplevels.push(Toplevel::new(id, Window::new_wayland_window(surface), pos));
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        if let Some(index) = self.toplevels.iter().position(|t| t.surface() == surface.wl_surface()) {
-            let mut t = self.toplevels.remove(index);
-            self.release_target(&mut t.target);
-            if t.announced {
-                self.wire.json(serde_json::json!({ "type": "close", "id": t.id }));
-            }
-            if self.focused == t.id {
-                self.focused = 0;
-            }
+        let index = self.toplevels.iter().position(|t| t.window.toplevel() == Some(&surface));
+        if let Some(index) = index {
+            self.remove_toplevel(index);
         }
     }
 
@@ -379,18 +546,9 @@ impl XdgShellHandler for State {
         let kind = PopupKind::Xdg(surface);
         let _ = self.popup_manager.track_popup(kind.clone());
         let id = self.allocate_id();
-        self.popups.push(Popup {
-            id,
-            kind,
-            parent,
-            rel: geometry.loc,
-            pos: origin + geometry.loc,
-            grab: false,
-            announced: false,
-            canvas: None,
-            target: None,
-            dirty: false,
-        });
+        let mut popup = Popup::new(id, PopupShell::Xdg { kind, parent }, origin + geometry.loc, false);
+        popup.rel = geometry.loc;
+        self.popups.push(popup);
     }
 
     fn reposition_request(&mut self, surface: PopupSurface, positioner: PositionerState, token: u32) {
@@ -400,7 +558,8 @@ impl XdgShellHandler for State {
             state.positioner = positioner;
         });
         surface.send_repositioned(token);
-        if let Some(p) = self.popups.iter_mut().find(|p| p.kind.wl_surface() == surface.wl_surface()) {
+        let wl_surface = Some(surface.wl_surface().clone());
+        if let Some(p) = self.popups.iter_mut().find(|p| p.wl_surface() == wl_surface) {
             p.rel = geometry.loc;
         }
         self.relayout_popups();
@@ -409,24 +568,19 @@ impl XdgShellHandler for State {
     fn grab(&mut self, surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
         // A grabbing popup is a menu: it takes the keyboard, and the shell
         // forwards clicks anywhere so it can dismiss it.
-        if let Some(p) = self.popups.iter_mut().find(|p| p.kind.wl_surface() == surface.wl_surface()) {
+        let wl_surface = surface.wl_surface().clone();
+        if let Some(p) = self.popups.iter_mut().find(|p| p.wl_surface().as_ref() == Some(&wl_surface)) {
             p.grab = true;
         }
         if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(self, Some(surface.wl_surface().clone()), Serial::from(0));
+            keyboard.set_focus(self, Some(KeyboardFocus::Wayland(wl_surface)), Serial::from(0));
         }
     }
 
     fn popup_destroyed(&mut self, surface: PopupSurface) {
-        if let Some(index) = self.popups.iter().position(|p| p.kind.wl_surface() == surface.wl_surface()) {
-            let mut p = self.popups.remove(index);
-            self.release_target(&mut p.target);
-            if p.announced {
-                self.wire.json(serde_json::json!({ "type": "close", "id": p.id }));
-            }
-            if p.grab {
-                self.restore_keyboard_focus();
-            }
+        let wl_surface = Some(surface.wl_surface().clone());
+        if let Some(index) = self.popups.iter().position(|p| p.wl_surface() == wl_surface) {
+            self.remove_popup(index);
         }
     }
 }
@@ -449,7 +603,7 @@ impl XdgDecorationHandler for State {
 }
 
 impl SeatHandler for State {
-    type KeyboardFocus = WlSurface;
+    type KeyboardFocus = KeyboardFocus;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -457,8 +611,9 @@ impl SeatHandler for State {
         &mut self.seat_state
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
-        let client = focused.and_then(|surface| self.dh.get_client(surface.id()).ok());
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocus>) {
+        let surface = focused.and_then(|focus| focus.wl_surface());
+        let client = surface.and_then(|surface| self.dh.get_client(surface.id()).ok());
         set_data_device_focus(&self.dh, seat, client);
     }
 
@@ -522,7 +677,7 @@ impl SelectionHandler for State {
             let mut bytes = Vec::new();
             if reader.by_ref().take(MAX_CLIPBOARD_BYTES).read_to_end(&mut bytes).is_ok() {
                 if let Ok(text) = String::from_utf8(bytes) {
-                    let _ = tx.send(text);
+                    let _ = tx.send((text, false));
                 }
             }
         });
@@ -555,6 +710,12 @@ impl ServerDndGrabHandler for State {}
 
 impl OutputHandler for State {}
 
+impl XWaylandShellHandler for State {
+    fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
+        &mut self.xwayland_shell_state
+    }
+}
+
 delegate_compositor!(State);
 delegate_shm!(State);
 delegate_xdg_shell!(State);
@@ -564,3 +725,4 @@ delegate_data_device!(State);
 delegate_output!(State);
 delegate_cursor_shape!(State);
 delegate_dmabuf!(State);
+delegate_xwayland_shell!(State);

@@ -9,7 +9,7 @@ use smithay::{
         renderer::utils::{import_surface_tree, with_renderer_surface_state},
     },
     desktop::{
-        PopupKind, WindowSurfaceType, find_popup_root_surface,
+        WindowSurfaceType, find_popup_root_surface,
         utils::{bbox_from_surface_tree, send_frames_surface_tree, under_from_surface_tree, with_surfaces_surface_tree},
     },
     input::{
@@ -30,8 +30,23 @@ use smithay::{
 
 use crate::{
     canvas::{Canvas, Patch},
-    state::State,
+    state::{KeyboardFocus, Popup, PopupShell, State, Toplevel},
+    xwayland::window_type_name,
 };
+
+/// The clipboard's text types, in order of preference.
+pub const TEXT_MIME_TYPES: [&str; 5] = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT"];
+
+/// What the shell is told about a toplevel.
+struct Description {
+    title: String,
+    class: Vec<String>,
+    pid: Option<i32>,
+    /// EWMH window type suffix: NORMAL, DIALOG, ...
+    kind: &'static str,
+    /// Whether the app has caught up with the shell's last configure.
+    acked: bool,
+}
 
 /// Batches in flight before rendering pauses; damage accumulates meanwhile.
 /// The CPU path overlaps two, since producing a batch takes a while. On the
@@ -57,16 +72,6 @@ fn linux_button(button: u32) -> Option<u32> {
 
 fn has_buffer(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
-}
-
-/// A popup's window geometry, falling back to its buffer's extent.
-fn popup_geometry(kind: &PopupKind) -> Rectangle<i32, Logical> {
-    let geometry = kind.geometry();
-    if geometry.size.w > 0 && geometry.size.h > 0 {
-        geometry
-    } else {
-        bbox_from_surface_tree(kind.wl_surface(), (0, 0))
-    }
 }
 
 /// Render `surface` into `canvas` (replaced when the size changed), returning
@@ -103,25 +108,53 @@ impl State {
         client.get_credentials(&self.dh).ok().map(|credentials| credentials.pid)
     }
 
+    /// Title, class names, pid, kind and acked-ness of a toplevel. X11
+    /// windows report their own pid: Xwayland is the client of all of them.
+    fn describe(&self, t: &Toplevel, surface: &WlSurface) -> Description {
+        if let Some(x11) = t.x11() {
+            let kind = match x11.window_type() {
+                Some(kind) => window_type_name(kind),
+                None if x11.is_transient_for().is_some() => "DIALOG",
+                None => "NORMAL",
+            };
+            return Description {
+                title: x11.title(),
+                class: [x11.instance(), x11.class()].into_iter().filter(|c| !c.is_empty()).collect(),
+                pid: x11.pid().map(|pid| pid as i32),
+                kind,
+                acked: true,
+            };
+        }
+        let (title, app_id) = with_states(surface, |states| {
+            let data = states.data_map.get::<XdgToplevelSurfaceData>();
+            let data = data.map(|d| d.lock().unwrap());
+            (
+                data.as_ref().and_then(|d| d.title.clone()).unwrap_or_default(),
+                data.as_ref().and_then(|d| d.app_id.clone()).unwrap_or_default(),
+            )
+        });
+        let toplevel = t.window.toplevel().expect("wayland window");
+        Description {
+            title,
+            class: if app_id.is_empty() { vec![] } else { vec![app_id] },
+            pid: self.pid_of(surface),
+            kind: if toplevel.parent().is_some() { "DIALOG" } else { "NORMAL" },
+            // Only once the app has acked the shell's last configure, so a
+            // stale commit never fights a live resize.
+            acked: toplevel.with_pending_state(|s| s.size) == toplevel.current_state().size,
+        }
+    }
+
     /// Announce newly mapped windows and report title/size changes.
     fn announce(&mut self) {
         let mut messages = Vec::new();
         for index in 0..self.toplevels.len() {
-            let surface = self.toplevels[index].surface().clone();
+            let Some(surface) = self.toplevels[index].wl_surface() else { continue };
             if !has_buffer(&surface) {
                 continue;
             }
-            let (title, app_id) = with_states(&surface, |states| {
-                let data = states.data_map.get::<XdgToplevelSurfaceData>();
-                let data = data.map(|d| d.lock().unwrap());
-                (
-                    data.as_ref().and_then(|d| d.title.clone()).unwrap_or_default(),
-                    data.as_ref().and_then(|d| d.app_id.clone()).unwrap_or_default(),
-                )
-            });
+            let Description { title, class, pid, kind, acked } = self.describe(&self.toplevels[index], &surface);
             let geometry = self.toplevels[index].window.geometry();
-            let pid = self.pid_of(&surface);
-            let toplevel = self.toplevels[index].window.toplevel().expect("wayland window").clone();
             let t = &mut self.toplevels[index];
             if !t.announced {
                 t.announced = true;
@@ -137,9 +170,9 @@ impl State {
                     "width": geometry.size.w,
                     "height": geometry.size.h,
                     "title": title,
-                    "wmClass": if app_id.is_empty() { vec![] } else { vec![app_id] },
+                    "wmClass": class,
                     "pid": pid,
-                    "kind": if toplevel.parent().is_some() { "DIALOG" } else { "NORMAL" },
+                    "kind": kind,
                     "transientFor": Value::Null,
                 }));
                 self.enter_output(&surface);
@@ -150,9 +183,7 @@ impl State {
                 messages.push(json!({ "type": "title", "id": t.id, "title": title }));
             }
             // The app sized itself (an initial size, a minimum it insists
-            // on): the Din window follows. Only once it has acked the shell's
-            // last configure, so a stale commit never fights a live resize.
-            let acked = toplevel.with_pending_state(|s| s.size) == toplevel.current_state().size;
+            // on): the Din window follows.
             if acked && t.known_size != Some(geometry.size) && geometry.size.w > 0 {
                 t.known_size = Some(geometry.size);
                 messages.push(json!({
@@ -166,15 +197,21 @@ impl State {
             }
         }
         for index in 0..self.popups.len() {
-            let surface = self.popups[index].kind.wl_surface().clone();
+            let Some(surface) = self.popups[index].wl_surface() else { continue };
             if self.popups[index].announced || !has_buffer(&surface) {
                 continue;
             }
-            let geometry = popup_geometry(&self.popups[index].kind);
+            let geometry = self.popups[index].geometry();
             let p = &mut self.popups[index];
             p.announced = true;
             p.dirty = true;
             p.canvas = None;
+            let kind = match &p.shell {
+                PopupShell::X11(x11) => x11.window_type().map(window_type_name).unwrap_or("NORMAL"),
+                // Menus grab; the shell shields the desktop for those.
+                PopupShell::Xdg { .. } if p.grab => "POPUP_MENU",
+                PopupShell::Xdg { .. } => "NORMAL",
+            };
             messages.push(json!({
                 "type": "popup",
                 "id": p.id,
@@ -185,8 +222,7 @@ impl State {
                 "title": "",
                 "wmClass": [],
                 "pid": Value::Null,
-                // Menus grab; the shell shields the desktop for those.
-                "kind": if p.grab { "POPUP_MENU" } else { "NORMAL" },
+                "kind": kind,
                 "transientFor": Value::Null,
             }));
             self.enter_output(&surface);
@@ -225,7 +261,7 @@ impl State {
         let State { toplevels, popups, renderer, frames, .. } = self;
         for t in toplevels.iter_mut().filter(|t| t.announced && t.dirty) {
             t.dirty = false;
-            let surface = t.surface().clone();
+            let Some(surface) = t.wl_surface() else { continue };
             let patches = render(renderer, &mut t.canvas, &surface, t.window.geometry());
             for patch in &patches {
                 frames.patch(t.id, patch);
@@ -235,8 +271,9 @@ impl State {
         }
         for p in popups.iter_mut().filter(|p| p.announced && p.dirty) {
             p.dirty = false;
-            let surface = p.kind.wl_surface().clone();
-            let patches = render(renderer, &mut p.canvas, &surface, popup_geometry(&p.kind));
+            let Some(surface) = p.wl_surface() else { continue };
+            let geometry = p.geometry();
+            let patches = render(renderer, &mut p.canvas, &surface, geometry);
             for patch in &patches {
                 frames.patch(p.id, patch);
             }
@@ -273,14 +310,15 @@ impl State {
             .filter(|t| t.announced && t.dirty)
             .map(|t| {
                 let geometry = t.window.geometry();
-                (t.id, t.surface().clone(), geometry, &mut t.dirty, &mut t.target)
+                (t.id, t.wl_surface(), geometry, &mut t.dirty, &mut t.target)
             })
             .chain(popups.iter_mut().filter(|p| p.announced && p.dirty).map(|p| {
-                let geometry = popup_geometry(&p.kind);
-                (p.id, p.kind.wl_surface().clone(), geometry, &mut p.dirty, &mut p.target)
+                let geometry = p.geometry();
+                (p.id, p.wl_surface(), geometry, &mut p.dirty, &mut p.target)
             }));
         for (id, surface, geometry, dirty, target) in windows {
             *dirty = false;
+            let Some(surface) = surface else { continue };
             match gpu.render(target, &surface, geometry, buffers) {
                 Some(buffer) => {
                     pixels += (geometry.size.w * geometry.size.h) as usize;
@@ -358,15 +396,17 @@ impl State {
 
     /// Recompute popup root positions after a parent moved or repositioned.
     pub fn relayout_popups(&mut self) {
-        // Popups are kept in creation order, so parents come first.
+        // Popups are kept in creation order, so parents come first. X11 ones
+        // place themselves.
         for index in 0..self.popups.len() {
-            let origin = self.geometry_origin(&self.popups[index].parent.clone());
+            let PopupShell::Xdg { parent, .. } = &self.popups[index].shell else { continue };
+            let origin = self.geometry_origin(&parent.clone());
             let p = &mut self.popups[index];
             let pos = origin + p.rel;
             if pos != p.pos {
                 p.pos = pos;
                 if p.announced {
-                    let geometry = popup_geometry(&p.kind);
+                    let geometry = p.geometry();
                     let message = json!({
                         "type": "configure", "id": p.id, "x": pos.x, "y": pos.y,
                         "width": geometry.size.w, "height": geometry.size.h,
@@ -396,9 +436,12 @@ impl State {
     }
 
     pub fn restore_keyboard_focus(&mut self) {
-        let surface = self.toplevels.iter().find(|t| t.id == self.focused).map(|t| t.surface().clone());
+        let focus = self.toplevels.iter().find(|t| t.id == self.focused).and_then(|t| match t.x11() {
+            Some(x11) => Some(KeyboardFocus::X11(x11.clone())),
+            None => t.wl_surface().map(KeyboardFocus::Wayland),
+        });
         if let Some(keyboard) = self.seat.get_keyboard() {
-            keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
+            keyboard.set_focus(self, focus, SERIAL_COUNTER.next_serial());
         }
     }
 
@@ -409,8 +452,17 @@ impl State {
             if t.id != previous && t.id != self.focused {
                 continue;
             }
-            let toplevel = t.window.toplevel().expect("wayland window");
             let active = t.id == self.focused;
+            if let Some(x11) = t.x11() {
+                let _ = x11.set_activated(active);
+                // X routes input by its own stacking order, so the focused
+                // window goes on top there too.
+                if let (true, Some(xwm)) = (active, self.xwm.as_mut()) {
+                    let _ = xwm.raise_window(x11);
+                }
+                continue;
+            }
+            let toplevel = t.window.toplevel().expect("wayland window");
             toplevel.with_pending_state(|state| {
                 if active {
                     state.states.set(xdg_toplevel::State::Activated);
@@ -427,8 +479,19 @@ impl State {
 
     fn set_geometry(&mut self, id: u32, x: i32, y: i32, width: i32, height: i32) {
         let Some(t) = self.toplevels.iter_mut().find(|t| t.id == id) else { return };
-        t.pos = (x, y).into();
+        let pos: Point<i32, Logical> = (x, y).into();
         let size: Size<i32, Logical> = (width.max(1), height.max(1)).into();
+        if let Some(x11) = t.x11() {
+            // X windows live at their Din window's position: apps place their
+            // menus from it, and Xwayland routes the pointer by it.
+            if t.pos != pos || t.known_size != Some(size) {
+                let _ = x11.configure(Rectangle::new(pos, size));
+            }
+            t.pos = pos;
+            t.known_size = Some(size);
+            return;
+        }
+        t.pos = pos;
         if t.known_size != Some(size) {
             t.known_size = Some(size);
             let toplevel = t.window.toplevel().expect("wayland window");
@@ -444,19 +507,29 @@ impl State {
     /// `id` 0 means the point is already in root coordinates (the shell's
     /// menu shield), where only popups can be hit.
     fn hit(&self, id: u32, x: f64, y: f64) -> (Point<f64, Logical>, Option<(WlSurface, Point<f64, Logical>)>) {
-        let popup_hit = |p: &crate::state::Popup, local: Point<f64, Logical>| {
-            let geometry = popup_geometry(&p.kind);
+        let popup_hit = |p: &Popup, local: Point<f64, Logical>| {
+            let geometry = p.geometry();
             let point = local + geometry.loc.to_f64();
-            under_from_surface_tree(p.kind.wl_surface(), point, (0, 0), WindowSurfaceType::ALL)
+            under_from_surface_tree(&p.wl_surface()?, point, (0, 0), WindowSurfaceType::ALL)
                 .map(|(surface, loc)| (surface, (p.pos - geometry.loc + loc).to_f64()))
         };
         if id == 0 {
             let global: Point<f64, Logical> = (x, y).into();
-            let focus = self.popups.iter().rev().find_map(|p| {
-                let geometry = popup_geometry(&p.kind);
-                let rect = Rectangle::new(p.pos, geometry.size).to_f64();
-                rect.contains(global).then(|| popup_hit(p, global - p.pos.to_f64())).flatten()
-            });
+            let focus = self
+                .popups
+                .iter()
+                .rev()
+                .find_map(|p| {
+                    let rect = Rectangle::new(p.pos, p.geometry().size).to_f64();
+                    rect.contains(global).then(|| popup_hit(p, global - p.pos.to_f64())).flatten()
+                })
+                // Outside every popup with an X menu open: the click still
+                // goes to X (Xwayland translates it to root coordinates past
+                // the menu's edge), where the menu's pointer grab closes it.
+                .or_else(|| {
+                    let menu = self.popups.iter().rev().find(|p| p.grab && matches!(p.shell, PopupShell::X11(_)))?;
+                    Some((menu.wl_surface()?, menu.pos.to_f64()))
+                });
             return (global, focus);
         }
         let local: Point<f64, Logical> = (x, y).into();
@@ -487,8 +560,9 @@ impl State {
 
     fn dismiss_menus(&mut self) {
         for p in self.popups.iter().filter(|p| p.grab) {
-            if let Ok(root) = find_popup_root_surface(&p.kind) {
-                let _ = smithay::desktop::PopupManager::dismiss_popup(&root, &p.kind);
+            let PopupShell::Xdg { kind, .. } = &p.shell else { continue };
+            if let Ok(root) = find_popup_root_surface(kind) {
+                let _ = smithay::desktop::PopupManager::dismiss_popup(&root, kind);
             }
         }
     }
@@ -550,16 +624,22 @@ impl State {
     }
 
     fn close(&mut self, id: u32) {
-        if let Some(t) = self.toplevels.iter().find(|t| t.id == id) {
-            t.window.toplevel().expect("wayland window").send_close();
+        let Some(t) = self.toplevels.iter().find(|t| t.id == id) else { return };
+        match (t.window.toplevel(), t.x11()) {
+            (Some(toplevel), _) => toplevel.send_close(),
+            // WM_DELETE_WINDOW where the app supports it, else XKillClient.
+            (_, Some(x11)) => {
+                let _ = x11.close();
+            }
+            _ => {}
         }
     }
 
     fn set_clipboard(&mut self, text: String) {
-        let mimes = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT"]
-            .map(String::from)
-            .to_vec();
-        set_data_device_selection(&self.dh, &self.seat, mimes, std::sync::Arc::new(text));
+        let mimes: Vec<String> = TEXT_MIME_TYPES.map(String::from).to_vec();
+        let text = std::sync::Arc::new(text);
+        set_data_device_selection(&self.dh, &self.seat, mimes, text.clone());
+        self.set_x11_clipboard(text);
     }
 
     /// One message from the shell (see electron/wayland-bridge.mts).

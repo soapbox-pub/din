@@ -4,7 +4,8 @@
 // It also hosts the Wayland half (wayland-bridge.mts): apps that speak
 // Wayland run on din-compositor beside the X server, and this process routes
 // the shell's messages to whichever server owns the window (Wayland ids
-// start at 0x40000001). Most of this file is the X half.
+// start at 0x40000001). Most of this file is the X half, which X11 apps only
+// use where the compositor can't run Xwayland for them.
 //
 // Native Linux apps are X11 clients of a private, headless X server (Xvfb)
 // that only Din can see. This process connects to it and is, at once:
@@ -322,8 +323,8 @@ async function start(
   xfixesSelectCursorInput(x, xfixes, x.root);
   xfixesSelectSelectionInput(x, xfixes, wmWindow, atoms.clipboard);
 
-  // Wayland apps get a compositor of their own beside the X server; X stays
-  // for the apps that only speak X.
+  // Wayland apps get a compositor of their own beside the X server, and X11
+  // apps its Xwayland when it has one; this X server stays as the fallback.
   const started = compositor
     ? await WaylandBridge.start(compositor, { width: x.screenWidth, height: x.screenHeight }, gpu)
     : null;
@@ -339,7 +340,12 @@ async function start(
   ready = true;
   if (pendingPort) connectShell(pendingPort);
   pendingPort = null;
-  toMain({ type: 'ready', wayland: started?.socket ?? null, buffers: started?.buffers ?? null });
+  toMain({
+    type: 'ready',
+    wayland: started?.socket ?? null,
+    buffers: started?.buffers ?? null,
+    xwayland: started?.xwayland ?? null,
+  });
 }
 
 /**
@@ -1041,6 +1047,8 @@ let wayland: WaylandBridge | null = null;
 let waylandFrames: string | null = null;
 /** Open Wayland menus: a click on the shell's menu shield belongs to them. */
 const waylandMenus = new Set<number>();
+/** Popup kinds the shell shields the desktop for (X11 menus come via Xwayland). */
+const MENU_KINDS = new Set(['MENU', 'DROPDOWN_MENU', 'POPUP_MENU', 'COMBO']);
 /** Whether the keyboard belongs to a Wayland window (else an X one). */
 let keyboardOnWayland = false;
 
@@ -1050,7 +1058,7 @@ function isWaylandId(id: unknown): boolean {
 
 function onWaylandMessage(message: unknown): void {
   const m = message as { type?: string; id?: number; kind?: string };
-  if (m.type === 'popup' && m.kind === 'POPUP_MENU' && m.id) waylandMenus.add(m.id);
+  if (m.type === 'popup' && m.kind && MENU_KINDS.has(m.kind) && m.id) waylandMenus.add(m.id);
   if (m.type === 'close' && m.id) waylandMenus.delete(m.id);
   toShell(message);
 }

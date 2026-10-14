@@ -3,7 +3,9 @@
 // pipe protocol into the messages the shell already understands.
 //
 // Apps that speak Wayland (GTK, Qt, Firefox, Electron/Chromium, SDL) connect
-// to the compositor; the rest stay on the Xvfb server next to it. Both feed
+// to the compositor, and so do X11 apps, through the rootless Xwayland it runs
+// and manages; the Xvfb server next to it is the fallback for X11 apps where
+// Xwayland isn't installed. Both feed
 // the same renderer protocol, so a window looks and behaves the same in Din
 // whichever server it lives on. Wayland window ids start at 0x40000001,
 // clear of X resource ids, which is how messages are routed back.
@@ -52,7 +54,7 @@ export class WaylandBridge {
    * Start the compositor; resolves with the bridge, its socket name (for
    * WAYLAND_DISPLAY), and where its pixels go - the buffer socket for Din's
    * main process when it renders on the GPU, else the renderer's frame-stream
-   * URL - or null if it can't run. `gpu: false` keeps it on the CPU path
+   * URL - and Xwayland's DISPLAY when it runs, or null if it can't run. `gpu: false` keeps it on the CPU path
    * (Din's main process can't receive GPU buffers without native/din-fd).
    */
   static start(
@@ -64,6 +66,7 @@ export class WaylandBridge {
     socket: string;
     frames: string | null;
     buffers: string | null;
+    xwayland: string | null;
   } | null> {
     return new Promise((resolve) => {
       let child: ChildProcess;
@@ -87,7 +90,13 @@ export class WaylandBridge {
         resolve(null);
       }, 10_000);
       bridge.onShell = (message) => {
-        const m = message as { type?: string; socket?: string; frames?: string; buffers?: string };
+        const m = message as {
+          type?: string;
+          socket?: string;
+          frames?: string;
+          buffers?: string;
+          xwayland?: string;
+        };
         if (m.type !== 'ready' || typeof m.socket !== 'string') return;
         clearTimeout(timer);
         bridge.onShell = null;
@@ -96,6 +105,7 @@ export class WaylandBridge {
           socket: m.socket,
           frames: typeof m.frames === 'string' ? m.frames : null,
           buffers: typeof m.buffers === 'string' ? m.buffers : null,
+          xwayland: typeof m.xwayland === 'string' ? m.xwayland : null,
         });
       };
       child.once('error', () => {
