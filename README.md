@@ -37,6 +37,7 @@ Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> Din
 - Xvfb, for running native Linux apps inside Din; optionally Rust (cargo), to
   build the Wayland compositor that hosts the apps able to use it (and draws
   them on the GPU), plus Xwayland, to put X11 apps there too
+- Wine, for Windows programs
 - Nix (with flakes enabled; the Determinate installer does this by default) —
   only needed for the Aladdin `os:*` commands
 - QEMU (`qemu-system-x86_64`) on the host for the `npm run os:run` demo
@@ -139,6 +140,21 @@ app runs on Xvfb; without din-fd, the compositor stays on the CPU path.
 `DIN_NATIVE_DISPLAY=x11` forces X and `DIN_COMPOSITOR_GPU=0` the CPU path,
 for comparisons, and `DIN_COMPOSITOR_STATS=1` logs the compositor's frame
 rate.
+
+### Windows programs
+
+Opening an `.exe`, `.msi`, `.bat` or `.lnk` (in Files, or a finished browser
+download) runs it through Wine on the same embedded display, so it gets a Din
+window like any native app. Din keeps one hidden Wine prefix in
+`~/.local/share/din/windows`, created on first use without any Wine dialogs:
+C: plus the home folder as H: (no Z: drive), the user folders linked to the
+home ones, and crashes closing quietly instead of opening winedbg. Installers
+need no help: the Start-menu shortcuts they create become desktop entries,
+which appear in the launcher as soon as the install finishes (Uninstall
+shortcuts are left out). See `electron/windows-apps.mts`.
+
+Aladdin ships Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
+and Gecko). Elsewhere Din uses the system's `wine`, or `$DIN_WINE`.
 
 ### Updating npm dependencies
 

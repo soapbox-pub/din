@@ -3,9 +3,11 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
+  AppWindow,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -47,6 +49,7 @@ import {
   useHomeDir,
 } from '@/hooks/useFileSystem';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
+import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
@@ -113,6 +116,7 @@ function EntryIcon({ entry }: { entry: FsEntry }) {
   if (ext in IMAGE_MIME) return <FileImage className={className} aria-hidden />;
   if (CODE_EXTENSIONS.has(ext)) return <FileCode className={className} aria-hidden />;
   if (ARCHIVE_EXTENSIONS.has(ext)) return <FileArchive className={className} aria-hidden />;
+  if (isWindowsProgram(entry.name)) return <AppWindow className={className} aria-hidden />;
   if (ext === 'md' || ext === 'txt' || ext === 'log') {
     return <FileText className={className} aria-hidden />;
   }
@@ -269,6 +273,9 @@ function FileBrowserTab({
   const [confirmDelete, setConfirmDelete] = useState<FsEntry | null>(null);
   // Last failed operation, shown in the status bar.
   const [opError, setOpError] = useState<string | null>(null);
+  // Windows program being started, while Wine gets it going.
+  const [opening, setOpening] = useState<string | null>(null);
+  const startingRef = useRef(new Set<string>());
 
   // Until the user navigates, the current directory is the home directory.
   const cwd = cursor >= 0 ? history[cursor] : (home.data ?? null);
@@ -335,8 +342,25 @@ function FileBrowserTab({
     (entry: FsEntry) => {
       if (cwd === null) return;
       const target = joinPath(cwd, entry.name);
+      const nativeApps = getNativeAppsBridge();
       if (entry.kind === 'directory') {
         navigate(target);
+      } else if (entry.kind === 'file' && nativeApps && isWindowsProgram(entry.name)) {
+        // Windows programs run, as they would from Explorer. The first one
+        // also sets up Wine, which takes a while, so say something meanwhile.
+        // Habitual double-clicks land here twice; one copy is plenty.
+        if (startingRef.current.has(target)) return;
+        startingRef.current.add(target);
+        setOpError(null);
+        setOpening(entry.name);
+        nativeApps
+          .runWindowsProgram(target)
+          .catch((error: unknown) => setOpError(cleanFsError(error)))
+          .finally(() => {
+            // Wine takes a moment more to put the window up.
+            setTimeout(() => startingRef.current.delete(target), 3_000);
+            setOpening((name) => (name === entry.name ? null : name));
+          });
       } else if (entry.kind === 'file') {
         setPreviewPath(target);
       }
@@ -555,6 +579,11 @@ function FileBrowserTab({
         {listing.data?.truncated && (
           <span className="text-amber-400/80">
             Listing truncated - directory has more entries than shown.
+          </span>
+        )}
+        {opening !== null && opError === null && (
+          <span role="status" className="min-w-0 flex-1 truncate text-right">
+            Opening {opening}…
           </span>
         )}
         {opError !== null && (

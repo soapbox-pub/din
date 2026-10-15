@@ -105,6 +105,12 @@ let
     cargoLock.lockFile = din-root + "/native/din-fd/Cargo.lock";
   };
 
+  # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
+  # runs 32- and 64-bit programs without 32-bit host libraries. The Full
+  # variant is the one that embeds the Wine Mono and Gecko installers (.NET
+  # and the HTML engine), so a new prefix gets them with no download prompt.
+  wine = pkgs.wineWow64Packages.stableFull;
+
   # Launcher: Electron running the Din host on Wayland (cage provides the
   # compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
   # variant below can swap in software rendering.
@@ -114,10 +120,11 @@ let
   # (wireplumber) for the Settings sound bridge's device/stream control and
   # pw-play (pipewire) for its test tone, Xwayland for X11 apps on the
   # embedded display native Linux apps run on (electron/native-display.mts)
-  # and Xvfb for its fallback, and setxkbmap plus xkeyboard-config's rules
-  # for their keyboard layout (electron/keyboard.mts).
+  # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
+  # their keyboard layout (electron/keyboard.mts), and Wine for Windows
+  # programs.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${wine}/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so

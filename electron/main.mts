@@ -35,7 +35,8 @@ import {
   clearNsiteManifestCache,
   clearNsiteBlobCache,
 } from './nsite.mts';
-import { registerNativeAppHandlers } from './native-apps.mts';
+import { registerNativeAppHandlers, runWindowsProgram } from './native-apps.mts';
+import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
@@ -3255,6 +3256,8 @@ function registerBrowserDownloadHandlers(): void {
   ipcMain.handle('browser:openDownload', async (event, filePath) => {
     assertShellSender(event);
     if (!isDownloadsPath(filePath) || !fs.existsSync(filePath)) return;
+    // A downloaded setup.exe runs, the way it would on Windows.
+    if (isWindowsProgram(filePath)) return runWindowsProgram(filePath);
     await shell.openPath(filePath);
   });
   ipcMain.handle('browser:showDownload', (event, filePath) => {
@@ -3636,7 +3639,10 @@ app.whenReady().then(() => {
   registerNostrBridge();
   registerHighlightBridge();
   registerFilePickerBridge();
-  registerNativeAppHandlers({ assertShellSender });
+  registerNativeAppHandlers({
+    assertShellSender,
+    shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
+  });
   registerKeyboardHandlers({ assertShellSender });
   registerNativeDisplayHandlers({
     assertShellSender,

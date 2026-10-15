@@ -279,6 +279,24 @@ contextBridge.exposeInMainWorld('nativeApps', {
    * @param {string[]} wmClass
    */
   resolve: (pid, wmClass) => ipcRenderer.invoke('native-apps:resolve', pid, wmClass),
+
+  /**
+   * Open a Windows program (.exe, .msi, .bat, .lnk) by absolute path,
+   * through Wine (electron/windows-apps.mts).
+   * @param {string} file
+   */
+  runWindowsProgram: (file) => ipcRenderer.invoke('native-apps:run-windows-program', file),
+
+  /**
+   * Subscribe to "the installed apps changed" (a program was installed or
+   * removed). Returns an unsubscribe fn.
+   * @param {() => void} callback
+   */
+  onChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('native-apps:changed', handler);
+    return () => ipcRenderer.removeListener('native-apps:changed', handler);
+  },
 });
 
 // Embedded display (src/lib/nativeDisplay.ts): pixels and input travel on a

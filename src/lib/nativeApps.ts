@@ -53,6 +53,23 @@ export interface NativeAppsBridge {
    * or null when it can't be matched.
    */
   resolve(pid: number | null, wmClass: string[]): Promise<string | null>;
+  /**
+   * Open a Windows program (.exe, .msi, .bat, .lnk) by absolute path. It
+   * runs through Wine, set up on first use; rejects with a user-facing
+   * message when it can't (e.g. Wine isn't installed).
+   */
+  runWindowsProgram(file: string): Promise<void>;
+  /** Subscribe to installed-app changes. Returns an unsubscribe fn. */
+  onChanged(callback: () => void): () => void;
+}
+
+/** File extensions opened as Windows programs (see electron/windows-apps.mts). */
+const WINDOWS_PROGRAM_EXTENSIONS = ['.exe', '.msi', '.bat', '.cmd', '.lnk'];
+
+/** Whether a file name is a Windows program Din can open. */
+export function isWindowsProgram(name: string): boolean {
+  const lower = name.toLowerCase();
+  return WINDOWS_PROGRAM_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 declare global {
