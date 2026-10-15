@@ -35,8 +35,13 @@ export interface NativeSurface {
   pid: number | null;
   wmClass: string[];
   transientFor: number | null;
+  /** The app draws its own title bar, so Din's is left off. */
+  csd: boolean;
   canvas: HTMLCanvasElement;
 }
+
+/** A window edge or corner, as Din's resize handles name them. */
+export type NativeResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
 /** Lifecycle events for the React side. */
 export type NativeDisplayEvent =
@@ -46,6 +51,17 @@ export type NativeDisplayEvent =
   | { type: 'title'; surface: NativeSurface }
   | { type: 'configure'; surface: NativeSurface }
   | { type: 'activate'; surface: NativeSurface }
+  /** The app started or stopped drawing its own title bar. */
+  | { type: 'decoration'; surface: NativeSurface }
+  /**
+   * The app's own title bar or edges, under a held button, ask Din to move
+   * or resize the window (an interactive gesture, like Din's own chrome).
+   */
+  | { type: 'move'; surface: NativeSurface }
+  | { type: 'resize'; surface: NativeSurface; edge: NativeResizeEdge }
+  /** The app's own maximize/minimize buttons. */
+  | { type: 'maximize'; surface: NativeSurface; maximized: boolean }
+  | { type: 'minimize'; surface: NativeSurface }
   /** The app locked the pointer (mouse-look) or let it go. */
   | { type: 'pointer-lock'; surface: NativeSurface; locked: boolean };
 
@@ -60,6 +76,7 @@ interface WindowInfo {
   pid: number | null;
   kind: string;
   transientFor: number | null;
+  csd?: boolean;
 }
 
 interface FrameUpdate {
@@ -78,6 +95,11 @@ type WorkerMessage =
   | { type: 'title'; id: number; title: string }
   | { type: 'configure'; id: number; x: number; y: number; width: number; height: number }
   | { type: 'activate'; id: number }
+  | { type: 'decoration'; id: number; csd: boolean }
+  | { type: 'move'; id: number }
+  | { type: 'resize'; id: number; edge: string }
+  | { type: 'maximize'; id: number; maximized: boolean }
+  | { type: 'minimize'; id: number }
   | { type: 'pointer-lock'; id: number; locked: boolean }
   /** `source` names the server (X or Wayland) that wants the ack. */
   | { type: 'frames'; source?: string; updates: FrameUpdate[] }
@@ -106,10 +128,15 @@ declare global {
 
 /**
  * What a Din window adds around its content: the 1px border on each side,
- * and the 36px title bar (src/components/desktop/Window.tsx). A native
- * window of W x H content needs a Din window this much larger.
+ * and the 36px title bar (src/components/desktop/Window.tsx) unless the app
+ * draws its own. A native window of W x H content needs a Din window this
+ * much larger.
  */
-export const WINDOW_CHROME = { width: 2, height: 38 };
+export function windowChrome(surface: { csd: boolean }): { width: number; height: number } {
+  return { width: 2, height: surface.csd ? 2 : 38 };
+}
+
+const RESIZE_EDGES = new Set<string>(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']);
 
 /** CSS custom property carrying the app's current cursor. */
 export const NATIVE_CURSOR_VAR = '--din-native-cursor';
@@ -242,6 +269,7 @@ function onMessage(message: WorkerMessage): void {
         pid: message.pid,
         wmClass: message.wmClass,
         transientFor: message.transientFor,
+        csd: message.csd === true,
         canvas: existing?.canvas ?? createCanvas(message.width, message.height),
       };
       resizeCanvas(surface.canvas, surface.width, surface.height);
@@ -285,6 +313,31 @@ function onMessage(message: WorkerMessage): void {
     case 'activate': {
       const surface = surfaces.get(message.id);
       if (surface) emit({ type: 'activate', surface });
+      return;
+    }
+    case 'decoration': {
+      const surface = surfaces.get(message.id);
+      const csd = message.csd === true;
+      if (!surface || surface.popup || surface.csd === csd) return;
+      surface.csd = csd;
+      emit({ type: 'decoration', surface });
+      return;
+    }
+    case 'move':
+    case 'minimize': {
+      const surface = surfaces.get(message.id);
+      if (surface && !surface.popup) emit({ type: message.type, surface });
+      return;
+    }
+    case 'resize': {
+      const surface = surfaces.get(message.id);
+      if (!surface || surface.popup || !RESIZE_EDGES.has(message.edge)) return;
+      emit({ type: 'resize', surface, edge: message.edge as NativeResizeEdge });
+      return;
+    }
+    case 'maximize': {
+      const surface = surfaces.get(message.id);
+      if (surface && !surface.popup) emit({ type: 'maximize', surface, maximized: message.maximized === true });
       return;
     }
     case 'pointer-lock': {
@@ -442,6 +495,11 @@ export function setNativeFocus(id: number, focused: boolean): void {
     focusedSurface = 0;
     send({ type: 'focus', id: 0 });
   }
+}
+
+/** Tell the app whether Din has its window maximized (its own title bar shows it). */
+export function setNativeMaximized(id: number, maximized: boolean): void {
+  send({ type: 'state', id, maximized });
 }
 
 export function raiseNativeWindow(id: number): void {

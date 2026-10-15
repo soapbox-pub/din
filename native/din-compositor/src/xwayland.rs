@@ -97,6 +97,12 @@ impl State {
         self.popups.iter().position(|p| matches!(&p.shell, PopupShell::X11(w) if w == window))
     }
 
+    fn x11_request(&mut self, window: &X11Surface, message: serde_json::Value) {
+        if let Some(id) = self.x11_toplevel(window).map(|index| self.toplevels[index].id) {
+            self.window_request(id, message);
+        }
+    }
+
     fn forget_x11(&mut self, window: &X11Surface) {
         if let Some(index) = self.x11_toplevel(window) {
             self.remove_toplevel(index);
@@ -216,10 +222,38 @@ impl XwmHandler for State {
         }
     }
 
-    // Din's window chrome moves and resizes windows.
-    fn resize_request(&mut self, _xwm: XwmId, _window: X11Surface, _button: u32, _edge: ResizeEdge) {}
+    // An app's own title bar asks Din to move, resize, maximize or minimize
+    // its window (_NET_WM_MOVERESIZE, _NET_WM_STATE, WM_CHANGE_STATE).
 
-    fn move_request(&mut self, _xwm: XwmId, _window: X11Surface, _button: u32) {}
+    fn resize_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32, edge: ResizeEdge) {
+        let edge = match edge {
+            ResizeEdge::Top => "n",
+            ResizeEdge::Bottom => "s",
+            ResizeEdge::Left => "w",
+            ResizeEdge::Right => "e",
+            ResizeEdge::TopLeft => "nw",
+            ResizeEdge::TopRight => "ne",
+            ResizeEdge::BottomLeft => "sw",
+            ResizeEdge::BottomRight => "se",
+        };
+        self.x11_request(&window, serde_json::json!({ "type": "resize", "edge": edge }));
+    }
+
+    fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
+        self.x11_request(&window, serde_json::json!({ "type": "move" }));
+    }
+
+    fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_request(&window, serde_json::json!({ "type": "maximize", "maximized": true }));
+    }
+
+    fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_request(&window, serde_json::json!({ "type": "maximize", "maximized": false }));
+    }
+
+    fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_request(&window, serde_json::json!({ "type": "minimize" }));
+    }
 
     fn allow_selection_access(&mut self, _xwm: XwmId, selection: SelectionTarget) -> bool {
         selection == SelectionTarget::Clipboard

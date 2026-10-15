@@ -46,6 +46,8 @@ struct Description {
     kind: &'static str,
     /// Whether the app has caught up with the shell's last configure.
     acked: bool,
+    /// Whether the app draws its own title bar.
+    csd: bool,
 }
 
 /// Batches in flight before rendering pauses; damage accumulates meanwhile.
@@ -108,8 +110,9 @@ impl State {
         client.get_credentials(&self.dh).ok().map(|credentials| credentials.pid)
     }
 
-    /// Title, class names, pid, kind and acked-ness of a toplevel. X11
-    /// windows report their own pid: Xwayland is the client of all of them.
+    /// Title, class names, pid, kind, acked-ness and decorations of a
+    /// toplevel. X11 windows report their own pid: Xwayland is the client of
+    /// all of them.
     fn describe(&self, t: &Toplevel, surface: &WlSurface) -> Description {
         if let Some(x11) = t.x11() {
             let kind = match x11.window_type() {
@@ -123,6 +126,9 @@ impl State {
                 pid: x11.pid().map(|pid| pid as i32),
                 kind,
                 acked: true,
+                // Motif hints asking for no decorations (Chrome, Steam):
+                // the app has its own.
+                csd: x11.is_decorated(),
             };
         }
         let (title, app_id) = with_states(surface, |states| {
@@ -142,6 +148,7 @@ impl State {
             // Only once the app has acked the shell's last configure, so a
             // stale commit never fights a live resize.
             acked: toplevel.with_pending_state(|s| s.size) == toplevel.current_state().size,
+            csd: t.client_side,
         }
     }
 
@@ -153,12 +160,13 @@ impl State {
             if !has_buffer(&surface) {
                 continue;
             }
-            let Description { title, class, pid, kind, acked } = self.describe(&self.toplevels[index], &surface);
+            let Description { title, class, pid, kind, acked, csd } = self.describe(&self.toplevels[index], &surface);
             let geometry = self.toplevels[index].window.geometry();
             let t = &mut self.toplevels[index];
             if !t.announced {
                 t.announced = true;
                 t.title = title.clone();
+                t.csd = csd;
                 t.known_size = Some(geometry.size);
                 t.dirty = true;
                 t.canvas = None;
@@ -174,6 +182,7 @@ impl State {
                     "pid": pid,
                     "kind": kind,
                     "transientFor": Value::Null,
+                    "csd": csd,
                 }));
                 self.enter_output(&surface);
                 continue;
@@ -181,6 +190,10 @@ impl State {
             if title != t.title {
                 t.title = title.clone();
                 messages.push(json!({ "type": "title", "id": t.id, "title": title }));
+            }
+            if csd != t.csd {
+                t.csd = csd;
+                messages.push(json!({ "type": "decoration", "id": t.id, "csd": csd }));
             }
             // The app sized itself (an initial size, a minimum it insists
             // on): the Din window follows.
@@ -504,6 +517,27 @@ impl State {
         self.relayout_popups();
     }
 
+    /// The shell maximized or restored a window: its own title bar shows it
+    /// (the maximize button becomes a restore button).
+    fn set_maximized(&mut self, id: u32, maximized: bool) {
+        let Some(t) = self.toplevels.iter().find(|t| t.id == id) else { return };
+        if let Some(x11) = t.x11() {
+            let _ = x11.set_maximized(maximized);
+            return;
+        }
+        let toplevel = t.window.toplevel().expect("wayland window");
+        toplevel.with_pending_state(|state| {
+            if maximized {
+                state.states.set(xdg_toplevel::State::Maximized);
+            } else {
+                state.states.unset(xdg_toplevel::State::Maximized);
+            }
+        });
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+    }
+
     /// The surface under a point and its origin, both in root coordinates.
     /// `id` 0 means the point is already in root coordinates (the shell's
     /// menu shield), where only popups can be hit.
@@ -710,6 +744,7 @@ impl State {
                 num("height").round() as i32,
             ),
             "focus" => self.set_focus(id),
+            "state" => self.set_maximized(id, message["maximized"] == true),
             "close" => self.close(id),
             "motion" => {
                 let delta = message.get("dx").is_some().then(|| (num("dx"), num("dy")));

@@ -141,6 +141,8 @@ interface Surface {
   /** WM_PROTOCOLS: WM_DELETE_WINDOW / WM_TAKE_FOCUS support. */
   deleteWindow: boolean;
   takeFocus: boolean;
+  /** Maximized in Din, which the app's own title bar shows (_NET_WM_STATE). */
+  maximized: boolean;
 }
 
 /** Interned atoms. */
@@ -161,6 +163,11 @@ interface Atoms {
   netSupportingWmCheck: number;
   netWmState: number;
   netWmStateFocused: number;
+  netWmStateMaximizedVert: number;
+  netWmStateMaximizedHorz: number;
+  netWmMoveResize: number;
+  wmChangeState: number;
+  motifWmHints: number;
   netFrameExtents: number;
   utf8String: number;
   string: number;
@@ -223,7 +230,8 @@ async function internAtoms(): Promise<Atoms> {
     'WM_CLASS', 'WM_TRANSIENT_FOR', 'WM_NORMAL_HINTS', '_NET_WM_NAME',
     '_NET_WM_PID', '_NET_WM_WINDOW_TYPE', '_NET_ACTIVE_WINDOW', '_NET_SUPPORTED',
     '_NET_SUPPORTING_WM_CHECK', '_NET_WM_STATE', '_NET_WM_STATE_FOCUSED',
-    '_NET_FRAME_EXTENTS', 'UTF8_STRING', 'STRING', 'TEXT', 'TARGETS',
+    '_NET_WM_STATE_MAXIMIZED_VERT', '_NET_WM_STATE_MAXIMIZED_HORZ', '_NET_WM_MOVERESIZE',
+    'WM_CHANGE_STATE', '_MOTIF_WM_HINTS', '_NET_FRAME_EXTENTS', 'UTF8_STRING', 'STRING', 'TEXT', 'TARGETS',
     'CLIPBOARD', 'PRIMARY', 'DIN_SELECTION', 'ATOM', 'WINDOW', 'CARDINAL',
   ];
   const values = await Promise.all(names.map((name) => x.atom(name)));
@@ -253,6 +261,11 @@ async function internAtoms(): Promise<Atoms> {
     netSupportingWmCheck: get('_NET_SUPPORTING_WM_CHECK'),
     netWmState: get('_NET_WM_STATE'),
     netWmStateFocused: get('_NET_WM_STATE_FOCUSED'),
+    netWmStateMaximizedVert: get('_NET_WM_STATE_MAXIMIZED_VERT'),
+    netWmStateMaximizedHorz: get('_NET_WM_STATE_MAXIMIZED_HORZ'),
+    netWmMoveResize: get('_NET_WM_MOVERESIZE'),
+    wmChangeState: get('WM_CHANGE_STATE'),
+    motifWmHints: get('_MOTIF_WM_HINTS'),
     netFrameExtents: get('_NET_FRAME_EXTENTS'),
     utf8String: get('UTF8_STRING'),
     string: get('STRING'),
@@ -345,6 +358,9 @@ async function start(
   changeProperty(x, x.root, atoms.netSupported, atoms.atom, 32, [
     atoms.netActiveWindow, atoms.netSupportingWmCheck, atoms.netWmName,
     atoms.netWmState, atoms.netWmStateFocused, atoms.netFrameExtents,
+    // Toolkits only hand a client-side title bar's drags and buttons to a
+    // window manager that advertises these.
+    atoms.netWmMoveResize, atoms.netWmStateMaximizedVert, atoms.netWmStateMaximizedHorz,
   ]);
 
   parkWindow = x.allocateId();
@@ -409,13 +425,14 @@ function createParkWindow(id: WindowId): void {
 
 /** Metadata the renderer needs to give a toplevel a Din window. */
 async function describe(id: WindowId) {
-  const [netName, wmName, wmClass, pids, types, transient] = await Promise.all([
+  const [netName, wmName, wmClass, pids, types, transient, csd] = await Promise.all([
     x.getText(id, atoms.netWmName, atoms.utf8String),
     x.getText(id, atoms.wmName, atoms.utf8String),
     x.getText(id, atoms.wmClass, atoms.utf8String),
     x.getCardinals(id, atoms.netWmPid, 1),
     x.getCardinals(id, atoms.netWmWindowType, 8),
     x.getCardinals(id, atoms.wmTransientFor, 1),
+    isClientDecorated(id),
   ]);
   const kind = types.map((t) => atoms.windowTypeNames.get(t)).find(Boolean) ?? 'NORMAL';
   return {
@@ -424,7 +441,17 @@ async function describe(id: WindowId) {
     pid: pids[0] ?? null,
     kind,
     transientFor: transient[0] ?? null,
+    csd,
   };
+}
+
+/**
+ * Whether an app draws its own title bar: its Motif hints ask the window
+ * manager for no decorations (Chrome, Steam, Spotify).
+ */
+async function isClientDecorated(id: WindowId): Promise<boolean> {
+  const [flags = 0, , decorations] = await x.getCardinals(id, atoms.motifWmHints, 5).catch((): number[] => []);
+  return (flags & 2) !== 0 && decorations === 0; // MWM_HINTS_DECORATIONS
 }
 
 /** Start compositing a window that just got mapped. */
@@ -450,6 +477,7 @@ async function track(id: WindowId, popup: boolean): Promise<void> {
     announced: false,
     deleteWindow: false,
     takeFocus: false,
+    maximized: false,
   };
   surfaces.set(id, surface);
   x.selectInput(id, PROPERTY_CHANGE | STRUCTURE_NOTIFY);
@@ -602,18 +630,51 @@ async function onPropertyNotify(id: WindowId, atom: number): Promise<void> {
     const protocols = await x.getCardinals(id, atoms.wmProtocols, 16).catch((): number[] => []);
     surface.deleteWindow = protocols.includes(atoms.wmDeleteWindow);
     surface.takeFocus = protocols.includes(atoms.wmTakeFocus);
+  } else if (atom === atoms.motifWmHints) {
+    toShell({ type: 'decoration', id, csd: await isClientDecorated(id).catch(() => false) });
   }
 }
 
-/** Messages clients send the window manager (EWMH). */
+/** _NET_WM_MOVERESIZE directions 0-7, clockwise from the top-left corner. */
+const RESIZE_EDGES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+const MOVERESIZE_MOVE = 8;
+
+/** Messages clients send the window manager (EWMH, ICCCM). */
 function onClientMessage(packet: Buffer): void {
   const id = packet.readUInt32LE(4);
   const type = packet.readUInt32LE(8);
-  if (type === atoms.netActiveWindow && surfaces.has(id)) {
+  const surface = surfaces.get(id);
+  if (!surface || surface.popup) return;
+  // The message's data, as 32-bit values.
+  const data = (i: number) => packet.readUInt32LE(12 + 4 * i);
+  if (type === atoms.netActiveWindow) {
     // An app asking to be raised (a notification click, a second launch
     // of a single-instance app): let the shell decide, like any focus.
     toShell({ type: 'activate', id });
+  } else if (type === atoms.netWmMoveResize) {
+    // A drag on the app's own title bar or window edge: Din moves it.
+    const direction = data(2);
+    if (direction === MOVERESIZE_MOVE) toShell({ type: 'move', id });
+    else if (RESIZE_EDGES[direction]) toShell({ type: 'resize', id, edge: RESIZE_EDGES[direction] });
+  } else if (type === atoms.netWmState) {
+    const maximize = [data(1), data(2)].some(
+      (atom) => atom === atoms.netWmStateMaximizedVert || atom === atoms.netWmStateMaximizedHorz,
+    );
+    if (!maximize) return;
+    // _NET_WM_STATE_REMOVE, _ADD, _TOGGLE.
+    const action = data(0);
+    toShell({ type: 'maximize', id, maximized: action === 2 ? !surface.maximized : action === 1 });
+  } else if (type === atoms.wmChangeState && data(0) === 3) {
+    // IconicState: the app's minimize button.
+    toShell({ type: 'minimize', id });
   }
+}
+
+/** _NET_WM_STATE: whether the window has the keyboard, and is maximized. */
+function writeNetWmState(surface: Surface): void {
+  const state = surface.id === focused ? [atoms.netWmStateFocused] : [];
+  if (surface.maximized) state.push(atoms.netWmStateMaximizedVert, atoms.netWmStateMaximizedHorz);
+  changeProperty(x, surface.id, atoms.netWmState, atoms.atom, 32, state);
 }
 
 // ---------------------------------------------------------------------------
@@ -805,10 +866,9 @@ function focus(id: WindowId): void {
   if (next === focused) return;
   // Keys held while focus moves would otherwise stay down in the app.
   releaseAll();
-  if (focused && surfaces.has(focused)) {
-    changeProperty(x, focused, atoms.netWmState, atoms.atom, 32, []);
-  }
+  const previous = surfaces.get(focused);
   focused = next;
+  if (previous) writeNetWmState(previous);
   changeProperty(x, x.root, atoms.netActiveWindow, atoms.window, 32, [next]);
   if (!next) {
     setInputFocus(x, x.root, 0);
@@ -816,7 +876,7 @@ function focus(id: WindowId): void {
   }
   const surface = surfaces.get(next)!;
   raise(next);
-  changeProperty(x, next, atoms.netWmState, atoms.atom, 32, [atoms.netWmStateFocused]);
+  writeNetWmState(surface);
   setInputFocus(x, next, 0);
   if (surface.takeFocus) sendProtocol(next, atoms.wmTakeFocus);
 }
@@ -826,6 +886,14 @@ function close(id: WindowId): void {
   if (!surface) return;
   if (surface.deleteWindow) sendProtocol(id, atoms.wmDeleteWindow);
   else killClient(x, id);
+}
+
+/** The shell maximized or restored a window. */
+function setMaximized(id: WindowId, maximized: boolean): void {
+  const surface = surfaces.get(id);
+  if (!surface || surface.popup || surface.maximized === maximized) return;
+  surface.maximized = maximized;
+  writeNetWmState(surface);
 }
 
 /** Fit a toplevel to its Din window's canvas (root position and size). */
@@ -993,6 +1061,8 @@ type ShellMessage =
   | { type: 'ack'; source?: string }
   | { type: 'geometry'; id: number; x: number; y: number; width: number; height: number }
   | { type: 'focus'; id: number }
+  /** Din maximized or restored the window. */
+  | { type: 'state'; id: number; maximized: boolean }
   | { type: 'raise'; id: number }
   | { type: 'close'; id: number }
   | { type: 'motion'; id: number; x: number; y: number; dx?: number; dy?: number }
@@ -1021,6 +1091,8 @@ function onShellMessage(message: ShellMessage): void {
       );
     case 'focus':
       return focus(num(message.id));
+    case 'state':
+      return setMaximized(num(message.id), message.maximized === true);
     case 'raise':
       return raise(num(message.id));
     case 'close':
