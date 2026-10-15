@@ -1135,6 +1135,14 @@ function registerPowerHandlers(): void {
     ]);
     return readPowerProfiles();
   });
+
+  // Log out: quit cleanly. din-session.sh treats exit 0 as "the user quit"
+  // and ends the login session, returning to the display manager; on Aladdin
+  // the cage service brings a fresh Din back up.
+  ipcMain.on('shell:endSession', (event) => {
+    if (!isShellSender(event)) return;
+    app.quit();
+  });
 }
 
 // ---------------------------------------------------------------------------

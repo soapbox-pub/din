@@ -1,4 +1,4 @@
-import { EthernetPort, LayoutGrid, LogOut, Search, Trash2, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { EthernetPort, LayoutGrid, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -47,6 +47,7 @@ import { getAudioBridge } from '@/lib/audio';
 import { getBrightnessBridge } from '@/lib/brightness';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
+import { getSessionBridge } from '@/lib/session';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import type { AppDefinition } from '@/lib/apps';
@@ -521,6 +522,7 @@ function AccountPanel({
   const { currentUser, otherUsers, isLoading, setLogin, removeLogin } =
     useLoggedInAccounts();
   const openUrl = useOpenUrl();
+  const session = getSessionBridge();
 
   const displayName = (account: Account): string =>
     account.metadata.name ?? 'Anonymous';
@@ -685,9 +687,20 @@ function AccountPanel({
           onClick={() => removeLogin(currentUser.id)}
           className="justify-start text-muted-foreground hover:text-destructive"
         >
-          <LogOut aria-hidden />
-          Log out
+          <UserMinus aria-hidden />
+          Remove account
         </Button>
+        {session && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => session.end()}
+            className="justify-start text-muted-foreground hover:text-foreground"
+          >
+            <LogOut aria-hidden />
+            Log out
+          </Button>
+        )}
       </div>
     </div>
   );

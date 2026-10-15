@@ -3,6 +3,7 @@
 //
 // Exposes bridges backed by IPC handlers in main.mts:
 //   - window.boot: first-frame readiness for the hidden-until-ready shell window
+//   - window.session: end the desktop session (log out to the display manager)
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
@@ -58,6 +59,14 @@ const { contextBridge, ipcRenderer, sharedTexture, webFrame } = require('electro
 contextBridge.exposeInMainWorld('boot', {
   /** Signal that the shell's first frame is ready to be shown. */
   ready: () => ipcRenderer.send('shell:bootReady'),
+});
+
+// Session bridge (window.session): "Log out" quits the shell cleanly. Under
+// din-session.sh a clean exit ends the login session and hands control back
+// to the display manager (GDM etc.); the saved Nostr accounts are untouched.
+contextBridge.exposeInMainWorld('session', {
+  /** End the desktop session (quits Din). */
+  end: () => ipcRenderer.send('shell:endSession'),
 });
 
 contextBridge.exposeInMainWorld('fs', {
