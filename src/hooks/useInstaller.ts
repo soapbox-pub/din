@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getInstallerBridge } from '@/lib/installer';
 import type { InstallerStatus, InstallState } from '@/lib/installer';
 
-/** Live boot status and the disks Aladdin could be installed on. */
+/** Live boot status and the disks DinOS could be installed on. */
 export function useInstallerStatus() {
   const installer = getInstallerBridge();
   return useQuery<InstallerStatus>({

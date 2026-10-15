@@ -1,6 +1,6 @@
 # din-install: the privileged half of Din's Installer app.
 #
-# Aladdin boots from a USB stick as a live system; this copies that running
+# DinOS boots from a USB stick as a live system; this copies that running
 # system onto a computer's own disk. Din runs it through sudo (a NOPASSWD rule
 # for exactly this program, see configuration.nix) from electron/installer.mts.
 #
@@ -50,8 +50,8 @@ is_live() {
 # The live system's ESP: the one the boot loader ran from, or failing that
 # the first on the boot disk.
 boot_esp() {
-  if [[ -b /dev/disk/aladdin-esp ]]; then
-    readlink -f /dev/disk/aladdin-esp
+  if [[ -b /dev/disk/dinos-esp ]]; then
+    readlink -f /dev/disk/dinos-esp
     return
   fi
   lsblk -lnpo NAME,PARTTYPE "$1" | awk -v t="$ESP_TYPE" 'tolower($2) == t { print $1; exit }'
@@ -163,8 +163,8 @@ cleanup() {
 install() {
   local disk=$1 mode=$2 boot required ss json esp root before
   boot=$(boot_disk)
-  is_live "$boot" || die "Aladdin can only be installed while running from a USB stick."
-  grep -qxF -- "$disk" <<<"$(candidate_disks "$boot")" || die "$disk is not a disk Aladdin can be installed on."
+  is_live "$boot" || die "DinOS can only be installed while running from a USB stick."
+  grep -qxF -- "$disk" <<<"$(candidate_disks "$boot")" || die "$disk is not a disk DinOS can be installed on."
   [[ $mode == wipe || $mode == free ]] || die "Unknown install mode: $mode"
 
   json=$(disk_json "$disk")
@@ -177,9 +177,9 @@ install() {
   step partition
   udevadm settle
   if [[ $mode == wipe ]]; then
-    (( $(jq '.sizeBytes' <<<"$json") >= required )) || die "$disk is too small for Aladdin."
+    (( $(jq '.sizeBytes' <<<"$json") >= required )) || die "$disk is too small for DinOS."
     wipefs -aq "$disk"
-    printf 'label: gpt\nsize=%s, type=%s, name="Aladdin boot"\ntype=%s, name="Aladdin"\n' \
+    printf 'label: gpt\nsize=%s, type=%s, name="DinOS boot"\ntype=%s, name="DinOS"\n' \
       $((ESP_BYTES / ss)) "$ESP_TYPE" "$ROOT_TYPE" |
       sfdisk -q --wipe always --wipe-partitions always "$disk"
   else
@@ -188,16 +188,16 @@ install() {
     # GPT auto-discovery takes the first root partition on the boot disk,
     # which could be the other system's.
     [[ $(jq '.hasLinuxRoot' <<<"$json") == false ]] ||
-      die "$disk already has a Linux system on it. Aladdin can't be installed alongside another Linux system yet."
+      die "$disk already has a Linux system on it. DinOS can't be installed alongside another Linux system yet."
     local region start sectors esp_sectors
     region=$(largest_free_region "$disk")
     [[ -n $region ]] || die "$disk has no unpartitioned space."
     start=${region% *}
     sectors=${region#* }
-    (( sectors * ss >= required )) || die "$disk doesn't have enough unpartitioned space for Aladdin."
+    (( sectors * ss >= required )) || die "$disk doesn't have enough unpartitioned space for DinOS."
     esp_sectors=$((ESP_BYTES / ss))
     before=$(partitions_by_start "$disk")
-    printf 'start=%s, size=%s, type=%s, name="Aladdin boot"\nstart=%s, size=%s, type=%s, name="Aladdin"\n' \
+    printf 'start=%s, size=%s, type=%s, name="DinOS boot"\nstart=%s, size=%s, type=%s, name="DinOS"\n' \
       "$start" "$esp_sectors" "$ESP_TYPE" \
       $((start + esp_sectors)) $((sectors - esp_sectors)) "$ROOT_TYPE" |
       sfdisk -q --append --wipe-partitions always "$disk"
@@ -213,7 +213,7 @@ install() {
   [[ -b $esp && -b $root ]] || die "The new partitions on $disk didn't appear."
 
   step format
-  mkfs.vfat -F 32 -n ALADDIN "$esp" >/dev/null
+  mkfs.vfat -F 32 -n DINOS "$esp" >/dev/null
   mkfs.ext4 -q -F -L nixos "$root"
 
   target=$(mktemp -d /run/din-install.XXXXXX)
@@ -258,12 +258,12 @@ install() {
   fi
   rm -f "$target/var/lib/systemd/random-seed"
 
-  # Put Aladdin first in the firmware's boot order. Firmware also boots the
+  # Put DinOS first in the firmware's boot order. Firmware also boots the
   # ESP's removable path on its own, so a refusal here isn't fatal.
   if [[ -d /sys/firmware/efi/efivars ]]; then
-    efibootmgr 2>/dev/null | awk '$1 ~ /^Boot[0-9A-Fa-f]{4}\*?$/ && $2 == "Aladdin" { print substr($1, 5, 4) }' |
+    efibootmgr 2>/dev/null | awk '$1 ~ /^Boot[0-9A-Fa-f]{4}\*?$/ && $2 == "DinOS" { print substr($1, 5, 4) }' |
       while read -r num; do efibootmgr -q -b "$num" -B || true; done
-    efibootmgr -q -c -d "$disk" -p "$(lsblk -no PARTN "$esp")" -L Aladdin \
+    efibootmgr -q -c -d "$disk" -p "$(lsblk -no PARTN "$esp")" -L DinOS \
       -l '\EFI\BOOT\BOOTX64.EFI' || echo "Couldn't add a firmware boot entry." >&2
   fi
 

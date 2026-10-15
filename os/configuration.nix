@@ -157,7 +157,7 @@ let
   din-launcher = makeDinLauncher "";
 in
 {
-  networking.hostName = "aladdin";
+  networking.hostName = "dinos";
 
   # NetworkManager backs Din's WiFi settings panel (nmcli via the
   # Electron wifi bridge). Physical adapters (wired and wireless) are
@@ -207,13 +207,13 @@ in
   # unsupported - the attribute just won't exist. `add|change` so it applies on
   # both cold-plug and hot-plug (e.g. plugging into the dock while running).
   #
-  # The last rule names the ESP the boot loader ran from /dev/disk/aladdin-esp
+  # The last rule names the ESP the boot loader ran from /dev/disk/dinos-esp
   # (for /boot, below). systemd's by-designator/esp is the first ESP on the
   # disk, which next to Windows is Windows'.
   services.udev.extraRules = ''
     ACTION=="add|change", SUBSYSTEM=="usb", ATTR{power/wakeup}="enabled"
     ACTION=="add|change", SUBSYSTEM=="pci", ATTR{class}=="0x0c03*", ATTR{power/wakeup}="enabled"
-    SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_PART_ENTRY_TYPE}=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b", PROGRAM="${isBootedEsp} $env{ID_PART_ENTRY_UUID}", SYMLINK+="disk/aladdin-esp"
+    SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_PART_ENTRY_TYPE}=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b", PROGRAM="${isBootedEsp} $env{ID_PART_ENTRY_UUID}", SYMLINK+="disk/dinos-esp"
   '';
 
   # cage: a Wayland compositor that runs exactly one fullscreen application.
@@ -254,7 +254,7 @@ in
     autoResize = true;
   };
   fileSystems."/boot" = {
-    device = "/dev/disk/aladdin-esp";
+    device = "/dev/disk/dinos-esp";
     fsType = "vfat";
     options = [ "umask=0077" "nofail" ];
   };

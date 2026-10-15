@@ -831,7 +831,7 @@ const TerminalSession = memo(function TerminalSession({
     // re-uploads to GL textures on every version bump. The first upload after
     // a purge paints every glyph on that page as a black box, so the terminal
     // degrades into black pixelation at a "random" moment mid-session, with
-    // no webglcontextlost/focus/visibility event to warn us (and on Aladdin's
+    // no webglcontextlost/focus/visibility event to warn us (and on DinOS's
     // fullscreen kiosk the focus/visibility events never fire anyway).
     //
     // So detect corruption empirically: cells the buffer reports as plain

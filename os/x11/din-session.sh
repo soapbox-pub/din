@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Din as a standalone login session on an existing Linux install, no
-# NixOS/Aladdin required.
+# NixOS/DinOS required.
 #
 # This runs the *production* Electron shell (fullscreen kiosk) against a
-# pre-built dist/. It is the hand-rolled equivalent of what Aladdin's cage
+# pre-built dist/. It is the hand-rolled equivalent of what DinOS's cage
 # service does: start exactly one fullscreen app - Din - and nothing else.
 # Din does all window management itself inside that single window, so no
 # external window manager is needed. Works under an X11 or Wayland session;
-# unlike Aladdin, the rest of your OS (audio, GPU drivers, Bluetooth, logind,
+# unlike DinOS, the rest of your OS (audio, GPU drivers, Bluetooth, logind,
 # printing) is still there underneath.
 #
 # Prerequisites:
@@ -65,7 +65,7 @@ fi
 # snappier than SwiftShader). --enable-unsafe-swiftshader stays in both modes
 # so the Terminal's WebGL box-drawing glyphs still render if Chromium falls
 # back to software. On real hardware there is no --disable-gpu (that was only
-# an Aladdin/QEMU workaround); set DIN_NO_GPU=1 to force it back.
+# a DinOS/QEMU workaround); set DIN_NO_GPU=1 to force it back.
 FLAGS=(--enable-unsafe-swiftshader)
 [ "${DIN_NO_GPU:-0}" = "1" ] && FLAGS=(--disable-gpu --enable-unsafe-swiftshader)
 [ -n "${DIN_OZONE:-}" ] && FLAGS+=(--ozone-platform="${DIN_OZONE}")

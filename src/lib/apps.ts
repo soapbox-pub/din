@@ -149,10 +149,10 @@ export const APPS: readonly AppDefinition[] = [
     hidden: true,
   },
   {
-    // Puts Aladdin on the computer's disk. Hidden except on a live USB boot,
+    // Puts DinOS on the computer's disk. Hidden except on a live USB boot,
     // where InstalledAppsProvider shows it and the desktop opens it.
     id: 'installer',
-    name: 'Install Aladdin',
+    name: 'Install DinOS',
     icon: HardDriveDownload,
     component: Installer,
     defaultSize: { width: 640, height: 560 },

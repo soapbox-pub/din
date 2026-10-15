@@ -59,7 +59,7 @@ function messageOf(error: unknown): string {
 }
 
 // Locate the built Vite app. Two supported layouts:
-//   - Aladdin/Nix: main.mts and dist/ are installed side by side (dirname/dist)
+//   - DinOS/Nix: main.mts and dist/ are installed side by side (dirname/dist)
 //   - repo/standalone launcher (os/x11/din-session.sh): main.mts lives in
 //     electron/, dist/ sits at the repo root (dirname/../dist)
 // DIN_DIST_DIR overrides both. Without this, the standalone session loads
@@ -624,7 +624,7 @@ async function savedVpnConnections(): Promise<VpnConnection[]> {
 // X11 session (the os/x11 standalone launcher), where Din is the whole desktop
 // and nothing else manages the outputs. It models the full multi-output layout
 // - resolution, position, on/off and which output is primary - and applies a
-// whole desired arrangement atomically. On Wayland/cage (Aladdin) xrandr isn't
+// whole desired arrangement atomically. On Wayland/cage (DinOS) xrandr isn't
 // applicable, so status reports `available: false` and the Settings panel
 // renders a fallback - same shape as the WiFi bridge in QEMU.
 //
@@ -952,7 +952,7 @@ function registerLidWatch(): void {
 // ---------------------------------------------------------------------------
 // Power bridge (window.power), backed by /sys/class/power_supply. Read-only
 // sysfs, so it needs no external binary and works on any Linux session (cage
-// on Aladdin or the bare-X11 standalone launcher). Reports `available: false`
+// on DinOS or the bare-X11 standalone launcher). Reports `available: false`
 // where there's no battery (desktops, the QEMU VM) so the menu-bar indicator
 // hides and the Settings panel shows a fallback. Sender-guarded like the
 // other bridges.
@@ -1140,7 +1140,7 @@ function registerPowerHandlers(): void {
   });
 
   // Log out: quit cleanly. din-session.sh treats exit 0 as "the user quit"
-  // and ends the login session, returning to the display manager; on Aladdin
+  // and ends the login session, returning to the display manager; on DinOS
   // the cage service brings a fresh Din back up.
   ipcMain.on('shell:endSession', (event) => {
     if (!isShellSender(event)) return;
@@ -1513,7 +1513,7 @@ function registerMediaKeys(): void {
 // ---------------------------------------------------------------------------
 // Brightness bridge (window.brightness). Two independent halves:
 //   - Screen backlight (/sys/class/backlight), via brightnessctl where
-//     installed (Aladdin ships it with udev rules that grant the `video`
+//     installed (DinOS ships it with udev rules that grant the `video`
 //     group write access; see os/configuration.nix). Where it's absent (e.g.
 //     a dev host), fall back to reading sysfs directly (world-readable) and
 //     writing through systemd-logind's Session.SetBrightness D-Bus call,
@@ -1915,7 +1915,7 @@ function registerScreenshotHandlers(): void {
 // the evdev level; do the same: read the keyboard event nodes directly and
 // forward presses to the shell as the 'screenshot-area' shortcut.
 //
-// Reading /dev/input needs the `input` group (Aladdin grants it to the
+// Reading /dev/input needs the `input` group (DinOS grants it to the
 // desktop user); anywhere else the watcher just stays off. The main process
 // already observes every keystroke via before-input-event, and nothing here
 // is exposed to renderers, so no new capability crosses a trust boundary.
@@ -3677,7 +3677,7 @@ app.whenReady().then(() => {
   // Route chrome.action popups into the shell instead of native windows.
   overrideActionPopup();
 
-  // Production runs with no window manager (cage on Aladdin, or a bare X11
+  // Production runs with no window manager (cage on DinOS, or a bare X11
   // login session via os/x11). cage force-fills the one app, but bare X11 has
   // nothing to honor the EWMH fullscreen hint, so the window would sit at its
   // default size letterboxed on a black screen. Size it to the primary
@@ -3696,7 +3696,7 @@ app.whenReady().then(() => {
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
     // Stay hidden until the renderer reports its first frame is ready (the
-    // shell:bootReady gate below). With no window manager (cage on Aladdin,
+    // shell:bootReady gate below). With no window manager (cage on DinOS,
     // bare X11 otherwise), showing early presents an unpainted surface — a
     // white/pixelated glitch frame. The renderer then fades in from black.
     show: false,

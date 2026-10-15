@@ -23,7 +23,7 @@ shell, so it can run:
 - **windowed** on a normal desktop for development,
 - or as a plain web app in any browser (with reduced integration).
 
-**Aladdin** is the flagship OS of Din: a minimal NixOS system that boots
+**DinOS** is the flagship OS of Din: a minimal NixOS system that boots
 straight into Din fullscreen. No X11, no display manager, no traditional
 desktop — just:
 
@@ -43,7 +43,7 @@ Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> Din
   - Debian/Ubuntu: `sudo apt install xvfb xwayland libpixman-1-dev libgbm-dev libxkbcommon-dev`
 - Wine, for Windows programs
 - Nix (with flakes enabled; the Determinate installer does this by default) —
-  only needed for the Aladdin `os:*` commands
+  only needed for the DinOS `os:*` commands
 - QEMU (`qemu-system-x86_64`) on the host for the `npm run os:run` demo
 
 ## Usage
@@ -54,12 +54,12 @@ npm run dev:browser # run Din in a plain browser with HMR (http://localhost:8080
 npm test            # type-check + lint + tests + build
 npm run build       # build the web app into dist/
 npm run build:native # build the Wayland compositor + GPU buffer addon (cargo)
-npm run os:build    # build the installable Aladdin disk image (./result/nixos.img)
-npm run os:run      # demo Aladdin in a QEMU window
-npm run os:clean    # remove the build output and the demo VM disk (aladdin.qcow2)
+npm run os:build    # build the installable DinOS disk image (./result/nixos.img)
+npm run os:run      # demo DinOS in a QEMU window
+npm run os:clean    # remove the build output and the demo VM disk (dinos.qcow2)
 ```
 
-`npm run dev` starts Vite, then launches the same `electron/main.mts` Aladdin
+`npm run dev` starts Vite, then launches the same `electron/main.mts` DinOS
 uses (Electron comes from devDependencies, pinned to the version the OS image
 ships) against the dev server via `DIN_DEV_URL`. This gives you the real
 Electron/`app://` environment with Vite HMR + React fast refresh. Ctrl-C stops
@@ -75,11 +75,11 @@ sudo dd if=result/nixos.img of=/dev/sdX bs=4M status=progress conv=fsync
 On first boot the root partition grows to fill the disk.
 
 Written to a USB stick instead, the same image is a live system: boot a laptop
-from it and Din opens the **Install Aladdin** app, which copies the running
+from it and Din opens the **Install DinOS** app, which copies the running
 system onto the computer's own disk — erasing it, or into its unpartitioned
 space next to Windows (shrink Windows' partition in Disk Management first; the
 firmware's boot menu then picks between them). The sign-in, saved Wi-Fi, and
-files from the live session come along. The app only appears when Aladdin is
+files from the live session come along. The app only appears when DinOS is
 running from removable media; the disk work is `os/din-install.sh`, run as
 root through a sudo rule for that one program. Because the stick and the
 installed disk are copies of each other, nothing is mounted by label: the
@@ -100,7 +100,7 @@ since QEMU provides no GPU), with boot logs mirrored to the serial console
 - `electron/native-*.mts`, `electron/wayland-bridge.mts`, `native/` — the
   embedded display that runs native Linux apps inside Din windows (see
   "Native Linux apps" below)
-- `os/` — Aladdin, the flagship OS:
+- `os/` — DinOS, the flagship OS:
   - `os/flake.nix` — entry point; exposes the installable disk image as
     `./os#image` (the default) and the QEMU demo as `./os#vm`, and pulls in
     the Din source tree (the repo root) as an input
@@ -117,11 +117,11 @@ Three tiers, fastest first:
    edit `src/` and see changes instantly at http://localhost:8080.
 2. **Electron windowed + HMR** (`npm run dev`): runs Din inside the actual
    Electron host (`app://` protocol, CSP, download handling) pointed at the
-   Vite dev server, so it matches Aladdin while staying hot-reloadable. Under
+   Vite dev server, so it matches DinOS while staying hot-reloadable. Under
    the hood this just sets `DIN_DEV_URL=http://localhost:8080` for
    `electron/main.mts`.
-3. **Full OS demo** (`npm run os:run`): rebuilds Aladdin and boots it in
-   QEMU; only changed layers rebuild. The demo VM disk (`aladdin.qcow2`)
+3. **Full OS demo** (`npm run os:run`): rebuilds DinOS and boots it in
+   QEMU; only changed layers rebuild. The demo VM disk (`dinos.qcow2`)
    persists between boots; `npm run os:clean` resets it.
 
 ### Native Linux apps
@@ -172,7 +172,7 @@ need no help: the Start-menu shortcuts they create become desktop entries,
 which appear in the launcher as soon as the install finishes (Uninstall
 shortcuts are left out). See `electron/windows-apps.mts`.
 
-Aladdin ships Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
+DinOS ships Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
 and Gecko). Elsewhere Din uses the system's `wine`, or `$DIN_WINE`.
 
 ### Updating npm dependencies

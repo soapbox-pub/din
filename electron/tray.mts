@@ -3,7 +3,7 @@
 // Apps that live in a tray - chat clients, sync clients, Steam - publish a
 // StatusNotifierItem on the session bus and register it with whoever owns
 // org.kde.StatusNotifierWatcher. Din owns that name when nobody else does
-// (Aladdin; a bare X11 session), so every app's item comes here. Inside a
+// (DinOS; a bare X11 session), so every app's item comes here. Inside a
 // desktop that already has a tray (KDE, GNOME with the AppIndicator
 // extension), Din registers as one more host of that watcher instead, and
 // shows the items of the apps it launched - the others belong to that

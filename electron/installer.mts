@@ -1,7 +1,7 @@
 // The Installer bridge (window.installer, for the Installer app): puts
-// Aladdin on a computer's own disk from a live USB boot.
+// DinOS on a computer's own disk from a live USB boot.
 //
-// The disk work is done as root by os/din-install.sh, which Aladdin's
+// The disk work is done as root by os/din-install.sh, which DinOS's
 // launcher names in DIN_INSTALLER and lets the shell's user run through sudo
 // without a password - that one program, nothing else. It decides for itself
 // what may be installed where (only from a live boot, never onto the boot

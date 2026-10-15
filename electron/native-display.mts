@@ -2,7 +2,7 @@
 //
 // Native apps used to be left to the host window manager, stacked above the
 // shell, which made them strangers on the desktop: no Din chrome, no Dock
-// grouping, no Alt+Tab, and nothing at all under Aladdin's cage, which has no
+// grouping, no Alt+Tab, and nothing at all under DinOS's cage, which has no
 // window manager. Instead, Din now runs its own X server (Xvfb) that only it
 // can see, launches apps against it, and composites their windows into its
 // own (native-display-worker.mts does the window management and compositing;

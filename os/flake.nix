@@ -1,5 +1,5 @@
 {
-  description = "Aladdin: the flagship OS of Din - a minimal NixOS that boots straight into the Din desktop environment";
+  description = "DinOS: the flagship OS of Din - a minimal NixOS that boots straight into the Din desktop environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
@@ -16,7 +16,7 @@
       system = "x86_64-linux";
     in
     {
-      nixosConfigurations.aladdin = nixpkgs.lib.nixosSystem {
+      nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din; };
         modules = [ ./configuration.nix ];
@@ -28,9 +28,9 @@
         # (e.g. `dd if=result/nixos.img of=/dev/sdX bs=4M status=progress`)
         # and boot via UEFI. The root partition grows to fill the disk on
         # first boot. Written to a USB stick, it's a live system whose
-        # Installer app puts Aladdin on the computer's own disk.
+        # Installer app puts DinOS on the computer's own disk.
         image = import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
-          inherit (self.nixosConfigurations.aladdin) config pkgs;
+          inherit (self.nixosConfigurations.dinos) config pkgs;
           lib = nixpkgs.lib;
           format = "raw";
           partitionTableType = "efi";
@@ -45,9 +45,9 @@
           '';
         };
 
-        # `nix build ./os#vm` -> ./result/bin/run-aladdin-vm demos the same
+        # `nix build ./os#vm` -> ./result/bin/run-dinos-vm demos the same
         # system in a QEMU window.
-        vm = self.nixosConfigurations.aladdin.config.system.build.vm;
+        vm = self.nixosConfigurations.dinos.config.system.build.vm;
 
         default = self.packages.${system}.image;
       };

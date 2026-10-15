@@ -5,7 +5,7 @@
  * Backed by xrandr in the main process. It is meaningful only on a bare X11
  * session (the os/x11 standalone launcher), where Din is the whole desktop and
  * nothing else manages the outputs. Where xrandr doesn't apply (Wayland/cage on
- * Aladdin) or in a plain browser the bridge is absent or `status()` resolves
+ * DinOS) or in a plain browser the bridge is absent or `status()` resolves
  * with `available: false`; callers must feature-detect and render a fallback.
  *
  * The bridge models a full multi-output layout: each connected output has a

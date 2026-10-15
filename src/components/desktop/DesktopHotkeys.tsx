@@ -49,7 +49,7 @@ const SCREENSHOT_APP_ID = 'screenshot';
  *
  * Note: when Din runs windowed inside a desktop environment, the host
  * window manager usually consumes Alt+Tab (and the OS may grab Print
- * Screen) first; in the Aladdin kiosk (cage) and the plain-browser dev
+ * Screen) first; in the DinOS kiosk (cage) and the plain-browser dev
  * loop the shortcuts reach us.
  */
 export function DesktopHotkeys() {

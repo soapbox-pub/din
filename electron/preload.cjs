@@ -12,7 +12,7 @@
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
 //   - window.keyboard: the keyboard layout native apps use, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
-//   - window.installer: put Aladdin on this computer's disk, for the
+//   - window.installer: put DinOS on this computer's disk, for the
 //     Installer app (live USB boots only)
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
@@ -553,7 +553,7 @@ contextBridge.exposeInMainWorld('power', {
 });
 
 // Installer bridge (window.installer), backed by electron/installer.mts:
-// copies a live USB boot of Aladdin onto the computer's own disk.
+// copies a live USB boot of DinOS onto the computer's own disk.
 contextBridge.exposeInMainWorld('installer', {
   /** Whether this is a live boot, the space an install needs, and the disks. */
   status: () => ipcRenderer.invoke('installer:status'),

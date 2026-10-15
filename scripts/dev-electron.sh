@@ -6,7 +6,7 @@
 # VM, so app:// routing / CSP behaviour matches production while React fast
 # refresh + Vite HMR stay live. Ctrl-C tears down both processes.
 #
-# Electron comes from devDependencies (pinned to the same version the Aladdin
+# Electron comes from devDependencies (pinned to the same version the DinOS
 # OS image ships), so no Nix setup is required. Nix is only needed for the
 # os:* scripts that build the VM.
 set -euo pipefail

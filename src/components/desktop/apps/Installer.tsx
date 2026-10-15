@@ -66,7 +66,7 @@ function alongsideProblem(disk: InstallerDisk, requiredBytes: number): string | 
     return 'This disk uses an older partition layout. Erasing it is the only option.';
   }
   if (disk.hasLinuxRoot) {
-    return 'There is already a Linux system on this disk. Installing Aladdin next to another Linux system isn’t supported yet.';
+    return 'There is already a Linux system on this disk. Installing DinOS next to another Linux system isn’t supported yet.';
   }
   if (disk.largestFreeBytes < requiredBytes) {
     return `This needs ${formatDiskSize(requiredBytes)} of unpartitioned space, and the largest free stretch is ${formatDiskSize(disk.largestFreeBytes)}. In Windows, shrink its partition in Disk Management to make room, then come back.`;
@@ -74,7 +74,7 @@ function alongsideProblem(disk: InstallerDisk, requiredBytes: number): string | 
   return null;
 }
 
-/** Installs Aladdin from a live USB boot onto this computer's own disk. */
+/** Installs DinOS from a live USB boot onto this computer's own disk. */
 export function Installer(_props: AppComponentProps) {
   const install = useInstallState();
 
@@ -103,10 +103,10 @@ function InstallSetup() {
           </div>
           <div className="max-w-md space-y-3">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-              Install Aladdin on this computer
+              Install DinOS on this computer
             </h1>
             <p className="text-sm text-muted-foreground">
-              You’re running Aladdin from a USB stick. Installing copies it onto this
+              You’re running DinOS from a USB stick. Installing copies it onto this
               computer’s own disk, so it starts faster and works without the stick.
             </p>
             <p className="text-sm text-muted-foreground">
@@ -123,7 +123,7 @@ function InstallSetup() {
 
   if (status.isPending) {
     return (
-      <Frame title="Where should Aladdin go?" onBack={() => setStage('welcome')}>
+      <Frame title="Where should DinOS go?" onBack={() => setStage('welcome')}>
         <DiskSkeleton />
       </Frame>
     );
@@ -131,7 +131,7 @@ function InstallSetup() {
 
   if (status.isError || !status.data.available) {
     return (
-      <Frame title="Where should Aladdin go?" onBack={() => setStage('welcome')}>
+      <Frame title="Where should DinOS go?" onBack={() => setStage('welcome')}>
         <ErrorNote>
           {status.isError
             ? cleanInstallerError(status.error)
@@ -147,7 +147,7 @@ function InstallSetup() {
   if (stage === 'disk' || !disk) {
     return (
       <Frame
-        title="Where should Aladdin go?"
+        title="Where should DinOS go?"
         onBack={() => setStage('welcome')}
         footer={
           <>
@@ -175,7 +175,7 @@ function InstallSetup() {
         {disks.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
             <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-              No disks found besides the USB stick Aladdin is running from.
+              No disks found besides the USB stick DinOS is running from.
             </p>
           </div>
         ) : (
@@ -238,10 +238,10 @@ function InstallSetup() {
         <Choice
           selected={mode === 'wipe'}
           onSelect={() => setMode('wipe')}
-          title={empty ? 'Use the whole disk' : 'Erase the disk and install Aladdin'}
+          title={empty ? 'Use the whole disk' : 'Erase the disk and install DinOS'}
           description={
             empty
-              ? `All ${formatDiskSize(disk.sizeBytes)} goes to Aladdin.`
+              ? `All ${formatDiskSize(disk.sizeBytes)} goes to DinOS.`
               : `Everything on it is deleted: ${describeContents(disk)}.`
           }
         />
@@ -253,7 +253,7 @@ function InstallSetup() {
             title="Install alongside what’s there"
             description={
               alongside ??
-              `Aladdin takes the ${formatDiskSize(disk.largestFreeBytes)} of unpartitioned space and leaves everything else alone. Aladdin starts by default; to start the other system, open your computer’s boot menu as it turns on.`
+              `DinOS takes the ${formatDiskSize(disk.largestFreeBytes)} of unpartitioned space and leaves everything else alone. DinOS starts by default; to start the other system, open your computer’s boot menu as it turns on.`
             }
           />
         )}
@@ -265,14 +265,14 @@ function InstallSetup() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {mode === 'wipe' && !empty ? `Erase ${diskName(disk)}?` : 'Install Aladdin?'}
+              {mode === 'wipe' && !empty ? `Erase ${diskName(disk)}?` : 'Install DinOS?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {mode === 'wipe' && !empty
                 ? `Everything on this ${formatDiskSize(disk.sizeBytes)} disk will be permanently deleted. This can’t be undone.`
                 : mode === 'free'
-                  ? `Aladdin will be installed in the free space on ${diskName(disk)}. Nothing already on it is changed.`
-                  : `Aladdin will be installed on ${diskName(disk)}.`}
+                  ? `DinOS will be installed in the free space on ${diskName(disk)}. Nothing already on it is changed.`
+                  : `DinOS will be installed on ${diskName(disk)}.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -297,7 +297,7 @@ function InstallSetup() {
 const STEPS: { id: InstallStep; label: string }[] = [
   { id: 'partition', label: 'Preparing the disk' },
   { id: 'format', label: 'Creating file systems' },
-  { id: 'copy', label: 'Copying Aladdin' },
+  { id: 'copy', label: 'Copying DinOS' },
   { id: 'boot', label: 'Making it bootable' },
 ];
 
@@ -315,10 +315,10 @@ function InstallProgress({ state }: { state: InstallState }) {
           </div>
           <div className="max-w-md space-y-3">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-              Aladdin is installed
+              DinOS is installed
             </h1>
             <p className="text-sm text-muted-foreground">
-              Restart, and remove the USB stick when the screen goes dark. Aladdin will
+              Restart, and remove the USB stick when the screen goes dark. DinOS will
               start from this computer’s disk.
             </p>
           </div>
@@ -348,7 +348,7 @@ function InstallProgress({ state }: { state: InstallState }) {
   const failed = state.phase === 'failed';
 
   return (
-    <Frame title={failed ? 'The install didn’t finish' : 'Installing Aladdin'}>
+    <Frame title={failed ? 'The install didn’t finish' : 'Installing DinOS'}>
       <ol className="flex flex-col gap-3">
         {STEPS.map((s, i) => {
           const done = i < current;

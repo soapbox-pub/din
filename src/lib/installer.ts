@@ -2,9 +2,9 @@
  * Typed access to the installer bridge exposed by the Electron preload
  * (`window.installer`, see electron/preload.cjs + electron/installer.mts).
  *
- * Aladdin written to a USB stick boots as a live system; the Installer app
+ * DinOS written to a USB stick boots as a live system; the Installer app
  * copies it onto the computer's own disk. The bridge is absent outside the
- * Electron shell and reports `available: false` off Aladdin, and the app is
+ * Electron shell and reports `available: false` off DinOS, and the app is
  * only offered when `live` is true.
  */
 
