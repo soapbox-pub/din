@@ -46,6 +46,8 @@ export type NativeDisplayEvent =
   | { type: 'title'; surface: NativeSurface }
   | { type: 'configure'; surface: NativeSurface }
   | { type: 'activate'; surface: NativeSurface }
+  /** Asked to close twice, and still open: offer to force quit. */
+  | { type: 'close-ignored'; surface: NativeSurface }
   /** The app locked the pointer (mouse-look) or let it go. */
   | { type: 'pointer-lock'; surface: NativeSurface; locked: boolean };
 
@@ -260,6 +262,7 @@ function onMessage(message: WorkerMessage): void {
       const surface = surfaces.get(message.id);
       if (!surface) return;
       surfaces.delete(message.id);
+      closeRequests.delete(message.id);
       window.nativeDisplay?.detachCanvas(message.id);
       emit({ type: 'close', surface });
       return;
@@ -448,9 +451,30 @@ export function raiseNativeWindow(id: number): void {
   send({ type: 'raise', id });
 }
 
-/** Ask an app to close a window (it may prompt first, or refuse). */
+/**
+ * How long after asking a window to close another close click means "it
+ * didn't listen" rather than "close it again".
+ */
+const CLOSE_PATIENCE_MS = 60_000;
+
+/** X window id -> when the shell last asked it to close. */
+const closeRequests = new Map<number, number>();
+
+/**
+ * Ask an app to close a window (it may prompt first, or refuse).
+ *
+ * Asking again while an earlier request is still unanswered reports the
+ * window as `close-ignored`, so the shell can offer to force quit - some
+ * programs (desktop toys, hung apps) never close on request.
+ */
 export function closeNativeWindow(id: number): void {
+  const asked = closeRequests.get(id);
+  const surface = surfaces.get(id);
+  closeRequests.set(id, Date.now());
   send({ type: 'close', id });
+  if (surface && asked !== undefined && Date.now() - asked < CLOSE_PATIENCE_MS) {
+    emit({ type: 'close-ignored', surface });
+  }
 }
 
 /** Whether an X window is still alive. */

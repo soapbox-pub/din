@@ -59,6 +59,8 @@ export interface NativeAppsBridge {
    * message when it can't (e.g. Wine isn't installed).
    */
   runWindowsProgram(file: string): Promise<void>;
+  /** Force quit the program owning a window, by pid (apps on Din's display only). */
+  forceQuit(pid: number): Promise<void>;
   /** Subscribe to installed-app changes. Returns an unsubscribe fn. */
   onChanged(callback: () => void): () => void;
 }

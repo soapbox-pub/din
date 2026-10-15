@@ -288,6 +288,13 @@ contextBridge.exposeInMainWorld('nativeApps', {
   runWindowsProgram: (file) => ipcRenderer.invoke('native-apps:run-windows-program', file),
 
   /**
+   * Force quit the program that owns a window (by its pid), for windows
+   * that won't close. Only apps on Din's embedded display qualify.
+   * @param {number} pid
+   */
+  forceQuit: (pid) => ipcRenderer.invoke('native-apps:force-quit', pid),
+
+  /**
    * Subscribe to "the installed apps changed" (a program was installed or
    * removed). Returns an unsubscribe fn.
    * @param {() => void} callback

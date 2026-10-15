@@ -811,6 +811,33 @@ export async function runWindowsProgram(file: string): Promise<void> {
 }
 
 /**
+ * Force quit the program behind a window that won't close.
+ *
+ * Only a process started onto Din's embedded display qualifies - its
+ * environment names one of the display's servers - so the shell can't be
+ * used to kill Din itself or anything else the user runs. Throws when the
+ * pid doesn't qualify.
+ */
+async function forceQuit(pid: number): Promise<void> {
+  const display = await embeddedDisplay();
+  if (!display || pid <= 1 || pid === process.pid) throw new Error('Not an app on Din’s display');
+  const servers = new Set([
+    `DISPLAY=${display.display}`,
+    display.xwayland && `DISPLAY=${display.xwayland}`,
+    display.wayland && `WAYLAND_DISPLAY=${display.wayland}`,
+  ]);
+  let environ: string[];
+  try {
+    environ = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0');
+  } catch {
+    // Gone already, which is what was wanted.
+    return;
+  }
+  if (!environ.some((entry) => servers.has(entry))) throw new Error('Not an app on Din’s display');
+  process.kill(pid, 'SIGKILL');
+}
+
+/**
  * Watch the user's applications folder, where installers - Wine's Start-menu
  * shortcuts above all - drop new entries, and report changes so the shell's
  * app list follows along without waiting out the scan cache.
@@ -910,6 +937,12 @@ export function registerNativeAppHandlers(options: {
     assertShellSender(event);
     if (typeof file !== 'string') throw new Error('A file path is required');
     await runWindowsProgram(file);
+  });
+
+  ipcMain.handle('native-apps:force-quit', async (event, pid) => {
+    assertShellSender(event);
+    if (!Number.isInteger(pid)) throw new Error('A pid is required');
+    await forceQuit(pid);
   });
 
   ipcMain.handle('native-apps:resolve', async (event, pid, wmClass) => {

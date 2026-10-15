@@ -4,6 +4,16 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { getNativeAppsBridge } from '@/lib/nativeApps';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   isNativeWindowOpen,
   nativePopups,
   sendNativeButton,
@@ -40,6 +50,8 @@ export function NativeDisplayHost() {
   // X window id -> Din window id.
   const windowsRef = useRef(new Map<number, string>());
   const [popups, setPopups] = useState<NativeSurface[]>(nativePopups);
+  // A window that ignored being asked to close, pending a force-quit choice.
+  const [stuck, setStuck] = useState<NativeSurface | null>(null);
 
   useEffect(() => {
     if (available) startNativeDisplay();
@@ -72,6 +84,8 @@ export function NativeDisplayHost() {
           windowsRef.current.delete(surface.id);
           if (id) close(id);
           if (surface.popup) setPopups(nativePopups());
+          // It closed after all; nothing left to force.
+          setStuck((s) => (s?.id === surface.id ? null : s));
           return;
         }
         case 'activate': {
@@ -79,6 +93,9 @@ export function NativeDisplayHost() {
           if (id) focus(id);
           return;
         }
+        case 'close-ignored':
+          if (surface.pid !== null) setStuck(surface);
+          return;
         case 'popup':
         case 'configure':
           if (surface.popup) setPopups(nativePopups());
@@ -89,8 +106,56 @@ export function NativeDisplayHost() {
 
   const grabbing = popups.some((p) => GRABBING_POPUPS.has(p.kind));
 
-  if (popups.length === 0) return null;
+  return (
+    <>
+      {popups.length > 0 && (
+        <NativePopupLayer popups={popups} grabbing={grabbing} />
+      )}
+      <ForceQuitDialog surface={stuck} onDone={() => setStuck(null)} />
+    </>
+  );
+}
 
+/**
+ * Offered when a window ignores being asked to close twice. It may be
+ * showing a "save changes?" prompt somewhere, so this asks rather than
+ * killing it outright.
+ */
+function ForceQuitDialog({
+  surface,
+  onDone,
+}: {
+  surface: NativeSurface | null;
+  onDone: () => void;
+}) {
+  const name = surface?.title.trim() || 'This program';
+  return (
+    <AlertDialog open={surface !== null} onOpenChange={(isOpen) => !isOpen && onDone()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{name} isn’t closing</AlertDialogTitle>
+          <AlertDialogDescription>
+            You can wait for it, or force it to quit. Anything it hasn’t saved will be lost.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Wait</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={() => {
+              if (surface?.pid != null) void getNativeAppsBridge()?.forceQuit(surface.pid).catch(() => {});
+            }}
+          >
+            Force Quit
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/** Popups (menus, tooltips) drawn above everything, at their screen position. */
+function NativePopupLayer({ popups, grabbing }: { popups: NativeSurface[]; grabbing: boolean }) {
   return (
     <div className="pointer-events-none fixed inset-0 z-[10000]">
       {/* While a menu is open the app holds a pointer grab: a click anywhere
