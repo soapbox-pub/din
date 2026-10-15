@@ -54,14 +54,11 @@ let
       runHook preInstall
       mkdir -p $out/share/din
       cp -r dist $out/share/din/dist
-      # The whole Electron host: main.mts and the .mts modules it imports
-      # (run via Node's native type stripping - no build step), the .cjs
-      # preloads, and the pty helper.
-      install -m444 electron/main.mts $out/share/din/main.mts
-      install -m444 electron/devtools-bridge.mts $out/share/din/devtools-bridge.mts
-      install -m444 electron/userscripts.mts $out/share/din/userscripts.mts
-      install -m444 electron/preload.cjs $out/share/din/preload.cjs
-      install -m444 electron/webview-preload.cjs $out/share/din/webview-preload.cjs
+      # The whole Electron host: main.mts and the .mts modules and workers it
+      # loads (run via Node's native type stripping - no build step), the
+      # .cjs preloads, and the pty helper. Copied wholesale so a new module
+      # can't be forgotten here.
+      install -m444 electron/*.mts electron/*.cjs $out/share/din/
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
 
       # Runtime node modules for main.mts's Chrome extension support
@@ -76,6 +73,38 @@ let
     '';
   };
 
+  # The Rust half of Din's embedded display (README, "Native Linux apps"):
+  # one crate per derivation, each built from its own directory with any
+  # local cargo output left out.
+  native-src = crate: lib.cleanSourceWith {
+    name = "${crate}-source";
+    src = din-root + "/native/${crate}";
+    filter = path: _type: baseNameOf path != "target";
+  };
+
+  # The headless Wayland compositor native apps run on. libEGL is dlopen()ed
+  # rather than linked, so glvnd goes on its rpath; glvnd finds the real
+  # driver under /run/opengl-driver (hardware.graphics).
+  din-compositor = pkgs.rustPlatform.buildRustPackage {
+    pname = "din-compositor";
+    version = "0.1.0";
+    src = native-src "din-compositor";
+    cargoLock.lockFile = din-root + "/native/din-compositor/Cargo.lock";
+    nativeBuildInputs = [ pkgs.pkg-config ];
+    buildInputs = with pkgs; [ libgbm libdrm pixman libxkbcommon ];
+    postFixup = ''
+      patchelf --add-rpath ${pkgs.libglvnd}/lib $out/bin/din-compositor
+    '';
+  };
+
+  # The N-API addon that hands the compositor's GPU buffers to Electron.
+  din-fd = pkgs.rustPlatform.buildRustPackage {
+    pname = "din-fd";
+    version = "0.1.0";
+    src = native-src "din-fd";
+    cargoLock.lockFile = din-root + "/native/din-fd/Cargo.lock";
+  };
+
   # Launcher: Electron running the Din host on Wayland (cage provides the
   # compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
   # variant below can swap in software rendering.
@@ -83,12 +112,15 @@ let
   # nmcli for the Settings app's WiFi bridge, brightnessctl + gammastep for the
   # Settings/menu-bar brightness bridge (backlight + night light), wpctl
   # (wireplumber) for the Settings sound bridge's device/stream control and
-  # pw-play (pipewire) for its test tone, Xvfb for the embedded display
-  # native Linux apps run on (electron/native-display.mts), and setxkbmap plus
-  # xkeyboard-config's rules for their keyboard layout (electron/keyboard.mts).
+  # pw-play (pipewire) for its test tone, Xwayland for X11 apps on the
+  # embedded display native Linux apps run on (electron/native-display.mts)
+  # and Xvfb for its fallback, and setxkbmap plus xkeyboard-config's rules
+  # for their keyboard layout (electron/keyboard.mts).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
+    export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
+    export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
     exec ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.mts \
       --ozone-platform=wayland ${extraFlags}
