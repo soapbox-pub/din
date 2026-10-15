@@ -135,12 +135,12 @@ declare global {
 
 /**
  * What a Din window adds around its content: the 1px border on each side,
- * and the 36px title bar (src/components/desktop/Window.tsx) unless the app
- * draws its own. A native window of W x H content needs a Din window this
- * much larger.
+ * and the 36px title bar (src/components/desktop/Window.tsx) - nothing, if
+ * the app draws its own. A native window of W x H content needs a Din
+ * window this much larger.
  */
 export function windowChrome(surface: { csd: boolean }): { width: number; height: number } {
-  return { width: 2, height: surface.csd ? 2 : 38 };
+  return surface.csd ? { width: 0, height: 0 } : { width: 2, height: 38 };
 }
 
 const RESIZE_EDGES = new Set<string>(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']);

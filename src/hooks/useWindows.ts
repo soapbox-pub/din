@@ -96,8 +96,9 @@ export interface WindowState {
   /** Geometry to restore to when un-maximizing or un-tiling. */
   restore: { x: number; y: number; width: number; height: number } | null;
   /**
-   * No title bar, and no minimum size. For native apps that draw their own
-   * title bar (or none), which also move themselves.
+   * No title bar, border or resize handles: the content is the whole
+   * window, at any size. For native apps that draw their own title bar (or
+   * none), which also move themselves.
    */
   frameless: boolean;
 }

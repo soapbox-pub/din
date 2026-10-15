@@ -72,7 +72,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
 
   /**
    * Where the Din window of an app that draws its own title bar must be for
-   * the app to sit at the root position it asked for - kept on the
+   * the app to sit at the root position it asked for: the window is all
+   * app, so that's its position in workspace coordinates - kept on the
    * workspace, though. Apps place themselves by the screen, which the
    * workspace may be smaller than (a windowed Din), and a window remembered
    * on a bigger monitor can be off this one; with no Din title bar, it
@@ -81,12 +82,9 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
    */
   const placeFor = useCallback((surface: NativeSurface) => {
     const area = workspaceOrigin(hostRef.current);
-    // The Din window's border, around the app on every side.
-    const extra = windowChrome(surface);
-    const border = extra.width / 2;
     return {
-      x: clamp(surface.x - area.x - border, 0, area.width - surface.width - extra.width),
-      y: clamp(surface.y - area.y - border, 0, area.height - surface.height - extra.height),
+      x: clamp(surface.x - area.x, 0, area.width - surface.width),
+      y: clamp(surface.y - area.y, 0, area.height - surface.height),
     };
   }, []);
 
