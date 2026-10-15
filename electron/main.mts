@@ -137,6 +137,14 @@ function resolveFile(pathname: string): string {
 // resizable window with DevTools rather than the production kiosk shell.
 const DEV_URL = process.env.DIN_DEV_URL;
 
+/**
+ * The shell's own origin. The shell window may only ever show this origin
+ * (see the navigation guard where the window is created), and the sender
+ * guard below requires it, so a remote page can never inherit the shell
+ * preload's privileged bridges.
+ */
+const SHELL_ORIGIN = DEV_URL ? new URL(DEV_URL).origin : 'app://din';
+
 // ---------------------------------------------------------------------------
 // Filesystem bridge (window.fs - see preload.cjs / the Files app).
 //
@@ -166,12 +174,19 @@ const MAX_READ_BYTES = 16 * 1024 * 1024;
 // reject IPC from any other web contents (e.g. <webview> guests).
 let shellContentsId = -1;
 
+/** Whether a request comes from the shell window's main frame, on the shell origin. */
+function isShellSender(event: IpcEvent): boolean {
+  return (
+    event.sender.id === shellContentsId &&
+    !!event.senderFrame &&
+    event.senderFrame === event.sender.mainFrame &&
+    event.senderFrame.origin === SHELL_ORIGIN
+  );
+}
+
 /** Throw unless the request comes from the shell window's main frame. */
 function assertShellSender(event: IpcEvent): void {
-  if (
-    event.sender.id !== shellContentsId ||
-    event.senderFrame !== event.sender.mainFrame
-  ) {
+  if (!isShellSender(event)) {
     throw new Error('fs bridge: unauthorized sender');
   }
 }
@@ -2257,6 +2272,24 @@ function isAppGuest(contents: Electron.WebContents | null | undefined): boolean 
   );
 }
 
+/**
+ * The origin each installed web-app guest was opened on, keyed by WebContents
+ * id (recorded in web-contents-created from the guest's initial src). An app
+ * guest is pinned to this origin: navigations away from it are handed to the
+ * Web Browser, and only this origin may use the Nostr identity bridge.
+ */
+const appGuestOrigins = new Map<number, string>();
+
+/** The origin of a URL, or null if it can't be parsed or is opaque. */
+function originOf(url: string): string | null {
+  try {
+    const { origin } = new URL(url);
+    return origin === 'null' ? null : origin;
+  } catch {
+    return null;
+  }
+}
+
 // Nostr identity bridge (window.nostr in installed web apps - see
 // webview-preload.cjs). The signer lives in the shell renderer (the nsec /
 // extension / bunker the user logged in with), not here, so each NIP-07 call
@@ -2273,19 +2306,23 @@ function registerNostrBridge(): void {
   // A guest's window.nostr.* call: verify it's a trusted app guest, then relay
   // to the shell renderer and resolve with whatever it signs/returns.
   ipcMain.handle('nostr-bridge:call', (event, payload) => {
-    if (!isAppGuest(event.sender)) {
+    // Only the installed app's own top-level document may sign: the guest is
+    // bound to the origin it was installed for (appGuestOrigins), so a page it
+    // navigates or is redirected to never inherits the user's identity.
+    const origin = appGuestOrigins.get(event.sender.id);
+    if (
+      !isAppGuest(event.sender) ||
+      !origin ||
+      !event.senderFrame ||
+      event.senderFrame !== event.sender.mainFrame ||
+      event.senderFrame.origin !== origin
+    ) {
       throw new Error('Nostr bridge is not available here');
     }
     if (!shellWindow || shellWindow.webContents.isDestroyed()) {
       throw new Error('Din shell is unavailable');
     }
     const method = payload && typeof payload.method === 'string' ? payload.method : '';
-    let origin = '';
-    try {
-      origin = new URL(event.sender.getURL()).origin;
-    } catch {
-      // Guests always load an https URL; ignore the rare parse failure.
-    }
     return new Promise((resolve, reject) => {
       const requestId = nextNostrRequestId++;
       const timer = setTimeout(() => {
@@ -2305,7 +2342,7 @@ function registerNostrBridge(): void {
   // The shell renderer's answer to a relayed request. Only the shell may
   // resolve these - a guest cannot forge another guest's response.
   ipcMain.on('nostr-bridge:response', (event, response) => {
-    if (!shellWindow || event.sender !== shellWindow.webContents) return;
+    if (!isShellSender(event)) return;
     const pending = response && pendingNostrRequests.get(response.requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
@@ -2395,7 +2432,7 @@ function registerHighlightBridge(): void {
   // The shell's answer to a relayed highlight publish. Only the shell may
   // resolve these.
   ipcMain.on('din-highlight:response', (event, response) => {
-    if (!shellWindow || event.sender !== shellWindow.webContents) return;
+    if (!isShellSender(event)) return;
     const pending = response && pendingHighlightRequests.get(response.requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
@@ -2436,7 +2473,7 @@ function registerFilePickerBridge(): void {
   // resolve these, and it only ever returns a path the user picked in-Din
   // (or null on cancel) - never a page-supplied one.
   ipcMain.on('filepicker:response', (event, response) => {
-    if (!shellWindow || event.sender !== shellWindow.webContents) return;
+    if (!isShellSender(event)) return;
     const requestId = response && (response as { requestId?: unknown }).requestId;
     const pending = typeof requestId === 'number' && pendingFilePicks.get(requestId);
     if (!pending) return;
@@ -2603,9 +2640,39 @@ function setupChromeExtensions(): void {
     // (Electron has no declarativeNetRequest, which most MV3 blockers need).
     minimumManifestVersion: 2,
     allowUnpackedExtensions: true,
+    // The library installs with no confirmation unless this says otherwise.
+    // Require the genuine store origin (its own check is a prefix match, see
+    // hardenWebStorePreload) and the user's explicit go-ahead, Chrome-style.
+    beforeInstall: async ({ frame, localizedName, manifest }) => {
+      if (!frame || frame.isDestroyed() || frame.origin !== WEB_STORE_ORIGIN) {
+        return { action: 'deny' };
+      }
+      const raw = manifest as unknown as Record<string, unknown>;
+      const strings = (value: unknown): string[] =>
+        Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+      // Site access comes from MV3 host_permissions, MV2 match patterns mixed
+      // into permissions, and content-script matches; show all of them.
+      const isPattern = (p: string) => p === '<all_urls>' || p.includes('://');
+      const contentScripts = Array.isArray(raw.content_scripts) ? raw.content_scripts : [];
+      const sites = new Set([
+        ...strings(raw.host_permissions),
+        ...strings(raw.permissions).filter(isPattern),
+        ...contentScripts.flatMap((cs: unknown) =>
+          cs && typeof cs === 'object' ? strings((cs as { matches?: unknown }).matches) : [],
+        ),
+      ]);
+      const allow = await askShell({
+        kind: 'extension-install',
+        name: localizedName || (typeof raw.name === 'string' ? raw.name : 'This extension'),
+        permissions: strings(raw.permissions).filter((p) => !isPattern(p)),
+        hostPermissions: [...sites],
+      });
+      return { action: allow ? 'allow' : 'deny' };
+    },
   }).catch((error) => {
     console.error('chrome-web-store setup failed:', error);
   });
+  hardenWebStorePreload();
 
   // Serve crx://extension-icon/... in the shell session so the toolbar's
   // <browser-action-list> and the extensions manager can render icons.
@@ -2617,6 +2684,201 @@ function setupChromeExtensions(): void {
     type: 'frame',
     filePath: ensureBrowserActionPreload(),
   });
+}
+
+/** The one origin allowed to drive extension installs. */
+const WEB_STORE_ORIGIN = 'https://chromewebstore.google.com';
+
+/**
+ * Swap electron-chrome-web-store's frame preload for a copy gated on the exact
+ * store origin. Upstream (0.13.0) gates its install API on
+ * `location.href.startsWith("https://chromewebstore.google.com")`, which any
+ * `chromewebstore.google.com.<attacker>` host also satisfies - handing that
+ * page chrome.webstorePrivate (install any extension) and chrome.management
+ * (list and uninstall them). Its IPC handlers make the same prefix check, but
+ * with the API never exposed to a lookalike page, it has nothing to call them
+ * with. If the upstream source no longer contains the gate we patch, fail
+ * closed: unregister the preload and leave the store install button inert.
+ */
+function hardenWebStorePreload(): void {
+  const s = browserSession();
+  s.unregisterPreloadScript('electron-chrome-web-store');
+  const gate = 'location.href.startsWith("https://chromewebstore.google.com")';
+  const source = fs.readFileSync(require.resolve('electron-chrome-web-store/preload'), 'utf8');
+  if (!source.includes(gate)) {
+    console.error('chrome-web-store: preload gate not found; store installs disabled');
+    return;
+  }
+  const file = path.join(app.getPath('userData'), 'chrome-web-store.preload.js');
+  fs.writeFileSync(file, source.replaceAll(gate, `location.origin === ${JSON.stringify(WEB_STORE_ORIGIN)}`));
+  s.registerPreloadScript({ id: 'din-chrome-web-store', type: 'frame', filePath: file });
+}
+
+// ---------------------------------------------------------------------------
+// Shell prompts: questions the main process needs the user to answer (a site
+// asking for the camera, an extension asking to be installed). Asked in the
+// shell renderer (PromptHost); an unanswered prompt times out as "no".
+// ---------------------------------------------------------------------------
+
+/** A capability a site must ask the user for. */
+type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications';
+
+type ShellPrompt =
+  | { kind: 'permission'; origin: string; capabilities: SiteCapability[] }
+  | { kind: 'extension-install'; name: string; permissions: string[]; hostPermissions: string[] };
+
+let nextPromptId = 1;
+const pendingPrompts = new Map<number, { resolve: (allow: boolean) => void; timer: NodeJS.Timeout }>();
+const PROMPT_TIMEOUT_MS = 2 * 60_000;
+
+/** Ask the user a yes/no question in the shell; resolves false on timeout. */
+function askShell(prompt: ShellPrompt): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
+      resolve(false);
+      return;
+    }
+    const requestId = nextPromptId++;
+    const timer = setTimeout(() => {
+      pendingPrompts.delete(requestId);
+      sendToShell('prompt:cancel', { requestId });
+      resolve(false);
+    }, PROMPT_TIMEOUT_MS);
+    pendingPrompts.set(requestId, { resolve, timer });
+    sendToShell('prompt:request', { requestId, ...prompt });
+  });
+}
+
+function registerPromptBridge(): void {
+  ipcMain.on('prompt:response', (event, response) => {
+    if (!isShellSender(event)) return;
+    const pending = response && pendingPrompts.get(response.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingPrompts.delete(response.requestId);
+    pending.resolve(response.allow === true);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Guest session hardening.
+//
+// Electron grants every permission a page asks for unless told otherwise:
+// camera and microphone with no indicator, location, clipboard reads, opening
+// arbitrary URL schemes in external apps (xdg-open), and more. Every guest
+// session gets a deny-by-default policy instead:
+//   - harmless capabilities pages rely on are allowed (writing the clipboard,
+//     fullscreen video, pointer lock for games, DRM playback)
+//   - camera, microphone, location and notifications are asked in the shell,
+//     per origin; the answer holds until Din restarts (private windows forget
+//     with their session)
+//   - everything else is denied: clipboard reads, keyboard lock, external
+//     protocol handlers, device pickers (HID/serial/USB/Bluetooth), ...
+// Guest sessions also refuse file:// outright: nothing legitimate loads local
+// files into a tab, and an extension could otherwise point one at Din's own
+// profile directory (chrome.tabs.update skips the address bar's checks).
+// ---------------------------------------------------------------------------
+
+const ALWAYS_ALLOWED_PERMISSIONS = new Set([
+  'clipboard-sanitized-write',
+  'fullscreen',
+  'pointerLock',
+  'mediaKeySystem',
+  'speaker-selection',
+]);
+
+/** Per-session answers, keyed `origin\0capability`. */
+const siteDecisions = new WeakMap<Electron.Session, Map<string, boolean>>();
+
+function decisionsFor(s: Electron.Session): Map<string, boolean> {
+  let decisions = siteDecisions.get(s);
+  if (!decisions) {
+    decisions = new Map();
+    siteDecisions.set(s, decisions);
+  }
+  return decisions;
+}
+
+/** The askable capabilities a permission request needs, or null if not askable. */
+function requestedCapabilities(
+  permission: string,
+  details: Electron.PermissionRequest | Electron.MediaAccessPermissionRequest,
+): SiteCapability[] | null {
+  if (permission === 'geolocation' || permission === 'notifications') return [permission];
+  if (permission !== 'media') return null;
+  const types = 'mediaTypes' in details ? details.mediaTypes ?? [] : [];
+  const capabilities: SiteCapability[] = [];
+  if (types.includes('video')) capabilities.push('camera');
+  if (types.includes('audio')) capabilities.push('microphone');
+  return capabilities.length > 0 ? capabilities : null;
+}
+
+function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean }): void {
+  const decisions = decisionsFor(s);
+  const key = (origin: string, capability: SiteCapability) => `${origin}\u0000${capability}`;
+  // One prompt per (origin, capabilities) at a time; repeat requests share it.
+  const asking = new Map<string, Promise<boolean>>();
+
+  s.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    if (ALWAYS_ALLOWED_PERMISSIONS.has(permission)) {
+      callback(true);
+      return;
+    }
+    const capabilities = prompts ? requestedCapabilities(permission, details) : null;
+    const origin = originOf(details.requestingUrl);
+    if (!capabilities || !origin) {
+      callback(false);
+      return;
+    }
+    if (capabilities.some((c) => decisions.get(key(origin, c)) === false)) {
+      callback(false);
+      return;
+    }
+    const undecided = capabilities.filter((c) => !decisions.has(key(origin, c)));
+    if (undecided.length === 0) {
+      callback(true);
+      return;
+    }
+    const askKey = `${origin}\u0000${undecided.join(',')}`;
+    let answer = asking.get(askKey);
+    if (!answer) {
+      answer = askShell({ kind: 'permission', origin, capabilities: undecided }).then((allow) => {
+        for (const c of undecided) decisions.set(key(origin, c), allow);
+        asking.delete(askKey);
+        return allow;
+      });
+      asking.set(askKey, answer);
+    }
+    answer.then(callback, () => callback(false));
+  });
+
+  s.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) => {
+    if (ALWAYS_ALLOWED_PERMISSIONS.has(permission)) return true;
+    let capability: SiteCapability | null = null;
+    if (permission === 'geolocation' || permission === 'notifications') capability = permission;
+    else if (permission === 'media' && details.mediaType === 'video') capability = 'camera';
+    else if (permission === 'media' && details.mediaType === 'audio') capability = 'microphone';
+    return capability !== null && decisions.get(key(requestingOrigin, capability)) === true;
+  });
+
+  s.setDevicePermissionHandler(() => false);
+  s.on('select-hid-device', (event, _details, callback) => {
+    event.preventDefault();
+    callback();
+  });
+  s.on('select-serial-port', (event, _ports, _contents, callback) => {
+    event.preventDefault();
+    callback('');
+  });
+  s.on('select-usb-device', (event, _details, callback) => {
+    event.preventDefault();
+    callback();
+  });
+
+  s.protocol.handle('file', () => new Response('Local files cannot be opened here.', {
+    status: 403,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -3147,6 +3409,14 @@ function registerCrxHandlers(): void {
 
 const DEVTOOLS_PARTITION = 'persist:devtools';
 
+/** The only session partitions a <webview> guest may attach in. */
+const GUEST_PARTITIONS = new Set([
+  WEBBROWSER_PARTITION,
+  WEBBROWSER_PRIVATE_PARTITION,
+  WEBAPP_PARTITION,
+  DEVTOOLS_PARTITION,
+]);
+
 /** The session all devtools host <webview>s run in. */
 function devtoolsSession(): Electron.Session {
   return session.fromPartition(DEVTOOLS_PARTITION);
@@ -3329,7 +3599,16 @@ app.whenReady().then(() => {
     item.setSavePath(uniqueDownloadPath(item.getFilename()));
   };
   session.defaultSession.on('will-download', downloadToHome);
+  // Installed apps and devtools would otherwise fall back to the native dialog.
+  appSession().on('will-download', downloadToHome);
+  devtoolsSession().on('will-download', downloadToHome);
   registerBrowserDownloadHandlers();
+
+  registerPromptBridge();
+  hardenGuestSession(browserSession(), { prompts: true });
+  hardenGuestSession(privateBrowserSession(), { prompts: true });
+  hardenGuestSession(appSession(), { prompts: true });
+  hardenGuestSession(devtoolsSession(), { prompts: false });
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
@@ -3370,8 +3649,7 @@ app.whenReady().then(() => {
   registerNsiteProtocol({
     sessions: [browserSession(), privateBrowserSession()],
     sendToShell,
-    isShellSender: (event) =>
-      event.sender.id === shellContentsId && event.senderFrame === event.sender.mainFrame,
+    isShellSender,
   });
 
   // Must run before any <webview> is created so the extension system's
@@ -3421,11 +3699,40 @@ app.whenReady().then(() => {
   shellContentsId = win.webContents.id;
   shellWindow = win;
 
+  // The shell preload follows its window across navigations, so the shell must
+  // never leave its own origin: a remote page loaded here would inherit
+  // window.fs, window.pty and every other bridge. External-app handoffs
+  // (nostrconnect: for remote signers) are the one exception - they never
+  // replace the document. Web links go to the Web Browser instead.
+  const keepShellHome = (event: Electron.Event, url: string) => {
+    if (originOf(url) === SHELL_ORIGIN) return;
+    event.preventDefault();
+    if (/^(https?|nsite):\/\//i.test(url)) sendToShell('crx:openTab', { url });
+  };
+  win.webContents.on('will-navigate', (event) => {
+    if (/^nostrconnect:/i.test(event.url)) return;
+    keepShellHome(event, event.url);
+  });
+  win.webContents.on('will-redirect', (event) => {
+    if (event.isMainFrame) keepShellHome(event, event.url);
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^(https?|nsite):\/\//i.test(url)) sendToShell('crx:openTab', { url });
+    return { action: 'deny' };
+  });
+
   // Attach the NIP-07 preload to installed web-app guests only (keyed on their
   // session partition), so they inherit the user's Nostr identity. Browser
   // tabs and devtools hosts attach in other partitions and get nothing. Keep
   // every guest locked down (sandboxed, no Node) regardless.
-  win.webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    // Every guest must live in one of Din's own partitions. A guest in the
+    // default session would share the shell's app:// origin - and with it the
+    // shell's storage, including any locally stored nsec.
+    if (!GUEST_PARTITIONS.has(params.partition)) {
+      event.preventDefault();
+      return;
+    }
     // Handed to the web-contents-created hook, which Electron runs next.
     attachingGuestSrc = typeof params.src === 'string' ? params.src : '';
     webPreferences.nodeIntegration = false;
@@ -3554,6 +3861,44 @@ app.on('web-contents-created', (_event, contents) => {
   const isExtensionPageGuest = attachingGuestSrc.startsWith('chrome-extension://');
   attachingGuestSrc = '';
 
+  // Web Bluetooth would otherwise pick the first device it finds, unasked.
+  contents.on('select-bluetooth-device', (event, _devices, callback) => {
+    event.preventDefault();
+    callback('');
+  });
+
+  // Pin an installed web app to the origin it was opened on. Leaving it - a
+  // plain link, a redirect, a script setting location - opens the destination
+  // in the Web Browser (or the installed app that owns it) instead, so a
+  // foreign page never runs inside the app's window with window.nostr.
+  //
+  // The pin is taken from the first committed load rather than the raw src,
+  // so an app whose home URL redirects (example.com -> www.example.com) still
+  // opens; the src itself was vetted when the app was installed.
+  if (contents.session === appSession()) {
+    let appOrigin: string | null = null;
+    contents.on('did-navigate', (_event, url) => {
+      // First real https commit only (an offline first load commits an error
+      // page, which mustn't become the pin).
+      const origin = originOf(url);
+      if (appOrigin || !origin?.startsWith('https:')) return;
+      appOrigin = origin;
+      appGuestOrigins.set(contents.id, origin);
+    });
+    contents.once('destroyed', () => appGuestOrigins.delete(contents.id));
+    const keepAppHome = (event: Electron.Event, url: string) => {
+      if (appOrigin && originOf(url) === appOrigin) return;
+      event.preventDefault();
+      if (/^(https?|nsite):\/\//i.test(url)) {
+        sendToShell('crx:openTab', { url, openerWcId: contents.id });
+      }
+    };
+    contents.on('will-navigate', (event) => keepAppHome(event, event.url));
+    contents.on('will-redirect', (event) => {
+      if (event.isMainFrame && appOrigin) keepAppHome(event, event.url);
+    });
+  }
+
   // Route native <input type=file> clicks to the in-Din file picker instead of
   // the host OS dialog. Real web content only - browser tabs (persistent and
   // private) and installed web-app guests; extension pages and devtools hosts
@@ -3594,7 +3939,12 @@ app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(({ url, disposition }) => {
     if (isBrowserTab && isUserscriptInstallUrl(url)) {
       sendToShell('userscripts:installRequested', { url, wcId: contents.id });
-    } else if (/^(https|chrome-extension|nsite):\/\//i.test(url)) {
+    } else if (
+      /^(https|nsite):\/\//i.test(url) ||
+      // Extension pages may open their own kind; a web page may not, since the
+      // shell's fresh tab would skip Chromium's web_accessible_resources check.
+      (/^chrome-extension:\/\//i.test(url) && contents.getURL().startsWith('chrome-extension://'))
+    ) {
       // Tag the popup with its opener so the shell opens the new tab in the
       // same window/session - keeps private-window links out of the
       // persistent, authenticated session (and vice versa). Middle-click and

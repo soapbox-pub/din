@@ -80,10 +80,13 @@ const BLOB_TIMEOUT_MS = 30_000;
  * Below this size a blob is buffered and hash-checked before any of it is
  * released to the page. Above it the body is streamed and verified as it goes,
  * erroring the stream on mismatch - a page can observe a prefix of an
- * unverified large file, but every HTML/JS/CSS file in practice sits far below
- * this line, so nothing with XSS consequence is ever released unverified.
+ * unverified large file, but script-bearing types are buffered whatever their
+ * size (SCRIPT_BEARING), so nothing with XSS consequence is released unverified.
  */
 const VERIFY_IN_FULL_LIMIT = 4 * 1024 * 1024;
+
+/** Content types that can execute script; always verified before release. */
+const SCRIPT_BEARING = /^(text\/html|text\/javascript|image\/svg\+xml|application\/xml|application\/wasm)/;
 
 /** Disk budget for the content-addressed blob cache. */
 const CACHE_BUDGET_BYTES = 512 * 1024 * 1024;
@@ -303,7 +306,10 @@ function blobUrl(server: string, hash: string): string | null {
   try {
     const base = server.endsWith('/') ? server : `${server}/`;
     const url = new URL(hash, base);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    // https only: the server list comes from the site author, and these
+    // fetches run from the main process - a plain-http "server" would let any
+    // site aim requests at the user's LAN or localhost.
+    if (url.protocol !== 'https:') return null;
     return url.toString();
   } catch {
     return null;
@@ -671,9 +677,14 @@ async function handleRequest(request: Request): Promise<Response> {
     );
   }
 
-  // Small files (every HTML/JS/CSS in practice) are verified in full before
-  // the page sees any of them.
-  if (opened.size === null || opened.size <= VERIFY_IN_FULL_LIMIT) {
+  // Small files are verified in full before the page sees any of them, and so
+  // is anything that can run script however large it is: HTML executes as it
+  // streams, so an unverified prefix would be XSS in the site's origin.
+  if (
+    opened.size === null ||
+    opened.size <= VERIFY_IN_FULL_LIMIT ||
+    SCRIPT_BEARING.test(contentType)
+  ) {
     const buffered = await new Response(opened.body).arrayBuffer().catch(() => null);
     if (!buffered) {
       return errorPage(

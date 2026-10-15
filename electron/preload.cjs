@@ -29,6 +29,8 @@
 //     in-Din file picker (see FilePickerBridgeHost)
 //   - window.nsiteHost: relays nsite:// manifest lookups to the renderer's
 //     Nostr client (see NsiteBridgeHost / electron/nsite.mts)
+//   - window.promptHost: yes/no questions for the user - site permissions and
+//     extension installs (see PromptHost)
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -1093,4 +1095,54 @@ contextBridge.exposeInMainWorld('filePickerHost', {
    * @param {{ requestId: number, path: string | null }} response
    */
   respond: (response) => ipcRenderer.send('filepicker:response', response),
+});
+
+/**
+ * A question the main process needs the user to answer.
+ * @typedef {(
+ *   { requestId: number, kind: 'permission', origin: string, capabilities: string[] } |
+ *   { requestId: number, kind: 'extension-install', name: string, permissions: string[], hostPermissions: string[] }
+ * )} ShellPromptRequest
+ */
+
+// Prompt host (window.promptHost), backed by the prompt:* handlers in main.mts.
+// A site asking for the camera/microphone/location/notifications, or the Chrome
+// Web Store asking to install an extension, is surfaced here so PromptHost can
+// ask the user. Unanswered prompts time out in main (and arrive here as a
+// cancel) as "no".
+contextBridge.exposeInMainWorld('promptHost', {
+  /**
+   * Subscribe to prompts. Returns an unsubscribe fn.
+   * @param {(request: ShellPromptRequest) => void} callback
+   */
+  onRequest: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {ShellPromptRequest} request
+     */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('prompt:request', listener);
+    return () => ipcRenderer.removeListener('prompt:request', listener);
+  },
+
+  /**
+   * Subscribe to prompts main has given up on (timed out). Returns an
+   * unsubscribe fn.
+   * @param {(requestId: number) => void} callback
+   */
+  onCancel: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number }} d
+     */
+    const listener = (_event, d) => callback(d.requestId);
+    ipcRenderer.on('prompt:cancel', listener);
+    return () => ipcRenderer.removeListener('prompt:cancel', listener);
+  },
+
+  /**
+   * Answer a prompt.
+   * @param {{ requestId: number, allow: boolean }} response
+   */
+  respond: (response) => ipcRenderer.send('prompt:response', response),
 });

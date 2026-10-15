@@ -16,6 +16,7 @@ import { ExtensionPopupHost } from './ExtensionPopupHost';
 import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { NsiteBridgeHost } from './NsiteBridgeHost';
+import { PromptHost } from './PromptHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
 import { SystemEventsHost } from './SystemEventsHost';
 import { useWindows } from '@/hooks/useWindows';
@@ -55,6 +56,7 @@ function DesktopSession() {
           <NostrBridgeHost />
           <HighlightBridgeHost />
           <NsiteBridgeHost />
+          <PromptHost />
           <DesktopHotkeys />
           <SystemEventsHost />
           <Wallpaper>

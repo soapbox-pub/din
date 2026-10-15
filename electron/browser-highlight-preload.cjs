@@ -22,8 +22,9 @@
 //   - This preload runs in an isolated world; the page's own JavaScript cannot
 //     see `ipcRenderer` or any function here.
 //   - The button lives in a CLOSED shadow root, so page scripts can't find or
-//     restyle it, and only a genuine user gesture (event.isTrusted) publishes -
-//     a synthetic `.click()` is ignored.
+//     restyle it, and only a genuine user gesture (event.isTrusted) on a button
+//     that has visibly been on screen (IntersectionObserver v2) publishes - a
+//     synthetic `.click()` or a click through a covering overlay is ignored.
 //
 // Stays plain CommonJS (.cjs): sandboxed preloads run through Electron's own
 // loader, which does not support ESM or TypeScript - typed via JSDoc instead.
@@ -135,6 +136,27 @@ function readSelection() {
 /** @type {ShadowRoot | null} */ let shadow = null;
 /** @type {HTMLButtonElement | null} */ let button = null;
 /** @type {HTMLElement | null} */ let toast = null;
+
+/** How long the button must have been visible before a click counts (ms). */
+const MIN_VISIBLE_MS = 300;
+/** When the button last became visible (performance.now()), or 0 while it isn't. */
+let visibleSince = 0;
+// IntersectionObserver v2: `isVisible` is only true while nothing covers the
+// target and it isn't faded, filtered, or skewed - Chromium's own answer to
+// clickjacking. Where it's missing, fall back to plain on-screen-ness.
+const visibilityObserver =
+  typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            const visible = 'isVisible' in entry ? Boolean(entry.isVisible) : entry.isIntersecting;
+            if (!visible) visibleSince = 0;
+            else if (!visibleSince) visibleSince = performance.now();
+          }
+        },
+        /** @type {IntersectionObserverInit} */ ({ trackVisibility: true, delay: 100 }),
+      )
+    : null;
 /** The selection snapshot the button currently offers to publish.
  * @type {HighlightSelection | null} */
 let current = null;
@@ -204,12 +226,19 @@ function ensureUi() {
   button.innerHTML =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg><span>Highlight</span>';
   // mousedown fires before the selection is torn down by the focus change, and
-  // isTrusted rejects synthetic page-driven clicks.
+  // isTrusted rejects synthetic page-driven clicks. A trusted click can still
+  // be tricked out of the user, though: the page chooses the selection (so
+  // where the button appears) and can cover the button with a top-layer
+  // element that lets clicks fall through. So the button must also have been
+  // genuinely visible - on screen, unobscured, fully opaque - for a moment.
   button.addEventListener('mousedown', (event) => {
     event.preventDefault();
-    if (event.isTrusted) publish();
+    if (event.isTrusted && visibleSince && performance.now() - visibleSince >= MIN_VISIBLE_MS) {
+      publish();
+    }
   });
   shadow.appendChild(button);
+  visibilityObserver?.observe(button);
 
   toast = document.createElement('div');
   toast.className = 'toast';
