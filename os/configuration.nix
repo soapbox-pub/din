@@ -66,7 +66,7 @@ let
       # transitive runtime deps). Resolved relative to main.mts, so they
       # live in a node_modules directory beside it.
       mkdir -p $out/share/din/node_modules
-      for dep in electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip; do
+      for dep in electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip pbf; do
         cp -r node_modules/$dep $out/share/din/node_modules/
       done
       runHook postInstall
