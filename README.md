@@ -36,7 +36,11 @@ Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> Din
 - Node.js (dev servers and builds)
 - Xvfb, for running native Linux apps inside Din; optionally Rust (cargo), to
   build the Wayland compositor that hosts the apps able to use it (and draws
-  them on the GPU), plus Xwayland, to put X11 apps there too
+  them on the GPU), plus Xwayland, to put X11 apps there too. The compositor
+  links against pixman, gbm, and xkbcommon, so it needs their development
+  packages:
+  - Fedora: `sudo dnf install xorg-x11-server-Xvfb xorg-x11-server-Xwayland pixman-devel mesa-libgbm-devel libxkbcommon-devel`
+  - Debian/Ubuntu: `sudo apt install xvfb xwayland libpixman-1-dev libgbm-dev libxkbcommon-dev`
 - Wine, for Windows programs
 - Nix (with flakes enabled; the Determinate installer does this by default) —
   only needed for the Aladdin `os:*` commands

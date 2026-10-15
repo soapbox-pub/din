@@ -97,6 +97,12 @@ impl State {
         self.popups.iter().position(|p| matches!(&p.shell, PopupShell::X11(w) if w == window))
     }
 
+    fn x11_request(&mut self, window: &X11Surface, message: serde_json::Value) {
+        if let Some(id) = self.x11_toplevel(window).map(|index| self.toplevels[index].id) {
+            self.window_request(id, message);
+        }
+    }
+
     fn forget_x11(&mut self, window: &X11Surface) {
         if let Some(index) = self.x11_toplevel(window) {
             self.remove_toplevel(index);
@@ -139,9 +145,9 @@ impl XwmHandler for State {
             return;
         }
         // Cascade until the shell places it, at the size the app asked for.
-        // A borderless window that names its own position (a splash screen
-        // centered on the screen, a widget where it was left) keeps it: with
-        // no frame to grab, where it goes is the app's business.
+        // A window drawing its own title bar (or none) that names its own
+        // position (a splash screen centered on the screen, a widget where
+        // it was left) keeps it: where it goes is the app's business.
         let offset = 40 * (self.toplevels.len() as i32 % 8);
         let placed = window.is_decorated() && window.size_hints().is_some_and(|h| h.position.is_some());
         let pos = if placed { window.geometry().loc } else { (80 + offset, 80 + offset).into() };
@@ -173,9 +179,9 @@ impl XwmHandler for State {
     }
 
     /// Sizes are granted (the shell then fits the Din window to the app);
-    /// positions are Din's, except for a window that isn't mapped yet, or a
-    /// borderless one: it has no frame to be dragged by, so it moves itself
-    /// and the Din window follows.
+    /// positions are Din's, except for a window that isn't mapped yet, or one
+    /// that draws its own title bar: it has no Din one to be dragged by, so
+    /// it moves itself and the Din window follows.
     fn configure_request(
         &mut self,
         _xwm: XwmId,
@@ -238,19 +244,37 @@ impl XwmHandler for State {
         }
     }
 
-    // Din's window chrome resizes windows.
-    fn resize_request(&mut self, _xwm: XwmId, _window: X11Surface, _button: u32, _edge: ResizeEdge) {}
+    // An app's own title bar asks Din to move, resize, maximize or minimize
+    // its window (_NET_WM_MOVERESIZE, _NET_WM_STATE, WM_CHANGE_STATE).
 
-    /// The app wants to be dragged (_NET_WM_MOVERESIZE): a borderless window
-    /// grabbed by its own "title bar". The shell moves the Din window with
-    /// the pointer until the button comes up.
+    fn resize_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32, edge: ResizeEdge) {
+        let edge = match edge {
+            ResizeEdge::Top => "n",
+            ResizeEdge::Bottom => "s",
+            ResizeEdge::Left => "w",
+            ResizeEdge::Right => "e",
+            ResizeEdge::TopLeft => "nw",
+            ResizeEdge::TopRight => "ne",
+            ResizeEdge::BottomLeft => "sw",
+            ResizeEdge::BottomRight => "se",
+        };
+        self.x11_request(&window, serde_json::json!({ "type": "resize", "edge": edge }));
+    }
+
     fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
-        let Some(index) = self.x11_toplevel(&window) else { return };
-        let t = &self.toplevels[index];
-        if t.announced {
-            let message = serde_json::json!({ "type": "move-request", "id": t.id });
-            self.wire.json(message);
-        }
+        self.x11_request(&window, serde_json::json!({ "type": "move" }));
+    }
+
+    fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_request(&window, serde_json::json!({ "type": "maximize", "maximized": true }));
+    }
+
+    fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_request(&window, serde_json::json!({ "type": "maximize", "maximized": false }));
+    }
+
+    fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_request(&window, serde_json::json!({ "type": "minimize" }));
     }
 
     fn allow_selection_access(&mut self, _xwm: XwmId, selection: SelectionTarget) -> bool {

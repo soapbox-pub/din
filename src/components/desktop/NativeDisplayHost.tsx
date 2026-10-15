@@ -75,7 +75,7 @@ export function NativeDisplayHost() {
                 appId: hostId,
                 width: surface.width + chrome.width,
                 height: surface.height + chrome.height,
-                frameless: surface.borderless,
+                frameless: surface.csd,
               });
               if (id) windowsRef.current.set(surface.id, id);
             });

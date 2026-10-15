@@ -39,6 +39,7 @@ import { registerNativeAppHandlers, runWindowsProgram } from './native-apps.mts'
 import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
+import { registerTrayHandlers } from './tray.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
@@ -1135,6 +1136,14 @@ function registerPowerHandlers(): void {
       'set-property', PPD_BUS, PPD_PATH, PPD_IFACE, 'ActiveProfile', 's', name,
     ]);
     return readPowerProfiles();
+  });
+
+  // Log out: quit cleanly. din-session.sh treats exit 0 as "the user quit"
+  // and ends the login session, returning to the display manager; on Aladdin
+  // the cage service brings a fresh Din back up.
+  ipcMain.on('shell:endSession', (event) => {
+    if (!isShellSender(event)) return;
+    app.quit();
   });
 }
 
@@ -3644,6 +3653,7 @@ app.whenReady().then(() => {
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
   });
   registerKeyboardHandlers({ assertShellSender });
+  registerTrayHandlers({ assertShellSender, sendToShell });
   registerNativeDisplayHandlers({
     assertShellSender,
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),

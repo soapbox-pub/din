@@ -3,6 +3,7 @@ import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowChrome, type ChromePoint } from '@/contexts/WindowChromeContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import {
@@ -17,6 +18,7 @@ import {
   sendNativeWheel,
   setNativeFocus,
   setNativeGeometry,
+  setNativeMaximized,
   subscribeNativeDisplay,
   windowChrome,
   type NativeSurface,
@@ -36,6 +38,10 @@ const POSITION_SYNC_MS = 500;
  * this component's DOM; input on it is forwarded to the app, and the canvas
  * size and screen position are reported back so the app's X window always
  * sits exactly under it.
+ *
+ * An app that draws its own title bar (client-side decorations) gets none
+ * from Din; drags on its title bar and edges, and its maximize and minimize
+ * buttons, drive the Din window instead (WindowChromeContext).
  */
 export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const xid = typeof params?.xid === 'number' ? params.xid : 0;
@@ -43,16 +49,19 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const isTop = useWindowIsTop();
   const setTitlebar = useWindowTitlebar();
+  const chrome = useWindowChrome();
   const { getApp } = useInstalledApps();
   const { windows } = useWindowManager();
-  const { move, resize, setFrameless } = useWindowActions();
+  const { move, resize, setFrameless, maximize, minimize, toggleMaximize } = useWindowActions();
   const [title, setTitle] = useState(() => getNativeSurface(xid)?.title ?? '');
   /** Whether the app holds a pointer lock, which the canvas mirrors. */
   const lockedRef = useRef(false);
-  /** Where the last button went down on the app, and whether it's still down. */
-  const pointerRef = useRef({ x: 0, y: 0, down: false });
-  /** An app-requested drag in progress: where it started, pointer and window. */
-  const draggingRef = useRef<{ x: number; y: number; winX: number; winY: number } | null>(null);
+  /** The pointer, and whether a button is held on the canvas. */
+  const pointerRef = useRef<ChromePoint & { held: boolean }>({ clientX: 0, clientY: 0, held: false });
+  /** Where the last button went down on the canvas. */
+  const pressRef = useRef<ChromePoint>({ clientX: 0, clientY: 0 });
+  /** A move or resize the app asked for is under way: the pointer drives it. */
+  const gestureRef = useRef(false);
   const app = getApp(appId);
 
   const current = windows.find((w) => w.id === windowId);
@@ -62,19 +71,22 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   });
 
   /**
-   * Where a borderless window's Din window must be for its app to sit at
-   * the root position it asked for: the window is all content, so that's
-   * the app's position in workspace coordinates - kept on the workspace,
-   * though. Apps place themselves by the screen, which the workspace may
-   * be smaller than (a windowed Din), and a window remembered on a bigger
-   * monitor can be off this one; with no frame, it couldn't be dragged
-   * back. The app is told where it landed, as with any window manager.
+   * Where the Din window of an app that draws its own title bar must be for
+   * the app to sit at the root position it asked for - kept on the
+   * workspace, though. Apps place themselves by the screen, which the
+   * workspace may be smaller than (a windowed Din), and a window remembered
+   * on a bigger monitor can be off this one; with no Din title bar, it
+   * couldn't be dragged back. The app is told where it landed, as with any
+   * window manager.
    */
   const placeFor = useCallback((surface: NativeSurface) => {
     const area = workspaceOrigin(hostRef.current);
+    // The Din window's border, around the app on every side.
+    const extra = windowChrome(surface);
+    const border = extra.width / 2;
     return {
-      x: clamp(surface.x - area.x, 0, area.width - surface.width),
-      y: clamp(surface.y - area.y, 0, area.height - surface.height),
+      x: clamp(surface.x - area.x - border, 0, area.width - surface.width - extra.width),
+      y: clamp(surface.y - area.y - border, 0, area.height - surface.height - extra.height),
     };
   }, []);
 
@@ -99,10 +111,10 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     const surface = getNativeSurface(xid);
     if (!host || !surface) return;
     host.appendChild(surface.canvas);
-    // A borderless window opens where its app put it (the Din window comes
-    // to it); everything else is placed by Din (the app goes to it). The
-    // observer's first callback reports the result.
-    if (surface.borderless) {
+    // An app that draws its own title bar opens where it put itself (the
+    // Din window comes to it); everything else is placed by Din (the app
+    // goes to it). The observer's first callback reports the result.
+    if (surface.csd) {
       const place = placeFor(surface);
       move(windowId, place.x, place.y);
     } else {
@@ -131,8 +143,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   }, [xid, isTop, syncGeometry]);
   useEffect(() => () => setNativeFocus(xid, false), [xid]);
 
-  // Title changes, and the app resizing (or, borderless, moving) itself,
-  // dropping its frame, or asking to be dragged: the Din window follows.
+  // Title changes, and the app resizing (or moving) itself, drawing its own
+  // title bar, or driving the window from it: the Din window follows.
   useEffect(
     () =>
       subscribeNativeDisplay((event) => {
@@ -154,29 +166,62 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         const win = currentRef.current;
         if (!win) return;
         const { surface } = event;
-        const chrome = windowChrome(surface);
-        const size = { width: surface.width + chrome.width, height: surface.height + chrome.height };
+        const extra = windowChrome(surface);
+        const size = { width: surface.width + extra.width, height: surface.height + extra.height };
+        // The app resized (or, drawing its own title bar, moved) itself: the
+        // Din window follows. Mid-gesture the window is the pointer's, and the
+        // app's echo of the move would only pull it back.
         if (event.type === 'configure' && !win.maximized && !win.snapped) {
-          // Mid-drag, the window is the pointer's; the app's echo of the
-          // move would only pull it back.
-          const place = surface.borderless && !draggingRef.current ? placeFor(surface) : win;
+          const place = surface.csd && !gestureRef.current ? placeFor(surface) : win;
           resize(windowId, { x: place.x, y: place.y, ...size });
         }
-        if (event.type === 'borderless') {
-          setFrameless(windowId, surface.borderless, {
-            ...(surface.borderless ? placeFor(surface) : { x: win.x, y: win.y }),
+        // Din's title bar came or went: the Din window keeps the app at its
+        // size, and in one commit, so the content doesn't jump.
+        if (event.type === 'decoration') {
+          setFrameless(windowId, surface.csd, {
+            ...(surface.csd ? placeFor(surface) : { x: win.x, y: win.y }),
             ...size,
           });
         }
-        // Anchored where the button went down, not where the pointer is now:
-        // apps ask only once it has travelled past their drag threshold, and
-        // the point grabbed should stay under the pointer.
-        if (event.type === 'move-request' && pointerRef.current.down) {
-          draggingRef.current = { x: pointerRef.current.x, y: pointerRef.current.y, winX: win.x, winY: win.y };
+        // Drags on the app's own title bar and edges. Only while a button
+        // is still held on the canvas, so a late request can't start a
+        // gesture nobody is driving. A move is anchored where the button
+        // went down, not where the pointer is now: apps ask only once it
+        // has travelled past their drag threshold, and the point grabbed
+        // should stay under the pointer.
+        const pointer = pointerRef.current;
+        if ((event.type === 'move' || event.type === 'resize') && pointer.held && !gestureRef.current) {
+          gestureRef.current =
+            event.type === 'move' ? chrome.beginMove(pressRef.current) : chrome.beginResize(event.edge, pointer);
         }
+        if (event.type === 'maximize') {
+          if (event.maximized && !win.maximized) maximize(windowId);
+          else if (!event.maximized && (win.maximized || win.snapped)) toggleMaximize(windowId);
+          // Nothing changed: the app still hears back, so its button is right.
+          else setNativeMaximized(xid, win.maximized);
+        }
+        if (event.type === 'minimize') minimize(windowId);
       }),
-    [xid, windowId, resize, setFrameless, placeFor],
+    [xid, windowId, resize, setFrameless, placeFor, maximize, minimize, toggleMaximize, chrome],
   );
+
+  // The app's own title bar shows whether the window is maximized.
+  const maximized = current?.maximized ?? false;
+  const reportedMaximizedRef = useRef(false);
+  useEffect(() => {
+    if (!xid || reportedMaximizedRef.current === maximized) return;
+    reportedMaximizedRef.current = maximized;
+    setNativeMaximized(xid, maximized);
+  }, [xid, maximized]);
+
+  /** The gesture the app asked for is over (the button came up). */
+  const endGesture = useCallback(() => {
+    if (!gestureRef.current) return;
+    gestureRef.current = false;
+    chrome.gestureEnd();
+    // The window moved: the app learns where it is now, after the commit.
+    requestAnimationFrame(syncGeometry);
+  }, [chrome, syncGeometry]);
 
   // The app's own title, beside its icon, in Din's title bar.
   useEffect(() => {
@@ -240,42 +285,38 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         if (!event.currentTarget.hasPointerCapture(event.pointerId)) sendNativeLeave();
       }}
       onPointerMove={(event) => {
+        pointerRef.current = { clientX: event.clientX, clientY: event.clientY, held: event.buttons !== 0 };
+        if (gestureRef.current) {
+          chrome.gestureMove(event);
+          return;
+        }
         // Locked, the pointer stays put and only its movement counts.
         if (document.pointerLockElement === event.currentTarget) {
           sendNativeRelative(xid, event.movementX, event.movementY);
-          return;
-        }
-        // The app handed its window to the pointer: it moves, and the app
-        // hears nothing until the button comes up.
-        const drag = draggingRef.current;
-        if (drag) {
-          move(windowId, drag.winX + event.clientX - drag.x, drag.winY + event.clientY - drag.y);
           return;
         }
         const [x, y] = localPoint(event.currentTarget, event);
         sendNativeMotion(xid, x, y, { dx: event.movementX, dy: event.movementY });
       }}
       onPointerDown={(event) => {
+        pointerRef.current = { clientX: event.clientX, clientY: event.clientY, held: true };
+        pressRef.current = { clientX: event.clientX, clientY: event.clientY };
         event.currentTarget.setPointerCapture(event.pointerId);
         event.currentTarget.focus({ preventScroll: true });
-        pointerRef.current = { x: event.clientX, y: event.clientY, down: true };
         syncGeometry();
         const [x, y] = localPoint(event.currentTarget, event);
         sendNativeButton(xid, x, y, event.button, true);
       }}
       onPointerUp={(event) => {
-        pointerRef.current.down = false;
-        if (draggingRef.current) {
-          draggingRef.current = null;
-          // Tell the app where the drag left it before it hears the release.
-          syncGeometry();
-        }
+        pointerRef.current = { clientX: event.clientX, clientY: event.clientY, held: event.buttons !== 0 };
+        if (!pointerRef.current.held) endGesture();
+        // The app hears the release either way, so no button stays down.
         const [x, y] = localPoint(event.currentTarget, event);
         sendNativeButton(xid, x, y, event.button, false);
       }}
       onPointerCancel={() => {
-        pointerRef.current.down = false;
-        draggingRef.current = null;
+        pointerRef.current.held = false;
+        endGesture();
       }}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {

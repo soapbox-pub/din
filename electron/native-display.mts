@@ -329,6 +329,15 @@ function launchEnvironment(): NodeJS.ProcessEnv {
 }
 
 /**
+ * The session bus the apps Din launches are on (see embeddedDisplayEnv), or
+ * undefined where there is none.
+ */
+export async function sessionBusAddress(): Promise<string | undefined> {
+  const address = { ...(await sessionEnvironment()), ...launchEnvironment() }.DBUS_SESSION_BUS_ADDRESS;
+  return address && !address.startsWith('disabled:') ? address : undefined;
+}
+
+/**
  * Environment for a process that should appear inside Din: the one Din was
  * started with, with the user's session environment filling in whatever
  * that lacks, pointed at the embedded display.

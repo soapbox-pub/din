@@ -3,7 +3,8 @@
 //! Din owns window placement, stacking and decoration; this compositor
 //! only tracks what clients map and relays it. Toplevels are told they're
 //! tiled on every side (so toolkits drop their shadows and rounded corners)
-//! and to use server-side decorations (Din draws the title bar).
+//! and to use server-side decorations (Din draws the title bar), unless they
+//! insist on drawing their own, which the shell is told about.
 
 use std::{borrow::Cow, io::Read, os::fd::OwnedFd, sync::Arc, time::Instant};
 
@@ -101,8 +102,12 @@ pub struct Toplevel {
     pub title: String,
     /// The size the shell knows the window to be, from either side.
     pub known_size: Option<Size<i32, Logical>>,
-    /// Whether the shell was last told the window draws no frame.
-    pub borderless: bool,
+    /// An xdg toplevel draws its own decorations: it never asked for a
+    /// decoration object (GTK3, libadwaita), or asked for client-side ones.
+    /// X11 windows say so in their Motif hints instead.
+    pub client_side: bool,
+    /// Whether the shell was last told the app decorates itself.
+    pub csd: bool,
 }
 
 impl Toplevel {
@@ -117,7 +122,8 @@ impl Toplevel {
             dirty: false,
             title: String::new(),
             known_size: None,
-            borderless: false,
+            client_side: true,
+            csd: false,
         }
     }
 
@@ -426,6 +432,20 @@ impl State {
         self.popups.iter().find(|p| p.wl_surface().as_ref() == Some(surface))
     }
 
+    fn xdg_toplevel_mut(&mut self, surface: &ToplevelSurface) -> Option<&mut Toplevel> {
+        self.toplevels.iter_mut().find(|t| t.window.toplevel() == Some(surface))
+    }
+
+    /// Tell the shell about a request from a window's own decorations (a
+    /// title-bar drag, its maximize button), if the shell knows the window.
+    pub fn window_request(&mut self, id: u32, mut message: serde_json::Value) {
+        if !self.toplevels.iter().any(|t| t.id == id && t.announced) {
+            return;
+        }
+        message["id"] = id.into();
+        self.wire.json(message);
+    }
+
     /// Forget a toplevel (destroyed or unmapped), telling the shell.
     pub fn remove_toplevel(&mut self, index: usize) {
         let mut t = self.toplevels.remove(index);
@@ -602,15 +622,79 @@ impl XdgShellHandler for State {
             self.remove_popup(index);
         }
     }
+
+    // A client-side title bar asks Din to move, resize, maximize or minimize
+    // its window; the shell owns all of that.
+
+    fn move_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
+        let Some(id) = self.xdg_toplevel_mut(&surface).map(|t| t.id) else { return };
+        self.window_request(id, serde_json::json!({ "type": "move" }));
+    }
+
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        _seat: wl_seat::WlSeat,
+        _serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        use xdg_toplevel::ResizeEdge as E;
+        let edge = match edges {
+            E::Top => "n",
+            E::Bottom => "s",
+            E::Left => "w",
+            E::Right => "e",
+            E::TopLeft => "nw",
+            E::TopRight => "ne",
+            E::BottomLeft => "sw",
+            E::BottomRight => "se",
+            _ => return,
+        };
+        let Some(id) = self.xdg_toplevel_mut(&surface).map(|t| t.id) else { return };
+        self.window_request(id, serde_json::json!({ "type": "resize", "edge": edge }));
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        self.xdg_maximize_request(surface, true);
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        self.xdg_maximize_request(surface, false);
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        let Some(id) = self.xdg_toplevel_mut(&surface).map(|t| t.id) else { return };
+        self.window_request(id, serde_json::json!({ "type": "minimize" }));
+    }
 }
 
+impl State {
+    /// The protocol wants a configure in reply either way; the shell's
+    /// answer, if it changes anything, comes as a "state" message.
+    fn xdg_maximize_request(&mut self, surface: ToplevelSurface, maximized: bool) {
+        if surface.is_initial_configure_sent() {
+            surface.send_configure();
+        }
+        let Some(id) = self.xdg_toplevel_mut(&surface).map(|t| t.id) else { return };
+        self.window_request(id, serde_json::json!({ "type": "maximize", "maximized": maximized }));
+    }
+}
+
+/// Din's title bar is the default; an app that asks to draw its own gets
+/// to, and the shell drops its title bar for it.
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        if let Some(t) = self.xdg_toplevel_mut(&toplevel) {
+            t.client_side = false;
+        }
         toplevel.with_pending_state(|state| state.decoration_mode = Some(DecorationMode::ServerSide));
     }
 
-    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
-        toplevel.with_pending_state(|state| state.decoration_mode = Some(DecorationMode::ServerSide));
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        if let Some(t) = self.xdg_toplevel_mut(&toplevel) {
+            t.client_side = mode == DecorationMode::ClientSide;
+        }
+        toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
         if toplevel.is_initial_configure_sent() {
             toplevel.send_pending_configure();
         }

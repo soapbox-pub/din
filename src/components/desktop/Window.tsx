@@ -1,4 +1,4 @@
-import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
@@ -11,6 +11,12 @@ import { getScreenshotBridge } from '@/lib/screenshot';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
 import { WindowFocusContext } from '@/contexts/WindowFocusContext';
+import {
+  WindowChromeContext,
+  type ChromePoint,
+  type ResizeDir,
+  type WindowChrome,
+} from '@/contexts/WindowChromeContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import {
   createModel,
@@ -29,9 +35,6 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { MIN_HEIGHT, MIN_WIDTH, type WindowState } from '@/hooks/useWindows';
-
-/** Which edges/corner a resize drag is acting on. */
-type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
 /**
  * Dragging with the pointer within this many pixels of the workspace's top
@@ -573,14 +576,12 @@ export const Window = memo(function Window({
     return () => window.clearTimeout(timer);
   }, [win.closing, win.minimized, win.id, destroy, stopWobble]);
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      // Ignore drags initiated on interactive title-bar controls: the window
-      // controls (buttons) and any app-provided controls (e.g. tab strip
-      // tabs, which are role="tab" divs). Capturing the pointer for a drag
-      // here would swallow their click, so bail before setPointerCapture.
-      const target = e.target as HTMLElement;
-      if (target.closest('button, [role="tab"], [data-window-no-drag]')) return;
+  /**
+   * Begin a title-bar drag with the pointer at `e`. The caller holds the
+   * pointer and feeds its moves to onPointerMove and its release to endDrag.
+   */
+  const startDrag = useCallback(
+    (e: ChromePoint) => {
       focus(win.id);
       const ws = sectionRef.current?.parentElement?.getBoundingClientRect();
       const wsLeft = ws?.left ?? 0;
@@ -609,7 +610,6 @@ export const Window = memo(function Window({
           tearAway: { width: restore.width, height: restore.height },
           snap: null,
         };
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         return;
       }
       dragState.current = {
@@ -625,7 +625,6 @@ export const Window = memo(function Window({
         tearAway: null,
         snap: null,
       };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       beginGesture();
 
       const wobblyEnabled =
@@ -670,8 +669,22 @@ export const Window = memo(function Window({
     [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, win.restore, beginGesture, config.wobblyWindows, stopWobble, wobbleFrame],
   );
 
-  const onPointerMove = useCallback(
+  const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Ignore drags initiated on interactive title-bar controls: the window
+      // controls (buttons) and any app-provided controls (e.g. tab strip
+      // tabs, which are role="tab" divs). Capturing the pointer for a drag
+      // here would swallow their click, so bail before setPointerCapture.
+      const target = e.target as HTMLElement;
+      if (target.closest('button, [role="tab"], [data-window-no-drag]')) return;
+      startDrag(e);
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [startDrag],
+  );
+
+  const onPointerMove = useCallback(
+    (e: ChromePoint) => {
       const s = dragState.current;
       const el = sectionRef.current;
       if (!s || !el) return;
@@ -785,12 +798,11 @@ export const Window = memo(function Window({
     [beginGesture, unmaximize, win.id, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
   );
 
-  const onPointerUp = useCallback(
-    (e: React.PointerEvent) => {
+  const endDrag = useCallback(
+    () => {
       const s = dragState.current;
       if (!s) return;
       dragState.current = null;
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
 
       // An armed tear-away that never crossed the threshold is just a click
       // on a maximized title bar - nothing moved, nothing to commit.
@@ -849,9 +861,19 @@ export const Window = memo(function Window({
     [move, win.id, win.width, win.height, endGesture, renderWobble, maximize, tile, stopWobble],
   );
 
-  const onResizePointerDown = useCallback(
-    (dir: ResizeDir) => (e: React.PointerEvent) => {
-      e.stopPropagation();
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (!dragState.current) return;
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      endDrag();
+    },
+    [endDrag],
+  );
+
+  /** Begin a resize from `dir`, like startDrag; false while maximized/tiled. */
+  const startResize = useCallback(
+    (dir: ResizeDir, e: ChromePoint) => {
+      if (win.maximized || win.snapped) return false;
       focus(win.id);
       // Resizing a still-jiggling window snaps it rigid first.
       stopWobble(false);
@@ -865,13 +887,21 @@ export const Window = memo(function Window({
         height: win.height,
         cur: { x: win.x, y: win.y, width: win.width, height: win.height },
       };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       beginGesture();
+      return true;
     },
-    [focus, win.id, win.x, win.y, win.width, win.height, beginGesture, stopWobble],
+    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, beginGesture, stopWobble],
   );
 
-  const onResizePointerMove = useCallback((e: React.PointerEvent) => {
+  const onResizePointerDown = useCallback(
+    (dir: ResizeDir) => (e: React.PointerEvent) => {
+      e.stopPropagation();
+      if (startResize(dir, e)) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [startResize],
+  );
+
+  const onResizePointerMove = useCallback((e: ChromePoint) => {
     const o = resizeState.current;
     const el = sectionRef.current;
     if (!o || !el) return;
@@ -903,16 +933,49 @@ export const Window = memo(function Window({
     el.style.height = `${height}px`;
   }, []);
 
+  const endResize = useCallback(() => {
+    const o = resizeState.current;
+    if (!o) return;
+    resizeState.current = null;
+    endGesture();
+    resize(win.id, o.cur);
+  }, [resize, win.id, endGesture]);
+
   const onResizePointerUp = useCallback(
     (e: React.PointerEvent) => {
-      const o = resizeState.current;
-      if (!o) return;
-      resizeState.current = null;
+      if (!resizeState.current) return;
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-      endGesture();
-      resize(win.id, o.cur);
+      endResize();
     },
-    [resize, win.id, endGesture],
+    [endResize],
+  );
+
+  // An app that draws its own title bar (WindowChromeContext) runs the same
+  // gestures from its own. The context value is stable, so apps never
+  // re-render for it; it calls the latest handlers.
+  const gestures = useRef({ startDrag, onPointerMove, endDrag, startResize, onResizePointerMove, endResize });
+  useLayoutEffect(() => {
+    gestures.current = { startDrag, onPointerMove, endDrag, startResize, onResizePointerMove, endResize };
+  });
+  const chrome = useMemo<WindowChrome>(
+    () => ({
+      beginMove: (point) => {
+        if (dragState.current || resizeState.current) return false;
+        gestures.current.startDrag(point);
+        return true;
+      },
+      beginResize: (dir, point) =>
+        !dragState.current && !resizeState.current && gestures.current.startResize(dir, point),
+      gestureMove: (point) => {
+        if (dragState.current) gestures.current.onPointerMove(point);
+        else if (resizeState.current) gestures.current.onResizePointerMove(point);
+      },
+      gestureEnd: () => {
+        if (dragState.current) gestures.current.endDrag();
+        else if (resizeState.current) gestures.current.endResize();
+      },
+    }),
+    [],
   );
 
   // An app uninstalled while its window is open renders nothing.
@@ -937,8 +1000,7 @@ export const Window = memo(function Window({
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
   const flush = win.maximized || win.snapped !== null;
-  // Frameless windows (native apps drawing their own frame, or none) are
-  // just their content: no title bar, border, shadow or resize handles.
+  // No title bar for a window whose app draws its own (WindowState.frameless).
   const frameless = win.frameless;
 
   // Sanitized chrome accent. Theme tokens can't guarantee contrast against
@@ -983,8 +1045,7 @@ export const Window = memo(function Window({
         }
       }}
       className={cn(
-        'absolute flex flex-col overflow-hidden',
-        !frameless && 'bg-card/90 backdrop-blur-xl',
+        'absolute flex flex-col overflow-hidden bg-card/90 backdrop-blur-xl',
         // Open/close animations: a quick macOS-style pop in (fade + zoom
         // from 95%) on mount, and its reverse on close - swapping the
         // classes restarts the element's animation as the exit. CSS
@@ -995,28 +1056,29 @@ export const Window = memo(function Window({
         win.closing
           ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:duration-150 motion-safe:fill-mode-forwards'
           : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200',
-        flush || frameless
+        flush
           ? 'rounded-none'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
-        !flush && !frameless && isTop && 'ring-ring/50',
+        !flush && isTop && 'ring-ring/50',
       )}
     >
-      {!frameless && <header
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onDoubleClick={() => {
-          stopWobble(false);
-          toggleMaximize(win.id);
-        }}
-        style={accent ? { backgroundColor: accent } : undefined}
-        className={cn(
-          'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b pr-3 active:cursor-grabbing',
-          accent
-            ? accentDark ? 'border-white/10' : 'border-black/10'
-            : 'border-border/60 bg-background/60',
-          titlebar ? 'pl-2' : 'pl-3',
+      {!frameless && (
+        <header
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onDoubleClick={() => {
+            stopWobble(false);
+            toggleMaximize(win.id);
+          }}
+          style={accent ? { backgroundColor: accent } : undefined}
+          className={cn(
+            'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b pr-3 active:cursor-grabbing',
+            accent
+              ? accentDark ? 'border-white/10' : 'border-black/10'
+              : 'border-border/60 bg-background/60',
+            titlebar ? 'pl-2' : 'pl-3',
         )}
       >
         {titlebar ? (
@@ -1067,29 +1129,31 @@ export const Window = memo(function Window({
         >
           <X className="size-4" />
         </button>
-      </header>}
+      </header>
+      )}
 
-      <div className={cn('relative flex-1 overflow-hidden', !frameless && 'bg-background/80')}>
+      <div className="relative flex-1 overflow-hidden bg-background/80">
         {/* isTop lets guest surfaces (webview/iframe) shield themselves while
             the window is stacked behind another, so clicking into web content
             raises the window (see GuestClickShield). */}
         <WindowFocusContext.Provider value={isTop}>
           <WindowTitlebarContext.Provider value={setTitlebar}>
-            <WindowAccentContext.Provider value={setAccent}>
-              {/* Built-in apps are code-split (React.lazy); the fallback shows
-                  while an app's chunk loads on its first launch. */}
-              <Suspense
-                fallback={<div className="size-full animate-pulse bg-muted/40" />}
-              >
-                <WindowContent component={app.component} windowId={win.id} params={win.params} />
-              </Suspense>
-            </WindowAccentContext.Provider>
+            <WindowChromeContext.Provider value={chrome}>
+              <WindowAccentContext.Provider value={setAccent}>
+                {/* Built-in apps are code-split (React.lazy); the fallback shows
+                    while an app's chunk loads on its first launch. */}
+                <Suspense
+                  fallback={<div className="size-full animate-pulse bg-muted/40" />}
+                >
+                  <WindowContent component={app.component} windowId={win.id} params={win.params} />
+                </Suspense>
+              </WindowAccentContext.Provider>
+            </WindowChromeContext.Provider>
           </WindowTitlebarContext.Provider>
         </WindowFocusContext.Provider>
       </div>
 
       {!flush &&
-        !frameless &&
         RESIZE_HANDLES.map(({ dir, className }) => (
           <div
             key={dir}

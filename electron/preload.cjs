@@ -3,6 +3,7 @@
 //
 // Exposes bridges backed by IPC handlers in main.mts:
 //   - window.boot: first-frame readiness for the hidden-until-ready shell window
+//   - window.session: end the desktop session (log out to the display manager)
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
@@ -10,6 +11,7 @@
 //   - window.display: xrandr multi-output arrangement for the Settings app
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
 //   - window.keyboard: the keyboard layout native apps use, for Settings
+//   - window.tray: apps' status icons and their menus, for the menu bar
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -58,6 +60,14 @@ const { contextBridge, ipcRenderer, sharedTexture, webFrame } = require('electro
 contextBridge.exposeInMainWorld('boot', {
   /** Signal that the shell's first frame is ready to be shown. */
   ready: () => ipcRenderer.send('shell:bootReady'),
+});
+
+// Session bridge (window.session): "Log out" quits the shell cleanly. Under
+// din-session.sh a clean exit ends the login session and hands control back
+// to the display manager (GDM etc.); the saved Nostr accounts are untouched.
+contextBridge.exposeInMainWorld('session', {
+  /** End the desktop session (quits Din). */
+  end: () => ipcRenderer.send('shell:endSession'),
 });
 
 contextBridge.exposeInMainWorld('fs', {
@@ -419,6 +429,89 @@ contextBridge.exposeInMainWorld('keyboard', {
    * @param {{ layout: string, variant: string } | null} choice
    */
   set: (choice) => ipcRenderer.invoke('keyboard:set', choice),
+});
+
+// Tray bridge (window.tray), backed by the tray:* handlers in
+// electron/tray.mts: apps' status icons (StatusNotifierItems) for the menu
+// bar, their menus, and the clicks that go back to them. Coordinates are
+// viewport pixels, which are screen pixels to native apps.
+contextBridge.exposeInMainWorld('tray', {
+  /** The current items. */
+  list: () => ipcRenderer.invoke('tray:list'),
+
+  /**
+   * Primary click. Resolves false when the app doesn't take it (then the
+   * item's menu is the thing to show).
+   * @param {string} id
+   * @param {number} x
+   * @param {number} y
+   */
+  activate: (id, x, y) => ipcRenderer.invoke('tray:activate', id, x, y),
+
+  /**
+   * Middle click.
+   * @param {string} id
+   * @param {number} x
+   * @param {number} y
+   */
+  secondaryActivate: (id, x, y) => ipcRenderer.invoke('tray:secondaryActivate', id, x, y),
+
+  /**
+   * Right click on an item without a menu Din can draw: the app shows its own.
+   * @param {string} id
+   * @param {number} x
+   * @param {number} y
+   */
+  contextMenu: (id, x, y) => ipcRenderer.invoke('tray:contextMenu', id, x, y),
+
+  /**
+   * @param {string} id
+   * @param {number} delta
+   * @param {'vertical' | 'horizontal'} orientation
+   */
+  scroll: (id, delta, orientation) => ipcRenderer.invoke('tray:scroll', id, delta, orientation),
+
+  /**
+   * An item's menu, read fresh (null when it has none).
+   * @param {string} id
+   */
+  menu: (id) => ipcRenderer.invoke('tray:menu', id),
+
+  /**
+   * A menu entry was picked.
+   * @param {string} id
+   * @param {number} entryId
+   */
+  menuEvent: (id, entryId) => ipcRenderer.invoke('tray:menuEvent', id, entryId),
+
+  /**
+   * Subscribe to the item list. Returns an unsubscribe fn.
+   * @param {(items: unknown[]) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown[]} items
+     */
+    const handler = (_event, items) => callback(items);
+    ipcRenderer.on('tray:changed', handler);
+    return () => ipcRenderer.removeListener('tray:changed', handler);
+  },
+
+  /**
+   * Subscribe to menu changes (the item's id): an open menu re-reads itself.
+   * Returns an unsubscribe fn.
+   * @param {(id: string) => void} callback
+   */
+  onMenuChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string} id
+     */
+    const handler = (_event, id) => callback(id);
+    ipcRenderer.on('tray:menu-changed', handler);
+    return () => ipcRenderer.removeListener('tray:menu-changed', handler);
+  },
 });
 
 // Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -
