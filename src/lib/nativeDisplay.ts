@@ -35,6 +35,12 @@ export interface NativeSurface {
   pid: number | null;
   wmClass: string[];
   transientFor: number | null;
+  /**
+   * The app asked for no window frame (a Windows program's popup-style
+   * window, a splash screen, a desktop widget): Din draws none, and the
+   * window positions itself.
+   */
+  borderless: boolean;
   canvas: HTMLCanvasElement;
 }
 
@@ -46,6 +52,10 @@ export type NativeDisplayEvent =
   | { type: 'title'; surface: NativeSurface }
   | { type: 'configure'; surface: NativeSurface }
   | { type: 'activate'; surface: NativeSurface }
+  /** The app asked for, or gave up, a frameless window. */
+  | { type: 'borderless'; surface: NativeSurface }
+  /** The app wants its (borderless) window dragged with the pointer. */
+  | { type: 'move-request'; surface: NativeSurface }
   /** Asked to close twice, and still open: offer to force quit. */
   | { type: 'close-ignored'; surface: NativeSurface }
   /** The app locked the pointer (mouse-look) or let it go. */
@@ -62,6 +72,8 @@ interface WindowInfo {
   pid: number | null;
   kind: string;
   transientFor: number | null;
+  /** Absent from servers that predate it. */
+  borderless?: boolean;
 }
 
 interface FrameUpdate {
@@ -80,6 +92,8 @@ type WorkerMessage =
   | { type: 'title'; id: number; title: string }
   | { type: 'configure'; id: number; x: number; y: number; width: number; height: number }
   | { type: 'activate'; id: number }
+  | { type: 'borderless'; id: number; borderless: boolean }
+  | { type: 'move-request'; id: number }
   | { type: 'pointer-lock'; id: number; locked: boolean }
   /** `source` names the server (X or Wayland) that wants the ack. */
   | { type: 'frames'; source?: string; updates: FrameUpdate[] }
@@ -112,6 +126,11 @@ declare global {
  * window of W x H content needs a Din window this much larger.
  */
 export const WINDOW_CHROME = { width: 2, height: 38 };
+
+/** What a surface's Din window adds around it: nothing, when borderless. */
+export function windowChrome(surface: NativeSurface | undefined): { width: number; height: number } {
+  return surface?.borderless ? { width: 0, height: 0 } : WINDOW_CHROME;
+}
 
 /** CSS custom property carrying the app's current cursor. */
 export const NATIVE_CURSOR_VAR = '--din-native-cursor';
@@ -244,6 +263,7 @@ function onMessage(message: WorkerMessage): void {
         pid: message.pid,
         wmClass: message.wmClass,
         transientFor: message.transientFor,
+        borderless: message.borderless === true,
         canvas: existing?.canvas ?? createCanvas(message.width, message.height),
       };
       resizeCanvas(surface.canvas, surface.width, surface.height);
@@ -288,6 +308,18 @@ function onMessage(message: WorkerMessage): void {
     case 'activate': {
       const surface = surfaces.get(message.id);
       if (surface) emit({ type: 'activate', surface });
+      return;
+    }
+    case 'borderless': {
+      const surface = surfaces.get(message.id);
+      if (!surface || surface.borderless === message.borderless) return;
+      surface.borderless = message.borderless;
+      emit({ type: 'borderless', surface });
+      return;
+    }
+    case 'move-request': {
+      const surface = surfaces.get(message.id);
+      if (surface) emit({ type: 'move-request', surface });
       return;
     }
     case 'pointer-lock': {

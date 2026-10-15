@@ -95,11 +95,27 @@ export interface WindowState {
   snapped: 'left' | 'right' | null;
   /** Geometry to restore to when un-maximizing or un-tiling. */
   restore: { x: number; y: number; width: number; height: number } | null;
+  /**
+   * No title bar, border or resize handles: the content is the whole
+   * window, at any size. For native apps that draw their own frame (or
+   * none), which also move themselves.
+   */
+  frameless: boolean;
 }
 
 /** Minimum window size in pixels. */
 export const MIN_WIDTH = 280;
 export const MIN_HEIGHT = 160;
+
+/**
+ * A window size, held to the minimum - except for a frameless window,
+ * which has no title bar to keep usable and is exactly as big as its app.
+ */
+function clampSize(width: number, height: number, frameless: boolean): { width: number; height: number } {
+  return frameless
+    ? { width: Math.max(1, width), height: Math.max(1, height) }
+    : { width: Math.max(MIN_WIDTH, width), height: Math.max(MIN_HEIGHT, height) };
+}
 
 let nextId = 0;
 const nextWindowId = () => `win-${nextId++}`;
@@ -159,10 +175,12 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       }
     }
 
-    // A native window opens at the size its app asked for.
+    // A native window opens at the size its app asked for; a frameless one
+    // exactly so, with no frame to keep usable.
+    const frameless = params?.frameless === true;
     const size =
       typeof params?.width === 'number' && typeof params?.height === 'number'
-        ? { width: Math.max(MIN_WIDTH, params.width), height: Math.max(MIN_HEIGHT, params.height) }
+        ? clampSize(params.width, params.height, frameless)
         : (app.defaultSize ?? { width: 800, height: 560 });
     const id = nextWindowId();
 
@@ -184,6 +202,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
           maximized: false,
           snapped: null,
           restore: null,
+          frameless,
         },
       ];
     });
@@ -249,10 +268,9 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
 
   const resize = useCallback(
     (id: string, geometry: { x: number; y: number; width: number; height: number }) => {
-      const width = Math.max(MIN_WIDTH, geometry.width);
-      const height = Math.max(MIN_HEIGHT, geometry.height);
       setWindows((ws) => {
         const t = ws.find((w) => w.id === id);
+        const { width, height } = clampSize(geometry.width, geometry.height, t?.frameless ?? false);
         if (
           !t ||
           (t.x === geometry.x &&
@@ -266,6 +284,24 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
           w.id === id ? { ...w, x: geometry.x, y: geometry.y, width, height } : w,
         );
       });
+    },
+    [],
+  );
+
+  /**
+   * Take a window's frame away, or give it back (a native app changed its
+   * mind), resizing it to `geometry` in the same commit so the content
+   * doesn't jump.
+   */
+  const setFrameless = useCallback(
+    (id: string, frameless: boolean, geometry: { x: number; y: number; width: number; height: number }) => {
+      setWindows((ws) =>
+        ws.map((w) =>
+          w.id === id
+            ? { ...w, frameless, x: geometry.x, y: geometry.y, ...clampSize(geometry.width, geometry.height, frameless) }
+            : w,
+        ),
+      );
     },
     [],
   );
@@ -418,8 +454,9 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       tile,
       toggleMaximize,
       cycleFocus,
+      setFrameless,
     }),
-    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus],
+    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

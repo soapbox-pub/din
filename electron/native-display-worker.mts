@@ -141,6 +141,8 @@ interface Surface {
   /** WM_PROTOCOLS: WM_DELETE_WINDOW / WM_TAKE_FOCUS support. */
   deleteWindow: boolean;
   takeFocus: boolean;
+  /** Motif hints ask for no frame; such a window positions itself. */
+  borderless: boolean;
 }
 
 /** Interned atoms. */
@@ -162,6 +164,8 @@ interface Atoms {
   netWmState: number;
   netWmStateFocused: number;
   netFrameExtents: number;
+  netWmMoveresize: number;
+  motifWmHints: number;
   utf8String: number;
   string: number;
   text: number;
@@ -223,7 +227,8 @@ async function internAtoms(): Promise<Atoms> {
     'WM_CLASS', 'WM_TRANSIENT_FOR', 'WM_NORMAL_HINTS', '_NET_WM_NAME',
     '_NET_WM_PID', '_NET_WM_WINDOW_TYPE', '_NET_ACTIVE_WINDOW', '_NET_SUPPORTED',
     '_NET_SUPPORTING_WM_CHECK', '_NET_WM_STATE', '_NET_WM_STATE_FOCUSED',
-    '_NET_FRAME_EXTENTS', 'UTF8_STRING', 'STRING', 'TEXT', 'TARGETS',
+    '_NET_FRAME_EXTENTS', '_NET_WM_MOVERESIZE', '_MOTIF_WM_HINTS',
+    'UTF8_STRING', 'STRING', 'TEXT', 'TARGETS',
     'CLIPBOARD', 'PRIMARY', 'DIN_SELECTION', 'ATOM', 'WINDOW', 'CARDINAL',
   ];
   const values = await Promise.all(names.map((name) => x.atom(name)));
@@ -254,6 +259,8 @@ async function internAtoms(): Promise<Atoms> {
     netWmState: get('_NET_WM_STATE'),
     netWmStateFocused: get('_NET_WM_STATE_FOCUSED'),
     netFrameExtents: get('_NET_FRAME_EXTENTS'),
+    netWmMoveresize: get('_NET_WM_MOVERESIZE'),
+    motifWmHints: get('_MOTIF_WM_HINTS'),
     utf8String: get('UTF8_STRING'),
     string: get('STRING'),
     text: get('TEXT'),
@@ -345,6 +352,7 @@ async function start(
   changeProperty(x, x.root, atoms.netSupported, atoms.atom, 32, [
     atoms.netActiveWindow, atoms.netSupportingWmCheck, atoms.netWmName,
     atoms.netWmState, atoms.netWmStateFocused, atoms.netFrameExtents,
+    atoms.netWmMoveresize,
   ]);
 
   parkWindow = x.allocateId();
@@ -409,13 +417,14 @@ function createParkWindow(id: WindowId): void {
 
 /** Metadata the renderer needs to give a toplevel a Din window. */
 async function describe(id: WindowId) {
-  const [netName, wmName, wmClass, pids, types, transient] = await Promise.all([
+  const [netName, wmName, wmClass, pids, types, transient, borderless] = await Promise.all([
     x.getText(id, atoms.netWmName, atoms.utf8String),
     x.getText(id, atoms.wmName, atoms.utf8String),
     x.getText(id, atoms.wmClass, atoms.utf8String),
     x.getCardinals(id, atoms.netWmPid, 1),
     x.getCardinals(id, atoms.netWmWindowType, 8),
     x.getCardinals(id, atoms.wmTransientFor, 1),
+    isBorderless(id),
   ]);
   const kind = types.map((t) => atoms.windowTypeNames.get(t)).find(Boolean) ?? 'NORMAL';
   return {
@@ -424,7 +433,21 @@ async function describe(id: WindowId) {
     pid: pids[0] ?? null,
     kind,
     transientFor: transient[0] ?? null,
+    borderless,
   };
+}
+
+/** Motif hints flag: the decorations field is meaningful. */
+const MWM_HINTS_DECORATIONS = 1 << 1;
+
+/**
+ * Whether a window asks for no frame: _MOTIF_WM_HINTS with decorations 0,
+ * as Wine sets for a Windows program's popup-style windows, and splash
+ * screens and widgets do.
+ */
+async function isBorderless(id: WindowId): Promise<boolean> {
+  const hints = await x.getCardinals(id, atoms.motifWmHints, 5);
+  return hints.length >= 3 && (hints[0] & MWM_HINTS_DECORATIONS) !== 0 && hints[2] === 0;
 }
 
 /** Start compositing a window that just got mapped. */
@@ -450,6 +473,7 @@ async function track(id: WindowId, popup: boolean): Promise<void> {
     announced: false,
     deleteWindow: false,
     takeFocus: false,
+    borderless: false,
   };
   surfaces.set(id, surface);
   x.selectInput(id, PROPERTY_CHANGE | STRUCTURE_NOTIFY);
@@ -473,6 +497,7 @@ async function announce(surface: Surface): Promise<void> {
   }
   if (!surfaces.has(surface.id)) return;
   surface.announced = true;
+  surface.borderless = info.borderless;
   toShell({
     type: surface.popup ? 'popup' : 'open',
     id: surface.id,
@@ -521,30 +546,35 @@ function onMapRequest(id: WindowId): void {
 /**
  * A client asked to move/resize/restack. Sizes are granted (the renderer
  * then fits the Din window to the new size); positions are the window
- * manager's call, so a managed toplevel stays where its Din window is.
+ * manager's call, so a managed toplevel stays where its Din window is -
+ * unless it's borderless: with no frame to be dragged by, it moves itself
+ * and its Din window follows.
  */
 function onConfigureRequest(packet: Buffer): void {
   const id = packet.readUInt32LE(8);
   const mask = packet.readUInt16LE(26);
   const managed = surfaces.get(id);
+  const movesItself = !managed || managed.borderless;
   const values: Parameters<typeof configureWindow>[2] = {};
-  if (!managed && mask & 1) values.x = packet.readInt16LE(16);
-  if (!managed && mask & 2) values.y = packet.readInt16LE(18);
+  if (movesItself && mask & 1) values.x = packet.readInt16LE(16);
+  if (movesItself && mask & 2) values.y = packet.readInt16LE(18);
   if (mask & 4) values.width = packet.readUInt16LE(20);
   if (mask & 8) values.height = packet.readUInt16LE(22);
   if (mask & 16) values.border = 0;
   configureWindow(x, id, values);
   if (!managed) return;
-  if (values.width === undefined && values.height === undefined) {
+  const changed = Object.keys(values).some((key) => key !== 'border');
+  if (!changed) {
     // Nothing really changed, but the client waits for a ConfigureNotify.
     sendSyntheticConfigure(managed);
   } else if (!managed.popup) {
-    // The app resized itself: its Din window should follow.
+    // The app resized (or, borderless, moved) itself: its Din window
+    // should follow.
     toShell({
       type: 'configure',
       id,
-      x: managed.x,
-      y: managed.y,
+      x: values.x ?? managed.x,
+      y: values.y ?? managed.y,
       width: values.width ?? managed.width,
       height: values.height ?? managed.height,
     });
@@ -602,8 +632,16 @@ async function onPropertyNotify(id: WindowId, atom: number): Promise<void> {
     const protocols = await x.getCardinals(id, atoms.wmProtocols, 16).catch((): number[] => []);
     surface.deleteWindow = protocols.includes(atoms.wmDeleteWindow);
     surface.takeFocus = protocols.includes(atoms.wmTakeFocus);
+  } else if (atom === atoms.motifWmHints) {
+    const borderless = await isBorderless(id).catch(() => surface.borderless);
+    if (borderless === surface.borderless || !surface.announced) return;
+    surface.borderless = borderless;
+    toShell({ type: 'borderless', id, borderless });
   }
 }
+
+/** _NET_WM_MOVERESIZE's direction for "move with the pointer". */
+const MOVERESIZE_MOVE = 8;
 
 /** Messages clients send the window manager (EWMH). */
 function onClientMessage(packet: Buffer): void {
@@ -613,6 +651,10 @@ function onClientMessage(packet: Buffer): void {
     // An app asking to be raised (a notification click, a second launch
     // of a single-instance app): let the shell decide, like any focus.
     toShell({ type: 'activate', id });
+  } else if (type === atoms.netWmMoveresize && surfaces.get(id)?.announced) {
+    // A borderless window grabbed by its own "title bar": the shell drags
+    // the Din window with the pointer. (Resizes are Din's chrome's job.)
+    if (packet.readUInt32LE(20) === MOVERESIZE_MOVE) toShell({ type: 'move-request', id });
   }
 }
 

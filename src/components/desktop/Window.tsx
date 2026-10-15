@@ -937,6 +937,9 @@ export const Window = memo(function Window({
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
   const flush = win.maximized || win.snapped !== null;
+  // Frameless windows (native apps drawing their own frame, or none) are
+  // just their content: no title bar, border, shadow or resize handles.
+  const frameless = win.frameless;
 
   // Sanitized chrome accent. Theme tokens can't guarantee contrast against
   // an arbitrary page color, so tinted chrome flips its foregrounds to plain
@@ -980,7 +983,8 @@ export const Window = memo(function Window({
         }
       }}
       className={cn(
-        'absolute flex flex-col overflow-hidden bg-card/90 backdrop-blur-xl',
+        'absolute flex flex-col overflow-hidden',
+        !frameless && 'bg-card/90 backdrop-blur-xl',
         // Open/close animations: a quick macOS-style pop in (fade + zoom
         // from 95%) on mount, and its reverse on close - swapping the
         // classes restarts the element's animation as the exit. CSS
@@ -991,13 +995,13 @@ export const Window = memo(function Window({
         win.closing
           ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:duration-150 motion-safe:fill-mode-forwards'
           : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200',
-        flush
+        flush || frameless
           ? 'rounded-none'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
-        !flush && isTop && 'ring-ring/50',
+        !flush && !frameless && isTop && 'ring-ring/50',
       )}
     >
-      <header
+      {!frameless && <header
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -1063,9 +1067,9 @@ export const Window = memo(function Window({
         >
           <X className="size-4" />
         </button>
-      </header>
+      </header>}
 
-      <div className="relative flex-1 overflow-hidden bg-background/80">
+      <div className={cn('relative flex-1 overflow-hidden', !frameless && 'bg-background/80')}>
         {/* isTop lets guest surfaces (webview/iframe) shield themselves while
             the window is stacked behind another, so clicking into web content
             raises the window (see GuestClickShield). */}
@@ -1085,6 +1089,7 @@ export const Window = memo(function Window({
       </div>
 
       {!flush &&
+        !frameless &&
         RESIZE_HANDLES.map(({ dir, className }) => (
           <div
             key={dir}

@@ -46,6 +46,9 @@ struct Description {
     kind: &'static str,
     /// Whether the app has caught up with the shell's last configure.
     acked: bool,
+    /// The app asked for no window frame (Motif hints: a Windows program's
+    /// popup-style window, a splash screen, a desktop widget).
+    borderless: bool,
 }
 
 /// Batches in flight before rendering pauses; damage accumulates meanwhile.
@@ -123,6 +126,9 @@ impl State {
                 pid: x11.pid().map(|pid| pid as i32),
                 kind,
                 acked: true,
+                // Smithay's name for "the client decorates itself", which is
+                // what Motif's decorations=0 says.
+                borderless: x11.is_decorated(),
             };
         }
         let (title, app_id) = with_states(surface, |states| {
@@ -142,6 +148,8 @@ impl State {
             // Only once the app has acked the shell's last configure, so a
             // stale commit never fights a live resize.
             acked: toplevel.with_pending_state(|s| s.size) == toplevel.current_state().size,
+            // Wayland apps are always told Din draws their frame.
+            borderless: false,
         }
     }
 
@@ -153,12 +161,14 @@ impl State {
             if !has_buffer(&surface) {
                 continue;
             }
-            let Description { title, class, pid, kind, acked } = self.describe(&self.toplevels[index], &surface);
+            let Description { title, class, pid, kind, acked, borderless } =
+                self.describe(&self.toplevels[index], &surface);
             let geometry = self.toplevels[index].window.geometry();
             let t = &mut self.toplevels[index];
             if !t.announced {
                 t.announced = true;
                 t.title = title.clone();
+                t.borderless = borderless;
                 t.known_size = Some(geometry.size);
                 t.dirty = true;
                 t.canvas = None;
@@ -174,6 +184,7 @@ impl State {
                     "pid": pid,
                     "kind": kind,
                     "transientFor": Value::Null,
+                    "borderless": borderless,
                 }));
                 self.enter_output(&surface);
                 continue;
@@ -181,6 +192,10 @@ impl State {
             if title != t.title {
                 t.title = title.clone();
                 messages.push(json!({ "type": "title", "id": t.id, "title": title }));
+            }
+            if borderless != t.borderless {
+                t.borderless = borderless;
+                messages.push(json!({ "type": "borderless", "id": t.id, "borderless": borderless }));
             }
             // The app sized itself (an initial size, a minimum it insists
             // on): the Din window follows.

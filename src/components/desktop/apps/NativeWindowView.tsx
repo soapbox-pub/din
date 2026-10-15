@@ -18,7 +18,8 @@ import {
   setNativeFocus,
   setNativeGeometry,
   subscribeNativeDisplay,
-  WINDOW_CHROME,
+  windowChrome,
+  type NativeSurface,
 } from '@/lib/nativeDisplay';
 
 /**
@@ -44,11 +45,38 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const setTitlebar = useWindowTitlebar();
   const { getApp } = useInstalledApps();
   const { windows } = useWindowManager();
-  const { resize } = useWindowActions();
+  const { move, resize, setFrameless } = useWindowActions();
   const [title, setTitle] = useState(() => getNativeSurface(xid)?.title ?? '');
   /** Whether the app holds a pointer lock, which the canvas mirrors. */
   const lockedRef = useRef(false);
+  /** Where the last button went down on the app, and whether it's still down. */
+  const pointerRef = useRef({ x: 0, y: 0, down: false });
+  /** An app-requested drag in progress: where it started, pointer and window. */
+  const draggingRef = useRef<{ x: number; y: number; winX: number; winY: number } | null>(null);
   const app = getApp(appId);
+
+  const current = windows.find((w) => w.id === windowId);
+  const currentRef = useRef(current);
+  useEffect(() => {
+    currentRef.current = current;
+  });
+
+  /**
+   * Where a borderless window's Din window must be for its app to sit at
+   * the root position it asked for: the window is all content, so that's
+   * the app's position in workspace coordinates - kept on the workspace,
+   * though. Apps place themselves by the screen, which the workspace may
+   * be smaller than (a windowed Din), and a window remembered on a bigger
+   * monitor can be off this one; with no frame, it couldn't be dragged
+   * back. The app is told where it landed, as with any window manager.
+   */
+  const placeFor = useCallback((surface: NativeSurface) => {
+    const area = workspaceOrigin(hostRef.current);
+    return {
+      x: clamp(surface.x - area.x, 0, area.width - surface.width),
+      y: clamp(surface.y - area.y, 0, area.height - surface.height),
+    };
+  }, []);
 
   /** Report where the canvas is (viewport) and how big its box is. */
   const syncGeometry = useCallback(() => {
@@ -71,7 +99,15 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     const surface = getNativeSurface(xid);
     if (!host || !surface) return;
     host.appendChild(surface.canvas);
-    syncGeometry();
+    // A borderless window opens where its app put it (the Din window comes
+    // to it); everything else is placed by Din (the app goes to it). The
+    // observer's first callback reports the result.
+    if (surface.borderless) {
+      const place = placeFor(surface);
+      move(windowId, place.x, place.y);
+    } else {
+      syncGeometry();
+    }
     const observer = new ResizeObserver(syncGeometry);
     observer.observe(host);
     const timer = window.setInterval(syncGeometry, POSITION_SYNC_MS);
@@ -80,6 +116,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       window.clearInterval(timer);
       if (surface.canvas.parentElement === host) surface.canvas.remove();
     };
+    // Placement happens once, on adoption, not whenever the actions re-bind.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [xid, syncGeometry]);
 
   // The window on top holds the app's keyboard focus.
@@ -93,12 +131,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   }, [xid, isTop, syncGeometry]);
   useEffect(() => () => setNativeFocus(xid, false), [xid]);
 
-  // Title changes, and the app resizing itself (the Din window follows).
-  const current = windows.find((w) => w.id === windowId);
-  const currentRef = useRef(current);
-  useEffect(() => {
-    currentRef.current = current;
-  });
+  // Title changes, and the app resizing (or, borderless, moving) itself,
+  // dropping its frame, or asking to be dragged: the Din window follows.
   useEffect(
     () =>
       subscribeNativeDisplay((event) => {
@@ -118,16 +152,30 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
           } else if (!event.locked && document.pointerLockElement === host) document.exitPointerLock();
         }
         const win = currentRef.current;
-        if (event.type === 'configure' && win && !win.maximized && !win.snapped) {
-          resize(windowId, {
-            x: win.x,
-            y: win.y,
-            width: event.surface.width + WINDOW_CHROME.width,
-            height: event.surface.height + WINDOW_CHROME.height,
+        if (!win) return;
+        const { surface } = event;
+        const chrome = windowChrome(surface);
+        const size = { width: surface.width + chrome.width, height: surface.height + chrome.height };
+        if (event.type === 'configure' && !win.maximized && !win.snapped) {
+          // Mid-drag, the window is the pointer's; the app's echo of the
+          // move would only pull it back.
+          const place = surface.borderless && !draggingRef.current ? placeFor(surface) : win;
+          resize(windowId, { x: place.x, y: place.y, ...size });
+        }
+        if (event.type === 'borderless') {
+          setFrameless(windowId, surface.borderless, {
+            ...(surface.borderless ? placeFor(surface) : { x: win.x, y: win.y }),
+            ...size,
           });
         }
+        // Anchored where the button went down, not where the pointer is now:
+        // apps ask only once it has travelled past their drag threshold, and
+        // the point grabbed should stay under the pointer.
+        if (event.type === 'move-request' && pointerRef.current.down) {
+          draggingRef.current = { x: pointerRef.current.x, y: pointerRef.current.y, winX: win.x, winY: win.y };
+        }
       }),
-    [xid, windowId, resize],
+    [xid, windowId, resize, setFrameless, placeFor],
   );
 
   // The app's own title, beside its icon, in Din's title bar.
@@ -197,19 +245,37 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
           sendNativeRelative(xid, event.movementX, event.movementY);
           return;
         }
+        // The app handed its window to the pointer: it moves, and the app
+        // hears nothing until the button comes up.
+        const drag = draggingRef.current;
+        if (drag) {
+          move(windowId, drag.winX + event.clientX - drag.x, drag.winY + event.clientY - drag.y);
+          return;
+        }
         const [x, y] = localPoint(event.currentTarget, event);
         sendNativeMotion(xid, x, y, { dx: event.movementX, dy: event.movementY });
       }}
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         event.currentTarget.focus({ preventScroll: true });
+        pointerRef.current = { x: event.clientX, y: event.clientY, down: true };
         syncGeometry();
         const [x, y] = localPoint(event.currentTarget, event);
         sendNativeButton(xid, x, y, event.button, true);
       }}
       onPointerUp={(event) => {
+        pointerRef.current.down = false;
+        if (draggingRef.current) {
+          draggingRef.current = null;
+          // Tell the app where the drag left it before it hears the release.
+          syncGeometry();
+        }
         const [x, y] = localPoint(event.currentTarget, event);
         sendNativeButton(xid, x, y, event.button, false);
+      }}
+      onPointerCancel={() => {
+        pointerRef.current.down = false;
+        draggingRef.current = null;
       }}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {
@@ -245,6 +311,28 @@ async function lockPointer(host: HTMLElement): Promise<boolean> {
       return false;
     }
   }
+}
+
+/**
+ * The workspace's top-left corner in the viewport (what a Din window's x/y
+ * are relative to) and its size. Read off the window's offset parent rather
+ * than the window itself, whose box an open animation or a wobble may be
+ * distorting.
+ */
+function workspaceOrigin(host: HTMLElement | null): { x: number; y: number; width: number; height: number } {
+  const parent = host?.closest('section')?.offsetParent;
+  const rect = parent?.getBoundingClientRect();
+  return {
+    x: rect?.left ?? 0,
+    y: rect?.top ?? 0,
+    width: parent?.clientWidth ?? window.innerWidth,
+    height: parent?.clientHeight ?? window.innerHeight,
+  };
+}
+
+/** `value` held within [min, max], preferring min when the range is empty. */
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max));
 }
 
 /** A pointer position relative to an element, in its untransformed pixels. */

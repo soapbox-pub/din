@@ -20,7 +20,7 @@ import {
   sendNativeMotion,
   startNativeDisplay,
   subscribeNativeDisplay,
-  WINDOW_CHROME,
+  windowChrome,
   type NativeSurface,
 } from '@/lib/nativeDisplay';
 
@@ -69,11 +69,13 @@ export function NativeDisplayHost() {
               // Gone before the lookup finished (a splash screen, say).
               if (!isNativeWindowOpen(surface.id) || windowsRef.current.has(surface.id)) return;
               const hostId = appId && getApp(appId) ? appId : UNMATCHED_APP_ID;
+              const chrome = windowChrome(surface);
               const id = open(hostId, {
                 xid: surface.id,
                 appId: hostId,
-                width: surface.width + WINDOW_CHROME.width,
-                height: surface.height + WINDOW_CHROME.height,
+                width: surface.width + chrome.width,
+                height: surface.height + chrome.height,
+                frameless: surface.borderless,
               });
               if (id) windowsRef.current.set(surface.id, id);
             });

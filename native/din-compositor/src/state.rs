@@ -101,6 +101,8 @@ pub struct Toplevel {
     pub title: String,
     /// The size the shell knows the window to be, from either side.
     pub known_size: Option<Size<i32, Logical>>,
+    /// Whether the shell was last told the window draws no frame.
+    pub borderless: bool,
 }
 
 impl Toplevel {
@@ -115,6 +117,7 @@ impl Toplevel {
             dirty: false,
             title: String::new(),
             known_size: None,
+            borderless: false,
         }
     }
 

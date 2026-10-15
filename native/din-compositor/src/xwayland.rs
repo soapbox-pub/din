@@ -139,8 +139,12 @@ impl XwmHandler for State {
             return;
         }
         // Cascade until the shell places it, at the size the app asked for.
+        // A borderless window that names its own position (a splash screen
+        // centered on the screen, a widget where it was left) keeps it: with
+        // no frame to grab, where it goes is the app's business.
         let offset = 40 * (self.toplevels.len() as i32 % 8);
-        let pos = (80 + offset, 80 + offset).into();
+        let placed = window.is_decorated() && window.size_hints().is_some_and(|h| h.position.is_some());
+        let pos = if placed { window.geometry().loc } else { (80 + offset, 80 + offset).into() };
         let _ = window.set_mapped(true);
         let _ = window.configure(Rectangle::new(pos, window.geometry().size));
         let id = self.allocate_id();
@@ -169,7 +173,9 @@ impl XwmHandler for State {
     }
 
     /// Sizes are granted (the shell then fits the Din window to the app);
-    /// positions are Din's, except for a window that isn't mapped yet.
+    /// positions are Din's, except for a window that isn't mapped yet, or a
+    /// borderless one: it has no frame to be dragged by, so it moves itself
+    /// and the Din window follows.
     fn configure_request(
         &mut self,
         _xwm: XwmId,
@@ -187,13 +193,29 @@ impl XwmHandler for State {
         if let Some(h) = h {
             geometry.size.h = (h as i32).max(1);
         }
-        if self.x11_toplevel(&window).is_none() {
+        let toplevel = self.x11_toplevel(&window);
+        let moves_itself = toplevel.is_none() || window.is_decorated();
+        if moves_itself {
             geometry.loc.x = x.unwrap_or(geometry.loc.x);
             geometry.loc.y = y.unwrap_or(geometry.loc.y);
         }
         // Configuring an unchanged window still sends the synthetic
         // ConfigureNotify the client waits for.
         let _ = window.configure(geometry);
+        let Some(index) = toplevel else { return };
+        let t = &mut self.toplevels[index];
+        if !moves_itself || t.pos == geometry.loc {
+            return;
+        }
+        t.pos = geometry.loc;
+        if t.announced {
+            let message = serde_json::json!({
+                "type": "configure", "id": t.id, "x": geometry.loc.x, "y": geometry.loc.y,
+                "width": geometry.size.w, "height": geometry.size.h,
+            });
+            t.known_size = Some(geometry.size);
+            self.wire.json(message);
+        }
     }
 
     /// Override-redirect windows move and resize themselves.
@@ -216,10 +238,20 @@ impl XwmHandler for State {
         }
     }
 
-    // Din's window chrome moves and resizes windows.
+    // Din's window chrome resizes windows.
     fn resize_request(&mut self, _xwm: XwmId, _window: X11Surface, _button: u32, _edge: ResizeEdge) {}
 
-    fn move_request(&mut self, _xwm: XwmId, _window: X11Surface, _button: u32) {}
+    /// The app wants to be dragged (_NET_WM_MOVERESIZE): a borderless window
+    /// grabbed by its own "title bar". The shell moves the Din window with
+    /// the pointer until the button comes up.
+    fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
+        let Some(index) = self.x11_toplevel(&window) else { return };
+        let t = &self.toplevels[index];
+        if t.announced {
+            let message = serde_json::json!({ "type": "move-request", "id": t.id });
+            self.wire.json(message);
+        }
+    }
 
     fn allow_selection_access(&mut self, _xwm: XwmId, selection: SelectionTarget) -> bool {
         selection == SelectionTarget::Clipboard
