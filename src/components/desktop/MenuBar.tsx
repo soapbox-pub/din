@@ -34,6 +34,7 @@ import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIn
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
 import { BrightnessGlyph, BrightnessPopoverBody } from '@/components/desktop/BrightnessIndicator';
 import { NotificationsMenuItem } from '@/components/desktop/NotificationsIndicator';
+import { TrayItems } from '@/components/desktop/TrayMenu';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useClock } from '@/hooks/useClock';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
@@ -57,8 +58,9 @@ import type { WebApp } from '@/lib/webApps';
  * macOS-style menu bar along the top of the desktop.
  *
  * The apps menu (the full launcher with search) sits on the left; ambient
- * indicators — Wi-Fi, the signed-in account, and the clock — sit on the
- * right, each behind its own affordance like the macOS status items.
+ * indicators — apps' status icons, Wi-Fi, the signed-in account, and the
+ * clock — sit on the right, each behind its own affordance like the macOS
+ * status items.
  *
  * The bar itself is borderless and transparent, fading from a soft scrim
  * into the wallpaper so it reads as part of the desktop rather than a
@@ -85,6 +87,7 @@ export function MenuBar() {
     >
       <AppsMenu />
       <div className="flex items-center gap-1.5">
+        <TrayItems />
         <BrightnessMenuItem />
         <VolumeMenuItem />
         <BatteryMenuItem />

@@ -580,8 +580,11 @@ function iconDataUrl(file: string): string | null {
   return url;
 }
 
-/** Resolve a desktop entry's Icon value to a data URL, or null. */
-async function resolveIcon(iconName: string | null): Promise<string | null> {
+/**
+ * Resolve an icon name (or absolute path), as desktop entries and tray items
+ * give them, to a data URL, or null.
+ */
+export async function resolveIcon(iconName: string | null): Promise<string | null> {
   if (!iconName) return null;
   // An absolute path is used as-is, per the spec.
   if (iconName.startsWith('/')) {
@@ -737,7 +740,7 @@ async function launch(appId: string): Promise<void> {
 }
 
 /** Walk a pid's ancestry, looking for a process Din launched. */
-function appIdForPid(pid: number | null): string | null {
+export function appIdForPid(pid: number | null): string | null {
   let current = pid;
   for (let depth = 0; current && current > 1 && depth < 12; depth += 1) {
     const appId = launchedPids.get(current);
