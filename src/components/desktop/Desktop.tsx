@@ -19,6 +19,7 @@ import { NsiteBridgeHost } from './NsiteBridgeHost';
 import { PromptHost } from './PromptHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
 import { SystemEventsHost } from './SystemEventsHost';
+import { InstallerAutoOpen } from './InstallerAutoOpen';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
@@ -59,6 +60,7 @@ function DesktopSession() {
           <PromptHost />
           <DesktopHotkeys />
           <SystemEventsHost />
+          <InstallerAutoOpen />
           <Wallpaper>
             <MenuBar />
 

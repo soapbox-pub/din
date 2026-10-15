@@ -111,6 +111,27 @@ let
   # and the HTML engine), so a new prefix gets them with no download prompt.
   wine = pkgs.wineWow64Packages.stableFull;
 
+  # The privileged half of the Installer app, which copies a live USB boot
+  # onto the computer's own disk (see the script, and electron/installer.mts).
+  din-installer = pkgs.writeShellApplication {
+    name = "din-install";
+    runtimeInputs = with pkgs; [
+      coreutils util-linux gawk gnugrep gnused jq rsync dosfstools e2fsprogs
+      efibootmgr systemd
+    ];
+    text = builtins.readFile ./din-install.sh;
+  };
+
+  # Succeeds when the partition UUID given is the boot loader's ESP, from
+  # systemd-boot's LoaderDevicePartUUID variable (UTF-16, after 4 bytes of
+  # attributes).
+  isBootedEsp = pkgs.writeShellScript "is-booted-esp" ''
+    var=/sys/firmware/efi/efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+    [ -r "$var" ] || exit 1
+    loader=$(${pkgs.coreutils}/bin/tail -c +5 "$var" | ${pkgs.coreutils}/bin/tr -d '\0' | ${pkgs.coreutils}/bin/tr A-F a-f)
+    [ -n "$1" ] && [ "$loader" = "$(echo "$1" | ${pkgs.coreutils}/bin/tr A-F a-f)" ]
+  '';
+
   # Launcher: Electron running the Din host on Wayland (cage provides the
   # compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
   # variant below can swap in software rendering.
@@ -121,13 +142,14 @@ let
   # pw-play (pipewire) for its test tone, Xwayland for X11 apps on the
   # embedded display native Linux apps run on (electron/native-display.mts)
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
-  # their keyboard layout (electron/keyboard.mts), and Wine for Windows
-  # programs.
+  # their keyboard layout (electron/keyboard.mts), Wine for Windows
+  # programs, and sudo (from /run/wrappers) for the Installer's helper.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${wine}/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${wine}/bin:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
+    export DIN_INSTALLER=${din-installer}/bin/din-install
     exec ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.mts \
       --ozone-platform=wayland ${extraFlags}
@@ -157,6 +179,20 @@ in
     extraGroups = [ "networkmanager" "video" "audio" "input" ];
   };
 
+  # The Installer app runs its helper as root, and nothing else. The helper
+  # validates its own arguments and only installs from a live USB boot.
+  security.sudo.extraRules = [
+    {
+      users = [ "web" ];
+      commands = [
+        {
+          command = "${din-installer}/bin/din-install";
+          options = [ "NOPASSWD" ];
+        }
+      ];
+    }
+  ];
+
   # brightnessctl ships udev rules that grant the `video` group write access to
   # /sys/class/backlight, so the Settings brightness panel works unprivileged.
   services.udev.packages = [ pkgs.brightnessctl ];
@@ -170,9 +206,14 @@ in
   # enables the controller's GPE so a wake actually propagates. Harmless where
   # unsupported - the attribute just won't exist. `add|change` so it applies on
   # both cold-plug and hot-plug (e.g. plugging into the dock while running).
+  #
+  # The last rule names the ESP the boot loader ran from /dev/disk/aladdin-esp
+  # (for /boot, below). systemd's by-designator/esp is the first ESP on the
+  # disk, which next to Windows is Windows'.
   services.udev.extraRules = ''
     ACTION=="add|change", SUBSYSTEM=="usb", ATTR{power/wakeup}="enabled"
     ACTION=="add|change", SUBSYSTEM=="pci", ATTR{class}=="0x0c03*", ATTR{power/wakeup}="enabled"
+    SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_PART_ENTRY_TYPE}=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b", PROGRAM="${isBootedEsp} $env{ID_PART_ENTRY_UUID}", SYMLINK+="disk/aladdin-esp"
   '';
 
   # cage: a Wayland compositor that runs exactly one fullscreen application.
@@ -196,18 +237,39 @@ in
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = false;
 
-  # The image is built at a minimal size; on first boot the root partition and
-  # filesystem grow to fill whatever disk it was written to.
-  boot.growPartition = true;
+  # The same image is a live USB stick and, copied by the Installer app, the
+  # system on a computer's own disk - often with the stick still plugged in.
+  # So nothing is mounted by label, which both copies share: root is the
+  # partition of the root type (set on the image in flake.nix) on the disk the
+  # boot loader ran from, found by systemd's GPT auto-discovery in a systemd
+  # initrd, and /boot is the ESP the boot loader ran from (see the udev rules
+  # above).
+  boot.initrd.systemd.enable = true;
+  boot.initrd.services.udev.rules = ''
+    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", SYMLINK+="gpt-auto-root"
+  '';
   fileSystems."/" = {
-    device = "/dev/disk/by-label/nixos";
+    device = "/dev/gpt-auto-root";
     fsType = "ext4";
     autoResize = true;
   };
   fileSystems."/boot" = {
-    device = "/dev/disk/by-label/ESP";
+    device = "/dev/disk/aladdin-esp";
     fsType = "vfat";
+    options = [ "umask=0077" "nofail" ];
   };
+
+  # The image is built at a minimal size; on first boot the root partition and
+  # filesystem grow to fill whatever disk it was written to. growpart is
+  # pointed at the mounted root, read from sysfs: this early in stage 2
+  # neither the gpt-auto-root link nor udev's database (lsblk) is back yet.
+  boot.growPartition = true;
+  systemd.services.growpart.script = lib.mkForce ''
+    root=$(${pkgs.util-linux}/bin/findmnt -nvo SOURCE /)
+    part=/sys/class/block/''${root#/dev/}
+    disk=$(basename "$(readlink -f "$part/..")")
+    "${pkgs.cloud-utils.guest}/bin/growpart" "/dev/$disk" "$(cat "$part/partition")"
+  '';
 
   # Storage controllers commonly found in real machines, so the initrd can
   # mount the root filesystem wherever the image lands (NVMe, SATA, USB, SD).
@@ -251,6 +313,10 @@ in
 
     # Serial console so `npm run os:run` shows boot logs in the terminal too.
     boot.kernelParams = [ "console=ttyS0" ];
+
+    # The demo boots its kernel directly from an unpartitioned disk: there's
+    # no partition to grow.
+    boot.growPartition = lib.mkForce false;
 
     virtualisation = {
       memorySize = 4096;

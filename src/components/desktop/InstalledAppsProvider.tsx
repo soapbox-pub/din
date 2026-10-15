@@ -4,6 +4,7 @@ import { AppWindow, Globe } from 'lucide-react';
 import { APPS, NativeWindowView } from '@/lib/apps';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { useNativeApps } from '@/hooks/useNativeApps';
+import { useIsLiveBoot } from '@/hooks/useInstaller';
 import type { NativeApp } from '@/lib/nativeApps';
 import {
   createWebApp,
@@ -105,10 +106,12 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
   );
   // Empty in a plain browser, and wherever Din's embedded display can't run.
   const { apps: nativeApps } = useNativeApps();
+  // The Installer is only offered when running from a USB stick.
+  const live = useIsLiveBoot();
 
   const value = useMemo<InstalledAppsManager>(() => {
     const apps: AppDefinition[] = [
-      ...APPS,
+      ...APPS.map((app) => (app.id === 'installer' && live ? { ...app, hidden: false } : app)),
       ...webApps.map(webAppToDefinition),
       ...nativeApps.map(nativeAppToDefinition),
     ];
@@ -139,7 +142,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         setWebApps((prev) => prev.filter((webApp) => webApp.id !== id));
       },
     };
-  }, [webApps, setWebApps, nativeApps]);
+  }, [webApps, setWebApps, nativeApps, live]);
 
   return (
     <InstalledAppsContext.Provider value={value}>

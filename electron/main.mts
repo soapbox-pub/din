@@ -40,6 +40,7 @@ import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerTrayHandlers } from './tray.mts';
+import { registerInstallerHandlers } from './installer.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
@@ -3654,6 +3655,7 @@ app.whenReady().then(() => {
   });
   registerKeyboardHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
+  registerInstallerHandlers({ assertShellSender, sendToShell });
   registerNativeDisplayHandlers({
     assertShellSender,
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),

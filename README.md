@@ -72,7 +72,20 @@ be installed on a physical machine. Write it to a drive and boot from it:
 sudo dd if=result/nixos.img of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-On first boot the root partition grows to fill the disk. `npm run os:run` is
+On first boot the root partition grows to fill the disk.
+
+Written to a USB stick instead, the same image is a live system: boot a laptop
+from it and Din opens the **Install Aladdin** app, which copies the running
+system onto the computer's own disk — erasing it, or into its unpartitioned
+space next to Windows (shrink Windows' partition in Disk Management first; the
+firmware's boot menu then picks between them). The sign-in, saved Wi-Fi, and
+files from the live session come along. The app only appears when Aladdin is
+running from removable media; the disk work is `os/din-install.sh`, run as
+root through a sudo rule for that one program. Because the stick and the
+installed disk are copies of each other, nothing is mounted by label: the
+initrd finds root by GPT auto-discovery on the disk the boot loader ran from.
+
+`npm run os:run` is
 for demoing: it boots the same system in a QEMU window (software rendering,
 since QEMU provides no GPU), with boot logs mirrored to the serial console
 (your terminal).
@@ -93,6 +106,8 @@ since QEMU provides no GPU), with boot logs mirrored to the serial console
     the Din source tree (the repo root) as an input
   - `os/configuration.nix` — the whole OS definition: cage + Electron
     launcher + Nix build of Din (`buildNpmPackage`)
+  - `os/din-install.sh` — the Installer app's privileged helper (see
+    `electron/installer.mts`)
 
 ## Dev loop
 

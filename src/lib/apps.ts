@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import type { ComponentType } from 'react';
-import { AppWindow, Camera, Store, type LucideIcon } from 'lucide-react';
+import { AppWindow, Camera, HardDriveDownload, Store, type LucideIcon } from 'lucide-react';
 
 // Built-in apps are code-split: each is its own chunk, loaded the first time
 // it's launched (windows render app content inside <Suspense>). Statically
@@ -26,6 +26,9 @@ const DevTools = lazy(() =>
 );
 const AppStore = lazy(() =>
   import('@/components/desktop/apps/AppStore').then((m) => ({ default: m.AppStore })),
+);
+const Installer = lazy(() =>
+  import('@/components/desktop/apps/Installer').then((m) => ({ default: m.Installer })),
 );
 /** The window body of every native Linux app (see src/lib/nativeDisplay.ts). */
 export const NativeWindowView = lazy(() =>
@@ -144,6 +147,17 @@ export const APPS: readonly AppDefinition[] = [
     component: DevTools,
     defaultSize: { width: 720, height: 560 },
     hidden: true,
+  },
+  {
+    // Puts Aladdin on the computer's disk. Hidden except on a live USB boot,
+    // where InstalledAppsProvider shows it and the desktop opens it.
+    id: 'installer',
+    name: 'Install Aladdin',
+    icon: HardDriveDownload,
+    component: Installer,
+    defaultSize: { width: 640, height: 560 },
+    hidden: true,
+    singleInstance: true,
   },
   {
     // Hosts native windows that no installed app claims (a helper process,

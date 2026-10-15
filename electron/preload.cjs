@@ -12,6 +12,8 @@
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
 //   - window.keyboard: the keyboard layout native apps use, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
+//   - window.installer: put Aladdin on this computer's disk, for the
+//     Installer app (live USB boots only)
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -548,6 +550,40 @@ contextBridge.exposeInMainWorld('power', {
    * @param {string} name
    */
   setProfile: (name) => ipcRenderer.invoke('power:setProfile', name),
+});
+
+// Installer bridge (window.installer), backed by electron/installer.mts:
+// copies a live USB boot of Aladdin onto the computer's own disk.
+contextBridge.exposeInMainWorld('installer', {
+  /** Whether this is a live boot, the space an install needs, and the disks. */
+  status: () => ipcRenderer.invoke('installer:status'),
+
+  /** The install in progress (or finished, or failed). */
+  state: () => ipcRenderer.invoke('installer:state'),
+
+  /**
+   * Start installing. Progress arrives through onProgress.
+   * @param {string} disk
+   * @param {'wipe' | 'free'} mode
+   */
+  install: (disk, mode) => ipcRenderer.invoke('installer:install', disk, mode),
+
+  /** Restart the computer, into the installed system. */
+  reboot: () => ipcRenderer.invoke('installer:reboot'),
+
+  /**
+   * Subscribe to install progress. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onProgress: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('installer:progress', handler);
+    return () => ipcRenderer.removeListener('installer:progress', handler);
+  },
 });
 
 // System change events (window.systemEvents): the main process watches
