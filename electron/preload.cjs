@@ -7,6 +7,7 @@
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
+//   - window.bluetooth: BlueZ pairing and connections for the Settings app
 //   - window.vpn: VPN/WireGuard profile toggles for the network selector
 //   - window.display: xrandr multi-output arrangement for the Settings app
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
@@ -228,6 +229,46 @@ contextBridge.exposeInMainWorld('wifi', {
    * @param {boolean} enabled
    */
   setRadio: (enabled) => ipcRenderer.invoke('wifi:setRadio', enabled),
+});
+
+// Bluetooth bridge (window.bluetooth), backed by the bluetooth:* handlers in
+// main.mts (BlueZ over D-Bus). Used by the Settings app.
+contextBridge.exposeInMainWorld('bluetooth', {
+  /** Adapter state and known/nearby devices. `available: false` without BlueZ or an adapter. */
+  status: () => ipcRenderer.invoke('bluetooth:status'),
+
+  /**
+   * Turn the adapter on or off. Resolves to the new status.
+   * @param {boolean} powered
+   */
+  setPowered: (powered) => ipcRenderer.invoke('bluetooth:setPowered', powered),
+
+  /** Look for nearby devices for a short while. */
+  scan: () => ipcRenderer.invoke('bluetooth:scan'),
+
+  /**
+   * Pair with, trust and connect to a nearby device.
+   * @param {string} address
+   */
+  pair: (address) => ipcRenderer.invoke('bluetooth:pair', address),
+
+  /**
+   * Connect to a paired device.
+   * @param {string} address
+   */
+  connect: (address) => ipcRenderer.invoke('bluetooth:connect', address),
+
+  /**
+   * Disconnect a device.
+   * @param {string} address
+   */
+  disconnect: (address) => ipcRenderer.invoke('bluetooth:disconnect', address),
+
+  /**
+   * Unpair and forget a device.
+   * @param {string} address
+   */
+  remove: (address) => ipcRenderer.invoke('bluetooth:remove', address),
 });
 
 // VPN bridge (window.vpn), backed by the vpn:* handlers in main.mts (nmcli /
@@ -526,12 +567,12 @@ contextBridge.exposeInMainWorld('power', {
 });
 
 // System change events (window.systemEvents): the main process watches
-// NetworkManager and PipeWire for changes (`nmcli monitor`, `pactl
-// subscribe`) and says which area changed, so the menu bar and Settings
-// refresh on events instead of polling every few seconds.
+// NetworkManager, PipeWire and BlueZ for changes (`nmcli monitor`, `pactl
+// subscribe`, `gdbus monitor`) and says which area changed, so the menu bar
+// and Settings refresh on events instead of polling every few seconds.
 contextBridge.exposeInMainWorld('systemEvents', {
   /**
-   * Subscribe to change notices ('network' | 'audio'). Returns an
+   * Subscribe to change notices ('network' | 'audio' | 'bluetooth'). Returns an
    * unsubscribe fn.
    * @param {(topic: string) => void} callback
    */
@@ -580,6 +621,15 @@ contextBridge.exposeInMainWorld('audio', {
    * @param {number} id
    */
   setDefault: (id) => ipcRenderer.invoke('audio:setDefault', id),
+
+  /**
+   * Select an output/input on a card's inactive profile: switch the card to
+   * a profile that carries the port and make its new node the default.
+   * Resolves to the new device list.
+   * @param {string} card
+   * @param {string} port
+   */
+  selectPort: (card, port) => ipcRenderer.invoke('audio:selectPort', card, port),
 
   /**
    * Set any node's volume (0-100) by id (per-app streams, per-device).

@@ -2,13 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BatteryFull,
   Bell,
+  Bluetooth,
+  BluetoothOff,
   Bomb,
   Bug,
   Check,
   Cloud,
   CloudOff,
   EthernetPort,
+  Gamepad2,
   Gauge,
+  Headphones,
   Keyboard,
   Laptop,
   Loader2,
@@ -17,6 +21,7 @@ import {
   Minus,
   Monitor,
   Moon,
+  Mouse,
   MousePointer2,
   Play,
   Palette,
@@ -24,6 +29,8 @@ import {
   Plus,
   RotateCw,
   Search,
+  Smartphone,
+  Speaker,
   Sun,
   TriangleAlert,
   Trash2,
@@ -72,7 +79,10 @@ import {
 } from '@/hooks/usePower';
 import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
 import { cleanAudioError, getAudioBridge } from '@/lib/audio';
-import type { AudioDevice, AudioStream } from '@/lib/audio';
+import type { AudioDevice, AudioPort, AudioStream } from '@/lib/audio';
+import { cleanBluetoothError, getBluetoothBridge } from '@/lib/bluetooth';
+import type { BluetoothDevice } from '@/lib/bluetooth';
+import { useBluetoothMutations, useBluetoothStatus } from '@/hooks/useBluetooth';
 import {
   useAudioDeviceMutations,
   useAudioDevices,
@@ -112,6 +122,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 type SectionId =
   | 'wifi'
+  | 'bluetooth'
   | 'display'
   | 'brightness'
   | 'battery'
@@ -125,6 +136,7 @@ type SectionId =
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
+  { id: 'bluetooth', name: 'Bluetooth', icon: Bluetooth },
   { id: 'display', name: 'Display', icon: Monitor },
   { id: 'brightness', name: 'Brightness', icon: Sun },
   { id: 'battery', name: 'Battery', icon: BatteryFull },
@@ -143,7 +155,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * The Wi-Fi section drives NetworkManager through `window.wifi` (Electron
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
- * explanatory fallback. The Display section changes screen resolution through
+ * explanatory fallback. The Bluetooth section pairs, connects and forgets
+ * devices through `window.bluetooth` (BlueZ over D-Bus). The Display section changes screen resolution through
  * `window.display` (xrandr) for the bare-X11 standalone session; on Wayland it
  * shows a fallback. The Battery section reads `window.power`
  * (/sys/class/power_supply) and hides on machines with no battery. The Power
@@ -151,7 +164,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * (net.hadess.PowerProfiles over D-Bus: power-profiles-daemon / tuned-ppd),
  * falling back where no such daemon runs. The Sound
  * section drives the default sink's volume/mute through `window.audio`
- * (wpctl/PipeWire). Keyboard picks the layout native Linux apps type with
+ * (wpctl/PipeWire), including outputs on a sound card's inactive profile. Keyboard picks the layout native Linux apps type with
  * through `window.keyboard`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
@@ -214,6 +227,8 @@ export function Settings({ params }: AppComponentProps) {
       <div className="min-w-0 flex-1 overflow-y-auto">
         {section === 'wifi' ? (
           <WifiSection />
+        ) : section === 'bluetooth' ? (
+          <BluetoothSection />
         ) : section === 'display' ? (
           <DisplaySection />
         ) : section === 'brightness' ? (
@@ -567,6 +582,243 @@ function NetworkListSkeleton() {
         </div>
       ))}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bluetooth
+// ---------------------------------------------------------------------------
+
+/** An icon for a device from BlueZ's freedesktop icon name. */
+function BluetoothDeviceIcon({ icon, className }: { icon: string | null; className?: string }) {
+  if (icon?.startsWith('audio-head')) return <Headphones className={className} aria-hidden />;
+  if (icon?.startsWith('audio')) return <Speaker className={className} aria-hidden />;
+  if (icon === 'input-mouse' || icon === 'input-tablet') return <Mouse className={className} aria-hidden />;
+  if (icon === 'input-keyboard') return <Keyboard className={className} aria-hidden />;
+  if (icon === 'input-gaming') return <Gamepad2 className={className} aria-hidden />;
+  if (icon === 'phone') return <Smartphone className={className} aria-hidden />;
+  if (icon === 'computer') return <Laptop className={className} aria-hidden />;
+  return <Bluetooth className={className} aria-hidden />;
+}
+
+/**
+ * Bluetooth: turn the adapter on or off, scan for nearby devices, and pair,
+ * connect, disconnect or forget them through `window.bluetooth` (BlueZ).
+ * Connected audio devices then show up as outputs in the Sound panel.
+ */
+function BluetoothSection() {
+  const bridge = getBluetoothBridge();
+  const status = useBluetoothStatus();
+  const { setPowered, scan, pair, connect, disconnect, remove } = useBluetoothMutations();
+  // Last failed operation, keyed to the device address it concerned.
+  const [opError, setOpError] = useState<{ address: string; message: string } | null>(null);
+  const { toast } = useToast();
+
+  // Look for devices as soon as the panel opens with the adapter on.
+  const powered = status.data?.powered ?? false;
+  const scanMutate = scan.mutate;
+  useEffect(() => {
+    if (powered) scanMutate();
+  }, [powered, scanMutate]);
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Bluetooth">
+        <FallbackCard icon={Bluetooth}>
+          Bluetooth settings need the Din desktop shell; devices can't be managed
+          in a plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const run = (
+    mutation: typeof pair,
+    device: BluetoothDevice,
+  ) => {
+    setOpError(null);
+    mutation.mutate(device.address, {
+      onError: (error) =>
+        setOpError({ address: device.address, message: cleanBluetoothError(error) }),
+    });
+  };
+
+  const devices = status.data?.devices ?? [];
+  const known = devices.filter((d) => d.paired || d.connected);
+  const nearby = devices.filter((d) => !d.paired && !d.connected);
+  const discovering = status.data?.discovering ?? false;
+  const pendingFor = (address: string) =>
+    [pair, connect, disconnect, remove].some((m) => m.isPending && m.variables === address);
+
+  const renderList = (list: BluetoothDevice[], label: string) => (
+    <ul className="flex flex-col gap-1" aria-label={label}>
+      {list.map((device) => (
+        <BluetoothDeviceRow
+          key={device.address}
+          device={device}
+          busy={pendingFor(device.address)}
+          action={
+            pair.isPending && pair.variables === device.address
+              ? 'Pairing…'
+              : connect.isPending && connect.variables === device.address
+                ? 'Connecting…'
+                : disconnect.isPending && disconnect.variables === device.address
+                  ? 'Disconnecting…'
+                  : null
+          }
+          error={opError?.address === device.address ? opError.message : null}
+          onPair={() => run(pair, device)}
+          onConnect={() => run(connect, device)}
+          onDisconnect={() => run(disconnect, device)}
+          onForget={() => run(remove, device)}
+        />
+      ))}
+    </ul>
+  );
+
+  return (
+    <SectionShell
+      title="Bluetooth"
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Scan for devices"
+            title="Scan for devices"
+            disabled={!powered || discovering}
+            onClick={() => scan.mutate()}
+          >
+            <RotateCw className={cn('size-4', discovering && 'animate-spin')} />
+          </Button>
+          <Switch
+            aria-label="Bluetooth"
+            checked={powered}
+            disabled={!status.data?.available || setPowered.isPending}
+            onCheckedChange={(checked) =>
+              setPowered.mutate(checked, {
+                onError: (error) =>
+                  toast({
+                    title: checked ? 'Could not turn Bluetooth on' : 'Could not turn Bluetooth off',
+                    description: cleanBluetoothError(error),
+                    variant: 'destructive',
+                  }),
+              })
+            }
+          />
+        </>
+      }
+    >
+      {status.isLoading ? (
+        <NetworkListSkeleton />
+      ) : status.isError ? (
+        <FallbackCard>Could not read Bluetooth state: {cleanBluetoothError(status.error)}</FallbackCard>
+      ) : !status.data?.available ? (
+        <FallbackCard icon={BluetoothOff}>
+          No Bluetooth adapter was found, or the Bluetooth service (BlueZ) isn't
+          running on this system.
+        </FallbackCard>
+      ) : !powered ? (
+        <FallbackCard icon={BluetoothOff}>Bluetooth is turned off.</FallbackCard>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {known.length > 0 && (
+            <>
+              <SoundGroupHeading icon={Bluetooth}>My devices</SoundGroupHeading>
+              {renderList(known, 'My devices')}
+            </>
+          )}
+          <SoundGroupHeading icon={Search}>
+            Nearby devices
+            {discovering && (
+              <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Scanning" />
+            )}
+          </SoundGroupHeading>
+          {nearby.length > 0 ? (
+            renderList(nearby, 'Nearby devices')
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {discovering
+                ? 'Looking for devices… Put yours in pairing mode.'
+                : 'No devices found. Put yours in pairing mode and scan again.'}
+            </p>
+          )}
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+function BluetoothDeviceRow({
+  device,
+  busy,
+  action,
+  error,
+  onPair,
+  onConnect,
+  onDisconnect,
+  onForget,
+}: {
+  device: BluetoothDevice;
+  busy: boolean;
+  /** In-progress label for the main button, e.g. "Pairing…". */
+  action: string | null;
+  error: string | null;
+  onPair: () => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onForget: () => void;
+}) {
+  const detail = device.connected
+    ? device.battery !== null
+      ? `Connected · ${device.battery}% battery`
+      : 'Connected'
+    : device.paired
+      ? 'Not connected'
+      : null;
+
+  return (
+    <li className="rounded-lg border border-border/60 bg-background/40">
+      <div className="flex items-center gap-3 px-3 py-2">
+        <BluetoothDeviceIcon
+          icon={device.icon}
+          className={cn('size-5 shrink-0', device.connected ? 'text-primary' : 'text-muted-foreground')}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-foreground">{device.name}</p>
+          {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={device.connected ? onDisconnect : device.paired ? onConnect : onPair}
+        >
+          {action ? (
+            <>
+              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              {action}
+            </>
+          ) : device.connected ? (
+            'Disconnect'
+          ) : device.paired ? (
+            'Connect'
+          ) : (
+            'Pair'
+          )}
+        </Button>
+        {device.paired && (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onForget}>
+            Forget
+          </Button>
+        )}
+      </div>
+      {error !== null && (
+        <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </li>
   );
 }
 
@@ -1713,6 +1965,46 @@ function AudioDeviceRow({
   );
 }
 
+/**
+ * An output/input on a sound card's inactive profile (e.g. the headphone jack
+ * while the speakers are in use). Selecting it switches the card over, which
+ * removes the card's current devices from the list.
+ */
+function AudioPortRow({
+  port,
+  kind,
+  pending,
+  onSelect,
+}: {
+  port: AudioPort;
+  kind: 'output' | 'input';
+  pending: boolean;
+  onSelect: () => void;
+}) {
+  const Icon = kind === 'input' ? Mic : /headphone|headset/i.test(port.port) ? Headphones : Volume2;
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/40 p-2.5">
+      <button
+        type="button"
+        role="radio"
+        aria-checked={false}
+        onClick={onSelect}
+        disabled={pending}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span
+          className="flex size-4 shrink-0 items-center justify-center rounded-full border border-muted-foreground/50"
+          aria-hidden
+        >
+          {pending && <Loader2 className="size-3 animate-spin" />}
+        </span>
+        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 truncate text-sm">{port.name}</span>
+      </button>
+    </div>
+  );
+}
+
 /** A per-application volume row with a smooth local drag committed on release. */
 function AudioStreamRow({
   stream,
@@ -1874,7 +2166,7 @@ function SoundSection() {
   const { setVolume, setMuted } = useAudioMutations();
   const devices = useAudioDevices();
   const streams = useAudioStreams();
-  const { setDefault, setNodeVolume, setNodeMuted, test } = useAudioDeviceMutations();
+  const { setDefault, selectPort, setNodeVolume, setNodeMuted, test } = useAudioDeviceMutations();
 
   const serverVolume = status.data?.volume ?? 0;
   const muted = status.data?.muted ?? false;
@@ -1888,6 +2180,23 @@ function SoundSection() {
     setLastServer(serverVolume);
     setValue(serverVolume);
   }
+
+  const choosePort = (port: AudioPort) =>
+    selectPort.mutate(
+      { card: port.card, port: port.port },
+      {
+        onError: (err) =>
+          toast({
+            title: `Couldn't switch to ${port.name}`,
+            description: cleanAudioError(err),
+            variant: 'destructive',
+          }),
+      },
+    );
+  const portPending = (port: AudioPort) =>
+    selectPort.isPending &&
+    selectPort.variables?.card === port.card &&
+    selectPort.variables.port === port.port;
 
   const runTest = (device: AudioDevice) =>
     test.mutate(device.id, {
@@ -1912,6 +2221,8 @@ function SoundSection() {
 
   const sinks = devices.data?.sinks ?? [];
   const sources = devices.data?.sources ?? [];
+  const inactiveSinks = devices.data?.inactiveSinks ?? [];
+  const inactiveSources = devices.data?.inactiveSources ?? [];
   const appStreams = streams.data?.streams ?? [];
 
   return (
@@ -2005,7 +2316,7 @@ function SoundSection() {
 
           {/* Output devices */}
           <SoundGroupHeading icon={Volume2}>Output device</SoundGroupHeading>
-          {sinks.length > 0 ? (
+          {sinks.length + inactiveSinks.length > 0 ? (
             <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Output device">
               {sinks.map((device) => (
                 <AudioDeviceRow
@@ -2017,6 +2328,15 @@ function SoundSection() {
                   testing={test.isPending && test.variables === device.id}
                 />
               ))}
+              {inactiveSinks.map((port) => (
+                <AudioPortRow
+                  key={`${port.card} ${port.port}`}
+                  port={port}
+                  kind="output"
+                  pending={portPending(port)}
+                  onSelect={() => choosePort(port)}
+                />
+              ))}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">No output devices found.</p>
@@ -2024,7 +2344,7 @@ function SoundSection() {
 
           {/* Input devices */}
           <SoundGroupHeading icon={Mic}>Input device</SoundGroupHeading>
-          {sources.length > 0 ? (
+          {sources.length + inactiveSources.length > 0 ? (
             <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Input device">
               {sources.map((device) => (
                 <AudioDeviceRow
@@ -2032,6 +2352,15 @@ function SoundSection() {
                   device={device}
                   kind="input"
                   onSelect={() => setDefault.mutate(device.id)}
+                />
+              ))}
+              {inactiveSources.map((port) => (
+                <AudioPortRow
+                  key={`${port.card} ${port.port}`}
+                  port={port}
+                  kind="input"
+                  pending={portPending(port)}
+                  onSelect={() => choosePort(port)}
                 />
               ))}
             </div>

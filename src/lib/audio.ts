@@ -28,6 +28,17 @@ export interface AudioDevice {
   isDefault: boolean;
 }
 
+/**
+ * An output or input with no device yet because its sound card is on a
+ * profile without it (e.g. the headphone jack while the speaker profile is
+ * active). Selecting it switches the card's profile.
+ */
+export interface AudioPort {
+  card: string;
+  port: string;
+  name: string;
+}
+
 export interface AudioDevices {
   /** False when wpctl/PipeWire is not present. */
   available: boolean;
@@ -35,6 +46,10 @@ export interface AudioDevices {
   sinks: AudioDevice[];
   /** Input devices. */
   sources: AudioDevice[];
+  /** Outputs reachable by switching a card's profile. */
+  inactiveSinks: AudioPort[];
+  /** Inputs reachable by switching a card's profile. */
+  inactiveSources: AudioPort[];
 }
 
 /** A per-application playback stream. */
@@ -64,6 +79,11 @@ export interface AudioBridge {
   streams(): Promise<AudioStreams>;
   /** Make a device the default sink/source by id. Resolves to the new list. */
   setDefault(id: number): Promise<AudioDevices>;
+  /**
+   * Select an output/input on a card's inactive profile, switching the card
+   * to it and making it the default. Resolves to the new list.
+   */
+  selectPort(card: string, port: string): Promise<AudioDevices>;
   /** Set any node's volume (0-100) by id (per-app streams, per-device). */
   setNodeVolume(id: number, percent: number): Promise<void>;
   /** Mute or unmute any node by id. */

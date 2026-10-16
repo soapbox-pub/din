@@ -94,6 +94,14 @@ export function useAudioDeviceMutations() {
     onSettled: invalidate,
   });
 
+  const selectPort = useMutation({
+    mutationFn: ({ card, port }: { card: string; port: string }) =>
+      requireBridge().selectPort(card, port),
+    onSuccess: (devices: AudioDevices) =>
+      queryClient.setQueryData(AUDIO_DEVICES_KEY, devices),
+    onSettled: invalidate,
+  });
+
   const setNodeVolume = useMutation({
     mutationFn: ({ id, percent }: { id: number; percent: number }) =>
       requireBridge().setNodeVolume(id, percent),
@@ -110,5 +118,5 @@ export function useAudioDeviceMutations() {
     mutationFn: (id: number) => requireBridge().test(id),
   });
 
-  return { setDefault, setNodeVolume, setNodeMuted, test };
+  return { setDefault, selectPort, setNodeVolume, setNodeMuted, test };
 }

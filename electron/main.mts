@@ -1151,9 +1151,11 @@ function registerPowerHandlers(): void {
 // the default sink's volume and mute for the menu-bar control, the media-key
 // OSD, and - for the Settings sound panel - output/input device enumeration
 // and selection, per-application (stream) volume, and a test tone played to a
-// chosen sink via pw-play. Where wpctl is absent (no PipeWire) it reports
-// available:false and the UI falls back. Same trust boundary as the other
-// bridges: sender guard, argv execFile, ids and volumes re-validated here.
+// chosen sink via pw-play. Outputs/inputs on a card's inactive profiles come
+// from pactl, and selecting one switches the profile. Where wpctl is absent
+// (no PipeWire) it reports available:false and the UI falls back. Same trust
+// boundary as the other bridges: sender guard, argv execFile, ids and volumes
+// re-validated here.
 // ---------------------------------------------------------------------------
 
 const WPCTL_TIMEOUT_MS = 5_000;
@@ -1238,10 +1240,28 @@ interface AudioStream {
   muted: boolean;
 }
 
+/**
+ * An output or input that has no node yet because its sound card is on a
+ * profile without it (a laptop's headphone jack while the speaker profile is
+ * active, a Bluetooth headset's mic on the A2DP profile). Selecting it
+ * switches the card's profile.
+ */
+interface AudioPort {
+  /** Card name, e.g. "alsa_card.pci-0000_c4_00.6". */
+  card: string;
+  /** Port name on that card, e.g. "[Out] Headphones". */
+  port: string;
+  name: string;
+}
+
 interface AudioDevices {
   available: boolean;
   sinks: AudioDevice[];
   sources: AudioDevice[];
+  /** Outputs reachable by switching a card's profile. */
+  inactiveSinks: AudioPort[];
+  /** Inputs reachable by switching a card's profile. */
+  inactiveSources: AudioPort[];
 }
 
 /** Pull "[vol: 0.60 MUTED]" out of a node line into a percentage and mute flag. */
@@ -1317,17 +1337,145 @@ function validNodeId(x: unknown): number {
   return n;
 }
 
+// --- Card profiles: outputs/inputs that only exist on an inactive profile. ---
+// `wpctl status` lists nodes, and a card makes nodes only for its active
+// profile, so pactl's card listing (served by pipewire-pulse) fills in the
+// rest. Where pactl is missing or too old for `-f json`, these lists are empty.
+
+const PACTL_TIMEOUT_MS = 5_000;
+/** How long to wait for a card's new node after switching its profile. */
+const PROFILE_SWITCH_WAIT_MS = 3_000;
+/** Profiles never offered as a device choice. */
+const SKIPPED_PROFILES = new Set(['off', 'pro-audio']);
+
+function pactl(args: string[], timeout = PACTL_TIMEOUT_MS): Promise<string> {
+  return tool('pactl', args, timeout, 4 * 1024 * 1024);
+}
+
+interface PactlCard {
+  name: string;
+  active_profile: string | null;
+  properties: Record<string, string>;
+  profiles: Record<string, { priority: number; available: boolean }>;
+  ports: Record<string, { description: string; type: string; availability: string; profiles: string[] }>;
+}
+
+/** A sink or source as `pactl -f json list sinks|sources` reports it. */
+interface PactlNode {
+  name: string;
+  properties: Record<string, string>;
+  ports: { name: string }[];
+  active_port: string | null;
+}
+
+/** Parse a `pactl -f json list ...` array; [] when pactl can't provide one. */
+async function pactlList<T>(what: 'cards' | 'sinks' | 'sources'): Promise<T[]> {
+  try {
+    const parsed: unknown = JSON.parse(await pactl(['-f', 'json', 'list', what]));
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Whether a card port is an output or an input, from its name. */
+function portDirection(port: string): 'output' | 'input' | null {
+  if (/^\[Out\]|(^|-)output(-|$)/i.test(port)) return 'output';
+  if (/^\[In\]|(^|-)input(-|$)/i.test(port)) return 'input';
+  return null;
+}
+
+/** The best profile that carries a port: available, highest priority. */
+function profileForPort(card: PactlCard, port: string): string | null {
+  let best: string | null = null;
+  let bestPriority = -Infinity;
+  for (const name of card.ports[port]?.profiles ?? []) {
+    const profile = card.profiles[name];
+    if (!profile?.available || SKIPPED_PROFILES.has(name)) continue;
+    if (profile.priority > bestPriority) {
+      best = name;
+      bestPriority = profile.priority;
+    }
+  }
+  return best;
+}
+
+/** Ports with no node because their card's active profile doesn't carry them. */
+function inactivePorts(cards: PactlCard[]): { output: AudioPort[]; input: AudioPort[] } {
+  const found = { output: [] as AudioPort[], input: [] as AudioPort[] };
+  for (const card of cards) {
+    const cardName = card.properties?.['device.description'] ?? card.name;
+    for (const [port, info] of Object.entries(card.ports ?? {})) {
+      if (info.availability === 'not available') continue;
+      // ALSA offers S/PDIF on many USB devices without the jack; only show it
+      // when the card can actually tell it's there.
+      if (info.type === 'SPDIF' && info.availability !== 'available') continue;
+      if (card.active_profile && info.profiles.includes(card.active_profile)) continue;
+      const direction = portDirection(port);
+      if (!direction || !profileForPort(card, port)) continue;
+      found[direction].push({ card: card.name, port, name: `${cardName} ${info.description}` });
+    }
+  }
+  return found;
+}
+
 /** All sinks and sources, or available:false when wpctl is absent. */
 async function audioDevices(): Promise<AudioDevices> {
   try {
-    const { sinks, sources } = parseAudioStatus(await wpctl(['status']));
-    return { available: true, sinks, sources };
+    const [status, cards] = await Promise.all([
+      wpctl(['status']),
+      pactlList<PactlCard>('cards'),
+    ]);
+    const { sinks, sources } = parseAudioStatus(status);
+    const inactive = inactivePorts(cards);
+    return {
+      available: true,
+      sinks,
+      sources,
+      inactiveSinks: inactive.output,
+      inactiveSources: inactive.input,
+    };
   } catch (error) {
     if (messageOf(error) === 'wpctl-missing') {
-      return { available: false, sinks: [], sources: [] };
+      return { available: false, sinks: [], sources: [], inactiveSinks: [], inactiveSources: [] };
     }
     throw error;
   }
+}
+
+/**
+ * Switch a card to the profile that carries `port`, then make the node that
+ * profile creates for it the default (setting it as that node's active port
+ * if the node has several). The card and port must be ones pactl currently
+ * lists, so a renderer can't pass arbitrary strings through to pactl.
+ */
+async function audioSelectPort(rawCard: unknown, rawPort: unknown): Promise<AudioDevices> {
+  if (typeof rawCard !== 'string' || typeof rawPort !== 'string') {
+    throw new Error('A card and port are required');
+  }
+  const card = (await pactlList<PactlCard>('cards')).find((c) => c.name === rawCard);
+  const direction = portDirection(rawPort);
+  const profile = card?.ports?.[rawPort] ? profileForPort(card, rawPort) : null;
+  if (!card || !direction || !profile) throw new Error('That device is no longer available');
+
+  await pactl(['set-card-profile', card.name, profile]);
+
+  // The profile's nodes appear asynchronously; wait for the one with our port.
+  const kind = direction === 'output' ? 'sinks' : 'sources';
+  const deadline = Date.now() + PROFILE_SWITCH_WAIT_MS;
+  while (Date.now() < deadline) {
+    const node = (await pactlList<PactlNode>(kind)).find(
+      (n) => n.properties?.['device.name'] === card.name && n.ports?.some((p) => p.name === rawPort),
+    );
+    if (node) {
+      const type = direction === 'output' ? 'sink' : 'source';
+      if (node.active_port !== rawPort) await pactl([`set-${type}-port`, node.name, rawPort]);
+      await pactl([`set-default-${type}`, node.name]);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return audioDevices();
 }
 
 /**
@@ -1445,6 +1593,10 @@ function registerAudioHandlers(): void {
     assertShellSender(event);
     return audioSetDefault(id);
   });
+  ipcMain.handle('audio:selectPort', async (event, card, port) => {
+    assertShellSender(event);
+    return audioSelectPort(card, port);
+  });
   ipcMain.handle('audio:setNodeVolume', async (event, id, pct) => {
     assertShellSender(event);
     return audioSetNodeVolume(id, pct);
@@ -1456,6 +1608,204 @@ function registerAudioHandlers(): void {
   ipcMain.handle('audio:test', async (event, id) => {
     assertShellSender(event);
     return audioTest(id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Bluetooth bridge (window.bluetooth), backed by BlueZ on the system bus via
+// busctl, like the power-profiles bridge. One GetManagedObjects call reads
+// the adapter and every known device; pairing, connecting and removal are
+// Device1/Adapter1 method calls. Discovery is the exception: BlueZ stops a
+// scan when the D-Bus client that started it leaves, so a short-lived busctl
+// can't hold one, and `bluetoothctl --timeout` keeps a scan running instead.
+// Pairing registers no agent, so BlueZ pairs as a device with no input or
+// output ("just works") - enough for headphones, speakers, mice and the like,
+// not for devices that need a PIN typed. Missing BlueZ, adapter or busctl ->
+// available:false and the Settings panel falls back.
+// ---------------------------------------------------------------------------
+
+const BLUEZ = 'org.bluez';
+const BLUETOOTH_SCAN_SECONDS = 30;
+const BLUETOOTH_PAIR_TIMEOUT_S = 60;
+const BLUETOOTH_CONNECT_TIMEOUT_S = 30;
+const BLUETOOTH_ADDRESS = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i;
+
+type DbusVariant = { type: string; data: unknown };
+type DbusInterfaces = Record<string, Record<string, DbusVariant> | undefined>;
+
+interface BluetoothDevice {
+  address: string;
+  name: string;
+  /** BlueZ's freedesktop icon name, e.g. "audio-headphones", or null. */
+  icon: string | null;
+  paired: boolean;
+  connected: boolean;
+  /** Battery percentage the device reports, or null. */
+  battery: number | null;
+}
+
+interface BluetoothStatus {
+  available: boolean;
+  powered: boolean;
+  discovering: boolean;
+  devices: BluetoothDevice[];
+}
+
+/** Every BlueZ object path with its interfaces and properties. */
+async function bluezObjects(): Promise<Record<string, DbusInterfaces>> {
+  const out = await busctl([
+    '--json=short', 'call', BLUEZ, '/', 'org.freedesktop.DBus.ObjectManager', 'GetManagedObjects',
+  ]);
+  const parsed = JSON.parse(out) as { data?: unknown[] };
+  const objects = parsed.data?.[0];
+  return objects && typeof objects === 'object' ? (objects as Record<string, DbusInterfaces>) : {};
+}
+
+/** The first adapter's object path, or null when there is none. */
+function bluezAdapter(objects: Record<string, DbusInterfaces>): string | null {
+  return Object.keys(objects).sort().find((p) => objects[p]['org.bluez.Adapter1']) ?? null;
+}
+
+function variantData<T>(props: Record<string, DbusVariant> | undefined, key: string, type: string): T | null {
+  const v = props?.[key];
+  return v && v.type === type ? (v.data as T) : null;
+}
+
+async function bluetoothStatus(): Promise<BluetoothStatus> {
+  const none = { available: false, powered: false, discovering: false, devices: [] };
+  let objects: Record<string, DbusInterfaces>;
+  try {
+    objects = await bluezObjects();
+  } catch {
+    // busctl missing, or BlueZ isn't running on the bus.
+    return none;
+  }
+  const adapterPath = bluezAdapter(objects);
+  if (!adapterPath) return none;
+  const adapter = objects[adapterPath]['org.bluez.Adapter1'];
+
+  const devices: BluetoothDevice[] = [];
+  for (const interfaces of Object.values(objects)) {
+    const dev = interfaces['org.bluez.Device1'];
+    if (!dev || variantData<string>(dev, 'Adapter', 'o') !== adapterPath) continue;
+    const address = variantData<string>(dev, 'Address', 's');
+    if (!address) continue;
+    const paired = variantData<boolean>(dev, 'Paired', 'b') === true;
+    const connected = variantData<boolean>(dev, 'Connected', 'b') === true;
+    const name = variantData<string>(dev, 'Name', 's');
+    // Scans turn up plenty of nameless beacons; only show those already in use.
+    if (!name && !paired && !connected) continue;
+    devices.push({
+      address,
+      name: variantData<string>(dev, 'Alias', 's') ?? name ?? address,
+      icon: variantData<string>(dev, 'Icon', 's'),
+      paired,
+      connected,
+      battery: variantData<number>(interfaces['org.bluez.Battery1'], 'Percentage', 'y'),
+    });
+  }
+  devices.sort(
+    (a, b) =>
+      Number(b.connected) - Number(a.connected) ||
+      Number(b.paired) - Number(a.paired) ||
+      a.name.localeCompare(b.name),
+  );
+
+  return {
+    available: true,
+    powered: variantData<boolean>(adapter, 'Powered', 'b') === true,
+    discovering: variantData<boolean>(adapter, 'Discovering', 'b') === true,
+    devices,
+  };
+}
+
+/**
+ * Resolve a caller-supplied address to a device BlueZ currently knows on the
+ * first adapter, so only real object paths reach busctl.
+ */
+async function bluezDevice(rawAddress: unknown): Promise<{ adapter: string; path: string }> {
+  if (typeof rawAddress !== 'string' || !BLUETOOTH_ADDRESS.test(rawAddress)) {
+    throw new Error('Invalid Bluetooth address');
+  }
+  const objects = await bluezObjects();
+  const adapter = bluezAdapter(objects);
+  const address = rawAddress.toUpperCase();
+  const path = Object.keys(objects).find((p) => {
+    const dev = objects[p]['org.bluez.Device1'];
+    return dev && variantData<string>(dev, 'Adapter', 'o') === adapter &&
+      variantData<string>(dev, 'Address', 's')?.toUpperCase() === address;
+  });
+  if (!adapter || !path) throw new Error('That device is no longer nearby');
+  return { adapter, path };
+}
+
+/** Call a BlueZ method with a D-Bus timeout (pairing waits on the device). */
+function bluezCall(path: string, iface: string, method: string, timeoutS: number, ...args: string[]) {
+  return busctl(
+    [`--timeout=${timeoutS}`, 'call', BLUEZ, path, iface, method, ...args],
+    (timeoutS + 5) * 1000,
+  );
+}
+
+let bluetoothScanning = false;
+
+function registerBluetoothHandlers(): void {
+  ipcMain.handle('bluetooth:status', async (event) => {
+    assertShellSender(event);
+    return bluetoothStatus();
+  });
+
+  ipcMain.handle('bluetooth:setPowered', async (event, powered) => {
+    assertShellSender(event);
+    const adapter = bluezAdapter(await bluezObjects());
+    if (!adapter) throw new Error('No Bluetooth adapter found');
+    await busctl([
+      'set-property', BLUEZ, adapter, 'org.bluez.Adapter1', 'Powered', 'b', powered === true ? 'true' : 'false',
+    ]);
+    return bluetoothStatus();
+  });
+
+  ipcMain.handle('bluetooth:scan', async (event) => {
+    assertShellSender(event);
+    if (!bluetoothScanning) {
+      bluetoothScanning = true;
+      tool(
+        'bluetoothctl',
+        ['--timeout', String(BLUETOOTH_SCAN_SECONDS), 'scan', 'on'],
+        (BLUETOOTH_SCAN_SECONDS + 5) * 1000,
+      )
+        .catch((error) => console.warn('[bluetooth] scan failed:', messageOf(error)))
+        .finally(() => {
+          bluetoothScanning = false;
+        });
+    }
+  });
+
+  ipcMain.handle('bluetooth:pair', async (event, address) => {
+    assertShellSender(event);
+    const { path: dev } = await bluezDevice(address);
+    await bluezCall(dev, 'org.bluez.Device1', 'Pair', BLUETOOTH_PAIR_TIMEOUT_S);
+    // Trusted devices may reconnect on their own, like they do elsewhere.
+    await busctl(['set-property', BLUEZ, dev, 'org.bluez.Device1', 'Trusted', 'b', 'true']);
+    await bluezCall(dev, 'org.bluez.Device1', 'Connect', BLUETOOTH_CONNECT_TIMEOUT_S);
+  });
+
+  ipcMain.handle('bluetooth:connect', async (event, address) => {
+    assertShellSender(event);
+    const { path: dev } = await bluezDevice(address);
+    await bluezCall(dev, 'org.bluez.Device1', 'Connect', BLUETOOTH_CONNECT_TIMEOUT_S);
+  });
+
+  ipcMain.handle('bluetooth:disconnect', async (event, address) => {
+    assertShellSender(event);
+    const { path: dev } = await bluezDevice(address);
+    await bluezCall(dev, 'org.bluez.Device1', 'Disconnect', BLUETOOTH_CONNECT_TIMEOUT_S);
+  });
+
+  ipcMain.handle('bluetooth:remove', async (event, address) => {
+    assertShellSender(event);
+    const { adapter, path: dev } = await bluezDevice(address);
+    await bluezCall(adapter, 'org.bluez.Adapter1', 'RemoveDevice', BLUETOOTH_CONNECT_TIMEOUT_S, 'o', dev);
   });
 }
 
@@ -1476,9 +1826,16 @@ const SYSTEM_EVENT_DEBOUNCE_MS = 250;
  */
 const AUDIO_EVENT = /on (sink|source|server|card|sink-input) /;
 
+/**
+ * BlueZ signals as `gdbus monitor` prints them. Scans stream RSSI updates
+ * several times a second; only these changes matter to the Bluetooth panel.
+ */
+const BLUETOOTH_EVENT =
+  /Interfaces(Added|Removed)|'(Powered|Discovering|Connected|Paired|Name|Alias|Percentage)'/;
+
 function registerSystemEvents(): void {
   const timers = new Map<string, NodeJS.Timeout>();
-  const changed = (topic: 'network' | 'audio') => {
+  const changed = (topic: 'network' | 'audio' | 'bluetooth') => {
     if (timers.has(topic)) return;
     timers.set(
       topic,
@@ -1491,6 +1848,9 @@ function registerSystemEvents(): void {
   watchCommand('network', 'nmcli', ['monitor'], () => changed('network'));
   watchCommand('audio', 'pactl', ['subscribe'], (line) => {
     if (AUDIO_EVENT.test(line)) changed('audio');
+  });
+  watchCommand('bluetooth', 'gdbus', ['monitor', '--system', '--dest', BLUEZ], (line) => {
+    if (BLUETOOTH_EVENT.test(line)) changed('bluetooth');
   });
 }
 
@@ -3631,6 +3991,7 @@ app.whenReady().then(() => {
   registerDisplayHandlers();
   registerPowerHandlers();
   registerAudioHandlers();
+  registerBluetoothHandlers();
   registerMediaKeys();
   registerSystemEvents();
   registerBrightnessHandlers();

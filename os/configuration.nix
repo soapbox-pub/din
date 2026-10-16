@@ -83,11 +83,13 @@ let
   # nmcli for the Settings app's WiFi bridge, brightnessctl + gammastep for the
   # Settings/menu-bar brightness bridge (backlight + night light), wpctl
   # (wireplumber) for the Settings sound bridge's device/stream control and
-  # pw-play (pipewire) for its test tone, Xvfb for the embedded display
-  # native Linux apps run on (electron/native-display.mts), and setxkbmap plus
+  # pw-play (pipewire) for its test tone, pactl (pulseaudio's client, talking
+  # to pipewire-pulse) for its change monitor and card profiles, bluetoothctl
+  # (bluez) for Bluetooth scans and gdbus (glib) to watch BlueZ, Xvfb for the
+  # embedded display native Linux apps run on (electron/native-display.mts), and setxkbmap plus
   # xkeyboard-config's rules for their keyboard layout (electron/keyboard.mts).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.bluez}/bin:${pkgs.glib.bin}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     exec ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.mts \
@@ -193,6 +195,10 @@ in
     alsa.enable = true;
     pulse.enable = true;
   };
+
+  # BlueZ backs Din's Bluetooth panel (busctl/bluetoothctl via the Electron
+  # bluetooth bridge); PipeWire picks up connected headsets as audio devices.
+  hardware.bluetooth.enable = true;
 
   # Keep the image lean-ish.
   documentation.enable = false;
