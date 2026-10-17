@@ -184,10 +184,27 @@ in
     uid = 1000;
     description = "Din desktop user";
     extraGroups = [ "wheel" "networkmanager" "video" "audio" "input" ];
+    shell = pkgs.zsh;
   };
 
   # `din` has no password (cage logs it in), so sudo can't ask for one.
   security.sudo.wheelNeedsPassword = false;
+
+  # zsh is the login shell, so it's what the Terminal app opens. The empty
+  # ~/.zshrc keeps zsh's first-run configuration wizard from appearing.
+  programs.zsh = {
+    enable = true;
+    autosuggestions.enable = true;
+    syntaxHighlighting.enable = true;
+  };
+  systemd.tmpfiles.rules = [ "f /home/din/.zshrc 0644 din users -" ];
+
+  # Desktop, Documents, Downloads, Music, Pictures, Videos, ... in the home
+  # directory, and ~/.config/user-dirs.dirs naming them for other apps.
+  # xdg-user-dirs' unit waits for a graphical session target that cage never
+  # reaches, so it runs at login instead.
+  systemd.packages = [ pkgs.xdg-user-dirs ];
+  systemd.user.services.xdg-user-dirs.wantedBy = [ "default.target" ];
 
   # brightnessctl ships udev rules that grant the `video` group write access to
   # /sys/class/backlight, so the Settings brightness panel works unprivileged.
