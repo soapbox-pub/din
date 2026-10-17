@@ -150,6 +150,8 @@ let
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
     export DIN_INSTALLER=${din-installer}/bin/din-install
+    # Chromium logging into the journal (via cage), for diagnosing real hardware.
+    export ELECTRON_ENABLE_LOGGING=1
     exec ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.mts \
       --ozone-platform=wayland ${extraFlags}
