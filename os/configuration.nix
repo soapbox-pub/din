@@ -174,26 +174,17 @@ in
   # event nodes directly for the laptop box-select screenshot key
   # (KEY_SELECTIVE_SCREENSHOT), whose keysym Chromium can't identify - see
   # electron/main.mts. The main process already observes every keystroke via
-  # before-input-event; nothing new is exposed to renderers.
+  # before-input-event; nothing new is exposed to renderers. `wheel` gives
+  # the developer the machine: full sudo, which the Installer app also uses
+  # (`sudo -n`) to run its helper as root.
   users.users.web = {
     isNormalUser = true;
     description = "Din desktop user";
-    extraGroups = [ "networkmanager" "video" "audio" "input" ];
+    extraGroups = [ "wheel" "networkmanager" "video" "audio" "input" ];
   };
 
-  # The Installer app runs its helper as root, and nothing else. The helper
-  # validates its own arguments and only installs from a live USB boot.
-  security.sudo.extraRules = [
-    {
-      users = [ "web" ];
-      commands = [
-        {
-          command = "${din-installer}/bin/din-install";
-          options = [ "NOPASSWD" ];
-        }
-      ];
-    }
-  ];
+  # `web` has no password (cage logs it in), so sudo can't ask for one.
+  security.sudo.wheelNeedsPassword = false;
 
   # brightnessctl ships udev rules that grant the `video` group write access to
   # /sys/class/backlight, so the Settings brightness panel works unprivileged.
