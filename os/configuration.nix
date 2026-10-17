@@ -280,6 +280,16 @@ in
     trusted-users = [ "@wheel" ];
   };
 
+  # Root is a fixed-size volume on an installed system (os/din-install.sh), so
+  # the Nix store mustn't grow without end: old systems leave the boot menu
+  # after ten, and what's unused for a month goes.
+  nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    options = "--delete-older-than 30d";
+  };
+  boot.loader.systemd-boot.configurationLimit = 10;
+
   # What install scripts and a developer's first hour assume is present.
   # distrobox is the escape hatch for anything else: a full Ubuntu/Fedora/Arch
   # userland with its own package manager, sharing $HOME, in rootless podman
