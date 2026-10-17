@@ -7,6 +7,7 @@ import type { AppComponentProps } from '@/lib/apps';
 import { getPtyBridge } from '@/lib/pty';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { TabStrip } from '@/components/desktop/TabStrip';
 import {
@@ -1064,9 +1065,31 @@ const TerminalSession = memo(function TerminalSession({
   }, [active]);
 
   // Keep keyboard focus on the tab's active pane (new splits focus the new
-  // pane; closing a pane moves focus to a survivor).
+  // pane; closing a pane moves focus to a survivor), and restore it whenever
+  // the window comes to the front (un-minimize, raise from the dock).
+  const isTop = useWindowIsTop();
+  const isTopRef = useRef(isTop);
+  useLayoutEffect(() => {
+    isTopRef.current = isTop;
+  });
   useEffect(() => {
-    if (active && focused) termRef.current?.focus();
+    if (active && focused && isTop) termRef.current?.focus();
+  }, [active, focused, isTop]);
+
+  // Clicking the title bar (empty space, the tab strip) of an already-raised
+  // window moves focus off the terminal; hand it back once the click lands.
+  // Skipped if the click minimized or closed the window.
+  useEffect(() => {
+    if (!active || !focused) return;
+    const header = containerRef.current?.closest('section')?.querySelector(':scope > header');
+    if (!header) return;
+    const onPointerUp = () => {
+      requestAnimationFrame(() => {
+        if (isTopRef.current) termRef.current?.focus();
+      });
+    };
+    header.addEventListener('pointerup', onPointerUp);
+    return () => header.removeEventListener('pointerup', onPointerUp);
   }, [active, focused]);
 
   const copySelection = useCallback(() => {
