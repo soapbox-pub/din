@@ -166,7 +166,7 @@ in
   # picked up by NetworkManager automatically.
   networking.networkmanager.enable = true;
 
-  # Unprivileged user Din runs as. `networkmanager` group membership lets the
+  # The user Din runs as. `networkmanager` group membership lets the
   # WiFi settings panel control connections without polkit prompts; `video`
   # lets the brightness bridge write the backlight (via brightnessctl's udev
   # rules below) without root; `audio` grants access to the sound devices the
@@ -177,13 +177,16 @@ in
   # before-input-event; nothing new is exposed to renderers. `wheel` gives
   # the developer the machine: full sudo, which the Installer app also uses
   # (`sudo -n`) to run its helper as root.
-  users.users.web = {
+  # The uid is pinned because this user used to be called `web`: installed
+  # machines keep owning their home directory across the rename.
+  users.users.din = {
     isNormalUser = true;
+    uid = 1000;
     description = "Din desktop user";
     extraGroups = [ "wheel" "networkmanager" "video" "audio" "input" ];
   };
 
-  # `web` has no password (cage logs it in), so sudo can't ask for one.
+  # `din` has no password (cage logs it in), so sudo can't ask for one.
   security.sudo.wheelNeedsPassword = false;
 
   # brightnessctl ships udev rules that grant the `video` group write access to
@@ -213,7 +216,7 @@ in
   # This is the entire graphical stack - no X11, no display manager, no desktop.
   services.cage = {
     enable = true;
-    user = "web";
+    user = "din";
     program = "${din-launcher}/bin/din";
   };
 
@@ -344,7 +347,7 @@ in
   # PipeWire + WirePlumber back Din's sound panel (wpctl/pw-play via the
   # Electron audio bridge): output/input device selection, per-app volume, and
   # the test tone. rtkit lets the audio threads run at real-time priority.
-  # Socket-activated per user session, so the `web` cage session gets its own
+  # Socket-activated per user session, so the `din` cage session gets its own
   # instance with no extra configuration.
   security.rtkit.enable = true;
   services.pipewire = {

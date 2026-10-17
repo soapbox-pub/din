@@ -213,7 +213,7 @@ files — `git add` new source files before `npm run os:build`.
 - On hardware, Din runs GPU-accelerated (Mesa via `hardware.graphics`, plus
   redistributable firmware). Only the QEMU demo variant passes
   `--disable-gpu` (no virgl) and falls back to software rendering.
-- Din runs as the unprivileged `web` user with Chromium's sandbox and
+- Din runs as the `din` user with Chromium's sandbox and
   context isolation enabled; the renderer has no Node access.
 - The `app://` protocol handler in `main.mts` serves only files inside
   `dist/` (path-traversal guarded) and falls back to `index.html` for SPA
