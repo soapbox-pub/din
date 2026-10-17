@@ -249,7 +249,38 @@ in
   };
 
   # What install scripts and a developer's first hour assume is present.
-  environment.systemPackages = with pkgs; [ git unzip ];
+  # distrobox is the escape hatch for anything else: a full Ubuntu/Fedora/Arch
+  # userland with its own package manager, sharing $HOME, in rootless podman
+  # (also answering to `docker`).
+  environment.systemPackages = with pkgs; [ git unzip distrobox ];
+  virtualisation.podman = {
+    enable = true;
+    dockerCompat = true;
+  };
+
+  # Flatpak for desktop apps from Flathub, per user and without root. It
+  # requires the desktop portals, which the GTK backend provides on its own.
+  services.flatpak.enable = true;
+  xdg.portal = {
+    enable = true;
+    extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+    config.common.default = "gtk";
+  };
+  systemd.services.flathub = {
+    description = "Add the Flathub Flatpak remote";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "network-online.target" ];
+    after = [ "network-online.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      Restart = "on-failure";
+      RestartSec = 30;
+    };
+    script = ''
+      ${pkgs.flatpak}/bin/flatpak remote-add --if-not-exists flathub \
+        https://dl.flathub.org/repo/flathub.flatpakrepo
+    '';
+  };
 
   # Emoji and broad Unicode coverage for web content.
   fonts.packages = with pkgs; [
