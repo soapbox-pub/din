@@ -85,6 +85,13 @@ root through a sudo rule for that one program. Because the stick and the
 installed disk are copies of each other, nothing is mounted by label: the
 initrd finds root by GPT auto-discovery on the disk the boot loader ran from.
 
+For debugging on real hardware, `nix build ./os#debug-image` builds the same
+image plus an SSH server (key-only) and mDNS (`dinos.local`). No key is baked
+in: after writing the drive, mount its root partition and put a public key in
+`/root/.ssh/authorized_keys`, and a NetworkManager profile in
+`/etc/NetworkManager/system-connections/` (mode 600) if the machine needs
+Wi-Fi. A system installed from a debug stick keeps that access.
+
 `npm run os:run` is
 for demoing: it boots the same system in a QEMU window (software rendering,
 since QEMU provides no GPU), with boot logs mirrored to the serial console

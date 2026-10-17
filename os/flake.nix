@@ -14,12 +14,34 @@
   outputs = { self, nixpkgs, din }:
     let
       system = "x86_64-linux";
+      makeImage = nixos: import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
+        inherit (nixos) config pkgs;
+        lib = nixpkgs.lib;
+        format = "raw";
+        partitionTableType = "efi";
+        diskSize = "auto";
+        # An appliance image doesn't need a nixpkgs channel copy on disk.
+        copyChannel = false;
+        # Mark the root partition as an x86-64 root, which is how the
+        # initrd finds it (see fileSystems in configuration.nix).
+        postVM = ''
+          ${nixpkgs.legacyPackages.${system}.gptfdisk}/bin/sgdisk \
+            --typecode=2:4f68bce3-e8cd-4db1-96e7-fbcaf984b709 $diskImage
+        '';
+      };
     in
     {
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din; };
         modules = [ ./configuration.nix ];
+      };
+
+      # The same system plus remote access (debug.nix), for real hardware.
+      nixosConfigurations.dinos-debug = nixpkgs.lib.nixosSystem {
+        inherit system;
+        specialArgs = { inherit din; };
+        modules = [ ./configuration.nix ./debug.nix ];
       };
 
       packages.${system} = {
@@ -29,21 +51,11 @@
         # and boot via UEFI. The root partition grows to fill the disk on
         # first boot. Written to a USB stick, it's a live system whose
         # Installer app puts DinOS on the computer's own disk.
-        image = import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
-          inherit (self.nixosConfigurations.dinos) config pkgs;
-          lib = nixpkgs.lib;
-          format = "raw";
-          partitionTableType = "efi";
-          diskSize = "auto";
-          # An appliance image doesn't need a nixpkgs channel copy on disk.
-          copyChannel = false;
-          # Mark the root partition as an x86-64 root, which is how the
-          # initrd finds it (see fileSystems in configuration.nix).
-          postVM = ''
-            ${nixpkgs.legacyPackages.${system}.gptfdisk}/bin/sgdisk \
-              --typecode=2:4f68bce3-e8cd-4db1-96e7-fbcaf984b709 $diskImage
-          '';
-        };
+        image = makeImage self.nixosConfigurations.dinos;
+
+        # `nix build ./os#debug-image`: the image with sshd and mDNS. Add an
+        # authorized key to /root/.ssh on the written drive before booting.
+        debug-image = makeImage self.nixosConfigurations.dinos-debug;
 
         # `nix build ./os#vm` -> ./result/bin/run-dinos-vm demos the same
         # system in a QEMU window.
