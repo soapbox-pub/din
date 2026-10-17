@@ -1946,13 +1946,20 @@ function keyboardEventNodes(): string[] {
 
 function watchSelectiveScreenshotKey(): void {
   if (process.platform !== 'linux') return;
-  const watched = new Set<string>();
+  const watched = new Map<string, ChildProcess>();
   const scan = () => {
     for (const node of keyboardEventNodes()) {
       if (watched.has(node)) continue;
-      watched.add(node);
       let leftover: Buffer = Buffer.alloc(0);
-      const stream = fs.createReadStream(node);
+      // Read through `cat` and a pipe, not fs.createReadStream: a file stream
+      // parks one of libuv's four threadpool threads in read() for as long as
+      // the device is open, and laptops have four or more "keyboards" (sleep
+      // button, video bus, vendor hotkeys...). With the pool full, every
+      // async fs call in this process waits forever and the shell never
+      // loads - a black screen on a ThinkPad P14s Gen 7 AMD.
+      const reader = spawn('cat', [node], { stdio: ['ignore', 'pipe', 'ignore'] });
+      watched.set(node, reader);
+      const stream = reader.stdout;
       stream.on('data', (chunk: string | Buffer) => {
         const data = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
         const buf = leftover.length > 0 ? Buffer.concat([leftover, data]) : data;
@@ -1969,13 +1976,20 @@ function watchSelectiveScreenshotKey(): void {
         }
         leftover = buf.subarray(full);
       });
-      const unwatch = () => watched.delete(node);
+      const unwatch = () => {
+        if (watched.get(node) === reader) watched.delete(node);
+      };
       // Unreadable (permissions) or unplugged: drop it so the next rescan
       // can retry (or pick up a replacement keyboard).
-      stream.on('error', unwatch);
-      stream.on('close', unwatch);
+      reader.on('error', unwatch);
+      reader.on('exit', unwatch);
     }
   };
+  // cat only notices its reader is gone on its next write, which may never
+  // come; stop the readers with the app.
+  app.on('will-quit', () => {
+    for (const reader of watched.values()) reader.kill();
+  });
   scan();
   // Keyboards come and go (docks, USB/BT keyboards): rescan periodically.
   setInterval(scan, 10_000).unref();
