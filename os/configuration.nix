@@ -243,6 +243,12 @@ in
     program = "${din-launcher}/bin/din";
   };
 
+  # cage's unit conflicts with the console login on tty1 (autovt@tty1), which
+  # getty.target still wants. A system switch re-starts both targets, and
+  # whichever job runs last wins: Din was restarted or stopped on every
+  # switch. Other VTs still get a login on demand.
+  systemd.targets.getty.wants = lib.mkForce [ ];
+
   # Native Linux software the ordinary way. DinOS users are developers, and
   # the binaries they download (install scripts, release tarballs, AppImages)
   # expect a conventional filesystem that NixOS doesn't have. nix-ld puts a
