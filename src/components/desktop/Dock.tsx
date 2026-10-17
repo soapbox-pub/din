@@ -72,10 +72,10 @@ const REVEAL_SLACK = 24;
  * magnify as the pointer sweeps across them.
  *
  * The dock overlays the bottom edge of the workspace and hides itself
- * intelligently: whenever any visible window intersects its footprint
- * (including maximized windows, which fill the whole workspace) it slides
+ * intelligently: whenever the focused window intersects its footprint
+ * (including a maximized window, which fills the whole workspace) it slides
  * off-screen, and it slides back when the pointer reaches the bottom edge
- * of the screen or when no window overlaps it anymore.
+ * of the screen or when the focused window no longer overlaps it.
  *
  * Shows pinned apps first (roaming via encrypted app data), then any
  * running apps that aren't pinned. Each tile keeps the grouped-window
@@ -235,9 +235,11 @@ export function Dock({
   // transform, unlike getBoundingClientRect).
   const stripRef = useRef<HTMLDivElement>(null);
 
-  // Does any visible window overlap the dock's footprint? Geometry comes
-  // from committed window-manager state, so this re-evaluates on every
-  // move/resize/open/close/minimize/maximize commit.
+  // Does the focused window overlap the dock's footprint? Windows behind it
+  // don't count, so a small window raised over a maximized one brings the
+  // dock back. Geometry comes from committed window-manager state, so this
+  // re-evaluates on every move/resize/open/close/minimize/maximize/focus
+  // commit.
   const [intersecting, setIntersecting] = useState(false);
   useLayoutEffect(() => {
     const measure = () => {
@@ -253,34 +255,32 @@ export function Dock({
       const dockTop = window.innerHeight - strip.offsetHeight;
       const dockLeft = strip.offsetLeft;
       const dockRight = dockLeft + strip.offsetWidth;
-      setIntersecting(
-        windows.some((w) => {
-          if (w.minimized) return false;
-          // Maximized windows fill the workspace, which reaches the screen bottom.
-          if (w.maximized) return workspaceRect.bottom > dockTop;
-          // Edge-tiled windows are CSS-driven (stored x/width are stale): they
-          // span full height against one half of the workspace.
-          if (w.snapped) {
-            if (workspaceRect.bottom <= dockTop) return false;
-            const mid = workspaceRect.left + workspaceRect.width / 2;
-            const tileLeft = w.snapped === 'left' ? workspaceRect.left : mid;
-            const tileRight = w.snapped === 'left' ? mid : workspaceRect.right;
-            return tileLeft < dockRight && tileRight > dockLeft;
-          }
-          const left = workspaceRect.left + w.x;
-          const top = workspaceRect.top + w.y;
-          return (
-            top + w.height > dockTop &&
-            left < dockRight &&
-            left + w.width > dockLeft
-          );
-        }),
-      );
+      const overlaps = (w: WindowState) => {
+        // Maximized windows fill the workspace, which reaches the screen bottom.
+        if (w.maximized) return workspaceRect.bottom > dockTop;
+        // Edge-tiled windows are CSS-driven (stored x/width are stale): they
+        // span full height against one half of the workspace.
+        if (w.snapped) {
+          if (workspaceRect.bottom <= dockTop) return false;
+          const mid = workspaceRect.left + workspaceRect.width / 2;
+          const tileLeft = w.snapped === 'left' ? workspaceRect.left : mid;
+          const tileRight = w.snapped === 'left' ? mid : workspaceRect.right;
+          return tileLeft < dockRight && tileRight > dockLeft;
+        }
+        const left = workspaceRect.left + w.x;
+        const top = workspaceRect.top + w.y;
+        return (
+          top + w.height > dockTop &&
+          left < dockRight &&
+          left + w.width > dockLeft
+        );
+      };
+      setIntersecting(activeWindow !== null && overlaps(activeWindow));
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [windows, entryIds.length, workspaceRef]);
+  }, [activeWindow, entryIds.length, workspaceRef]);
 
   // Hot-edge reveal: sweeping the pointer into the strip at the very bottom
   // of the screen slides a hidden dock back up; it retracts once the pointer
