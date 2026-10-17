@@ -565,8 +565,13 @@ contextBridge.exposeInMainWorld('installer', {
    * Start installing. Progress arrives through onProgress.
    * @param {string} disk
    * @param {'wipe' | 'free'} mode
+   * @param {string | null} passphrase Encrypts the disk under it, or null.
    */
-  install: (disk, mode) => ipcRenderer.invoke('installer:install', disk, mode),
+  install: (disk, mode, passphrase) =>
+    ipcRenderer.invoke('installer:install', disk, mode, passphrase),
+
+  /** Run the failed install again, with the same choices. */
+  retry: () => ipcRenderer.invoke('installer:retry'),
 
   /** Restart the computer, into the installed system. */
   reboot: () => ipcRenderer.invoke('installer:reboot'),

@@ -117,7 +117,7 @@ let
     name = "din-install";
     runtimeInputs = with pkgs; [
       coreutils util-linux gawk gnugrep gnused jq rsync dosfstools e2fsprogs
-      efibootmgr systemd
+      efibootmgr systemd cryptsetup
     ];
     text = builtins.readFile ./din-install.sh;
   };
@@ -334,10 +334,22 @@ in
   # boot loader ran from, found by systemd's GPT auto-discovery in a systemd
   # initrd, and /boot is the ESP the boot loader ran from (see the udev rules
   # above).
+  #
+  # The Installer can encrypt root with LUKS, so the same initrd boots either.
+  # These mirror systemd's 90-image-dissect.rules, which NixOS's initrd leaves
+  # out: an encrypted root partition shows up as gpt-auto-root-luks and pulls
+  # in its own unlock (a passphrase prompt on the console), and the unlocked
+  # device becomes gpt-auto-root. A plain root never asks or waits.
   boot.initrd.systemd.enable = true;
   boot.initrd.services.udev.rules = ''
-    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", SYMLINK+="gpt-auto-root"
+    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}!="crypto_LUKS", SYMLINK+="gpt-auto-root"
+    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}=="crypto_LUKS", SYMLINK+="gpt-auto-root-luks", ENV{SYSTEMD_WANTS}+="systemd-cryptsetup@root.service"
+    SUBSYSTEM=="block", ENV{DM_UUID}=="CRYPT-*", ENV{DM_NAME}=="root", SYMLINK+="gpt-auto-root"
   '';
+  boot.initrd.luks.devices.root = {
+    device = "/dev/gpt-auto-root-luks";
+    crypttabExtraOpts = [ "noauto" ];
+  };
   fileSystems."/" = {
     device = "/dev/gpt-auto-root";
     fsType = "ext4";
@@ -353,10 +365,13 @@ in
   # filesystem grow to fill whatever disk it was written to. growpart is
   # pointed at the mounted root, read from sysfs: this early in stage 2
   # neither the gpt-auto-root link nor udev's database (lsblk) is back yet.
+  # An encrypted root isn't a partition (the Installer already made its
+  # partition fill the space), so there's nothing to grow.
   boot.growPartition = true;
   systemd.services.growpart.script = lib.mkForce ''
     root=$(${pkgs.util-linux}/bin/findmnt -nvo SOURCE /)
     part=/sys/class/block/''${root#/dev/}
+    [ -e "$part/partition" ] || exit 0
     disk=$(basename "$(readlink -f "$part/..")")
     "${pkgs.cloud-utils.guest}/bin/growpart" "/dev/$disk" "$(cat "$part/partition")"
   '';

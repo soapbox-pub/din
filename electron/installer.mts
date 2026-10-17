@@ -2,16 +2,17 @@
 // DinOS on a computer's own disk from a live USB boot.
 //
 // The disk work is done as root by os/din-install.sh, which DinOS's
-// launcher names in DIN_INSTALLER and lets the shell's user run through sudo
-// without a password - that one program, nothing else. It decides for itself
-// what may be installed where (only from a live boot, never onto the boot
-// disk), so this side only relays: status in, progress out. Where
-// DIN_INSTALLER isn't set (a dev machine, another distro) the bridge reports
-// itself unavailable and the app never appears.
+// launcher names in DIN_INSTALLER and the shell's user runs through sudo
+// without a password. It decides for itself what may be installed where
+// (only from a live boot, never onto the boot disk), so this side only
+// relays: status in, progress out, and an encryption passphrase over the
+// helper's stdin. Where DIN_INSTALLER isn't set (a dev machine, another
+// distro) the bridge reports itself unavailable and the app never appears.
 //
 // An install runs for minutes, so it's tracked here rather than in the
 // renderer: progress is pushed as `installer:progress` and can be read back
-// with `installer:state` after a reload.
+// with `installer:state` after a reload. The passphrase is held here too,
+// only until the install succeeds, so a failed one can be retried.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -29,6 +30,7 @@ interface InstallState {
   phase: 'idle' | 'running' | 'done' | 'failed';
   disk: string | null;
   mode: 'wipe' | 'free' | null;
+  encrypted: boolean;
   step: Step | null;
   /** Percent of the copy step, the long one. */
   percent: number;
@@ -41,13 +43,26 @@ let state: InstallState = {
   phase: 'idle',
   disk: null,
   mode: null,
+  encrypted: false,
   step: null,
   percent: 0,
   error: null,
 };
 
+/** The last install's passphrase, kept for a retry until one succeeds. */
+let passphrase: string | null = null;
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Printable ASCII only: it's typed at boot on a console with a US keymap,
+ * before Din (and any other layout) is running.
+ */
+function isValidPassphrase(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 8 && value.length <= 512 &&
+    /^[\x20-\x7e]+$/.test(value);
 }
 
 export function registerInstallerHandlers(options: {
@@ -79,19 +94,16 @@ export function registerInstallerHandlers(options: {
     return state;
   });
 
-  ipcMain.handle('installer:install', (event, disk, mode) => {
-    assertShellSender(event);
-    if (!HELPER) throw new Error('Installing is not available here');
-    if (state.phase === 'running') throw new Error('An install is already running');
-    if (typeof disk !== 'string' || !/^\/dev\/[A-Za-z0-9/_-]+$/.test(disk)) {
-      throw new Error('Not a disk');
-    }
-    if (mode !== 'wipe' && mode !== 'free') throw new Error('Unknown install mode');
-
-    update({ phase: 'running', disk, mode, step: null, percent: 0, error: null });
-    const child = spawn('sudo', ['-n', HELPER, 'install', disk, mode], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+  const start = (helper: string, disk: string, mode: 'wipe' | 'free') => {
+    const encrypted = passphrase !== null;
+    update({ phase: 'running', disk, mode, encrypted, step: null, percent: 0, error: null });
+    const args = ['-n', helper, 'install', disk, mode];
+    if (encrypted) args.push('encrypt');
+    const child = spawn('sudo', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    child.stdin.on('error', () => {
+      // The helper exited before reading it; its stderr says why.
     });
+    child.stdin.end(passphrase ?? '');
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
@@ -111,12 +123,37 @@ export function registerInstallerHandlers(options: {
     child.on('close', (code) => {
       if (state.phase !== 'running') return;
       if (code === 0) {
+        passphrase = null;
         update({ phase: 'done', percent: 100 });
       } else {
         const reason = stderr.trim().split('\n').filter(Boolean).pop();
         update({ phase: 'failed', error: reason || `The installer stopped (exit ${code})` });
       }
     });
+  };
+
+  ipcMain.handle('installer:install', (event, disk, mode, newPassphrase) => {
+    assertShellSender(event);
+    if (!HELPER) throw new Error('Installing is not available here');
+    if (state.phase === 'running') throw new Error('An install is already running');
+    if (typeof disk !== 'string' || !/^\/dev\/[A-Za-z0-9/_-]+$/.test(disk)) {
+      throw new Error('Not a disk');
+    }
+    if (mode !== 'wipe' && mode !== 'free') throw new Error('Unknown install mode');
+    if (newPassphrase !== null && !isValidPassphrase(newPassphrase)) {
+      throw new Error('Not a usable passphrase');
+    }
+    passphrase = newPassphrase;
+    start(HELPER, disk, mode);
+  });
+
+  ipcMain.handle('installer:retry', (event) => {
+    assertShellSender(event);
+    if (!HELPER) throw new Error('Installing is not available here');
+    if (state.phase !== 'failed' || !state.disk || !state.mode) {
+      throw new Error('There is no failed install to retry');
+    }
+    start(HELPER, state.disk, state.mode);
   });
 
   ipcMain.handle('installer:reboot', async (event) => {

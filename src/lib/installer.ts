@@ -55,6 +55,8 @@ export interface InstallState {
   phase: 'idle' | 'running' | 'done' | 'failed';
   disk: string | null;
   mode: InstallMode | null;
+  /** The root partition is encrypted. */
+  encrypted: boolean;
   step: InstallStep | null;
   /** Percent of the copy step. */
   percent: number;
@@ -64,7 +66,10 @@ export interface InstallState {
 export interface InstallerBridge {
   status(): Promise<InstallerStatus>;
   state(): Promise<InstallState>;
-  install(disk: string, mode: InstallMode): Promise<void>;
+  /** Encrypts the disk under `passphrase`, unless it's null. */
+  install(disk: string, mode: InstallMode, passphrase: string | null): Promise<void>;
+  /** Run the failed install again, with the same choices. */
+  retry(): Promise<void>;
   reboot(): Promise<void>;
   onProgress(callback: (state: InstallState) => void): () => void;
 }
@@ -80,6 +85,23 @@ declare global {
 export function getInstallerBridge(): InstallerBridge | undefined {
   if (typeof window === 'undefined') return undefined;
   return window.installer;
+}
+
+/** Shortest passphrase the Installer accepts. */
+export const MIN_PASSPHRASE_LENGTH = 8;
+
+/**
+ * Why `passphrase` won't do, or null. It's typed at boot on a console with a
+ * US keyboard layout, so it's limited to what that can type.
+ */
+export function passphraseProblem(passphrase: string): string | null {
+  if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+    return `Use at least ${MIN_PASSPHRASE_LENGTH} characters.`;
+  }
+  if (!/^[\x20-\x7e]+$/.test(passphrase)) {
+    return 'Use only letters, numbers, spaces, and the symbols on a US keyboard.';
+  }
+  return null;
 }
 
 /** Strip Electron's IPC wrapper from an error message. */

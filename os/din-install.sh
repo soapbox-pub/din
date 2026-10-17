@@ -1,17 +1,19 @@
 # din-install: the privileged half of Din's Installer app.
 #
 # DinOS boots from a USB stick as a live system; this copies that running
-# system onto a computer's own disk. Din runs it through sudo (a NOPASSWD rule
-# for exactly this program, see configuration.nix) from electron/installer.mts.
+# system onto a computer's own disk. Din runs it through sudo from
+# electron/installer.mts.
 #
 #   din-install status
 #       JSON: whether this is a live boot, the space an install needs, and
 #       the disks it could go on.
-#   din-install install <disk> wipe|free
+#   din-install install <disk> wipe|free [encrypt]
 #       Install onto <disk>, either erasing it or into its largest stretch of
-#       unpartitioned space (next to Windows, say). Reports on stdout as it
-#       goes - `step <name>` and `progress <percent>` lines - and exits
-#       non-zero with the reason on stderr if it can't.
+#       unpartitioned space (next to Windows, say). With `encrypt`, the root
+#       partition is LUKS2 under the passphrase read from stdin, asked for at
+#       every boot. Reports on stdout as it goes - `step <name>` and
+#       `progress <percent>` lines - and exits non-zero with the reason on
+#       stderr if it can't.
 #
 # The installed system is a file-level copy of the live one: the same Nix
 # store, the same boot entries, and the session (sign-in, saved WiFi) the user
@@ -20,6 +22,9 @@
 # whichever disk it's on, even with the stick still plugged in.
 
 ROOT_TYPE=4f68bce3-e8cd-4db1-96e7-fbcaf984b709 # Linux root (x86-64)
+# The new root's LUKS mapping while installing. Not `root`: udev would take
+# that for this system's own root (see configuration.nix).
+CRYPT_NAME=dinos-install
 ESP_TYPE=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
 MIB=$((1024 * 1024))
 ESP_BYTES=$((512 * MIB))
@@ -149,10 +154,14 @@ partitions_by_start() {
 
 target=""
 source_esp=""
+crypt_open=""
 cleanup() {
   if [[ -n $target ]]; then
     umount -R "$target" 2>/dev/null || true
     rmdir "$target" 2>/dev/null || true
+  fi
+  if [[ -n $crypt_open ]]; then
+    cryptsetup close "$CRYPT_NAME" 2>/dev/null || true
   fi
   if [[ -n $source_esp ]]; then
     umount "$source_esp" 2>/dev/null || true
@@ -161,11 +170,15 @@ cleanup() {
 }
 
 install() {
-  local disk=$1 mode=$2 boot required ss json esp root before
+  local disk=$1 mode=$2 encrypt=$3 boot required ss json esp root before passphrase=""
   boot=$(boot_disk)
   is_live "$boot" || die "DinOS can only be installed while running from a USB stick."
   grep -qxF -- "$disk" <<<"$(candidate_disks "$boot")" || die "$disk is not a disk DinOS can be installed on."
   [[ $mode == wipe || $mode == free ]] || die "Unknown install mode: $mode"
+  if [[ $encrypt == encrypt ]]; then
+    passphrase=$(cat)
+    [[ -n $passphrase ]] || die "Encrypting the disk needs a passphrase."
+  fi
 
   json=$(disk_json "$disk")
   [[ $(jq '.inUse' <<<"$json") == false ]] || die "A partition on $disk is in use."
@@ -214,10 +227,19 @@ install() {
 
   step format
   mkfs.vfat -F 32 -n DINOS "$esp" >/dev/null
-  mkfs.ext4 -q -F -L nixos "$root"
+  local fs=$root
+  if [[ -n $passphrase ]]; then
+    # printf is a builtin: the passphrase never shows up in a command line.
+    printf '%s' "$passphrase" |
+      cryptsetup luksFormat -q --type luks2 --label DinOS --key-file=- "$root"
+    printf '%s' "$passphrase" | cryptsetup open --key-file=- "$root" "$CRYPT_NAME"
+    crypt_open=1
+    fs=/dev/mapper/$CRYPT_NAME
+  fi
+  mkfs.ext4 -q -F -L nixos "$fs"
 
   target=$(mktemp -d /run/din-install.XXXXXX)
-  mount "$root" "$target"
+  mount "$fs" "$target"
   mkdir "$target/boot"
   mount -o umask=0077 "$esp" "$target/boot"
 
@@ -270,6 +292,7 @@ install() {
   sync
   cleanup
   target=""
+  crypt_open=""
   source_esp=""
   step finished
 }
@@ -277,8 +300,8 @@ install() {
 case "${1:-}" in
   status) status ;;
   install)
-    [[ $# == 3 ]] || die "usage: din-install install <disk> wipe|free"
-    install "$2" "$3"
+    [[ $# == 3 || ($# == 4 && $4 == encrypt) ]] || die "usage: din-install install <disk> wipe|free [encrypt]"
+    install "$2" "$3" "${4:-}"
     ;;
-  *) die "usage: din-install status | install <disk> wipe|free" ;;
+  *) die "usage: din-install status | install <disk> wipe|free [encrypt]" ;;
 esac

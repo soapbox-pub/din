@@ -6,14 +6,18 @@ import {
   CircleAlert,
   HardDrive,
   Loader2,
+  Lock,
   RotateCw,
   Usb,
 } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +33,7 @@ import {
   cleanInstallerError,
   formatDiskSize,
   getInstallerBridge,
+  passphraseProblem,
   type InstallMode,
   type InstallState,
   type InstallStep,
@@ -91,6 +96,9 @@ function InstallSetup() {
   const [stage, setStage] = useState<Stage>('welcome');
   const [diskPath, setDiskPath] = useState<string | null>(null);
   const [mode, setMode] = useState<InstallMode>('wipe');
+  const [encrypt, setEncrypt] = useState(true);
+  const [passphrase, setPassphrase] = useState('');
+  const [repeat, setRepeat] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -210,12 +218,15 @@ function InstallSetup() {
 
   const alongside = alongsideProblem(disk, requiredBytes);
   const empty = disk.partitions.length === 0;
+  const passphraseIssue = passphrase ? passphraseProblem(passphrase) : null;
+  const mismatch = repeat.length > 0 && repeat !== passphrase;
+  const ready = !encrypt || (passphraseProblem(passphrase) === null && repeat === passphrase);
 
   const start = async () => {
     setConfirming(false);
     setError(null);
     try {
-      await getInstallerBridge()?.install(disk.path, mode);
+      await getInstallerBridge()?.install(disk.path, mode, encrypt ? passphrase : null);
     } catch (e) {
       setError(cleanInstallerError(e));
     }
@@ -228,6 +239,7 @@ function InstallSetup() {
       footer={
         <Button
           variant={mode === 'wipe' && !empty ? 'destructive' : 'default'}
+          disabled={!ready}
           onClick={() => setConfirming(true)}
         >
           {mode === 'wipe' && !empty ? 'Erase and install' : 'Install'}
@@ -259,6 +271,64 @@ function InstallSetup() {
         )}
       </div>
 
+      <section className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+        <div className="flex items-start gap-3">
+          <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <Label htmlFor="installer-encrypt" className="text-sm font-medium text-foreground">
+              Encrypt the disk
+            </Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Your account, keys, and files can’t be read without the passphrase, even
+              if the computer is lost or stolen. You’ll type it every time the computer
+              starts.
+            </p>
+          </div>
+          <Switch id="installer-encrypt" checked={encrypt} onCheckedChange={setEncrypt} />
+        </div>
+
+        {encrypt && (
+          <div className="flex flex-col gap-3 pl-8">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="installer-passphrase">Passphrase</Label>
+              <Input
+                id="installer-passphrase"
+                type="password"
+                autoComplete="new-password"
+                value={passphrase}
+                onChange={(e) => setPassphrase(e.target.value)}
+                aria-invalid={passphraseIssue !== null}
+                aria-describedby="installer-passphrase-hint"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="installer-passphrase-repeat">Type it again</Label>
+              <Input
+                id="installer-passphrase-repeat"
+                type="password"
+                autoComplete="new-password"
+                value={repeat}
+                onChange={(e) => setRepeat(e.target.value)}
+                aria-invalid={mismatch}
+                aria-describedby="installer-passphrase-hint"
+              />
+            </div>
+            <p
+              id="installer-passphrase-hint"
+              className={cn(
+                'text-xs',
+                passphraseIssue || mismatch ? 'text-destructive' : 'text-muted-foreground',
+              )}
+            >
+              {passphraseIssue ??
+                (mismatch
+                  ? 'The passphrases don’t match.'
+                  : 'If you forget it, everything on DinOS is lost: there’s no way to recover it. It’s typed with a US keyboard layout.')}
+            </p>
+          </div>
+        )}
+      </section>
+
       {error && <ErrorNote>{error}</ErrorNote>}
 
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
@@ -273,6 +343,7 @@ function InstallSetup() {
                 : mode === 'free'
                   ? `DinOS will be installed in the free space on ${diskName(disk)}. Nothing already on it is changed.`
                   : `DinOS will be installed on ${diskName(disk)}.`}
+              {encrypt && ' It will be encrypted, and asks for your passphrase each time it starts.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -321,6 +392,12 @@ function InstallProgress({ state }: { state: InstallState }) {
               Restart, and remove the USB stick when the screen goes dark. DinOS will
               start from this computer’s disk.
             </p>
+            {state.encrypted && (
+              <p className="text-sm text-muted-foreground">
+                As it starts, it asks for your passphrase on a plain text screen. Type
+                it and press Enter.
+              </p>
+            )}
           </div>
           <Button
             size="lg"
@@ -381,7 +458,7 @@ function InstallProgress({ state }: { state: InstallState }) {
                     done || active ? 'font-medium text-foreground' : 'text-muted-foreground',
                   )}
                 >
-                  {s.label}
+                  {s.id === 'format' && state.encrypted ? 'Encrypting the disk' : s.label}
                 </span>
                 {s.id === 'copy' && active && !failed && (
                   <span className="ml-auto text-sm tabular-nums text-muted-foreground">
@@ -401,13 +478,7 @@ function InstallProgress({ state }: { state: InstallState }) {
         <>
           <ErrorNote>{state.error ?? 'Something went wrong.'}</ErrorNote>
           <div className="flex justify-end">
-            <Button
-              onClick={() => {
-                if (state.disk && state.mode) {
-                  void getInstallerBridge()?.install(state.disk, state.mode);
-                }
-              }}
-            >
+            <Button onClick={() => void getInstallerBridge()?.retry()}>
               <RotateCw className="size-4" />
               Try again
             </Button>
