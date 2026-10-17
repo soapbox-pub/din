@@ -564,8 +564,9 @@ contextBridge.exposeInMainWorld('installer', {
   /**
    * Start installing. Progress arrives through onProgress.
    * @param {string} disk
-   * @param {'wipe' | 'free'} mode
-   * @param {string | null} passphrase Encrypts the disk under it, or null.
+   * @param {'wipe' | 'free' | 'keep'} mode
+   * @param {string | null} passphrase Encrypts the disk under it (for
+   *   `keep`, unlocks it), or null.
    */
   install: (disk, mode, passphrase) =>
     ipcRenderer.invoke('installer:install', disk, mode, passphrase),

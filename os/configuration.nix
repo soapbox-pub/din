@@ -117,7 +117,7 @@ let
     name = "din-install";
     runtimeInputs = with pkgs; [
       coreutils util-linux gawk gnugrep gnused jq rsync dosfstools e2fsprogs
-      efibootmgr systemd cryptsetup
+      efibootmgr systemd cryptsetup lvm2
     ];
     text = builtins.readFile ./din-install.sh;
   };
@@ -350,15 +350,64 @@ in
   # out: an encrypted root partition shows up as gpt-auto-root-luks and pulls
   # in its own unlock (a passphrase prompt on the console), and the unlocked
   # device becomes gpt-auto-root. A plain root never asks or waits.
+  #
+  # An installed system's root partition (see os/din-install.sh) holds, under
+  # any encryption, LVM: a `dinos` volume group with `root` and `home`
+  # volumes, so the system can be reinstalled without touching anyone's
+  # files. The group is made with autoactivation off, so neither LVM's own
+  # rules nor anything else brings it up; the rules below activate it only
+  # when it's in the boot disk's root partition. A DinOS disk that's merely
+  # plugged in - the computer's own, under a live stick - is left alone, and
+  # two such disks never trip over their shared group name.
   boot.initrd.systemd.enable = true;
   boot.initrd.services.udev.rules = ''
-    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}!="crypto_LUKS", SYMLINK+="gpt-auto-root"
+    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}!="crypto_LUKS|LVM2_member", SYMLINK+="gpt-auto-root"
     SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}=="crypto_LUKS", SYMLINK+="gpt-auto-root-luks", ENV{SYSTEMD_WANTS}+="systemd-cryptsetup@root.service"
-    SUBSYSTEM=="block", ENV{DM_UUID}=="CRYPT-*", ENV{DM_NAME}=="root", SYMLINK+="gpt-auto-root"
+    SUBSYSTEM=="block", ENV{DM_UUID}=="CRYPT-*", ENV{DM_NAME}=="root", ENV{ID_FS_TYPE}!="LVM2_member", SYMLINK+="gpt-auto-root"
+    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}=="LVM2_member", ENV{SYSTEMD_WANTS}+="dinos-lvm@$kernel.service"
+    SUBSYSTEM=="block", ENV{DM_UUID}=="CRYPT-*", ENV{DM_NAME}=="root", ENV{ID_FS_TYPE}=="LVM2_member", ENV{SYSTEMD_WANTS}+="dinos-lvm@$kernel.service"
+    SUBSYSTEM=="block", ENV{DM_NAME}=="dinos-root", SYMLINK+="gpt-auto-root"
   '';
   boot.initrd.luks.devices.root = {
     device = "/dev/gpt-auto-root-luks";
     crypttabExtraOpts = [ "noauto" ];
+  };
+  # `--devices` keeps LVM from looking at any other disk's `dinos` group.
+  # Ordered before the root device counts as found, so by the time root is
+  # mounted the home volume is there too.
+  boot.initrd.systemd.services."dinos-lvm@" = {
+    description = "Activate DinOS's volumes on %i";
+    unitConfig.DefaultDependencies = false;
+    before = [ "initrd-root-device.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "/bin/lvm vgchange --activate y --devices /dev/%i dinos";
+    };
+  };
+  # /home is mounted here rather than through fileSystems: the live stick and
+  # systems installed before the split have no home volume, and must boot as
+  # they always have, while an installed system that has one must never come
+  # up on an empty /home - if it can't be mounted, booting stops.
+  boot.initrd.systemd.services.dinos-home = {
+    description = "Mount DinOS's home volume";
+    unitConfig = {
+      DefaultDependencies = false;
+      ConditionPathExists = "/dev/mapper/dinos-home";
+    };
+    after = [ "initrd-root-device.target" "sysroot.mount" ];
+    requires = [ "sysroot.mount" ];
+    before = [ "initrd-fs.target" ];
+    requiredBy = [ "initrd-fs.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    # e2fsck exits 1 for errors it fixed; 4 and up is trouble.
+    script = ''
+      e2fsck -p /dev/mapper/dinos-home || [ $? -lt 4 ]
+      mount -t ext4 /dev/mapper/dinos-home /sysroot/home
+    '';
   };
   fileSystems."/" = {
     device = "/dev/gpt-auto-root";
@@ -375,8 +424,8 @@ in
   # filesystem grow to fill whatever disk it was written to. growpart is
   # pointed at the mounted root, read from sysfs: this early in stage 2
   # neither the gpt-auto-root link nor udev's database (lsblk) is back yet.
-  # An encrypted root isn't a partition (the Installer already made its
-  # partition fill the space), so there's nothing to grow.
+  # An installed root is a volume, not a partition (the Installer already made
+  # its partition fill the space), so there's nothing to grow.
   boot.growPartition = true;
   systemd.services.growpart.script = lib.mkForce ''
     root=$(${pkgs.util-linux}/bin/findmnt -nvo SOURCE /)

@@ -47,6 +47,7 @@ function diskName(disk: InstallerDisk): string {
 
 /** What's on a disk now, in a line. */
 function describeContents(disk: InstallerDisk): string {
+  if (disk.existingInstall) return 'DinOS is installed here';
   if (disk.partitions.length === 0) return 'Empty';
   const named = disk.partitions
     .map((p) => p.label || p.fsType)
@@ -59,7 +60,8 @@ function describeContents(disk: InstallerDisk): string {
 /** Why a disk can't take an install, or null if it can. */
 function diskProblem(disk: InstallerDisk, requiredBytes: number): string | null {
   if (disk.inUse) return 'In use';
-  if (disk.sizeBytes < requiredBytes) {
+  // A reinstall reuses the space DinOS already has.
+  if (disk.sizeBytes < requiredBytes && !disk.existingInstall) {
     return `Too small, needs ${formatDiskSize(requiredBytes)}`;
   }
   return null;
@@ -171,7 +173,9 @@ function InstallSetup() {
               disabled={!disk || diskProblem(disk, requiredBytes) !== null}
               onClick={() => {
                 if (!disk) return;
-                setMode('wipe');
+                setMode(disk.existingInstall ? 'keep' : 'wipe');
+                setPassphrase('');
+                setRepeat('');
                 setStage('mode');
               }}
             >
@@ -216,21 +220,40 @@ function InstallSetup() {
     );
   }
 
+  const existing = disk.existingInstall;
+  const keep = mode === 'keep';
   const alongside = alongsideProblem(disk, requiredBytes);
+  const tooSmall = disk.sizeBytes < requiredBytes;
   const empty = disk.partitions.length === 0;
+  const erasing = mode === 'wipe' && !empty;
+  // A reinstall asks for the passphrase the disk already has, once.
+  const unlocking = keep && existing?.encrypted === true;
   const passphraseIssue = passphrase ? passphraseProblem(passphrase) : null;
   const mismatch = repeat.length > 0 && repeat !== passphrase;
-  const ready = !encrypt || (passphraseProblem(passphrase) === null && repeat === passphrase);
+  const ready = keep
+    ? !unlocking || passphrase.length > 0
+    : !encrypt || (passphraseProblem(passphrase) === null && repeat === passphrase);
+
+  const selectMode = (next: InstallMode) => {
+    if ((next === 'keep') !== keep) {
+      setPassphrase('');
+      setRepeat('');
+    }
+    setMode(next);
+  };
 
   const start = async () => {
     setConfirming(false);
     setError(null);
+    const secret = keep ? (unlocking ? passphrase : null) : encrypt ? passphrase : null;
     try {
-      await getInstallerBridge()?.install(disk.path, mode, encrypt ? passphrase : null);
+      await getInstallerBridge()?.install(disk.path, mode, secret);
     } catch (e) {
       setError(cleanInstallerError(e));
     }
   };
+
+  const action = keep ? 'Reinstall' : erasing ? 'Erase and install' : 'Install';
 
   return (
     <Frame
@@ -238,30 +261,43 @@ function InstallSetup() {
       onBack={() => setStage('disk')}
       footer={
         <Button
-          variant={mode === 'wipe' && !empty ? 'destructive' : 'default'}
+          variant={erasing ? 'destructive' : 'default'}
           disabled={!ready}
           onClick={() => setConfirming(true)}
         >
-          {mode === 'wipe' && !empty ? 'Erase and install' : 'Install'}
+          {action}
         </Button>
       }
     >
       <div role="radiogroup" aria-label="How to install" className="flex flex-col gap-2">
+        {existing && (
+          <Choice
+            selected={keep}
+            onSelect={() => selectMode('keep')}
+            title="Reinstall DinOS and keep your files"
+            description="The system is replaced with this version. Your files, apps, and settings stay, along with saved Wi-Fi networks and Bluetooth devices. Anything saved while running from the USB stick isn’t copied over."
+          />
+        )}
         <Choice
           selected={mode === 'wipe'}
-          onSelect={() => setMode('wipe')}
+          disabled={tooSmall}
+          onSelect={() => selectMode('wipe')}
           title={empty ? 'Use the whole disk' : 'Erase the disk and install DinOS'}
           description={
-            empty
-              ? `All ${formatDiskSize(disk.sizeBytes)} goes to DinOS.`
-              : `Everything on it is deleted: ${describeContents(disk)}.`
+            tooSmall
+              ? `This disk is too small: DinOS needs ${formatDiskSize(requiredBytes)}.`
+              : empty
+                ? `All ${formatDiskSize(disk.sizeBytes)} goes to DinOS.`
+                : existing
+                  ? 'Everything on it is deleted, including your files in DinOS.'
+                  : `Everything on it is deleted: ${describeContents(disk)}.`
           }
         />
-        {!empty && (
+        {!empty && !existing && (
           <Choice
             selected={mode === 'free'}
             disabled={alongside !== null}
-            onSelect={() => setMode('free')}
+            onSelect={() => selectMode('free')}
             title="Install alongside what’s there"
             description={
               alongside ??
@@ -271,63 +307,92 @@ function InstallSetup() {
         )}
       </div>
 
-      <section className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
-        <div className="flex items-start gap-3">
-          <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
-          <div className="min-w-0 flex-1">
-            <Label htmlFor="installer-encrypt" className="text-sm font-medium text-foreground">
-              Encrypt the disk
-            </Label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Your account, keys, and files can’t be read without the passphrase, even
-              if the computer is lost or stolen. You’ll type it every time the computer
-              starts.
-            </p>
-          </div>
-          <Switch id="installer-encrypt" checked={encrypt} onCheckedChange={setEncrypt} />
-        </div>
-
-        {encrypt && (
-          <div className="flex flex-col gap-3 pl-8">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="installer-passphrase">Passphrase</Label>
+      {unlocking && (
+        <section className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+          <div className="flex items-start gap-3">
+            <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+            <div className="flex min-w-0 flex-1 flex-col gap-3">
+              <div>
+                <Label htmlFor="installer-unlock" className="text-sm font-medium text-foreground">
+                  Passphrase
+                </Label>
+                <p id="installer-unlock-hint" className="mt-0.5 text-xs text-muted-foreground">
+                  This disk is encrypted. Enter the passphrase you type when DinOS starts; it
+                  stays the same after reinstalling.
+                </p>
+              </div>
               <Input
-                id="installer-passphrase"
+                id="installer-unlock"
                 type="password"
-                autoComplete="new-password"
+                autoComplete="current-password"
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
-                aria-invalid={passphraseIssue !== null}
-                aria-describedby="installer-passphrase-hint"
+                aria-describedby="installer-unlock-hint"
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="installer-passphrase-repeat">Type it again</Label>
-              <Input
-                id="installer-passphrase-repeat"
-                type="password"
-                autoComplete="new-password"
-                value={repeat}
-                onChange={(e) => setRepeat(e.target.value)}
-                aria-invalid={mismatch}
-                aria-describedby="installer-passphrase-hint"
-              />
-            </div>
-            <p
-              id="installer-passphrase-hint"
-              className={cn(
-                'text-xs',
-                passphraseIssue || mismatch ? 'text-destructive' : 'text-muted-foreground',
-              )}
-            >
-              {passphraseIssue ??
-                (mismatch
-                  ? 'The passphrases don’t match.'
-                  : 'If you forget it, everything on DinOS is lost: there’s no way to recover it. It’s typed with a US keyboard layout.')}
-            </p>
           </div>
-        )}
-      </section>
+        </section>
+      )}
+
+      {!keep && (
+        <section className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+          <div className="flex items-start gap-3">
+            <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <Label htmlFor="installer-encrypt" className="text-sm font-medium text-foreground">
+                Encrypt the disk
+              </Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Your account, keys, and files can’t be read without the passphrase, even
+                if the computer is lost or stolen. You’ll type it every time the computer
+                starts.
+              </p>
+            </div>
+            <Switch id="installer-encrypt" checked={encrypt} onCheckedChange={setEncrypt} />
+          </div>
+
+          {encrypt && (
+            <div className="flex flex-col gap-3 pl-8">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="installer-passphrase">Passphrase</Label>
+                <Input
+                  id="installer-passphrase"
+                  type="password"
+                  autoComplete="new-password"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  aria-invalid={passphraseIssue !== null}
+                  aria-describedby="installer-passphrase-hint"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="installer-passphrase-repeat">Type it again</Label>
+                <Input
+                  id="installer-passphrase-repeat"
+                  type="password"
+                  autoComplete="new-password"
+                  value={repeat}
+                  onChange={(e) => setRepeat(e.target.value)}
+                  aria-invalid={mismatch}
+                  aria-describedby="installer-passphrase-hint"
+                />
+              </div>
+              <p
+                id="installer-passphrase-hint"
+                className={cn(
+                  'text-xs',
+                  passphraseIssue || mismatch ? 'text-destructive' : 'text-muted-foreground',
+                )}
+              >
+                {passphraseIssue ??
+                  (mismatch
+                    ? 'The passphrases don’t match.'
+                    : 'If you forget it, everything on DinOS is lost: there’s no way to recover it. It’s typed with a US keyboard layout.')}
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       {error && <ErrorNote>{error}</ErrorNote>}
 
@@ -335,28 +400,29 @@ function InstallSetup() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {mode === 'wipe' && !empty ? `Erase ${diskName(disk)}?` : 'Install DinOS?'}
+              {keep ? 'Reinstall DinOS?' : erasing ? `Erase ${diskName(disk)}?` : 'Install DinOS?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {mode === 'wipe' && !empty
-                ? `Everything on this ${formatDiskSize(disk.sizeBytes)} disk will be permanently deleted. This can’t be undone.`
-                : mode === 'free'
-                  ? `DinOS will be installed in the free space on ${diskName(disk)}. Nothing already on it is changed.`
-                  : `DinOS will be installed on ${diskName(disk)}.`}
-              {encrypt && ' It will be encrypted, and asks for your passphrase each time it starts.'}
+              {keep
+                ? `The system on ${diskName(disk)} will be replaced with this version of DinOS. Your files and settings aren’t touched.`
+                : erasing
+                  ? `Everything on this ${formatDiskSize(disk.sizeBytes)} disk will be permanently deleted. This can’t be undone.`
+                  : mode === 'free'
+                    ? `DinOS will be installed in the free space on ${diskName(disk)}. Nothing already on it is changed.`
+                    : `DinOS will be installed on ${diskName(disk)}.`}
+              {!keep && encrypt && ' It will be encrypted, and asks for your passphrase each time it starts.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className={cn(
-                mode === 'wipe' &&
-                  !empty &&
+                erasing &&
                   'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20',
               )}
               onClick={() => void start()}
             >
-              {mode === 'wipe' && !empty ? 'Erase and install' : 'Install'}
+              {action}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -458,7 +524,11 @@ function InstallProgress({ state }: { state: InstallState }) {
                     done || active ? 'font-medium text-foreground' : 'text-muted-foreground',
                   )}
                 >
-                  {s.id === 'format' && state.encrypted ? 'Encrypting the disk' : s.label}
+                  {s.id === 'format' && state.mode === 'keep'
+                    ? 'Clearing out the old system'
+                    : s.id === 'format' && state.encrypted
+                      ? 'Encrypting the disk'
+                      : s.label}
                 </span>
                 {s.id === 'copy' && active && !failed && (
                   <span className="ml-auto text-sm tabular-nums text-muted-foreground">

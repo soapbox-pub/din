@@ -32,6 +32,8 @@ export interface InstallerDisk {
   inUse: boolean;
   /** It holds another Linux system, which rules out installing alongside. */
   hasLinuxRoot: boolean;
+  /** DinOS is installed on it in a way that can be reinstalled keeping its files. */
+  existingInstall: { encrypted: boolean } | null;
   partitions: InstallerPartition[];
 }
 
@@ -47,7 +49,8 @@ export type InstallerStatus =
       disks: InstallerDisk[];
     };
 
-export type InstallMode = 'wipe' | 'free';
+/** Erase the disk, use its free space, or replace the DinOS on it but keep its files. */
+export type InstallMode = 'wipe' | 'free' | 'keep';
 
 export type InstallStep = 'partition' | 'format' | 'copy' | 'boot';
 
@@ -66,7 +69,10 @@ export interface InstallState {
 export interface InstallerBridge {
   status(): Promise<InstallerStatus>;
   state(): Promise<InstallState>;
-  /** Encrypts the disk under `passphrase`, unless it's null. */
+  /**
+   * Encrypts the disk under `passphrase`, unless it's null. For `keep`, it's
+   * the passphrase the disk is already encrypted under.
+   */
   install(disk: string, mode: InstallMode, passphrase: string | null): Promise<void>;
   /** Run the failed install again, with the same choices. */
   retry(): Promise<void>;

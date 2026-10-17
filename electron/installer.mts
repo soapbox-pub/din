@@ -26,10 +26,15 @@ const HELPER = process.env.DIN_INSTALLER;
 
 type Step = 'partition' | 'format' | 'copy' | 'boot';
 
+/** Erase the disk, use its free space, or replace the DinOS on it but keep its files. */
+type Mode = 'wipe' | 'free' | 'keep';
+
+const MODES: readonly string[] = ['wipe', 'free', 'keep'];
+
 interface InstallState {
   phase: 'idle' | 'running' | 'done' | 'failed';
   disk: string | null;
-  mode: 'wipe' | 'free' | null;
+  mode: Mode | null;
   encrypted: boolean;
   step: Step | null;
   /** Percent of the copy step, the long one. */
@@ -94,7 +99,7 @@ export function registerInstallerHandlers(options: {
     return state;
   });
 
-  const start = (helper: string, disk: string, mode: 'wipe' | 'free') => {
+  const start = (helper: string, disk: string, mode: Mode) => {
     const encrypted = passphrase !== null;
     update({ phase: 'running', disk, mode, encrypted, step: null, percent: 0, error: null });
     const args = ['-n', helper, 'install', disk, mode];
@@ -139,12 +144,12 @@ export function registerInstallerHandlers(options: {
     if (typeof disk !== 'string' || !/^\/dev\/[A-Za-z0-9/_-]+$/.test(disk)) {
       throw new Error('Not a disk');
     }
-    if (mode !== 'wipe' && mode !== 'free') throw new Error('Unknown install mode');
+    if (typeof mode !== 'string' || !MODES.includes(mode)) throw new Error('Unknown install mode');
     if (newPassphrase !== null && !isValidPassphrase(newPassphrase)) {
       throw new Error('Not a usable passphrase');
     }
     passphrase = newPassphrase;
-    start(HELPER, disk, mode);
+    start(HELPER, disk, mode as Mode);
   });
 
   ipcMain.handle('installer:retry', (event) => {

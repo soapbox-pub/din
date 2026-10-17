@@ -85,6 +85,17 @@ root through a sudo rule for that one program. Because the stick and the
 installed disk are copies of each other, nothing is mounted by label: the
 initrd finds root by GPT auto-discovery on the disk the boot loader ran from.
 
+Every install has the same layout, with no choices offered: an ESP and one
+system partition (optionally LUKS-encrypted) holding an LVM volume group,
+`dinos`, with an ext4 `root` volume — a quarter of the space, between 48 and
+128 GiB — and an ext4 `home` volume taking the rest. Disks under 100 GiB are
+refused. Run on a disk that already has DinOS, the Installer offers to
+**reinstall and keep your files**: it formats `root`, never mounts `home`, and
+carries over saved Wi-Fi, Bluetooth pairings, and the machine's identity. The
+group is created with LVM autoactivation off; only the initrd activates it, and
+only on the disk it booted from, so a DinOS disk attached to another DinOS
+machine (or under a live stick) is left alone.
+
 For debugging on real hardware, `nix build ./os#debug-image` builds the same
 image plus an SSH server (key-only) and mDNS (`dinos.local`). No key is baked
 in: after writing the drive, mount its root partition and put a public key in
