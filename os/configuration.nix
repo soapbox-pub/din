@@ -190,12 +190,18 @@ in
   # `din` has no password (cage logs it in), so sudo can't ask for one.
   security.sudo.wheelNeedsPassword = false;
 
-  # zsh is the login shell, so it's what the Terminal app opens. The empty
-  # ~/.zshrc keeps zsh's first-run configuration wizard from appearing.
+  # zsh is the login shell, so it's what the Terminal app opens, dressed in
+  # oh-my-zsh's jtriley theme. The empty ~/.zshrc keeps zsh's first-run
+  # configuration wizard from appearing.
   programs.zsh = {
     enable = true;
     autosuggestions.enable = true;
     syntaxHighlighting.enable = true;
+    ohMyZsh = {
+      enable = true;
+      theme = "jtriley";
+      plugins = [ "git" ];
+    };
   };
   systemd.tmpfiles.rules = [ "f /home/din/.zshrc 0644 din users -" ];
 
