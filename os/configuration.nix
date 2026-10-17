@@ -217,6 +217,40 @@ in
     program = "${din-launcher}/bin/din";
   };
 
+  # Native Linux software the ordinary way. DinOS users are developers, and
+  # the binaries they download (install scripts, release tarballs, AppImages)
+  # expect a conventional filesystem that NixOS doesn't have. nix-ld puts a
+  # loader at /lib64/ld-linux-x86-64.so.2 that serves the libraries below
+  # (on top of its own base set): roughly what desktop, Electron and game
+  # binaries link against. envfs fills /bin and /usr/bin from PATH so
+  # `#!/bin/bash` scripts run. AppImages launch directly via binfmt.
+  programs.nix-ld = {
+    enable = true;
+    libraries = with pkgs; [
+      glib gtk3 gtk4 gdk-pixbuf pango cairo atk at-spi2-atk at-spi2-core
+      fontconfig freetype dbus expat icu libuuid libnotify libsecret
+      nss nspr cups krb5 libusb1 fuse fuse3
+      libdrm libgbm libglvnd libGL vulkan-loader wayland libxkbcommon
+      libx11 libxcb libxext libxfixes libxrandr libxrender libxi libxcursor
+      libxcomposite libxdamage libxtst libxscrnsaver libxshmfence libxkbfile
+      alsa-lib libpulseaudio pipewire SDL2
+    ];
+  };
+  services.envfs.enable = true;
+  programs.appimage = {
+    enable = true;
+    binfmt = true;
+  };
+
+  # The Nix way works too: `nix run nixpkgs#foo`, `nix profile install ...`.
+  nix.settings = {
+    experimental-features = [ "nix-command" "flakes" ];
+    trusted-users = [ "@wheel" ];
+  };
+
+  # What install scripts and a developer's first hour assume is present.
+  environment.systemPackages = with pkgs; [ git unzip ];
+
   # Emoji and broad Unicode coverage for web content.
   fonts.packages = with pkgs; [
     noto-fonts
