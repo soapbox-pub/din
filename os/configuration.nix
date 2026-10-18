@@ -30,6 +30,12 @@ let
       ];
   };
 
+  # The release this system is (os/version), which a release's tag repeats
+  # (scripts/dinos-release.sh). The updater compares it with the newest
+  # release's. Not package.json's: the lockfile repeats that one, and
+  # changing it changes npmDepsHash.
+  version = lib.fileContents ./version;
+
   # Build the Vite/React desktop environment from source (deps fetched via
   # lockfile hash).
   din-app = pkgs.buildNpmPackage {
@@ -122,6 +128,16 @@ let
     text = builtins.readFile ./din-install.sh;
   };
 
+  # The privileged half of system updates, which stages newer releases for
+  # the next boot (see the script, and electron/updater.mts).
+  din-updater = pkgs.writeShellApplication {
+    name = "din-update";
+    runtimeInputs = with pkgs; [
+      coreutils util-linux jq curl nak zstd gnutar config.nix.package
+    ];
+    text = builtins.readFile ./din-update.sh;
+  };
+
   # Succeeds when the partition UUID given is the boot loader's ESP, from
   # systemd-boot's LoaderDevicePartUUID variable (UTF-16, after 4 bytes of
   # attributes).
@@ -144,13 +160,15 @@ let
   # embedded display native Linux apps run on (electron/native-display.mts)
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
   # their keyboard layout (electron/keyboard.mts), Wine for Windows
-  # programs, and sudo (from /run/wrappers) for the Installer's helper.
+  # programs, and sudo (from /run/wrappers) for the Installer's and the
+  # updater's helpers.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${wine}/bin:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
     export DIN_INSTALLER=${din-installer}/bin/din-install
+    export DIN_UPDATER=${din-updater}/bin/din-update
     # Chromium logging into the journal (via cage), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
     exec ${pkgs.electron}/bin/electron \
@@ -161,6 +179,10 @@ let
 in
 {
   networking.hostName = "dinos";
+
+  # Which release this is, for the updater (os/din-update.sh), which reads it
+  # from a system's etc/ - the running one's, and the next boot's.
+  environment.etc."din-version".text = version;
 
   # NetworkManager backs Din's WiFi settings panel (nmcli via the
   # Electron wifi bridge). Physical adapters (wired and wireless) are

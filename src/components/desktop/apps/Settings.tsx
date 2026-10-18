@@ -5,6 +5,7 @@ import {
   Bomb,
   Bug,
   Check,
+  CircleArrowUp,
   Cloud,
   CloudOff,
   EthernetPort,
@@ -109,6 +110,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
+import { getUpdaterBridge, UPDATE_STEP_LABELS } from '@/lib/updater';
+import type { UpdateState } from '@/lib/updater';
+import { cleanInstallerError } from '@/lib/installer';
+import { useUpdateState } from '@/hooks/useUpdater';
 
 type SectionId =
   | 'wifi'
@@ -121,6 +127,7 @@ type SectionId =
   | 'notifications'
   | 'nostr'
   | 'appearance'
+  | 'updates'
   | 'developers';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
@@ -134,6 +141,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'notifications', name: 'Notifications', icon: Bell },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
+  { id: 'updates', name: 'Updates', icon: CircleArrowUp },
   { id: 'developers', name: 'Developers', icon: Bug },
 ];
 
@@ -156,6 +164,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
+ * Updates shows DinOS's version and the update it's staging through
+ * `window.updater`, and offers the restart that finishes one.
  * Developers holds debug utilities such as intentionally crashing the shell
  * to test the error boundary.
  */
@@ -232,6 +242,8 @@ export function Settings({ params }: AppComponentProps) {
           <NostrStorageSection />
         ) : section === 'appearance' ? (
           <AppearanceSection />
+        ) : section === 'updates' ? (
+          <UpdatesSection />
         ) : (
           <DevelopersSection />
         )}
@@ -2674,6 +2686,130 @@ function DevelopersSection() {
         </Button>
       </div>
     </SectionShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Updates
+// ---------------------------------------------------------------------------
+
+/**
+ * DinOS's version, and its updates (window.updater). The system looks for
+ * them by itself and stages what it finds for the next boot, so this mostly
+ * reports, and offers the restart.
+ */
+function UpdatesSection() {
+  const bridge = getUpdaterBridge();
+  const state = useUpdateState();
+
+  if (!bridge || (state && !state.available)) {
+    return (
+      <SectionShell title="Updates">
+        <FallbackCard icon={CircleArrowUp}>
+          Updates are for DinOS. Elsewhere, Din is updated along with the system
+          it runs on.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  if (!state) {
+    return (
+      <SectionShell title="Updates">
+        <div className="space-y-2 rounded-xl border border-border/60 p-4" aria-hidden>
+          <Skeleton className="h-4 w-32 bg-foreground/10" />
+          <Skeleton className="h-3 w-56 bg-foreground/10" />
+        </div>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell title="Updates">
+      <div className="flex flex-col gap-1 rounded-xl border border-border/60 bg-background/40 p-4">
+        <p className="text-sm font-medium text-foreground">
+          DinOS {state.current ?? '(unknown version)'}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {state.live
+            ? 'Running from a USB stick. Install DinOS to get updates.'
+            : 'Updates are downloaded by themselves and installed when you restart.'}
+        </p>
+      </div>
+      {!state.live && <UpdateStatus state={state} />}
+    </SectionShell>
+  );
+}
+
+function UpdateStatus({ state }: { state: UpdateState }) {
+  const [error, setError] = useState<string | null>(null);
+  const [rebooting, setRebooting] = useState(false);
+  const busy = state.phase === 'checking' || state.phase === 'updating';
+
+  const check = () => {
+    setError(null);
+    getUpdaterBridge()?.check().catch((e: unknown) => setError(cleanInstallerError(e)));
+  };
+
+  const reboot = () => {
+    setRebooting(true);
+    setError(null);
+    getUpdaterBridge()
+      ?.reboot()
+      .catch((e: unknown) => {
+        setRebooting(false);
+        setError(cleanInstallerError(e));
+      });
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      {state.phase === 'updating' && state.updatingTo ? (
+        <div className="flex flex-col gap-2 rounded-xl border border-border/60 p-4">
+          <div className="flex items-center gap-2 text-sm text-foreground">
+            <Loader2 className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">
+              {state.step ? UPDATE_STEP_LABELS[state.step] : 'Getting'} DinOS {state.updatingTo}
+            </span>
+            {state.step && state.step !== 'install' && (
+              <span className="tabular-nums text-muted-foreground">{state.percent}%</span>
+            )}
+          </div>
+          {state.step && state.step !== 'install' && (
+            <Progress value={state.percent} aria-label="Update progress" />
+          )}
+        </div>
+      ) : state.staged ? (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">DinOS {state.staged} is ready</p>
+            <p className="text-xs text-muted-foreground">Restart to finish updating.</p>
+          </div>
+          <Button size="sm" disabled={rebooting} onClick={reboot}>
+            {rebooting && <Loader2 className="size-4 motion-safe:animate-spin" />}
+            Restart now
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <p className="min-w-0 text-xs text-muted-foreground">
+          {state.phase === 'checking'
+            ? 'Looking for updates…'
+            : state.phase === 'failed'
+              ? state.error ?? 'The last check didn’t finish.'
+              : state.checkedAt
+                ? `${state.staged ? 'Checked' : 'Up to date. Checked'} ${new Date(state.checkedAt).toLocaleString()}.`
+                : 'Not checked yet.'}
+        </p>
+        <Button variant="outline" size="sm" disabled={busy} onClick={check}>
+          <RotateCw className={cn('size-4', state.phase === 'checking' && 'motion-safe:animate-spin')} aria-hidden />
+          Check now
+        </Button>
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
   );
 }
 

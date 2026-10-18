@@ -12,6 +12,7 @@
     "test": "npm i --silent && tsc --noEmit && tsc -p tsconfig.electron.json && eslint --cache && vitest run --reporter=dot --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'All tests passed!'",
     "os:build": "nix build ./os#image",
     "os:run": "nix build ./os#vm && ./result/bin/run-dinos-vm",
+    "os:release": "scripts/dinos-release.sh",
     "os:clean": "rm -f result dinos.qcow2"
   },
   "dependencies": {

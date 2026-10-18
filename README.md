@@ -96,6 +96,26 @@ group is created with LVM autoactivation off; only the initrd activates it, and
 only on the disk it booted from, so a DinOS disk attached to another DinOS
 machine (or under a live stick) is left alone.
 
+Installed systems update themselves. A DinOS release is a NIP-82 release of
+the application `din` (`.ngit/release.yaml`), signed by the soapbox.pub key,
+with two files on Blossom: the compressed disk image, for new installs, and an
+update bundle. The bundle holds the new system's store path, the list of its
+store paths cache.nixos.org already has, and a `nix-store --export` of the
+rest (Din itself and the generated configuration, a few tens of MB). Din looks
+for a newer release a minute after starting and every six hours. The check is
+`os/din-update.sh`, run as root like the Installer's helper. It verifies the
+release's signature and author, downloads the bundle and checks it against the
+asset's sha256, fetches the rest from cache.nixos.org, and stages the new
+system with `switch-to-configuration boot`. Settings → Updates shows its
+progress and offers the restart. Older systems stay in the boot menu. Live
+sticks aren't updated.
+
+To cut a release, bump `os/version`, commit, tag `v<version>`, and run
+`npm run os:release -- -- --nbunksec-file <file>` (or pass any other
+`ngit release publish` signer option after the second `--`). It builds from a
+clean worktree of the tag. `npm run os:release -- --stage-only` builds the two
+files into `.release-artifacts/` without publishing anything.
+
 For debugging on real hardware, `nix build ./os#debug-image` builds the same
 image plus an SSH server (key-only) and mDNS (`dinos.local`). No key is baked
 in: after writing the drive, mount its root partition and put a public key in

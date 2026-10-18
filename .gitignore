@@ -24,6 +24,9 @@ yarn.lock
 # Nix build output symlink
 result
 
+# DinOS release files (scripts/dinos-release.sh)
+.release-artifacts
+
 # VM persistent disk
 *.qcow2
 

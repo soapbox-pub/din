@@ -17,6 +17,7 @@
 //   - window.tray: apps' status icons and their menus, for the menu bar
 //   - window.installer: put DinOS on this computer's disk, for the
 //     Installer app (live USB boots only)
+//   - window.updater: DinOS system updates, for the Settings app
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -618,6 +619,33 @@ contextBridge.exposeInMainWorld('installer', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('installer:progress', handler);
     return () => ipcRenderer.removeListener('installer:progress', handler);
+  },
+});
+
+// Updater bridge (window.updater), backed by electron/updater.mts: stages
+// newer DinOS releases for the next boot.
+contextBridge.exposeInMainWorld('updater', {
+  /** Versions, and the check or update in progress (or the failed one). */
+  state: () => ipcRenderer.invoke('updater:state'),
+
+  /** Look for a newer release now, and stage it. Progress arrives through onProgress. */
+  check: () => ipcRenderer.invoke('updater:check'),
+
+  /** Restart the computer, into the staged release. */
+  reboot: () => ipcRenderer.invoke('updater:reboot'),
+
+  /**
+   * Subscribe to update progress. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onProgress: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('updater:progress', handler);
+    return () => ipcRenderer.removeListener('updater:progress', handler);
   },
 });
 
