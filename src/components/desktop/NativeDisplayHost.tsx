@@ -3,6 +3,7 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { getNativeAppsBridge } from '@/lib/nativeApps';
+import { ScreenLayer } from './MonitorsProvider';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -159,7 +160,8 @@ function ForceQuitDialog({
 /** Popups (menus, tooltips) drawn above everything, at their screen position. */
 function NativePopupLayer({ popups, grabbing }: { popups: NativeSurface[]; grabbing: boolean }) {
   return (
-    <div className="pointer-events-none fixed inset-0 z-[10000]">
+    // Over every monitor: popups sit at screen (viewport) coordinates.
+    <ScreenLayer className="pointer-events-none z-[10000]">
       {/* While a menu is open the app holds a pointer grab: a click anywhere
           belongs to it (that's how it learns to close the menu), so the rest
           of the desktop is shielded and clicks forwarded at screen
@@ -179,7 +181,7 @@ function NativePopupLayer({ popups, grabbing }: { popups: NativeSurface[]; grabb
       {popups.map((popup) => (
         <NativePopup key={popup.id} surface={popup} />
       ))}
-    </div>
+    </ScreenLayer>
   );
 }
 

@@ -143,9 +143,9 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * The Wi-Fi section drives NetworkManager through `window.wifi` (Electron
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
- * explanatory fallback. The Display section changes screen resolution through
- * `window.display` (xrandr) for the bare-X11 standalone session; on Wayland it
- * shows a fallback. The Battery section reads `window.power`
+ * explanatory fallback. The Display section arranges the monitors through
+ * `window.display` (wlr-randr under cage, xrandr on bare X11), falling back
+ * where neither can manage them. The Battery section reads `window.power`
  * (/sys/class/power_supply) and hides on machines with no battery. The Power
  * section switches the system power profile through the same bridge
  * (net.hadess.PowerProfiles over D-Bus: power-profiles-daemon / tuned-ppd),
@@ -592,7 +592,7 @@ interface DisplayDraft {
   modes: DisplayMode[];
 }
 
-/** Seed the editable draft from xrandr's reported outputs. */
+/** Seed the editable draft from the reported outputs. */
 function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
   return outputs.map((output) => {
     const modes = uniqueModes(output.modes);
@@ -647,8 +647,8 @@ function clampZoom(percent: number): number {
 /**
  * Interface zoom - DPI-style scaling of the whole desktop through Chromium
  * page zoom (window.zoom preload bridge). Lives in AppConfig (persisted
- * locally) and works in every Electron session, including Wayland/cage where
- * the xrandr arrangement below is unavailable. In a plain browser there is no
+ * locally) and works in every Electron session, including ones where the
+ * arrangement below is unavailable. In a plain browser there is no
  * bridge, so the control points at the browser's own zoom instead.
  */
 function DisplayZoomControl({
@@ -708,13 +708,13 @@ function DisplayZoomControl({
 }
 
 /**
- * The whole multi-output arrangement, via the xrandr display bridge
- * (window.display). Meaningful on the bare-X11 standalone session where Din is
- * the whole desktop: drag displays to position them, pick a resolution, choose
- * the primary, and switch any output on or off; "Apply" commits the layout in
- * one atomic xrandr call. On Wayland/cage or in a plain browser the arrangement
- * falls back to a note, since the compositor arranges the outputs automatically
- * - but the zoom control above always applies.
+ * The whole multi-output arrangement, via the display bridge (window.display:
+ * wlr-randr under cage, xrandr on bare X11), where Din is the whole desktop:
+ * drag displays to position them, pick a resolution, choose the primary (the
+ * one with the menu bar and Dock), and switch any output on or off; "Apply"
+ * commits the layout in one atomic call. Where the outputs can't be managed,
+ * or in a plain browser, the arrangement falls back to a note - but the zoom
+ * control above always applies.
  */
 function DisplaySection() {
   const bridge = getDisplayBridge();
@@ -732,7 +732,7 @@ function DisplaySection() {
   const seededSignature = useRef<string>('');
 
   // Re-seed the draft only when the real arrangement changes (first load,
-  // hotplug, an applied layout, or an xrandr change from elsewhere) - not on
+  // hotplug, an applied layout, or a change made from elsewhere) - not on
   // every poll, so in-progress edits survive the 5s refetch.
   useEffect(() => {
     if (outputs && baseSignature !== seededSignature.current) {
@@ -787,8 +787,8 @@ function DisplaySection() {
     <FallbackCard>Could not read display state: {cleanDisplayError(status.error)}</FallbackCard>
   ) : !status.data?.available ? (
     <FallbackCard icon={Monitor}>
-      Displays can't be arranged here. This session uses a Wayland
-      compositor (cage), which sizes Din to the display automatically.
+      Displays can't be arranged here. This session's display server doesn't
+      let Din manage its outputs.
     </FallbackCard>
   ) : draft.length === 0 ? (
     <FallbackCard icon={Monitor}>No connected displays were found.</FallbackCard>

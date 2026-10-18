@@ -8,7 +8,10 @@
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //   - window.vpn: VPN/WireGuard profile toggles for the network selector
-//   - window.display: xrandr multi-output arrangement for the Settings app
+//   - window.display: multi-output arrangement (wlr-randr/xrandr) for the
+//     Settings app
+//   - window.monitors: where each display sits in the shell window, for the
+//     desktop's layout
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
 //   - window.keyboard: the keyboard layout native apps use, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
@@ -253,21 +256,47 @@ contextBridge.exposeInMainWorld('vpn', {
 });
 
 // Display bridge (window.display), backed by the display:* handlers in
-// main.mts (xrandr). Used by the Settings app to arrange the outputs on a bare
-// X11 session: resolution, position, on/off and which one is primary.
-// `available: false` where xrandr doesn't apply (Wayland/cage), so the panel
-// can render a fallback.
+// main.mts (wlr-randr under cage, xrandr on bare X11). Used by the Settings
+// app to arrange the outputs: resolution, position, on/off and which one is
+// primary. `available: false` where the outputs can't be managed, so the
+// panel can render a fallback.
 contextBridge.exposeInMainWorld('display', {
-  /** Connected outputs with their available modes/positions. `available: false` = no xrandr. */
+  /** Connected outputs with their available modes/positions. `available: false` = unmanageable. */
   status: () => ipcRenderer.invoke('display:status'),
 
   /**
-   * Apply a complete output arrangement in one atomic xrandr call. Each
+   * Apply a complete output arrangement in one atomic call. Each
    * placement is { output, enabled, primary, x, y, width, height }; every
    * field is re-validated in the main process against xrandr's own report.
    * @param {Array<{ output: string, enabled: boolean, primary: boolean, x: number, y: number, width: number, height: number }>} placements
    */
   applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
+});
+
+// Monitors bridge (window.monitors), backed by the monitors:* handler in
+// main.mts: each display's rectangle within the shell window (null when the
+// window covers just one), so the desktop can keep its menu bar and Dock on
+// the primary monitor and maximize windows to the monitor they're on.
+contextBridge.exposeInMainWorld('monitors', {
+  /** The displays, in DIPs relative to the window's top-left, or null. */
+  get: () => ipcRenderer.invoke('monitors:get'),
+
+  /**
+   * Subscribe to display changes. Returns an unsubscribe function.
+   * @param {(monitors: unknown) => void} callback
+   */
+  onChange: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} monitors
+     */
+    const handler = (_event, monitors) => callback(monitors);
+    ipcRenderer.on('monitors:changed', handler);
+    return () => ipcRenderer.removeListener('monitors:changed', handler);
+  },
+
+  /** CSS pixels per DIP: the shell's page zoom. */
+  zoomFactor: () => webFrame.getZoomFactor(),
 });
 
 // Native-app bridge (window.nativeApps), backed by the native-apps:* handlers

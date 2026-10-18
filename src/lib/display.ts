@@ -2,17 +2,18 @@
  * Typed access to the OS display bridge exposed by the Electron preload
  * (`window.display`, see electron/preload.cjs + electron/main.cjs).
  *
- * Backed by xrandr in the main process. It is meaningful only on a bare X11
- * session (the os/x11 standalone launcher), where Din is the whole desktop and
- * nothing else manages the outputs. Where xrandr doesn't apply (Wayland/cage on
- * DinOS) or in a plain browser the bridge is absent or `status()` resolves
- * with `available: false`; callers must feature-detect and render a fallback.
+ * Backed by wlr-randr under cage (DinOS) and by xrandr on a bare X11 session
+ * (the os/x11 standalone launcher) - wherever Din is the whole desktop and
+ * nothing else manages the outputs. Elsewhere, or in a plain browser, the
+ * bridge is absent or `status()` resolves with `available: false`; callers
+ * must feature-detect and render a fallback.
  *
  * The bridge models a full multi-output layout: each connected output has a
  * resolution, a position in the shared virtual screen, an on/off state and a
- * primary flag. `applyLayout` commits an entire desired arrangement in one
- * atomic xrandr call, so the desktop never passes through a half-configured
- * state.
+ * primary flag (the monitor with the menu bar and Dock). `applyLayout`
+ * commits an entire desired arrangement in one atomic call, so the desktop
+ * never passes through a half-configured state. Under cage, the arrangement
+ * is remembered and reapplied when the same displays are connected again.
  */
 
 export interface DisplayMode {
@@ -25,7 +26,7 @@ export interface DisplayMode {
 }
 
 export interface DisplayOutput {
-  /** xrandr output name, e.g. "eDP", "HDMI-A-0". */
+  /** Output (connector) name, e.g. "eDP-1", "HDMI-A-1". */
   name: string;
   connected: boolean;
   /** Whether this is the primary output. */
@@ -36,12 +37,12 @@ export interface DisplayOutput {
   current: { width: number; height: number } | null;
   /** Top-left position in the shared virtual screen (px); {0,0} when off. */
   position: { x: number; y: number };
-  /** Available modes, as xrandr reports them (one entry per resolution). */
+  /** Available modes, as the display tool reports them. */
   modes: DisplayMode[];
 }
 
 export interface DisplayStatus {
-  /** False when xrandr is not present (e.g. a Wayland session). */
+  /** False where Din can't manage the outputs. */
   available: boolean;
   /** Connected outputs. */
   outputs: DisplayOutput[];
@@ -63,12 +64,12 @@ export interface DisplayPlacement {
 }
 
 export interface DisplayBridge {
-  /** Connected outputs with their modes. `available: false` when xrandr is absent. */
+  /** Connected outputs with their modes. `available: false` where unmanageable. */
   status(): Promise<DisplayStatus>;
   /**
    * Apply a complete output arrangement (resolution + position + on/off +
-   * primary) in a single atomic xrandr invocation. Every field is re-validated
-   * in the main process against xrandr's own report before use.
+   * primary) in a single atomic call. Every field is re-validated
+   * in the main process against the display tool's own report before use.
    */
   applyLayout(placements: DisplayPlacement[]): Promise<void>;
 }
@@ -97,7 +98,7 @@ export function formatMode(width: number, height: number): string {
   return `${width} \u00d7 ${height}`;
 }
 
-/** A friendlier label for common xrandr output names. */
+/** A friendlier label for common output names. */
 export function friendlyOutputName(name: string): string {
   if (/^(eDP|LVDS|DSI)/i.test(name)) return 'Built-in display';
   if (/^HDMI/i.test(name)) return 'HDMI display';
@@ -112,7 +113,7 @@ export function isInternalOutput(name: string): boolean {
 }
 
 /**
- * Collapse xrandr's per-refresh-rate rows to unique resolutions, largest first,
+ * Collapse per-refresh-rate rows to unique resolutions, largest first,
  * carrying the current/native flags forward.
  */
 export function uniqueModes(modes: DisplayMode[]): DisplayMode[] {

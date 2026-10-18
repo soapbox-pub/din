@@ -3,6 +3,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { LoginScreen } from '@/components/desktop/LoginScreen';
 import { Desktop } from '@/components/desktop/Desktop';
 import { BootVeil } from '@/components/desktop/BootVeil';
+import { MonitorsProvider } from '@/components/desktop/MonitorsProvider';
 
 const Index = () => {
   const { user } = useCurrentUser();
@@ -13,10 +14,10 @@ const Index = () => {
   });
 
   return (
-    <>
+    <MonitorsProvider>
       {user ? <Desktop /> : <LoginScreen />}
       <BootVeil />
-    </>
+    </MonitorsProvider>
   );
 };
 

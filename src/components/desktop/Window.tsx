@@ -34,24 +34,52 @@ import {
 import { useAppContext } from '@/hooks/useAppContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { MIN_HEIGHT, MIN_WIDTH, type WindowState } from '@/hooks/useWindows';
+import { useWorkAreas } from '@/contexts/MonitorsContext';
+import { MIN_HEIGHT, MIN_WIDTH, windowRect, type WindowState } from '@/hooks/useWindows';
+import { areaAt, areaFor, hasNeighbor, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
 
 /**
- * Dragging with the pointer within this many pixels of the workspace's top
- * edge arms the snap-to-maximize (drop to maximize, GNOME/Windows style).
+ * Dragging with the pointer within this many pixels of a monitor's top edge
+ * arms the snap-to-maximize (drop to maximize, GNOME/Windows style).
  */
 const SNAP_TOP_PX = 6;
 
 /**
- * Dragging with the pointer within this many pixels of the workspace's left
- * or right edge arms a half-workspace tile (drop to snap the window to that
+ * Dragging with the pointer within this many pixels of a monitor's left or
+ * right edge arms a half-monitor tile (drop to snap the window to that
  * half, GNOME/Windows style). More generous than the top zone: you shove the
- * window into the side rather than clip a thin strip.
+ * window into the side rather than clip a thin strip. Edges another monitor
+ * continues past don't snap - the window is on its way over there.
  */
 const SNAP_EDGE_PX = 24;
 
 /** Which edge a title-bar drag is currently snapping to, or null. */
 type SnapZone = 'top' | 'left' | 'right' | null;
+
+/** The snap a drag would drop into: the zone and the monitor it's on. */
+interface SnapTarget {
+  zone: Exclude<SnapZone, null>;
+  area: WorkArea;
+}
+
+/** The snap zone under a pointer (workspace coordinates), if any. */
+function snapTargetAt(areas: WorkArea[], x: number, y: number): SnapTarget | null {
+  const area = areaAt(areas, x, y);
+  if (!area) return null;
+  // Top wins its (thinner) corner overlap. On the primary monitor the
+  // pointer can be above the work area, over the menu bar: that's the top.
+  if (y - area.y <= SNAP_TOP_PX && !hasNeighbor(areas, area, 'top', x)) return { zone: 'top', area };
+  if (x - area.x <= SNAP_EDGE_PX && !hasNeighbor(areas, area, 'left', y)) return { zone: 'left', area };
+  if (area.x + area.width - x <= SNAP_EDGE_PX && !hasNeighbor(areas, area, 'right', y)) {
+    return { zone: 'right', area };
+  }
+  return null;
+}
+
+/** The highest a window's top edge may go with the pointer (or window) at a spot. */
+function topLimit(areas: WorkArea[], x: number, y: number, rect: Rect): number {
+  return (areaAt(areas, x, y) ?? areaFor(areas, rect)).y;
+}
 
 /**
  * Dragging a maximized window's title bar farther than this tears it away:
@@ -59,6 +87,9 @@ type SnapZone = 'top' | 'left' | 'right' | null;
  * enough to feel immediate, large enough that a sloppy click doesn't tear.
  */
 const TEAR_AWAY_PX = 8;
+
+/** Gap between the snap preview and the edges of the area it previews. */
+const SNAP_HINT_INSET = 6;
 
 /** The eight resize handles: edges + corners. */
 const RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
@@ -157,6 +188,12 @@ export const Window = memo(function Window({
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
+  const areas = useWorkAreas();
+  // For gesture handlers, which shouldn't re-bind whenever monitors change.
+  const areasRef = useRef(areas);
+  useLayoutEffect(() => {
+    areasRef.current = areas;
+  });
   const sectionRef = useRef<HTMLElement>(null);
   // Drag state: pointer origin, window origin, and the latest position (so
   // pointer-up/cancel can commit without needing event coordinates). The
@@ -169,14 +206,13 @@ export const Window = memo(function Window({
     wy: number;
     x: number;
     y: number;
-    /** Workspace origin/width in viewport coordinates, cached at grab. */
+    /** Workspace origin in viewport coordinates, cached at grab. */
     wsLeft: number;
     wsTop: number;
-    wsWidth: number;
     /** Armed tear-away from maximized/tiled: the size to restore to, or null. */
     tearAway: { width: number; height: number } | null;
-    /** Which snap zone (top/left/right) the pointer currently rides, or null. */
-    snap: SnapZone;
+    /** Which snap zone the pointer currently rides, and on which monitor. */
+    snap: SnapTarget | null;
   } | null>(null);
   const resizeState = useRef<{
     dir: ResizeDir;
@@ -186,6 +222,8 @@ export const Window = memo(function Window({
     y: number;
     width: number;
     height: number;
+    /** The highest the top edge may go (its monitor's work area top). */
+    minTop: number;
     cur: { x: number; y: number; width: number; height: number };
   } | null>(null);
   const wobblyRef = useRef<WobblyDrag | null>(null);
@@ -217,10 +255,10 @@ export const Window = memo(function Window({
   // from an untrusted page, so it's strictly normalized before styling.
   const [accentRaw, setAccent] = useState<string | null>(null);
 
-  // Which snap zone (if any) the drag pointer is riding: drives the "drop to
-  // maximize"/"drop to tile" preview overlay. Only flips when a zone boundary
-  // is crossed, so pointer moves still avoid React state churn.
-  const [snapHint, setSnapHint] = useState<SnapZone>(null);
+  // The rect the drag would snap into (if any): drives the "drop to
+  // maximize"/"drop to tile" preview overlay. Only changes when a zone
+  // boundary is crossed, so pointer moves still avoid React state churn.
+  const [snapHint, setSnapHint] = useState<Rect | null>(null);
 
   /**
    * Put the window into "cheap to move" mode for the duration of a gesture.
@@ -280,7 +318,8 @@ export const Window = memo(function Window({
       if (commit) {
         const rest = modelTopLeft(st.model);
         const x = Math.round(rest.x);
-        const y = Math.max(0, Math.round(rest.y));
+        const area = areaFor(areasRef.current, { ...st.layout, x, y: rest.y });
+        const y = Math.max(area.y, Math.round(rest.y));
         if (el) {
           el.style.left = `${x}px`;
           el.style.top = `${y}px`;
@@ -586,7 +625,6 @@ export const Window = memo(function Window({
       const ws = sectionRef.current?.parentElement?.getBoundingClientRect();
       const wsLeft = ws?.left ?? 0;
       const wsTop = ws?.top ?? 0;
-      const wsWidth = ws?.width ?? window.innerWidth;
       if (win.maximized || win.snapped) {
         // Arm a tear-away: nothing moves yet - once the pointer travels past
         // TEAR_AWAY_PX (see onPointerMove), the window un-maximizes/un-tiles
@@ -606,7 +644,6 @@ export const Window = memo(function Window({
           y: 0,
           wsLeft,
           wsTop,
-          wsWidth,
           tearAway: { width: restore.width, height: restore.height },
           snap: null,
         };
@@ -621,7 +658,6 @@ export const Window = memo(function Window({
         y: win.y,
         wsLeft,
         wsTop,
-        wsWidth,
         tearAway: null,
         snap: null,
       };
@@ -689,20 +725,18 @@ export const Window = memo(function Window({
       const el = sectionRef.current;
       if (!s || !el) return;
 
+      const areas = areasRef.current;
+      const px = e.clientX - s.wsLeft;
+      const py = e.clientY - s.wsTop;
+
       if (s.tearAway) {
         // Maximized window being dragged: past the threshold, restore it
         // under the cursor (horizontally proportional, like Windows/GNOME)
         // and continue as a normal drag.
         if (Math.hypot(e.clientX - s.px, e.clientY - s.py) < TEAR_AWAY_PX) return;
         const { width, height } = s.tearAway;
-        const fraction = s.wsWidth > 0
-          ? Math.min(Math.max((e.clientX - s.wsLeft) / s.wsWidth, 0), 1)
-          : 0.5;
-        const x = Math.round(e.clientX - s.wsLeft - width * fraction);
-        // Keep the grab point's offset within the title bar (window top was 0).
-        const y = Math.max(0, e.clientY - s.py);
         // The rect the window is painted at right now (the maximized/tiled
-        // CSS layout, in pixels) - measured before the style writes below
+        // layout, in pixels) - measured before the style writes below
         // replace it. The wobbly shrink springs from here.
         const prevRect = {
           x: el.offsetLeft,
@@ -710,6 +744,15 @@ export const Window = memo(function Window({
           width: el.offsetWidth,
           height: el.offsetHeight,
         };
+        const fraction = prevRect.width > 0
+          ? Math.min(Math.max((s.px - s.wsLeft - prevRect.x) / prevRect.width, 0), 1)
+          : 0.5;
+        const x = Math.round(px - width * fraction);
+        // Keep the grab point's offset within the title bar.
+        const y = Math.max(
+          topLimit(areas, px, py, prevRect),
+          prevRect.y + (e.clientY - s.py),
+        );
         s.tearAway = null;
         s.wx = x;
         s.wy = y;
@@ -751,11 +794,7 @@ export const Window = memo(function Window({
           };
           // Grab first (the anchor point near the cursor snaps to the hand
           // immediately), then spread the rest of the lattice.
-          const anchor = grabModel(
-            st.model,
-            e.clientX - s.wsLeft,
-            e.clientY - s.wsTop,
-          );
+          const anchor = grabModel(st.model, px, py);
           st.anchorOrigin = { x: anchor.x, y: anchor.y };
           spreadModel(st.model, prevRect.x, prevRect.y, prevRect.width, prevRect.height);
           wobblyRef.current = st;
@@ -768,17 +807,17 @@ export const Window = memo(function Window({
       }
 
       s.x = s.wx + (e.clientX - s.px);
-      s.y = Math.max(0, s.wy + (e.clientY - s.py));
+      s.y = Math.max(
+        topLimit(areas, px, py, { x: s.x, y: s.wy, width: win.width, height: win.height }),
+        s.wy + (e.clientY - s.py),
+      );
 
-      // Snap hint while the pointer rides a workspace edge: top maximizes,
-      // left/right tile to that half. Top wins its (thinner) corner overlap.
-      let zone: SnapZone = null;
-      if (e.clientY - s.wsTop <= SNAP_TOP_PX) zone = 'top';
-      else if (e.clientX - s.wsLeft <= SNAP_EDGE_PX) zone = 'left';
-      else if (s.wsLeft + s.wsWidth - e.clientX <= SNAP_EDGE_PX) zone = 'right';
-      if (zone !== s.snap) {
-        s.snap = zone;
-        setSnapHint(zone);
+      // Snap hint while the pointer rides a monitor's edge: top maximizes,
+      // left/right tile to that half.
+      const snap = snapTargetAt(areas, px, py);
+      if (snap?.zone !== s.snap?.zone || snap?.area.id !== s.snap?.area.id) {
+        s.snap = snap;
+        setSnapHint(snap ? snapRect(snap.area, snap.zone === 'top' ? 'max' : snap.zone) : null);
       }
 
       const st = wobblyRef.current;
@@ -795,7 +834,7 @@ export const Window = memo(function Window({
         el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
       }
     },
-    [beginGesture, unmaximize, win.id, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
+    [beginGesture, unmaximize, win.id, win.width, win.height, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
   );
 
   const endDrag = useCallback(
@@ -822,8 +861,8 @@ export const Window = memo(function Window({
         // The FLIP into the snap target starts from the drop position, where
         // the window visually sat (the drag never committed geometry).
         paintedRect.current = { x: s.x, y: s.y, width: win.width, height: win.height };
-        if (s.snap === 'top') maximize(win.id, restore);
-        else tile(win.id, s.snap, restore);
+        if (s.snap.zone === 'top') maximize(win.id, restore, s.snap.area.id);
+        else tile(win.id, s.snap.zone, restore, s.snap.area.id);
         return;
       }
 
@@ -885,6 +924,7 @@ export const Window = memo(function Window({
         y: win.y,
         width: win.width,
         height: win.height,
+        minTop: areaFor(areasRef.current, { x: win.x, y: win.y, width: win.width, height: win.height }).y,
         cur: { x: win.x, y: win.y, width: win.width, height: win.height },
       };
       beginGesture();
@@ -920,7 +960,7 @@ export const Window = memo(function Window({
     }
     if (o.dir.includes('n')) {
       const clampedDy = Math.min(dy, o.height - MIN_HEIGHT);
-      y = Math.max(0, o.y + clampedDy);
+      y = Math.max(Math.min(o.minTop, o.y), o.y + clampedDy);
       height = o.height - (y - o.y);
     }
 
@@ -981,15 +1021,17 @@ export const Window = memo(function Window({
   // An app uninstalled while its window is open renders nothing.
   if (!app) return null;
 
-  // maximized/tiled are CSS-driven (the window's own x/y/width/height keep
-  // their pre-snap values); a normal window renders at its stored geometry.
-  const geometry: React.CSSProperties = win.maximized
-    ? { left: 0, top: 0, width: '100%', height: '100%', zIndex: win.z }
-    : win.snapped === 'left'
-      ? { left: 0, top: 0, width: '50%', height: '100%', zIndex: win.z }
-      : win.snapped === 'right'
-        ? { left: '50%', top: 0, width: '50%', height: '100%', zIndex: win.z }
-        : { left: win.x, top: win.y, width: win.width, height: win.height, zIndex: win.z };
+  // Maximized/tiled windows fill (half) their monitor's work area; the
+  // window's own x/y/width/height keep their pre-snap values. A normal
+  // window renders at its stored geometry.
+  const rect = windowRect(win, areas);
+  const geometry: React.CSSProperties = {
+    left: rect.x,
+    top: rect.y,
+    width: rect.width,
+    height: rect.height,
+    zIndex: win.z,
+  };
 
   // Minimized windows stay mounted but hidden so app state (terminal
   // sessions, browser pages, navigation history) survives restore.
@@ -1168,21 +1210,22 @@ export const Window = memo(function Window({
           />
         ))}
 
-      {/* Snap preview while the drag rides a workspace edge: full target for
-          "drop to maximize" (top), the left/right half for "drop to tile".
-          Portaled to the workspace so it outlines the full snap target
-          instead of being clipped to the window's own box. */}
+      {/* Snap preview while the drag rides a monitor's edge: its whole work
+          area for "drop to maximize" (top), the left/right half for "drop to
+          tile". Portaled to the workspace so it outlines the full snap
+          target instead of being clipped to the window's own box. */}
       {snapHint &&
         sectionRef.current?.parentElement &&
         createPortal(
           <div
             aria-hidden
-            className={cn(
-              'pointer-events-none absolute z-[9000] rounded-xl border-2 border-primary/50 bg-primary/10 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-150',
-              snapHint === 'top' && 'inset-1.5',
-              snapHint === 'left' && 'inset-y-1.5 left-1.5 right-1/2',
-              snapHint === 'right' && 'inset-y-1.5 left-1/2 right-1.5',
-            )}
+            className="pointer-events-none absolute z-[9000] rounded-xl border-2 border-primary/50 bg-primary/10 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-150"
+            style={{
+              left: snapHint.x + SNAP_HINT_INSET,
+              top: snapHint.y + SNAP_HINT_INSET,
+              width: snapHint.width - SNAP_HINT_INSET * 2,
+              height: snapHint.height - SNAP_HINT_INSET * 2,
+            }}
           />,
           sectionRef.current.parentElement,
         )}

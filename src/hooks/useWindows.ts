@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AppDefinition } from '@/lib/apps';
+import { areaAt, areaFor, primaryArea, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
 import { launchNativeApp } from '@/lib/nativeApps';
 import { closeNativeWindow, isNativeWindowOpen } from '@/lib/nativeDisplay';
 
@@ -84,15 +85,21 @@ export interface WindowState {
    * Closing windows are excluded from focus/stacking and can't be raised.
    */
   closing: boolean;
-  /** Whether the window fills the workspace. */
+  /** Whether the window fills its monitor's work area. */
   maximized: boolean;
   /**
-   * Half-workspace edge tile, or null. Like `maximized`, this is a
-   * CSS-driven layout (the window renders at 50% width against the given
-   * edge); the window's own x/y/width/height keep their pre-tile values so
-   * `restore` can return it there.
+   * Half-monitor edge tile, or null. Like `maximized`, this is a layout
+   * derived from the monitor (the window renders at half its width against
+   * the given edge); the window's own x/y/width/height keep their pre-tile
+   * values so `restore` can return it there.
    */
   snapped: 'left' | 'right' | null;
+  /**
+   * The monitor (work area id) a maximized or tiled window fills; null
+   * otherwise. Kept apart from x/y because those hold the restore spot,
+   * which can be on another monitor (a window dragged across to snap).
+   */
+  monitor: string | null;
   /** Geometry to restore to when un-maximizing or un-tiling. */
   restore: { x: number; y: number; width: number; height: number } | null;
   /**
@@ -101,6 +108,16 @@ export interface WindowState {
    * none), which also move themselves.
    */
   frameless: boolean;
+}
+
+/**
+ * Where a window is painted, in workspace coordinates: its monitor's work
+ * area (or half of it) when maximized or tiled, else its own geometry.
+ */
+export function windowRect(w: WindowState, areas: WorkArea[]): Rect {
+  if (!w.maximized && !w.snapped) return { x: w.x, y: w.y, width: w.width, height: w.height };
+  const area = areas.find((a) => a.id === w.monitor) ?? areaFor(areas, w);
+  return snapRect(area, w.maximized ? 'max' : (w.snapped ?? 'left'));
 }
 
 /** Minimum window size in pixels. */
@@ -120,13 +137,26 @@ function clampSize(width: number, height: number, frameless: boolean): { width: 
 let nextId = 0;
 const nextWindowId = () => `win-${nextId++}`;
 
+/** The work area holding a window's (unsnapped) geometry. */
+function areaOf(areas: WorkArea[], w: WindowState): WorkArea | null {
+  return areas.length > 0 ? areaFor(areas, w) : null;
+}
+
+/** Spacing between successive windows opened on the same monitor. */
+const CASCADE_PX = 28;
+
 /**
  * Manages the set of open windows and their stacking/focus/geometry.
  *
  * @param getApp Resolver from app id to definition (built-in or installed
  *   web app). Must be referentially stable while the app list is unchanged.
+ * @param getAreas The monitors' work areas, in workspace coordinates (read
+ *   when an action needs them, so it must be stable but always current).
  */
-export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
+export function useWindows(
+  getApp: (id: string) => AppDefinition | undefined,
+  getAreas: () => WorkArea[],
+) {
   const [windows, setWindows] = useState<WindowState[]>([]);
   // For actions that must look before they leap without re-binding on every
   // commit (close, which asks native apps instead of deciding for them).
@@ -185,15 +215,29 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
     const id = nextWindowId();
 
     setWindows((ws) => {
-      const offset = ws.length * 28;
+      // New windows open on the monitor of the focused window, cascading
+      // from its top-left corner.
+      const areas = getAreas();
+      const focused = ws.reduce<WindowState | null>(
+        (top, w) => (!w.minimized && !w.closing && (!top || w.z > top.z) ? w : top),
+        null,
+      );
+      const area = focused
+        ? focused.monitor
+          ? areas.find((a) => a.id === focused.monitor) ?? areaOf(areas, focused)
+          : areaOf(areas, focused)
+        : areas.length > 0
+          ? primaryArea(areas)
+          : null;
+      const offset = (area ? ws.filter((w) => areaOf(areas, w) === area).length : ws.length) * CASCADE_PX;
       return [
         ...ws,
         {
           id,
           appId,
           params,
-          x: 80 + offset,
-          y: 60 + offset,
+          x: (area?.x ?? 0) + 80 + offset,
+          y: (area?.y ?? 0) + 60 + offset,
           width: size.width,
           height: size.height,
           z: maxZ(ws) + 1,
@@ -201,13 +245,14 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
           closing: false,
           maximized: false,
           snapped: null,
+          monitor: null,
           restore: null,
           frameless,
         },
       ];
     });
     return id;
-  }, [getApp, windows]);
+  }, [getApp, getAreas, windows]);
 
   /**
    * Begin closing a window: it stays mounted, marked `closing`, while the
@@ -310,10 +355,11 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
    * Maximize a window (no-op if already maximized). `restore` overrides the
    * geometry remembered for un-maximizing - the drag-to-top-edge snap passes
    * the window's pre-drag spot so a later restore returns it there, not to
-   * wherever it was dropped along the top edge.
+   * wherever it was dropped along the top edge. `monitor` is the work area
+   * to fill; by default, the one the window is on.
    */
   const maximize = useCallback(
-    (id: string, restore?: { x: number; y: number; width: number; height: number }) => {
+    (id: string, restore?: { x: number; y: number; width: number; height: number }, monitor?: string) => {
       setWindows((ws) => {
         const top = maxZ(ws);
         return ws.map((w) =>
@@ -321,14 +367,16 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
             ? {
                 ...w,
                 maximized: true,
-                restore: restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
+                snapped: null,
+                monitor: monitor ?? w.monitor ?? areaOf(getAreas(), w)?.id ?? null,
+                restore: restore ?? w.restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
                 z: top + 1,
               }
             : w,
         );
       });
     },
-    [],
+    [getAreas],
   );
 
   /**
@@ -341,7 +389,7 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       setWindows((ws) =>
         ws.map((w) =>
           w.id === id && (w.maximized || w.snapped)
-            ? { ...w, ...geometry, maximized: false, snapped: null, restore: null }
+            ? { ...w, ...geometry, maximized: false, snapped: null, monitor: null, restore: null }
             : w,
         ),
       );
@@ -350,36 +398,41 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
   );
 
   /**
-   * Tile a window to the left or right half of the workspace (no-op if
-   * already tiled to that side). `restore` overrides the geometry remembered
+   * Tile a window to the left or right half of a monitor (no-op if already
+   * tiled to that side there). `restore` overrides the geometry remembered
    * for un-tiling - the drag-to-edge snap passes the window's pre-drag spot
    * so a later restore returns it there. Like `maximize`, the tile is
-   * CSS-driven, so the window's x/y/width/height are left untouched.
+   * derived from the monitor, so the window's x/y/width/height are left
+   * untouched. `monitor` defaults to the one the window is on.
    */
   const tile = useCallback(
     (
       id: string,
       side: 'left' | 'right',
       restore?: { x: number; y: number; width: number; height: number },
+      monitor?: string,
     ) => {
       setWindows((ws) => {
         const top = maxZ(ws);
-        return ws.map((w) =>
-          w.id === id && w.snapped !== side
+        return ws.map((w) => {
+          if (w.id !== id) return w;
+          const target = monitor ?? w.monitor ?? areaOf(getAreas(), w)?.id ?? null;
+          return w.snapped !== side || w.monitor !== target
             ? {
                 ...w,
                 snapped: side,
                 maximized: false,
+                monitor: target,
                 restore:
                   restore ??
                   w.restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
                 z: top + 1,
               }
-            : w,
-        );
+            : w;
+        });
       });
     },
-    [],
+    [getAreas],
   );
 
   /**
@@ -416,20 +469,59 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
             ...w.restore,
             maximized: false,
             snapped: null,
+            monitor: null,
             restore: null,
             z: top + 1,
           };
         }
         // Maximize. A tiled window keeps its pre-tile geometry (w.restore) as
-        // the restore target; a normal window remembers its current geometry.
+        // the restore target, and its monitor; a normal window remembers its
+        // current geometry and fills the monitor it's on.
         return {
           ...w,
           maximized: true,
           snapped: null,
+          monitor: w.monitor ?? areaOf(getAreas(), w)?.id ?? null,
           restore: w.restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
           z: top + 1,
         };
       });
+    });
+  }, [getAreas]);
+
+  /**
+   * Bring windows home after the monitors change: a maximized or tiled
+   * window whose monitor went away fills the primary instead, and a window
+   * whose title bar no longer lands on any monitor (it was on one that was
+   * unplugged, or now sits in the dead area beside a smaller one) moves to
+   * the primary, keeping its size. Restore spots are moved the same way.
+   */
+  const fitToAreas = useCallback((areas: WorkArea[]) => {
+    if (areas.length === 0) return;
+    const primary = primaryArea(areas);
+    const ids = new Set(areas.map((a) => a.id));
+    /** A rect moved onto the primary if its title bar is lost, else null. */
+    const rehome = (r: { x: number; y: number; width: number }, i: number) =>
+      [40, r.width / 2, r.width - 40].some((dx) => areaAt(areas, r.x + dx, r.y + 18))
+        ? null
+        : { x: primary.x + 80 + i * CASCADE_PX, y: primary.y + 60 + i * CASCADE_PX };
+    setWindows((ws) => {
+      let changed = false;
+      let lost = 0;
+      const next = ws.map((w) => {
+        let out = w;
+        if (w.monitor !== null && !ids.has(w.monitor)) out = { ...out, monitor: primary.id };
+        const moved = rehome(w, lost);
+        if (moved) out = { ...out, ...moved };
+        const restoreMoved = w.restore ? rehome(w.restore, lost) : null;
+        if (w.restore && restoreMoved) out = { ...out, restore: { ...w.restore, ...restoreMoved } };
+        if (out !== w) {
+          changed = true;
+          if (moved || restoreMoved) lost++;
+        }
+        return out;
+      });
+      return changed ? next : ws;
     });
   }, []);
 
@@ -455,8 +547,9 @@ export function useWindows(getApp: (id: string) => AppDefinition | undefined) {
       toggleMaximize,
       cycleFocus,
       setFrameless,
+      fitToAreas,
     }),
-    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless],
+    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, fitToAreas],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

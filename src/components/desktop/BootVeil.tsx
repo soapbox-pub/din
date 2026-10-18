@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getBootBridge } from '@/lib/boot';
 import { cn } from '@/lib/utils';
+import { ScreenLayer } from './MonitorsProvider';
 
 /**
  * Boot veil: a black overlay covering the shell's first frame, fading out
@@ -34,10 +35,10 @@ export function BootVeil() {
   }, []);
 
   return (
-    <div
+    <ScreenLayer
       aria-hidden
       className={cn(
-        'pointer-events-none fixed inset-0 z-[10001] bg-black',
+        'pointer-events-none z-[10001] bg-black',
         visible && 'animate-veil-out motion-reduce:animate-none motion-reduce:opacity-0',
       )}
     />

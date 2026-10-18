@@ -22,7 +22,8 @@ import { APPS } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
-import type { WindowState } from '@/hooks/useWindows';
+import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
+import { windowRect, type WindowState } from '@/hooks/useWindows';
 
 /** One window in a Dock tile. */
 interface DockWindow {
@@ -71,11 +72,11 @@ const REVEAL_SLACK = 24;
  * macOS-style Dock: a centered, backgroundless strip of app tiles that
  * magnify as the pointer sweeps across them.
  *
- * The dock overlays the bottom edge of the workspace and hides itself
+ * The dock overlays the bottom edge of the primary monitor and hides itself
  * intelligently: whenever the focused window intersects its footprint
- * (including a maximized window, which fills the whole workspace) it slides
- * off-screen, and it slides back when the pointer reaches the bottom edge
- * of the screen or when the focused window no longer overlaps it.
+ * (including a window maximized there, which fills the whole monitor) it
+ * slides off-screen, and it slides back when the pointer reaches the bottom
+ * edge of that monitor or when the focused window no longer overlaps it.
  *
  * Shows pinned apps first (roaming via encrypted app data), then any
  * running apps that aren't pinned. Each tile keeps the grouped-window
@@ -90,6 +91,8 @@ export function Dock({
   workspaceRef: React.RefObject<HTMLElement | null>;
 }) {
   const { windows } = useWindowManager();
+  const { primary } = useMonitors();
+  const areas = useWorkAreas();
   const dinActions = useWindowActions();
   const { closeApp } = dinActions;
   const { getApp, webApps, uninstallWebApp } = useInstalledApps();
@@ -251,28 +254,21 @@ export function Dock({
       }
       const workspaceRect = workspace.getBoundingClientRect();
       // Dock footprint in viewport coordinates. The footer is pinned to
-      // inset-x-0 bottom-0, so the strip's offsets are viewport offsets.
-      const dockTop = window.innerHeight - strip.offsetHeight;
-      const dockLeft = strip.offsetLeft;
+      // inset-x-0 bottom-0 of the primary monitor, so the strip's offsets
+      // are offsets from that monitor's left edge.
+      const dockTop = primary.y + primary.height - strip.offsetHeight;
+      const dockLeft = primary.x + strip.offsetLeft;
       const dockRight = dockLeft + strip.offsetWidth;
       const overlaps = (w: WindowState) => {
-        // Maximized windows fill the workspace, which reaches the screen bottom.
-        if (w.maximized) return workspaceRect.bottom > dockTop;
-        // Edge-tiled windows are CSS-driven (stored x/width are stale): they
-        // span full height against one half of the workspace.
-        if (w.snapped) {
-          if (workspaceRect.bottom <= dockTop) return false;
-          const mid = workspaceRect.left + workspaceRect.width / 2;
-          const tileLeft = w.snapped === 'left' ? workspaceRect.left : mid;
-          const tileRight = w.snapped === 'left' ? mid : workspaceRect.right;
-          return tileLeft < dockRight && tileRight > dockLeft;
-        }
-        const left = workspaceRect.left + w.x;
-        const top = workspaceRect.top + w.y;
+        // Where it's painted: maximized and tiled windows fill their monitor.
+        const r = windowRect(w, areas);
+        const left = workspaceRect.left + r.x;
+        const top = workspaceRect.top + r.y;
         return (
-          top + w.height > dockTop &&
+          top + r.height > dockTop &&
+          top < primary.y + primary.height &&
           left < dockRight &&
-          left + w.width > dockLeft
+          left + r.width > dockLeft
         );
       };
       setIntersecting(activeWindow !== null && overlaps(activeWindow));
@@ -280,7 +276,7 @@ export function Dock({
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [activeWindow, entryIds.length, workspaceRef]);
+  }, [activeWindow, entryIds.length, workspaceRef, primary, areas]);
 
   // Hot-edge reveal: sweeping the pointer into the strip at the very bottom
   // of the screen slides a hidden dock back up; it retracts once the pointer
@@ -310,7 +306,12 @@ export function Dock({
   useEffect(() => {
     if (!intersecting) return;
     const onPointerMove = (e: PointerEvent) => {
-      const fromBottom = window.innerHeight - e.clientY;
+      const fromBottom = primary.y + primary.height - e.clientY;
+      // Only the primary monitor's bottom edge is the Dock's.
+      if (e.clientX < primary.x || e.clientX >= primary.x + primary.width || fromBottom < 0) {
+        setRevealed(false);
+        return;
+      }
       setRevealed((prev) => {
         if (!prev) return fromBottom <= REVEAL_ZONE;
         const dockHeight = stripRef.current?.offsetHeight ?? 80;
@@ -319,7 +320,7 @@ export function Dock({
     };
     window.addEventListener('pointermove', onPointerMove);
     return () => window.removeEventListener('pointermove', onPointerMove);
-  }, [intersecting]);
+  }, [intersecting, primary]);
 
   // Keyboard users can still tab into the dock while it's hidden; keep it
   // on-screen whenever any tile holds focus.

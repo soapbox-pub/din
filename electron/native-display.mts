@@ -141,8 +141,11 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
   writeXauthority(xauthority, displayNumber, crypto.randomBytes(16));
 
   // The X screen is the shell's viewport (see the worker's coordinate notes):
-  // a popup an app clamps to the screen then stays inside Din's.
-  const { width, height } = screen.getPrimaryDisplay().size;
+  // a popup an app clamps to the screen then stays inside Din's. The shell
+  // spans every display, so that's their union.
+  const displays = screen.getAllDisplays().map((d) => d.bounds);
+  const width = Math.max(...displays.map((b) => b.x + b.width)) - Math.min(...displays.map((b) => b.x));
+  const height = Math.max(...displays.map((b) => b.y + b.height)) - Math.min(...displays.map((b) => b.y));
   const child = spawn(
     xvfb,
     [

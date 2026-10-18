@@ -620,47 +620,62 @@ async function savedVpnConnections(): Promise<VpnConnection[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Display bridge (window.display), backed by xrandr. Meaningful only on a bare
-// X11 session (the os/x11 standalone launcher), where Din is the whole desktop
-// and nothing else manages the outputs. It models the full multi-output layout
-// - resolution, position, on/off and which output is primary - and applies a
-// whole desired arrangement atomically. On Wayland/cage (DinOS) xrandr isn't
-// applicable, so status reports `available: false` and the Settings panel
-// renders a fallback - same shape as the WiFi bridge in QEMU.
+// Display bridge (window.display): the arrangement of the outputs Din's one
+// window spans - resolution, position, on/off and which output is primary -
+// applied as a whole desired layout at once. Two backends:
+//   - wlr-randr on Wayland (cage on DinOS), through the compositor's
+//     wlr-output-management protocol. "Primary" isn't a Wayland notion: it's
+//     Din's own (the monitor with the menu bar and Dock), so it's saved with
+//     the arrangement, and the arrangement is reapplied whenever the same set
+//     of outputs is connected again - cage itself forgets, laying outputs out
+//     left to right at their preferred modes.
+//   - xrandr on a bare X11 session (the os/x11 standalone launcher), where
+//     Din is the whole desktop and nothing else manages the outputs.
+// Where neither applies (a desktop compositor without the protocol, a
+// windowed dev shell), status reports `available: false` and the Settings
+// panel renders a fallback - same shape as the WiFi bridge in QEMU.
+//
+// Positions are in the compositor's layout coordinates, which match output
+// pixels at scale 1. (Scaled outputs are laid out by their scaled size, which
+// the arrangement editor doesn't model yet.)
 //
 // Threat model: same boundaries as the other bridges (strict CSP, sender
-// guard, arguments re-validated). xrandr runs via execFile with an argv array
-// - no shell - and the output name / mode are matched against xrandr's own
-// parsed output before use, so neither can inject or select an invalid mode.
+// guard, arguments re-validated). Both tools run via execFile with an argv
+// array - no shell - and the output name / mode are matched against the
+// tool's own report before use, so neither can inject or select an invalid
+// mode.
 // ---------------------------------------------------------------------------
 
-const XRANDR_TIMEOUT_MS = 15_000;
+const DISPLAY_TIMEOUT_MS = 15_000;
 
-/** Run xrandr with an argv array; resolves stdout, rejects with a clean message. */
-function xrandr(args: string[], timeout = XRANDR_TIMEOUT_MS): Promise<string> {
-  return tool('xrandr', args, timeout, 4 * 1024 * 1024);
+/** The tool that drives the outputs: the compositor's on Wayland, else X's. */
+const DISPLAY_TOOL = process.env.WAYLAND_DISPLAY ? 'wlr-randr' : 'xrandr';
+
+/** Run the display tool with an argv array; resolves stdout, rejects with a clean message. */
+function displayTool(args: string[], timeout = DISPLAY_TIMEOUT_MS): Promise<string> {
+  return tool(DISPLAY_TOOL, args, timeout, 4 * 1024 * 1024);
 }
 
-/** One mode line of an xrandr output. */
-interface XrandrMode {
+/** One mode of an output. */
+interface DisplayMode {
   width: number;
   height: number;
   current: boolean;
   preferred: boolean;
 }
 
-/** One output of `xrandr --query`. */
-interface XrandrOutput {
+/** One connected output, as either tool reports it. */
+interface DisplayOutput {
   name: string;
   connected: boolean;
   primary: boolean;
   enabled: boolean;
   current: { width: number; height: number } | null;
   position: { x: number; y: number };
-  modes: XrandrMode[];
+  modes: DisplayMode[];
 }
 
-/** A desired on-state for one output in an xrandr layout call. */
+/** A desired on-state for one output in a layout call. */
 interface OutputPlacement {
   name: string;
   width: number;
@@ -676,9 +691,9 @@ interface OutputPlacement {
  * followed by indented mode lines
  *   1920x1200     60.00*+     ('*' = current mode, '+' = preferred/native)
  */
-function parseXrandr(stdout: string): XrandrOutput[] {
-  const outputs: XrandrOutput[] = [];
-  let current: XrandrOutput | null = null;
+function parseXrandr(stdout: string): DisplayOutput[] {
+  const outputs: DisplayOutput[] = [];
+  let current: DisplayOutput | null = null;
   for (const line of stdout.split('\n')) {
     const head = line.match(
       /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+(\d+)\+(\d+))?/,
@@ -710,23 +725,123 @@ function parseXrandr(stdout: string): XrandrOutput[] {
   return outputs;
 }
 
+/** `wlr-randr --json`: one entry per head the compositor knows (all connected). */
+interface WlrHead {
+  name?: unknown;
+  enabled?: unknown;
+  position?: { x?: unknown; y?: unknown };
+  modes?: { width?: unknown; height?: unknown; current?: unknown; preferred?: unknown }[];
+}
+
+/** Parse `wlr-randr --json`. Primary is left unset: it's Din's to decide. */
+function parseWlrRandr(stdout: string): DisplayOutput[] {
+  const heads: unknown = JSON.parse(stdout);
+  if (!Array.isArray(heads)) return [];
+  return (heads as WlrHead[]).flatMap((head) => {
+    if (typeof head?.name !== 'string') return [];
+    const modes = (Array.isArray(head.modes) ? head.modes : []).map((m) => ({
+      width: Number(m.width) || 0,
+      height: Number(m.height) || 0,
+      current: m.current === true,
+      preferred: m.preferred === true,
+    }));
+    const enabled = head.enabled === true;
+    const now = enabled ? modes.find((m) => m.current) : undefined;
+    return [{
+      name: head.name,
+      connected: true,
+      primary: false,
+      enabled,
+      current: now ? { width: now.width, height: now.height } : null,
+      position: enabled
+        ? { x: Number(head.position?.x) || 0, y: Number(head.position?.y) || 0 }
+        : { x: 0, y: 0 },
+      modes,
+    }];
+  });
+}
+
+/** A failure that just means this session's outputs can't be managed. */
+function displayUnavailable(error: unknown): boolean {
+  const message = messageOf(error);
+  return (
+    message === `${DISPLAY_TOOL}-missing` ||
+    /doesn't support wlr-output-management|failed to connect to display/i.test(message)
+  );
+}
+
+// ---- Saved arrangements (Wayland) -----------------------------------------
+
+/** An arrangement, as saved for one set of connected outputs. */
+interface SavedLayout {
+  enabled: OutputPlacement[];
+  disabled: string[];
+}
+
+/** Saved arrangements by outputSetKey, in the user's config. */
+function savedLayoutsPath(): string {
+  return path.join(app.getPath('userData'), 'displays.json');
+}
+
+/** Key for a set of connected outputs: the arrangement saved for it. */
+function outputSetKey(outputs: DisplayOutput[]): string {
+  return outputs.map((o) => o.name).sort().join('+');
+}
+
+function readSavedLayouts(): Record<string, SavedLayout> {
+  try {
+    const data: unknown = JSON.parse(fs.readFileSync(savedLayoutsPath(), 'utf8'));
+    return data && typeof data === 'object' ? (data as Record<string, SavedLayout>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLayout(key: string, layout: SavedLayout): void {
+  const layouts = readSavedLayouts();
+  layouts[key] = layout;
+  try {
+    fs.writeFileSync(savedLayoutsPath(), JSON.stringify(layouts, null, 2));
+  } catch (error) {
+    console.warn('displays: could not save the arrangement:', messageOf(error));
+  }
+}
+
+/** Din's primary among Wayland outputs: the saved choice, if it's on. */
+function savedPrimary(outputs: DisplayOutput[]): string | null {
+  const saved = readSavedLayouts()[outputSetKey(outputs)];
+  const name = saved?.enabled.find((p) => p.primary)?.name;
+  return name && outputs.some((o) => o.name === name && o.enabled) ? name : null;
+}
+
 /**
- * Connected outputs, via xrandr. Throws 'xrandr-missing' where xrandr absent.
+ * Connected outputs. Throws '<tool>-missing' where the tool is absent.
  *
  * `probe` asks the X server to re-probe every connector first (--query),
  * which can stall it for ~10 ms - fine before changing the layout, not for
  * the Settings panel's status poll, which reads the state the server already
- * keeps current from hotplug events (--current).
+ * keeps current from hotplug events (--current). Wayland compositors always
+ * report live state.
  */
-async function queryOutputs(probe = false): Promise<XrandrOutput[]> {
-  return parseXrandr(await xrandr([probe ? '--query' : '--current'])).filter((o) => o.connected);
+async function queryOutputs(probe = false): Promise<DisplayOutput[]> {
+  if (DISPLAY_TOOL === 'xrandr') {
+    return parseXrandr(await displayTool([probe ? '--query' : '--current'])).filter((o) => o.connected);
+  }
+  const outputs = parseWlrRandr(await displayTool(['--json']));
+  // No saved choice: the display Electron calls primary, else the first on.
+  const primaryBounds = screen.getPrimaryDisplay().bounds;
+  const primary =
+    savedPrimary(outputs) ??
+    outputs.find((o) => o.enabled && o.position.x === primaryBounds.x && o.position.y === primaryBounds.y)?.name ??
+    outputs.find((o) => o.enabled)?.name;
+  return outputs.map((o) => ({ ...o, primary: o.name === primary }));
 }
 
 /** Laptop built-in panels (the ones that switch off when the lid shuts). */
 const INTERNAL_OUTPUT = /^(eDP|LVDS|DSI)/i;
 
 /** An output's best default mode: preferred, else current, else the largest. */
-function preferredMode(output: XrandrOutput): XrandrMode | null {
+function preferredMode(output: DisplayOutput): DisplayMode | null {
   return (
     output.modes.find((m) => m.preferred) ||
     output.modes.find((m) => m.current) ||
@@ -735,29 +850,156 @@ function preferredMode(output: XrandrOutput): XrandrMode | null {
   );
 }
 
-/**
- * Run one xrandr call that turns each enabled output on at its mode/position
- * (marking one primary) and each disabled output off. With no window manager,
- * follow up by fitting the shell window to the primary's new bounds instead of
- * waiting on a RandR event.
- */
-async function applyXrandrLayout(enabled: OutputPlacement[], disabled: string[]): Promise<void> {
-  const args: string[] = [];
-  for (const e of enabled) {
-    args.push('--output', e.name, '--mode', `${e.width}x${e.height}`, '--pos', `${e.x}x${e.y}`);
-    if (e.primary) args.push('--primary');
-  }
-  for (const name of disabled) args.push('--output', name, '--off');
-  await xrandr(args);
+/** The bounding box of a set of rectangles. */
+function unionRect(rects: { x: number; y: number; width: number; height: number }[]): Electron.Rectangle {
+  const x = Math.min(...rects.map((r) => r.x));
+  const y = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.width));
+  const bottom = Math.max(...rects.map((r) => r.y + r.height));
+  return { x, y, width: right - x, height: bottom - y };
+}
 
-  const primary = enabled.find((e) => e.primary);
-  if (primary && shellWindow && !shellWindow.isDestroyed()) {
-    shellWindow.setBounds({
-      x: primary.x,
-      y: primary.y,
-      width: primary.width,
-      height: primary.height,
+/**
+ * Turn each enabled output on at its mode/position (marking one primary) and
+ * each disabled output off, in one tool call. Under X there's no window
+ * manager, so the shell window is refitted to the new outputs right away
+ * instead of waiting on a RandR event. `remember` saves the arrangement (and
+ * with it the primary) for this set of outputs - for the user's own
+ * arrangements, not automatic ones like the lid hand-off.
+ */
+async function applyOutputLayout(
+  outputs: DisplayOutput[],
+  enabled: OutputPlacement[],
+  disabled: string[],
+  remember = false,
+): Promise<void> {
+  const args: string[] = [];
+  if (DISPLAY_TOOL === 'xrandr') {
+    for (const e of enabled) {
+      args.push('--output', e.name, '--mode', `${e.width}x${e.height}`, '--pos', `${e.x}x${e.y}`);
+      if (e.primary) args.push('--primary');
+    }
+    for (const name of disabled) args.push('--output', name, '--off');
+  } else {
+    const byName = new Map(outputs.map((o) => [o.name, o]));
+    for (const e of enabled) {
+      args.push('--output', e.name, '--on');
+      // Re-setting the current size could drop it to another refresh rate.
+      const now = byName.get(e.name)?.current;
+      if (!now || now.width !== e.width || now.height !== e.height) {
+        args.push('--mode', `${e.width}x${e.height}`);
+      }
+      args.push('--pos', `${e.x},${e.y}`);
+    }
+    for (const name of disabled) args.push('--output', name, '--off');
+  }
+  await displayTool(args);
+
+  if (remember && DISPLAY_TOOL !== 'xrandr') saveLayout(outputSetKey(outputs), { enabled, disabled });
+
+  if (DISPLAY_TOOL === 'xrandr' && enabled.length > 0 && shellWindow && !shellWindow.isDestroyed()) {
+    shellWindow.setBounds(unionRect(enabled));
+  }
+  // The primary may have moved without any output changing.
+  scheduleMonitorsUpdate();
+}
+
+/**
+ * Validate a renderer-supplied arrangement against the outputs the tool
+ * reports - never trust the renderer's strings directly.
+ */
+function placementsFor(
+  outputs: DisplayOutput[],
+  rawPlacements: unknown,
+): { enabled: OutputPlacement[]; disabled: string[] } {
+  if (!Array.isArray(rawPlacements)) throw new Error('Invalid layout');
+  const byName = new Map(outputs.map((o) => [o.name, o]));
+  const enabled: OutputPlacement[] = [];
+  const disabled: string[] = [];
+  const mentioned = new Set<string>();
+  for (const p of rawPlacements) {
+    const output = byName.get(String(p && p.output));
+    if (!output) throw new Error('Unknown display output');
+    if (mentioned.has(output.name)) throw new Error('Duplicate display output');
+    mentioned.add(output.name);
+    if (!p.enabled) {
+      disabled.push(output.name);
+      continue;
+    }
+    const width = Number(p.width);
+    const height = Number(p.height);
+    if (!output.modes.some((m) => m.width === width && m.height === height)) {
+      throw new Error(`Unsupported mode for ${output.name}`);
+    }
+    enabled.push({
+      name: output.name,
+      width,
+      height,
+      x: Math.max(0, Math.round(Number(p.x)) || 0),
+      y: Math.max(0, Math.round(Number(p.y)) || 0),
+      primary: Boolean(p.primary),
     });
+  }
+  // Any connected output the renderer didn't mention is turned off.
+  for (const o of outputs) if (!mentioned.has(o.name)) disabled.push(o.name);
+
+  if (enabled.length === 0) throw new Error('At least one display must stay on');
+  if (enabled.filter((e) => e.primary).length !== 1) {
+    throw new Error('Exactly one display must be primary');
+  }
+  return { enabled, disabled };
+}
+
+/** Whether the outputs are already arranged as `layout` says. */
+function layoutMatches(outputs: DisplayOutput[], layout: SavedLayout): boolean {
+  const byName = new Map(outputs.map((o) => [o.name, o]));
+  return (
+    layout.enabled.every((e) => {
+      const o = byName.get(e.name);
+      return (
+        o?.enabled &&
+        o.current?.width === e.width &&
+        o.current?.height === e.height &&
+        o.position.x === e.x &&
+        o.position.y === e.y
+      );
+    }) && layout.disabled.every((name) => !byName.get(name)?.enabled)
+  );
+}
+
+/** The set of outputs last seen, so only a change of set restores a layout. */
+let lastOutputSet: string | null = null;
+
+/**
+ * Wayland: when a set of outputs is connected that the user has arranged
+ * before, put it back that way. Only on a change of set: switching an output
+ * off (the lid hand-off, say) keeps it in the set, and must stick.
+ */
+async function restoreSavedLayout(): Promise<void> {
+  if (DISPLAY_TOOL === 'xrandr') return;
+  let outputs: DisplayOutput[];
+  try {
+    outputs = await queryOutputs();
+  } catch {
+    return;
+  }
+  const key = outputSetKey(outputs);
+  if (key === lastOutputSet) return;
+  lastOutputSet = key;
+  const saved = readSavedLayouts()[key];
+  if (!saved || lidAutoArranged || layoutMatches(outputs, saved)) return;
+  try {
+    // Re-validated like a fresh request: modes can disappear with a new cable.
+    const { enabled, disabled } = placementsFor(
+      outputs,
+      [
+        ...saved.enabled.map((e) => ({ output: e.name, enabled: true, ...e })),
+        ...saved.disabled.map((name) => ({ output: name, enabled: false })),
+      ],
+    );
+    await applyOutputLayout(outputs, enabled, disabled);
+  } catch (error) {
+    console.warn('displays: could not restore the saved arrangement:', messageOf(error));
   }
 }
 
@@ -767,67 +1009,108 @@ function registerDisplayHandlers(): void {
     try {
       return { available: true, outputs: await queryOutputs() };
     } catch (error) {
-      if (messageOf(error) === 'xrandr-missing') return { available: false, outputs: [] };
+      if (displayUnavailable(error)) return { available: false, outputs: [] };
       throw error;
     }
   });
 
   ipcMain.handle('display:applyLayout', async (event, rawPlacements) => {
     assertShellSender(event);
-    if (!Array.isArray(rawPlacements)) throw new Error('Invalid layout');
-
-    // Re-derive the real outputs and only act on names/modes that xrandr
-    // actually reports - never trust the renderer's strings directly.
     const outputs = await queryOutputs(true);
-    const byName = new Map(outputs.map((o) => [o.name, o]));
-
-    const enabled: OutputPlacement[] = [];
-    const disabled: string[] = [];
-    const mentioned = new Set<string>();
-    for (const p of rawPlacements) {
-      const output = byName.get(String(p && p.output));
-      if (!output) throw new Error('Unknown display output');
-      if (mentioned.has(output.name)) throw new Error('Duplicate display output');
-      mentioned.add(output.name);
-      if (!p.enabled) {
-        disabled.push(output.name);
-        continue;
-      }
-      const width = Number(p.width);
-      const height = Number(p.height);
-      if (!output.modes.some((m) => m.width === width && m.height === height)) {
-        throw new Error(`Unsupported mode for ${output.name}`);
-      }
-      enabled.push({
-        name: output.name,
-        width,
-        height,
-        x: Math.max(0, Math.round(Number(p.x)) || 0),
-        y: Math.max(0, Math.round(Number(p.y)) || 0),
-        primary: Boolean(p.primary),
-      });
-    }
-    // Any connected output the renderer didn't mention is turned off.
-    for (const o of outputs) if (!mentioned.has(o.name)) disabled.push(o.name);
-
-    if (enabled.length === 0) throw new Error('At least one display must stay on');
-    if (enabled.filter((e) => e.primary).length !== 1) {
-      throw new Error('Exactly one display must be primary');
-    }
-
-    await applyXrandrLayout(enabled, disabled);
+    const { enabled, disabled } = placementsFor(outputs, rawPlacements);
+    await applyOutputLayout(outputs, enabled, disabled, true);
     // A manual arrangement supersedes any automatic lid re-arrangement.
     lidAutoArranged = false;
   });
 }
 
 // ---------------------------------------------------------------------------
-// Lid switch (bare X11 only). When the laptop is docked to an external display
-// and the lid is closed, the built-in panel should switch off and an external
-// output take over as primary; opening the lid again restores the built-in
-// panel. There is no window manager or logind seat handling this, so the shell
-// watches the ACPI lid state itself and drives xrandr through the same path as
-// the Settings panel. If the lid closes with no external attached we leave the
+// Monitors bridge (window.monitors): where each display sits inside the shell
+// window, for the desktop's layout (src/lib/monitors.ts). The production
+// window spans every display - cage stretches it over all outputs, and on bare
+// X11 it's sized to their union below - so positions are relative to the
+// union's top-left. Reports null for a single display, or in the windowed dev
+// shell, where the viewport is the one monitor.
+// ---------------------------------------------------------------------------
+
+/** One display, in DIPs relative to the shell window's top-left. */
+interface ShellMonitor {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  primary: boolean;
+}
+
+/** The union of every display: what the production shell window covers. */
+function screenBounds(): Electron.Rectangle {
+  return unionRect(screen.getAllDisplays().map((d) => d.bounds));
+}
+
+/**
+ * The display Din treats as primary. On Wayland that's Din's saved choice of
+ * output (matched to a display by position), else what Electron reports.
+ */
+async function primaryDisplay(displays: Electron.Display[]): Promise<Electron.Display> {
+  if (DISPLAY_TOOL !== 'xrandr') {
+    try {
+      const output = (await queryOutputs()).find((o) => o.primary);
+      const match = output && displays.find((d) => d.bounds.x === output.position.x && d.bounds.y === output.position.y);
+      if (match) return match;
+    } catch {
+      // No output management: fall through.
+    }
+  }
+  return screen.getPrimaryDisplay();
+}
+
+async function shellMonitors(): Promise<ShellMonitor[] | null> {
+  if (DEV_URL) return null;
+  const displays = screen.getAllDisplays();
+  if (displays.length < 2) return null;
+  const origin = screenBounds();
+  const primary = await primaryDisplay(displays);
+  return displays.map((d, i) => ({
+    id: String(d.id),
+    name: d.label || `Display ${i + 1}`,
+    x: d.bounds.x - origin.x,
+    y: d.bounds.y - origin.y,
+    width: d.bounds.width,
+    height: d.bounds.height,
+    primary: d.id === primary.id,
+  }));
+}
+
+let monitorsTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Tell the shell the monitors changed, once things settle: a hotplug arrives
+ * as a burst of display events while the compositor rearranges.
+ */
+function scheduleMonitorsUpdate(): void {
+  if (monitorsTimer) clearTimeout(monitorsTimer);
+  monitorsTimer = setTimeout(() => {
+    monitorsTimer = null;
+    void shellMonitors().then((monitors) => sendToShell('monitors:changed', monitors));
+  }, 150);
+}
+
+function registerMonitorsHandlers(): void {
+  ipcMain.handle('monitors:get', (event) => {
+    assertShellSender(event);
+    return shellMonitors();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lid switch. When the laptop is docked to an external display and the lid is
+// closed, the built-in panel should switch off and an external output take
+// over as primary; opening the lid again restores the built-in panel. There
+// is no window manager or logind seat handling this, so the shell watches the
+// ACPI lid state itself and drives the outputs through the same path as the
+// Settings panel. If the lid closes with no external attached we leave the
 // only screen alone rather than blanking the machine.
 // ---------------------------------------------------------------------------
 
@@ -860,11 +1143,11 @@ async function readLidState(): Promise<'open' | 'closed' | null> {
 /**
  * Lay a set of outputs left-to-right starting at the origin, first one primary,
  * each at its preferred mode. Returns the { enabled, disabled } pair for
- * applyXrandrLayout, or null if none can be driven.
+ * applyOutputLayout, or null if none can be driven.
  */
 function packLeftToRight(
-  on: XrandrOutput[],
-  off: XrandrOutput[],
+  on: DisplayOutput[],
+  off: DisplayOutput[],
 ): { enabled: OutputPlacement[]; disabled: string[] } | null {
   const enabled: OutputPlacement[] = [];
   let x = 0;
@@ -887,7 +1170,7 @@ function packLeftToRight(
 
 /** Lid closed: if docked, switch the built-in panel off and hand off to externals. */
 async function onLidClosed(): Promise<void> {
-  let outputs: XrandrOutput[];
+  let outputs: DisplayOutput[];
   try {
     outputs = await queryOutputs(true);
   } catch {
@@ -901,7 +1184,7 @@ async function onLidClosed(): Promise<void> {
   const layout = packLeftToRight(external, internal);
   if (!layout) return;
   try {
-    await applyXrandrLayout(layout.enabled, layout.disabled);
+    await applyOutputLayout(outputs, layout.enabled, layout.disabled);
     lidAutoArranged = true;
   } catch {
     // Leave the current arrangement in place on failure.
@@ -912,7 +1195,7 @@ async function onLidClosed(): Promise<void> {
 async function onLidOpened(): Promise<void> {
   if (!lidAutoArranged) return; // only reverse our own change
   lidAutoArranged = false;
-  let outputs: XrandrOutput[];
+  let outputs: DisplayOutput[];
   try {
     outputs = await queryOutputs(true);
   } catch {
@@ -926,7 +1209,7 @@ async function onLidOpened(): Promise<void> {
   const layout = packLeftToRight([...internal, ...external], []);
   if (!layout) return;
   try {
-    await applyXrandrLayout(layout.enabled, layout.disabled);
+    await applyOutputLayout(outputs, layout.enabled, layout.disabled);
   } catch {
     // Leave the current arrangement in place on failure.
   }
@@ -3647,6 +3930,7 @@ app.whenReady().then(() => {
   registerWifiHandlers();
   registerVpnHandlers();
   registerDisplayHandlers();
+  registerMonitorsHandlers();
   registerPowerHandlers();
   registerAudioHandlers();
   registerMediaKeys();
@@ -3692,21 +3976,22 @@ app.whenReady().then(() => {
   overrideActionPopup();
 
   // Production runs with no window manager (cage on DinOS, or a bare X11
-  // login session via os/x11). cage force-fills the one app, but bare X11 has
-  // nothing to honor the EWMH fullscreen hint, so the window would sit at its
-  // default size letterboxed on a black screen. Size it to the primary
-  // display's bounds explicitly and drop the frame; fullscreen/kiosk still
-  // apply where a compositor does honor them.
+  // login session via os/x11). cage force-fills the one app across every
+  // output, but bare X11 has nothing to honor the EWMH fullscreen hint, so
+  // the window would sit at its default size letterboxed on a black screen.
+  // Size it to cover every display explicitly and drop the frame;
+  // fullscreen/kiosk still apply where a compositor does honor them. The
+  // desktop itself works out where each monitor is (window.monitors).
   const production = !DEV_URL;
-  const primaryBounds = screen.getPrimaryDisplay().bounds;
+  // Bare X11 fullscreens a window onto one display; across several, the
+  // explicit bounds have to do.
+  const spanX11 = DISPLAY_TOOL === 'xrandr' && screen.getAllDisplays().length > 1;
   const win = new BrowserWindow({
-    // Dev: normal windowed shell. Production: fills the display, frameless.
-    fullscreen: production,
-    kiosk: production,
+    // Dev: normal windowed shell. Production: fills the displays, frameless.
+    fullscreen: production && !spanX11,
+    kiosk: production && !spanX11,
     frame: !production,
-    ...(production
-      ? { x: primaryBounds.x, y: primaryBounds.y, width: primaryBounds.width, height: primaryBounds.height }
-      : { width: 1280, height: 800 }),
+    ...(production ? screenBounds() : { width: 1280, height: 800 }),
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
     // Stay hidden until the renderer reports its first frame is ready (the
@@ -3795,14 +4080,21 @@ app.whenReady().then(() => {
   });
 
   // With no window manager, the shell won't follow a resolution change on its
-  // own. Refit it to the primary display whenever the display metrics change
-  // (e.g. the Settings display panel applying a new xrandr mode).
+  // own. Refit it over every display whenever they change (e.g. the Settings
+  // display panel applying a new mode, or a monitor plugged in), and tell the
+  // desktop where the monitors are now. A newly connected set of outputs gets
+  // its saved arrangement back (Wayland).
   if (production) {
     const refit = () => {
       if (win.isDestroyed()) return;
-      const b = screen.getPrimaryDisplay().bounds;
-      win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+      if (DISPLAY_TOOL === 'xrandr') {
+        if (screen.getAllDisplays().length > 1 && win.isKiosk()) win.setKiosk(false);
+        win.setBounds(screenBounds());
+      }
+      scheduleMonitorsUpdate();
+      void restoreSavedLayout();
     };
+    void restoreSavedLayout();
     screen.on('display-metrics-changed', refit);
     screen.on('display-added', refit);
     screen.on('display-removed', refit);

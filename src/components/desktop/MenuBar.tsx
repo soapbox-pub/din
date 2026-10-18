@@ -51,6 +51,8 @@ import { cn } from '@/lib/utils';
 import { getSessionBridge } from '@/lib/session';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWorkAreas } from '@/contexts/MonitorsContext';
+import { primaryArea } from '@/lib/monitors';
 import type { AppDefinition } from '@/lib/apps';
 import type { WebApp } from '@/lib/webApps';
 
@@ -73,7 +75,11 @@ export function MenuBar() {
   // re-renders on every window commit - all children are memoized so the
   // re-render stops at this component's own <header> element.
   const { windows } = useWindowManager();
-  const fullscreen = windows.some((w) => w.maximized && !w.minimized);
+  // Only a window maximized beneath it - on the primary monitor - counts.
+  const primaryId = primaryArea(useWorkAreas()).id;
+  const fullscreen = windows.some(
+    (w) => w.maximized && !w.minimized && (w.monitor === null || w.monitor === primaryId),
+  );
 
   return (
     <header
