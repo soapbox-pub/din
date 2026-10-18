@@ -18,6 +18,8 @@
 //   - window.installer: put DinOS on this computer's disk, for the
 //     Installer app (live USB boots only)
 //   - window.updater: DinOS system updates, for the Settings app
+//   - window.bluetoothLogin: receive the account key from a phone over
+//     Bluetooth LE, for the login screen
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -619,6 +621,37 @@ contextBridge.exposeInMainWorld('installer', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('installer:progress', handler);
     return () => ipcRenderer.removeListener('installer:progress', handler);
+  },
+});
+
+// Bluetooth login bridge (window.bluetoothLogin), backed by
+// electron/bluetooth-login.mts: advertises a GATT service a phone (Tenna)
+// sends the account key to, encrypted to the renderer's ephemeral key.
+contextBridge.exposeInMainWorld('bluetoothLogin', {
+  /** Whether this computer has a Bluetooth adapter that can do it. */
+  available: () => ipcRenderer.invoke('bluetooth-login:available'),
+
+  /**
+   * Start advertising. Progress arrives through onEvent.
+   * @param {string} din The renderer's ephemeral x-only pubkey, hex.
+   */
+  start: (din) => ipcRenderer.invoke('bluetooth-login:start', din),
+
+  /** Stop advertising. */
+  stop: () => ipcRenderer.invoke('bluetooth-login:stop'),
+
+  /**
+   * Subscribe to login progress. Returns an unsubscribe fn.
+   * @param {(event: unknown) => void} callback
+   */
+  onEvent: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} payload
+     */
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('bluetooth-login:event', handler);
+    return () => ipcRenderer.removeListener('bluetooth-login:event', handler);
   },
 });
 

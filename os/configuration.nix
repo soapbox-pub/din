@@ -472,6 +472,21 @@ in
   hardware.graphics.enable = true;
   hardware.enableRedistributableFirmware = true;
 
+  # BlueZ, for logging in with a phone: the login screen advertises a GATT
+  # service the phone sends the account key to (electron/bluetooth-login.mts).
+  # BlueZ's D-Bus policy lets any user register one, so `din` needs no group.
+  #
+  # One ATT channel, no Enhanced ATT: when a phone connects, BlueZ otherwise
+  # opens extra EATT channels to it, and those need an encrypted link, so it
+  # asks the phone to pair. The login doesn't pair (the handshake carries its
+  # own protection), and the phone's pairing popup stalls it until the
+  # link times out.
+  hardware.bluetooth = {
+    enable = true;
+    powerOnBoot = true;
+    settings.GATT.Channels = 1;
+  };
+
   # PipeWire + WirePlumber back Din's sound panel (wpctl/pw-play via the
   # Electron audio bridge): output/input device selection, per-app volume, and
   # the test tone. rtkit lets the audio threads run at real-time priority.

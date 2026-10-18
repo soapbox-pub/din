@@ -41,6 +41,7 @@ import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerTrayHandlers } from './tray.mts';
 import { registerInstallerHandlers } from './installer.mts';
+import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerUpdaterHandlers } from './updater.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 
@@ -3955,6 +3956,7 @@ app.whenReady().then(() => {
   registerKeyboardHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerInstallerHandlers({ assertShellSender, sendToShell });
+  registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerUpdaterHandlers({ assertShellSender, sendToShell });
   registerNativeDisplayHandlers({
     assertShellSender,
