@@ -70,10 +70,22 @@
         default = self.packages.${system}.image;
       };
 
-      checks.${system}.accounts = import ./tests/accounts.nix {
-        pkgs = nixpkgs.legacyPackages.${system};
-        modules = [ nostrd.nixosModules.default ./configuration.nix ];
-        inherit din;
-      };
+      checks.${system} =
+        let
+          test = file: import file {
+            pkgs = nixpkgs.legacyPackages.${system};
+            modules = [
+              nostrd.nixosModules.default
+              ./configuration.nix
+              # The test driver wants the kernel's messages on its console.
+              { boot.consoleLogLevel = nixpkgs.lib.mkForce 7; }
+            ];
+            inherit din;
+          };
+        in
+        {
+          accounts = test ./tests/accounts.nix;
+          boot-screen = test ./tests/boot-screen.nix;
+        };
     };
 }

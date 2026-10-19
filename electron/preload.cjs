@@ -22,6 +22,8 @@
 //     Bluetooth LE, for the login screen
 //   - window.nostrd: the signer daemon that holds the account keys, for the
 //     shell's signer and account menu
+//   - window.bootScreen: the wallpaper and clock format DinOS's boot and
+//     unlock screen shows
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -687,6 +689,17 @@ contextBridge.exposeInMainWorld('nostrd', {
     ipcRenderer.on('nostrd:event', handler);
     return () => ipcRenderer.removeListener('nostrd:event', handler);
   },
+});
+
+// Boot screen bridge (window.bootScreen), backed by electron/boot-screen.mts:
+// copies the wallpaper to the boot partition, for DinOS's unlock screen.
+contextBridge.exposeInMainWorld('bootScreen', {
+  /**
+   * Show this wallpaper on the boot screen, with a 12- or 24-hour clock.
+   * @param {string | null} wallpaper A URL, or null for none.
+   * @param {boolean} hour12
+   */
+  update: (wallpaper, hour12) => ipcRenderer.invoke('boot-screen:update', wallpaper, hour12),
 });
 
 // Updater bridge (window.updater), backed by electron/updater.mts: stages

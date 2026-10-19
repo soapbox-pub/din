@@ -1,0 +1,234 @@
+# Din's boot and unlock screen, for Plymouth (see os/boot-screen.nix).
+#
+# It looks like Din's old login screen: the wallpaper, dimmed, a large clock
+# and the date, a password field, and DIN at the foot. Until a password is
+# asked for there's only the background and the footer. Once root is mounted
+# everything fades to black, which Din's own boot veil fades in from.
+#
+# What it can't know by itself arrives through files and messages from the
+# initrd (os/boot-screen.nix): the wallpaper is a file in ImageDir that may
+# only show up after this starts, and the time comes as display-message
+# lines "din-clock:<time>|<date>", since Plymouth scripts have no clock.
+
+Window.SetBackgroundTopColor(0.043, 0.059, 0.078);
+Window.SetBackgroundBottomColor(0.043, 0.059, 0.078);
+
+screen.x = Window.GetX();
+screen.y = Window.GetY();
+screen.w = Window.GetWidth();
+screen.h = Window.GetHeight();
+# Sizes are designed for 1080 lines and follow the screen's height.
+scale = Math.Max(screen.h / 1080, 0.5);
+
+fun px(size)
+{
+  return Math.Int(size * scale);
+}
+
+fun font(weight, size)
+{
+  return "Inter " + weight + " " + px(size);
+}
+
+fun text(string, alpha, weight, size)
+{
+  return Image.Text(string, 1, 1, 1, alpha, font(weight, size));
+}
+
+# A sprite that eases its opacity toward a target, a little each frame.
+fun fader(sprite, z)
+{
+  local.f.sprite = sprite;
+  f.sprite.SetZ(z);
+  f.sprite.SetOpacity(0);
+  f.opacity = 0;
+  f.target = 0;
+  return f;
+}
+
+fun ease(f)
+{
+  f.opacity += (f.target - f.opacity) * 0.12;
+  if (Math.Abs(f.target - f.opacity) < 0.005)
+    f.opacity = f.target;
+  f.sprite.SetOpacity(f.opacity);
+  return f;
+}
+
+fun center(sprite, image, y)
+{
+  sprite.SetImage(image);
+  sprite.SetX(screen.x + Math.Int((screen.w - image.GetWidth()) / 2));
+  sprite.SetY(screen.y + y);
+}
+
+black = Image("black.png");
+
+#------------------------------------ Wallpaper -------------------------------
+
+wallpaper = fader(Sprite(), -100);
+dim = fader(Sprite(black.Scale(screen.w, screen.h)), -90);
+dim.sprite.SetPosition(screen.x, screen.y, -90);
+wallpaper_tries = 0;
+
+# Scaled to cover the screen, centered, as Din draws it.
+fun load_wallpaper()
+{
+  image = Image("wallpaper.png");
+  if (!image)
+    return 0;
+  factor = Math.Max(screen.w / image.GetWidth(), screen.h / image.GetHeight());
+  width = Math.Int(image.GetWidth() * factor + 0.999);
+  height = Math.Int(image.GetHeight() * factor + 0.999);
+  wallpaper.sprite.SetImage(image.Scale(width, height));
+  wallpaper.sprite.SetX(screen.x + Math.Int((screen.w - width) / 2));
+  wallpaper.sprite.SetY(screen.y + Math.Int((screen.h - height) / 2));
+  return 1;
+}
+
+#------------------------------------ Lock screen -----------------------------
+
+clock = fader(Sprite(), 10);
+date = fader(Sprite(), 10);
+field = fader(Sprite(), 10);
+entry = fader(Sprite(), 11);
+caption = fader(Sprite(), 10);
+footer = fader(Sprite(), 10);
+
+clock_y = Math.Int(screen.h * 0.5) - px(190);
+date_y = clock_y + px(124);
+field_y = date_y + px(104);
+caption_y = field_y + px(64);
+
+field_image = Image("field.png");
+if (field_image)
+  center(field.sprite, field_image.Scale(px(320), px(48)), field_y);
+
+center(footer.sprite, text("D I N", 0.4, "Medium", 11), screen.h - px(48));
+footer.target = 1;
+
+asked = 0;
+mounted = 0;
+
+fun show_lock()
+{
+  clock.target = 1;
+  date.target = 1;
+  field.target = 1;
+  entry.target = 1;
+  caption.target = 1;
+  dim.target = 0.3;
+}
+
+fun set_entry(string, alpha, size)
+{
+  image = text(string, alpha, "Regular", size);
+  center(entry.sprite, image, field_y + Math.Int((px(48) - image.GetHeight()) / 2));
+}
+
+fun set_caption(string)
+{
+  center(caption.sprite, text(string, 0.55, "Regular", 13), caption_y);
+}
+
+fun display_password(prompt, bullets)
+{
+  if (global.asked == 0 || global.entered)
+  {
+    if (global.asked > 0)
+      set_caption("That password didn't work. Try again.");
+    else
+      set_caption("Enter your password to unlock this computer.");
+    global.asked++;
+    global.entered = 0;
+  }
+  if (bullets == 0)
+  {
+    set_entry("Password", 0.5, 15);
+  }
+  else
+  {
+    dots = "";
+    for (i = 0; i < bullets && i < 24; i++)
+      dots += "•";
+    set_entry(dots, 1, 20);
+  }
+  show_lock();
+}
+
+# Called once the password is in, while the disk checks it.
+fun display_normal()
+{
+  if (global.asked > 0 && !global.entered)
+  {
+    global.entered = 1;
+    set_entry("Unlocking…", 0.7, 15);
+  }
+}
+
+fun display_message(message)
+{
+  message = String(message);
+  if (message.SubString(0, 10) != "din-clock:")
+    return;
+  rest = String(message.SubString(10, message.Length()));
+  bar = 0;
+  while (bar < rest.Length() && rest.CharAt(bar) != "|")
+    bar++;
+  center(clock.sprite, text(rest.SubString(0, bar), 1, "Semi-Bold", 72), clock_y);
+  center(date.sprite, text(rest.SubString(bar + 1, rest.Length()), 0.7, "Regular", 16), date_y);
+}
+
+#------------------------------------ Fade out --------------------------------
+
+veil = fader(Sprite(black.Scale(screen.w, screen.h)), 1000);
+veil.sprite.SetPosition(screen.x, screen.y, 1000);
+
+fun root_mounted()
+{
+  global.mounted = 1;
+  veil.target = 1;
+}
+
+#------------------------------------ Every frame -----------------------------
+
+capslock = 0;
+
+fun refresh()
+{
+  # The wallpaper is copied off the boot partition once that turns up, often
+  # after this script starts; look for it for the first ten seconds.
+  if (!wallpaper.loaded && wallpaper_tries < 500)
+  {
+    if (Math.Int(wallpaper_tries / 25) * 25 == wallpaper_tries)
+      wallpaper.loaded = load_wallpaper();
+    wallpaper_tries++;
+  }
+  if (wallpaper.loaded && asked > 0)
+    wallpaper.target = 1;
+
+  if (asked > 0 && !entered && Plymouth.GetCapslockState() != capslock)
+  {
+    global.capslock = Plymouth.GetCapslockState();
+    if (capslock)
+      set_caption("Caps Lock is on.");
+    else
+      set_caption("Enter your password to unlock this computer.");
+  }
+
+  global.wallpaper = ease(wallpaper);
+  global.dim = ease(dim);
+  global.clock = ease(clock);
+  global.date = ease(date);
+  global.field = ease(field);
+  global.entry = ease(entry);
+  global.caption = ease(caption);
+  global.footer = ease(footer);
+  global.veil = ease(veil);
+}
+
+Plymouth.SetRefreshFunction(refresh);
+Plymouth.SetDisplayPasswordFunction(display_password);
+Plymouth.SetDisplayNormalFunction(display_normal);
+Plymouth.SetDisplayMessageFunction(display_message);
+Plymouth.SetRootMountedFunction(root_mounted);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Wallpaper } from './Wallpaper';
+import { BootScreenSync } from './BootScreenSync';
 import { Dock } from './Dock';
 import { DesktopHotkeys } from './DesktopHotkeys';
 import { MenuBar } from './MenuBar';
@@ -101,6 +102,7 @@ function DesktopSession() {
             <SystemEventsHost />
             <InstallerAutoOpen />
             <UpdateNotifier />
+            <BootScreenSync />
             <Wallpaper>
               <MenuBar />
 

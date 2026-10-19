@@ -142,9 +142,42 @@ let
   # keyboard layout (see the script, and electron/keyboard.mts).
   din-keyboard = pkgs.writeShellApplication {
     name = "din-keyboard";
-    runtimeInputs = with pkgs; [ coreutils gnugrep systemd ];
+    runtimeInputs = with pkgs; [ coreutils gnugrep systemd din-boot-screen ];
     text = builtins.readFile ./din-keyboard.sh;
   };
+
+  # Puts what the boot screen shows on the boot partition (see the script,
+  # and electron/boot-screen.mts).
+  din-boot-screen = pkgs.writeShellApplication {
+    name = "din-boot-screen";
+    runtimeInputs = with pkgs; [ coreutils util-linux ];
+    text = builtins.readFile ./din-boot-screen.sh;
+  };
+
+  # The boot and unlock screen: a Plymouth script theme (boot-screen/), with
+  # the two images it draws with made here. Its ImageDir is under /run, where
+  # the initrd puts those and the user's wallpaper (dinos-boot-screen, below).
+  boot-screen-theme = pkgs.runCommand "dinos-boot-screen" {
+    nativeBuildInputs = [ pkgs.imagemagick ];
+  } ''
+    dir=$out/share/plymouth/themes/din
+    mkdir -p $dir
+    cp ${./boot-screen/din.script} $dir/din.script
+    cat >$dir/din.plymouth <<EOF
+    [Plymouth Theme]
+    Name=DinOS
+    Description=Din's boot and unlock screen
+    ModuleName=script
+
+    [script]
+    ImageDir=/run/din-boot
+    ScriptFile=$dir/din.script
+    EOF
+    magick -size 1x1 xc:black $dir/black.png
+    magick -size 640x96 xc:none -fill 'rgba(255,255,255,0.14)' \
+      -stroke 'rgba(255,255,255,0.32)' -strokewidth 2 \
+      -draw 'roundrectangle 1,1 638,94 47,47' $dir/field.png
+  '';
 
   # Succeeds when the partition UUID given is the boot loader's ESP, from
   # systemd-boot's LoaderDevicePartUUID variable (UTF-16, after 4 bytes of
@@ -178,6 +211,7 @@ let
     export DIN_INSTALLER=${din-installer}/bin/din-install
     export DIN_UPDATER=${din-updater}/bin/din-update
     export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
+    export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Chromium logging into the journal (via cage), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
@@ -233,6 +267,7 @@ in
       "${din-installer}/bin/din-install"
       "${din-updater}/bin/din-update"
       "${din-keyboard}/bin/din-keyboard"
+      "${din-boot-screen}/bin/din-boot-screen"
     ];
   }];
   security.sudo.extraConfig = ''
@@ -427,6 +462,141 @@ in
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = false;
 
+  # A quiet boot: no boot menu (holding Space while it starts brings it
+  # back, for older systems), no kernel or systemd chatter, and no cursor.
+  # Plymouth covers the rest with the boot screen.
+  boot.loader.timeout = 0;
+  boot.consoleLogLevel = 3;
+  boot.initrd.verbose = false;
+  boot.kernelParams = [
+    "quiet"
+    "udev.log_level=3"
+    "rd.udev.log_level=3"
+    "systemd.show_status=auto"
+    "rd.systemd.show_status=auto"
+    "vt.global_cursor_default=0"
+  ];
+
+  # The boot screen, which is also where the disk's password is typed. It
+  # looks like Din: the user's wallpaper, a clock, a password field. Those,
+  # and the keyboard layout to type with, are on the boot partition
+  # (os/din-boot-screen.sh), since nothing on the encrypted disk can be read
+  # yet. The screen fades to black once root is mounted and stays that way
+  # (--retain-splash) until Din fades in over it.
+  boot.plymouth = {
+    enable = true;
+    theme = "din";
+    themePackages = [ boot-screen-theme ];
+    font = "${pkgs.inter}/share/fonts/truetype/InterVariable.ttf";
+  };
+  # Plymouth turns the layout into a keymap with libxkbcommon, which looks
+  # for XKB's data where it was built to, a store path the initrd only has
+  # if it's asked for.
+  boot.initrd.systemd.storePaths = [ pkgs.xkeyboard_config ];
+  systemd.services.plymouth-quit.serviceConfig.ExecStart = [
+    ""
+    "${config.boot.plymouth.package}/bin/plymouth quit --retain-splash"
+  ];
+
+  # Before Plymouth starts: its images into its ImageDir, then from the boot
+  # partition, when it turns up within a few seconds, the wallpaper, the
+  # keyboard layout (as vconsole.conf, which Plymouth reads its XKB layout
+  # from), the time zone, and the clock's format. Anyone who can write the
+  # boot partition can replace the initrd too, so this trusts it no less;
+  # it still only takes values that look right.
+  boot.initrd.systemd.services.dinos-boot-screen = {
+    description = "Prepare DinOS's boot screen";
+    unitConfig.DefaultDependencies = false;
+    wantedBy = [ "sysinit.target" ];
+    after = [ "systemd-udevd.service" "systemd-udev-trigger.service" ];
+    before = [ "plymouth-start.service" "sysinit.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      dir=/run/din-boot
+      mkdir -p $dir
+      cp /etc/plymouth/themes/din/*.png $dir/
+
+      var=/sys/firmware/efi/efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+      [ -r $var ] || exit 0
+      uuid=$(tail -c +5 $var | tr -d '\0' | tr A-F a-f)
+      esp=/dev/disk/by-partuuid/$uuid
+      udevadm wait --timeout=5 "$esp" || exit 0
+      mkdir -p $dir/esp
+      mount -t vfat -o ro,nosuid,nodev,noexec "$esp" $dir/esp || exit 0
+      src=$dir/esp/din
+
+      if [ -f $src/wallpaper.png ] && [ "$(stat -c %s $src/wallpaper.png)" -le 16777216 ]; then
+        cp $src/wallpaper.png $dir/
+      fi
+
+      if [ -f $src/keyboard ]; then
+        conf=""
+        while IFS== read -r key value; do
+          [[ $value =~ ^[A-Za-z0-9_.,:+-]+$ ]] || continue
+          case $key in
+            XKB_DEFAULT_LAYOUT) conf+="XKBLAYOUT=$value"$'\n' ;;
+            XKB_DEFAULT_MODEL) conf+="XKBMODEL=$value"$'\n' ;;
+            XKB_DEFAULT_VARIANT) conf+="XKBVARIANT=$value"$'\n' ;;
+            XKB_DEFAULT_OPTIONS) conf+="XKBOPTIONS=$value"$'\n' ;;
+          esac
+        done <$src/keyboard
+        if [[ $conf == *XKBLAYOUT=* ]]; then
+          rm -f /etc/vconsole.conf
+          printf '%s' "$conf" >/etc/vconsole.conf
+        fi
+      fi
+
+      if [ -f $src/localtime ] && [ "$(head -c 4 $src/localtime)" = TZif ]; then
+        rm -f /etc/localtime
+        cp $src/localtime /etc/localtime
+      fi
+      if [ "$(head -c 2 $src/clock 2>/dev/null)" = 12 ]; then
+        echo 12 >$dir/clock
+      fi
+
+      umount $dir/esp
+      rmdir $dir/esp
+    '';
+  };
+
+  # The boot screen's clock: Plymouth scripts can't tell the time, so it's
+  # sent to them as a message every minute until the initrd is done.
+  boot.initrd.systemd.services.dinos-boot-clock = {
+    description = "Show the time on DinOS's boot screen";
+    unitConfig.DefaultDependencies = false;
+    wantedBy = [ "sysinit.target" ];
+    after = [ "plymouth-start.service" "dinos-boot-screen.service" ];
+    conflicts = [ "initrd-switch-root.target" ];
+    before = [ "initrd-switch-root.target" ];
+    script = ''
+      format='%H:%M'
+      [ "$(cat /run/din-boot/clock 2>/dev/null)" = 12 ] && format='%I:%M %p'
+      last=""
+      while :; do
+        text="din-clock:$(date +"$format")|$(date +'%A, %B %-d')"
+        [ -n "$last" ] && plymouth hide-message --text="$last"
+        plymouth display-message --text="$text"
+        last=$text
+        sleep $((60 - 10#$(date +%S)))
+      done
+    '';
+  };
+
+  # Keeps the boot partition's copy of the layout and time zone current, for
+  # systems whose layout was set before the boot screen had one.
+  systemd.services.din-boot-screen-sync = {
+    description = "Give DinOS's boot screen the keyboard layout and time zone";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "boot.mount" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${din-boot-screen}/bin/din-boot-screen sync";
+    };
+  };
+
   # The same image is a live USB stick and, copied by the Installer app, the
   # system on a computer's own disk - often with the stick still plugged in.
   # So nothing is mounted by label, which both copies share: root is the
@@ -530,6 +700,8 @@ in
   boot.initrd.availableKernelModules = [
     "xhci_pci" "ehci_pci" "ahci" "nvme" "usb_storage" "usbhid" "sd_mod"
     "sdhci_pci"
+    # The ESP, which the boot screen reads before root is unlocked.
+    "vfat" "nls_cp437" "nls_iso8859_1"
   ];
 
   # GPU acceleration for cage/Electron, plus the firmware real WiFi and
@@ -581,7 +753,8 @@ in
       "${makeDinLauncher "--disable-gpu --enable-unsafe-swiftshader"}/bin/din";
 
     # Serial console so `npm run os:run` shows boot logs in the terminal too.
-    boot.kernelParams = [ "console=ttyS0" ];
+    # Plymouth would draw on the serial console instead of the window.
+    boot.kernelParams = [ "console=ttyS0" "plymouth.ignore-serial-consoles" ];
 
     # The demo boots its kernel directly from an unpartitioned disk: there's
     # no partition to grow.

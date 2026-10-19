@@ -3,7 +3,8 @@
 # DinOS's layout lives in one file, LAYOUT_FILE, as XKB_DEFAULT_* lines. The
 # cage unit reads it as its EnvironmentFile (configuration.nix): cage applies
 # it to everything on screen, and Din inherits it, so native apps get the
-# same one (electron/keyboard.mts). cage only reads it when it starts.
+# same one (electron/keyboard.mts). cage only reads it when it starts. A copy
+# goes on the boot partition, for the password prompt (din-boot-screen).
 #
 # Din runs this through sudo from electron/keyboard.mts.
 #
@@ -43,6 +44,8 @@ set_layout() {
   } >"$tmp"
   chmod 644 "$tmp"
   mv "$tmp" "$LAYOUT_FILE"
+  # The boot screen types the disk's password with it too.
+  din-boot-screen sync || echo "Couldn't give the boot screen the layout." >&2
 }
 
 case "${1:-}" in

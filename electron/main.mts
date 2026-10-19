@@ -43,6 +43,7 @@ import { registerTrayHandlers } from './tray.mts';
 import { registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
+import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerUpdaterHandlers } from './updater.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 
@@ -3961,6 +3962,7 @@ app.whenReady().then(() => {
   registerInstallerHandlers({ assertShellSender, sendToShell });
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerNostrdHandlers({ assertShellSender, sendToShell });
+  registerBootScreenHandlers({ assertShellSender });
   registerUpdaterHandlers({ assertShellSender, sendToShell });
   registerNativeDisplayHandlers({
     assertShellSender,

@@ -92,7 +92,9 @@ system partition (optionally LUKS-encrypted) holding an LVM volume group,
 refused. Run on a disk that already has DinOS, the Installer offers to
 **reinstall and keep your files**: it formats `root`, never mounts `home`, and
 carries over saved Wi-Fi, Bluetooth pairings, the Nostr account keys, and the
-machine's identity.
+machine's identity. The group is created with LVM autoactivation off; only the
+initrd activates it, and only on the disk it booted from, so a DinOS disk
+attached to another DinOS machine (or under a live stick) is left alone.
 
 One password runs the computer. Encrypting the disk sets its passphrase as
 `din`'s password too, which `sudo` asks for (Din's own helpers excepted), and
@@ -100,10 +102,18 @@ as the password of **nostrd**, the signer daemon that holds the Nostr account
 keys as its own user so nothing `din` runs can read them. Din signs through
 nostrd's socket, and the passphrase typed at boot unlocks it. Without
 encryption there's no password, and `sudo` doesn't ask. `os/tests/accounts.nix`
-checks all of this in a VM: `nix build ./os#checks.x86_64-linux.accounts`. The
-group is created with LVM autoactivation off; only the initrd activates it, and
-only on the disk it booted from, so a DinOS disk attached to another DinOS
-machine (or under a live stick) is left alone.
+checks all of this in a VM: `nix build ./os#checks.x86_64-linux.accounts`.
+
+The boot is quiet: no boot menu (hold Space to get it), no log lines, just
+Plymouth drawing Din's boot screen (`os/boot-screen/din.script`). On an
+encrypted disk that's where the password is typed, over the user's wallpaper,
+with a clock, in the keyboard layout Settings set. None of that can come from
+the encrypted disk, so the wallpaper, layout, time zone and clock format are
+kept on the boot partition under `din/` (`os/din-boot-screen.sh`), and the
+initrd copies them out before Plymouth starts. Once root is mounted the screen
+fades to black, and Din fades in from there.
+`nix build ./os#checks.x86_64-linux.boot-screen` draws it in a VM and leaves
+screenshots in `result/`.
 
 Installed systems update themselves. A DinOS release is a NIP-82 release of
 the application `din` (`.ngit/release.yaml`), signed by the soapbox.pub key,
