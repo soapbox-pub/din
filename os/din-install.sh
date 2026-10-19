@@ -53,12 +53,14 @@ ROOT_MAX_BYTES=$((128 * GIB))
 # Room for apps and system updates beyond the live system's own footprint.
 HEADROOM_BYTES=$((8 * GIB))
 # What a reinstall carries over from the old root, besides home: saved WiFi,
-# Bluetooth pairings, the keyboard layout, the machine's identity, and
-# NixOS's record of the ids it handed out (which files in home are owned by).
+# Bluetooth pairings, the keyboard layout, the Nostr account keys (nostrd's
+# store), the machine's identity, and NixOS's record of the ids it handed
+# out (which files in home are owned by).
 KEEP_PATHS=(
   etc/NetworkManager/system-connections
   var/lib/bluetooth
   var/lib/din/keyboard
+  var/lib/nostrd
   var/lib/nixos
   etc/machine-id
 )
@@ -295,6 +297,29 @@ stash_old_root() {
   mv "$stash.partial" "$stash"
 }
 
+# Make `din`'s password (for sudo) the disk's passphrase, in the new root.
+set_din_password() {
+  local root=$1 passphrase=$2 hash shadow
+  shadow=$root/etc/shadow
+  hash=$(printf '%s' "$passphrase" | openssl passwd -6 -stdin)
+  awk -F: -v OFS=: -v hash="$hash" '$1 == "din" { $2 = hash } { print }' "$shadow" >"$shadow.din-install"
+  chown --reference="$shadow" "$shadow.din-install"
+  chmod --reference="$shadow" "$shadow.din-install"
+  mv "$shadow.din-install" "$shadow"
+}
+
+# Put nostrd's store, with the account keys added while running live, under
+# the disk's passphrase, so it unlocks with the disk at boot. A store kept
+# from the old system already has it.
+protect_nostrd() {
+  local dir=$1/var/lib/nostrd passphrase=$2
+  if [[ $(jq -r '.master.protection // empty' "$dir/store.json" 2>/dev/null) != password ]]; then
+    printf '%s\n' "$passphrase" | nostrd set-password --state-dir "$dir" ||
+      die "Couldn't protect the account keys with the passphrase."
+  fi
+  chown -R nostrd:nostrd "$dir"
+}
+
 install() {
   local disk=$1 mode=$2 encrypt=$3 boot required ss json esp part before passphrase="" pv stash=""
   boot=$(boot_disk)
@@ -463,6 +488,13 @@ install() {
         cp -a "$stash/$path" "$target/$path"
       fi
     done
+  fi
+
+  # One password for the computer: on an encrypted disk, the passphrase that
+  # unlocks it is also `din`'s and the account keys'.
+  if [[ -n $passphrase ]]; then
+    set_din_password "$target" "$passphrase"
+    protect_nostrd "$target" "$passphrase"
   fi
 
   # Put DinOS first in the firmware's boot order. Firmware also boots the

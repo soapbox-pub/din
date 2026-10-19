@@ -123,7 +123,7 @@ let
     name = "din-install";
     runtimeInputs = with pkgs; [
       coreutils util-linux gawk gnugrep gnused jq rsync dosfstools e2fsprogs
-      efibootmgr systemd cryptsetup lvm2
+      efibootmgr systemd cryptsetup lvm2 openssl config.services.nostrd.package
     ];
     text = builtins.readFile ./din-install.sh;
   };
@@ -178,6 +178,7 @@ let
     export DIN_INSTALLER=${din-installer}/bin/din-install
     export DIN_UPDATER=${din-updater}/bin/din-update
     export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
+    export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Chromium logging into the journal (via cage), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
     exec ${pkgs.electron}/bin/electron \
@@ -207,8 +208,7 @@ in
   # (KEY_SELECTIVE_SCREENSHOT), whose keysym Chromium can't identify - see
   # electron/main.mts. The main process already observes every keystroke via
   # before-input-event; nothing new is exposed to renderers. `wheel` gives
-  # the developer the machine: full sudo, which the Installer app also uses
-  # (`sudo -n`) to run its helper as root.
+  # the developer the machine: sudo, behind the computer's password.
   # The uid is pinned because this user used to be called `web`: installed
   # machines keep owning their home directory across the rename.
   users.users.din = {
@@ -219,8 +219,61 @@ in
     shell = pkgs.zsh;
   };
 
-  # `din` has no password (cage logs it in), so sudo can't ask for one.
-  security.sudo.wheelNeedsPassword = false;
+  # sudo asks for the computer's password: `din`'s, which the Installer sets
+  # to the disk's when it encrypts (os/din-install.sh). Otherwise anything the
+  # user runs could become root and read the keys out of nostrd. Din's own
+  # helpers run without one; each takes only the commands it means to.
+  #
+  # Where `din` has no password - the live stick, an install without
+  # encryption - there's nothing to ask for, so sudo doesn't: din-sudo puts a
+  # rule saying so under /run at boot.
+  security.sudo.extraRules = [{
+    users = [ "din" ];
+    commands = map (command: { inherit command; options = [ "NOPASSWD" ]; }) [
+      "${din-installer}/bin/din-install"
+      "${din-updater}/bin/din-update"
+      "${din-keyboard}/bin/din-keyboard"
+    ];
+  }];
+  security.sudo.extraConfig = ''
+    @includedir /run/din/sudoers.d
+  '';
+  systemd.tmpfiles.settings."10-din-sudo"."/run/din/sudoers.d".d = {
+    mode = "0750";
+    user = "root";
+    group = "root";
+  };
+  systemd.services.din-sudo = {
+    description = "Let sudo skip the password when din has none";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "systemd-tmpfiles-setup.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      rule=/run/din/sudoers.d/no-password
+      hash=$(${pkgs.gawk}/bin/awk -F: '$1 == "din" { print $2 }' /etc/shadow)
+      case $hash in
+        "" | "!"* | "*"*)
+          echo 'din ALL=(ALL:ALL) NOPASSWD: ALL' > "$rule.tmp"
+          chmod 0440 "$rule.tmp"
+          mv "$rule.tmp" "$rule"
+          ;;
+        *) rm -f "$rule" ;;
+      esac
+    '';
+  };
+
+  # nostrd, the signer daemon: it holds the Nostr account keys as its own
+  # user, out of reach of everything `din` runs, and Din signs through it
+  # (electron/nostrd.mts). Its password is the disk's (os/din-install.sh), so
+  # the passphrase that unlocks the disk at boot unlocks it too.
+  services.nostrd = {
+    enable = true;
+    users = [ "din" ];
+    unlockWithDiskPassword = true;
+  };
 
   # zsh is the login shell, so it's what the Terminal app opens, dressed in
   # oh-my-zsh's jtriley theme. The empty ~/.zshrc keeps zsh's first-run
@@ -312,10 +365,10 @@ in
   };
 
   # The Nix way works too: `nix run nixpkgs#foo`, `nix profile install ...`.
-  nix.settings = {
-    experimental-features = [ "nix-command" "flakes" ];
-    trusted-users = [ "@wheel" ];
-  };
+  # `din` isn't one of Nix's trusted users: a trusted user can hand the
+  # daemon options that run code as root, which would get around sudo's
+  # password.
+  nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
   # Root is a fixed-size volume on an installed system (os/din-install.sh), so
   # the Nix store mustn't grow without end: old systems leave the boot menu

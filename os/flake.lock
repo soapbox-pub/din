@@ -28,10 +28,31 @@
         "type": "github"
       }
     },
+    "nostrd": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792442699,
+        "narHash": "sha256-IyZ75oubfL8OGJG2YO5wQmOlrxTjYhMwWp9Sf9cgjss=",
+        "ref": "refs/heads/main",
+        "rev": "5e88008b35140b592c3dbbae1c627ae180a66251",
+        "revCount": 3,
+        "type": "git",
+        "url": "file:///home/alex/Projects/nostrd"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/alex/Projects/nostrd"
+      }
+    },
     "root": {
       "inputs": {
         "din": "din",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "nostrd": "nostrd"
       }
     }
   },

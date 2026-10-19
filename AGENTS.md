@@ -54,7 +54,7 @@ The assistant's behavior is defined by this file (`AGENTS.md`). Edit it directly
 
 Two rules that always apply, even without the skill loaded:
 
-- **Security:** `nsec` keys live in plaintext `localStorage`, so XSS = permanent key theft. Never use `dangerouslySetInnerHTML`/`innerHTML` with untrusted data, never relax the CSP, sanitize event-sourced URLs/CSS, and filter by `authors` on trust-sensitive queries (admin data, addressable/replaceable events). Full threat model: `nostr-security` skill.
+- **Security:** where nostrd is running (always on DinOS) the keys live there and Din only asks it to sign (`src/lib/nostrd.ts`, `electron/nostrd.mts`); elsewhere `nsec` keys live in plaintext `localStorage`, so XSS = permanent key theft. Even with nostrd, XSS can still sign as the user. Never use `dangerouslySetInnerHTML`/`innerHTML` with untrusted data, never relax the CSP, sanitize event-sourced URLs/CSS, and filter by `authors` on trust-sensitive queries (admin data, addressable/replaceable events). Full threat model: `nostr-security` skill.
 - **NIP-19 routing:** all identifiers (`npub1`, `note1`, `naddr1`, …) route at the URL root (`/:nip19` → `src/pages/NIP19Page.tsx`); decode to hex before querying. Details: `nip19-routing` skill.
 
 ## App Configuration

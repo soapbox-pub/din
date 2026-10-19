@@ -9,9 +9,15 @@
       url = "path:..";
       flake = false;
     };
+
+    # The signer daemon that holds the account keys.
+    nostrd = {
+      url = "git+file:///home/alex/Projects/nostrd";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, din }:
+  outputs = { self, nixpkgs, din, nostrd }:
     let
       system = "x86_64-linux";
       makeImage = nixos: import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
@@ -34,14 +40,14 @@
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din; };
-        modules = [ ./configuration.nix ];
+        modules = [ nostrd.nixosModules.default ./configuration.nix ];
       };
 
       # The same system plus remote access (debug.nix), for real hardware.
       nixosConfigurations.dinos-debug = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din; };
-        modules = [ ./configuration.nix ./debug.nix ];
+        modules = [ nostrd.nixosModules.default ./configuration.nix ./debug.nix ];
       };
 
       packages.${system} = {
@@ -62,6 +68,12 @@
         vm = self.nixosConfigurations.dinos.config.system.build.vm;
 
         default = self.packages.${system}.image;
+      };
+
+      checks.${system}.accounts = import ./tests/accounts.nix {
+        pkgs = nixpkgs.legacyPackages.${system};
+        modules = [ nostrd.nixosModules.default ./configuration.nix ];
+        inherit din;
       };
     };
 }
