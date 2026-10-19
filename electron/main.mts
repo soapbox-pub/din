@@ -35,7 +35,7 @@ import {
   clearNsiteManifestCache,
   clearNsiteBlobCache,
 } from './nsite.mts';
-import { registerNativeAppHandlers, runWindowsProgram } from './native-apps.mts';
+import { registerNativeAppHandlers, runWindowsProgram, terminalEnvironment } from './native-apps.mts';
 import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
@@ -377,7 +377,7 @@ function userShell(): string {
 }
 
 function registerPtyHandlers(): void {
-  ipcMain.handle('pty:spawn', (event, size, cwd) => {
+  ipcMain.handle('pty:spawn', async (event, size, cwd) => {
     assertShellSender(event);
     if (ptySessions.size >= MAX_PTY_SESSIONS) {
       throw new Error(`Too many terminal sessions (max ${MAX_PTY_SESSIONS})`);
@@ -387,9 +387,11 @@ function registerPtyHandlers(): void {
 
     const spawnCwd =
       typeof cwd === 'string' && cwd.length > 0 && cwd.length <= 4096 ? cwd : os.homedir();
+    const env = await terminalEnvironment();
 
     const proc = spawn('python3', [PTY_HELPER, userShell(), String(rows), String(cols)], {
       cwd: spawnCwd,
+      env,
       // fd 3 is the helper's control channel (resize).
       stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
     });

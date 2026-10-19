@@ -786,6 +786,18 @@ async function appEnvironment(display: EmbeddedDisplay): Promise<NodeJS.ProcessE
   return env;
 }
 
+/**
+ * The environment for the Terminal's shells: the apps' own, so a program
+ * started from a shell opens as a window in Din like any launched app, not
+ * on the display Din itself is drawn to (under cage, that put it in Din's
+ * place, fullscreen). Din's own environment where the embedded display
+ * can't run.
+ */
+export async function terminalEnvironment(): Promise<NodeJS.ProcessEnv> {
+  const display = await embeddedDisplay().catch(() => null);
+  return display ? appEnvironment(display) : { ...process.env };
+}
+
 /** Start a process detached from the shell, returning its pid. */
 function spawnDetached(argv: string[], cwd: string, env: NodeJS.ProcessEnv): number | undefined {
   const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: 'ignore' });
