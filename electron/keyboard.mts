@@ -1,4 +1,5 @@
-// The keyboard layout native apps type with.
+// The keyboard layout: the system's, which Settings → Keyboard shows and
+// changes.
 //
 // Din forwards physical keys to native apps (src/lib/nativeDisplay.ts sends
 // evdev keycodes, not characters), and the embedded display's servers turn
@@ -6,8 +7,16 @@
 // US QWERTY whatever the OS is set to, so a Colemak or AZERTY typist got the
 // right letters in Din's own windows (those come from the host) and the wrong
 // ones in every native app. So the layout is read from wherever the OS keeps
-// it, the user can override it in Settings, and native-display.mts pushes the
-// result to the compositor (and through it Xwayland) and the X server.
+// it, and native-display.mts pushes it to the compositor (and through it
+// Xwayland) and the X server.
+//
+// Settings changes the system's layout where Din knows how. On DinOS that's
+// os/din-keyboard.sh, which DinOS's launcher names in DIN_KEYBOARD and the
+// shell's user runs through sudo without a password, like the updater's
+// helper. cage reads the layout when it starts, so native apps switch at
+// once and Din's own windows after Din restarts. On GNOME it's the desktop's
+// input sources, which switch everything at once. Elsewhere the layout is
+// shown but not changed.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -40,6 +49,9 @@ interface LayoutEntry extends LayoutChoice {
 }
 
 const DEFAULT_KEYMAP: Keymap = { rules: '', model: '', layout: 'us', variant: '', options: '' };
+
+const HELPER = process.env.DIN_KEYBOARD;
+const LAYOUT_FILE = '/var/lib/din/keyboard';
 
 /**
  * What a keymap field may contain. The values end up as setxkbmap arguments
@@ -97,9 +109,10 @@ async function fromGnome(): Promise<Keymap | null> {
   const [sources, options] = await Promise.all([gsettings('sources'), gsettings('xkb-options')]);
   if (!sources) return null;
   // XKB holds at most four groups; input methods (ibus) aren't XKB layouts.
-  const groups = [...sources.matchAll(/\(\s*'xkb'\s*,\s*'([^']*)'\s*\)/g)]
+  const groups = parseSources(sources)
+    .filter(([type]) => type === 'xkb')
     .slice(0, 4)
-    .map((match) => match[1].split('+'));
+    .map(([, name]) => name.split('+'));
   if (groups.length === 0) return null;
   const variants = groups.map(([, variant]) => variant ?? '');
   return toKeymap({
@@ -107,6 +120,27 @@ async function fromGnome(): Promise<Keymap | null> {
     variant: variants.some(Boolean) ? variants.join(',') : '',
     options: [...(options ?? '').matchAll(/'([^']*)'/g)].map((match) => match[1]).join(','),
   });
+}
+
+/** An input sources value, e.g. "[('xkb', 'us'), ('ibus', 'mozc-jp')]", as pairs. */
+function parseSources(value: string | null): [string, string][] {
+  return [...(value ?? '').matchAll(/\(\s*'([^']*)'\s*,\s*'([^']*)'\s*\)/g)]
+    .map((match): [string, string] => [match[1], match[2]]);
+}
+
+/**
+ * Make a layout GNOME's: first in its input sources and its most recently
+ * used, so it's the one in use. The others stay, to switch to as before.
+ */
+async function setGnomeLayout(choice: LayoutChoice): Promise<void> {
+  const id = choice.variant ? `${choice.layout}+${choice.variant}` : choice.layout;
+  const promote = (value: string | null) => {
+    const rest = parseSources(value).filter(([type, name]) => !(type === 'xkb' && name === id));
+    return `[${[['xkb', id], ...rest].map(([type, name]) => `('${type}', '${name}')`).join(', ')}]`;
+  };
+  const [sources, mru] = await Promise.all([gsettings('sources'), gsettings('mru-sources')]);
+  await runCommand('gsettings', ['set', GNOME_SCHEMA, 'sources', promote(sources)], { timeout: 3_000 });
+  await runCommand('gsettings', ['set', GNOME_SCHEMA, 'mru-sources', promote(mru)], { timeout: 3_000 });
 }
 
 /** Parse the `[section]` of an INI-style file into key/value pairs. */
@@ -200,12 +234,33 @@ async function fromXorgConf(file: string): Promise<Keymap | null> {
   });
 }
 
+/** DinOS's layout file, as XKB_DEFAULT_* lines (os/din-keyboard.sh). */
+async function fromLayoutFile(): Promise<Keymap | null> {
+  let text: string;
+  try {
+    text = await fs.readFile(LAYOUT_FILE, 'utf8');
+  } catch {
+    return null;
+  }
+  const field = (name: string) => new RegExp(`^XKB_DEFAULT_${name}=(.*)$`, 'm').exec(text)?.[1];
+  return toKeymap({
+    rules: field('RULES'),
+    model: field('MODEL'),
+    layout: field('LAYOUT'),
+    variant: field('VARIANT'),
+    options: field('OPTIONS'),
+  });
+}
+
 /**
- * The OS's layout, from the most specific place that has one: what Din's
- * own compositor was told, then the desktop's settings, the live X server,
- * and the system-wide defaults.
+ * The OS's layout, from the most specific place that has one. On DinOS
+ * that's the layout file, which is newer than what cage was started with
+ * when Settings has changed it since. Elsewhere it's what Din's own
+ * compositor was told, then the desktop's settings, the live X server, and
+ * the system-wide defaults.
  */
 async function detectSystemKeymap(): Promise<Keymap | null> {
+  if (HELPER) return (await fromLayoutFile()) ?? fromEnvironment();
   const sources = [
     async () => fromEnvironment(),
     fromGnome,
@@ -281,15 +336,9 @@ function layoutCatalog(): Promise<LayoutEntry[]> {
 }
 
 // ---------------------------------------------------------------------------
-// The user's choice, and the keymap in effect
+// The keymap in effect, and changing it
 // ---------------------------------------------------------------------------
 
-function selectionFile(): string {
-  return path.join(app.getPath('userData'), 'keyboard-layout.json');
-}
-
-/** The layout picked in Settings; null follows the OS. */
-let selection: LayoutChoice | null = null;
 let system: Keymap | null = null;
 let effective: Keymap = DEFAULT_KEYMAP;
 let loaded: Promise<void> | null = null;
@@ -302,14 +351,18 @@ function parseChoice(value: unknown): LayoutChoice | null {
   return { layout, variant };
 }
 
-/**
- * Recompute the keymap in effect and tell listeners if it changed. A picked
- * layout replaces the OS's layouts but keeps its model and options (Caps
- * Lock as Ctrl and the like belong to the person, not the layout).
- */
+function sameLayout(a: Keymap, b: Keymap): boolean {
+  return a.layout === b.layout && a.variant === b.variant;
+}
+
+/** Whether Settings can change the system's layout here. */
+function canChange(): boolean {
+  return Boolean(HELPER) || isGnome();
+}
+
+/** Recompute the keymap in effect and tell listeners if it changed. */
 function update(): void {
-  const base = system ?? DEFAULT_KEYMAP;
-  const next = selection ? { ...base, ...selection } : base;
+  const next = system ?? DEFAULT_KEYMAP;
   if (JSON.stringify(next) === JSON.stringify(effective)) return;
   effective = next;
   for (const listener of listeners) listener(next);
@@ -320,19 +373,50 @@ async function refreshSystem(): Promise<void> {
   update();
 }
 
+async function setSystemLayout(choice: LayoutChoice): Promise<void> {
+  if (HELPER) {
+    const args = ['-n', HELPER, 'set', choice.layout];
+    if (choice.variant) args.push(choice.variant);
+    await runCommand('sudo', args, { timeout: 15_000 });
+  } else if (isGnome()) {
+    await setGnomeLayout(choice);
+  } else {
+    throw new Error('Din can\'t change the keyboard layout on this system');
+  }
+}
+
+/**
+ * Settings used to keep a layout of its own, for native apps only. On DinOS
+ * that was the only way to pick one, so it becomes the system's, unless the
+ * system already has one; elsewhere the system's layout takes over.
+ */
+async function migrateOldSelection(): Promise<void> {
+  const file = path.join(app.getPath('userData'), 'keyboard-layout.json');
+  let choice: LayoutChoice | null;
+  try {
+    choice = parseChoice(JSON.parse(await fs.readFile(file, 'utf8')));
+  } catch {
+    return;
+  }
+  if (choice && HELPER && !(await fromLayoutFile())) {
+    try {
+      await setSystemLayout(choice);
+    } catch (error) {
+      console.error('keyboard: carrying over the old layout failed:', error);
+    }
+  }
+  await fs.rm(file, { force: true });
+}
+
 function load(): Promise<void> {
   loaded ??= (async () => {
-    try {
-      selection = parseChoice(JSON.parse(await fs.readFile(selectionFile(), 'utf8')));
-    } catch {
-      selection = null;
-    }
+    await migrateOldSelection();
     await refreshSystem();
   })();
   return loaded;
 }
 
-/** The keymap native apps should use (the OS's unless Settings overrides it). */
+/** The keymap native apps should use: the system's. */
 export async function keyboardKeymap(): Promise<Keymap> {
   await load();
   return effective;
@@ -363,9 +447,12 @@ export function registerKeyboardHandlers(options: {
     await load();
     // The OS may have changed since; Settings is where anyone would look.
     await refreshSystem();
+    const current = system ?? DEFAULT_KEYMAP;
     return {
-      system: await describe(system ?? DEFAULT_KEYMAP),
-      selected: selection,
+      layout: await describe(current),
+      canChange: canChange(),
+      // cage still has the layout it started with (and passed down to Din).
+      restartNeeded: Boolean(HELPER) && !sameLayout(current, fromEnvironment() ?? DEFAULT_KEYMAP),
     };
   });
 
@@ -376,20 +463,20 @@ export function registerKeyboardHandlers(options: {
 
   ipcMain.handle('keyboard:set', async (event, raw) => {
     assertShellSender(event);
-    let next: LayoutChoice | null = null;
-    if (raw !== null) {
-      const choice = parseChoice(raw);
-      const known = choice && (await layoutCatalog()).some(
-        (entry) => entry.layout === choice.layout && entry.variant === choice.variant,
-      );
-      if (!choice || !known) throw new Error('Unknown keyboard layout');
-      next = { layout: choice.layout, variant: choice.variant };
-    }
+    const choice = parseChoice(raw);
+    const known = choice && (await layoutCatalog()).some(
+      (entry) => entry.layout === choice.layout && entry.variant === choice.variant,
+    );
+    if (!choice || !known) throw new Error('Unknown keyboard layout');
     await load();
-    if (next) await fs.writeFile(selectionFile(), JSON.stringify(next));
-    else await fs.rm(selectionFile(), { force: true });
-    selection = next;
-    update();
+    await setSystemLayout({ layout: choice.layout, variant: choice.variant });
+    await refreshSystem();
+  });
+
+  ipcMain.handle('keyboard:restart', async (event) => {
+    assertShellSender(event);
+    if (!HELPER) throw new Error('Din doesn\'t need a restart here');
+    await runCommand('sudo', ['-n', HELPER, 'restart'], { timeout: 15_000 });
   });
 
   // Follow GNOME's layout switches while Din runs.

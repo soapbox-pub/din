@@ -186,11 +186,13 @@ mouse-look in games (Wayland or X11 via Xwayland): an app's pointer lock
 becomes DOM Pointer Lock on its window, Escape releases it, and the next click
 in the window lets the app take it again.
 
-Apps type with the OS's keyboard layout (`electron/keyboard.mts` reads it from
-`XKB_DEFAULT_*`, GNOME or KDE settings, the host X server, or the system
-keyboard config), or with one picked in Settings → Keyboard. Din sends them
-physical keys and both servers apply the layout; the Xvfb fallback needs
-`setxkbmap` for it.
+Apps type with the system's keyboard layout (`electron/keyboard.mts` reads it
+from `XKB_DEFAULT_*`, GNOME or KDE settings, the host X server, or the system
+keyboard config). Din sends them physical keys and both servers apply the
+layout; the Xvfb fallback needs `setxkbmap` for it. Settings → Keyboard shows
+the layout and changes it on DinOS and GNOME. DinOS keeps it in
+`/var/lib/din/keyboard`, which cage reads when it starts (`os/din-keyboard.sh`
+writes it as root), so Din's own windows switch after Din restarts.
 
 Build both crates with `npm run build:native`. Without the compositor, every
 app runs on Xvfb; without din-fd, the compositor stays on the CPU path.

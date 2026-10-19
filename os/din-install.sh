@@ -53,11 +53,12 @@ ROOT_MAX_BYTES=$((128 * GIB))
 # Room for apps and system updates beyond the live system's own footprint.
 HEADROOM_BYTES=$((8 * GIB))
 # What a reinstall carries over from the old root, besides home: saved WiFi,
-# Bluetooth pairings, the machine's identity, and NixOS's record of the ids
-# it handed out (which files in home are owned by).
+# Bluetooth pairings, the keyboard layout, the machine's identity, and
+# NixOS's record of the ids it handed out (which files in home are owned by).
 KEEP_PATHS=(
   etc/NetworkManager/system-connections
   var/lib/bluetooth
+  var/lib/din/keyboard
   var/lib/nixos
   etc/machine-id
 )

@@ -86,6 +86,7 @@ import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
 import {
   useKeyboardLayouts,
   useKeyboardStatus,
+  useRestartForKeyboardLayout,
   useSetKeyboardLayout,
 } from '@/hooks/useKeyboardLayout';
 import { getBrightnessBridge, MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
@@ -2082,22 +2083,21 @@ function SoundSection() {
 // ---------------------------------------------------------------------------
 
 /**
- * The keyboard layout native Linux apps type with (window.keyboard). Din
- * sends them physical keys, and their display servers apply this layout:
- * the OS's by default, or one picked from xkeyboard-config's list. Din's own
- * windows get characters from the system Din runs on, so they keep its
- * layout either way.
+ * The system's keyboard layout (window.keyboard), which Din's own windows and
+ * the native Linux apps it runs both type with. Picking one from
+ * xkeyboard-config's list changes the system's, where Din can (DinOS, GNOME).
  */
 function KeyboardSection() {
   const bridge = getKeyboardBridge();
   const status = useKeyboardStatus();
   const layouts = useKeyboardLayouts();
   const setLayout = useSetKeyboardLayout();
+  const restart = useRestartForKeyboardLayout();
   const [query, setQuery] = useState('');
   const selectedRef = useRef<HTMLButtonElement>(null);
 
   // While a change is in flight, show the requested choice.
-  const selected = setLayout.isPending ? setLayout.variables : status.data?.selected ?? null;
+  const selected = setLayout.isPending ? setLayout.variables : status.data?.layout ?? null;
   const selectedKey = selected ? layoutKey(selected) : null;
 
   const filtered = useMemo(() => {
@@ -2110,8 +2110,8 @@ function KeyboardSection() {
     });
   }, [layouts.data, query]);
 
-  // Bring the picked layout into view when the list first appears.
-  const showList = selectedKey !== null && Boolean(layouts.data);
+  // Bring the system's layout into view when the list first appears.
+  const showList = status.data?.canChange === true && Boolean(layouts.data);
   useEffect(() => {
     if (showList) selectedRef.current?.scrollIntoView({ block: 'nearest' });
   }, [showList]);
@@ -2130,12 +2130,12 @@ function KeyboardSection() {
   if (status.isLoading) {
     return (
       <SectionShell title="Keyboard">
-        <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3" aria-hidden>
+        <div className="flex items-center gap-3 rounded-md border bg-muted/20 p-3" aria-hidden>
+          <Skeleton className="size-4 bg-foreground/10" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-4 w-32 bg-foreground/10" />
             <Skeleton className="h-3 w-56 bg-foreground/10" />
           </div>
-          <Skeleton className="h-5 w-9 rounded-full bg-foreground/10" />
         </div>
       </SectionShell>
     );
@@ -2149,24 +2149,38 @@ function KeyboardSection() {
     );
   }
 
-  const system = status.data.system;
+  const { layout, canChange, restartNeeded } = status.data;
 
   return (
     <SectionShell title="Keyboard">
-      <SettingSwitchRow
-        id="keyboard-follow-system"
-        icon={Keyboard}
-        label="Use the system layout"
-        description={`Your system is set to ${system.name}.`}
-        checked={selected === null}
-        onCheckedChange={(checked) =>
-          // Start from the system's layout, so turning this off changes nothing
-          // until a layout is picked.
-          setLayout.mutate(checked ? null : { layout: system.layout, variant: system.variant })
-        }
-      />
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <Keyboard className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-sm text-foreground">{layout.name}</p>
+          <p className="text-xs text-muted-foreground">
+            {canChange
+              ? 'The layout everything on this computer types with.'
+              : 'Din uses your system’s layout. Change it in your desktop’s keyboard settings.'}
+          </p>
+        </div>
+      </div>
 
-      {selected !== null && (
+      {restartNeeded && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Restart Din to finish switching</p>
+            <p className="text-xs text-muted-foreground">
+              Apps already use {layout.name}; Din’s own windows will after a restart. Open apps close.
+            </p>
+          </div>
+          <Button size="sm" disabled={restart.isPending} onClick={() => restart.mutate()}>
+            {restart.isPending && <Loader2 className="size-4 motion-safe:animate-spin" />}
+            Restart Din
+          </Button>
+        </div>
+      )}
+
+      {canChange && (
         <div className="flex flex-col gap-2">
           <div className="relative">
             <Search
@@ -2251,10 +2265,11 @@ function KeyboardSection() {
         </p>
       )}
 
-      <p className="text-xs text-muted-foreground">
-        Native Linux apps type with this layout. Din's own windows use the layout
-        of the system Din runs on.
-      </p>
+      {restart.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {restart.error instanceof Error ? restart.error.message : 'Could not restart Din.'}
+        </p>
+      )}
     </SectionShell>
   );
 }

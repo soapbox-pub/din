@@ -10,7 +10,7 @@ function requireBridge() {
   return keyboard;
 }
 
-/** The OS's layout and the one picked in Settings. */
+/** The system's layout, and whether it can be changed here. */
 export function useKeyboardStatus() {
   return useQuery<KeyboardStatus>({
     queryKey: ['keyboard', 'status'],
@@ -31,11 +31,18 @@ export function useKeyboardLayouts() {
   });
 }
 
-/** Pick a layout for native apps, or null to follow the OS. */
+/** Make a layout the system's. */
 export function useSetKeyboardLayout() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (choice: KeyboardLayoutChoice | null) => requireBridge().set(choice),
+    mutationFn: (choice: KeyboardLayoutChoice) => requireBridge().set(choice),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['keyboard', 'status'] }),
+  });
+}
+
+/** Restart Din, so its own windows take a changed layout (DinOS). */
+export function useRestartForKeyboardLayout() {
+  return useMutation({
+    mutationFn: () => requireBridge().restart(),
   });
 }

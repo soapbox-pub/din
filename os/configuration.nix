@@ -138,6 +138,14 @@ let
     text = builtins.readFile ./din-update.sh;
   };
 
+  # The privileged half of Settings → Keyboard, which sets the system's
+  # keyboard layout (see the script, and electron/keyboard.mts).
+  din-keyboard = pkgs.writeShellApplication {
+    name = "din-keyboard";
+    runtimeInputs = with pkgs; [ coreutils gnugrep systemd ];
+    text = builtins.readFile ./din-keyboard.sh;
+  };
+
   # Succeeds when the partition UUID given is the boot loader's ESP, from
   # systemd-boot's LoaderDevicePartUUID variable (UTF-16, after 4 bytes of
   # attributes).
@@ -160,8 +168,8 @@ let
   # embedded display native Linux apps run on (electron/native-display.mts)
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
   # their keyboard layout (electron/keyboard.mts), Wine for Windows
-  # programs, and sudo (from /run/wrappers) for the Installer's and the
-  # updater's helpers.
+  # programs, and sudo (from /run/wrappers) for the Installer's, the
+  # updater's, and the keyboard layout's helpers.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${wine}/bin:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
@@ -169,6 +177,7 @@ let
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
     export DIN_INSTALLER=${din-installer}/bin/din-install
     export DIN_UPDATER=${din-updater}/bin/din-update
+    export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
     # Chromium logging into the journal (via cage), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
     exec ${pkgs.electron}/bin/electron \
@@ -267,6 +276,9 @@ in
     user = "din";
     program = "${din-launcher}/bin/din";
   };
+  # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
+  # writes (os/din-keyboard.sh). cage applies it, and Din inherits it.
+  systemd.services.cage-tty1.serviceConfig.EnvironmentFile = "-/var/lib/din/keyboard";
 
   # cage's unit conflicts with the console login on tty1 (autovt@tty1), which
   # getty.target still wants. A system switch re-starts both targets, and

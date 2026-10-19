@@ -13,7 +13,7 @@
 //   - window.monitors: where each display sits in the shell window, for the
 //     desktop's layout
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
-//   - window.keyboard: the keyboard layout native apps use, for Settings
+//   - window.keyboard: the system's keyboard layout, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
 //   - window.installer: put DinOS on this computer's disk, for the
 //     Installer app (live USB boots only)
@@ -449,20 +449,23 @@ contextBridge.exposeInMainWorld('nativeDisplay', {
 });
 
 // Keyboard bridge (window.keyboard), backed by the keyboard:* handlers in
-// electron/keyboard.mts: the layout native apps type with - the OS's, or
-// one picked in Settings from xkeyboard-config's list.
+// electron/keyboard.mts: the system's keyboard layout, which Settings shows
+// and, where Din knows how, changes to one from xkeyboard-config's list.
 contextBridge.exposeInMainWorld('keyboard', {
-  /** The OS's layout ({ layout, variant, name }) and the one picked, if any. */
+  /** The system's layout ({ layout, variant, name }), whether it can be changed, and whether Din needs a restart for it. */
   status: () => ipcRenderer.invoke('keyboard:status'),
 
   /** Every layout and variant there is: { layout, variant, name }[]. */
   layouts: () => ipcRenderer.invoke('keyboard:layouts'),
 
   /**
-   * Use a layout for native apps, or null to follow the OS.
-   * @param {{ layout: string, variant: string } | null} choice
+   * Make a layout the system's.
+   * @param {{ layout: string, variant: string }} choice
    */
   set: (choice) => ipcRenderer.invoke('keyboard:set', choice),
+
+  /** Restart Din, so its own windows take a changed layout (DinOS). */
+  restart: () => ipcRenderer.invoke('keyboard:restart'),
 });
 
 // Tray bridge (window.tray), backed by the tray:* handlers in
