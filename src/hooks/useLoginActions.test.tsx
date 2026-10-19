@@ -33,14 +33,14 @@ describe('useLoginActions auto-switch', () => {
     // so wait for the provider to mount.
     await waitFor(() => expect(result.current).not.toBeNull());
 
-    act(() => {
-      result.current.actions.nsec(nsec1);
+    await act(async () => {
+      await result.current.actions.nsec(nsec1);
     });
 
     expect(result.current.login.logins).toHaveLength(1);
 
-    act(() => {
-      result.current.actions.nsec(nsec2);
+    await act(async () => {
+      await result.current.actions.nsec(nsec2);
     });
 
     expect(result.current.login.logins).toHaveLength(2);

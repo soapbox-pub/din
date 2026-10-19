@@ -20,6 +20,8 @@
 //   - window.updater: DinOS system updates, for the Settings app
 //   - window.bluetoothLogin: receive the account key from a phone over
 //     Bluetooth LE, for the login screen
+//   - window.nostrd: the signer daemon that holds the account keys, for the
+//     shell's signer and account menu
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -655,6 +657,35 @@ contextBridge.exposeInMainWorld('bluetoothLogin', {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('bluetooth-login:event', handler);
     return () => ipcRenderer.removeListener('bluetooth-login:event', handler);
+  },
+});
+
+// Signer bridge (window.nostrd), backed by electron/nostrd.mts: nostrd, the
+// signer daemon that holds the account keys, signs for the shell and manages
+// its accounts.
+contextBridge.exposeInMainWorld('nostrd', {
+  /** Whether to keep accounts in nostrd ({ use, connected, managed }). */
+  info: () => ipcRenderer.invoke('nostrd:info'),
+
+  /**
+   * Call a nostrd method. Resolves to { result } or { error: { code, message } }.
+   * @param {string} method
+   * @param {unknown[]} params
+   */
+  call: (method, params) => ipcRenderer.invoke('nostrd:call', method, params),
+
+  /**
+   * Subscribe to nostrd's events ({ event }). Returns an unsubscribe fn.
+   * @param {(event: unknown) => void} callback
+   */
+  onEvent: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} payload
+     */
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('nostrd:event', handler);
+    return () => ipcRenderer.removeListener('nostrd:event', handler);
   },
 });
 

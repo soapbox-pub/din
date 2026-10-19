@@ -1,7 +1,10 @@
+import { useCallback } from 'react';
 import { useNostr } from '@nostrify/react';
 import { useNostrLogin } from '@nostrify/react/login';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { NSchema as n, NostrEvent, NostrMetadata } from '@nostrify/nostrify';
+import { NOSTRD_STATUS_KEY, useNostrd } from '@/hooks/useNostrd';
+import { NOSTRD_LOGIN, nostrdCall } from '@/lib/nostrd';
 import { readProfileCache, writeProfileCache } from '@/lib/profileCache';
 
 export interface Account {
@@ -13,7 +16,9 @@ export interface Account {
 
 export function useLoggedInAccounts() {
   const { nostr } = useNostr();
-  const { logins, setLogin, removeLogin } = useNostrLogin();
+  const { logins, setLogin: setCurrentLogin, removeLogin } = useNostrLogin();
+  const { use: useNostrdAccounts } = useNostrd();
+  const queryClient = useQueryClient();
 
   const { data: authors = [], isLoading } = useQuery({
     queryKey: ['nostr', 'logins', logins.map((l) => l.id).join(';')],
@@ -61,12 +66,65 @@ export function useLoggedInAccounts() {
   // Other users are all logins except the current one
   const otherUsers = (authors || []).slice(1) as Account[];
 
+  /** Whether an account is kept in nostrd, where removing it deletes its key. */
+  const isNostrdAccount = useCallback(
+    (id: string) => logins.some((login) => login.id === id && login.type === NOSTRD_LOGIN),
+    [logins],
+  );
+
+  const refreshNostrd = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: NOSTRD_STATUS_KEY }),
+    [queryClient],
+  );
+
+  /**
+   * Switch to an account. An nostrd account becomes nostrd's active one (and
+   * NostrdSync follows); switching to any other signs out of nostrd's.
+   */
+  const setLogin = useCallback(async (id: string) => {
+    const login = logins.find((l) => l.id === id);
+    if (!login) return;
+    if (login.type === NOSTRD_LOGIN) {
+      await nostrdCall('set_active', [login.pubkey]);
+    } else {
+      setCurrentLogin(id);
+      if (useNostrdAccounts) await nostrdCall('set_active', [null]).catch(() => {});
+    }
+    await refreshNostrd();
+  }, [logins, setCurrentLogin, useNostrdAccounts, refreshNostrd]);
+
+  /** Sign in as an account nostrd holds. */
+  const signInWithNostrd = useCallback(async (pubkey: string) => {
+    await nostrdCall('set_active', [pubkey]);
+    await refreshNostrd();
+  }, [refreshNostrd]);
+
+  /** Sign out of an account. An nostrd account's key stays on the computer. */
+  const signOut = useCallback(async (id: string) => {
+    if (isNostrdAccount(id)) {
+      await nostrdCall('set_active', [null]);
+      await refreshNostrd();
+    } else {
+      removeLogin(id);
+    }
+  }, [isNostrdAccount, removeLogin, refreshNostrd]);
+
+  /** Delete an nostrd account's key from the computer. Needs nostrd's password, if it has one. */
+  const removeNostrdAccount = useCallback(async (pubkey: string, password: string) => {
+    await nostrdCall('remove_account', [pubkey, password]);
+    await refreshNostrd();
+  }, [refreshNostrd]);
+
   return {
     authors,
     currentUser,
     otherUsers,
     isLoading,
     setLogin,
+    signOut,
+    signInWithNostrd,
     removeLogin,
+    removeNostrdAccount,
+    isNostrdAccount,
   };
 }

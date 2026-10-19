@@ -273,15 +273,25 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
   };
 
   // Signup: download the nsec to a file and move on to the profile step.
-  const downloadAndProceed = () => {
+  const downloadAndProceed = async () => {
     try {
       downloadNsecFile(nsec);
-      login.nsec(nsec);
-      setStep('profile');
     } catch {
       toast({
         title: 'Download failed',
         description: 'Could not download the key file. Please copy it manually.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      // The profile step signs as the new account, so it must be current first.
+      await login.nsec(nsec);
+      setStep('profile');
+    } catch (error) {
+      toast({
+        title: "Couldn't sign in",
+        description: error instanceof Error ? error.message : String(error),
         variant: 'destructive',
       });
     }
@@ -315,16 +325,13 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
 
     setIsLoggingIn(true);
     setLoginError('');
-    // Timeout gives the UI a chance to repaint before the synchronous login.
-    setTimeout(() => {
-      try {
-        login.nsec(value);
-        onClose();
-      } catch {
+    login
+      .nsec(value)
+      .then(() => onClose())
+      .catch(() => {
         setLoginError("Couldn't log in with this key.");
         setIsLoggingIn(false);
-      }
-    }, 50);
+      });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {

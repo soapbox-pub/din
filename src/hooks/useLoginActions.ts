@@ -6,8 +6,11 @@ import {
   type NostrConnectStatus,
   useNostrLogin,
 } from '@nostrify/react/login';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
+import { NOSTRD_STATUS_KEY } from '@/hooks/useNostrd';
 import { APP_RELAYS } from '@/lib/appRelays';
+import { importToNostrd, NOSTRD_LOGIN, nostrdCall, nostrdManagesAccounts } from '@/lib/nostrd';
 
 // NOTE: This file should not be edited except for adding new login methods.
 
@@ -18,6 +21,7 @@ export function useLoginActions() {
   const { nostr } = useNostr();
   const { logins, addLogin, setLogin, removeLogin } = useNostrLogin();
   const { config } = useAppContext();
+  const queryClient = useQueryClient();
 
   // Add a login and promote it to be the current user. Without the
   // setLogin call the new login is appended to the end of the array,
@@ -30,8 +34,16 @@ export function useLoginActions() {
   };
 
   return {
-    // Login with a Nostr secret key
-    nsec(nsec: string): void {
+    // Login with a Nostr secret key. Where nostrd holds the accounts the key
+    // goes there, and is active once this resolves; otherwise it's kept by
+    // Din, in localStorage.
+    async nsec(nsec: string): Promise<void> {
+      if (await nostrdManagesAccounts()) {
+        const pubkey = await importToNostrd(nsec);
+        await nostrdCall('set_active', [pubkey]);
+        await queryClient.invalidateQueries({ queryKey: NOSTRD_STATUS_KEY });
+        return;
+      }
       const login = NLogin.fromNsec(nsec);
       addAndActivate(login);
     },
@@ -69,10 +81,13 @@ export function useLoginActions() {
         ? relays
         : APP_RELAYS.relays.filter((r) => r.write).map((r) => r.url);
     },
-    // Log out the current user
+    // Log out the current user. An nostrd account's key stays on the computer.
     async logout(): Promise<void> {
       const login = logins[0];
-      if (login) {
+      if (login?.type === NOSTRD_LOGIN) {
+        await nostrdCall('set_active', [null]);
+        await queryClient.invalidateQueries({ queryKey: NOSTRD_STATUS_KEY });
+      } else if (login) {
         removeLogin(login.id);
       }
     }

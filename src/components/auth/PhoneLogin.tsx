@@ -68,13 +68,13 @@ export function PhoneLogin({ onDone, onCancel }: PhoneLoginProps) {
                 : (event.message ?? 'Something went wrong with Bluetooth.'),
           });
         case 'key':
-          try {
-            loginRef.current.nsec(openKeyPayload(sk, event));
-            active = false;
-            onDoneRef.current();
-          } catch (error) {
-            setPhase({ name: 'failed', message: cleanBluetoothError(error) });
-          }
+          active = false;
+          Promise.resolve()
+            .then(() => loginRef.current.nsec(openKeyPayload(sk, event)))
+            .then(() => onDoneRef.current())
+            .catch((error: unknown) => {
+              setPhase({ name: 'failed', message: cleanBluetoothError(error) });
+            });
       }
     };
 

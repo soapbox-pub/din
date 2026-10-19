@@ -6,6 +6,7 @@ import { NUser, useNostrLogin } from '@nostrify/react/login';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
 import { SEARCH_RELAYS } from '@/lib/searchRelays';
+import { NOSTRD_LOGIN, NostrdSigner } from '@/lib/nostrd';
 
 interface NostrProviderProps {
   children: React.ReactNode;
@@ -115,6 +116,8 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
           return NUser.fromBunkerLogin(currentLogin, pool).signer;
         case 'extension':
           return NUser.fromExtensionLogin(currentLogin).signer;
+        case NOSTRD_LOGIN:
+          return new NostrdSigner(currentLogin.pubkey);
         default:
           return undefined;
       }

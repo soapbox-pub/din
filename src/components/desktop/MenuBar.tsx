@@ -1,4 +1,4 @@
-import { EthernetPort, LayoutGrid, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { CircleUserRound, EthernetPort, LayoutGrid, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -27,6 +27,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import AuthDialog from '@/components/auth/AuthDialog';
 import { QuickLoginDialog } from '@/components/auth/QuickLoginDialog';
+import { RemoveAccountDialog } from '@/components/auth/RemoveAccountDialog';
 import { EditProfileForm } from '@/components/EditProfileForm';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
@@ -38,6 +39,8 @@ import { TrayItems } from '@/components/desktop/TrayMenu';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useClock } from '@/hooks/useClock';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
+import { useNostrd } from '@/hooks/useNostrd';
+import { useAuthor } from '@/hooks/useAuthor';
 import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
 import { useBatteryStatus } from '@/hooks/usePower';
 import { useAudioStatus } from '@/hooks/useAudio';
@@ -48,7 +51,6 @@ import { getAudioBridge } from '@/lib/audio';
 import { getBrightnessBridge } from '@/lib/brightness';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
-import { getSessionBridge } from '@/lib/session';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
@@ -435,6 +437,7 @@ const AccountMenuItem = memo(function AccountMenuItem() {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [quickLoginPubkey, setQuickLoginPubkey] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<{ pubkey: string; name: string } | null>(null);
 
   return (
     <>
@@ -445,12 +448,16 @@ const AccountMenuItem = memo(function AccountMenuItem() {
             aria-label="Account"
             className="grid size-7 place-items-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Avatar className="size-4.5" shape={getAvatarShape(currentUser?.metadata)}>
-              <AvatarImage src={currentUser?.metadata.picture} alt="" />
-              <AvatarFallback className="text-[9px]">
-                {currentUser?.metadata.name?.charAt(0) ?? '?'}
-              </AvatarFallback>
-            </Avatar>
+            {currentUser ? (
+              <Avatar className="size-4.5" shape={getAvatarShape(currentUser.metadata)}>
+                <AvatarImage src={currentUser.metadata.picture} alt="" />
+                <AvatarFallback className="text-[9px]">
+                  {currentUser.metadata.name?.charAt(0) ?? '?'}
+                </AvatarFallback>
+              </Avatar>
+            ) : (
+              <CircleUserRound className="size-4.5 text-foreground/80" aria-hidden />
+            )}
           </button>
         </PopoverTrigger>
         <PopoverContent
@@ -464,9 +471,12 @@ const AccountMenuItem = memo(function AccountMenuItem() {
             onJoin={() => setAuthDialogOpen(true)}
             onQuickLogin={setQuickLoginPubkey}
             onEditProfile={() => setEditProfileOpen(true)}
+            onRemoveAccount={setRemoving}
           />
         </PopoverContent>
       </Popover>
+
+      <RemoveAccountDialog account={removing} onClose={() => setRemoving(null)} />
 
       <Dialog open={editProfileOpen} onOpenChange={setEditProfileOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
@@ -500,6 +510,33 @@ const AccountMenuItem = memo(function AccountMenuItem() {
   );
 });
 
+/** One account nostrd holds, for the signed-out account panel. */
+function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect: () => void }) {
+  const author = useAuthor(pubkey);
+  const metadata = author.data?.metadata;
+  const name = metadata?.name ?? `${nip19.npubEncode(pubkey).slice(0, 12)}…`;
+
+  return (
+    <PopoverClose asChild>
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Avatar className="size-8" shape={getAvatarShape(metadata)}>
+          <AvatarImage src={metadata?.picture} alt="" />
+          <AvatarFallback className="text-xs">
+            {author.isLoading ? <Skeleton className="size-full rounded-full" /> : name.charAt(0)}
+          </AvatarFallback>
+        </Avatar>
+        <span className="truncate text-sm font-medium text-foreground">
+          {author.isLoading && !metadata ? <Skeleton className="h-3.5 w-24" /> : name}
+        </span>
+      </button>
+    </PopoverClose>
+  );
+}
+
 /** Menu-bar clock: weekday, date, and time, macOS style. */
 const ClockDisplay = memo(function ClockDisplay() {
   const now = useClock();
@@ -516,22 +553,32 @@ const ClockDisplay = memo(function ClockDisplay() {
   );
 });
 
-/** Account header: current user, other accounts, add-account, log out. */
+/** Account header: current user, other accounts, add-account, sign out. */
 function AccountPanel({
   onAddAccount,
   onJoin,
   onQuickLogin,
   onEditProfile,
+  onRemoveAccount,
 }: {
   onAddAccount: () => void;
   onJoin: () => void;
   onQuickLogin: (pubkey: string) => void;
   onEditProfile: () => void;
+  onRemoveAccount: (account: { pubkey: string; name: string }) => void;
 }) {
-  const { currentUser, otherUsers, isLoading, setLogin, removeLogin } =
-    useLoggedInAccounts();
+  const {
+    currentUser,
+    otherUsers,
+    isLoading,
+    setLogin,
+    signOut,
+    signInWithNostrd: nostrdSignIn,
+    removeLogin,
+    isNostrdAccount,
+  } = useLoggedInAccounts();
+  const { status: nostrd } = useNostrd();
   const openUrl = useOpenUrl();
-  const session = getSessionBridge();
 
   const displayName = (account: Account): string =>
     account.metadata.name ?? 'Anonymous';
@@ -555,16 +602,40 @@ function AccountPanel({
   };
 
   if (!currentUser) {
+    // Accounts nostrd already holds sign in with a click; their keys never
+    // left the computer.
+    const onComputer = nostrd?.accounts ?? [];
     return (
-      <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
-        <p className="text-sm text-muted-foreground">
-          Sign in with your Nostr account to sync your desktop.
-        </p>
-        <PopoverClose asChild>
-          <Button onClick={handleJoin} className="rounded-full px-6">
-            Join
-          </Button>
-        </PopoverClose>
+      <div className="flex flex-col">
+        {onComputer.length > 0 && (
+          <>
+            <p className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">
+              Sign in as
+            </p>
+            <div className="flex flex-col gap-1 p-2">
+              {onComputer.map((pubkey) => (
+                <ComputerAccountButton
+                  key={pubkey}
+                  pubkey={pubkey}
+                  onSelect={() => void nostrdSignIn(pubkey)}
+                />
+              ))}
+            </div>
+            <Separator />
+          </>
+        )}
+        <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            {onComputer.length > 0
+              ? 'Or use another Nostr account.'
+              : 'Sign in with your Nostr account to sync your desktop.'}
+          </p>
+          <PopoverClose asChild>
+            <Button onClick={handleJoin} className="rounded-full px-6">
+              {onComputer.length > 0 ? 'Add account' : 'Join'}
+            </Button>
+          </PopoverClose>
+        </div>
       </div>
     );
   }
@@ -661,7 +732,7 @@ function AccountPanel({
             <button
               key={user.id}
               type="button"
-              onClick={() => setLogin(user.id)}
+              onClick={() => void setLogin(user.id)}
               className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Avatar className="size-7" shape={getAvatarShape(user.metadata)}>
@@ -690,24 +761,40 @@ function AccountPanel({
           <UserPlus aria-hidden />
           Add another account
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => removeLogin(currentUser.id)}
-          className="justify-start text-muted-foreground hover:text-destructive"
-        >
-          <UserMinus aria-hidden />
-          Remove account
-        </Button>
-        {session && (
+        {isNostrdAccount(currentUser.id) ? (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void signOut(currentUser.id)}
+              className="justify-start text-muted-foreground hover:text-foreground"
+            >
+              <LogOut aria-hidden />
+              Sign out
+            </Button>
+            <PopoverClose asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  onRemoveAccount({ pubkey: currentUser.pubkey, name: displayName(currentUser) })
+                }
+                className="justify-start text-muted-foreground hover:text-destructive"
+              >
+                <UserMinus aria-hidden />
+                Remove from this computer…
+              </Button>
+            </PopoverClose>
+          </>
+        ) : (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => session.end()}
-            className="justify-start text-muted-foreground hover:text-foreground"
+            onClick={() => removeLogin(currentUser.id)}
+            className="justify-start text-muted-foreground hover:text-destructive"
           >
-            <LogOut aria-hidden />
-            Log out
+            <UserMinus aria-hidden />
+            Remove account
           </Button>
         )}
       </div>
