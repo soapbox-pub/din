@@ -24,6 +24,7 @@
 //     shell's signer and account menu
 //   - window.bootScreen: the wallpaper and clock format DinOS's boot and
 //     unlock screen shows
+//   - window.lock: DinOS's lock screen, for the Lock menu item
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -700,6 +701,25 @@ contextBridge.exposeInMainWorld('bootScreen', {
    * @param {boolean} hour12
    */
   update: (wallpaper, hour12) => ipcRenderer.invoke('boot-screen:update', wallpaper, hour12),
+});
+
+// Lock bridge (window.lock), backed by electron/lock.mts: DinOS's lock
+// screen, which runs outside Din.
+contextBridge.exposeInMainWorld('lock', {
+  /** Whether this computer can be locked (it has a password). */
+  available: () => ipcRenderer.invoke('lock:available'),
+
+  /** Lock now. */
+  lock: () => ipcRenderer.invoke('lock:lock'),
+
+  /**
+   * Change the computer's password: the disk's, the lock screen's, and the
+   * Nostr keys'.
+   * @param {string} oldPassword
+   * @param {string} newPassword
+   */
+  changePassword: (oldPassword, newPassword) =>
+    ipcRenderer.invoke('lock:change-password', oldPassword, newPassword),
 });
 
 // Updater bridge (window.updater), backed by electron/updater.mts: stages

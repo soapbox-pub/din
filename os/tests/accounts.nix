@@ -13,7 +13,7 @@ pkgs.testers.runNixOSTest {
     # Din itself isn't under test, and has no GPU here.
     services.cage.enable = pkgs.lib.mkForce false;
     users.users.stranger.isNormalUser = true;
-    environment.systemPackages = [ pkgs.keyutils ];
+    environment.systemPackages = [ pkgs.keyutils pkgs.cryptsetup ];
     virtualisation.memorySize = 2048;
   };
 
@@ -66,6 +66,28 @@ pkgs.testers.runNixOSTest {
         machine.succeed("keyctl add user cryptsetup wrong @u")
         machine.succeed("systemctl restart nostrd-unlock")
         as_din("nostrd call status | grep -q '\"locked\": true'")
+
+    password = machine.succeed("grep -o '/nix/store/[^ ,]*-din-password/bin/din-password' /etc/sudoers | head -1").strip()
+    script = machine.succeed(f"grep -o '/nix/store/[^ ]*din-password.py' {password}").strip()
+
+    with subtest("changing the password needs the old one"):
+        machine.fail(f"su - din -c \"printf 'nope\\nbattery-staple\\n' | sudo -n {password} change\"")
+        machine.fail(f"su - din -c \"printf 'hunter22\\nshort\\n' | sudo -n {password} change\"")
+
+    with subtest("it changes sudo's and nostrd's together"):
+        as_din(f"printf 'hunter22\\nbattery-staple\\n' | sudo -n {password} change")
+        as_din("echo battery-staple | sudo -S -k true")
+        machine.fail("su - din -c 'echo hunter22 | sudo -S -k true'")
+        as_din("printf 'battery-staple\\n' | nostrd call --stdin verify_password | grep -q true")
+
+    with subtest("and the disk's"):
+        machine.succeed(
+            "truncate -s 64M /tmp/disk",
+            "printf hunter22 | cryptsetup luksFormat --batch-mode --pbkdf pbkdf2 --pbkdf-force-iterations 1000 /tmp/disk -",
+            f"${pkgs.python3}/bin/python3 -c \"import importlib.util as u; s = u.spec_from_file_location('p', '{script}'); m = u.module_from_spec(s); s.loader.exec_module(m); m.change_disk('/tmp/disk', 'hunter22', 'battery-staple')\"",
+            "printf battery-staple | cryptsetup open --test-passphrase --key-file=- /tmp/disk",
+        )
+        machine.fail("printf hunter22 | cryptsetup open --test-passphrase --key-file=- /tmp/disk")
 
     with subtest("the store survives a restart, locked"):
         machine.succeed("systemctl restart nostrd")

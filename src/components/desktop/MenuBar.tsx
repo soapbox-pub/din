@@ -1,4 +1,4 @@
-import { CircleUserRound, EthernetPort, LayoutGrid, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -40,6 +40,8 @@ import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useClock } from '@/hooks/useClock';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useNostrd } from '@/hooks/useNostrd';
+import { useQuery } from '@tanstack/react-query';
+import { getLockBridge } from '@/lib/lock';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
 import { useBatteryStatus } from '@/hooks/usePower';
@@ -510,6 +512,42 @@ const AccountMenuItem = memo(function AccountMenuItem() {
   );
 });
 
+/**
+ * Lock the computer: DinOS's lock screen, which takes the computer's
+ * password. Only where there's one to take.
+ */
+function LockButton({ separated = false }: { separated?: boolean }) {
+  const bridge = getLockBridge();
+  const { data: available = false } = useQuery({
+    queryKey: ['lock', 'available'],
+    queryFn: () => bridge?.available() ?? false,
+    enabled: !!bridge,
+    staleTime: 60_000,
+  });
+  if (!bridge || !available) return null;
+
+  const button = (
+    <PopoverClose asChild>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => void bridge.lock()}
+        className="justify-start text-muted-foreground hover:text-foreground"
+      >
+        <Lock aria-hidden />
+        Lock
+      </Button>
+    </PopoverClose>
+  );
+  if (!separated) return button;
+  return (
+    <>
+      <Separator />
+      <div className="flex flex-col p-2">{button}</div>
+    </>
+  );
+}
+
 /** One account nostrd holds, for the signed-out account panel. */
 function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect: () => void }) {
   const author = useAuthor(pubkey);
@@ -636,6 +674,7 @@ function AccountPanel({
             </Button>
           </PopoverClose>
         </div>
+        <LockButton separated />
       </div>
     );
   }
@@ -797,6 +836,7 @@ function AccountPanel({
             Remove account
           </Button>
         )}
+        <LockButton />
       </div>
     </div>
   );

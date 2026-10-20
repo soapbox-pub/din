@@ -10,6 +10,7 @@ import {
   CloudOff,
   EthernetPort,
   Gauge,
+  KeyRound,
   Keyboard,
   Laptop,
   Loader2,
@@ -83,6 +84,8 @@ import {
 } from '@/hooks/useAudio';
 import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
 import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
+import { cleanLockError, getLockBridge } from '@/lib/lock';
+import { useQuery } from '@tanstack/react-query';
 import {
   useKeyboardLayouts,
   useKeyboardStatus,
@@ -125,6 +128,7 @@ type SectionId =
   | 'power'
   | 'sound'
   | 'keyboard'
+  | 'password'
   | 'notifications'
   | 'nostr'
   | 'appearance'
@@ -139,6 +143,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'power', name: 'Power', icon: Gauge },
   { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'keyboard', name: 'Keyboard', icon: Keyboard },
+  { id: 'password', name: 'Password', icon: KeyRound },
   { id: 'notifications', name: 'Notifications', icon: Bell },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
@@ -161,7 +166,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * falling back where no such daemon runs. The Sound
  * section drives the default sink's volume/mute through `window.audio`
  * (wpctl/PipeWire). Keyboard picks the layout native Linux apps type with
- * through `window.keyboard`. Nostr & Storage manages Din's encrypted app-data
+ * through `window.keyboard`. Password changes the computer's one password
+ * (disk, lock screen, Nostr keys) through `window.lock`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
@@ -237,6 +243,8 @@ export function Settings({ params }: AppComponentProps) {
           <SoundSection />
         ) : section === 'keyboard' ? (
           <KeyboardSection />
+        ) : section === 'password' ? (
+          <PasswordSection />
         ) : section === 'notifications' ? (
           <NotificationsSection />
         ) : section === 'nostr' ? (
@@ -2700,6 +2708,137 @@ function DevelopersSection() {
           Crash
         </Button>
       </div>
+    </SectionShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Password
+// ---------------------------------------------------------------------------
+
+/**
+ * The computer's password (window.lock): one password that unlocks the disk
+ * at boot, the lock screen, sudo, and the Nostr keys in nostrd, so it changes
+ * everywhere at once. Only a computer that has one (an encrypted DinOS
+ * install) shows the form.
+ */
+function PasswordSection() {
+  const bridge = getLockBridge();
+  const { data: available, isLoading } = useQuery({
+    queryKey: ['lock', 'available'],
+    queryFn: () => bridge?.available() ?? false,
+    enabled: !!bridge,
+    staleTime: 60_000,
+  });
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+
+  if (!bridge || (!isLoading && !available)) {
+    return (
+      <SectionShell title="Password">
+        <FallbackCard icon={KeyRound}>
+          {bridge
+            ? 'This computer has no password. DinOS installed with an encrypted disk has one, which unlocks the disk, the lock screen and your Nostr keys.'
+            : 'The computer’s password is for DinOS. Elsewhere, it’s set where the system’s own settings are.'}
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const tooShort = next.length > 0 && next.length < 8;
+  const notAscii = /[^\x20-\x7e]/.test(next);
+  const mismatch = confirm.length > 0 && confirm !== next;
+  const ready = current.length > 0 && next.length >= 8 && !notAscii && confirm === next && !saving;
+
+  const save = () => {
+    setSaving(true);
+    setError(null);
+    setDone(false);
+    bridge
+      .changePassword(current, next)
+      .then(() => {
+        setCurrent('');
+        setNext('');
+        setConfirm('');
+        setDone(true);
+      })
+      .catch((e: unknown) => setError(cleanLockError(e)))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <SectionShell title="Password">
+      <p className="text-sm text-muted-foreground">
+        One password unlocks this computer: the disk when it starts, the lock screen, and the
+        Nostr accounts kept on it. Changing it here changes it everywhere.
+      </p>
+      <form
+        className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready) save();
+        }}
+      >
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="password-current">Current password</Label>
+          <Input
+            id="password-current"
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="password-new">New password</Label>
+          <Input
+            id="password-new"
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            aria-invalid={tooShort || notAscii || undefined}
+            aria-describedby="password-new-hint"
+            onChange={(e) => setNext(e.target.value)}
+          />
+          <p id="password-new-hint" className="text-xs text-muted-foreground">
+            {notAscii
+              ? 'Use only letters, numbers, spaces and symbols on a standard keyboard: it’s typed before anything else is running.'
+              : 'At least 8 characters.'}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="password-confirm">Type it again</Label>
+          <Input
+            id="password-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            aria-invalid={mismatch || undefined}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+          {mismatch && <p className="text-xs text-destructive">The passwords don’t match.</p>}
+        </div>
+        {error && (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+        {done && (
+          <p className="text-sm text-foreground" role="status">
+            The password is changed.
+          </p>
+        )}
+        <div className="flex justify-end">
+          <Button type="submit" size="sm" disabled={!ready}>
+            {saving && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
+            Change password
+          </Button>
+        </div>
+      </form>
     </SectionShell>
   );
 }

@@ -9,7 +9,9 @@
 #
 #   din-boot-screen sync
 #       Copy the keyboard layout (/var/lib/din/keyboard) and the time zone
-#       over. Run at boot, and by din-keyboard when the layout changes.
+#       over. Run at boot, and by din-keyboard when the layout changes. The
+#       layout also goes to VCONSOLE_FILE, for the lock screen's Plymouth
+#       (os/din-lock.py), which reads it in place of /etc/vconsole.conf.
 #   din-boot-screen wallpaper 12|24
 #       Make the PNG on stdin the wallpaper (none on stdin removes it), and
 #       set the clock's format. Din runs this through sudo
@@ -17,6 +19,7 @@
 
 ESP_DIR=/boot/din
 LAYOUT_FILE=/var/lib/din/keyboard
+VCONSOLE_FILE=/var/lib/din/vconsole.conf
 MAX_WALLPAPER_BYTES=$((16 * 1024 * 1024))
 
 die() {
@@ -38,7 +41,29 @@ put() {
   mv -f "$tmp" "$ESP_DIR/$name"
 }
 
+# The layout as vconsole.conf's XKB* lines, which is how Plymouth takes it.
+write_vconsole() {
+  local key value
+  {
+    while IFS='=' read -r key value; do
+      [[ $value =~ ^[A-Za-z0-9_.,:+-]+$ ]] || continue
+      case $key in
+        XKB_DEFAULT_LAYOUT | XKB_DEFAULT_MODEL | XKB_DEFAULT_VARIANT | XKB_DEFAULT_OPTIONS)
+          echo "XKB${key#XKB_DEFAULT_}=$value"
+          ;;
+      esac
+    done <"$LAYOUT_FILE"
+  } >"$VCONSOLE_FILE.tmp"
+  chmod 644 "$VCONSOLE_FILE.tmp"
+  mv "$VCONSOLE_FILE.tmp" "$VCONSOLE_FILE"
+}
+
 sync_settings() {
+  if [[ -f $LAYOUT_FILE ]]; then
+    write_vconsole
+  else
+    rm -f "$VCONSOLE_FILE"
+  fi
   require_esp
   if [[ -f $LAYOUT_FILE ]]; then
     cp "$LAYOUT_FILE" "$ESP_DIR/keyboard.tmp"

@@ -154,6 +154,28 @@ let
     text = builtins.readFile ./din-boot-screen.sh;
   };
 
+  # The lock screen (see the script): the boot screen again, on its own
+  # terminal, until the computer's password is typed.
+  din-lock = pkgs.writeShellApplication {
+    name = "din-lock";
+    runtimeInputs = [ pkgs.python3 config.boot.plymouth.package config.systemd.package ];
+    text = ''
+      export DIN_LIBCRYPT=${pkgs.libxcrypt}/lib/libcrypt.so.2
+      exec python3 ${./din-lock.py} "$@"
+    '';
+  };
+
+  # Changes the computer's password: the disk's, `din`'s and nostrd's
+  # together (see the script).
+  din-password = pkgs.writeShellApplication {
+    name = "din-password";
+    runtimeInputs = with pkgs; [ python3 util-linux cryptsetup shadow ];
+    text = ''
+      export DIN_LIBCRYPT=${pkgs.libxcrypt}/lib/libcrypt.so.2
+      exec python3 ${./din-password.py} "$@"
+    '';
+  };
+
   # The boot and unlock screen: a Plymouth script theme (boot-screen/), with
   # the two images it draws with made here. Its ImageDir is under /run, where
   # the initrd puts those and the user's wallpaper (dinos-boot-screen, below).
@@ -212,6 +234,8 @@ let
     export DIN_UPDATER=${din-updater}/bin/din-update
     export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
     export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
+    export DIN_LOCK=${din-lock}/bin/din-lock
+    export DIN_PASSWORD=${din-password}/bin/din-password
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Chromium logging into the journal (via cage), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
@@ -268,6 +292,10 @@ in
       "${din-updater}/bin/din-update"
       "${din-keyboard}/bin/din-keyboard"
       "${din-boot-screen}/bin/din-boot-screen"
+      "${din-lock}/bin/din-lock start"
+      "${din-lock}/bin/din-lock status"
+      # It checks the old password itself.
+      "${din-password}/bin/din-password change"
     ];
   }];
   security.sudo.extraConfig = ''
@@ -534,7 +562,7 @@ in
 
       if [ -f $src/keyboard ]; then
         conf=""
-        while IFS== read -r key value; do
+        while IFS='=' read -r key value; do
           [[ $value =~ ^[A-Za-z0-9_.,:+-]+$ ]] || continue
           case $key in
             XKB_DEFAULT_LAYOUT) conf+="XKBLAYOUT=$value"$'\n' ;;
@@ -582,6 +610,87 @@ in
         last=$text
         sleep $((60 - 10#$(date +%S)))
       done
+    '';
+  };
+
+  # Locking. Closing the lid (or Lock in Din's menu) puts up the lock screen
+  # (os/din-lock.py) before the computer sleeps. Where the disk is
+  # encrypted, it sleeps for two hours, or until the battery runs low, and
+  # then hibernates: memory goes to swap on the encrypted disk and the power
+  # goes off, so from then on the disk is locked, and the next unlock is at
+  # the boot screen. Coming back from that, the lock screen steps aside,
+  # since the password was just typed there. Without encryption there's no
+  # password: the computer just sleeps.
+  systemd.services.din-lock = {
+    description = "Lock the screen";
+    wantedBy = [ "sleep.target" ];
+    before = [ "sleep.target" ];
+    serviceConfig = {
+      Type = "notify";
+      NotifyAccess = "main";
+      ExecStart = "${din-lock}/bin/din-lock run";
+      # Plymouth takes the keyboard layout from vconsole.conf.
+      BindReadOnlyPaths = [ "-/var/lib/din/vconsole.conf:/etc/vconsole.conf" ];
+      # Long enough for a slow GPU to come up: on a timeout the computer
+      # would sleep unlocked.
+      TimeoutStartSec = 60;
+    };
+  };
+  environment.etc."systemd/system-sleep/din-lock".source = pkgs.writeShellScript "din-lock-sleep" ''
+    if [ "$1" = post ] && [ "$SYSTEMD_SLEEP_ACTION" = hibernate ]; then
+      ${din-lock}/bin/din-lock resumed
+    fi
+  '';
+  systemd.sleep.settings.Sleep.HibernateDelaySec = "2h";
+
+  # Hibernating takes swap as big as memory. On an encrypted root with room
+  # to spare, this makes a swap file there and tells logind to hibernate
+  # after sleeping; otherwise lids just suspend, as logind does by default.
+  # The resume itself needs nothing more: systemd records where the image
+  # went in an EFI variable, which the initrd reads after the disk unlocks.
+  systemd.services.dinos-hibernation = {
+    description = "Set up hibernation on an encrypted disk";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "local-fs.target" ];
+    path = with pkgs; [ coreutils util-linux gawk gnugrep config.systemd.package ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      swap=/var/lib/swap/hibernate
+      dropin=/run/systemd/logind.conf.d/50-dinos-hibernate.conf
+      mib=$((1024 * 1024))
+
+      root=$(findmnt -nvo SOURCE /)
+      if ! lsblk -nso TYPE "$root" | grep -qx crypt; then
+        rm -f "$swap" "$dropin"
+        exit 0
+      fi
+
+      # As big as memory, in whole GiB, if root keeps 16 GiB free besides.
+      size=$(awk '/^MemTotal:/ { print int(($2 * 1024 + 2^30 - 1) / 2^30) * 2^30 }' /proc/meminfo)
+      have=$(stat -c %s "$swap" 2>/dev/null || echo 0)
+      if [ "$have" != "$size" ]; then
+        swapoff "$swap" 2>/dev/null || true
+        rm -f "$swap"
+        free=$(df -B1 --output=avail / | tail -n1)
+        if [ $((free - size)) -lt $((16 * 1024 * mib)) ]; then
+          echo "Not enough room on root to hibernate."
+          rm -f "$dropin"
+          exit 0
+        fi
+        mkdir -p -m 0700 "$(dirname "$swap")"
+        fallocate -l "$size" "$swap"
+        chmod 0600 "$swap"
+        mkswap -q "$swap"
+      fi
+      # Lowest priority: it's there for hibernating, not to swap to.
+      swapon --priority=-2 "$swap" 2>/dev/null || swapon --show=NAME --noheadings | grep -qx "$swap"
+
+      mkdir -p "$(dirname "$dropin")"
+      printf '[Login]\nHandleLidSwitch=suspend-then-hibernate\nHandleLidSwitchExternalPower=suspend-then-hibernate\n' >"$dropin"
+      systemctl reload systemd-logind || systemctl kill -s HUP systemd-logind
     '';
   };
 

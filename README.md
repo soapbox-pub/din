@@ -101,7 +101,9 @@ One password runs the computer. Encrypting the disk sets its passphrase as
 as the password of **nostrd**, the signer daemon that holds the Nostr account
 keys as its own user so nothing `din` runs can read them. Din signs through
 nostrd's socket, and the passphrase typed at boot unlocks it. Without
-encryption there's no password, and `sudo` doesn't ask. `os/tests/accounts.nix`
+encryption there's no password, and `sudo` doesn't ask. Settings → Password
+changes it in all three places at once (`os/din-password.py`, disk first).
+`os/tests/accounts.nix`
 checks all of this in a VM: `nix build ./os#checks.x86_64-linux.accounts`.
 
 The boot is quiet: no boot menu (hold Space to get it), no log lines, just
@@ -114,6 +116,15 @@ initrd copies them out before Plymouth starts. Once root is mounted the screen
 fades to black, and Din fades in from there.
 `nix build ./os#checks.x86_64-linux.boot-screen` draws it in a VM and leaves
 screenshots in `result/`.
+
+Closing the lid, or **Lock** in the account menu, locks the computer: the boot
+screen again, run as root on its own terminal by `os/din-lock.py`, with
+terminal switching turned off until the password is typed, so nothing running
+as `din` can get past it. On an encrypted disk the computer then sleeps, and
+after two hours (or on low battery) hibernates to a swap file on the encrypted
+root, so the disk is locked too; waking from that goes through the boot
+screen's password, and the lock screen steps aside. Without a password nothing
+locks, and the lid just suspends. `nix build ./os#checks.x86_64-linux.lock`.
 
 Installed systems update themselves. A DinOS release is a NIP-82 release of
 the application `din` (`.ngit/release.yaml`), signed by the soapbox.pub key,

@@ -86,6 +86,7 @@
         {
           accounts = test ./tests/accounts.nix;
           boot-screen = test ./tests/boot-screen.nix;
+          lock = test ./tests/lock.nix;
         };
     };
 }
