@@ -125,6 +125,11 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+// After a GPU reset, Chromium blocks WebGL for the pages it blames (or for
+// every page, when it can't tell). Din is the whole desktop: losing WebGL
+// leaves the Terminal on its DOM renderer until Din restarts.
+app.disableDomainBlockingFor3DAPIs();
+
 /** Map a request pathname to a file inside dist/, with SPA fallback. */
 function resolveFile(pathname: string): string {
   const candidate = path.normalize(path.join(DIST, decodeURIComponent(pathname)));

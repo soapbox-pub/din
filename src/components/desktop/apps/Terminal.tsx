@@ -746,7 +746,9 @@ const TerminalSession = memo(function TerminalSession({
     // boxes. Recreate the addon on context loss; after repeated losses give
     // up and let xterm fall back to the DOM renderer.
     let contextLosses = 0;
+    let reloadFailures = 0;
     const loadWebgl = () => {
+      if (disposed) return;
       try {
         const webgl = new WebglAddon();
         webgl.onContextLoss(() => {
@@ -763,6 +765,13 @@ const TerminalSession = memo(function TerminalSession({
         term.loadAddon(webgl);
         disableAtlasMipmaps(container);
       } catch (error) {
+        // Right after a GPU reset the restarted GPU process may not hand out
+        // contexts yet. Keep trying for a while before settling for DOM.
+        if (contextLosses > 0 && reloadFailures < 10) {
+          reloadFailures += 1;
+          setTimeout(loadWebgl, 2000);
+          return;
+        }
         console.warn('Terminal: WebGL renderer unavailable, falling back to DOM renderer', error);
       }
     };

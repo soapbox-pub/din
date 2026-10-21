@@ -475,6 +475,9 @@ in
     enable = true;
     user = "din";
     program = "${din-launcher}/bin/din";
+    # cage swallows Ctrl+Alt+Fn unless told otherwise. Without it there is no
+    # way to reach a text login on another VT when Din hangs.
+    extraArguments = [ "-s" ];
   };
   # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
   # writes (os/din-keyboard.sh). cage applies it, and Din inherits it.
