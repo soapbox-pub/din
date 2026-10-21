@@ -531,7 +531,26 @@ in
   # distrobox is the escape hatch for anything else: a full Ubuntu/Fedora/Arch
   # userland with its own package manager, sharing $HOME, in rootless podman
   # (also answering to `docker`).
-  environment.systemPackages = with pkgs; [ git unzip distrobox din-keyring ];
+  environment.systemPackages = with pkgs; [ git unzip distrobox din-keyring ]
+    # The command-line userland a Mac ships with, so nobody who sits down at a
+    # terminal finds their usual tools missing.
+    ++ [
+      vim ed file lsof psmisc strace pciutils usbutils sysstat
+      # Below NixOS's own lowPrio (10) packages, so the stock `hostname` and
+      # `ping` win, and net-tools' `ifconfig` beats inetutils'.
+      (lib.setPrio 11 nettools) (lib.setPrio 12 inetutils)
+      dnsutils traceroute whois tcpdump
+      rsync zip ncompress sharutils pax
+      bc units jq libxml2 libxslt sqlite openssl
+      perl python3 tcl expect ruby
+      screen tmux mksh tcsh dash
+      (runCommand "ksh-csh" { } ''
+        mkdir -p $out/bin
+        ln -s ${mksh}/bin/mksh $out/bin/ksh
+        ln -s ${tcsh}/bin/tcsh $out/bin/csh
+      '')
+      man-pages man-pages-posix texinfo
+    ];
   virtualisation.podman = {
     enable = true;
     dockerCompat = true;
@@ -943,8 +962,10 @@ in
     pulse.enable = true;
   };
 
-  # Keep the image lean-ish.
-  documentation.enable = false;
+  # Man and info pages, like any Unix. Skip /share/doc and the NixOS manual to
+  # keep the image lean-ish.
+  documentation.doc.enable = false;
+  documentation.nixos.enable = false;
   environment.defaultPackages = [ ];
 
   # QEMU demo settings — these apply only to the `./os#vm` variant, never to
