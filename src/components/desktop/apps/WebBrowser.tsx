@@ -70,10 +70,6 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
-import {
-  useWindowOverlay,
-  WINDOW_TITLEBAR_HEIGHT,
-} from '@/contexts/WindowOverlayContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
@@ -154,8 +150,6 @@ interface Tab {
   favicon: string | null;
   /** Page-reported `<meta name="theme-color">` (raw; webview mode only). */
   themeColor: string | null;
-  /** The page declares viewport-fit=cover (runs edge to edge; webview only). */
-  cover: boolean;
   loading: boolean;
   /** The <webview> guest's WebContents id (null in the iframe fallback). */
   wcId: number | null;
@@ -191,7 +185,6 @@ function createTab(
     title: null,
     favicon: null,
     themeColor: null,
-    cover: false,
     loading: false,
     wcId: null,
     canBack: false,
@@ -211,7 +204,6 @@ type TabEvent =
   | { kind: 'title'; value: string }
   | { kind: 'favicon'; value: string | null }
   | { kind: 'themeColor'; value: string | null }
-  | { kind: 'viewportFitCover'; value: boolean }
   | { kind: 'navigate'; url: string; canBack: boolean; canForward: boolean }
   | { kind: 'loadError'; value: LoadErrorInfo }
   | { kind: 'webContentsId'; value: number };
@@ -693,9 +685,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           break;
         case 'themeColor':
           updateTab(id, { themeColor: event.value });
-          break;
-        case 'viewportFitCover':
-          updateTab(id, { cover: event.value });
           break;
         case 'navigate':
           updateTab(id, {
@@ -1209,35 +1198,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       } as React.CSSProperties)
     : undefined;
 
-  // An edge-to-edge page (viewport-fit=cover) runs under the title bar and
-  // toolbar, which float over it without backgrounds, and pads itself clear
-  // of them through its top safe-area inset. Din's own pages over a tab (new
-  // tab, load and certificate errors) and device emulation keep the normal
-  // layout.
-  const tabOverlays = (tab: Tab) => webviewMode && tab.cover && !tab.deviceId;
-  const overlay =
-    tabOverlays(activeTab) &&
-    activeTab.url !== '' &&
-    !loadErrors.has(activeTab.id) &&
-    !(activeTab.wcId !== null && certErrors.has(activeTab.wcId));
-  const setOverlay = useWindowOverlay();
-  useEffect(() => {
-    setOverlay(overlay);
-    return () => setOverlay(false);
-  }, [overlay, setOverlay]);
-
-  // The toolbar's height, for the inset under the chrome.
-  const toolbarRef = useRef<HTMLFormElement>(null);
-  const [toolbarHeight, setToolbarHeight] = useState(0);
-  useEffect(() => {
-    const el = toolbarRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => setToolbarHeight(el.offsetHeight));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  const chromeHeight = overlay ? WINDOW_TITLEBAR_HEIGHT + toolbarHeight : 0;
-
   // F12 / Ctrl+Shift+I while focus is in the shell's chrome (address bar,
   // buttons). The same shortcut inside a page arrives as a `toggle` command
   // from the main process instead (see the devtools.onCommand effect).
@@ -1365,7 +1325,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   ]);
 
   return (
-    <div className="relative flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
+    <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
       {/* Toolbar: spans the full width across the top, sitting *over* the
           tree-tabs sidebar and the page surface (not beside the tabs). In the
           horizontal-strip mode the tabs live in the title bar, so this is
@@ -1375,22 +1335,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           e.preventDefault();
           navigate(activeTab.address);
         }}
-        ref={toolbarRef}
-        style={
-          overlay
-            ? { ...toolbarTint, backgroundColor: undefined, top: WINDOW_TITLEBAR_HEIGHT }
-            : toolbarTint
-        }
+        style={toolbarTint}
         className={cn(
-          'flex shrink-0 items-center gap-1 px-2 py-1.5',
-          overlay
-            ? 'absolute inset-x-0 z-20 border-b border-transparent'
-            : cn(
-                'relative border-b',
-                // The overridden --border already carries its own alpha; the
-                // default keeps the token at 60%.
-                accent ? 'border-border' : 'border-border/60 bg-background/50',
-              ),
+          'relative flex shrink-0 items-center gap-1 border-b px-2 py-1.5',
+          // The overridden --border already carries its own alpha; the
+          // default keeps the token at 60%.
+          accent ? 'border-border' : 'border-border/60 bg-background/50',
         )}
       >
         <NavButton label="Go back" disabled={!canBack} onClick={() => go(-1)}>
@@ -1487,7 +1437,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onToggleCollapsed={toggleCollapsed}
             onMoveTab={moveTab}
             onMoveTabToEnd={moveTabToEnd}
-            insetTop={chromeHeight}
           />
         )}
 
@@ -1506,9 +1455,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             // A blank tab (empty url) shows the custom new-tab page overlaid
             // on its (about:blank) surface until the user navigates.
             isNewTab={tab.url === ''}
-            // Cover pages behind an edge-to-edge active page share its
-            // layout, so they get the same inset.
-            safeAreaTop={overlay && tabOverlays(tab) ? chromeHeight : 0}
             onNavigate={navigateTab}
             // Only render a docked pane for bottom/right; 'window' hosts its
             // own pane in a separate desktop window.
@@ -1541,7 +1487,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onNext={() => queryFind(findText, { forward: true, findNext: true })}
             onPrev={() => queryFind(findText, { forward: false, findNext: true })}
             onClose={closeFind}
-            insetTop={chromeHeight}
           />
         )}
         </div>
@@ -1767,7 +1712,6 @@ function FindBar({
   onNext,
   onPrev,
   onClose,
-  insetTop,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
   text: string;
@@ -1776,15 +1720,12 @@ function FindBar({
   onNext: () => void;
   onPrev: () => void;
   onClose: () => void;
-  /** Height of the chrome overlaying the page area's top edge, in px. */
-  insetTop: number;
 }) {
   const noMatches = text.length > 0 && result !== null && result.matches === 0;
   return (
     <div
       role="search"
       aria-label="Find in page"
-      style={insetTop ? { top: insetTop + 8 } : undefined}
       className="absolute right-3 top-2 z-30 flex items-center gap-0.5 rounded-lg border border-border/60 bg-popover px-1.5 py-1 text-popover-foreground shadow-lg"
     >
       <input
@@ -2038,7 +1979,6 @@ function TreeTabStrip({
   onToggleCollapsed,
   onMoveTab,
   onMoveTabToEnd,
-  insetTop,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -2049,8 +1989,6 @@ function TreeTabStrip({
   onToggleCollapsed: (id: string) => void;
   onMoveTab: (dragId: string, targetId: string, position: DropZone) => void;
   onMoveTabToEnd: (dragId: string) => void;
-  /** Height of the chrome overlaying the sidebar's top edge, in px. */
-  insetTop: number;
 }) {
   const rows = useMemo(() => flattenTabTree(tabs, collapsed), [tabs, collapsed]);
   // The tab currently being dragged, or null. Shared across rows so a row can
@@ -2063,7 +2001,6 @@ function TreeTabStrip({
       role="tablist"
       aria-label="Browser tabs"
       aria-orientation="vertical"
-      style={insetTop ? { paddingTop: insetTop + 6 } : undefined}
       className="flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/60 bg-background/40 p-1.5"
     >
       {rows.map(({ tab, depth, hasChildren }) => (
@@ -2651,7 +2588,6 @@ const TabSurface = memo(function TabSurface({
   isPrivate,
   active,
   isNewTab,
-  safeAreaTop,
   onNavigate: onNavigateToUrl,
   dock,
   deviceId,
@@ -2681,8 +2617,6 @@ const TabSurface = memo(function TabSurface({
   active: boolean;
   /** Show the custom new-tab page over the surface (blank tab). */
   isNewTab: boolean;
-  /** Chrome height over the page's top edge, for edge-to-edge pages. */
-  safeAreaTop: number;
   /** Navigate this tab to a URL/search (from the new-tab page). */
   onNavigate: (id: string, raw: string) => void;
   /** Docked pane position, or null when not docked in this surface. */
@@ -2747,10 +2681,6 @@ const TabSurface = memo(function TabSurface({
   );
   const onWebContentsId = useCallback(
     (wcId: number) => onEvent(id, { kind: 'webContentsId', value: wcId }),
-    [id, onEvent],
-  );
-  const onViewportFitCoverChange = useCallback(
-    (cover: boolean) => onEvent(id, { kind: 'viewportFitCover', value: cover }),
     [id, onEvent],
   );
   const ref = useCallback(
@@ -2823,8 +2753,6 @@ const TabSurface = memo(function TabSurface({
           onThemeColorChange={onThemeColorChange}
           onNavigate={onNavigate}
           onWebContentsId={onWebContentsId}
-          onViewportFitCoverChange={onViewportFitCoverChange}
-          safeAreaTop={safeAreaTop}
         />
       </div>
       {/* The custom new-tab page sits over the (blank) surface until the

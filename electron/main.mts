@@ -3643,101 +3643,6 @@ function registerThemeHandler(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Safe areas. A page that opts into edge-to-edge layout (viewport-fit=cover)
-// is laid out under the window's title bar and the browser's toolbar, and is
-// told how much of it they cover through env(safe-area-inset-*), the same
-// way iOS reports its notch and status bar. Chromium has no embedder API for
-// those values, so they go in over CDP (Emulation.setSafeAreaInsetsOverride),
-// on the debugger the file-chooser interception already holds. The override
-// survives navigations; it's lost when the debugger detaches (devtools
-// closing), so it's re-applied then. The shell decides when to set it.
-// ---------------------------------------------------------------------------
-
-interface SafeAreaInsets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
-/** Insets currently applied to each guest, by WebContents id. */
-const safeAreaInsets = new Map<number, SafeAreaInsets>();
-
-/** Guests whose debugger detach is already watched for re-applying insets. */
-const safeAreaWatched = new Set<number>();
-
-/** A renderer-supplied inset: a finite number of CSS px, clamped to sanity. */
-function insetValue(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.min(1000, Math.max(0, Math.round(value)))
-    : 0;
-}
-
-function applySafeArea(contents: Electron.WebContents): void {
-  if (contents.isDestroyed()) return;
-  const dbg = contents.debugger;
-  try {
-    if (!dbg.isAttached()) dbg.attach('1.3');
-  } catch {
-    return; // another client owns the debugger; leave it alone
-  }
-  const { top, right, bottom, left } =
-    safeAreaInsets.get(contents.id) ?? { top: 0, right: 0, bottom: 0, left: 0 };
-  dbg
-    .sendCommand('Emulation.setSafeAreaInsetsOverride', {
-      insets: {
-        top,
-        topMax: top,
-        right,
-        rightMax: right,
-        bottom,
-        bottomMax: bottom,
-        left,
-        leftMax: left,
-      },
-    })
-    .catch(() => {});
-}
-
-function registerSafeAreaHandler(): void {
-  ipcMain.on('safearea:set', (event, wcId: unknown, insets: unknown) => {
-    if (!isShellSender(event)) return;
-    // Web content only: browser tabs and installed web apps.
-    const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
-    if (!contents || !(isAppGuest(contents) || anyBrowserTabFromId(wcId))) return;
-
-    if (insets && typeof insets === 'object') {
-      const i = insets as Partial<Record<keyof SafeAreaInsets, unknown>>;
-      safeAreaInsets.set(contents.id, {
-        top: insetValue(i.top),
-        right: insetValue(i.right),
-        bottom: insetValue(i.bottom),
-        left: insetValue(i.left),
-      });
-    } else {
-      safeAreaInsets.delete(contents.id);
-    }
-
-    if (!safeAreaWatched.has(contents.id)) {
-      safeAreaWatched.add(contents.id);
-      const id = contents.id;
-      const onDetach = () => {
-        if (!contents.isDestroyed() && safeAreaInsets.has(id)) {
-          setTimeout(() => applySafeArea(contents), 0);
-        }
-      };
-      contents.debugger.on('detach', onDetach);
-      contents.once('destroyed', () => {
-        safeAreaInsets.delete(id);
-        safeAreaWatched.delete(id);
-      });
-    }
-
-    applySafeArea(contents);
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Find-in-page for the Web Browser app (Ctrl+F).
 //
 // Chromium's find-in-page is per-WebContents and driven from the main
@@ -4073,7 +3978,6 @@ app.whenReady().then(() => {
   registerBrowserDataHandlers();
   registerFindHandlers();
   registerThemeHandler();
-  registerSafeAreaHandler();
   registerUserscriptHandlers({ assertShellSender });
   registerDevtoolsHandlers();
   registerNostrBridge();

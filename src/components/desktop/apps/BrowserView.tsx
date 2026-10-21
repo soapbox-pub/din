@@ -4,10 +4,8 @@ import {
   useImperativeHandle,
   useLayoutEffect,
   useRef,
-  useState,
 } from 'react';
 import { isWebviewAvailable } from '@/lib/isElectron';
-import { getSafeAreaBridge, VIEWPORT_FIT_COVER_JS } from '@/lib/safeArea';
 import { useAppContext } from '@/hooks/useAppContext';
 import { GuestClickShield } from '@/components/desktop/GuestClickShield';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
@@ -121,20 +119,6 @@ export interface BrowserViewProps {
    * Only available on the Electron <webview> surface.
    */
   onWebContentsId?: (id: number) => void;
-  /**
-   * Called with whether the loaded page declares `viewport-fit=cover` (it's
-   * designed to run edge to edge, padded by env(safe-area-inset-*)).
-   * Re-checked on every page load and in-page navigation.
-   * Only available on the Electron <webview> surface.
-   */
-  onViewportFitCoverChange?: (cover: boolean) => void;
-  /**
-   * How much of the surface's top edge the window chrome covers, in CSS px.
-   * A page that declares `viewport-fit=cover` sees it as
-   * env(safe-area-inset-top); other pages are left alone.
-   * Only available on the Electron <webview> surface.
-   */
-  safeAreaTop?: number;
 }
 
 /**
@@ -234,8 +218,6 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       onThemeColorChange,
       onNavigate,
       onWebContentsId,
-      onViewportFitCoverChange,
-      safeAreaTop = 0,
     },
     ref,
   ) {
@@ -461,59 +443,6 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         el.removeEventListener('dom-ready', attached);
       };
     }, [onWebContentsId]);
-
-    // Whether the page asks to run edge to edge (viewport-fit=cover). Checked
-    // once the DOM is parsed and again on in-page navigations, since a
-    // single-page app can swap its viewport tag without a load.
-    const [cover, setCover] = useState(false);
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      let alive = true;
-      const check = () => {
-        el.executeJavaScript(VIEWPORT_FIT_COVER_JS).then(
-          (result) => {
-            if (alive) setCover(result === true);
-          },
-          () => {
-            // Page went away mid-check; the next dom-ready re-checks.
-          },
-        );
-      };
-      const inPage = (e: Event) => {
-        if ((e as Event & { isMainFrame?: boolean }).isMainFrame) check();
-      };
-      el.addEventListener('dom-ready', check);
-      el.addEventListener('did-navigate-in-page', inPage);
-      return () => {
-        alive = false;
-        el.removeEventListener('dom-ready', check);
-        el.removeEventListener('did-navigate-in-page', inPage);
-      };
-    }, []);
-
-    useEffect(() => {
-      onViewportFitCoverChange?.(cover);
-    }, [cover, onViewportFitCoverChange]);
-
-    // Hand an edge-to-edge page the chrome's height as its top safe-area
-    // inset (and clear it when the page or the layout stops asking for one).
-    // The main process keeps the override across navigations.
-    const insetTop = cover ? Math.max(0, Math.round(safeAreaTop)) : 0;
-    const appliedTop = useRef(0);
-    useEffect(() => {
-      const el = webviewRef.current;
-      const bridge = getSafeAreaBridge();
-      if (!el || !bridge || insetTop === appliedTop.current) return;
-      let wcId: number;
-      try {
-        wcId = el.getWebContentsId();
-      } catch {
-        return; // Not attached yet; cover is only known after dom-ready anyway.
-      }
-      appliedTop.current = insetTop;
-      bridge.set(wcId, insetTop > 0 ? { top: insetTop } : null);
-    }, [insetTop]);
 
     // Host for the guest built in the mount effect above. The <webview> itself
     // is not rendered by React so its attributes can be set before insertion.

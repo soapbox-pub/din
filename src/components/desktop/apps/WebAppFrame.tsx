@@ -12,10 +12,6 @@ import {
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
-import {
-  useWindowOverlay,
-  WINDOW_TITLEBAR_HEIGHT,
-} from '@/contexts/WindowOverlayContext';
 
 /**
  * Standalone, chrome-less window content for an installed web app: the site
@@ -26,10 +22,6 @@ import {
  * the body. Each caret appears only when that move is possible. They drive the
  * webview's own history and thus only work on the Electron surface; the iframe
  * fallback reports no navigations, so the carets never appear there.
- *
- * An app built to run edge to edge (`viewport-fit=cover`) also fills the
- * title bar's space: the title bar floats over it, and the app pads itself
- * clear through env(safe-area-inset-top).
  *
  * The URL is sanitized (https-only) even though it was validated at install
  * time — stored data is never trusted blindly.
@@ -102,16 +94,6 @@ export function WebAppFrame({
       setNav({ canBack: canGoBack, canForward: canGoForward }),
     [],
   );
-
-  // An app built to run edge to edge (viewport-fit=cover) fills the whole
-  // window, title bar included, and pads itself clear of the title bar via
-  // its safe-area inset - the way it sits under a phone's status bar.
-  const [cover, setCover] = useState(false);
-  const setOverlay = useWindowOverlay();
-  useEffect(() => {
-    setOverlay(cover);
-    return () => setOverlay(false);
-  }, [cover, setOverlay]);
 
   // Publish back/forward controls (plus the app's icon + name) into the window
   // title bar, keeping the body chrome-less. Cleared on unmount so the Window
@@ -195,8 +177,6 @@ export function WebAppFrame({
         }}
         onThemeColorChange={onThemeColorChange}
         onNavigate={onNavigate}
-        onViewportFitCoverChange={setCover}
-        safeAreaTop={WINDOW_TITLEBAR_HEIGHT}
       />
       {/* Until the first paint lands, cover the guest's blank white surface
           with a splash tinted by the app's theme color, so opening an app
