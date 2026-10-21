@@ -369,7 +369,7 @@ in
   # and asleep, bumping an external mouse does nothing - you have to crack the
   # lid to wake it. Marking USB devices and their host controllers wake-capable
   # arms them as ACPI wake sources: the `usb` rule covers the input devices and
-  # hubs, and the `pci` rule (class 0x0c03xx = USB controllers: xHCI/EHCI/etc.)
+  # hubs (devices only: their interfaces have no power/wakeup), and the `pci` rule (class 0x0c03xx = USB controllers: xHCI/EHCI/etc.)
   # enables the controller's GPE so a wake actually propagates. Harmless where
   # unsupported - the attribute just won't exist. `add|change` so it applies on
   # both cold-plug and hot-plug (e.g. plugging into the dock while running).
@@ -378,7 +378,7 @@ in
   # (for /boot, below). systemd's by-designator/esp is the first ESP on the
   # disk, which next to Windows is Windows'.
   services.udev.extraRules = ''
-    ACTION=="add|change", SUBSYSTEM=="usb", ATTR{power/wakeup}="enabled"
+    ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{power/wakeup}="enabled"
     ACTION=="add|change", SUBSYSTEM=="pci", ATTR{class}=="0x0c03*", ATTR{power/wakeup}="enabled"
     SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_PART_ENTRY_TYPE}=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b", PROGRAM="${isBootedEsp} $env{ID_PART_ENTRY_UUID}", SYMLINK+="disk/dinos-esp"
   '';
