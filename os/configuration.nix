@@ -452,6 +452,12 @@ in
   # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
   # writes (os/din-keyboard.sh). cage applies it, and Din inherits it.
   systemd.services.cage-tty1.serviceConfig.EnvironmentFile = "-/var/lib/din/keyboard";
+  # pam_systemd gives a session's processes CAP_WAKE_ALARM as an ambient
+  # capability, so everything Din and its Terminal start carried it. Programs
+  # that drop all their capabilities (gnome-keyring-daemon, for one) can't
+  # drop an ambient one they never asked for, and abort. Elsewhere terminals
+  # are started by the user manager, which doesn't hand it out; nor does Din.
+  security.pam.services.cage.rules.session.systemd.settings."default-capability-ambient-set" = "";
 
   # cage's unit conflicts with the console login on tty1 (autovt@tty1), which
   # getty.target still wants. A system switch re-starts both targets, and
