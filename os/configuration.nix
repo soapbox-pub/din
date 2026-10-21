@@ -559,7 +559,10 @@ in
       man-pages man-pages-posix texinfo
     ]
     # Not on a Mac, but what developers install first.
-    ++ [ ripgrep fd bat htop tree wget gh ];
+    ++ [ ripgrep fd bat htop tree wget gh ]
+    # Screenshots of the whole screen. Cage's socket is renamed to din-shell
+    # (see the launcher above), so: WAYLAND_DISPLAY=din-shell grim x.png
+    ++ [ grim slurp ];
   virtualisation.podman = {
     enable = true;
     dockerCompat = true;
