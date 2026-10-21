@@ -63,6 +63,12 @@ function magnify(distance: number): number {
   return 1 + ((MAX_SCALE - 1) * (Math.cos((distance / FALLOFF) * Math.PI) + 1)) / 2;
 }
 
+/**
+ * How far a fully magnified tile reaches above the bottom of the dock, in px:
+ * the icon (the slot less its inset-x-1) sitting on its bottom-2.5 offset.
+ */
+const MAGNIFIED_HEIGHT = BASE_WIDTH * MAX_SCALE + 8;
+
 /** Height of the hot zone at the screen's bottom edge that reveals a hidden dock, in px. */
 const REVEAL_ZONE = 8;
 /** Extra slack above the dock before a hot-edge reveal retracts, in px. */
@@ -177,6 +183,13 @@ export function Dock({
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
   const pointerX = useRef<number | null>(null);
   const rafId = useRef(0);
+  // Magnified tiles grow up out of the 80px strip, but a tile's neighbors are
+  // shorter, so sliding sideways along the top of a big icon would cross empty
+  // space outside the strip, end the hover, and collapse the dock under the
+  // cursor. While magnified, this pad covers the strip's whole width up to a
+  // fully magnified icon's height so the hover holds.
+  const hoverPadRef = useRef<HTMLDivElement>(null);
+  const magnified = useRef(false);
 
   /** Stable tile-ref registrar (identity matters for memo'd DockItems). */
   const registerRef = useCallback((appId: string, el: HTMLDivElement | null) => {
@@ -213,6 +226,8 @@ export function Dock({
       const scale = cursor === null ? 1 : magnify(Math.abs(i - cursor));
       el.style.width = `${Math.round(BASE_WIDTH * scale)}px`;
     });
+    magnified.current = cursor !== null;
+    if (hoverPadRef.current) hoverPadRef.current.hidden = cursor === null;
   };
   useEffect(() => {
     paintRef.current = paint;
@@ -303,10 +318,23 @@ export function Dock({
     setWasIntersecting(intersecting);
     if (!intersecting) setRevealed(false);
   }
+  //
+  // The pointer can also leave the window entirely: cage parks a cursor
+  // shoved into the bottom edge on the row just past the last one Din covers,
+  // and from there Din gets no pointer events at all - not for a fast throw
+  // that skips the hot zone, nor for a slide along the edge. A mouse leaving
+  // the window near the primary monitor's bottom edge therefore counts as
+  // reaching it.
   useEffect(() => {
     if (!intersecting) return;
+    let last: { x: number; y: number } | null = null;
     const onPointerMove = (e: PointerEvent) => {
-      const fromBottom = primary.y + primary.height - e.clientY;
+      last = { x: e.clientX, y: e.clientY };
+      // At or past the viewport's bottom edge is the edge itself; past the
+      // primary monitor's bottom but inside the viewport is another monitor.
+      const fromBottom = e.clientY >= window.innerHeight
+        ? 0
+        : primary.y + primary.height - e.clientY;
       // Only the primary monitor's bottom edge is the Dock's.
       if (e.clientX < primary.x || e.clientX >= primary.x + primary.width || fromBottom < 0) {
         setRevealed(false);
@@ -314,12 +342,31 @@ export function Dock({
       }
       setRevealed((prev) => {
         if (!prev) return fromBottom <= REVEAL_ZONE;
-        const dockHeight = stripRef.current?.offsetHeight ?? 80;
+        const dockHeight = magnified.current
+          ? MAGNIFIED_HEIGHT
+          : (stripRef.current?.offsetHeight ?? 80);
         return fromBottom <= dockHeight + REVEAL_SLACK;
       });
     };
+    const onPointerOut = (e: PointerEvent) => {
+      // A null relatedTarget on a mouse means it left the window itself.
+      if (e.relatedTarget !== null || e.pointerType !== 'mouse' || !last) return;
+      const { x, y } = last;
+      if (x < primary.x || x >= primary.x + primary.width) return;
+      const fromBottom = primary.y + primary.height - y;
+      // It left through the bottom if that was the nearest edge, and it was
+      // already in the lower part of the screen (a fast throw skips rows).
+      const nearest = Math.min(y, x, window.innerWidth - x);
+      if (fromBottom >= -1 && fromBottom <= nearest && fromBottom <= primary.height / 4) {
+        setRevealed(true);
+      }
+    };
     window.addEventListener('pointermove', onPointerMove);
-    return () => window.removeEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerout', onPointerOut);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerout', onPointerOut);
+    };
   }, [intersecting, primary]);
 
   // Keyboard users can still tab into the dock while it's hidden; keep it
@@ -378,10 +425,19 @@ export function Dock({
           // Explicit auto punches through the footer's none; while hidden the
           // strip goes inert itself (a parent's none no longer covers it), so
           // a mid-slide dock can't catch clicks.
-          className={cn('flex items-end', hidden ? 'pointer-events-none' : 'pointer-events-auto')}
+          className={cn('relative flex items-end', hidden ? 'pointer-events-none' : 'pointer-events-auto')}
           onMouseMove={(e) => scheduleMagnify(e.clientX)}
           onMouseLeave={() => scheduleMagnify(null)}
         >
+          {/* Shown only while magnified (see hoverPadRef). First in DOM
+              order, so the tiles paint and hit-test above it. */}
+          <div
+            ref={hoverPadRef}
+            aria-hidden
+            hidden
+            className="absolute inset-x-0 bottom-0"
+            style={{ height: MAGNIFIED_HEIGHT }}
+          />
           {entryIds.map((appId) => {
             const app = getApp(appId);
             if (!app) return null;
