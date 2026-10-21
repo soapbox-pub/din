@@ -1,16 +1,11 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Bell, BellOff, CheckCheck } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Popover,
-  PopoverClose,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { PopoverClose } from '@/components/ui/popover';
 import { NotificationCard } from '@/components/desktop/NotificationCard';
 import { getAvatarShape } from '@/lib/avatarShape';
 import {
@@ -24,11 +19,7 @@ import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
-import {
-  useHasUnreadNotifications,
-  useNotifications,
-  type NotificationItem,
-} from '@/hooks/useNotifications';
+import { useNotifications, type NotificationItem } from '@/hooks/useNotifications';
 import {
   getZapAmountSats,
   notificationTargetUrl,
@@ -36,55 +27,22 @@ import {
 } from '@/lib/notifications';
 
 /**
- * Menu-bar notifications bell: the notification center.
+ * The notification center, shown in the menu-bar clock's panel.
  *
  * Its list holds this session's notifications from apps (see
  * notificationCenter.ts) above the signed-in account's Nostr interactions,
- * which come from relays. The bell shows a badge dot while either has unread
- * entries (for Nostr, a cheap one-event relay check). Unread rows stay
- * highlighted while the list is open, and everything counts as read once it
- * closes, so viewing the list dismisses the badge.
+ * which come from relays. The clock shows a badge dot while either has unread
+ * entries (see useNotificationsBadge). Unread rows stay highlighted while the
+ * list is open, and everything counts as read once it closes, so viewing the
+ * list dismisses the badge.
  */
-export const NotificationsMenuItem = memo(function NotificationsMenuItem() {
-  const hasUnreadNostr = useHasUnreadNotifications();
-  const { notifications, doNotDisturb } = useNotificationCenter();
-  const hasUnread = hasUnreadNostr || notifications.some((n) => n.history && !n.read);
-  const BellIcon = doNotDisturb ? BellOff : Bell;
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={hasUnread ? 'Notifications, unread' : 'Notifications'}
-          title={doNotDisturb ? 'Notifications (Do Not Disturb)' : 'Notifications'}
-          className="relative size-7 rounded-md text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
-        >
-          <BellIcon className="size-4.5" />
-          {hasUnread && (
-            <span
-              aria-hidden
-              className="absolute right-1 top-1 size-2 rounded-full bg-primary ring-2 ring-background"
-            />
-          )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="bottom"
-        align="end"
-        sideOffset={8}
-        className="w-96 overflow-hidden p-0"
-      >
-        <NotificationsPanel onNavigate={() => setOpen(false)} />
-      </PopoverContent>
-    </Popover>
-  );
-});
-
-/** The popover body: header, then app notifications above Nostr's. */
-function NotificationsPanel({ onNavigate }: { onNavigate: () => void }) {
+export function NotificationsPanel({
+  onNavigate,
+  className,
+}: {
+  onNavigate: () => void;
+  className?: string;
+}) {
   const { user } = useCurrentUser();
   const { notifications, doNotDisturb } = useNotificationCenter();
   const appNotifications = notifications.filter((n) => n.history);
@@ -95,7 +53,7 @@ function NotificationsPanel({ onNavigate }: { onNavigate: () => void }) {
   useEffect(() => () => markNotificationsRead(), []);
 
   return (
-    <div className="flex max-h-[70vh] flex-col">
+    <div className={cn('flex flex-col', className)}>
       <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
         <p className="text-sm font-semibold text-foreground">Notifications</p>
         <div className="flex items-center gap-1">

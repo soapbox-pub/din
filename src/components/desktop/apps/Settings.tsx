@@ -2288,7 +2288,7 @@ function KeyboardSection() {
  * (mentions, comments, reposts, reactions, zaps) surface as notifications,
  * whether to gate them to people you follow, and whether they pop up. Those
  * are stored through Din's encrypted app-data layer, so they roam across
- * devices. The menu-bar bell and the popups read the same settings.
+ * devices. The notification center and the popups read the same settings.
  */
 function NotificationsSection() {
   const { user } = useCurrentUser();

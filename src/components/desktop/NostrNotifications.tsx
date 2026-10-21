@@ -27,7 +27,7 @@ import {
  * Holds a single always-on relay subscription (`#p: [user.pubkey]`, the
  * enabled kinds, `since: now`) so notifications arrive in real time without
  * polling. Every new event invalidates the notification query caches (so the
- * menu-bar bell badge and list refresh), and - when the on-screen alerts
+ * menu-bar clock's unread dot and list refresh), and - when the on-screen alerts
  * preference is on - pops it up through the notification center. Nostr's
  * history lives on relays, so these popups stay out of the center's list.
  *
@@ -111,7 +111,7 @@ export function NostrNotifications() {
           if (seen.has(event.id)) continue;
           seen.add(event.id);
 
-          // Refresh the bell badge + list.
+          // Refresh the clock's unread dot + list.
           queryClient.invalidateQueries({ queryKey: ['notifications', user.pubkey] });
           queryClient.invalidateQueries({ queryKey: ['notifications-unread', user.pubkey] });
 

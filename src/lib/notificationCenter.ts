@@ -9,7 +9,7 @@ import type { LucideIcon } from 'lucide-react';
  * apps, and the Nostr watcher (NostrNotifications.tsx).
  *
  * A notification pops up in the corner (NotificationPopups) and stays in the
- * bell's list (NotificationsIndicator) until it's dismissed or acted on. The
+ * notification center (NotificationsIndicator) until it's dismissed or acted on. The
  * list lasts for the session; Nostr's own history comes from relays, so
  * Nostr popups skip it (`history: false`).
  */
@@ -49,7 +49,7 @@ export interface DesktopNotification {
   urgency: NotificationUrgency;
   /** How long the popup stays, in ms; 0 keeps it until dismissed. */
   timeout: number;
-  /** Keep it in the bell's list once the popup goes. */
+  /** Keep it in the notification center once the popup goes. */
   history: boolean;
   /** Acting on it doesn't remove it (org.freedesktop.Notifications' `resident`). */
   resident: boolean;

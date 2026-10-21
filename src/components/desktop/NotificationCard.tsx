@@ -7,7 +7,7 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 
 /**
- * One notification, as a popup or a row of the bell's list: who sent it,
+ * One notification, as a popup or a row of the notification center's list: who sent it,
  * when, its title and text, a picture, and its actions. A click on the body
  * activates it. Everything shown is plain text: notifications come from web
  * pages and Linux apps, and none of it is trusted.

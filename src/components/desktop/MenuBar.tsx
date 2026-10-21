@@ -1,4 +1,4 @@
-import { CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { BellOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -34,7 +34,9 @@ import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndica
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
 import { BrightnessGlyph, BrightnessPopoverBody } from '@/components/desktop/BrightnessIndicator';
-import { NotificationsMenuItem } from '@/components/desktop/NotificationsIndicator';
+import { NotificationsPanel } from '@/components/desktop/NotificationsIndicator';
+import { useNotificationsBadge } from '@/hooks/useNotificationsBadge';
+import { Calendar } from '@/components/ui/calendar';
 import { TrayItems } from '@/components/desktop/TrayMenu';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useClock } from '@/hooks/useClock';
@@ -61,12 +63,13 @@ import type { AppDefinition } from '@/lib/apps';
 import type { WebApp } from '@/lib/webApps';
 
 /**
- * macOS-style menu bar along the top of the desktop.
+ * Menu bar along the top of the desktop.
  *
- * The apps menu (the full launcher with search) sits on the left; ambient
- * indicators — apps' status icons, Wi-Fi, the signed-in account, and the
- * clock — sit on the right, each behind its own affordance like the macOS
- * status items.
+ * The apps menu (the full launcher with search) and the focused app's name
+ * sit on the left. The clock sits in the center and opens a calendar above
+ * the notification center, GNOME style. Ambient indicators — apps' status
+ * icons, hardware, Wi-Fi, and the signed-in account — sit on the right, each
+ * behind its own affordance.
  *
  * The bar itself is borderless and transparent, fading from a soft scrim
  * into the wallpaper so it reads as part of the desktop rather than a
@@ -84,31 +87,56 @@ export function MenuBar() {
   const fullscreen = windows.some(
     (w) => w.maximized && !w.minimized && (w.monitor === null || w.monitor === primaryId),
   );
+  // The focused window is the highest visible one, as for its focus ring.
+  const focused = windows.reduce<(typeof windows)[number] | null>(
+    (top, w) => (w.minimized || w.closing || (top && top.z > w.z) ? top : w),
+    null,
+  );
 
   return (
     <header
       className={cn(
+        // Equal side columns keep the clock centered on the screen however
+        // much each side holds.
         // tracking-tight approximates SF Pro's optical spacing at menu-bar sizes.
-        'relative z-20 flex h-9 items-center justify-between px-2 tracking-tight transition-colors',
+        'relative z-20 grid h-9 grid-cols-[1fr_auto_1fr] items-center gap-2 px-2 tracking-tight transition-colors',
         fullscreen
           ? 'bg-white dark:bg-black'
           : 'bg-gradient-to-b from-background/60 via-background/25 to-transparent',
       )}
     >
-      <AppsMenu />
-      <div className="flex items-center gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <AppsMenu />
+        <FocusedAppName appId={focused?.appId ?? null} />
+      </div>
+      <ClockMenuItem />
+      <div className="flex min-w-0 items-center justify-end gap-1.5">
         <TrayItems />
         <BrightnessMenuItem />
         <VolumeMenuItem />
         <BatteryMenuItem />
         <WifiMenuItem />
-        <NotificationsMenuItem />
         <AccountMenuItem />
-        <ClockDisplay />
       </div>
     </header>
   );
 }
+
+/**
+ * The focused app's name, like the bold app name in the macOS menu bar, so
+ * it's clear which app has focus even when its window has no title bar.
+ */
+const FocusedAppName = memo(function FocusedAppName({ appId }: { appId: string | null }) {
+  const { apps } = useInstalledApps();
+  const app = appId ? apps.find((a) => a.id === appId) : undefined;
+  if (!app) return null;
+
+  return (
+    <span className="truncate px-1 text-sm font-semibold text-foreground">
+      {app.name}
+    </span>
+  );
+});
 
 /** Left menu: the full searchable apps launcher. */
 const AppsMenu = memo(function AppsMenu() {
@@ -575,21 +603,90 @@ function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect:
   );
 }
 
-/** Menu-bar clock: weekday, date, and time, macOS style. */
-const ClockDisplay = memo(function ClockDisplay() {
+/**
+ * Menu-bar clock: weekday, date, and time. Clicking opens a calendar above
+ * the notification center; a dot beside the time marks unread notifications.
+ */
+const ClockMenuItem = memo(function ClockMenuItem() {
+  const { hasUnread, doNotDisturb } = useNotificationsBadge();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={hasUnread ? 'Calendar and notifications, unread' : 'Calendar and notifications'}
+          title={doNotDisturb ? 'Calendar and notifications (Do Not Disturb)' : undefined}
+          className="h-7 gap-1.5 rounded-md px-2.5 text-sm font-medium text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
+        >
+          <ClockText />
+          {doNotDisturb ? (
+            <BellOff className="size-3.5 text-muted-foreground" aria-hidden />
+          ) : (
+            hasUnread && <span aria-hidden className="size-2 rounded-full bg-primary" />
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="center"
+        sideOffset={8}
+        className="flex max-h-[85vh] w-96 flex-col overflow-hidden p-0"
+      >
+        <CalendarSection />
+        <NotificationsPanel
+          onNavigate={() => setOpen(false)}
+          className="min-h-0 flex-1 border-t border-border/60"
+        />
+      </PopoverContent>
+    </Popover>
+  );
+});
+
+/** The clock's text. Its own component so only it re-renders every second. */
+function ClockText() {
   const now = useClock();
 
   return (
-    <time
-      dateTime={now.toISOString()}
-      className="px-2 text-sm font-medium tabular-nums text-foreground/90"
-    >
+    <time dateTime={now.toISOString()} className="tabular-nums">
       {now.toLocaleDateString([], { weekday: 'short' })}{' '}
       {now.toLocaleDateString([], { month: 'short', day: 'numeric' })}{' '}
       {now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
     </time>
   );
-});
+}
+
+/** Today's date and a month calendar, at the top of the clock's panel. */
+function CalendarSection() {
+  // The panel mounts each time it opens, so this is today as of opening.
+  const [today] = useState(() => new Date());
+
+  return (
+    <section aria-label="Calendar" className="shrink-0">
+      <div className="px-4 pt-4">
+        <p className="text-xs font-medium text-muted-foreground">
+          {today.toLocaleDateString([], { weekday: 'long' })}
+        </p>
+        <p className="text-lg font-semibold text-foreground">
+          {today.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' })}
+        </p>
+      </div>
+      {/* Without a selection mode the days are plain cells rather than
+          buttons, so they're sized here instead of by the day button. */}
+      <Calendar
+        defaultMonth={today}
+        className="mx-auto [--cell-size:--spacing(9)]"
+        classNames={{
+          week: 'flex w-full',
+          day: 'grid size-(--cell-size) place-items-center p-0 text-sm select-none',
+          today: 'rounded-md bg-primary font-semibold text-primary-foreground',
+        }}
+      />
+    </section>
+  );
+}
 
 /** Account header: current user, other accounts, add-account, sign out. */
 function AccountPanel({

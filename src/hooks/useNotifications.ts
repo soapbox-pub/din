@@ -203,7 +203,7 @@ export function useNotifications(): NotificationData {
 
   const markAsRead = useCallback(() => {
     if (newestTimestamp <= cursor) return;
-    // Advance the persisted cursor (roams + propagates to the bell instance
+    // Advance the persisted cursor (roams + propagates to the clock's instance
     // via useAppData's cross-instance broadcast)…
     setCursor(newestTimestamp);
     // …and clear the unread dot immediately rather than waiting for the next
@@ -233,7 +233,7 @@ export function useNotifications(): NotificationData {
 
 /**
  * Cheap check for whether the user has any unread notifications, for the
- * menu-bar bell badge. Fetches at most one event (relay-level `since` filter),
+ * menu-bar clock's unread dot. Fetches at most one event (relay-level `since` filter),
  * respecting the same per-type preferences and follow gate as the full list.
  */
 export function useHasUnreadNotifications(): boolean {

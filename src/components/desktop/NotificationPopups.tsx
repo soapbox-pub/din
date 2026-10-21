@@ -5,7 +5,7 @@ import { expirePopup, useNotificationCenter, type DesktopNotification } from '@/
 /**
  * New notifications, popped up in the top-right corner under the menu bar.
  * Each goes after its timeout (held while the pointer is over it) and stays
- * in the bell's list.
+ * in the notification center.
  */
 export function NotificationPopups() {
   const { notifications, popups } = useNotificationCenter();
