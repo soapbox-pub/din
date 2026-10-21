@@ -2506,6 +2506,13 @@ const WEBAPP_PRELOAD = path.join(import.meta.dirname, 'webview-preload.cjs');
  */
 const HIGHLIGHT_PRELOAD = path.join(import.meta.dirname, 'browser-highlight-preload.cjs');
 
+/**
+ * Absolute path to the session preload that puts web pages' notifications
+ * in Din's notification center (see electron/notifications.mts). Every page
+ * gets it - browser tabs, private ones, and installed web apps.
+ */
+const NOTIFICATION_PRELOAD = path.join(import.meta.dirname, 'notification-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow: BrowserWindow | null = null;
 
@@ -3141,6 +3148,12 @@ function requestedCapabilities(
   if (types.includes('video')) capabilities.push('camera');
   if (types.includes('audio')) capabilities.push('microphone');
   return capabilities.length > 0 ? capabilities : null;
+}
+
+/** Whether a site may notify, as the user answered (Notification.permission). */
+function siteNotificationPermission(s: Electron.Session, origin: string): NotificationPermission {
+  const allowed = decisionsFor(s).get(`${origin}\u0000notifications`);
+  return allowed === undefined ? 'default' : allowed ? 'granted' : 'denied';
 }
 
 function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean }): void {
@@ -3955,6 +3968,10 @@ app.whenReady().then(() => {
   hardenGuestSession(privateBrowserSession(), { prompts: true });
   hardenGuestSession(appSession(), { prompts: true });
   hardenGuestSession(devtoolsSession(), { prompts: false });
+  // Web pages' notifications go to Din's notification center.
+  for (const s of [browserSession(), privateBrowserSession(), appSession()]) {
+    s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
+  }
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
@@ -3990,7 +4007,7 @@ app.whenReady().then(() => {
   });
   registerKeyboardHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
-  registerNotificationHandlers({ isShellSender, sendToShell });
+  registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
   registerInstallerHandlers({ assertShellSender, sendToShell });
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerNostrdHandlers({ assertShellSender, sendToShell });

@@ -8,6 +8,13 @@
 // The user's clicks and dismissals go back the same way, as the
 // ActionInvoked and NotificationClosed signals.
 //
+// Web pages' come from notification-preload.cjs, in every browser tab and
+// installed web app. Only a top document whose origin the user allowed to
+// notify (asked in the shell, see hardenGuestSession in main.mts) gets one
+// shown; its icon is fetched here, in the page's own session. Clicks and
+// closes go back to the page as its Notification's events, and its
+// notifications go when the page does.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
@@ -45,6 +52,10 @@ export interface SystemNotification {
   resident: boolean;
   /** Not kept in the list once it's gone from the screen. */
   transient: boolean;
+  /** For a web page's: the guest it came from. */
+  guest: { webContentsId: number; origin: string } | null;
+  /** A web page's tag: one with the same tag and origin replaces it. */
+  tag: string;
 }
 
 type CloseReason = 'expired' | 'dismissed' | 'closed';
@@ -97,6 +108,8 @@ async function show(message: Extract<ServerMessage, { type: 'notify' }>): Promis
     timeout: message.timeout,
     resident: message.resident,
     transient: message.transient,
+    guest: null,
+    tag: '',
   };
   sendToShell('notifications:show', notification);
 }
@@ -157,26 +170,161 @@ function plainText(markup: string): string {
     .trim();
 }
 
+// ---------------------------------------------------------------------------
+// Web pages
+// ---------------------------------------------------------------------------
+
+/** Past these, a page's notification is abuse. */
+const MAX_WEB_TITLE = 256;
+const MAX_WEB_BODY = 4096;
+const MAX_WEB_PER_PAGE = 32;
+const MAX_FETCHED_ICON_BYTES = 2 * 1024 * 1024;
+const ICON_FETCH_TIMEOUT_MS = 5_000;
+
+/** A web page's notification, by the number the page knows it by. */
+const webNotifications = new Map<number, Electron.WebContents>();
+let lastWebId = 0;
+/** Guests already watched for going away. */
+const watchedGuests = new WeakSet<Electron.WebContents>();
+
+function webText(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
+
+/**
+ * A page's icon as a data URL, fetched in its own session (its cookies,
+ * its nsite:// handler). Images are scaled down; SVG stays SVG, which an
+ * <img> never runs scripts in.
+ */
+async function fetchIcon(s: Electron.Session, url: string): Promise<string | null> {
+  if (!/^(https?|nsite):/i.test(url)) {
+    return /^data:image\/[a-z0-9.+-]+[;,]/i.test(url) && url.length <= MAX_IMAGE_BYTES ? url : null;
+  }
+  try {
+    const response = await s.fetch(url, { signal: AbortSignal.timeout(ICON_FETCH_TIMEOUT_MS) });
+    if (!response.ok || Number(response.headers.get('content-length') ?? 0) > MAX_FETCHED_ICON_BYTES) return null;
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.length > MAX_FETCHED_ICON_BYTES) return null;
+    if ((response.headers.get('content-type') ?? '').startsWith('image/svg+xml')) {
+      return data.length <= MAX_IMAGE_BYTES ? `data:image/svg+xml;base64,${data.toString('base64')}` : null;
+    }
+    let image = nativeImage.createFromBuffer(data);
+    if (image.isEmpty()) return null;
+    const { width, height } = image.getSize();
+    if (Math.max(width, height) > IMAGE_TARGET) {
+      image = image.resize(width >= height ? { width: IMAGE_TARGET } : { height: IMAGE_TARGET });
+    }
+    const png = image.toPNG();
+    return png.length <= MAX_IMAGE_BYTES ? `data:image/png;base64,${png.toString('base64')}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Tell a page one of its notifications was clicked or closed. */
+function webEvent(id: number, type: 'click' | 'close'): void {
+  const contents = webNotifications.get(id);
+  if (!contents) return;
+  if (type === 'close') webNotifications.delete(id);
+  if (!contents.isDestroyed()) contents.send('notifications:web-event', id, type);
+}
+
+/** A page went away (closed, or navigated): so do its notifications. */
+function dropGuest(contents: Electron.WebContents): void {
+  for (const [id, owner] of webNotifications) {
+    if (owner !== contents) continue;
+    webNotifications.delete(id);
+    sendToShell('notifications:close', `web:${id}`);
+  }
+}
+
+/** The top document of a web guest, or null for anything else. */
+function guestOrigin(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): string | null {
+  const frame = event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame || event.sender.getType() !== 'webview') return null;
+  return frame.origin && frame.origin !== 'null' ? frame.origin : null;
+}
+
+function registerWebHandlers(permission: (s: Electron.Session, origin: string) => NotificationPermission): void {
+  ipcMain.on('notifications:web-permission', (event) => {
+    const origin = guestOrigin(event);
+    event.returnValue = origin ? permission(event.sender.session, origin) : 'denied';
+  });
+
+  ipcMain.handle('notifications:web-show', async (event, options) => {
+    const contents = event.sender;
+    const origin = guestOrigin(event);
+    if (!origin || permission(contents.session, origin) !== 'granted') return null;
+    if ([...webNotifications.values()].filter((owner) => owner === contents).length >= MAX_WEB_PER_PAGE) return null;
+    const opts = typeof options === 'object' && options !== null ? (options as Record<string, unknown>) : {};
+    const icon = await fetchIcon(contents.session, webText(opts.icon, 4096));
+    if (contents.isDestroyed()) return null;
+
+    const id = ++lastWebId;
+    webNotifications.set(id, contents);
+    if (!watchedGuests.has(contents)) {
+      watchedGuests.add(contents);
+      contents.once('destroyed', () => dropGuest(contents));
+      contents.on('did-navigate', () => dropGuest(contents));
+    }
+    const notification: SystemNotification = {
+      id: `web:${id}`,
+      appName: new URL(origin).host,
+      appId: null,
+      icon: null,
+      image: icon,
+      title: webText(opts.title, MAX_WEB_TITLE),
+      body: webText(opts.body, MAX_WEB_BODY),
+      actions: [],
+      urgency: 'normal',
+      timeout: opts.requireInteraction === true ? 0 : -1,
+      resident: false,
+      transient: false,
+      guest: { webContentsId: contents.id, origin },
+      tag: webText(opts.tag, 256),
+    };
+    sendToShell('notifications:show', notification);
+    return id;
+  });
+
+  ipcMain.on('notifications:web-close', (event, id) => {
+    if (typeof id === 'number' && webNotifications.get(id) === event.sender) {
+      sendToShell('notifications:close', `web:${id}`);
+    }
+  });
+}
+
+/** The id behind an opaque shell id, by kind. */
+function parseId(id: unknown): { kind: 'dbus' | 'web'; id: number } | null {
+  if (typeof id !== 'string') return null;
+  const match = /^(dbus|web):(\d+)$/.exec(id);
+  return match ? { kind: match[1] as 'dbus' | 'web', id: Number(match[2]) } : null;
+}
+
 /** Register the notifications IPC surface (window.systemNotifications) and start the server. */
 export function registerNotificationHandlers(options: {
   isShellSender: (event: Electron.IpcMainEvent) => boolean;
   sendToShell: (channel: string, payload?: unknown) => void;
+  /** Whether a site may show notifications, as the user answered. */
+  webPermission: (s: Electron.Session, origin: string) => NotificationPermission;
 }): void {
   const { isShellSender } = options;
   sendToShell = options.sendToShell;
 
   ipcMain.on('notifications:activate', (event, id, action) => {
-    if (!isShellSender(event) || typeof id !== 'string' || typeof action !== 'string') return;
-    const dbusId = Number(id.startsWith('dbus:') ? id.slice(5) : NaN);
-    if (Number.isInteger(dbusId)) command({ type: 'action', id: dbusId, key: action.slice(0, 256) });
+    const target = parseId(id);
+    if (!isShellSender(event) || !target || typeof action !== 'string') return;
+    if (target.kind === 'dbus') command({ type: 'action', id: target.id, key: action.slice(0, 256) });
+    else if (action === 'default') webEvent(target.id, 'click');
   });
   ipcMain.on('notifications:closed', (event, id, reason) => {
-    if (!isShellSender(event) || typeof id !== 'string') return;
-    const code = REASON_CODES[reason as CloseReason] ?? 4;
-    const dbusId = Number(id.startsWith('dbus:') ? id.slice(5) : NaN);
-    if (Number.isInteger(dbusId)) command({ type: 'closed', id: dbusId, reason: code });
+    const target = parseId(id);
+    if (!isShellSender(event) || !target) return;
+    if (target.kind === 'dbus') command({ type: 'closed', id: target.id, reason: REASON_CODES[reason as CloseReason] ?? 4 });
+    else webEvent(target.id, 'close');
   });
 
+  registerWebHandlers(options.webPermission);
   void startServer();
   app.on('will-quit', () => server?.kill());
 }

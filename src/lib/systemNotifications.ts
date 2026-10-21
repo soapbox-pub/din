@@ -2,8 +2,9 @@
  * Typed access to the system notifications bridge exposed by the Electron
  * preload (`window.systemNotifications`, see electron/preload.cjs +
  * electron/notifications.mts): notifications from Linux apps, which Din
- * receives as the desktop's org.freedesktop.Notifications server. Absent
- * outside the Electron shell.
+ * receives as the desktop's org.freedesktop.Notifications server, and from
+ * web pages in browser tabs and installed web apps. Absent outside the
+ * Electron shell.
  */
 
 import type { NotificationCloseReason, NotificationUrgency } from '@/lib/notificationCenter';
@@ -29,6 +30,10 @@ export interface SystemNotification {
   resident: boolean;
   /** Not kept in the list once it's gone from the screen. */
   transient: boolean;
+  /** For a web page's: the <webview> it came from. */
+  guest: { webContentsId: number; origin: string } | null;
+  /** A web page's tag: one with the same tag and origin replaces it. */
+  tag: string;
 }
 
 export interface SystemNotificationsBridge {
