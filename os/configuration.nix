@@ -565,7 +565,9 @@ in
     ++ [ ripgrep fd bat htop tree wget gh ]
     # Screenshots of the whole screen. Cage's socket is renamed to din-shell
     # (see the launcher above), so: WAYLAND_DISPLAY=din-shell grim x.png
-    ++ [ grim slurp ];
+    ++ [ grim slurp ]
+    # notify-send, for scripts and long builds: Din is the notification server.
+    ++ [ libnotify ];
   virtualisation.podman = {
     enable = true;
     dockerCompat = true;
