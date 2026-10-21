@@ -206,6 +206,22 @@ contextBridge.exposeInMainWorld('pty', {
     ipcRenderer.on('pty:exit', listener);
     return () => ipcRenderer.removeListener('pty:exit', listener);
   },
+
+  /**
+   * Subscribe to commands finishing (the shell got the terminal back), in
+   * all sessions. Returns an unsubscribe fn.
+   * @param {(id: number, done: { command: string, seconds: number }) => void} callback
+   */
+  onCommandDone: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {number} id
+     * @param {{ command: string, seconds: number }} done
+     */
+    const listener = (_event, id, done) => callback(id, done);
+    ipcRenderer.on('pty:commandDone', listener);
+    return () => ipcRenderer.removeListener('pty:commandDone', listener);
+  },
 });
 
 // WiFi bridge (window.wifi), backed by the wifi:* handlers in main.mts

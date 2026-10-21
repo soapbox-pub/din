@@ -16,6 +16,14 @@ export interface PtySize {
   rows: number;
 }
 
+/** A command that ran in a session, as its pty saw it. */
+export interface CommandDone {
+  /** Its command line, roughly as typed (no exit code: the shell keeps that). */
+  command: string;
+  /** How long it ran. */
+  seconds: number;
+}
+
 export interface PtyBridge {
   /** Start a shell session; resolves to its session id. */
   spawn(size: PtySize, cwd?: string): Promise<number>;
@@ -29,6 +37,11 @@ export interface PtyBridge {
   onData(callback: (id: number, data: Uint8Array) => void): () => void;
   /** Subscribe to session exits. Returns an unsubscribe fn. */
   onExit(callback: (id: number, code: number) => void): () => void;
+  /**
+   * Subscribe to commands finishing in any session: the shell got the
+   * terminal back. Returns an unsubscribe fn.
+   */
+  onCommandDone(callback: (id: number, done: CommandDone) => void): () => void;
 }
 
 declare global {

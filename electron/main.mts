@@ -15,6 +15,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeTheme, shell } from 'electron';
@@ -345,7 +346,7 @@ function registerFsHandlers(): void {
 // module we'd have to rebuild against Electron's ABI inside the Nix build),
 // each session spawns pty-host.py: a stdlib-only Python helper that owns the
 // pseudo-terminal and proxies bytes over pipes (stdin/stdout for terminal
-// I/O, fd 3 for resize commands).
+// I/O, fd 3 for resize commands, fd 4 for "a command finished" events).
 //
 // Threat model: this is deliberately an arbitrary-command-execution API for
 // the shell's origin, so it adds nothing beyond what the fs bridge already
@@ -396,8 +397,8 @@ function registerPtyHandlers(): void {
     const proc = spawn('python3', [PTY_HELPER, userShell(), String(rows), String(cols)], {
       cwd: spawnCwd,
       env,
-      // fd 3 is the helper's control channel (resize).
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      // fd 3 is the helper's control channel (resize), fd 4 its events.
+      stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
     });
 
     const id = nextPtyId++;
@@ -416,6 +417,21 @@ function registerPtyHandlers(): void {
     proc.stdout?.on('data', (chunk) => send('pty:data', id, chunk));
     // Helper diagnostics (e.g. exec failures) surface in the terminal too.
     proc.stderr?.on('data', (chunk) => send('pty:data', id, chunk));
+    const events = proc.stdio[4];
+    if (events && 'read' in events) {
+      createInterface({ input: events }).on('line', (line) => {
+        let event: unknown;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          return;
+        }
+        const { type, command, seconds } = (event ?? {}) as Record<string, unknown>;
+        if (type === 'done' && typeof command === 'string' && typeof seconds === 'number') {
+          send('pty:commandDone', id, { command: command.slice(0, 200), seconds });
+        }
+      });
+    }
     proc.on('error', (err) => {
       send('pty:data', id, Buffer.from(`pty host failed: ${err.message}\r\n`));
       ptySessions.delete(id);

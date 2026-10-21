@@ -105,6 +105,18 @@ const setSharedFontSize = (size: number) => {
   for (const listener of fontSizeListeners) listener(clamped);
 };
 
+/** Commands that run at least this long notify when they finish out of sight. */
+const NOTIFY_AFTER_SECONDS = 10;
+
+/** "45s", "2m 14s", "1h 3m". */
+function formatDuration(seconds: number): string {
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 /**
  * Whether a key event is the given Latin letter. Layouts without Latin
  * letters (Cyrillic, Greek, ...) fall back to the physical key, so Ctrl+C
@@ -284,7 +296,8 @@ function flattenLayout(
  * mounted (their xterm state survives) and only the active tab is visible.
  * Ctrl+PageUp/PageDown switch tabs, Ctrl+(Shift+)T opens one and Ctrl+Shift+W
  * closes one (gnome-terminal/Tilix bindings); when a shell exits its pane
- * closes, and closing the last tab closes the window.
+ * closes, and closing the last tab closes the window. A command that ran for
+ * a while and finishes out of sight posts a notification.
  * Within a tab, right-click offers Tilix-style tiling: split a pane right or
  * down into a tree of terminals with draggable dividers.
  * Outside the Electron shell (plain-browser dev) there is no bridge, so a
@@ -292,7 +305,7 @@ function flattenLayout(
  */
 export function Terminal({ windowId }: AppComponentProps) {
   const bridge = getPtyBridge();
-  const { close: closeWindow } = useWindowActions();
+  const { close: closeWindow, focus: focusWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
 
   const [tabs, setTabs] = useState<TermTab[]>(() => {
@@ -424,6 +437,16 @@ export function Terminal({ windowId }: AppComponentProps) {
     );
   }, []);
 
+  /** Bring a pane into view: its tab, its window (a notification was clicked). */
+  const revealPane = useCallback(
+    (tabId: string, paneId: string) => {
+      setActiveId(tabId);
+      focusPane(tabId, paneId);
+      focusWindow(windowId);
+    },
+    [focusPane, focusWindow, windowId],
+  );
+
   const resizeSplit = useCallback((tabId: string, splitId: string, ratio: number) => {
     setTabs((ts) =>
       ts.map((t) =>
@@ -481,6 +504,7 @@ export function Terminal({ windowId }: AppComponentProps) {
           onSplit={splitPane}
           onClosePane={closePane}
           onFocusPane={focusPane}
+          onRevealPane={revealPane}
           onResizeSplit={resizeSplit}
           onCwdChange={handleCwdChange}
           onTabShortcut={onTabShortcut}
@@ -501,6 +525,7 @@ const TerminalTab = memo(function TerminalTab({
   onSplit,
   onClosePane,
   onFocusPane,
+  onRevealPane,
   onResizeSplit,
   onCwdChange,
   onTabShortcut,
@@ -510,6 +535,7 @@ const TerminalTab = memo(function TerminalTab({
   onSplit: (tabId: string, paneId: string, dir: SplitDir) => void;
   onClosePane: (tabId: string, paneId: string) => void;
   onFocusPane: (tabId: string, paneId: string) => void;
+  onRevealPane: (tabId: string, paneId: string) => void;
   onResizeSplit: (tabId: string, splitId: string, ratio: number) => void;
   onCwdChange: (paneId: string, cwd: string) => void;
   onTabShortcut: (action: TabShortcut) => void;
@@ -533,6 +559,10 @@ const TerminalTab = memo(function TerminalTab({
   const handleClose = useCallback(
     (paneId: string) => onClosePane(tab.id, paneId),
     [onClosePane, tab.id],
+  );
+  const handleReveal = useCallback(
+    (paneId: string) => onRevealPane(tab.id, paneId),
+    [onRevealPane, tab.id],
   );
 
   const startDividerDrag = (d: DividerBox) => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -584,6 +614,7 @@ const TerminalTab = memo(function TerminalTab({
             initialCwd={leaf.initialCwd}
             onSplit={handleSplit}
             onClose={handleClose}
+            onReveal={handleReveal}
             onCwdChange={onCwdChange}
             onTabShortcut={onTabShortcut}
           />
@@ -640,6 +671,7 @@ const TerminalSession = memo(function TerminalSession({
   initialCwd,
   onSplit,
   onClose,
+  onReveal,
   onCwdChange,
   onTabShortcut,
 }: {
@@ -652,6 +684,8 @@ const TerminalSession = memo(function TerminalSession({
   initialCwd?: string;
   onSplit: (paneId: string, dir: SplitDir) => void;
   onClose: (paneId: string) => void;
+  /** Bring this pane into view. */
+  onReveal: (paneId: string) => void;
   onCwdChange: (paneId: string, cwd: string) => void;
   onTabShortcut: (action: TabShortcut) => void;
 }) {
@@ -666,11 +700,15 @@ const TerminalSession = memo(function TerminalSession({
   // closure never goes stale.
   const onCwdChangeRef = useRef(onCwdChange);
   const onCloseRef = useRef(onClose);
+  const onRevealRef = useRef(onReveal);
   const onTabShortcutRef = useRef(onTabShortcut);
   const openUrlRef = useRef(openUrl);
+  /** Whether the user can see this pane: its tab showing, its window on top. */
+  const visibleRef = useRef(false);
   useLayoutEffect(() => {
     onCwdChangeRef.current = onCwdChange;
     onCloseRef.current = onClose;
+    onRevealRef.current = onReveal;
     onTabShortcutRef.current = onTabShortcut;
     openUrlRef.current = openUrl;
   });
@@ -877,6 +915,19 @@ const TerminalSession = memo(function TerminalSession({
       // last tab closes the window.
       if (id === sessionId) onCloseRef.current(paneId);
     });
+    // Like elementary's terminal: a long command finishing out of sight
+    // (another tab, a window in front, minimized) says so. Clicking the
+    // notification brings this pane back.
+    let finished: Notification | null = null;
+    const offCommandDone = bridge.onCommandDone((id, done) => {
+      if (id !== sessionId || done.seconds < NOTIFY_AFTER_SECONDS || visibleRef.current) return;
+      finished = new Notification(done.command || 'Command', {
+        app: 'terminal',
+        body: `Finished after ${formatDuration(done.seconds)}`,
+        tag: paneId,
+      });
+      finished.onclick = () => onRevealRef.current(paneId);
+    });
 
     term.onData((data) => {
       if (sessionId !== null) bridge.write(sessionId, data);
@@ -926,6 +977,8 @@ const TerminalSession = memo(function TerminalSession({
       container.removeEventListener('mousedown', focus);
       offData();
       offExit();
+      offCommandDone();
+      finished?.close();
       oscHandler.dispose();
       linkProvider.dispose();
       if (sessionId !== null) bridge.kill(sessionId);
@@ -951,6 +1004,7 @@ const TerminalSession = memo(function TerminalSession({
   const isTopRef = useRef(isTop);
   useLayoutEffect(() => {
     isTopRef.current = isTop;
+    visibleRef.current = active && isTop;
   });
   useEffect(() => {
     if (active && focused && isTop) termRef.current?.focus();
