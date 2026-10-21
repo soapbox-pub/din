@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { ComponentType, ReactNode } from 'react';
-import { AppWindow, Globe } from 'lucide-react';
 import { APPS, NativeWindowView } from '@/lib/apps';
+import { NATIVE_APP_ICON, WEB_APP_ICON } from '@/lib/appIcons';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { useIsLiveBoot } from '@/hooks/useInstaller';
@@ -36,8 +36,8 @@ function webAppComponent(webApp: WebApp): ComponentType<AppComponentProps> {
   let component = componentCache.get(cacheKey);
   if (!component) {
     const { url, name, themeColor } = webApp;
-    // AppIcon falls back to a Globe glyph when a favicon fails to load.
-    const icon = webApp.icon ?? Globe;
+    // AppIcon falls back to the globe icon when a favicon fails to load.
+    const icon = webApp.icon ?? WEB_APP_ICON;
     component = function InstalledWebApp(props: AppComponentProps) {
       // A link routed into this app (see BrowserExtensionHost) arrives as a
       // `url` launch param, so the window opens at that deep link instead of
@@ -64,8 +64,8 @@ function webAppToDefinition(webApp: WebApp): AppDefinition {
   return {
     id: webApp.id,
     name: webApp.name,
-    // AppIcon falls back to a Globe glyph when a favicon fails to load.
-    icon: webApp.icon ?? Globe,
+    // AppIcon falls back to the globe icon when a favicon fails to load.
+    icon: webApp.icon ?? WEB_APP_ICON,
     component: webAppComponent(webApp),
     defaultSize: WEB_APP_DEFAULT_SIZE,
     // One window per installed web app: clicking a link that belongs to the
@@ -80,13 +80,13 @@ function webAppToDefinition(webApp: WebApp): AppDefinition {
  *
  * Every window it maps on Din's embedded display opens a Din window around
  * NativeWindowView. The icon is a data URL resolved from the icon theme by
- * the main process, falling back to a generic glyph.
+ * the main process, falling back to a generic window icon.
  */
 function nativeAppToDefinition(app: NativeApp): AppDefinition {
   return {
     id: app.id,
     name: app.name,
-    icon: app.icon ?? AppWindow,
+    icon: app.icon ?? NATIVE_APP_ICON,
     component: NativeWindowView,
     native: true,
     keywords: [...app.keywords, ...app.categories],

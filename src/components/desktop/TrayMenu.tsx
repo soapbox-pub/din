@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { AppWindow } from 'lucide-react';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { NATIVE_APP_ICON } from '@/lib/appIcons';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -121,7 +121,7 @@ function TrayButton({ item }: { item: TrayItem }) {
           }}
           className="relative grid size-7 place-items-center rounded-md text-foreground/90 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-foreground/10"
         >
-          <AppIcon icon={item.icon ?? app?.icon ?? AppWindow} className="size-4.5 object-contain" />
+          <AppIcon icon={item.icon ?? app?.icon ?? NATIVE_APP_ICON} className="size-4.5 object-contain" />
           {item.status === 'NeedsAttention' && (
             <span aria-hidden className="absolute top-1 right-1 size-1.5 rounded-full bg-primary ring-2 ring-background" />
           )}

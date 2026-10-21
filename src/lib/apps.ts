@@ -1,6 +1,7 @@
 import { lazy } from 'react';
 import type { ComponentType } from 'react';
-import { AppWindow, Camera, HardDriveDownload, Store, type LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { NATIVE_APP_ICON } from '@/lib/appIcons';
 
 // Built-in apps are code-split: each is its own chunk, loaded the first time
 // it's launched (windows render app content inside <Suspense>). Statically
@@ -122,14 +123,14 @@ export const APPS: readonly AppDefinition[] = [
   {
     id: 'app-store',
     name: 'App Store',
-    icon: Store,
+    icon: '/icons/apps/app-store.png',
     component: AppStore,
     defaultSize: { width: 900, height: 640 },
   },
   {
     id: 'screenshot',
     name: 'Screenshot',
-    icon: Camera,
+    icon: '/icons/apps/screenshot.png',
     component: Screenshot,
     defaultSize: { width: 440, height: 400 },
     // One shot at a time: the Print Screen / box-select hotkeys re-open
@@ -153,7 +154,7 @@ export const APPS: readonly AppDefinition[] = [
     // where InstalledAppsProvider shows it and the desktop opens it.
     id: 'installer',
     name: 'Install DinOS',
-    icon: HardDriveDownload,
+    icon: '/icons/apps/installer.png',
     component: Installer,
     defaultSize: { width: 640, height: 560 },
     hidden: true,
@@ -164,7 +165,7 @@ export const APPS: readonly AppDefinition[] = [
     // an app started from a terminal). Opened only by the embedded display.
     id: 'native-window',
     name: 'Application',
-    icon: AppWindow,
+    icon: NATIVE_APP_ICON,
     component: NativeWindowView,
     native: true,
     hidden: true,
