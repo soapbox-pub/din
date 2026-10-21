@@ -249,7 +249,15 @@ let
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Chromium logging into the journal (via cage), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
-    exec ${pkgs.electron}/bin/electron \
+    # pam_systemd gives the session's processes CAP_WAKE_ALARM as an ambient
+    # capability (its default for a seat), which everything Din and its
+    # Terminal start would inherit. Programs that drop all their capabilities
+    # (gnome-keyring-daemon, for one) can't drop an ambient one they never
+    # asked for, and abort. Terminals elsewhere are started by the user
+    # manager and don't have it; nothing in Din needs it. pam_systemd has no
+    # setting for "none" (an empty one means its default).
+    exec ${pkgs.util-linux}/bin/setpriv --inh-caps=-all --ambient-caps=-all \
+      ${pkgs.electron}/bin/electron \
       ${din-app}/share/din/main.mts \
       --ozone-platform=wayland ${extraFlags}
   '';
@@ -452,12 +460,6 @@ in
   # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
   # writes (os/din-keyboard.sh). cage applies it, and Din inherits it.
   systemd.services.cage-tty1.serviceConfig.EnvironmentFile = "-/var/lib/din/keyboard";
-  # pam_systemd gives a session's processes CAP_WAKE_ALARM as an ambient
-  # capability, so everything Din and its Terminal start carried it. Programs
-  # that drop all their capabilities (gnome-keyring-daemon, for one) can't
-  # drop an ambient one they never asked for, and abort. Elsewhere terminals
-  # are started by the user manager, which doesn't hand it out; nor does Din.
-  security.pam.services.cage.rules.session.systemd.settings."default-capability-ambient-set" = "";
 
   # cage's unit conflicts with the console login on tty1 (autovt@tty1), which
   # getty.target still wants. A system switch re-starts both targets, and
