@@ -260,6 +260,20 @@ export const Window = memo(function Window({
   // boundary is crossed, so pointer moves still avoid React state churn.
   const [snapHint, setSnapHint] = useState<Rect | null>(null);
 
+  // The element in this window that last held focus. Coming back on top -
+  // Alt+Tab, a dock click, restoring from minimized - gives it focus again,
+  // the way native windows get keyboard focus back when raised, so typing
+  // and arrow keys pick up where they left off. A focused <webview> guest
+  // registers through GuestInputHost's focusin.
+  const lastFocused = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!isTop) return;
+    const section = sectionRef.current;
+    const el = lastFocused.current;
+    if (!section || !el?.isConnected || section.contains(document.activeElement)) return;
+    el.focus({ preventScroll: true });
+  }, [isTop]);
+
   /**
    * Put the window into "cheap to move" mode for the duration of a gesture.
    * backdrop-filter forces the compositor to re-sample everything behind the
@@ -1077,8 +1091,13 @@ export const Window = memo(function Window({
       // fire focus events either (Electron webviews in particular, and
       // guest-to-guest focus moves fire nothing here at all). Clicks into web
       // content raise the window via GuestClickShield overlays instead, whose
-      // pointerdown bubbles to the handler above.
-      onFocus={() => focus(win.id)}
+      // pointerdown bubbles to the handler above. Presses inside a top
+      // window's guest arrive as GuestInputHost's synthetic focusin, so the
+      // guest is still remembered as the last-focused element.
+      onFocus={(e) => {
+        if (e.target instanceof HTMLElement) lastFocused.current = e.target;
+        focus(win.id);
+      }}
       style={geometry}
       onAnimationEnd={(e) => {
         // The exit animation finished: remove the window for real. Guarded

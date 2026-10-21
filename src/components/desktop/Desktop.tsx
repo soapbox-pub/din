@@ -9,6 +9,7 @@ import { BrightnessOsd } from './BrightnessOsd';
 import { NostrNotifications } from './NostrNotifications';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
+import { GuestInputHost } from './GuestInputHost';
 import { Window } from './Window';
 import { WindowSwitcher } from './WindowSwitcher';
 import { FilePickerProvider } from './FilePickerProvider';
@@ -103,6 +104,7 @@ function DesktopSession() {
             <DesktopHotkeys />
             <SystemEventsHost />
             <SystemNotificationsHost />
+            <GuestInputHost />
             <InstallerAutoOpen />
             <UpdateNotifier />
             <BootScreenSync />

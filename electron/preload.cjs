@@ -1371,6 +1371,27 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
   },
 });
 
+// Pointer input inside <webview> guests, forwarded from the main process
+// (forwardGuestInput in main.mts) because it never reaches the shell's
+// document. See src/lib/guestInput.ts for the typed renderer-side accessor.
+contextBridge.exposeInMainWorld('guestInput', {
+  /**
+   * Subscribe to forwarded guest input. Returns an unsubscribe fn. Payloads:
+   *   { wcId, type: 'move', x, y }
+   *   { wcId, type: 'down', x, y, button }
+   * @param {(data: { wcId: number, type: string, x: number, y: number, button?: string }) => void} callback
+   */
+  onInput: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, type: string, x: number, y: number, button?: string }} data
+     */
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('guest:input', handler);
+    return () => ipcRenderer.removeListener('guest:input', handler);
+  },
+});
+
 // Nostr identity bridge host (window.nostrHost), backed by the
 // nostr-bridge:* handlers in main.mts. Installed web apps get a NIP-07
 // window.nostr (see webview-preload.cjs) whose calls are relayed here, to the

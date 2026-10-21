@@ -312,9 +312,10 @@ export function Dock({
   // never reaches this document - so with, say, a maximized Browser window the
   // pointermove listener is blind across the whole reveal zone. A real DOM
   // strip at the bottom edge (rendered only while hidden, above the windows)
-  // catches the hover instead, and a pointerleave check on the footer handles
-  // the mirror-image problem of retracting after the pointer re-enters the
-  // guest surface.
+  // catches the hover instead. Retracting is the mirror-image problem: in the
+  // Electron shell, GuestInputHost replays moves over a <webview> as
+  // pointermoves, so the listener below sees them; for iframes, a
+  // pointerleave check on the footer stands in.
   const [revealed, setRevealed] = useState(false);
   // A reveal only means something while the dock is hideable; drop stale
   // reveals as soon as nothing overlaps (adjust-state-during-render pattern).

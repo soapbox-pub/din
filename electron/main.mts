@@ -2588,6 +2588,48 @@ function sendToShell(channel: string, payload?: unknown): void {
   }
 }
 
+/** How often, at most, a guest's pointer moves are forwarded to the shell. */
+const GUEST_MOVE_INTERVAL_MS = 16;
+
+/**
+ * Pointer input inside a <webview> guest goes to the guest's own document and
+ * never reaches the shell's, so the shell can't react to it: popovers and
+ * menus stay open over a click into the page, and the dock can't tell the
+ * pointer moved over one. Forward what the shell reacts to - button presses
+ * and moves (at most one per frame) - so GuestInputHost can replay it on the
+ * guest's <webview> element. Coordinates are in the guest's view, in DIPs
+ * (verified on Electron 41: the shell's interface zoom isn't applied).
+ *
+ * A guest's own `focus` event would be the obvious way to report focus too,
+ * but it never fires for <webview> guests (also verified), so the shell
+ * treats a press as focusing the page instead.
+ */
+function forwardGuestInput(contents: Electron.WebContents): void {
+  const wcId = contents.id;
+  let pendingMove: { x: number; y: number } | null = null;
+  let moveTimer: NodeJS.Timeout | null = null;
+  const flushMove = (): void => {
+    if (moveTimer) clearTimeout(moveTimer);
+    moveTimer = null;
+    if (!pendingMove) return;
+    sendToShell('guest:input', { wcId, type: 'move', ...pendingMove });
+    pendingMove = null;
+  };
+  contents.on('before-mouse-event', (_event, mouse) => {
+    if (mouse.type === 'mouseMove') {
+      pendingMove = { x: mouse.x, y: mouse.y };
+      moveTimer ??= setTimeout(flushMove, GUEST_MOVE_INTERVAL_MS);
+    } else if (mouse.type === 'mouseDown') {
+      // Keep the order the guest saw: the move that led here comes first.
+      flushMove();
+      sendToShell('guest:input', { wcId, type: 'down', x: mouse.x, y: mouse.y, button: mouse.button ?? 'left' });
+    }
+  });
+  contents.once('destroyed', () => {
+    if (moveTimer) clearTimeout(moveTimer);
+  });
+}
+
 /**
  * Resolve a renderer-supplied WebContents id to a browser-tab guest, or null.
  * Only <webview> guests inside the browser partition qualify; anything else
@@ -4263,6 +4305,8 @@ app.on('web-contents-created', (_event, contents) => {
     });
     return;
   }
+
+  forwardGuestInput(contents);
 
   const isBrowserTab = contents.session === browserSession();
 
