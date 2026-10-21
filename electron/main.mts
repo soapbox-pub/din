@@ -40,6 +40,7 @@ import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerTrayHandlers } from './tray.mts';
+import { registerNotificationHandlers } from './notifications.mts';
 import { registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
@@ -3989,6 +3990,7 @@ app.whenReady().then(() => {
   });
   registerKeyboardHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
+  registerNotificationHandlers({ isShellSender, sendToShell });
   registerInstallerHandlers({ assertShellSender, sendToShell });
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerNostrdHandlers({ assertShellSender, sendToShell });

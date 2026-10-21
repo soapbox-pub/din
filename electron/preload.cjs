@@ -16,6 +16,8 @@
 //   - window.theme: the light/dark mode pages see through prefers-color-scheme
 //   - window.keyboard: the system's keyboard layout, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
+//   - window.systemNotifications: Linux apps' and web pages' notifications,
+//     for the notification center
 //   - window.installer: put DinOS on this computer's disk, for the
 //     Installer app (live USB boots only)
 //   - window.updater: DinOS system updates, for the Settings app
@@ -555,6 +557,54 @@ contextBridge.exposeInMainWorld('tray', {
     ipcRenderer.on('tray:menu-changed', handler);
     return () => ipcRenderer.removeListener('tray:menu-changed', handler);
   },
+});
+
+// System notifications bridge (window.systemNotifications), backed by
+// electron/notifications.mts: notifications from Linux apps (over D-Bus) and
+// web pages, for the notification center, and what the user did with them.
+contextBridge.exposeInMainWorld('systemNotifications', {
+  /**
+   * Subscribe to new (or replaced) notifications. Returns an unsubscribe fn.
+   * @param {(notification: unknown) => void} callback
+   */
+  onShow: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} notification
+     */
+    const handler = (_event, notification) => callback(notification);
+    ipcRenderer.on('notifications:show', handler);
+    return () => ipcRenderer.removeListener('notifications:show', handler);
+  },
+
+  /**
+   * Subscribe to notifications their sender closed (their id). Returns an
+   * unsubscribe fn.
+   * @param {(id: string) => void} callback
+   */
+  onClose: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string} id
+     */
+    const handler = (_event, id) => callback(id);
+    ipcRenderer.on('notifications:close', handler);
+    return () => ipcRenderer.removeListener('notifications:close', handler);
+  },
+
+  /**
+   * The user clicked a notification ('default') or one of its actions.
+   * @param {string} id
+   * @param {string} action
+   */
+  activate: (id, action) => ipcRenderer.send('notifications:activate', id, action),
+
+  /**
+   * A notification went away.
+   * @param {string} id
+   * @param {'expired' | 'dismissed' | 'closed'} reason
+   */
+  closed: (id, reason) => ipcRenderer.send('notifications:closed', id, reason),
 });
 
 // Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -
