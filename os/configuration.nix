@@ -142,7 +142,7 @@ let
   # keyboard layout (see the script, and electron/keyboard.mts).
   din-keyboard = pkgs.writeShellApplication {
     name = "din-keyboard";
-    runtimeInputs = with pkgs; [ coreutils gnugrep systemd din-boot-screen ];
+    runtimeInputs = with pkgs; [ coreutils gnugrep systemd libxkbcommon din-boot-screen ];
     text = builtins.readFile ./din-keyboard.sh;
   };
 
@@ -439,13 +439,17 @@ in
   # unsupported - the attribute just won't exist. `add|change` so it applies on
   # both cold-plug and hot-plug (e.g. plugging into the dock while running).
   #
-  # The last rule names the ESP the boot loader ran from /dev/disk/dinos-esp
+  # The next rule names the ESP the boot loader ran from /dev/disk/dinos-esp
   # (for /boot, below). systemd's by-designator/esp is the first ESP on the
   # disk, which next to Windows is Windows'.
+  #
+  # The last remaps keys the way hwdb does, from the file din-keyboard
+  # writes when the layout needs it (os/din-keyboard.sh).
   services.udev.extraRules = ''
     ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{power/wakeup}="enabled"
     ACTION=="add|change", SUBSYSTEM=="pci", ATTR{class}=="0x0c03*", ATTR{power/wakeup}="enabled"
     SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_PART_ENTRY_TYPE}=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b", PROGRAM="${isBootedEsp} $env{ID_PART_ENTRY_UUID}", SYMLINK+="disk/dinos-esp"
+    ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TEST=="/var/lib/din/keyboard-remap", IMPORT{file}="/var/lib/din/keyboard-remap", IMPORT{builtin}="keyboard"
   '';
 
   # cage: a Wayland compositor that runs exactly one fullscreen application.
@@ -584,8 +588,11 @@ in
   };
   # Plymouth turns the layout into a keymap with libxkbcommon, which looks
   # for XKB's data where it was built to, a store path the initrd only has
-  # if it's asked for.
+  # if it's asked for. It only uses the layout for keyboards it reads through
+  # evdev, which nothing loads in the initrd unless asked: without it, the
+  # password is typed through the console's US keymap.
   boot.initrd.systemd.storePaths = [ pkgs.xkeyboard_config ];
+  boot.initrd.kernelModules = [ "evdev" ];
   systemd.services.plymouth-quit.serviceConfig.ExecStart = [
     ""
     "${config.boot.plymouth.package}/bin/plymouth quit --retain-splash"
@@ -768,6 +775,17 @@ in
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${din-boot-screen}/bin/din-boot-screen sync";
+    };
+  };
+
+  # Likewise Caps Lock's remapping, for layouts set before there was one.
+  systemd.services.din-keyboard-remap = {
+    description = "Remap keys for DinOS's keyboard layout";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "systemd-udev-trigger.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${din-keyboard}/bin/din-keyboard remap";
     };
   };
 
