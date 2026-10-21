@@ -105,6 +105,14 @@ const setSharedFontSize = (size: number) => {
   for (const listener of fontSizeListeners) listener(clamped);
 };
 
+/**
+ * Whether a key event is the given Latin letter. Layouts without Latin
+ * letters (Cyrillic, Greek, ...) fall back to the physical key, so Ctrl+C
+ * still copies on them, the way elementary's terminal matches keycodes.
+ */
+const isLetterKey = (e: KeyboardEvent, letter: string) =>
+  /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() === letter : e.code === `Key${letter.toUpperCase()}`;
+
 /** Split axis: 'row' places panes side by side, 'column' stacks them. */
 type SplitDir = 'row' | 'column';
 
@@ -274,7 +282,7 @@ function flattenLayout(
  * bridge (see src/lib/pty.ts). Sessions run as the unprivileged OS user and
  * die with the window. Multiple tabs share one window: all sessions stay
  * mounted (their xterm state survives) and only the active tab is visible.
- * Ctrl+PageUp/PageDown switch tabs, Ctrl+Shift+T opens one and Ctrl+Shift+W
+ * Ctrl+PageUp/PageDown switch tabs, Ctrl+(Shift+)T opens one and Ctrl+Shift+W
  * closes one (gnome-terminal/Tilix bindings); when a shell exits its pane
  * closes, and closing the last tab closes the window.
  * Within a tab, right-click offers Tilix-style tiling: split a pane right or
@@ -799,9 +807,12 @@ const TerminalSession = memo(function TerminalSession({
     container.addEventListener('wheel', onWheel, { passive: false, capture: true });
 
     // Ctrl/Cmd +/-/0 keyboard zoom and gnome-terminal/Tilix-style tab
-    // shortcuts: Ctrl+PageUp/PageDown switch tabs, Ctrl+Shift+T opens one,
-    // Ctrl+Shift+W closes the current one. Returning false stops xterm from
-    // also sending the keystroke to the shell.
+    // shortcuts: Ctrl+PageUp/PageDown switch tabs, Ctrl+T or Ctrl+Shift+T
+    // opens one, Ctrl+Shift+W closes the current one. Copy and paste work
+    // like elementary's terminal ("natural copy/paste"): Ctrl+C copies when
+    // there's a selection and is ^C otherwise, Ctrl+V pastes when the
+    // clipboard has text and is ^V otherwise; Shift works too. Returning
+    // false stops xterm from also sending the keystroke to the shell.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey) || e.altKey) return true;
       if (!e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
@@ -809,7 +820,24 @@ const TerminalSession = memo(function TerminalSession({
         onTabShortcutRef.current(e.key === 'PageUp' ? 'prev-tab' : 'next-tab');
         return false;
       }
-      if (e.shiftKey && e.key.toLowerCase() === 't') {
+      if (isLetterKey(e, 'c') && term.hasSelection()) {
+        e.preventDefault();
+        navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+        return false;
+      }
+      if (isLetterKey(e, 'v')) {
+        e.preventDefault();
+        navigator.clipboard
+          .readText()
+          .catch(() => '')
+          .then((text) => {
+            if (disposed) return;
+            if (text) term.paste(text);
+            else if (sessionId !== null && !e.shiftKey) bridge.write(sessionId, '\x16');
+          });
+        return false;
+      }
+      if (isLetterKey(e, 't')) {
         e.preventDefault();
         onTabShortcutRef.current('new-tab');
         return false;
