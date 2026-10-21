@@ -1786,18 +1786,23 @@ function registerSystemEvents(): void {
   });
 }
 
+/** Adjust the default sink and push the new state to the shell for the OSD. */
+function pushAudioOsd(statusPromise: Promise<AudioState>): void {
+  statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
+}
+
 /**
- * Global media keys (VolumeUp/Down/Mute). Din owns the whole session, so it
- * grabs these directly, adjusts the default sink, and pushes the new state to
- * the shell so it can show the volume OSD. Harmless when wpctl is absent (the
- * adjust rejects and no OSD is shown).
+ * Global volume keys (VolumeUp/Down/Mute) under X11. Wayland has no global
+ * key grabs (cage offers no GlobalShortcuts portal), so there these calls
+ * would silently fail; the keys reach Din as ordinary input instead and
+ * attachMediaKeys handles them. Harmless when wpctl is absent (the adjust
+ * rejects and no OSD is shown).
  */
 function registerMediaKeys(): void {
-  const push = (statusPromise: Promise<AudioState>) =>
-    statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
-  globalShortcut.register('VolumeUp', () => push(audioAdjust(5)));
-  globalShortcut.register('VolumeDown', () => push(audioAdjust(-5)));
-  globalShortcut.register('VolumeMute', () => push(audioToggleMute()));
+  if (process.env.WAYLAND_DISPLAY) return;
+  globalShortcut.register('VolumeUp', () => pushAudioOsd(audioAdjust(5)));
+  globalShortcut.register('VolumeDown', () => pushAudioOsd(audioAdjust(-5)));
+  globalShortcut.register('VolumeMute', () => pushAudioOsd(audioToggleMute()));
 }
 
 // ---------------------------------------------------------------------------
@@ -2097,17 +2102,26 @@ async function brightnessSetTemperature(kelvin: unknown): Promise<BrightnessStat
 }
 
 /**
- * Brightness media keys. Electron's accelerator grammar has no brightness key
- * names (globalShortcut can only grab the audio media keys), but the
- * compositor delivers XF86MonBrightnessUp/Down to the focused client as
- * ordinary keyboard input with the DOM key "BrightnessUp"/"BrightnessDown".
- * Din is that client, so intercept them in before-input-event - attached to
- * every webContents, since focus may live inside a <webview> guest - adjust
- * the backlight, and push the new state to the shell for the OSD.
+ * Brightness and volume media keys. Electron's accelerator grammar has no
+ * brightness key names, and on Wayland globalShortcut can't grab anything,
+ * but the compositor delivers XF86MonBrightness* and XF86Audio* keys to the
+ * focused client as ordinary keyboard input ("BrightnessUp",
+ * "AudioVolumeUp", ...). Din is that client, so intercept them in
+ * before-input-event - attached to every webContents, since focus may live
+ * inside a <webview> guest - adjust the backlight or sink, and push the new
+ * state to the shell for the OSD.
  */
-function attachBrightnessMediaKeys(contents: Electron.WebContents): void {
+function attachMediaKeys(contents: Electron.WebContents): void {
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
+    const key = input.key === 'Unidentified' ? input.code : input.key;
+    if (key === 'AudioVolumeUp' || key === 'AudioVolumeDown' || key === 'AudioVolumeMute') {
+      event.preventDefault();
+      if (key === 'AudioVolumeUp') pushAudioOsd(audioAdjust(5));
+      else if (key === 'AudioVolumeDown') pushAudioOsd(audioAdjust(-5));
+      else pushAudioOsd(audioToggleMute());
+      return;
+    }
     let delta: number | null = null;
     if (input.key === 'BrightnessUp' || input.code === 'BrightnessUp') delta = 5;
     if (input.key === 'BrightnessDown' || input.code === 'BrightnessDown') delta = -5;
@@ -4160,9 +4174,9 @@ app.on('will-quit', () => {
 // Browser-partition guests are also registered as tabs with the Chrome
 // extension system (chrome.tabs sees them; content scripts inject).
 app.on('web-contents-created', (_event, contents) => {
-  // Brightness keys arrive as ordinary keyboard input to whichever contents
-  // holds focus (shell or any guest), so hook them everywhere.
-  attachBrightnessMediaKeys(contents);
+  // Brightness and volume keys arrive as ordinary keyboard input to whichever
+  // contents holds focus (shell or any guest), so hook them everywhere.
+  attachMediaKeys(contents);
 
   if (contents.getType() !== 'webview') {
     // The shell renderer (address bar, inputs, etc.) gets no context menu by
