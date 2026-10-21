@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BatteryFull,
   Bell,
+  BellOff,
   Bomb,
   Bug,
   Check,
@@ -101,6 +102,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
 import { useNotificationSettings } from '@/hooks/useNotificationSettings';
+import { setDoNotDisturb, useNotificationCenter } from '@/lib/notificationCenter';
 import { NOTIFICATION_CATEGORY_META, type NotificationPreferences } from '@/lib/notifications';
 import { useToast } from '@/hooks/useToast';
 import { useFilePicker } from '@/contexts/FilePickerContext';
@@ -2287,24 +2289,39 @@ function KeyboardSection() {
 // ---------------------------------------------------------------------------
 
 /**
- * Notification preferences: which Nostr interactions (mentions, comments,
- * reposts, reactions, zaps) surface as desktop notifications, whether to gate
- * them to people you follow, and whether to show the transient on-screen
- * popup. Everything is stored through Din's encrypted app-data layer, so it
- * roams across devices. The menu-bar bell and the on-screen display read the
- * same settings.
+ * Notification preferences. Do Not Disturb applies to every notification and
+ * stays on this computer. The rest is about Nostr: which interactions
+ * (mentions, comments, reposts, reactions, zaps) surface as notifications,
+ * whether to gate them to people you follow, and whether they pop up. Those
+ * are stored through Din's encrypted app-data layer, so they roam across
+ * devices. The menu-bar bell and the popups read the same settings.
  */
 function NotificationsSection() {
   const { user } = useCurrentUser();
   const { preferences, setPreferences } = useNotificationSettings();
+  const { doNotDisturb } = useNotificationCenter();
+
+  const dndRow = (
+    <SettingSwitchRow
+      id="notif-dnd"
+      icon={BellOff}
+      label="Do Not Disturb"
+      description="Keep notifications in the list without popping them up. Urgent ones still show."
+      checked={doNotDisturb}
+      onCheckedChange={setDoNotDisturb}
+    />
+  );
 
   if (!user) {
     return (
       <SectionShell title="Notifications">
-        <FallbackCard icon={Bell}>
-          Log in with your Nostr account to receive notifications when people
-          mention, react to, repost, comment on, or zap you.
-        </FallbackCard>
+        <div className="flex flex-col gap-4">
+          {dndRow}
+          <FallbackCard icon={Bell}>
+            Log in with your Nostr account to also be notified when people
+            mention, react to, repost, comment on, or zap you.
+          </FallbackCard>
+        </div>
       </SectionShell>
     );
   }
@@ -2312,13 +2329,14 @@ function NotificationsSection() {
   return (
     <SectionShell title="Notifications">
       <div className="flex flex-col gap-4">
-        <div>
-          <h3 className="mb-2 text-sm font-medium text-foreground">Delivery</h3>
+        {dndRow}
+        <div className="border-t border-border/60 pt-4">
+          <h3 className="mb-2 text-sm font-medium text-foreground">Nostr</h3>
           <div className="flex flex-col gap-2">
             <SettingSwitchRow
               id="notif-osd"
               label="On-screen alerts"
-              description="Show a popup in the corner when a new notification arrives."
+              description="Pop up new mentions, reactions, reposts, comments and zaps in the corner."
               checked={preferences.osd}
               onCheckedChange={(checked) => setPreferences({ osd: checked })}
             />

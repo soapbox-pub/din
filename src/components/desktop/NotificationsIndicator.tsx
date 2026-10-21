@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
-import { Bell, CheckCheck } from 'lucide-react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Bell, BellOff, CheckCheck } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -11,7 +11,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { NotificationCard } from '@/components/desktop/NotificationCard';
 import { getAvatarShape } from '@/lib/avatarShape';
+import {
+  clearNotifications,
+  markNotificationsRead,
+  setDoNotDisturb,
+  useNotificationCenter,
+} from '@/lib/notificationCenter';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
@@ -29,31 +36,33 @@ import {
 } from '@/lib/notifications';
 
 /**
- * Menu-bar notifications bell.
+ * Menu-bar notifications bell: the notification center.
  *
- * The bell shows a badge dot while unread interactions exist (a cheap
- * one-event relay check). Clicking it opens a popover with the grouped
- * notification list; unread rows stay highlighted while it's open and the read
- * cursor advances when it closes, so viewing the list dismisses the badge.
- * Renders nothing when signed out — notifications are per-account.
+ * Its list holds this session's notifications from apps (see
+ * notificationCenter.ts) above the signed-in account's Nostr interactions,
+ * which come from relays. The bell shows a badge dot while either has unread
+ * entries (for Nostr, a cheap one-event relay check). Unread rows stay
+ * highlighted while the list is open, and everything counts as read once it
+ * closes, so viewing the list dismisses the badge.
  */
 export const NotificationsMenuItem = memo(function NotificationsMenuItem() {
-  const { user } = useCurrentUser();
-  const hasUnread = useHasUnreadNotifications();
-
-  if (!user) return null;
+  const hasUnreadNostr = useHasUnreadNotifications();
+  const { notifications, doNotDisturb } = useNotificationCenter();
+  const hasUnread = hasUnreadNostr || notifications.some((n) => n.history && !n.read);
+  const BellIcon = doNotDisturb ? BellOff : Bell;
+  const [open, setOpen] = useState(false);
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
           aria-label={hasUnread ? 'Notifications, unread' : 'Notifications'}
-          title="Notifications"
+          title={doNotDisturb ? 'Notifications (Do Not Disturb)' : 'Notifications'}
           className="relative size-7 rounded-md text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
         >
-          <Bell className="size-4.5" />
+          <BellIcon className="size-4.5" />
           {hasUnread && (
             <span
               aria-hidden
@@ -68,22 +77,90 @@ export const NotificationsMenuItem = memo(function NotificationsMenuItem() {
         sideOffset={8}
         className="w-96 overflow-hidden p-0"
       >
-        <NotificationsPanel />
+        <NotificationsPanel onNavigate={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   );
 });
 
-/** The popover body: header + scrollable notification list. */
-function NotificationsPanel() {
+/** The popover body: header, then app notifications above Nostr's. */
+function NotificationsPanel({ onNavigate }: { onNavigate: () => void }) {
+  const { user } = useCurrentUser();
+  const { notifications, doNotDisturb } = useNotificationCenter();
+  const appNotifications = notifications.filter((n) => n.history);
+
+  // Dismiss-on-view: unread rows stay highlighted while the panel is open, and
+  // count as read once it closes. The panel only mounts while the popover is
+  // open, so its unmount cleanup is exactly "the user dismissed the list".
+  useEffect(() => () => markNotificationsRead(), []);
+
+  return (
+    <div className="flex max-h-[70vh] flex-col">
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+        <p className="text-sm font-semibold text-foreground">Notifications</p>
+        <div className="flex items-center gap-1">
+          {appNotifications.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={clearNotifications}
+            >
+              Clear
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-pressed={doNotDisturb}
+            aria-label="Do Not Disturb"
+            title={doNotDisturb ? 'Do Not Disturb is on' : 'Do Not Disturb'}
+            className={cn(
+              'size-7 text-muted-foreground hover:text-foreground',
+              doNotDisturb && 'bg-foreground/10 text-foreground',
+            )}
+            onClick={() => setDoNotDisturb(!doNotDisturb)}
+          >
+            <BellOff className="size-3.5" aria-hidden />
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {appNotifications.length > 0 && (
+          <ul className="divide-y divide-border/40" aria-label="App notifications">
+            {appNotifications.map((notification) => (
+              <li key={notification.id}>
+                <NotificationCard notification={notification} variant="list" onActivated={onNavigate} />
+              </li>
+            ))}
+          </ul>
+        )}
+        {user ? (
+          <NostrNotificationsList separated={appNotifications.length > 0} />
+        ) : (
+          appNotifications.length === 0 && (
+            <div className="px-6 py-12 text-center">
+              <Bell className="mx-auto mb-3 size-8 text-muted-foreground/50" aria-hidden />
+              <p className="text-sm text-muted-foreground">
+                No notifications. Log in to get your Nostr mentions, reactions and zaps here too.
+              </p>
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The signed-in account's Nostr interactions, from relays. */
+function NostrNotificationsList({ separated }: { separated: boolean }) {
   const { items, isLoading, hasFetched, hasNextPage, isFetchingNextPage, fetchNextPage, hasUnread, markAsRead } =
     useNotifications();
 
-  // Dismiss-on-view: unread rows stay highlighted while the panel is open, and
-  // the read cursor advances when it closes. The panel only mounts while the
-  // popover is open, so its unmount cleanup is exactly "the user dismissed the
-  // list". A ref keeps the latest markAsRead so the once-only cleanup still
-  // closes over the freshest cursor/newest-timestamp.
+  // The read cursor advances when the list closes. A ref keeps the latest
+  // markAsRead so the once-only cleanup still closes over the freshest
+  // cursor/newest-timestamp.
   const markAsReadRef = useRef(markAsRead);
   useEffect(() => {
     markAsReadRef.current = markAsRead;
@@ -91,9 +168,9 @@ function NotificationsPanel() {
   useEffect(() => () => markAsReadRef.current(), []);
 
   return (
-    <div className="flex max-h-[70vh] flex-col">
-      <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
-        <p className="text-sm font-semibold text-foreground">Notifications</p>
+    <section aria-label="Nostr notifications" className={cn(separated && 'border-t border-border/60')}>
+      <div className="flex items-center justify-between px-4 pb-1 pt-2.5">
+        <p className="text-xs font-medium text-muted-foreground">Nostr</p>
         <Button
           variant="ghost"
           size="sm"
@@ -105,41 +182,38 @@ function NotificationsPanel() {
           Mark all read
         </Button>
       </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {isLoading && !hasFetched ? (
-          <NotificationsSkeleton />
-        ) : items.length === 0 ? (
-          <div className="px-6 py-12 text-center">
-            <Bell className="mx-auto mb-3 size-8 text-muted-foreground/50" aria-hidden />
-            <p className="text-sm text-muted-foreground">
-              No notifications yet. Mentions, reactions, reposts and zaps will show up here.
-            </p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-border/40">
-            {items.map((item) => (
-              <li key={item.event.id}>
-                <NotificationRow item={item} />
-              </li>
-            ))}
-            {hasNextPage && (
-              <li className="p-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full text-xs text-muted-foreground"
-                  disabled={isFetchingNextPage}
-                  onClick={() => fetchNextPage()}
-                >
-                  {isFetchingNextPage ? 'Loading…' : 'Load more'}
-                </Button>
-              </li>
-            )}
-          </ul>
-        )}
-      </div>
-    </div>
+      {isLoading && !hasFetched ? (
+        <NotificationsSkeleton />
+      ) : items.length === 0 ? (
+        <div className="px-6 py-12 text-center">
+          <Bell className="mx-auto mb-3 size-8 text-muted-foreground/50" aria-hidden />
+          <p className="text-sm text-muted-foreground">
+            No notifications yet. Mentions, reactions, reposts and zaps will show up here.
+          </p>
+        </div>
+      ) : (
+        <ul className="divide-y divide-border/40">
+          {items.map((item) => (
+            <li key={item.event.id}>
+              <NotificationRow item={item} />
+            </li>
+          ))}
+          {hasNextPage && (
+            <li className="p-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full text-xs text-muted-foreground"
+                disabled={isFetchingNextPage}
+                onClick={() => fetchNextPage()}
+              >
+                {isFetchingNextPage ? 'Loading…' : 'Load more'}
+              </Button>
+            </li>
+          )}
+        </ul>
+      )}
+    </section>
   );
 }
 
