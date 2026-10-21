@@ -41,11 +41,11 @@
         "rev": "5e88008b35140b592c3dbbae1c627ae180a66251",
         "revCount": 3,
         "type": "git",
-        "url": "file:///home/alex/Projects/nostrd"
+        "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/nostrd.git"
       },
       "original": {
         "type": "git",
-        "url": "file:///home/alex/Projects/nostrd"
+        "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/nostrd.git"
       }
     },
     "root": {

@@ -10,9 +10,11 @@
       flake = false;
     };
 
-    # The signer daemon that holds the account keys.
+    # The signer daemon that holds the account keys. Its repository is
+    # nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/nostrd;
+    # Nix fetches it from the grasp server over plain git.
     nostrd = {
-      url = "git+file:///home/alex/Projects/nostrd";
+      url = "git+https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/nostrd.git";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
