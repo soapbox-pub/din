@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { Settings2, Volume1, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { PopoverClose } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
+import { MAX_VOLUME } from '@/lib/audio';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 
 /**
@@ -29,6 +30,29 @@ export function VolumeGlyph({
           ? Volume1
           : Volume2;
   return <Icon className={className} aria-hidden />;
+}
+
+/** Where 100% sits along a 0-MAX_VOLUME track, as a CSS percentage. */
+export const UNITY_POSITION = `${(100 / MAX_VOLUME) * 100}%`;
+
+/**
+ * A 0-MAX_VOLUME slider with a tick at 100%. Everything right of the tick is
+ * PipeWire amplifying past the device's full volume.
+ */
+export function VolumeSlider({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof Slider>, 'min' | 'max' | 'step'>) {
+  return (
+    <div className={cn('relative flex items-center', className)}>
+      <Slider min={0} max={MAX_VOLUME} step={1} {...props} />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/40"
+        style={{ left: UNITY_POSITION }}
+      />
+    </div>
+  );
 }
 
 /** Popover content: a volume slider, mute toggle, and settings link. */
@@ -74,12 +98,9 @@ export function VolumePopoverBody() {
             className={cn('size-5', muted && 'text-muted-foreground')}
           />
         </Button>
-        <Slider
+        <VolumeSlider
           aria-label="Volume"
           value={[muted ? 0 : value]}
-          min={0}
-          max={100}
-          step={1}
           className="flex-1"
           onValueChange={([v]) => {
             if (muted) setMuted.mutate(false);

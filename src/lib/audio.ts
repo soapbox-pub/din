@@ -8,10 +8,16 @@
  * must feature-detect and render nothing / a fallback.
  */
 
+/**
+ * Loudest volume the bridge will set, in percent. Above 100 is PipeWire's
+ * software amplification. Keep in step with MAX_VOLUME in electron/main.mts.
+ */
+export const MAX_VOLUME = 150;
+
 export interface AudioStatus {
   /** False when wpctl/PipeWire is not present. */
   available: boolean;
-  /** Default sink volume 0-100, or null if it couldn't be read. */
+  /** Default sink volume 0-MAX_VOLUME, or null if it couldn't be read. */
   volume: number | null;
   muted: boolean;
 }
@@ -54,7 +60,7 @@ export interface AudioStreams {
 export interface AudioBridge {
   /** Default sink volume/mute. `available: false` when wpctl is absent. */
   status(): Promise<AudioStatus>;
-  /** Set the default sink volume (0-100). Resolves to the new state. */
+  /** Set the default sink volume (0-MAX_VOLUME). Resolves to the new state. */
   setVolume(percent: number): Promise<AudioStatus>;
   /** Mute or unmute the default sink. Resolves to the new state. */
   setMuted(muted: boolean): Promise<AudioStatus>;
@@ -64,7 +70,7 @@ export interface AudioBridge {
   streams(): Promise<AudioStreams>;
   /** Make a device the default sink/source by id. Resolves to the new list. */
   setDefault(id: number): Promise<AudioDevices>;
-  /** Set any node's volume (0-100) by id (per-app streams, per-device). */
+  /** Set any node's volume (0-MAX_VOLUME) by id (per-app streams, per-device). */
   setNodeVolume(id: number, percent: number): Promise<void>;
   /** Mute or unmute any node by id. */
   setNodeMuted(id: number, muted: boolean): Promise<void>;

@@ -74,7 +74,7 @@ import {
   useSetPowerProfile,
 } from '@/hooks/usePower';
 import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
-import { cleanAudioError, getAudioBridge } from '@/lib/audio';
+import { MAX_VOLUME, cleanAudioError, getAudioBridge } from '@/lib/audio';
 import type { AudioDevice, AudioStream } from '@/lib/audio';
 import {
   useAudioDeviceMutations,
@@ -83,7 +83,7 @@ import {
   useAudioStatus,
   useAudioStreams,
 } from '@/hooks/useAudio';
-import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
+import { VolumeGlyph, VolumeSlider } from '@/components/desktop/VolumeIndicator';
 import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
 import { cleanLockError, getLockBridge } from '@/lib/lock';
 import { useQuery } from '@tanstack/react-query';
@@ -1752,7 +1752,7 @@ function AudioStreamRow({
     setLastServer(stream.volume);
     setValue(stream.volume);
   }
-  const shown = Math.min(100, value);
+  const shown = Math.min(MAX_VOLUME, value);
   return (
     <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
       <Button
@@ -1771,12 +1771,9 @@ function AudioStreamRow({
       <span className="w-28 shrink-0 truncate text-sm" title={stream.name}>
         {stream.name}
       </span>
-      <Slider
+      <VolumeSlider
         aria-label={`${stream.name} volume`}
         value={[stream.muted ? 0 : shown]}
-        min={0}
-        max={100}
-        step={1}
         className="flex-1"
         onValueChange={([v]) => {
           if (stream.muted) onMuted(false);
@@ -1992,12 +1989,9 @@ function SoundSection() {
                 className={cn('size-6', muted && 'text-muted-foreground')}
               />
             </Button>
-            <Slider
+            <VolumeSlider
               aria-label="Output volume"
               value={[muted ? 0 : value]}
-              min={0}
-              max={100}
-              step={1}
               className="flex-1"
               onValueChange={([v]) => {
                 if (muted) setMuted.mutate(false);

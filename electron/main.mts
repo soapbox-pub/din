@@ -1478,11 +1478,19 @@ function wpctl(args: string[], timeout = WPCTL_TIMEOUT_MS): Promise<string> {
   return tool('wpctl', args, timeout);
 }
 
-/** Clamp a caller-supplied percentage to an integer 0..100. */
+/**
+ * Loudest volume Din will set, in percent. Past 100 PipeWire amplifies in
+ * software, which can clip, so it stops at 150 like GNOME's over-amplification.
+ * Keep in step with MAX_VOLUME in src/lib/audio.ts.
+ */
+const MAX_VOLUME = 150;
+const WPCTL_LIMIT = String(MAX_VOLUME / 100);
+
+/** Clamp a caller-supplied percentage to an integer 0..MAX_VOLUME. */
 function clampVolume(pct: unknown): number {
   const n = Number(pct);
   if (!Number.isFinite(n)) throw new Error('Invalid volume');
-  return Math.max(0, Math.min(100, Math.round(n)));
+  return Math.max(0, Math.min(MAX_VOLUME, Math.round(n)));
 }
 
 /** The default sink's state as reported to the shell. */
@@ -1510,8 +1518,7 @@ async function audioStatus(): Promise<AudioState> {
 
 async function audioSetVolume(pct: unknown): Promise<AudioState> {
   const v = clampVolume(pct);
-  // -l 1.0 caps at 100% so we never push into PipeWire's >1.0 boost range.
-  await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${v}%`]);
+  await wpctl(['set-volume', '-l', WPCTL_LIMIT, DEFAULT_SINK, `${v}%`]);
   return audioStatus();
 }
 
@@ -1522,7 +1529,7 @@ async function audioSetMuted(muted: boolean): Promise<AudioState> {
 
 async function audioAdjust(deltaPct: number): Promise<AudioState> {
   const sign = deltaPct >= 0 ? '+' : '-';
-  await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${Math.abs(deltaPct)}%${sign}`]);
+  await wpctl(['set-volume', '-l', WPCTL_LIMIT, DEFAULT_SINK, `${Math.abs(deltaPct)}%${sign}`]);
   return audioStatus();
 }
 
@@ -1678,11 +1685,11 @@ async function audioSetDefault(id: unknown): Promise<AudioDevices> {
   return audioDevices();
 }
 
-/** Set any node's volume (0-100) by id - used for per-device and per-app control. */
+/** Set any node's volume (0-MAX_VOLUME) by id - used for per-device and per-app control. */
 async function audioSetNodeVolume(id: unknown, pct: unknown): Promise<void> {
   const node = validNodeId(id);
   const v = clampVolume(pct);
-  await wpctl(['set-volume', '-l', '1.0', String(node), `${v}%`]);
+  await wpctl(['set-volume', '-l', WPCTL_LIMIT, String(node), `${v}%`]);
 }
 
 /** Mute or unmute any node by id. */

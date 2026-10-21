@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { getAudioBridge } from '@/lib/audio';
+import { MAX_VOLUME, getAudioBridge } from '@/lib/audio';
 import type { AudioStatus } from '@/lib/audio';
-import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
+import { UNITY_POSITION, VolumeGlyph } from '@/components/desktop/VolumeIndicator';
 
 /** How long the OSD stays on screen after the last volume change. */
 const OSD_VISIBLE_MS = 1500;
@@ -60,16 +60,20 @@ export function VolumeOsd() {
           muted={status.muted}
           className={cn('size-6 shrink-0', muted ? 'text-muted-foreground' : 'text-foreground')}
         />
-        <div className="h-2 w-40 overflow-hidden rounded-full bg-foreground/15">
+        <div className="relative h-2 w-40 overflow-hidden rounded-full bg-foreground/15">
           <div
             className={cn(
               'h-full rounded-full transition-[width] duration-150 motion-reduce:transition-none',
               muted ? 'bg-muted-foreground' : 'bg-primary',
             )}
-            style={{ width: `${level}%` }}
+            style={{ width: `${(Math.min(level, MAX_VOLUME) / MAX_VOLUME) * 100}%` }}
+          />
+          <span
+            className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background/70"
+            style={{ left: UNITY_POSITION }}
           />
         </div>
-        <span className="w-9 text-right text-sm font-medium tabular-nums text-foreground">
+        <span className="w-11 text-right text-sm font-medium tabular-nums text-foreground">
           {muted ? '—' : `${level}%`}
         </span>
       </div>

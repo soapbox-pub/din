@@ -859,7 +859,7 @@ contextBridge.exposeInMainWorld('audio', {
   status: () => ipcRenderer.invoke('audio:status'),
 
   /**
-   * Set the default sink volume (0-100). Resolves to the new state.
+   * Set the default sink volume (0-150; past 100 amplifies). Resolves to the new state.
    * @param {number} percent
    */
   setVolume: (percent) => ipcRenderer.invoke('audio:setVolume', percent),
@@ -884,7 +884,7 @@ contextBridge.exposeInMainWorld('audio', {
   setDefault: (id) => ipcRenderer.invoke('audio:setDefault', id),
 
   /**
-   * Set any node's volume (0-100) by id (per-app streams, per-device).
+   * Set any node's volume (0-150) by id (per-app streams, per-device).
    * @param {number} id
    * @param {number} percent
    */
