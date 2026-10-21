@@ -143,6 +143,25 @@ interface TermTab {
 }
 
 /** Replace the leaf `paneId` with a split of itself and a new pane. */
+/**
+ * xterm's WebGL renderer calls generateMipmap() after every glyph-atlas
+ * upload. On some drivers (ANGLE's GL backend on amdgpu) that fails with
+ * "allocateMipmapLevelsForGeneration: Unexpected driver error", leaving the
+ * texture mipmap-incomplete under the default NEAREST_MIPMAP_LINEAR min
+ * filter, so every glyph on the page samples as a black box. Glyphs are drawn
+ * at 1:1 scale and never need mipmaps: replace the call on this terminal's
+ * context with plain LINEAR filtering, which is complete without them.
+ */
+function disableAtlasMipmaps(container: HTMLElement) {
+  for (const canvas of container.querySelectorAll<HTMLCanvasElement>('.xterm-screen canvas')) {
+    const gl = canvas.getContext('webgl2');
+    if (!gl) continue;
+    gl.generateMipmap = (target) => {
+      gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    };
+  }
+}
+
 function splitLeaf(
   node: LayoutNode,
   paneId: string,
@@ -641,10 +660,6 @@ const TerminalSession = memo(function TerminalSession({
   const onCloseRef = useRef(onClose);
   const onTabShortcutRef = useRef(onTabShortcut);
   const openUrlRef = useRef(openUrl);
-  /** Mirrors `active` so the watchdog interval only probes the visible tab. */
-  const activeRef = useRef(active);
-  /** The corruption watchdog, set while the session's effect is live. */
-  const healRef = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     onCwdChangeRef.current = onCwdChange;
     onCloseRef.current = onClose;
@@ -685,15 +700,10 @@ const TerminalSession = memo(function TerminalSession({
     // boxes. Recreate the addon on context loss; after repeated losses give
     // up and let xterm fall back to the DOM renderer.
     let contextLosses = 0;
-    let activeWebgl: WebglAddon | null = null;
     const loadWebgl = () => {
       try {
-        // preserveDrawingBuffer lets the corruption watchdog below sample
-        // rendered pixels at any time; without it the back buffer is only
-        // valid inside the render task.
-        const webgl = new WebglAddon(true);
+        const webgl = new WebglAddon();
         webgl.onContextLoss(() => {
-          if (activeWebgl === webgl) activeWebgl = null;
           webgl.dispose();
           contextLosses += 1;
           if (disposed) return;
@@ -705,7 +715,7 @@ const TerminalSession = memo(function TerminalSession({
           }
         });
         term.loadAddon(webgl);
-        activeWebgl = webgl;
+        disableAtlasMipmaps(container);
       } catch (error) {
         console.warn('Terminal: WebGL renderer unavailable, falling back to DOM renderer', error);
       }
@@ -826,156 +836,6 @@ const TerminalSession = memo(function TerminalSession({
       }
     });
 
-    // Chromium can silently purge the GPU backing of off-DOM accelerated 2D
-    // canvases under memory pressure and across GPU-process restarts
-    // (suspend/resume) — including the texture-atlas pages the WebGL renderer
-    // re-uploads to GL textures on every version bump. The first upload after
-    // a purge paints every glyph on that page as a black box, so the terminal
-    // degrades into black pixelation at a "random" moment mid-session, with
-    // no webglcontextlost/focus/visibility event to warn us (and on DinOS's
-    // fullscreen kiosk the focus/visibility events never fire anyway).
-    //
-    // So detect corruption empirically: cells the buffer reports as plain
-    // default-foreground text must render some bright pixels. If none do,
-    // heal — clear the atlas (forces a full re-rasterize and re-upload), and
-    // if two clears don't revive it, rebuild the WebGL renderer outright.
-    let probePixels: Uint8Array | null = null;
-    let failedHeals = 0;
-    let rebuilds = 0;
-    let probeResumeAt = 0;
-    let watchdogDead = false;
-    // Theme bg is #0a0a0a (max channel 10); plain fg is #e5e5e5 (229).
-    const GLYPH_BRIGHTNESS = 48;
-
-    const probeAndHeal = () => {
-      if (disposed || watchdogDead || document.hidden || !activeWebgl) return;
-      if (Date.now() < probeResumeAt) return;
-
-      // The screen element holds two canvases (a 2D link layer and the WebGL
-      // renderer); find the one with a WebGL2 context. When the DOM renderer
-      // is active there is none, and there is nothing to heal.
-      let gl: WebGL2RenderingContext | null = null;
-      for (const canvas of container.querySelectorAll<HTMLCanvasElement>(
-        '.xterm-screen canvas',
-      )) {
-        const candidate = canvas.getContext('webgl2');
-        if (candidate) {
-          gl = candidate;
-          break;
-        }
-      }
-      if (!gl) return;
-      const width = gl.drawingBufferWidth;
-      const height = gl.drawingBufferHeight;
-      if (width < 8 || height < 8) return;
-
-      // Collect cells that must contain bright pixels: default-foreground
-      // text, neither dim nor inverse. Skip the cursor cell — the cursor is
-      // a solid rectangle drawn independently of the glyph atlas, so it
-      // stays bright even when every glyph is corrupt.
-      const buffer = term.buffer.active;
-      const cells: number[] = [];
-      for (let row = 0; row < term.rows; row++) {
-        const line = buffer.getLine(buffer.viewportY + row);
-        if (!line) continue;
-        for (let col = 0; col < term.cols; col++) {
-          if (row === buffer.cursorY && col === buffer.cursorX) continue;
-          const cell = line.getCell(col);
-          if (!cell || !cell.getChars().trim()) continue;
-          if (!cell.isFgDefault() || cell.isDim() || cell.isInverse()) continue;
-          cells.push(row * term.cols + col);
-          if (cells.length >= 48) break;
-        }
-        if (cells.length >= 48) break;
-      }
-      // Too little plain text on screen to judge (e.g. an idle colorized
-      // prompt): skip rather than risk a false positive.
-      if (cells.length < 8) return;
-
-      const bytes = width * height * 4;
-      if (!probePixels || probePixels.length !== bytes) {
-        probePixels = new Uint8Array(bytes);
-      }
-      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, probePixels);
-
-      const cellW = width / term.cols;
-      const cellH = height / term.rows;
-      let lit = 0;
-      for (const packed of cells) {
-        const col = packed % term.cols;
-        const row = (packed - col) / term.cols;
-        // Sample 5 points across the cell's central glyph area; one bright
-        // pixel is enough — even sparse glyphs cover one of these.
-        for (const [fx, fy] of [
-          [0.5, 0.5],
-          [0.3, 0.5],
-          [0.7, 0.5],
-          [0.5, 0.35],
-          [0.5, 0.65],
-        ]) {
-          const x = Math.min(width - 1, Math.floor((col + fx) * cellW));
-          // GL framebuffer origin is bottom-left; row 0 renders at the top.
-          const y = height - 1 - Math.min(height - 1, Math.floor((row + fy) * cellH));
-          const o = (y * width + x) * 4;
-          if (
-            probePixels[o] > GLYPH_BRIGHTNESS ||
-            probePixels[o + 1] > GLYPH_BRIGHTNESS ||
-            probePixels[o + 2] > GLYPH_BRIGHTNESS
-          ) {
-            lit++;
-            break;
-          }
-        }
-      }
-      if (lit > 0) {
-        failedHeals = 0;
-        rebuilds = 0;
-        return;
-      }
-
-      // Every plain-text cell renders dark: the glyph atlas (or the whole
-      // context) is corrupt.
-      failedHeals++;
-      if (failedHeals <= 2) {
-        console.warn('Terminal: glyph corruption detected, re-rasterizing texture atlas');
-        term.clearTextureAtlas();
-        term.refresh(0, term.rows - 1);
-        return;
-      }
-
-      // Atlas clears didn't help; the context itself must be bad. Rebuild
-      // the renderer, then give the probe a pause before judging again. Cap
-      // rebuilds so a fundamentally broken WebGL can't loop forever.
-      failedHeals = 0;
-      rebuilds++;
-      if (rebuilds > 2) {
-        watchdogDead = true;
-        console.warn('Terminal: WebGL watchdog could not recover the renderer; giving up');
-        return;
-      }
-      console.warn('Terminal: glyph corruption persists, rebuilding WebGL renderer');
-      const dead = activeWebgl;
-      activeWebgl = null;
-      dead.dispose();
-      loadWebgl();
-      term.refresh(0, term.rows - 1);
-      probeResumeAt = Date.now() + 10_000;
-    };
-    healRef.current = probeAndHeal;
-
-    // The interval is the only trigger that exists in kiosk mode and the
-    // only one that catches corruption mid-typing; probing is cheap (a
-    // buffer scan, with a full-frame readback only when there is enough
-    // plain text to judge). Only the visible tab probes itself.
-    const probeInterval = window.setInterval(() => {
-      if (activeRef.current) probeAndHeal();
-    }, 3_000);
-    const onVisibilityChange = () => {
-      if (!document.hidden) probeAndHeal();
-    };
-    window.addEventListener('focus', probeAndHeal);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
     const offData = bridge.onData((id, data) => {
       if (sessionId === null) {
         pending.push({ id, data });
@@ -1036,10 +896,6 @@ const TerminalSession = memo(function TerminalSession({
       fontSizeListeners.delete(applyFontSize);
       container.removeEventListener('wheel', onWheel, { capture: true });
       container.removeEventListener('mousedown', focus);
-      window.removeEventListener('focus', probeAndHeal);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.clearInterval(probeInterval);
-      healRef.current = null;
       offData();
       offExit();
       oscHandler.dispose();
@@ -1052,15 +908,11 @@ const TerminalSession = memo(function TerminalSession({
   }, [bridge, paneId]);
 
   // When this pane's tab becomes active, refit (its container had zero size
-  // while hidden, so xterm's cached dimensions are stale) and let the
-  // watchdog check for corruption that struck while it was in the
-  // background.
+  // while hidden, so xterm's cached dimensions are stale).
   useEffect(() => {
-    activeRef.current = active;
     if (!active) return;
     requestAnimationFrame(() => {
       fitRef.current?.fit();
-      healRef.current?.();
     });
   }, [active]);
 
