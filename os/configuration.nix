@@ -285,6 +285,10 @@ in
   # Where `din` has no password - the live stick, an install without
   # encryption - there's nothing to ask for, so sudo doesn't: din-sudo puts a
   # rule saying so under /run at boot.
+  #
+  # /etc/sudoers.d is for the computer's own rules, as on other distros:
+  # `sudo visudo -f /etc/sudoers.d/din` to stop asking on a developer's
+  # machine.
   security.sudo.extraRules = [{
     users = [ "din" ];
     commands = map (command: { inherit command; options = [ "NOPASSWD" ]; }) [
@@ -300,11 +304,19 @@ in
   }];
   security.sudo.extraConfig = ''
     @includedir /run/din/sudoers.d
+    @includedir /etc/sudoers.d
   '';
-  systemd.tmpfiles.settings."10-din-sudo"."/run/din/sudoers.d".d = {
-    mode = "0750";
-    user = "root";
-    group = "root";
+  systemd.tmpfiles.settings."10-din-sudo" = {
+    "/run/din/sudoers.d".d = {
+      mode = "0750";
+      user = "root";
+      group = "root";
+    };
+    "/etc/sudoers.d".d = {
+      mode = "0750";
+      user = "root";
+      group = "root";
+    };
   };
   systemd.services.din-sudo = {
     description = "Let sudo skip the password when din has none";
