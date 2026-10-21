@@ -9,6 +9,7 @@ import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerCont
 import {
   getNativeSurface,
   raiseNativeWindow,
+  releaseNativeKeys,
   sendNativeButton,
   sendNativeKey,
   sendNativeLeave,
@@ -252,6 +253,9 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     };
   }, [xid]);
 
+  // Closing with a key down (Alt+F4) leaves no window to hear it come up.
+  useEffect(() => releaseNativeKeys, []);
+
   // Wheel needs a non-passive listener to keep the page from scrolling.
   useEffect(() => {
     const host = hostRef.current;
@@ -317,6 +321,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         endGesture();
       }}
       onContextMenu={(event) => event.preventDefault()}
+      onBlur={releaseNativeKeys}
       onKeyDown={(event) => {
         // Shell shortcuts (Alt+Tab, screenshots) are claimed in the capture
         // phase before they get here.

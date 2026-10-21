@@ -555,6 +555,9 @@ export function isNativeWindowOpen(id: number): boolean {
  */
 let keyQueue: Promise<void> = Promise.resolve();
 
+/** Keys the servers have seen go down and not yet come up. */
+const heldKeys = new Set<number>();
+
 /** DOM mouse button -> X button. */
 const BUTTONS = [1, 2, 3, 8, 9];
 
@@ -652,9 +655,29 @@ function isPaste(event: KeyboardEvent): boolean {
 export function sendNativeKey(event: KeyboardEvent, down: boolean): boolean {
   const keycode = KEYCODES[event.code];
   if (!keycode) return false;
+  if (down) {
+    heldKeys.add(keycode);
+  } else if (!heldKeys.delete(keycode)) {
+    // Pressed elsewhere (the Tab of an Alt+Tab the shell claimed): the
+    // servers never saw it go down.
+    return true;
+  }
   if (down && isPaste(event)) keyQueue = keyQueue.then(syncClipboard);
   keyQueue = keyQueue.then(() => send({ type: 'key', keycode, down }));
   return true;
+}
+
+/**
+ * Let go of every held key: focus left the native window, and the keyups
+ * will land elsewhere. The servers count presses, so an Alt that went down
+ * in an app and came up in the window switcher would stay held for every
+ * app after it.
+ */
+export function releaseNativeKeys(): void {
+  for (const keycode of heldKeys) {
+    keyQueue = keyQueue.then(() => send({ type: 'key', keycode, down: false }));
+  }
+  heldKeys.clear();
 }
 
 /** Text last exchanged with the X clipboard, in either direction. */
