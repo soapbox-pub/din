@@ -142,7 +142,7 @@ let
   # keyboard layout (see the script, and electron/keyboard.mts).
   din-keyboard = pkgs.writeShellApplication {
     name = "din-keyboard";
-    runtimeInputs = with pkgs; [ coreutils gnugrep systemd libxkbcommon din-boot-screen ];
+    runtimeInputs = with pkgs; [ coreutils gnugrep systemd libxkbcommon ckbcomp din-boot-screen ];
     text = builtins.readFile ./din-keyboard.sh;
   };
 
@@ -821,16 +821,22 @@ in
     };
   };
 
-  # Likewise Caps Lock's remapping, for layouts set before there was one.
+  # Likewise Caps Lock's remapping and the text consoles' keymap, for layouts
+  # set before there were those.
   systemd.services.din-keyboard-remap = {
     description = "Remap keys for DinOS's keyboard layout";
     wantedBy = [ "multi-user.target" ];
-    after = [ "systemd-udev-trigger.service" ];
+    after = [ "systemd-udev-trigger.service" "systemd-vconsole-setup.service" ];
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${din-keyboard}/bin/din-keyboard remap";
+      ExecStart = [
+        "${din-keyboard}/bin/din-keyboard remap"
+        "${din-keyboard}/bin/din-keyboard console"
+      ];
     };
   };
+  # The text consoles take the layout din-keyboard writes, not a fixed one.
+  environment.etc."vconsole.conf".source = lib.mkForce "/var/lib/din/console.conf";
 
   # The same image is a live USB stick and, copied by the Installer app, the
   # system on a computer's own disk - often with the stick still plugged in.

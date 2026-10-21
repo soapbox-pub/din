@@ -19,9 +19,15 @@
 #       configuration.nix applies). Chromium only repeats keys held down by
 #       which physical key they are, and never Caps Lock, so in Din it
 #       wouldn't repeat like Backspace. Run at boot and by `set`.
+#   din-keyboard console
+#       Give the text consoles (Ctrl+Alt+F2) the layout too, as a console
+#       keymap (CONSOLE_MAP) that /etc/vconsole.conf, a link to
+#       CONSOLE_CONF, names. Run at boot and by `set`.
 
 LAYOUT_FILE=/var/lib/din/keyboard
 REMAP_FILE=/var/lib/din/keyboard-remap
+CONSOLE_CONF=/var/lib/din/console.conf
+CONSOLE_MAP=/var/lib/din/console.map
 SESSION_UNIT=cage-tty1.service
 
 die() {
@@ -52,6 +58,7 @@ set_layout() {
   chmod 644 "$tmp"
   mv "$tmp" "$LAYOUT_FILE"
   remap || echo "Couldn't remap Caps Lock for the layout." >&2
+  console || echo "Couldn't give the text consoles the layout." >&2
   # The boot screen types the disk's password with it too.
   din-boot-screen sync || echo "Couldn't give the boot screen the layout." >&2
 }
@@ -75,19 +82,28 @@ apply_remap() {
   udevadm settle --timeout=10 || true
 }
 
+# LAYOUT_FILE's fields as flags, into the array named $2: `$1rules`,
+# `$1model`, `$1layout`, `$1variant`, and `$1$3` for the options, whose flag
+# xkbcli and ckbcomp spell differently.
+layout_flags() {
+  local -n flags=$2
+  local key value
+  flags=()
+  [[ -f $LAYOUT_FILE ]] || return 0
+  while IFS='=' read -r key value; do
+    case $key in
+      XKB_DEFAULT_RULES) flags+=("$1rules" "$value") ;;
+      XKB_DEFAULT_MODEL) flags+=("$1model" "$value") ;;
+      XKB_DEFAULT_LAYOUT) flags+=("$1layout" "$value") ;;
+      XKB_DEFAULT_VARIANT) flags+=("$1variant" "$value") ;;
+      XKB_DEFAULT_OPTIONS) flags+=("$1$3" "$value") ;;
+    esac
+  done <"$LAYOUT_FILE"
+}
+
 remap() {
-  local args=() key value
-  if [[ -f $LAYOUT_FILE ]]; then
-    while IFS='=' read -r key value; do
-      case $key in
-        XKB_DEFAULT_RULES) args+=(--rules "$value") ;;
-        XKB_DEFAULT_MODEL) args+=(--model "$value") ;;
-        XKB_DEFAULT_LAYOUT) args+=(--layout "$value") ;;
-        XKB_DEFAULT_VARIANT) args+=(--variant "$value") ;;
-        XKB_DEFAULT_OPTIONS) args+=(--options "$value") ;;
-      esac
-    done <"$LAYOUT_FILE"
-  fi
+  local args
+  layout_flags -- args options
   # Caps Lock's first symbol, from `key <CAPS> { [ BackSpace ] };` or the
   # longer form with `symbols[1]= [ BackSpace ]`.
   local keymap
@@ -103,6 +119,24 @@ remap() {
   fi
 }
 
+console() {
+  if [[ -f $LAYOUT_FILE ]]; then
+    local args tmp
+    layout_flags - args option
+    tmp=$(mktemp "$CONSOLE_MAP.XXXXXX")
+    ckbcomp "${args[@]}" >"$tmp"
+    chmod 644 "$tmp"
+    mv "$tmp" "$CONSOLE_MAP"
+    tmp=$(mktemp "$CONSOLE_CONF.XXXXXX")
+    echo "KEYMAP=$CONSOLE_MAP" >"$tmp"
+    chmod 644 "$tmp"
+    mv "$tmp" "$CONSOLE_CONF"
+  else
+    rm -f "$CONSOLE_CONF" "$CONSOLE_MAP"
+  fi
+  systemctl restart systemd-vconsole-setup.service
+}
+
 case "${1:-}" in
   set)
     [[ $# == 2 || $# == 3 ]] || die "usage: din-keyboard set <layout> [variant]"
@@ -113,5 +147,9 @@ case "${1:-}" in
     [[ $# == 1 ]] || die "usage: din-keyboard remap"
     remap
     ;;
-  *) die "usage: din-keyboard set <layout> [variant] | restart | remap" ;;
+  console)
+    [[ $# == 1 ]] || die "usage: din-keyboard console"
+    console
+    ;;
+  *) die "usage: din-keyboard set <layout> [variant] | restart | remap | console" ;;
 esac
