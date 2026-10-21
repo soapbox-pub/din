@@ -14,6 +14,8 @@
 //     desktop's layout
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
 //   - window.theme: the light/dark mode pages see through prefers-color-scheme
+//   - window.safeArea: env(safe-area-inset-*) for edge-to-edge pages under
+//     the window chrome
 //   - window.keyboard: the system's keyboard layout, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
 //   - window.installer: put DinOS on this computer's disk, for the
@@ -582,6 +584,18 @@ contextBridge.exposeInMainWorld('theme', {
    * @param {'light' | 'dark' | 'system'} source
    */
   set: (source) => ipcRenderer.send('theme:set', source),
+});
+
+// Safe-area bridge (window.safeArea), backed by the safearea:set handler in
+// main.mts: how much of an edge-to-edge page the window chrome covers, which
+// the page reads as env(safe-area-inset-*).
+contextBridge.exposeInMainWorld('safeArea', {
+  /**
+   * Set a guest's safe-area insets in CSS px, or clear them with null.
+   * @param {number} wcId
+   * @param {{ top?: number, right?: number, bottom?: number, left?: number } | null} insets
+   */
+  set: (wcId, insets) => ipcRenderer.send('safearea:set', wcId, insets),
 });
 
 // Power bridge (window.power), backed by the power:* handlers in main.mts.

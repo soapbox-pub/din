@@ -11,6 +11,7 @@ import { getScreenshotBridge } from '@/lib/screenshot';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
 import { WindowFocusContext } from '@/contexts/WindowFocusContext';
+import { WindowOverlayContext } from '@/contexts/WindowOverlayContext';
 import {
   WindowChromeContext,
   type ChromePoint,
@@ -254,6 +255,11 @@ export const Window = memo(function Window({
   // theme-color), tinting the title bar Safari-style. The raw value comes
   // from an untrusted page, so it's strictly normalized before styling.
   const [accentRaw, setAccent] = useState<string | null>(null);
+
+  // Whether the hosted app runs its content under the title bar (an
+  // edge-to-edge page, see WindowOverlayContext): the title bar then floats
+  // over the body with no background of its own.
+  const [overlay, setOverlay] = useState(false);
 
   // The rect the drag would snap into (if any): drives the "drop to
   // maximize"/"drop to tile" preview overlay. Only changes when a zone
@@ -1116,12 +1122,15 @@ export const Window = memo(function Window({
             stopWobble(false);
             toggleMaximize(win.id);
           }}
-          style={accent ? { backgroundColor: accent } : undefined}
+          style={accent && !overlay ? { backgroundColor: accent } : undefined}
           className={cn(
-            'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b pr-3 active:cursor-grabbing',
-            accent
-              ? accentDark ? 'border-white/10' : 'border-black/10'
-              : 'border-border/60 bg-background/60',
+            // h-9 is WINDOW_TITLEBAR_HEIGHT.
+            'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 pr-3 active:cursor-grabbing',
+            overlay
+              ? 'absolute inset-x-0 top-0 z-10'
+              : accent
+                ? accentDark ? 'border-b border-white/10' : 'border-b border-black/10'
+                : 'border-b border-border/60 bg-background/60',
             titlebar ? 'pl-2' : 'pl-3',
         )}
       >
@@ -1184,13 +1193,15 @@ export const Window = memo(function Window({
           <WindowTitlebarContext.Provider value={setTitlebar}>
             <WindowChromeContext.Provider value={chrome}>
               <WindowAccentContext.Provider value={setAccent}>
-                {/* Built-in apps are code-split (React.lazy); the fallback shows
-                    while an app's chunk loads on its first launch. */}
-                <Suspense
-                  fallback={<div className="size-full animate-pulse bg-muted/40" />}
-                >
-                  <WindowContent component={app.component} windowId={win.id} params={win.params} />
-                </Suspense>
+                <WindowOverlayContext.Provider value={setOverlay}>
+                  {/* Built-in apps are code-split (React.lazy); the fallback shows
+                      while an app's chunk loads on its first launch. */}
+                  <Suspense
+                    fallback={<div className="size-full animate-pulse bg-muted/40" />}
+                  >
+                    <WindowContent component={app.component} windowId={win.id} params={win.params} />
+                  </Suspense>
+                </WindowOverlayContext.Provider>
               </WindowAccentContext.Provider>
             </WindowChromeContext.Provider>
           </WindowTitlebarContext.Provider>
