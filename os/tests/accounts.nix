@@ -3,7 +3,7 @@
 # The computer's accounts and password: nostrd holds the Nostr keys as its
 # own user, Din's user reaches it through the link in its home, sudo asks for
 # a password exactly when `din` has one, and the disk passphrase systemd
-# leaves in root's keyring unlocks nostrd at boot.
+# leaves in root's keyring unlocks nostrd and the login keyring at boot.
 # `nix build ./os#checks.x86_64-linux.accounts`
 pkgs.testers.runNixOSTest {
   name = "dinos-accounts";
@@ -13,7 +13,7 @@ pkgs.testers.runNixOSTest {
     # Din itself isn't under test, and has no GPU here.
     services.cage.enable = pkgs.lib.mkForce false;
     users.users.stranger.isNormalUser = true;
-    environment.systemPackages = [ pkgs.keyutils pkgs.cryptsetup ];
+    environment.systemPackages = [ pkgs.keyutils pkgs.cryptsetup pkgs.libsecret ];
     virtualisation.memorySize = 2048;
   };
 
@@ -67,6 +67,32 @@ pkgs.testers.runNixOSTest {
         machine.succeed("systemctl restart nostrd-unlock")
         as_din("nostrd call status | grep -q '\"locked\": true'")
 
+    session = "export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus; "
+    lookup = session + "timeout 10 secret-tool lookup test 1"
+
+    def restart_keyring_with(passphrase):
+        machine.succeed("pkill -u din -f gnome-keyring-daemon")
+        machine.wait_until_fails("pgrep -u din -f gnome-keyring-daemon")
+        machine.succeed(f"keyctl add user cryptsetup {passphrase} @u")
+        machine.succeed("systemctl restart din-keyring-unlock")
+        machine.succeed("keyctl unlink $(keyctl search @u user cryptsetup) @u")
+
+    with subtest("without a password, the keyring has none"):
+        machine.wait_until_succeeds("test -f /home/din/.local/share/keyrings/login.keyring", timeout=30)
+        as_din(session + "printf s3cret | secret-tool store --label=test test 1")
+        assert as_din(lookup) == "s3cret"
+
+    with subtest("the disk passphrase unlocks the keyring"):
+        as_din(session + "printf '\\nhunter22\\n' | din-keyring change")
+        restart_keyring_with("hunter22")
+        assert as_din(lookup) == "s3cret"
+
+    with subtest("a wrong one leaves it locked"):
+        restart_keyring_with("wrong")
+        machine.fail("su - din -c " + shlex.quote(lookup))
+        as_din(session + "printf hunter22 | din-keyring unlock")
+        assert as_din(lookup) == "s3cret"
+
     password = machine.succeed("grep -o '/nix/store/[^ ,]*-din-password/bin/din-password' /etc/sudoers | head -1").strip()
     script = machine.succeed(f"grep -o '/nix/store/[^ ]*din-password.py' {password}").strip()
 
@@ -74,11 +100,13 @@ pkgs.testers.runNixOSTest {
         machine.fail(f"su - din -c \"printf 'nope\\nbattery-staple\\n' | sudo -n {password} change\"")
         machine.fail(f"su - din -c \"printf 'hunter22\\nshort\\n' | sudo -n {password} change\"")
 
-    with subtest("it changes sudo's and nostrd's together"):
+    with subtest("it changes sudo's, nostrd's and the keyring's together"):
         as_din(f"printf 'hunter22\\nbattery-staple\\n' | sudo -n {password} change")
         as_din("echo battery-staple | sudo -S -k true")
         machine.fail("su - din -c 'echo hunter22 | sudo -S -k true'")
         as_din("printf 'battery-staple\\n' | nostrd call --stdin verify_password | grep -q true")
+        as_din(session + "printf battery-staple | din-keyring unlock")
+        machine.fail("su - din -c " + shlex.quote(session + "printf hunter22 | din-keyring unlock"))
 
     with subtest("and the disk's"):
         machine.succeed(

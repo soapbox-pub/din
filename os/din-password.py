@@ -1,21 +1,23 @@
 """din-password: changes the computer's one password, everywhere it's kept.
 
 DinOS has one password (os/din-install.sh sets it): it unlocks the disk at
-boot, it's `din`'s for sudo and the lock screen, and it protects the Nostr
-account keys in nostrd. This changes all three, after checking the old one
-itself, so Din can run it through sudo without a password.
+boot, it's `din`'s for sudo and the lock screen, it protects the Nostr
+account keys in nostrd, and it's the login keyring's. This changes all four,
+after checking the old one itself, so Din can run it through sudo without a
+password.
 
     din-password change    old and new password on stdin, one per line
 
 Passwords never go on a command line, where other users could read them:
-cryptsetup gets them through pipes, nostrd over its socket, chpasswd on
-stdin. The disk goes first, since it's the one that can't be got around:
+cryptsetup gets them through pipes, nostrd over its socket, din-keyring and
+chpasswd on stdin. The disk goes first, since it's the one that can't be got around:
 if a later step fails, the message says what still has the old password.
 """
 
 import ctypes
 import json
 import os
+import pwd
 import socket
 import subprocess
 import sys
@@ -114,6 +116,17 @@ def change_nostrd(old, new):
         nostrd_call("set_password", [new])
 
 
+def change_keyring(old, new):
+    """Only a running keyring: one that isn't picks the new one up at boot."""
+    if not os.path.exists(f"/run/user/{pwd.getpwnam(USER).pw_uid}/keyring/control"):
+        return
+    result = subprocess.run(
+        ["din-keyring", "change"], input=f"{old}\n{new}\n", text=True, capture_output=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip())
+
+
 def change():
     lines = sys.stdin.read().split("\n")
     if len(lines) < 2:
@@ -134,10 +147,15 @@ def change():
         change_nostrd(old, new)
     except (OSError, RuntimeError) as error:
         fail(f"The disk has the new password, but the Nostr keys still have the old one ({error}).")
+    try:
+        change_keyring(old, new)
+    except RuntimeError as error:
+        fail("The disk and Nostr keys have the new password, but the keyring still has the "
+             f"old one ({error}).")
     result = subprocess.run(["chpasswd"], input=f"{USER}:{new}\n", text=True, capture_output=True)
     if result.returncode != 0:
-        fail("The disk and Nostr keys have the new password, but sudo and the lock screen still "
-             "take the old one. " + result.stderr.strip())
+        fail("The disk, Nostr keys and keyring have the new password, but sudo and the lock "
+             "screen still take the old one. " + result.stderr.strip())
 
 
 def main():

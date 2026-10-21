@@ -165,11 +165,21 @@ let
     '';
   };
 
-  # Changes the computer's password: the disk's, `din`'s and nostrd's
-  # together (see the script).
+  # Unlocks and re-keys `din`'s login keyring with the computer's password
+  # (see the script).
+  din-keyring = pkgs.writeShellApplication {
+    name = "din-keyring";
+    runtimeInputs = [ pkgs.python3 pkgs.util-linux pkgs.coreutils config.systemd.package ];
+    text = ''
+      exec python3 ${./din-keyring.py} "$@"
+    '';
+  };
+
+  # Changes the computer's password: the disk's, nostrd's, the keyring's and
+  # `din`'s together (see the script).
   din-password = pkgs.writeShellApplication {
     name = "din-password";
-    runtimeInputs = with pkgs; [ python3 util-linux cryptsetup shadow ];
+    runtimeInputs = with pkgs; [ python3 util-linux cryptsetup shadow ] ++ [ din-keyring ];
     text = ''
       export DIN_LIBCRYPT=${pkgs.libxcrypt}/lib/libcrypt.so.2
       exec python3 ${./din-password.py} "$@"
@@ -350,6 +360,41 @@ in
     unlockWithDiskPassword = true;
   };
 
+  # The login keyring (the Secret Service most Linux apps keep passwords and
+  # tokens in), with the computer's password, as on any desktop. There's no
+  # login screen for pam_gnome_keyring to take the password from, so it comes
+  # from the boot screen like nostrd's: this reads the passphrase cached in
+  # root's keyring and unlocks `din`'s keyring with it, creating it the first
+  # time. nostrd-unlock, after it, removes the cached copy. Without a password
+  # (the live stick, a plain disk) the keyring has none either. With one but
+  # nothing cached, it stays locked until an app asks to unlock it.
+  # din-password keeps the keyring's password in step with the others;
+  # `din-keyring change` re-keys a keyring brought from another computer.
+  services.gnome.gnome-keyring.enable = true;
+  systemd.services.din-keyring-unlock = {
+    description = "Unlock the login keyring with the disk passphrase";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "user@${toString config.users.users.din.uid}.service" ];
+    after = [ "user@${toString config.users.users.din.uid}.service" ];
+    before = [ "nostrd-unlock.service" ];
+    path = [ pkgs.keyutils pkgs.gawk din-keyring ];
+    serviceConfig = {
+      Type = "oneshot";
+      # See nostrd-unlock: reading the cached key takes root's user keyring.
+      KeyringMode = "shared";
+    };
+    script = ''
+      if id=$(keyctl search @u user cryptsetup 2>/dev/null); then
+        keyctl pipe "$id" | din-keyring unlock || true
+        exit 0
+      fi
+      hash=$(awk -F: '$1 == "din" { print $2 }' /etc/shadow)
+      case $hash in
+        "" | "!"* | "*"*) din-keyring unlock </dev/null || true ;;
+      esac
+    '';
+  };
+
   # zsh is the login shell, so it's what the Terminal app opens, dressed in
   # oh-my-zsh's jtriley theme. The empty ~/.zshrc keeps zsh's first-run
   # configuration wizard from appearing.
@@ -459,7 +504,7 @@ in
   # distrobox is the escape hatch for anything else: a full Ubuntu/Fedora/Arch
   # userland with its own package manager, sharing $HOME, in rootless podman
   # (also answering to `docker`).
-  environment.systemPackages = with pkgs; [ git unzip distrobox ];
+  environment.systemPackages = with pkgs; [ git unzip distrobox din-keyring ];
   virtualisation.podman = {
     enable = true;
     dockerCompat = true;
