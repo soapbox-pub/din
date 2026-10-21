@@ -73,6 +73,10 @@ const MAGNIFIED_HEIGHT = BASE_WIDTH * MAX_SCALE + 8;
 const REVEAL_ZONE = 8;
 /** Extra slack above the dock before a hot-edge reveal retracts, in px. */
 const REVEAL_SLACK = 24;
+/** Height of the bottom-edge strip a touch swipe has to start in, in px. */
+const SWIPE_ZONE = 16;
+/** How far a touch has to travel up from the edge to reveal the dock, in px. */
+const SWIPE_DISTANCE = 24;
 
 /**
  * macOS-style Dock: a centered, backgroundless strip of app tiles that
@@ -82,7 +86,8 @@ const REVEAL_SLACK = 24;
  * intelligently: whenever the focused window intersects its footprint
  * (including a window maximized there, which fills the whole monitor) it
  * slides off-screen, and it slides back when the pointer reaches the bottom
- * edge of that monitor or when the focused window no longer overlaps it.
+ * edge of that monitor, when a finger swipes up from that edge, or when the
+ * focused window no longer overlaps it.
  *
  * Shows pinned apps first (roaming via encrypted app data), then any
  * running apps that aren't pinned. Each tile keeps the grouped-window
@@ -329,6 +334,9 @@ export function Dock({
     if (!intersecting) return;
     let last: { x: number; y: number } | null = null;
     const onPointerMove = (e: PointerEvent) => {
+      // Touch has no hover: a finger only reveals by swiping up from the
+      // edge (see the trigger strip below) and retracts by tapping elsewhere.
+      if (e.pointerType === 'touch') return;
       last = { x: e.clientX, y: e.clientY };
       // At or past the viewport's bottom edge is the edge itself; past the
       // primary monitor's bottom but inside the viewport is another monitor.
@@ -369,6 +377,35 @@ export function Dock({
     };
   }, [intersecting, primary]);
 
+  // A swiped-up dock stays until the user touches somewhere else, the way a
+  // tablet's does. Capture phase, so windows that stop propagation still
+  // dismiss it; the touch itself goes through. Touches inside the dock or in
+  // its popups (tile menus and window pickers are portaled out of the footer)
+  // keep it up. A touch on a <webview> or iframe never reaches this document,
+  // but it moves focus into the guest, which does.
+  const footerRef = useRef<HTMLElement>(null);
+  /** Where the current edge swipe's finger went down, if one is in progress. */
+  const swipeStartY = useRef<number | null>(null);
+  useEffect(() => {
+    if (!intersecting || !revealed) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !(e.target instanceof Element)) return;
+      if (footerRef.current?.contains(e.target)) return;
+      if (e.target.closest('[data-radix-popper-content-wrapper]')) return;
+      setRevealed(false);
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      const into = e.target instanceof Element ? e.target.tagName : null;
+      if (into === 'WEBVIEW' || into === 'IFRAME') setRevealed(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('focusin', onFocusIn);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('focusin', onFocusIn);
+    };
+  }, [intersecting, revealed]);
+
   // Keyboard users can still tab into the dock while it's hidden; keep it
   // on-screen whenever any tile holds focus.
   const [focusWithin, setFocusWithin] = useState(false);
@@ -383,16 +420,36 @@ export function Dock({
       {/* Hot-edge trigger: a thin strip over the very bottom of the screen,
           present only while the dock is hidden. Unlike the window pointermove
           listener it's a real element above the windows, so it still sees the
-          pointer when a <webview> or iframe covers the bottom edge. */}
+          pointer when a <webview> or iframe covers the bottom edge. It also
+          catches a finger swiping up from the edge: a touch is implicitly
+          captured by the element it lands on, so the whole swipe reports here
+          even once it's over a guest surface. Touch needs a taller target than
+          a cursor shoved into the edge, hence the larger of the two zones. */}
       {hidden && (
         <div
           aria-hidden
-          className="absolute inset-x-0 bottom-0 z-[9999]"
-          style={{ height: REVEAL_ZONE }}
-          onPointerEnter={() => setRevealed(true)}
+          className="absolute inset-x-0 bottom-0 z-[9999] touch-none"
+          style={{ height: Math.max(REVEAL_ZONE, SWIPE_ZONE) }}
+          onPointerEnter={(e) => {
+            if (e.pointerType !== 'touch') setRevealed(true);
+          }}
+          onPointerDown={(e) => {
+            if (e.pointerType === 'touch') swipeStartY.current = e.clientY;
+          }}
+          onPointerMove={(e) => {
+            const startY = swipeStartY.current;
+            if (e.pointerType !== 'touch' || startY === null) return;
+            if (startY - e.clientY >= SWIPE_DISTANCE) {
+              swipeStartY.current = null;
+              setRevealed(true);
+            }
+          }}
+          onPointerUp={() => (swipeStartY.current = null)}
+          onPointerCancel={() => (swipeStartY.current = null)}
         />
       )}
       <footer
+        ref={footerRef}
         aria-label="Dock"
         // pointer-events-none: the footer is a full-width flex shim that only
         // exists to center the strip, but it sits above every window - left
