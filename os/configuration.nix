@@ -550,7 +550,9 @@ in
         ln -s ${tcsh}/bin/tcsh $out/bin/csh
       '')
       man-pages man-pages-posix texinfo
-    ];
+    ]
+    # Not on a Mac, but what developers install first.
+    ++ [ ripgrep fd bat htop tree wget gh ];
   virtualisation.podman = {
     enable = true;
     dockerCompat = true;
