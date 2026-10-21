@@ -13,6 +13,7 @@
 //   - window.monitors: where each display sits in the shell window, for the
 //     desktop's layout
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
+//   - window.theme: the light/dark mode pages see through prefers-color-scheme
 //   - window.keyboard: the system's keyboard layout, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
 //   - window.installer: put DinOS on this computer's disk, for the
@@ -570,6 +571,17 @@ contextBridge.exposeInMainWorld('zoom', {
     if (!Number.isFinite(factor)) return;
     webFrame.setZoomFactor(Math.min(2, Math.max(0.5, factor)));
   },
+});
+
+// Theme bridge (window.theme), backed by the theme:set handler in main.mts:
+// the shell's light/dark mode becomes Chromium's, so `prefers-color-scheme`
+// in browser tabs and web apps follows it.
+contextBridge.exposeInMainWorld('theme', {
+  /**
+   * Set the color scheme pages see.
+   * @param {'light' | 'dark' | 'system'} source
+   */
+  set: (source) => ipcRenderer.send('theme:set', source),
 });
 
 // Power bridge (window.power), backed by the power:* handlers in main.mts.

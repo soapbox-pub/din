@@ -17,7 +17,7 @@ import os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeTheme, shell } from 'electron';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import {
   installChromeWebStore,
@@ -3629,6 +3629,20 @@ function registerBrowserDataHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Color scheme. Chromium answers `prefers-color-scheme` from the host
+// desktop's setting, which under cage doesn't exist, so every page saw light.
+// Din is the desktop here: the shell reports its own light/dark mode and
+// nativeTheme passes it on to every web contents, browser tabs included.
+// ---------------------------------------------------------------------------
+function registerThemeHandler(): void {
+  ipcMain.on('theme:set', (event, source: unknown) => {
+    if (!isShellSender(event)) return;
+    if (source !== 'light' && source !== 'dark' && source !== 'system') return;
+    nativeTheme.themeSource = source;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Find-in-page for the Web Browser app (Ctrl+F).
 //
 // Chromium's find-in-page is per-WebContents and driven from the main
@@ -3963,6 +3977,7 @@ app.whenReady().then(() => {
   registerCertificateHandling();
   registerBrowserDataHandlers();
   registerFindHandlers();
+  registerThemeHandler();
   registerUserscriptHandlers({ assertShellSender });
   registerDevtoolsHandlers();
   registerNostrBridge();
