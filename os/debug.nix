@@ -5,7 +5,8 @@
 # in - the authorized key (and any WiFi profile) is added to the written
 # stick, so nothing secret lands in the store or the repo. The machine
 # announces itself as dinos.local. grim screenshots cage's output; wtype and
-# wlrctl type and click into it.
+# wlrctl type and click into it (all with WAYLAND_DISPLAY=din-shell: the
+# launcher moves cage's socket there).
 {
   services.openssh = {
     enable = true;

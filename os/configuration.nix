@@ -247,6 +247,21 @@ let
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
+    # Din is the whole desktop: the session's services (the desktop portal's
+    # file chooser) open their windows on its embedded display
+    # (electron/native-display.mts).
+    export DIN_DESKTOP_SESSION=1
+    # cage shows its newest window fullscreen with all the input, so anything
+    # that opens a window on it takes Din's place, and there's no way back.
+    # Wayland clients without a WAYLAND_DISPLAY look for wayland-0, which is
+    # cage's; moving its socket aside leaves them failing to connect instead.
+    # Only Din (and what it starts with its own environment, like wlr-randr
+    # and gammastep) knows the new name. cage's lock file stays, so no other
+    # compositor takes wayland-0 either.
+    if [ -n "$WAYLAND_DISPLAY" ] && [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then
+      ${pkgs.coreutils}/bin/mv -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$XDG_RUNTIME_DIR/din-shell"
+      export WAYLAND_DISPLAY=din-shell
+    fi
     # Chromium logging into the journal (via cage), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
     # pam_systemd gives the session's processes CAP_WAKE_ALARM as an ambient
