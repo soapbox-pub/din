@@ -21,6 +21,8 @@
 //   - window.installer: put DinOS on this computer's disk, for the
 //     Installer app (live USB boots only)
 //   - window.updater: DinOS system updates, for the Settings app
+//   - window.airplay: sharing the screen with AirPlay receivers, for the menu
+//     bar and Settings
 //   - window.bluetoothLogin: receive the account key from a phone over
 //     Bluetooth LE, for the login screen
 //   - window.nostrd: the signer daemon that holds the account keys, for the
@@ -824,6 +826,50 @@ contextBridge.exposeInMainWorld('updater', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('updater:progress', handler);
     return () => ipcRenderer.removeListener('updater:progress', handler);
+  },
+});
+
+// AirPlay bridge (window.airplay), backed by electron/airplay.mts: mirrors
+// or extends the screen to AirPlay receivers through deckmon.
+contextBridge.exposeInMainWorld('airplay', {
+  /** Receivers found nearby and the sessions in progress. */
+  state: () => ipcRenderer.invoke('airplay:state'),
+
+  /** Look for receivers now. */
+  scan: () => ipcRenderer.invoke('airplay:scan'),
+
+  /**
+   * Start sharing with a receiver; resolves once it's streaming.
+   * @param {string} target
+   * @param {'mirror' | 'extend'} mode
+   */
+  connect: (target, mode) => ipcRenderer.invoke('airplay:connect', target, mode),
+
+  /**
+   * Answer a receiver's request for the PIN it shows, or its password.
+   * @param {string} target
+   * @param {string} code
+   */
+  code: (target, code) => ipcRenderer.invoke('airplay:code', target, code),
+
+  /**
+   * Stop sharing with a receiver.
+   * @param {string} target
+   */
+  disconnect: (target) => ipcRenderer.invoke('airplay:disconnect', target),
+
+  /**
+   * Subscribe to state changes. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('airplay:changed', handler);
+    return () => ipcRenderer.removeListener('airplay:changed', handler);
   },
 });
 

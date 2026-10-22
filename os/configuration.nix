@@ -1,4 +1,4 @@
-{ config, pkgs, lib, din, ... }:
+{ config, pkgs, lib, din, deckmon, ... }:
 
 let
   # The Din source tree (the repo root, via the flake's `din` input),
@@ -110,6 +110,31 @@ let
     src = native-src "din-fd";
     cargoLock.lockFile = din-root + "/native/din-fd/Cargo.lock";
   };
+
+  # deckmon, the AirPlay sender behind screen sharing (electron/airplay.mts),
+  # from its repository (the flake's `deckmon` input). It captures the screen
+  # through cage's wlroots screencopy and encodes with GStreamer: VA-API on
+  # the GPU, x264 or OpenH264 without one. pactl gives the receiver its sound
+  # output, wlr-randr sets the size of the display it adds to extend the
+  # desktop, and tee writes that display's EDID (through sudo, below).
+  deckmon-gst = with pkgs.gst_all_1; [ gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly ];
+  din-deckmon = pkgs.rustPlatform.buildRustPackage {
+    pname = "deckmon";
+    version = "0.2.0";
+    src = deckmon + "/cli";
+    cargoLock.lockFile = deckmon + "/cli/Cargo.lock";
+    nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
+    buildInputs = with pkgs.gst_all_1; [ gstreamer gst-plugins-base ];
+    postInstall = ''
+      wrapProgram $out/bin/deckmon \
+        --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : ${lib.makeSearchPath "lib/gstreamer-1.0" (map lib.getLib (deckmon-gst ++ [ pkgs.pipewire ]))} \
+        --prefix PATH : ${lib.makeBinPath [ pkgs.coreutils pkgs.pulseaudio pkgs.wlr-randr ]}
+    '';
+  };
+
+  # The local UDP ports AirPlay receivers send timing and sound control to,
+  # three per session; the firewall lets them in (below).
+  airplayPorts = { from = 7010; to = 7039; };
 
   # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
   # runs 32- and 64-bit programs without 32-bit host libraries. The Full
@@ -246,6 +271,8 @@ let
     export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
+    export DIN_DECKMON=${din-deckmon}/bin/deckmon
+    export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Din is the whole desktop: the session's services (the desktop portal's
     # file chooser) open their windows on its embedded display
@@ -333,6 +360,13 @@ in
       "${din-lock}/bin/din-lock status"
       # It checks the old password itself.
       "${din-password}/bin/din-password change"
+      # deckmon's virtual display for an AirPlay receiver, which extends the
+      # desktop onto it: its EDID on the spare DisplayPort connector, forced
+      # on, and taken away again.
+      "${pkgs.coreutils}/bin/tee /sys/kernel/debug/dri/[0-9]*/DP-2/edid_override"
+      "${pkgs.coreutils}/bin/tee /sys/kernel/debug/dri/[0-9]*/DP-2/trigger_hotplug"
+      "${pkgs.coreutils}/bin/tee /sys/class/drm/card[0-9]*-DP-2/status"
+      "${pkgs.coreutils}/bin/test -e /sys/kernel/debug/dri/[0-9]*/DP-2/trigger_hotplug"
     ];
   }];
   security.sudo.extraConfig = ''
@@ -567,7 +601,9 @@ in
     # (see the launcher above), so: WAYLAND_DISPLAY=din-shell grim x.png
     ++ [ grim slurp ]
     # notify-send, for scripts and long builds: Din is the notification server.
-    ++ [ libnotify ];
+    ++ [ libnotify ]
+    # AirPlay from the command line too (`deckmon discover`, `deckmon status`).
+    ++ [ din-deckmon ];
   virtualisation.podman = {
     enable = true;
     dockerCompat = true;
@@ -984,6 +1020,27 @@ in
     alsa.enable = true;
     pulse.enable = true;
   };
+
+  # Screen sharing over AirPlay (electron/airplay.mts). deckmon's daemon owns
+  # the sessions; it runs in the user manager rather than under Din, so that
+  # `deckmon` in the Terminal reaches the same one (one it started itself
+  # would capture the Terminal's nested display, not the screen). It finds
+  # cage by the socket name Din's launcher gives it. Receivers are found over
+  # mDNS, and send timing and sound control back to airplayPorts.
+  systemd.user.services.deckmon = {
+    description = "AirPlay sender";
+    wantedBy = [ "default.target" ];
+    unitConfig.ConditionUser = "din";
+    environment.WAYLAND_DISPLAY = "din-shell";
+    # sudo, for the virtual display's EDID.
+    path = [ "/run/wrappers" ];
+    serviceConfig = {
+      ExecStart = "${din-deckmon}/bin/deckmon daemon";
+      Restart = "on-failure";
+    };
+  };
+  networking.firewall.allowedUDPPorts = [ 5353 ];
+  networking.firewall.allowedUDPPortRanges = [ airplayPorts ];
 
   # Man and info pages, like any Unix. Skip /share/doc and the NixOS manual to
   # keep the image lean-ish.

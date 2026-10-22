@@ -1,4 +1,4 @@
-import { BellOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { Airplay, BellOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -34,6 +34,9 @@ import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndica
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
 import { BrightnessGlyph, BrightnessPopoverBody } from '@/components/desktop/BrightnessIndicator';
+import { AirPlayPopoverBody } from '@/components/desktop/AirPlayIndicator';
+import { useAirPlayState } from '@/hooks/useAirPlay';
+import { getAirPlayBridge } from '@/lib/airplay';
 import { NotificationsPanel } from '@/components/desktop/NotificationsIndicator';
 import { useNotificationsBadge } from '@/hooks/useNotificationsBadge';
 import { Calendar } from '@/components/ui/calendar';
@@ -112,6 +115,7 @@ export function MenuBar() {
       <ClockMenuItem />
       <div className="flex min-w-0 items-center justify-end gap-1.5">
         <TrayItems />
+        <AirPlayMenuItem />
         <BrightnessMenuItem />
         <VolumeMenuItem />
         <BatteryMenuItem />
@@ -281,6 +285,48 @@ function AppGrid({
     </div>
   );
 }
+
+/**
+ * AirPlay status item: shows once a receiver is nearby, and lights up while
+ * the screen is shared; clicking lists the receivers to mirror or extend
+ * the desktop to. Renders nothing outside the Electron shell or without
+ * deckmon, like the hardware indicators.
+ */
+const AirPlayMenuItem = memo(function AirPlayMenuItem() {
+  const bridge = getAirPlayBridge();
+  const { data } = useAirPlayState();
+
+  if (!bridge || !data?.available) return null;
+  const sharing = data.sessions.filter((s) => s.state === 'streaming');
+  if (data.receivers.length === 0 && data.sessions.length === 0) return null;
+
+  const label =
+    sharing.length > 0
+      ? `Sharing the screen with ${sharing.map((s) => s.name).join(', ')}`
+      : 'Screen sharing';
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          title={label}
+          className={cn(
+            'size-7 rounded-md hover:bg-foreground/10 hover:text-foreground',
+            sharing.length > 0 ? 'bg-primary/15 text-primary' : 'text-foreground/90',
+          )}
+        >
+          <Airplay className="size-4.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-80 p-0">
+        <AirPlayPopoverBody />
+      </PopoverContent>
+    </Popover>
+  );
+});
 
 /**
  * Brightness status item: sun glyph; clicking opens a backlight slider plus a

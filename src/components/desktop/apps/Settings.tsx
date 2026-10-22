@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Airplay,
   BatteryFull,
   Bell,
   BellOff,
@@ -61,6 +62,9 @@ import {
 import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
 import { getZoomBridge } from '@/lib/zoom';
 import { useApplyDisplayLayout, useDisplayStatus } from '@/hooks/useDisplay';
+import { useAirPlayState } from '@/hooks/useAirPlay';
+import { getAirPlayBridge } from '@/lib/airplay';
+import { AirPlayReceiverList } from '@/components/desktop/AirPlayIndicator';
 import {
   describePowerProfile,
   formatTimeRemaining,
@@ -622,7 +626,7 @@ function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
     const fallback = preferredMode(output) ?? modes[0] ?? null;
     return {
       name: output.name,
-      friendly: friendlyOutputName(output.name),
+      friendly: output.airplay ? `${output.airplay} (AirPlay)` : friendlyOutputName(output.name),
       internal: isInternalOutput(output.name),
       enabled: output.enabled,
       primary: output.primary,
@@ -877,7 +881,29 @@ function DisplaySection() {
         onChange={setZoom}
       />
       {arrangement}
+      <AirPlayDisplays />
     </SectionShell>
+  );
+}
+
+/**
+ * AirPlay receivers nearby: mirror the screen to one, or add it as a
+ * separate display, which then appears in the arrangement above. Hidden
+ * where AirPlay isn't available.
+ */
+function AirPlayDisplays() {
+  const { data } = useAirPlayState();
+  if (!getAirPlayBridge() || !data?.available) return null;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+      <SoundGroupHeading icon={Airplay}>AirPlay</SoundGroupHeading>
+      <p className="text-xs text-muted-foreground">
+        Share the screen with an Apple TV, AirPlay TV or other receiver on this
+        network. Sound plays there too, and the volume keys control it.
+      </p>
+      <AirPlayReceiverList />
+    </div>
   );
 }
 
@@ -1655,7 +1681,7 @@ function BrightnessSection() {
   );
 }
 
-/** A small heading that groups a subsection within the Sound panel. */
+/** A small heading that groups a subsection within a panel (Sound, Display). */
 function SoundGroupHeading({ icon: Icon, children }: { icon: LucideIcon; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 pt-1 text-sm font-medium text-foreground">

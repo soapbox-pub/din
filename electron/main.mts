@@ -48,6 +48,7 @@ import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
 import { registerUpdaterHandlers } from './updater.mts';
+import { airplayDisplays, registerAirPlayHandlers } from './airplay.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
@@ -702,6 +703,8 @@ interface DisplayOutput {
   current: { width: number; height: number } | null;
   position: { x: number; y: number };
   modes: DisplayMode[];
+  /** The AirPlay receiver this display is, for the ones deckmon adds. */
+  airplay?: string;
 }
 
 /** A desired on-state for one output in a layout call. */
@@ -1036,7 +1039,12 @@ function registerDisplayHandlers(): void {
   ipcMain.handle('display:status', async (event) => {
     assertShellSender(event);
     try {
-      return { available: true, outputs: await queryOutputs() };
+      const airplay = airplayDisplays();
+      const outputs = (await queryOutputs()).map((o) => {
+        const receiver = airplay.get(o.name);
+        return receiver ? { ...o, airplay: receiver } : o;
+      });
+      return { available: true, outputs };
     } catch (error) {
       if (displayUnavailable(error)) return { available: false, outputs: [] };
       throw error;
@@ -4084,6 +4092,11 @@ app.whenReady().then(() => {
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
   registerUpdaterHandlers({ assertShellSender, sendToShell });
+  registerAirPlayHandlers({
+    assertShellSender,
+    sendToShell,
+    primaryOutput: async () => (await queryOutputs()).find((o) => o.primary && o.enabled)?.name ?? null,
+  });
   registerNativeDisplayHandlers({
     assertShellSender,
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),

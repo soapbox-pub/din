@@ -39,6 +39,8 @@ export interface DisplayOutput {
   position: { x: number; y: number };
   /** Available modes, as the display tool reports them. */
   modes: DisplayMode[];
+  /** The AirPlay receiver this display is (one added to extend the desktop). */
+  airplay?: string;
 }
 
 export interface DisplayStatus {

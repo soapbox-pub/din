@@ -17,9 +17,18 @@
       url = "git+https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/nostrd.git";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # deckmon, the AirPlay sender behind screen sharing (electron/airplay.mts).
+    # Its repository is
+    # nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/deckmon;
+    # it's built here from source (configuration.nix).
+    deckmon = {
+      url = "git+https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/deckmon.git";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, din, nostrd }:
+  outputs = { self, nixpkgs, din, nostrd, deckmon }:
     let
       system = "x86_64-linux";
       makeImage = nixos: import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
@@ -41,14 +50,14 @@
     {
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit din; };
+        specialArgs = { inherit din deckmon; };
         modules = [ nostrd.nixosModules.default ./configuration.nix ];
       };
 
       # The same system plus remote access (debug.nix), for real hardware.
       nixosConfigurations.dinos-debug = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit din; };
+        specialArgs = { inherit din deckmon; };
         modules = [ nostrd.nixosModules.default ./configuration.nix ./debug.nix ];
       };
 
@@ -82,7 +91,7 @@
               # The test driver wants the kernel's messages on its console.
               { boot.consoleLogLevel = nixpkgs.lib.mkForce 7; }
             ];
-            inherit din;
+            inherit din deckmon;
           };
         in
         {

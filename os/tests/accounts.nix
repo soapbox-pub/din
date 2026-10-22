@@ -1,4 +1,4 @@
-{ pkgs, modules, din }:
+{ pkgs, modules, din, deckmon }:
 
 # The computer's accounts and password: nostrd holds the Nostr keys as its
 # own user, Din's user reaches it through the link in its home, sudo asks for
@@ -7,7 +7,7 @@
 # `nix build ./os#checks.x86_64-linux.accounts`
 pkgs.testers.runNixOSTest {
   name = "dinos-accounts";
-  node.specialArgs = { inherit din; };
+  node.specialArgs = { inherit din deckmon; };
   nodes.machine = {
     imports = modules;
     # Din itself isn't under test, and has no GPU here.

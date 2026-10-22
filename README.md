@@ -245,6 +245,18 @@ shortcuts are left out). See `electron/windows-apps.mts`.
 DinOS ships Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
 and Gecko). Elsewhere Din uses the system's `wine`, or `$DIN_WINE`.
 
+### AirPlay
+
+The menu bar's AirPlay item (once a receiver is nearby) and Settings →
+Display share the screen with Apple TVs, AirPlay TVs and Rokus: mirroring
+the primary display, or as a separate display that extends the desktop and
+is arranged in Settings like any other. Sound goes to the receiver too. The
+sending is [deckmon](https://git.shakespeare.diy)'s, a daemon DinOS runs as a
+user service (the flake's `deckmon` input) and Din talks to over its socket
+(`electron/airplay.mts`). It captures cage through wlroots screencopy, and a
+separate display is a spare DisplayPort connector forced on with an EDID,
+through a sudo rule for those writes. Elsewhere Din uses a `deckmon` on PATH.
+
 ### Updating npm dependencies
 
 The Nix build fetches npm deps from `package-lock.json` pinned by hash.

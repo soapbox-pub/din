@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "deckmon": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792627174,
+        "narHash": "sha256-igyZQNJS+y3F9VHKVC5S3S9vR7vpc+dY2NZs2hE2Cyc=",
+        "ref": "refs/heads/main",
+        "rev": "bdc2b6d5c329285b69b3195af2b58aafbdd53e6c",
+        "revCount": 37,
+        "type": "git",
+        "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/deckmon.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/deckmon.git"
+      }
+    },
     "din": {
       "flake": false,
       "locked": {
@@ -50,6 +66,7 @@
     },
     "root": {
       "inputs": {
+        "deckmon": "deckmon",
         "din": "din",
         "nixpkgs": "nixpkgs",
         "nostrd": "nostrd"

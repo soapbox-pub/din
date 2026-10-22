@@ -25,6 +25,7 @@ import { NativeDisplayHost } from './NativeDisplayHost';
 import { SystemEventsHost } from './SystemEventsHost';
 import { InstallerAutoOpen } from './InstallerAutoOpen';
 import { UpdateNotifier } from './UpdateNotifier';
+import { AirPlayPromptHost } from './AirPlayIndicator';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
@@ -107,6 +108,7 @@ function DesktopSession() {
             <GuestInputHost />
             <InstallerAutoOpen />
             <UpdateNotifier />
+            <AirPlayPromptHost />
             <BootScreenSync />
             <Wallpaper>
               <MenuBar />
