@@ -60,6 +60,22 @@
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
   --animate-veil-out: veil-out 1.2s ease-out forwards;
+  --animate-dock-bounce: dock-bounce 0.8s infinite;
+
+  /* A launching app's Dock icon: thrown up, falling back under gravity, a
+     beat on the ground between hops. */
+  @keyframes dock-bounce {
+    0%,
+    70%,
+    100% {
+      transform: translateY(0);
+      animation-timing-function: cubic-bezier(0.3, 0.6, 0.5, 1);
+    }
+    35% {
+      transform: translateY(-40%);
+      animation-timing-function: cubic-bezier(0.5, 0, 0.7, 0.4);
+    }
+  }
 
   @keyframes veil-out {
     from {

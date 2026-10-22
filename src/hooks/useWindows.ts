@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AppDefinition } from '@/lib/apps';
+import { endLaunching } from '@/lib/appLaunches';
 import { areaAt, areaFor, primaryArea, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
 import { launchNativeApp } from '@/lib/nativeApps';
 import { closeNativeWindow, isNativeWindowOpen } from '@/lib/nativeDisplay';
@@ -177,6 +178,16 @@ export function useWindows(
   const windowsRef = useRef(windows);
   useEffect(() => {
     windowsRef.current = windows;
+  }, [windows]);
+
+  // A native app's new window is the end of its launch. After the commit,
+  // so a launching app's Dock tile never blinks out between the two.
+  const seenIds = useRef(new Set<string>());
+  useEffect(() => {
+    for (const w of windows) {
+      if (!seenIds.current.has(w.id)) endLaunching(w.appId);
+    }
+    seenIds.current = new Set(windows.map((w) => w.id));
   }, [windows]);
 
   const focus = useCallback((id: string) => {

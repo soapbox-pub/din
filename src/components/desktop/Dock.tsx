@@ -11,6 +11,7 @@ import {
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useAppData } from '@/hooks/useAppData';
 import { useDragReorder } from '@/hooks/useDragReorder';
+import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
 import { registerDockTile } from '@/lib/dockTiles';
 import { cn } from '@/lib/utils';
 import { APPS } from '@/lib/apps';
@@ -162,8 +163,10 @@ export function Dock({
 
   // One dock tile per app: pinned apps first in pin order, then any
   // running apps that aren't pinned, in the order they were dragged into or
-  // else launch order.
-  const running = [...new Set(windows.map((w) => w.appId))];
+  // else launch order. An app still launching counts as running, so it has a
+  // tile to bounce on while its window is on the way.
+  const launching = useLaunchingApps();
+  const running = [...new Set([...windows.map((w) => w.appId), ...launching])];
   const pinnedIds = pinned.filter((id) => getApp(id));
   const rank = (id: string) => {
     const i = unpinnedOrder.indexOf(id);
@@ -722,6 +725,8 @@ const DockItem = memo(function DockItem({
   // gave it one (Preview's picture, video or file).
   const frontmost = appWindows.reduce<DockWindow | null>((top, w) => (!top || w.z > top.z ? w : top), null);
   const tileIcon = frontmost?.icon ?? app.icon;
+  // Bounces until the app's window turns up.
+  const launching = useLaunching(app.id);
 
   const button = (
     <button
@@ -747,7 +752,7 @@ const DockItem = memo(function DockItem({
     >
       <AppIcon
         icon={tileIcon}
-        className="size-[82%] text-foreground drop-shadow-md"
+        className={cn('size-[82%] text-foreground drop-shadow-md', launching && 'motion-safe:animate-dock-bounce')}
       />
       {/* Name label, floating above the (possibly magnified) icon. */}
       <span

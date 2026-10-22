@@ -11,6 +11,8 @@
  * `available: false` and the desktop simply shows no native apps.
  */
 
+import { endLaunching, startLaunching } from '@/lib/appLaunches';
+
 /** Registry id prefix for native apps, e.g. `native:org.gnome.Calculator`. */
 export const NATIVE_APP_PREFIX = 'native:';
 
@@ -98,5 +100,8 @@ export function getNativeAppsBridge(): NativeAppsBridge | undefined {
  * that asked for it.
  */
 export function launchNativeApp(appId: string): void {
-  void getNativeAppsBridge()?.launch(appId).catch(() => {});
+  const bridge = getNativeAppsBridge();
+  if (!bridge) return;
+  startLaunching(appId);
+  void bridge.launch(appId).catch(() => endLaunching(appId));
 }
