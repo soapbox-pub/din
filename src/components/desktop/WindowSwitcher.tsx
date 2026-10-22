@@ -223,7 +223,7 @@ export function WindowSwitcher() {
   const selectedId = session.ids[session.index];
 
   // Human label per window: the app name, disambiguated with a running index
-  // when the app has more than one window (matching the Dock's picker).
+  // when the app has more than one window.
   const totals = new Map<string, number>();
   for (const w of windows) totals.set(w.appId, (totals.get(w.appId) ?? 0) + 1);
   const seen = new Map<string, number>();

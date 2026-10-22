@@ -401,7 +401,7 @@ export const Window = memo(function Window({
   // instead of blinking (see src/lib/genie.ts). The window stays mounted
   // either way. Watching the flag here (rather than wrapping the
   // minimize/focus actions) covers every trigger: title-bar button, dock
-  // tile clicks, and the dock's window picker.
+  // tile clicks and scrolls.
   //
   // Inside the Electron shell the warp runs on a *bitmap snapshot* of the
   // window, not the live element: the section wraps a <webview>/WebGL guest

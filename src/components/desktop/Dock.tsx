@@ -8,12 +8,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import {
-  Popover,
-  PopoverClose,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useAppData } from '@/hooks/useAppData';
 import { useDragReorder } from '@/hooks/useDragReorder';
@@ -29,8 +23,8 @@ import { windowRect, type WindowState } from '@/hooks/useWindows';
 /** One window in a Dock tile. */
 interface DockWindow {
   id: string;
-  /** Label for the multi-window picker. */
-  title: string;
+  /** Stacking order; the frontmost window has the highest. */
+  z: number;
   minimized: boolean;
 }
 
@@ -41,7 +35,6 @@ interface DockControls {
   /** Raise and focus a window. */
   focus: (id: string) => void;
   minimize: (id: string) => void;
-  close: (id: string) => void;
   /** Close every window of the app. */
   closeAll: (appId: string, windows: DockWindow[]) => void;
 }
@@ -79,6 +72,13 @@ const SWIPE_ZONE = 16;
 /** How far a touch has to travel up from the edge to reveal the dock, in px. */
 const SWIPE_DISTANCE = 24;
 
+/** Wheel travel that steps a tile to its app's next window, in px. */
+const WHEEL_STEP = 50;
+/** Minimum time between wheel steps, so a touchpad flick doesn't spin through every window, in ms. */
+const WHEEL_COOLDOWN = 120;
+/** Most running-window dots drawn under one tile. */
+const MAX_DOTS = 4;
+
 /**
  * macOS-style Dock: a centered, backgroundless strip of app tiles that
  * magnify as the pointer sweeps across them.
@@ -91,10 +91,10 @@ const SWIPE_DISTANCE = 24;
  * focused window no longer overlaps it.
  *
  * Shows pinned apps first (roaming via encrypted app data), then any
- * running apps that aren't pinned. Each tile keeps the grouped-window
- * behavior: click launches or toggles, a picker opens for multiple
- * windows, middle-click always opens a new window, and right-click offers
- * pin/unpin, close, and uninstall.
+ * running apps that aren't pinned. Each tile groups its app's windows, with
+ * a dot under it per window: click launches, toggles, or cycles through
+ * them, the scroll wheel cycles too, middle-click always opens a new window,
+ * and right-click offers pin/unpin, close, and uninstall.
  */
 export function Dock({
   workspaceRef,
@@ -146,7 +146,6 @@ export function Dock({
       open: dinActions.open,
       focus: dinActions.focus,
       minimize: dinActions.minimize,
-      close: dinActions.close,
       closeAll: (appId) => dinActions.closeApp(appId),
     }),
     [dinActions],
@@ -397,7 +396,7 @@ export function Dock({
   // A swiped-up dock stays until the user touches somewhere else, the way a
   // tablet's does. Capture phase, so windows that stop propagation still
   // dismiss it; the touch itself goes through. Touches inside the dock or in
-  // its popups (tile menus and window pickers are portaled out of the footer)
+  // its popups (tile menus are portaled out of the footer)
   // keep it up. A touch on a <webview> or iframe never reaches this document,
   // but it moves focus into the guest, which does.
   const footerRef = useRef<HTMLElement>(null);
@@ -515,13 +514,11 @@ export function Dock({
           {entryIds.map((appId) => {
             const app = getApp(appId);
             if (!app) return null;
+            // Launch order, so cycling visits windows in a fixed sequence.
+            // Closing windows are on their way out and can't be focused.
             const appWindows = windows
-              .filter((w) => w.appId === appId)
-              .map((w, i) => ({
-                id: w.id,
-                title: `${app.name} ${i + 1}`,
-                minimized: w.minimized,
-              }));
+              .filter((w) => w.appId === appId && !w.closing)
+              .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized }));
             return (
               <DockItem
                 key={appId}
@@ -552,13 +549,15 @@ export function Dock({
  *
  * - no windows: click launches the app
  * - one window: click toggles it (focus if not active, minimize if active)
- * - multiple windows: click opens a picker listing every window
+ * - multiple windows: click brings the app forward, then cycles which of
+ *   its windows is on top
+ * - scrolling over the tile cycles through its windows, in either direction
  * - middle-click always opens a new window
  * - right-click: new window, pin/unpin, close all, uninstall
  * - dragging a pinned tile moves it among the pinned ones
  *
  * Memoized: the dock re-renders on every window commit, but a tile (and its
- * Radix context-menu/popover tree) only re-renders when its own app's
+ * Radix context-menu tree) only re-renders when its own app's
  * windows, active state, or pin state actually changed. `appWindows` is
  * rebuilt on every parent render, so the comparator compares its entries
  * field by field rather than by identity.
@@ -587,7 +586,7 @@ const DockItem = memo(function DockItem({
   /** Present only for installed web apps; removes the app entirely. */
   onUninstall?: (appId: string) => void;
 }) {
-  const { open, focus, minimize, close, closeAll } = controls;
+  const { open, focus, minimize, closeAll } = controls;
   const isAppActive = appWindows.some((w) => w.id === activeWindowId);
 
   /** Focus a window, or minimize it if it's already the active one. */
@@ -599,13 +598,48 @@ const DockItem = memo(function DockItem({
     }
   };
 
+  /**
+   * Raise the window `step` places from the active one, in launch order. If
+   * none of the app's windows is active, bring its frontmost one forward
+   * instead (preferring one that isn't minimized).
+   */
+  const cycle = (step: number) => {
+    if (appWindows.length === 0) return;
+    const current = appWindows.findIndex((w) => w.id === activeWindowId);
+    if (current === -1) {
+      const frontmost = appWindows.reduce((top, w) =>
+        (w.minimized === top.minimized ? w.z > top.z : top.minimized) ? w : top,
+      );
+      focus(frontmost.id);
+      return;
+    }
+    const n = appWindows.length;
+    focus(appWindows[(((current + step) % n) + n) % n].id);
+  };
+
   const handleClick = () => {
     if (appWindows.length === 0) {
       open(app.id);
     } else if (appWindows.length === 1) {
       toggleWindow(appWindows[0]);
+    } else {
+      cycle(1);
     }
-    // With multiple windows the tile is a PopoverTrigger; the picker opens.
+  };
+
+  // Wheel travel since the last step, and when that step happened. Wheels
+  // report anywhere from one big delta per notch to a stream of small
+  // touchpad deltas, so steps go by accumulated distance, rate-limited.
+  const wheel = useRef({ delta: 0, at: 0 });
+  const handleWheel = (e: React.WheelEvent) => {
+    const px = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 40 : e.deltaY;
+    const w = wheel.current;
+    // A reversal starts over rather than unwinding the old direction first.
+    w.delta = Math.sign(px) === Math.sign(w.delta) ? w.delta + px : px;
+    if (Math.abs(w.delta) < WHEEL_STEP || e.timeStamp - w.at < WHEEL_COOLDOWN) return;
+    cycle(Math.sign(w.delta));
+    w.delta = 0;
+    w.at = e.timeStamp;
   };
 
   const button = (
@@ -617,13 +651,9 @@ const DockItem = memo(function DockItem({
           : `Open ${app.name}`
       }
       onClick={handleClick}
+      onWheel={handleWheel}
       onPointerDown={(e) => {
-        // Right-clicks open the context menu (via the separate `contextmenu`
-        // event). Stop the secondary-button pointerdown from also reaching the
-        // PopoverTrigger, which would otherwise toggle the window picker mid-
-        // gesture and make the menu flicker open/closed.
-        if (e.button !== 0) e.stopPropagation();
-        else if (isPinned) onDragPointerDown(app.id, e);
+        if (e.button === 0 && isPinned) onDragPointerDown(app.id, e);
       }}
       onAuxClick={(e) => {
         if (e.button === 1) open(app.id);
@@ -716,73 +746,37 @@ const DockItem = memo(function DockItem({
     style: { width: BASE_WIDTH },
   } as const;
 
-  const runningDot = appWindows.length > 0 && (
-    <span
+  // One dot per window, the active one lit. Past MAX_DOTS the row stops
+  // growing; the last dot stands in for the rest and lights if any of them
+  // is active.
+  const activeIndex = appWindows.findIndex((w) => w.id === activeWindowId);
+  const dotCount = Math.min(appWindows.length, MAX_DOTS);
+  const runningDots = dotCount > 0 && (
+    <div
       aria-hidden
-      className={cn(
-        'absolute bottom-1 left-1/2 size-1.5 -translate-x-1/2 rounded-full',
-        isAppActive ? 'bg-primary' : 'bg-foreground/70',
-      )}
-    />
+      className="pointer-events-none absolute bottom-1 left-1/2 flex -translate-x-1/2 gap-1"
+    >
+      {Array.from({ length: dotCount }, (_, i) => (
+        <span
+          key={i}
+          className={cn(
+            'size-1.5 rounded-full',
+            isAppActive && Math.min(activeIndex, dotCount - 1) === i
+              ? 'bg-primary'
+              : 'bg-foreground/70',
+          )}
+        />
+      ))}
+    </div>
   );
-
-  if (appWindows.length <= 1) {
-    return (
-      <div {...wrapperProps}>
-        <ContextMenu>
-          <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
-          {menu}
-        </ContextMenu>
-        {runningDot}
-      </div>
-    );
-  }
 
   return (
     <div {...wrapperProps}>
-      <Popover>
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <PopoverTrigger asChild>{button}</PopoverTrigger>
-          </ContextMenuTrigger>
-          {menu}
-        </ContextMenu>
-        <PopoverContent side="top" sideOffset={12} className="z-[10000] w-64 p-1">
-          <ul aria-label={`${app.name} windows`} className="flex flex-col gap-0.5">
-            {appWindows.map((win) => (
-              <li key={win.id} className="flex items-center gap-0.5">
-                <PopoverClose asChild>
-                  <button
-                    type="button"
-                    onClick={() => toggleWindow(win)}
-                    className={cn(
-                      'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      win.id === activeWindowId && 'bg-accent/60',
-                    )}
-                  >
-                    <AppIcon icon={app.icon} className="size-4 shrink-0" />
-                    <span className="truncate">{win.title}</span>
-                    {win.minimized && (
-                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                        Minimized
-                      </span>
-                    )}
-                  </button>
-                </PopoverClose>
-                <button
-                  type="button"
-                  aria-label={`Close ${win.title}`}
-                  onClick={() => close(win.id)}
-                  className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <X className="size-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </PopoverContent>
-      </Popover>
-      {runningDot}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+        {menu}
+      </ContextMenu>
+      {runningDots}
     </div>
   );
 }, (prev, next) =>
@@ -797,5 +791,5 @@ const DockItem = memo(function DockItem({
   prev.appWindows.length === next.appWindows.length &&
   prev.appWindows.every((w, i) => {
     const n = next.appWindows[i];
-    return w.id === n.id && w.title === n.title && w.minimized === n.minimized;
+    return w.id === n.id && w.z === n.z && w.minimized === n.minimized;
   }));
