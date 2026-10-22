@@ -107,16 +107,20 @@ const TEAR_AWAY_PX = 8;
 /** Gap between the snap preview and the edges of the area it previews. */
 const SNAP_HINT_INSET = 6;
 
-/** The eight resize handles: edges + corners. */
+/**
+ * The eight resize handles: edges + corners. They straddle the window's
+ * edge, mostly outside it, so there's a grip of 10px without covering much
+ * of the title bar or the app; corners are larger, being the usual grip.
+ */
 const RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
-  { dir: 'n', className: 'top-0 inset-x-3 h-1.5 cursor-ns-resize' },
-  { dir: 's', className: 'bottom-0 inset-x-3 h-1.5 cursor-ns-resize' },
-  { dir: 'w', className: 'left-0 inset-y-3 w-1.5 cursor-ew-resize' },
-  { dir: 'e', className: 'right-0 inset-y-3 w-1.5 cursor-ew-resize' },
-  { dir: 'nw', className: 'top-0 left-0 size-3 cursor-nwse-resize' },
-  { dir: 'ne', className: 'top-0 right-0 size-3 cursor-nesw-resize' },
-  { dir: 'sw', className: 'bottom-0 left-0 size-3 cursor-nesw-resize' },
-  { dir: 'se', className: 'bottom-0 right-0 size-3 cursor-nwse-resize' },
+  { dir: 'n', className: '-top-1.5 inset-x-3 h-2.5 cursor-ns-resize' },
+  { dir: 's', className: '-bottom-1.5 inset-x-3 h-2.5 cursor-ns-resize' },
+  { dir: 'w', className: '-left-1.5 inset-y-3 w-2.5 cursor-ew-resize' },
+  { dir: 'e', className: '-right-1.5 inset-y-3 w-2.5 cursor-ew-resize' },
+  { dir: 'nw', className: '-top-1.5 -left-1.5 size-4.5 cursor-nwse-resize' },
+  { dir: 'ne', className: '-top-1.5 -right-1.5 size-4.5 cursor-nesw-resize' },
+  { dir: 'sw', className: '-bottom-1.5 -left-1.5 size-4.5 cursor-nesw-resize' },
+  { dir: 'se', className: '-bottom-1.5 -right-1.5 size-4.5 cursor-nwse-resize' },
 ];
 
 /**
@@ -1202,7 +1206,9 @@ export const Window = memo(function Window({
         }
       }}
       className={cn(
-        'absolute flex flex-col overflow-hidden',
+        // Not clipped, so the resize handles can reach past the edges; the
+        // title bar and the content round their own corners instead.
+        'absolute flex flex-col',
         !frameless && 'bg-card/90 backdrop-blur-xl',
         // Open/close animations: a quick macOS-style pop in (fade + zoom
         // from 95%) on mount, and its reverse on close - swapping the
@@ -1233,7 +1239,7 @@ export const Window = memo(function Window({
           }}
           style={accent ? { backgroundColor: accent } : undefined}
           className={cn(
-            'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b pr-3 active:cursor-grabbing',
+            'flex h-9 shrink-0 touch-none select-none items-center gap-2 rounded-t-[inherit] border-b pr-3',
             accent
               ? accentDark ? 'border-white/10' : 'border-black/10'
               : 'border-border/60 bg-background/60',
@@ -1291,7 +1297,7 @@ export const Window = memo(function Window({
       </header>
       )}
 
-      <div className={cn('relative flex-1 overflow-hidden', !frameless && 'bg-background/80')}>
+      <div className={cn('relative flex-1 overflow-hidden rounded-b-[inherit]', !frameless && 'bg-background/80')}>
         <WindowFocusContext.Provider value={isTop}>
           <WindowTitlebarContext.Provider value={setTitlebar}>
             <WindowTitleContext.Provider value={publishTitle}>
