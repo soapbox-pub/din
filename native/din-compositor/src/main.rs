@@ -13,6 +13,7 @@
 //! Spawned by electron/wayland-bridge.mts; exits when stdin closes.
 
 mod canvas;
+mod clipboard;
 mod constraints;
 mod frames;
 mod gpu;
@@ -47,7 +48,7 @@ fn main() {
     let dh = display.handle();
     let screen = (env_size("DIN_SCREEN_WIDTH", 1920), env_size("DIN_SCREEN_HEIGHT", 1080)).into();
 
-    let (clipboard_tx, clipboard_rx) = channel::channel::<(String, bool)>();
+    let (clipboard_tx, clipboard_rx) = channel::channel::<(clipboard::Contents, bool)>();
     let (connected_tx, connected_rx) = channel::channel::<()>();
     let frames = frames::FrameServer::start(connected_tx).expect("frame stream");
     let frames_url = frames.url.clone();
@@ -121,12 +122,12 @@ fn main() {
 
     handle
         .insert_source(clipboard_rx, |event, _, state| {
-            if let channel::Event::Msg((text, from_x11)) = event {
-                // So the text coming back from Din leaves the X app owning it.
+            if let channel::Event::Msg((contents, from_x11)) = event {
+                state.wire.json(contents.to_shell());
+                // So what comes back from Din leaves the X app owning it.
                 if from_x11 {
-                    state.x11_clipboard = Some(Arc::new(text.clone()));
+                    state.x11_clipboard = Some(Arc::new(contents));
                 }
-                state.wire.json(serde_json::json!({ "type": "clipboard", "text": text }));
             }
         })
         .expect("clipboard source");

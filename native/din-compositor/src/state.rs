@@ -6,7 +6,7 @@
 //! and to use server-side decorations (Din draws the title bar), unless they
 //! insist on drawing their own, which the shell is told about.
 
-use std::{borrow::Cow, io::Read, os::fd::OwnedFd, sync::Arc, time::Instant};
+use std::{borrow::Cow, os::fd::OwnedFd, sync::Arc, time::Instant};
 
 use smithay::{
     backend::{
@@ -66,6 +66,7 @@ use smithay::{
 
 use crate::{
     canvas::Canvas,
+    clipboard::{Contents, read_from_app},
     frames::FrameServer,
     gpu::{BufferChannel, Gpu, Target},
     stats::Stats,
@@ -75,9 +76,6 @@ use crate::{
 /// Window ids start here, clear of X11 resource ids (29-bit), so the shell
 /// can tell the two servers' windows apart.
 const FIRST_ID: u32 = 0x4000_0001;
-
-/// Clipboard text larger than this isn't bridged.
-pub const MAX_CLIPBOARD_BYTES: u64 = 256 * 1024;
 
 #[derive(Default)]
 pub struct ClientState {
@@ -292,14 +290,18 @@ pub struct State {
     /// The toplevel the shell gave the keyboard (0: none).
     pub focused: u32,
     pub cursor_surface: Option<WlSurface>,
-    /// Clipboard text apps copied, and whether it came from X.
-    pub clipboard_tx: Sender<(String, bool)>,
+    /// What apps copied, and whether it came from X.
+    pub clipboard_tx: Sender<(Contents, bool)>,
     pub handle: LoopHandle<'static, State>,
     pub xwayland_shell_state: XWaylandShellState,
     /// The X11 window manager, once Xwayland is up (xwayland.rs).
     pub xwm: Option<X11Wm>,
-    /// Text last put on (or read from) the X clipboard.
-    pub x11_clipboard: Option<Arc<String>>,
+    /// What was last put on (or read from) the X clipboard.
+    pub x11_clipboard: Option<Arc<Contents>>,
+    /// Files being dragged in from the shell (they stay readable after the
+    /// drop, until the app has them), and whether the drag is under way.
+    pub drag: Option<Arc<Contents>>,
+    pub dragging: bool,
     /// The surface under the pointer and its root origin.
     pub pointer_focus: Option<(WlSurface, Point<f64, Logical>)>,
     /// The window the shell was told holds a pointer lock (0: none).
@@ -320,7 +322,7 @@ impl State {
         frames: FrameServer,
         gpu: Option<Gpu>,
         buffers: Option<BufferChannel>,
-        clipboard_tx: Sender<(String, bool)>,
+        clipboard_tx: Sender<(Contents, bool)>,
     ) -> Self {
         let compositor_state = CompositorState::new::<Self>(dh);
         let xdg_shell_state = XdgShellState::new::<Self>(dh);
@@ -399,6 +401,8 @@ impl State {
             xwayland_shell_state,
             xwm: None,
             x11_clipboard: None,
+            drag: None,
+            dragging: false,
             pointer_focus: None,
             pointer_lock: 0,
             constraint_released: false,
@@ -756,49 +760,40 @@ impl DmabufHandler for State {
 }
 
 impl SelectionHandler for State {
-    type SelectionUserData = Arc<String>;
+    type SelectionUserData = Arc<Contents>;
 
-    fn new_selection(&mut self, ty: SelectionTarget, source: Option<SelectionSource>, seat: Seat<Self>) {
+    /// A Wayland app copied: read what Din can use and hand it on.
+    fn new_selection(&mut self, ty: SelectionTarget, source: Option<SelectionSource>, _seat: Seat<Self>) {
         if ty != SelectionTarget::Clipboard {
             return;
         }
         let Some(source) = source else { return };
-        let mimes = source.mime_types();
-        let Some(mime) = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING"]
-            .into_iter()
-            .find(|m| mimes.iter().any(|have| have == m))
-        else {
-            return;
-        };
-        let Ok((mut reader, writer)) = std::io::pipe() else { return };
-        if request_data_device_client_selection(&seat, mime.to_string(), OwnedFd::from(writer)).is_err() {
-            return;
-        }
-        // The app writes at its own pace; read off the event loop.
-        let tx = self.clipboard_tx.clone();
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            if reader.by_ref().take(MAX_CLIPBOARD_BYTES).read_to_end(&mut bytes).is_ok() {
-                if let Ok(text) = String::from_utf8(bytes) {
-                    let _ = tx.send((text, false));
-                }
-            }
+        let offered = source.mime_types();
+        // This runs before the seat takes the new selection, so a read now
+        // would go to the previous one: wait until it has.
+        self.handle.insert_idle(move |state| {
+            let tx = state.clipboard_tx.clone();
+            read_from_app(
+                &offered,
+                &["text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING"],
+                |mime, fd| request_data_device_client_selection(&state.seat, mime.to_string(), fd).is_ok(),
+                move |contents| {
+                    let _ = tx.send((contents, false));
+                },
+            );
         });
     }
 
+    /// A Wayland app pastes Din's clipboard.
     fn send_selection(
         &mut self,
         _ty: SelectionTarget,
-        _mime_type: String,
+        mime_type: String,
         fd: OwnedFd,
         _seat: Seat<Self>,
-        user_data: &Arc<String>,
+        user_data: &Arc<Contents>,
     ) {
-        let text = user_data.clone();
-        std::thread::spawn(move || {
-            use std::io::Write;
-            let _ = std::fs::File::from(fd).write_all(text.as_bytes());
-        });
+        user_data.send(&mime_type, fd);
     }
 }
 
@@ -809,7 +804,23 @@ impl DataDeviceHandler for State {
 }
 
 impl ClientDndGrabHandler for State {}
-impl ServerDndGrabHandler for State {}
+
+/// A drag from the shell (Files) into an app.
+impl ServerDndGrabHandler for State {
+    fn send(&mut self, mime_type: String, fd: OwnedFd, _seat: Seat<Self>) {
+        if let Some(drag) = &self.drag {
+            drag.send(&mime_type, fd);
+        }
+    }
+
+    fn dropped(&mut self, _seat: Seat<Self>) {
+        self.dragging = false;
+    }
+
+    fn cancelled(&mut self, _seat: Seat<Self>) {
+        self.dragging = false;
+    }
+}
 
 impl OutputHandler for State {}
 

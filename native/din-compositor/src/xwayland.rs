@@ -12,7 +12,7 @@
 //! Xwayland, which hit-tests the pointer against its own window tree, sends
 //! input to the right window.
 
-use std::{io::Read, os::fd::OwnedFd, process::Stdio, sync::Arc};
+use std::{os::fd::OwnedFd, process::Stdio, sync::Arc};
 
 use smithay::{
     desktop::Window,
@@ -25,7 +25,8 @@ use smithay::{
 };
 
 use crate::{
-    state::{MAX_CLIPBOARD_BYTES, Popup, PopupShell, State, Toplevel},
+    clipboard::{Contents, read_from_app},
+    state::{Popup, PopupShell, State, Toplevel},
 };
 
 /// The EWMH window type suffix the shell speaks (as on its X server).
@@ -43,10 +44,6 @@ pub fn window_type_name(kind: WmWindowType) -> &'static str {
         WmWindowType::Utility => "UTILITY",
     }
 }
-
-/// The clipboard types offered to X apps: UTF8_STRING and TEXT (which the
-/// window manager maps to these), and plain STRING for older clients.
-const X11_TEXT_TYPES: [&str; 3] = ["text/plain;charset=utf-8", "text/plain", "STRING"];
 
 fn is_menu(kind: WmWindowType) -> bool {
     matches!(kind, WmWindowType::DropdownMenu | WmWindowType::Menu | WmWindowType::PopupMenu)
@@ -112,16 +109,16 @@ impl State {
         }
     }
 
-    /// Offer Din's clipboard text to X apps.
-    pub fn set_x11_clipboard(&mut self, text: Arc<String>) {
-        // The text an X app just copied, coming back from Din: the app
-        // keeps the selection.
-        if self.x11_clipboard.as_ref().is_some_and(|current| *current == text) {
+    /// Offer Din's clipboard to X apps.
+    pub fn set_x11_clipboard(&mut self, contents: Arc<Contents>) {
+        // What an X app just copied, coming back from Din: the app keeps
+        // the selection.
+        if self.x11_clipboard.as_ref().is_some_and(|current| *current == contents) {
             return;
         }
-        self.x11_clipboard = Some(text);
+        let mimes = contents.mime_types(true);
+        self.x11_clipboard = Some(contents);
         if let Some(xwm) = self.xwm.as_mut() {
-            let mimes = X11_TEXT_TYPES.iter().map(|m| m.to_string()).collect();
             let _ = xwm.new_selection(SelectionTarget::Clipboard, Some(mimes));
             // The ownership request sits in the connection's buffer until
             // something flushes it, and X11Wm has no flush of its own: a
@@ -283,41 +280,26 @@ impl XwmHandler for State {
 
     /// An X app pastes Din's clipboard.
     fn send_selection(&mut self, _xwm: XwmId, _selection: SelectionTarget, mime_type: String, fd: OwnedFd) {
-        let Some(text) = self.x11_clipboard.clone() else { return };
-        std::thread::spawn(move || {
-            use std::io::Write;
-            // STRING is Latin-1 (ICCCM).
-            let bytes = if mime_type == "STRING" {
-                text.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect()
-            } else {
-                text.as_bytes().to_vec()
-            };
-            let _ = std::fs::File::from(fd).write_all(&bytes);
-        });
+        if let Some(contents) = &self.x11_clipboard {
+            contents.send(&mime_type, fd);
+        }
     }
 
-    /// An X app copied: read the text and hand it to Din.
+    /// An X app copied: read what Din can use and hand it on.
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         if selection != SelectionTarget::Clipboard {
             return;
         }
-        let Some(mime) = X11_TEXT_TYPES[..2].iter().find(|m| mime_types.iter().any(|have| have == *m)) else {
-            return;
-        };
-        let Ok((mut reader, writer)) = std::io::pipe() else { return };
         let Some(xwm) = self.xwm.as_mut() else { return };
         let handle = self.handle.clone();
-        if xwm.send_selection(SelectionTarget::Clipboard, mime.to_string(), OwnedFd::from(writer), handle).is_err() {
-            return;
-        }
         let tx = self.clipboard_tx.clone();
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            if reader.by_ref().take(MAX_CLIPBOARD_BYTES).read_to_end(&mut bytes).is_ok() {
-                if let Ok(text) = String::from_utf8(bytes) {
-                    let _ = tx.send((text, true));
-                }
-            }
-        });
+        read_from_app(
+            &mime_types,
+            &["text/plain;charset=utf-8", "text/plain"],
+            |mime, fd| xwm.send_selection(SelectionTarget::Clipboard, mime.to_string(), fd, handle.clone()).is_ok(),
+            move |contents| {
+                let _ = tx.send((contents, true));
+            },
+        );
     }
 }

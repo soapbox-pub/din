@@ -14,28 +14,29 @@ use smithay::{
     },
     input::{
         keyboard::{FilterResult, XkbConfig},
-        pointer::{AxisFrame, ButtonEvent, CursorImageSurfaceData, MotionEvent},
+        pointer::{AxisFrame, ButtonEvent, CursorImageSurfaceData, GrabStartData, MotionEvent},
     },
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
-        wayland_server::{Resource, protocol::wl_surface::WlSurface},
+        wayland_server::{
+            Resource,
+            protocol::{wl_data_device_manager::DndAction, wl_surface::WlSurface},
+        },
     },
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size},
     wayland::{
         compositor::with_states,
-        selection::data_device::set_data_device_selection,
+        selection::data_device::{SourceMetadata, set_data_device_selection, start_dnd},
         shell::xdg::XdgToplevelSurfaceData,
     },
 };
 
 use crate::{
     canvas::{Canvas, Patch},
+    clipboard::{Contents, URI_LIST},
     state::{KeyboardFocus, Popup, PopupShell, State, Toplevel},
     xwayland::window_type_name,
 };
-
-/// The clipboard's text types, in order of preference.
-pub const TEXT_MIME_TYPES: [&str; 5] = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT"];
 
 /// What the shell is told about a toplevel.
 struct Description {
@@ -722,11 +723,50 @@ impl State {
         }
     }
 
-    fn set_clipboard(&mut self, text: String) {
-        let mimes: Vec<String> = TEXT_MIME_TYPES.map(String::from).to_vec();
-        let text = std::sync::Arc::new(text);
-        set_data_device_selection(&self.dh, &self.seat, mimes, text.clone());
-        self.set_x11_clipboard(text);
+    fn set_clipboard(&mut self, contents: Contents) {
+        let contents = std::sync::Arc::new(contents);
+        set_data_device_selection(&self.dh, &self.seat, contents.mime_types(false), contents.clone());
+        self.set_x11_clipboard(contents);
+    }
+
+    /// Files dragged from the shell came over window `id`: the drag starts
+    /// here (a server-side one, as if the compositor itself were dragging),
+    /// or carries on into this window.
+    fn drag_enter(&mut self, id: u32, x: f64, y: f64, files: Vec<String>) {
+        if !self.dragging {
+            if files.is_empty() {
+                return;
+            }
+            if self.seat.get_pointer().is_none() {
+                return;
+            }
+            let (location, _) = self.hit(id, x, y);
+            let drag = std::sync::Arc::new(Contents::files(files));
+            let metadata = SourceMetadata { mime_types: vec![URI_LIST.into()], dnd_action: DndAction::Copy };
+            self.drag = Some(drag);
+            self.dragging = true;
+            // The button the drag is held by went down in the shell, and
+            // comes up there too: the drop (or cancel) below ends the grab.
+            let start = GrabStartData { focus: None, button: 0x110, location };
+            let (dh, seat) = (self.dh.clone(), self.seat.clone());
+            start_dnd(&dh, &seat, self, SERIAL_COUNTER.next_serial(), Some(start), None, metadata);
+        }
+        self.motion(id, x, y, None);
+    }
+
+    /// The drag is over: dropped on whatever the pointer is over now (which
+    /// may be nothing), or, with `cancel`, on nothing.
+    fn drag_end(&mut self, cancel: bool) {
+        if !self.dragging {
+            return;
+        }
+        if cancel {
+            self.leave();
+        }
+        self.dragging = false;
+        let Some(pointer) = self.seat.get_pointer() else { return };
+        pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), self.now_ms());
+        pointer.frame(self);
     }
 
     /// One message from the shell (see electron/wayland-bridge.mts).
@@ -757,10 +797,23 @@ impl State {
             "keymap" => self.set_keymap(message),
             "leave" => self.leave(),
             "clipboard" => {
-                if let Some(text) = message.get("text").and_then(Value::as_str) {
-                    self.set_clipboard(text.to_string());
+                if let Some(contents) = Contents::from_shell(message) {
+                    self.set_clipboard(contents);
                 }
             }
+            "drag-enter" => {
+                let files = message["files"].as_array().map(|files| {
+                    files.iter().filter_map(Value::as_str).filter(|p| p.starts_with('/')).map(String::from).collect()
+                });
+                self.drag_enter(id, num("x"), num("y"), files.unwrap_or_default());
+            }
+            "drag-drop" => {
+                if self.dragging {
+                    self.motion(id, num("x"), num("y"), None);
+                    self.drag_end(false);
+                }
+            }
+            "drag-end" => self.drag_end(true),
             _ => {}
         }
     }
