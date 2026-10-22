@@ -55,8 +55,9 @@
 //     electron/bunker.mts)
 //   - window.highlightHost: relays NIP-84 highlight clicks from browser tabs to
 //     the signer (see HighlightBridgeHost / browser-highlight-preload.cjs)
-//   - window.filePickerHost: relays <input type=file> clicks from guests to the
-//     in-Din file picker (see FilePickerBridgeHost)
+//   - window.filePickerHost: relays <input type=file> clicks from guests, and
+//     native apps' file dialogs, to the in-Din file picker (see
+//     FilePickerBridgeHost)
 //   - window.nsiteHost: relays nsite:// manifest lookups to the renderer's
 //     Nostr client (see NsiteBridgeHost / electron/nsite.mts)
 //   - window.promptHost: yes/no questions for the user - site permissions and
@@ -1982,27 +1983,48 @@ contextBridge.exposeInMainWorld('nsiteHost', {
 // web-app guest is intercepted over CDP and relayed here, to the shell
 // renderer, where FilePickerBridgeHost opens the in-Din FilePickerDialog and
 // answers with the chosen absolute path (or null on cancel). The page never
-// supplies the path - it only triggers the request.
+// supplies the path - it only triggers the request. Native apps' Open and
+// Save dialogs come the same way, from the desktop portal (file-chooser.mts).
 contextBridge.exposeInMainWorld('filePickerHost', {
   /**
    * Subscribe to relayed file-chooser requests. The callback receives
-   * { requestId, origin }. Returns an unsubscribe fn.
-   * @param {(request: { requestId: number, origin: string }) => void} callback
+   * { requestId, origin, multiple?, options? } - `options` for a native
+   * app's dialog, through the desktop portal (see file-chooser.mts).
+   * Returns an unsubscribe fn.
+   * @param {(request: { requestId: number, origin: string, multiple?: boolean, options?: unknown }) => void} callback
    */
   onRequest: (callback) => {
     /**
      * @param {Electron.IpcRendererEvent} _event
-     * @param {{ requestId: number, origin: string }} request
+     * @param {{ requestId: number, origin: string, multiple?: boolean, options?: unknown }} request
      */
     const listener = (_event, request) => callback(request);
     ipcRenderer.on('filepicker:request', listener);
+    // A fresh shell has no picker open, whatever the last one was showing.
+    ipcRenderer.send('filepicker:ready');
     return () => ipcRenderer.removeListener('filepicker:request', listener);
   },
 
   /**
-   * Answer a relayed request: { requestId, path } where path is the chosen
-   * absolute path, or null when the user cancelled.
-   * @param {{ requestId: number, path: string | null }} response
+   * Subscribe to requests withdrawn before the user answered (the app gave
+   * up). Returns an unsubscribe fn.
+   * @param {(requestId: number) => void} callback
+   */
+  onCancel: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number }} message
+     */
+    const listener = (_event, message) => callback(message.requestId);
+    ipcRenderer.on('filepicker:cancel', listener);
+    return () => ipcRenderer.removeListener('filepicker:cancel', listener);
+  },
+
+  /**
+   * Answer a relayed request: { requestId, path, paths, filter } where path
+   * is the (first) chosen absolute path and paths all of them, or null when
+   * the user cancelled; filter is the index of the file type in use.
+   * @param {{ requestId: number, path: string | null, paths?: string[] | null, filter?: number | null }} response
    */
   respond: (response) => ipcRenderer.send('filepicker:response', response),
 });

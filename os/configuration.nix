@@ -708,12 +708,24 @@ in
   };
 
   # Flatpak for desktop apps from Flathub, per user and without root. It
-  # requires the desktop portals, which the GTK backend provides on its own.
+  # requires the desktop portals, which the GTK backend provides, except for
+  # the file chooser: that's Din's own picker (electron/file-chooser-portal.mts),
+  # for Flatpaks and for Chromium and Electron apps, which ask the portal too.
   services.flatpak.enable = true;
   xdg.portal = {
     enable = true;
-    extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
-    config.common.default = "gtk";
+    extraPortals = [
+      pkgs.xdg-desktop-portal-gtk
+      (pkgs.writeTextDir "share/xdg-desktop-portal/portals/din.portal" ''
+        [portal]
+        DBusName=org.freedesktop.impl.portal.desktop.din
+        Interfaces=org.freedesktop.impl.portal.FileChooser
+      '')
+    ];
+    config.common = {
+      default = "gtk";
+      "org.freedesktop.impl.portal.FileChooser" = "din";
+    };
   };
   systemd.services.flathub = {
     description = "Add the Flathub Flatpak remote";

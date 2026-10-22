@@ -670,6 +670,11 @@ export class DBusConnection {
     this.objects.set(path, handler);
   }
 
+  /** Stop answering at a path. */
+  unexport(path: string): void {
+    this.objects.delete(path);
+  }
+
   close(): void {
     this.socket.destroy();
     this.shutdown();

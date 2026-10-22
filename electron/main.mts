@@ -56,6 +56,7 @@ import {
 } from './night-light.mts';
 import { registerTrayHandlers } from './tray.mts';
 import { registerNotificationHandlers } from './notifications.mts';
+import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
 import { registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
@@ -3294,7 +3295,15 @@ function registerFilePickerBridge(): void {
   ipcMain.on('filepicker:response', (event, response) => {
     if (!isShellSender(event)) return;
     const requestId = response && (response as { requestId?: unknown }).requestId;
-    const pending = typeof requestId === 'number' && pendingFilePicks.get(requestId);
+    if (typeof requestId !== 'number') return;
+    const paths = (response as { paths?: unknown }).paths;
+    const chosen = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && p !== '') : [];
+    // A native app's, through the desktop portal (file-chooser.mts).
+    const filter = (response as { filter?: unknown }).filter;
+    if (answerFileChooser(requestId, chosen.length > 0 ? chosen : null, typeof filter === 'number' ? filter : null)) {
+      return;
+    }
+    const pending = pendingFilePicks.get(requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
     pendingFilePicks.delete(requestId as number);
@@ -3306,13 +3315,20 @@ function registerFilePickerBridge(): void {
     // Either way the intercepted chooser must be answered so the input isn't
     // left hanging - an empty file list is the "cancelled" answer.
     const path = (response as { path?: unknown }).path;
-    const files = typeof path === 'string' && path ? [path] : [];
+    const files = chosen.length > 0 ? chosen : typeof path === 'string' && path ? [path] : [];
     contents.debugger
       .sendCommand('DOM.setFileInputFiles', { files, backendNodeId })
       .catch(() => {
         // Node gone (page navigated) or DOM agent unavailable - nothing to do.
       });
   });
+
+  // A shell that just (re)loaded has no picker open: any it was showing for
+  // native apps are cancelled.
+  ipcMain.on('filepicker:ready', (event) => {
+    if (isShellSender(event)) cancelFileChoosers();
+  });
+  registerFileChooserPortal({ sendToShell, nextRequestId: () => nextFilePickerRequestId++ });
 }
 
 /**
@@ -3341,7 +3357,7 @@ function attachFileChooserInterception(contents: Electron.WebContents): void {
   const onMessage = (_e: Electron.Event, method: string, params: unknown) => {
     if (method !== 'Page.fileChooserOpened') return;
     if (!shellWindow || shellWindow.webContents.isDestroyed()) return;
-    const backendNodeId = (params as { backendNodeId?: unknown }).backendNodeId;
+    const { backendNodeId, mode } = params as { backendNodeId?: unknown; mode?: unknown };
     if (typeof backendNodeId !== 'number') return;
 
     const requestId = nextFilePickerRequestId++;
@@ -3356,7 +3372,7 @@ function attachFileChooserInterception(contents: Electron.WebContents): void {
     } catch {
       // Opaque/blank URL - the picker just omits the origin in its title.
     }
-    sendToShell('filepicker:request', { requestId, origin });
+    sendToShell('filepicker:request', { requestId, origin, multiple: mode === 'selectMultiple' });
   };
 
   // devtools closing detaches the shared debugger (see devtools-bridge.mts);

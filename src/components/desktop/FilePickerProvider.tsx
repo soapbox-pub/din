@@ -1,15 +1,21 @@
-import { ReactNode, useCallback, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import {
   FilePickerContext,
   type FilePickerContextValue,
   type FilePickerOptions,
+  type FilePickerResult,
 } from '@/contexts/FilePickerContext';
 import { FilePickerDialog } from './FilePickerDialog';
 
 interface PendingRequest {
+  id: number;
   options: FilePickerOptions;
-  resolve: (path: string | null) => void;
+  resolve: (result: FilePickerResult | null) => void;
+  /** What had focus before, to give it back (a native app's window, say). */
+  focused: Element | null;
 }
+
+let lastRequestId = 0;
 
 /**
  * Provides the in-Din {@link useFilePicker} service. A single modal
@@ -22,34 +28,56 @@ interface PendingRequest {
  */
 export function FilePickerProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingRequest | null>(null);
+  const pendingRef = useRef<PendingRequest | null>(null);
 
-  const pickFile = useCallback<FilePickerContextValue['pickFile']>((options = {}) => {
-    return new Promise<string | null>((resolve) => {
-      setPending((current) => {
+  const settle = useCallback((request: PendingRequest, result: FilePickerResult | null, refocus = true) => {
+    if (pendingRef.current !== request) return;
+    pendingRef.current = null;
+    setPending(null);
+    request.resolve(result);
+    const { focused } = request;
+    if (refocus && focused instanceof HTMLElement && focused.isConnected) {
+      requestAnimationFrame(() => focused.focus({ preventScroll: true }));
+    }
+  }, []);
+
+  const pickFiles = useCallback<FilePickerContextValue['pickFiles']>(
+    (options = {}) => {
+      return new Promise<FilePickerResult | null>((resolve) => {
+        if (options.signal?.aborted) return resolve(null);
         // If a picker is somehow already open, cancel it first.
-        current?.resolve(null);
-        return { options, resolve };
+        const current = pendingRef.current;
+        if (current) settle(current, null, false);
+        const request: PendingRequest = {
+          id: ++lastRequestId,
+          options,
+          resolve,
+          focused: current?.focused ?? document.activeElement,
+        };
+        options.signal?.addEventListener('abort', () => settle(request, null), { once: true });
+        pendingRef.current = request;
+        setPending(request);
       });
-    });
-  }, []);
+    },
+    [settle],
+  );
 
-  const settle = useCallback((path: string | null) => {
-    setPending((current) => {
-      current?.resolve(path);
-      return null;
-    });
-  }, []);
+  const pickFile = useCallback<FilePickerContextValue['pickFile']>(
+    async (options = {}) => (await pickFiles({ ...options, multiple: false }))?.paths[0] ?? null,
+    [pickFiles],
+  );
 
-  const value = useMemo<FilePickerContextValue>(() => ({ pickFile }), [pickFile]);
+  const value = useMemo<FilePickerContextValue>(() => ({ pickFile, pickFiles }), [pickFile, pickFiles]);
 
   return (
     <FilePickerContext.Provider value={value}>
       {children}
       {pending && (
         <FilePickerDialog
+          key={pending.id}
           options={pending.options}
-          onConfirm={(path) => settle(path)}
-          onCancel={() => settle(null)}
+          onConfirm={(result) => settle(pending, result)}
+          onCancel={() => settle(pending, null)}
         />
       )}
     </FilePickerContext.Provider>
