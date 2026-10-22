@@ -108,7 +108,8 @@ export function MenuBar() {
         // Equal side columns keep the clock centered on the screen however
         // much each side holds.
         // tracking-tight approximates SF Pro's optical spacing at menu-bar sizes.
-        'relative z-20 grid h-9 grid-cols-[1fr_auto_1fr] items-center gap-2 px-2 tracking-tight transition-colors',
+        // Chrome, not content: no text cursor or selection anywhere in it.
+        'relative z-20 grid h-9 cursor-default select-none grid-cols-[1fr_auto_1fr] items-center gap-2 px-2 tracking-tight transition-colors',
         fullscreen
           ? 'bg-white dark:bg-black'
           : 'bg-gradient-to-b from-background/60 via-background/25 to-transparent',
