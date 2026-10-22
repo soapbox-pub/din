@@ -27,6 +27,7 @@ import { spawn } from 'node:child_process';
 import { ipcMain, nativeImage } from 'electron';
 import {
   embeddedDisplay,
+  embeddedDisplayAvailable,
   embeddedDisplayEnv,
   type EmbeddedDisplay,
 } from './native-display.mts';
@@ -955,7 +956,7 @@ async function appIdForWindow(pid: number | null, wmClass: string[]): Promise<st
 /**
  * Register the native-app IPC surface (window.nativeApps in the preload).
  *
- * The embedded display starts on the shell's first call, so the cost isn't
+ * The embedded display starts with the first app launched, so the cost isn't
  * paid during boot, and a machine without Xvfb never tries.
  */
 export function registerNativeAppHandlers(options: {
@@ -968,7 +969,7 @@ export function registerNativeAppHandlers(options: {
 
   ipcMain.handle('native-apps:list', async (event) => {
     assertShellSender(event);
-    const available = (await embeddedDisplay()) !== null;
+    const available = embeddedDisplayAvailable();
     return { available, apps: available ? await listApps() : [] };
   });
 
