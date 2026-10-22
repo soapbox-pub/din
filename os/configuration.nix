@@ -466,6 +466,14 @@ in
     '';
   };
 
+  # gpg, for signing commits. The passphrase prompt is a Qt window, which
+  # opens on Din's desktop like any native app; a terminal prompt would never
+  # reach anyone when git runs without a terminal, as coding agents do.
+  programs.gnupg.agent = {
+    enable = true;
+    pinentryPackage = pkgs.pinentry-qt;
+  };
+
   # zsh is the login shell, so it's what the Terminal app opens, dressed in
   # oh-my-zsh's jtriley theme. The empty ~/.zshrc keeps zsh's first-run
   # configuration wizard from appearing.
