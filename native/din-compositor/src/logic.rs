@@ -687,6 +687,12 @@ impl State {
 
     fn key(&mut self, keycode: u32, down: bool) {
         let Some(keyboard) = self.seat.get_keyboard() else { return };
+        // xkb counts presses, so a second press of a key whose release got
+        // lost would need two releases: a stuck Alt could never be cleared
+        // by pressing it again.
+        if down && keyboard.pressed_keys().contains(&keycode.into()) {
+            return;
+        }
         let state = if down { KeyState::Pressed } else { KeyState::Released };
         let time = self.now_ms();
         keyboard.input::<(), _>(self, keycode.into(), state, SERIAL_COUNTER.next_serial(), time, |_, _, _| {
