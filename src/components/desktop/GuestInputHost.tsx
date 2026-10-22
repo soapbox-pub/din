@@ -62,6 +62,7 @@ export function GuestInputHost() {
         pointerId: 1,
         pointerType: 'mouse',
         isPrimary: true,
+        metaKey: input.meta,
       };
       if (input.type === 'move') {
         el.dispatchEvent(new PointerEvent('pointermove', init));

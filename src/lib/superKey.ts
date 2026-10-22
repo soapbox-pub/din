@@ -10,7 +10,9 @@ import { getShellShortcuts } from '@/lib/shellShortcuts';
  *  - the shell-shortcut bridge, while focus is inside a <webview> guest
  *    (the main process forwards Super's down/up as 'super-key');
  *  - the `metaKey` flag of pointer events in the shell document, which
- *    corrects a missed keyup the next time the pointer moves over the shell.
+ *    corrects a missed keyup the next time the pointer moves over the shell
+ *    (including the moves GuestInputHost replays from inside guests, which
+ *    carry Super's state too).
  *
  * Losing window focus clears it, since the keyup may go elsewhere.
  */

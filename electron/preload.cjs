@@ -1702,14 +1702,14 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
 contextBridge.exposeInMainWorld('guestInput', {
   /**
    * Subscribe to forwarded guest input. Returns an unsubscribe fn. Payloads:
-   *   { wcId, type: 'move', x, y }
-   *   { wcId, type: 'down', x, y, button }
-   * @param {(data: { wcId: number, type: string, x: number, y: number, button?: string }) => void} callback
+   *   { wcId, type: 'move', x, y, meta }
+   *   { wcId, type: 'down', x, y, button, meta }
+   * @param {(data: { wcId: number, type: string, x: number, y: number, button?: string, meta: boolean }) => void} callback
    */
   onInput: (callback) => {
     /**
      * @param {Electron.IpcRendererEvent} _event
-     * @param {{ wcId: number, type: string, x: number, y: number, button?: string }} data
+     * @param {{ wcId: number, type: string, x: number, y: number, button?: string, meta: boolean }} data
      */
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('guest:input', handler);

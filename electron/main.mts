@@ -2765,7 +2765,7 @@ const GUEST_MOVE_INTERVAL_MS = 16;
  */
 function forwardGuestInput(contents: Electron.WebContents): void {
   const wcId = contents.id;
-  let pendingMove: { x: number; y: number } | null = null;
+  let pendingMove: { x: number; y: number; meta: boolean } | null = null;
   let moveTimer: NodeJS.Timeout | null = null;
   const flushMove = (): void => {
     if (moveTimer) clearTimeout(moveTimer);
@@ -2775,13 +2775,17 @@ function forwardGuestInput(contents: Electron.WebContents): void {
     pendingMove = null;
   };
   contents.on('before-mouse-event', (_event, mouse) => {
+    // Super's state rides along: the shell reads it off pointer events to
+    // keep its Super+drag grab layer in sync (src/lib/superKey.ts), and a
+    // replayed move without it would read as Super released.
+    const meta = mouse.modifiers?.includes('meta') ?? false;
     if (mouse.type === 'mouseMove') {
-      pendingMove = { x: mouse.x, y: mouse.y };
+      pendingMove = { x: mouse.x, y: mouse.y, meta };
       moveTimer ??= setTimeout(flushMove, GUEST_MOVE_INTERVAL_MS);
     } else if (mouse.type === 'mouseDown') {
       // Keep the order the guest saw: the move that led here comes first.
       flushMove();
-      sendToShell('guest:input', { wcId, type: 'down', x: mouse.x, y: mouse.y, button: mouse.button ?? 'left' });
+      sendToShell('guest:input', { wcId, type: 'down', x: mouse.x, y: mouse.y, button: mouse.button ?? 'left', meta });
     }
   });
   contents.once('destroyed', () => {

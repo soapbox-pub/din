@@ -19,6 +19,8 @@ export type GuestInput =
       wcId: number;
       x: number;
       y: number;
+      /** Whether Super (Meta) was held. */
+      meta: boolean;
     }
   | {
       /** A mouse button went down in the guest. */
@@ -27,6 +29,8 @@ export type GuestInput =
       x: number;
       y: number;
       button: 'left' | 'middle' | 'right';
+      /** Whether Super (Meta) was held. */
+      meta: boolean;
     };
 
 export interface GuestInputBridge {
