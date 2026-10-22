@@ -45,6 +45,7 @@
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.userscripts: userscript library sync and install
 //     requests for the Web Browser app
+//   - window.adblock: the Web Browser's built-in ad blocker
 //   - window.devtools: docked devtools control for the Web Browser app
 //   - window.nostrHost: relays NIP-07 requests from installed web apps to the
 //     signed-in account's signer (see NostrBridgeHost / webview-preload.cjs)
@@ -1571,6 +1572,54 @@ contextBridge.exposeInMainWorld('userscripts', {
     const listener = (_event, request) => callback(request);
     ipcRenderer.on('userscripts:installRequested', listener);
     return () => ipcRenderer.removeListener('userscripts:installRequested', listener);
+  },
+});
+
+// Ad blocker bridge (window.adblock), backed by the adblock:* handlers in
+// electron/adblock.mts: on/off, the sites ads are allowed on, and how much
+// each browser tab has had blocked.
+contextBridge.exposeInMainWorld('adblock', {
+  /** @returns {Promise<{ enabled: boolean, allowlist: string[] }>} */
+  getSettings: () => ipcRenderer.invoke('adblock:getSettings'),
+
+  /** @param {boolean} enabled */
+  setEnabled: (enabled) => ipcRenderer.invoke('adblock:setEnabled', enabled),
+
+  /**
+   * @param {string} hostname
+   * @param {boolean} allowed whether ads are allowed (blocking off) there
+   */
+  setSiteAllowed: (hostname, allowed) => ipcRenderer.invoke('adblock:setSiteAllowed', hostname, allowed),
+
+  /** @param {number} wcId a browser tab's guest */
+  blockedCount: (wcId) => ipcRenderer.invoke('adblock:blockedCount', wcId),
+
+  /**
+   * Subscribe to settings changes. Returns an unsubscribe fn.
+   * @param {(settings: { enabled: boolean, allowlist: string[] }) => void} callback
+   */
+  onSettings: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ enabled: boolean, allowlist: string[] }} settings
+     */
+    const listener = (_event, settings) => callback(settings);
+    ipcRenderer.on('adblock:settings', listener);
+    return () => ipcRenderer.removeListener('adblock:settings', listener);
+  },
+
+  /**
+   * Subscribe to tabs' blocked counts. Returns an unsubscribe fn.
+   * @param {(update: { wcId: number, count: number }) => void} callback
+   */
+  onBlocked: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, count: number }} update
+     */
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on('adblock:blocked', listener);
+    return () => ipcRenderer.removeListener('adblock:blocked', listener);
   },
 });
 

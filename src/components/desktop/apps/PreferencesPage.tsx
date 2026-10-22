@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Puzzle, Settings, Trash2 } from 'lucide-react';
+import { Puzzle, Settings, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { crxIconUrl, getCrxBridge, type CrxExtension } from '@/lib/crx';
 import type { Userscript } from '@/lib/userscripts';
+import { getAdblockBridge } from '@/lib/adblock';
+import { useAdblockSettings } from '@/hooks/useAdblock';
 import { useToast } from '@/hooks/useToast';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -89,6 +91,8 @@ export function PreferencesPage(props: PreferencesProps) {
           </SettingRow>
         </PreferencesSection>
 
+        <AdblockSection />
+
         {showClearData && (
           <PreferencesSection
             title="Privacy"
@@ -108,6 +112,62 @@ export function PreferencesPage(props: PreferencesProps) {
         {showExtensions && <ExtensionsSection {...props} />}
       </div>
     </div>
+  );
+}
+
+/**
+ * The built-in ad blocker: on/off for every site, and the sites the user
+ * turned it off for from the toolbar's shield. Absent outside the Electron
+ * shell, where nothing blocks.
+ */
+function AdblockSection() {
+  const bridge = getAdblockBridge();
+  const settings = useAdblockSettings();
+  if (!bridge || !settings) return null;
+
+  return (
+    <PreferencesSection
+      title="Ad blocker"
+      description="Blocks ads and trackers with EasyList, EasyPrivacy, and uBlock Origin's filters, updated every few days."
+    >
+      <SettingRow
+        htmlFor="prefs-adblock"
+        label="Block ads and trackers"
+        description="Applies to every window, private ones included."
+      >
+        <Switch
+          id="prefs-adblock"
+          checked={settings.enabled}
+          onCheckedChange={(enabled) => {
+            bridge.setEnabled(enabled).catch(() => {});
+          }}
+        />
+      </SettingRow>
+      {settings.allowlist.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Allowed on these sites</p>
+          <ul className="divide-y divide-border/60 rounded-lg border border-border/60">
+            {[...settings.allowlist].sort().map((site) => (
+              <li key={site} className="flex items-center justify-between gap-4 px-3 py-2">
+                <span className="min-w-0 truncate text-sm">{site}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0"
+                  aria-label={`Block ads on ${site} again`}
+                  title="Block ads here again"
+                  onClick={() => {
+                    bridge.setSiteAllowed(site, false).catch(() => {});
+                  }}
+                >
+                  <X className="size-4" aria-hidden />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </PreferencesSection>
   );
 }
 

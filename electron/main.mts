@@ -30,6 +30,7 @@ import {
   attachUserscripts,
   isUserscriptInstallUrl,
 } from './userscripts.mts';
+import { attachAdblock, isAdblockExtension, setupAdblock } from './adblock.mts';
 import {
   NSITE_SCHEME,
   registerNsiteProtocol,
@@ -3963,6 +3964,7 @@ function registerCrxHandlers(): void {
     assertShellSender(event);
     return browserSession()
       .extensions.getAllExtensions()
+      .filter((extension) => !isAdblockExtension(extension.id))
       .map((extension) => ({
         id: extension.id,
         name: extension.manifest?.name ?? extension.name,
@@ -4283,6 +4285,16 @@ app.whenReady().then(() => {
   // preload/APIs are in place when the first tab loads.
   setupChromeExtensions();
 
+  // The built-in ad blocker (electron/adblock.mts). Also before the first
+  // <webview>: its extension and preloads must be in place for the first tab.
+  setupAdblock({
+    browserSession: browserSession(),
+    privateSession: privateBrowserSession(),
+    isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents,
+    assertShellSender,
+    sendToShell,
+  });
+
   // Route chrome.action popups into the shell instead of native windows.
   overrideActionPopup();
 
@@ -4574,6 +4586,11 @@ app.on('web-contents-created', (_event, contents) => {
   // electron/userscripts.mts): inject matching scripts as pages load, and
   // turn navigations to *.user.js files into install prompts in the shell
   // instead of pages of raw source. Extension pages are off limits.
+  // The ad blocker's per-page blocked count (electron/adblock.mts).
+  if (isBrowserTabSession(contents.session) && !isExtensionPageGuest) {
+    attachAdblock(contents);
+  }
+
   if (isBrowserTab && !isExtensionPageGuest) {
     attachUserscripts(contents);
     contents.on('will-navigate', (event, url) => {

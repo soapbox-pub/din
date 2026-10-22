@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "scripts/dev-electron.sh",
     "dev:browser": "npm i --silent && vite",
+    "build:adblock": "node scripts/build-adblock-engine.mjs",
     "build:native": "cargo build --release --manifest-path native/din-compositor/Cargo.toml && cargo build --release --manifest-path native/din-fd/Cargo.toml",
     "build": "npm i --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'Project built successfully!'",
     "test": "npm i --silent && tsc --noEmit && tsc -p tsconfig.electron.json && eslint --cache && vitest run --reporter=dot --silent && vite build -l error && cp dist/index.html dist/404.html && echo 'All tests passed!'",
@@ -17,6 +18,8 @@
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
+    "@ghostery/adblocker": "^2.20.1",
+    "@ghostery/adblocker-electron-preload": "^2.20.1",
     "@nostrify/nostrify": "^0.52.2",
     "@nostrify/react": "^0.6.2",
     "@radix-ui/react-toast": "^1.2.1",
@@ -47,6 +50,7 @@
     "react-router-dom": "^7.14.2",
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0",
+    "tldts-experimental": "^7.4.19",
     "tw-animate-css": "^1.2.0",
     "unhead": "^3.1.0",
     "vaul": "^1.1.2",

@@ -9,7 +9,7 @@ import htmlEslint from "@html-eslint/eslint-plugin";
 import customRules from "./eslint-rules/index.js";
 
 export default defineConfig(
-  globalIgnores(["dist", ".agents"]),
+  globalIgnores(["dist", ".agents", "electron/adblock-extension/engine.js"]),
   {
     name: "app/ts",
     files: ["**/*.{ts,tsx}"],
@@ -79,7 +79,7 @@ export default defineConfig(
     // directly (window/document/Element/requestAnimationFrame), so they need
     // browser globals on top of the electron block's node globals.
     name: "app/electron-dom-preload",
-    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs"],
+    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/adblock-preload.cjs"],
     languageOptions: {
       globals: globals.browser,
     },

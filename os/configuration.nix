@@ -27,7 +27,12 @@ let
         "public"
         "src"
         "electron"
-      ];
+      ]
+      # The ad blocker's engine bundle is built from these two
+      # (electron/adblock.mts). `scripts` itself must pass for its files to.
+      || rel == "scripts"
+      || rel == "scripts/build-adblock-engine.mjs"
+      || rel == "scripts/adblock-engine-entry.js";
   };
 
   # The release this system is (os/version), which a release's tag repeats
@@ -42,7 +47,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-9F+vbSFjvGWdSBF6Hxbeq1e9SvbFkfxxtTGYmyV+ujM=";
+    npmDepsHash = "sha256-JwMTneH6j7Jf8SW+oIKtdNXWQZD6xXxNA6w3qVT5nu0=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -53,6 +58,7 @@ let
     buildPhase = ''
       runHook preBuild
       npm exec -- vite build -l error
+      node scripts/build-adblock-engine.mjs
       runHook postBuild
     '';
 
@@ -66,14 +72,23 @@ let
       # can't be forgotten here.
       install -m444 electron/*.mts electron/*.cjs $out/share/din/
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
+      # The ad blocker's extension, with its engine bundle built above.
+      cp -r electron/adblock-extension $out/share/din/adblock-extension
 
       # Runtime node modules for main.mts's Chrome extension support
       # (electron-chrome-extensions + electron-chrome-web-store and their
       # transitive runtime deps). Resolved relative to main.mts, so they
       # live in a node_modules directory beside it.
       mkdir -p $out/share/din/node_modules
-      for dep in electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip pbf; do
-        cp -r node_modules/$dep $out/share/din/node_modules/
+      # The ad blocker's filter engine (electron/adblock.mts) and its
+      # page preload come along too.
+      for dep in electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip pbf \
+        @ghostery/adblocker @ghostery/adblocker-content @ghostery/adblocker-extended-selectors \
+        @ghostery/adblocker-electron-preload @ghostery/url-parser tldts-experimental tldts-core \
+        @remusao/guess-url-type @remusao/small @remusao/smaz @remusao/smaz-compress \
+        @remusao/smaz-decompress @remusao/trie; do
+        mkdir -p "$(dirname $out/share/din/node_modules/$dep)"
+        cp -r node_modules/$dep $out/share/din/node_modules/$dep
       done
       runHook postInstall
     '';

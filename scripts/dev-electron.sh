@@ -21,6 +21,9 @@ cd "${ROOT_DIR}"
 # Make sure dependencies (including Electron) are present.
 npm install --silent
 
+# The ad blocker's filter engine bundle (electron/adblock.mts).
+node scripts/build-adblock-engine.mjs
+
 ELECTRON="${ROOT_DIR}/node_modules/.bin/electron"
 if [ ! -x "${ELECTRON}" ]; then
   echo "Electron binary not found at ${ELECTRON}." >&2

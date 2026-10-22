@@ -92,6 +92,7 @@ import {
   type LoadErrorInfo,
 } from '@/components/desktop/apps/BrowserView';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
+import { AdblockButton } from '@/components/desktop/apps/AdblockButton';
 import { useUserscripts } from '@/hooks/useUserscripts';
 import {
   UserscriptInstallDialog,
@@ -1524,6 +1525,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         {/* Extension action icons are hidden in private windows (extensions
             don't run in the ephemeral private session). */}
         {crx && !isPrivate && <BrowserActionList tabWcId={activeTab.wcId} />}
+
+        <AdblockButton
+          wcId={activeTab.wcId}
+          url={activeTab.url}
+          onReload={() => views.current.get(activeId)?.reload()}
+        />
 
         {isPrivate && (
           <span

@@ -1,0 +1,12 @@
+{
+  "manifest_version": 2,
+  "name": "Din Ad Blocker",
+  "version": "1.0.0",
+  "description": "Blocks ads and trackers in Din's web browser.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8TwqHhLvMgtRTO7BBmIhZ64y1PwKT+gavxBGqldk1tWndt7Y6oV1QoYRnArasG2YZqTfv1gfnx3smRg/phWB1UuTUVzyp3wVr5KkttgKHEkbYOYCjUoK8QD6m443n2QseFW5RG+yfByE+ELEC6Apq8erV77KQOggzmLe8iPK7d7VB2AriSqriPr6zODfSyE0bc+d+WpjZo2luYobcpDFyPqwL38MfObNgNmiaJRV/D6xj7d9Cj9ae9IHvKrIECfvPwRVPFPFs/x3yC4Vgdm15zVLZsWT0FwnS0378zZDGcJ9NGFmqgtfqjS004X0z1a8dHKM2dSoppzJsHu8dpceTwIDAQAB",
+  "background": {
+    "scripts": ["engine.js", "background.js"],
+    "persistent": true
+  },
+  "permissions": ["webRequest", "webRequestBlocking", "<all_urls>"]
+}

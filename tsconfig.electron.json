@@ -32,5 +32,7 @@
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuildinfo-electron"
   },
-  "include": ["electron"]
+  "include": ["electron"],
+  /* The ad blocker's extension runs in an extension page, not Node. */
+  "exclude": ["electron/adblock-extension"]
 }
