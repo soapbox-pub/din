@@ -582,6 +582,12 @@ in
     # cage swallows Ctrl+Alt+Fn unless told otherwise. Without it there is no
     # way to reach a text login on another VT when Din hangs.
     extraArguments = [ "-s" ];
+    # cage creates the gamma-control protocol but never hands it to its
+    # scene, so gamma ramps (night light's gammastep) are accepted and then
+    # silently dropped.
+    package = pkgs.cage.overrideAttrs (old: {
+      patches = (old.patches or [ ]) ++ [ ./patches/cage-gamma-control.patch ];
+    });
   };
   # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
   # writes (os/din-keyboard.sh). cage applies it, and Din inherits it.
