@@ -281,10 +281,13 @@ function blockInSession(session: Electron.Session): void {
  * before the page runs anything.
  */
 function registerCosmeticHandlers(): void {
+  // Setting returnValue sends the reply there and then, so it's set once.
   ipcMain.on('adblock:scriptlets', (event, url: unknown) => {
-    event.returnValue = [];
     const contents = event.sender;
-    if (!isBrowserTab(contents) || !engine || !activeFor(contents) || typeof url !== 'string') return;
+    if (!isBrowserTab(contents) || !engine || !activeFor(contents) || typeof url !== 'string') {
+      event.returnValue = [];
+      return;
+    }
     const { hostname, domain } = parseDomain(url);
     event.returnValue = engine.getCosmeticsFilters({
       url,
