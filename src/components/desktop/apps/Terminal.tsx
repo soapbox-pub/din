@@ -4,7 +4,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { SquareTerminal } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
-import { getPtyBridge } from '@/lib/pty';
+import { getPtyBridge, type PtyBridge } from '@/lib/pty';
+import { parkedTab } from '@/lib/tabTransfer';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
@@ -175,6 +176,10 @@ function paneTitle(label: PaneLabel | undefined): string {
   return 'Terminal';
 }
 
+function isTermTab(value: unknown): value is TermTab {
+  return typeof value === 'object' && value !== null && 'layout' in value && 'activePaneId' in value;
+}
+
 /** Replace the leaf `paneId` with a split of itself and a new pane. */
 /**
  * xterm's WebGL renderer calls generateMipmap() after every glyph-atlas
@@ -316,18 +321,25 @@ function flattenLayout(
  * Outside the Electron shell (plain-browser dev) there is no bridge, so a
  * fallback notice renders instead.
  */
-export function Terminal({ windowId }: AppComponentProps) {
+export function Terminal({ windowId, params }: AppComponentProps) {
   const bridge = getPtyBridge();
   const { close: closeWindow, focus: focusWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
 
   const [tabs, setTabs] = useState<TermTab[]>(() => {
+    // A window opened for a tab dragged out of another one.
+    const adopted = parkedTab(params);
+    if (isTermTab(adopted)) return [adopted];
     const paneId = newSessionId();
     return [
       { id: newTabId(), layout: { type: 'leaf', paneId }, activePaneId: paneId },
     ];
   });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
+  const tabsRef = useRef(tabs);
+  useLayoutEffect(() => {
+    tabsRef.current = tabs;
+  });
   // Tracks last known CWD per pane, updated via OSC 7 from each shell.
   const panesCwd = useRef<Map<string, string>>(new Map());
   // What each pane's tab is named after.
@@ -383,6 +395,28 @@ export function Terminal({ windowId }: AppComponentProps) {
     },
     [closeWindow, windowId],
   );
+
+  /** Hand a tab to another window, its shells still running. */
+  const takeTab = useCallback(
+    (id: string) => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (tab) {
+        markMoving(tab.layout);
+        closeTab(id);
+      }
+      return tab;
+    },
+    [closeTab],
+  );
+
+  const receiveTab = useCallback((payload: unknown, index: number) => {
+    if (!isTermTab(payload)) return;
+    setTabs((ts) => {
+      const rest = ts.filter((t) => t.id !== payload.id);
+      return [...rest.slice(0, index), payload, ...rest.slice(index)];
+    });
+    setActiveId(payload.id);
+  }, []);
 
   const splitPane = useCallback((tabId: string, paneId: string, dir: SplitDir) => {
     const newPaneId = newSessionId();
@@ -483,7 +517,8 @@ export function Terminal({ windowId }: AppComponentProps) {
 
   // Each tab is named after its focused pane, and the window after its tab.
   const activeTab = tabs.find((t) => t.id === activeId);
-  useWindowTitle(activeTab ? paneTitle(labels[activeTab.activePaneId]) : null);
+  const title = activeTab ? paneTitle(labels[activeTab.activePaneId]) : null;
+  useWindowTitle(title);
 
   // Publish the tab strip into the window title bar (Chrome-style), so tabs
   // share a line with the window controls. Cleared on unmount.
@@ -503,10 +538,18 @@ export function Terminal({ windowId }: AppComponentProps) {
         onClose={closeTab}
         onNew={openTab}
         onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+        transfer={{
+          windowId,
+          appId: 'terminal',
+          group: 'terminal',
+          title: title ?? 'Terminal',
+          take: takeTab,
+          receive: receiveTab,
+        }}
       />,
     );
     return () => setTitlebar(null);
-  }, [bridge, tabs, labels, activeId, closeTab, openTab, setTitlebar]);
+  }, [bridge, tabs, labels, activeId, title, windowId, closeTab, openTab, takeTab, receiveTab, setTitlebar]);
 
   if (!bridge) {
     return (
@@ -693,11 +736,413 @@ const TerminalTab = memo(function TerminalTab({
   );
 });
 
+/** Where a pane's session sends its events: the pane mounted for it now. */
+interface PaneHost {
+  onCwdChange: (paneId: string, cwd: string) => void;
+  onLabel: (paneId: string, label: PaneLabel | null) => void;
+  onClose: (paneId: string) => void;
+  onReveal: (paneId: string) => void;
+  onTabShortcut: (action: TabShortcut) => void;
+  openUrl: (url: string) => void;
+  /** Whether the user can see the pane: its tab showing, its window on top. */
+  visible: boolean;
+}
+
 /**
- * A single terminal session: one xterm instance bound to one pty. Mounted for
- * the lifetime of its pane. Memoized so another pane's state change doesn't
- * re-run this one's effects. Right-click opens a context menu with clipboard
- * actions and Tilix-style split/close-pane actions.
+ * A pane's terminal: one xterm instance bound to one pty. It lives outside
+ * React so its tab can move to another window without the shell noticing:
+ * the tab's panes are marked `moving`, the old window's panes detach without
+ * killing them, and the new window's panes attach the same sessions.
+ */
+interface PaneSession {
+  term: XTerm;
+  fit: FitAddon;
+  /** Keep the session alive through its next detach: its tab is moving. */
+  moving: boolean;
+  /** Show the terminal in a pane's container. Returns the detach fn. */
+  attach: (container: HTMLElement, host: { current: PaneHost }) => () => void;
+}
+
+const paneSessions = new Map<string, PaneSession>();
+
+/** How long a moving pane waits to be picked up before its shell is killed. */
+const MOVE_GRACE_MS = 10_000;
+
+/** Mark a tab's sessions as moving to another window. */
+function markMoving(node: LayoutNode): void {
+  if (node.type === 'split') {
+    markMoving(node.a);
+    markMoving(node.b);
+    return;
+  }
+  const session = paneSessions.get(node.paneId);
+  if (session) session.moving = true;
+}
+
+/** The session for a pane: the one it already has, or a new shell. */
+function paneSession(bridge: PtyBridge, paneId: string, initialCwd: string | undefined): PaneSession {
+  const existing = paneSessions.get(paneId);
+  if (existing) return existing;
+
+  let disposed = false;
+  let sessionId: number | null = null;
+  let exited = false;
+  let host: { current: PaneHost } | null = null;
+  let disposeTimer: number | undefined;
+  /** Output that raced ahead of the spawn() ack, keyed by session id. */
+  const pending: Array<{ id: number; data: Uint8Array }> = [];
+  /** Tracks the shell's current working directory via OSC 7. */
+  let cwd = initialCwd;
+  /** The command the pane's tab is named after. */
+  let command: string | undefined;
+
+  const term = new XTerm({
+    cursorBlink: true,
+    fontSize: currentFontSize,
+    fontFamily:
+      "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace",
+    scrollback: 5000,
+    theme: TERMINAL_THEME,
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+
+  // Prefer the WebGL renderer: the default DOM renderer draws box-drawing
+  // and block glyphs straight from the font, leaving gaps and misaligned
+  // borders in TUI apps. WebGL synthesizes those glyphs pixel-perfectly
+  // (customGlyphs). Falls back to the DOM renderer when WebGL is
+  // unavailable (e.g. software rendering disabled).
+  //
+  // The browser can also reclaim the GL context later (context-count
+  // limits, GPU resets, suspend/resume), after which cells paint as black
+  // boxes. Recreate the addon on context loss; after repeated losses give
+  // up and let xterm fall back to the DOM renderer.
+  //
+  // A GPU reset also wipes the glyph atlas: its pages are accelerated 2D
+  // canvases, and xterm shares one atlas between every terminal with the
+  // same font settings. xterm still believes the glyphs are drawn, so every
+  // cell (in old and new tabs alike) paints as a blank block. Clear the
+  // atlas whenever a context comes back or a replacement addon loads, so
+  // glyphs are rasterized again. The addon restores the GL context itself
+  // when it returns within 3 s and only reports a loss after that.
+  let contextLosses = 0;
+  let reloadFailures = 0;
+  let currentWebgl: WebglAddon | null = null;
+  const onContextRestored = () => {
+    requestAnimationFrame(() => currentWebgl?.clearTextureAtlas());
+  };
+  const loadWebgl = () => {
+    if (disposed || !term.element) return;
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        if (currentWebgl === webgl) currentWebgl = null;
+        webgl.dispose();
+        contextLosses += 1;
+        if (disposed) return;
+        if (contextLosses <= 3) {
+          requestAnimationFrame(loadWebgl);
+        } else {
+          console.warn('Terminal: WebGL context lost repeatedly, falling back to DOM renderer');
+          term.refresh(0, term.rows - 1);
+        }
+      });
+      term.loadAddon(webgl);
+      currentWebgl = webgl;
+      disableAtlasMipmaps(term.element);
+      if (contextLosses > 0) webgl.clearTextureAtlas();
+    } catch (error) {
+      // Right after a GPU reset the restarted GPU process may not hand out
+      // contexts yet. Keep trying for a while before settling for DOM.
+      if (contextLosses > 0 && reloadFailures < 10) {
+        reloadFailures += 1;
+        setTimeout(loadWebgl, 2000);
+        return;
+      }
+      console.warn('Terminal: WebGL renderer unavailable, falling back to DOM renderer', error);
+    }
+  };
+
+  // OSC 7 ("file://host/path") is emitted by zsh/bash/fish on every
+  // directory change when the shell is configured to do so (or when using
+  // a terminal-aware prompt theme). Capture it to track the pane's CWD so
+  // new tabs and splits can inherit it.
+  const oscHandler = term.parser.registerOscHandler(7, (data) => {
+    try {
+      const url = new URL(data);
+      if (url.protocol === 'file:') {
+        cwd = decodeURIComponent(url.pathname);
+        host?.current.onCwdChange(paneId, cwd);
+      }
+    } catch {
+      // ignore malformed OSC 7 payloads
+    }
+    return true;
+  });
+
+  // Linkify http/https URLs in the output. xterm has no link detection of
+  // its own; this provider scans each line for URLs and, on Ctrl/Cmd+click
+  // (Tilix/VS Code convention — a plain click still selects text), routes
+  // the URL through the desktop's opener so it lands in the Web Browser (or
+  // an installed web app that owns the origin).
+  const linkProvider = term.registerLinkProvider({
+    provideLinks(lineNumber, callback) {
+      const line = term.buffer.active.getLine(lineNumber - 1);
+      if (!line) {
+        callback(undefined);
+        return;
+      }
+      const text = line.translateToString(true);
+      const links: ILink[] = [];
+      TERMINAL_URL_REGEX.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = TERMINAL_URL_REGEX.exec(text)) !== null) {
+        // Drop trailing punctuation that's more likely sentence than URL.
+        const url = match[0].replace(/[.,;:!?]+$/, '');
+        if (!url) continue;
+        const startX = match.index + 1; // xterm columns are 1-based
+        links.push({
+          text: url,
+          range: {
+            start: { x: startX, y: lineNumber },
+            end: { x: startX + url.length - 1, y: lineNumber },
+          },
+          activate: (event, href) => {
+            if (event.ctrlKey || event.metaKey) host?.current.openUrl(href);
+          },
+        });
+      }
+      callback(links.length ? links : undefined);
+    },
+  });
+
+  // Zoom: keep this session's font size synced with the shared (persisted)
+  // value and refit so cols/rows track the new glyph metrics.
+  const applyFontSize = (size: number) => {
+    if (disposed) return;
+    term.options.fontSize = size;
+    fit.fit();
+  };
+  fontSizeListeners.add(applyFontSize);
+
+  // Ctrl/Cmd +/-/0 keyboard zoom and gnome-terminal/Tilix-style tab
+  // shortcuts: Ctrl+PageUp/PageDown switch tabs, Ctrl+T or Ctrl+Shift+T
+  // opens one, Ctrl+Shift+W closes the current one. Copy and paste work
+  // like elementary's terminal ("natural copy/paste"): Ctrl+C copies when
+  // there's a selection and is ^C otherwise, Ctrl+V pastes when the
+  // clipboard has text and is ^V otherwise; Shift works too. Returning
+  // false stops xterm from also sending the keystroke to the shell.
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey) || e.altKey) return true;
+    if (!e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
+      e.preventDefault();
+      host?.current.onTabShortcut(e.key === 'PageUp' ? 'prev-tab' : 'next-tab');
+      return false;
+    }
+    if (isLetterKey(e, 'c') && term.hasSelection()) {
+      e.preventDefault();
+      navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+      return false;
+    }
+    if (isLetterKey(e, 'v')) {
+      e.preventDefault();
+      navigator.clipboard
+        .readText()
+        .catch(() => '')
+        .then((text) => {
+          if (disposed) return;
+          if (text) term.paste(text);
+          else if (sessionId !== null && !e.shiftKey) bridge.write(sessionId, '\x16');
+        });
+      return false;
+    }
+    if (isLetterKey(e, 't')) {
+      e.preventDefault();
+      host?.current.onTabShortcut('new-tab');
+      return false;
+    }
+    if (e.shiftKey && e.key.toLowerCase() === 'w') {
+      e.preventDefault();
+      host?.current.onTabShortcut('close-tab');
+      return false;
+    }
+    switch (e.key) {
+      case '+':
+      case '=':
+        setSharedFontSize(currentFontSize + 1);
+        return false;
+      case '-':
+      case '_':
+        setSharedFontSize(currentFontSize - 1);
+        return false;
+      case '0':
+        setSharedFontSize(DEFAULT_FONT_SIZE);
+        return false;
+      default:
+        return true;
+    }
+  });
+
+  const offData = bridge.onData((id, data) => {
+    if (sessionId === null) {
+      pending.push({ id, data });
+    } else if (id === sessionId) {
+      term.write(data);
+    }
+  });
+  const offExit = bridge.onExit((id) => {
+    // The shell ended (Ctrl+D, `exit`, crash): close the pane right away —
+    // no interstitial. Closing a tab's last pane closes the tab, and the
+    // last tab closes the window. A pane between windows closes on arrival.
+    if (id !== sessionId) return;
+    exited = true;
+    host?.current.onClose(paneId);
+  });
+  // Like elementary's terminal: a long command finishing out of sight
+  // (another tab, a window in front, minimized) says so. Clicking the
+  // notification brings this pane back.
+  // The tab is named after the command running in it, or the last one.
+  const offCommandStart =
+    bridge.onCommandStart?.((id, started) => {
+      if (id !== sessionId || !started) return;
+      command = started;
+      host?.current.onLabel(paneId, { command });
+    }) ?? (() => {});
+  let finished: Notification | null = null;
+  const offCommandDone = bridge.onCommandDone((id, done) => {
+    if (id !== sessionId) return;
+    if (done.command) {
+      command = done.command;
+      host?.current.onLabel(paneId, { command });
+    }
+    if (done.seconds < NOTIFY_AFTER_SECONDS || host?.current.visible) return;
+    finished = new Notification(done.command || 'Command', {
+      app: 'terminal',
+      body: `Finished after ${formatDuration(done.seconds)}`,
+      tag: paneId,
+    });
+    finished.onclick = () => host?.current.onReveal(paneId);
+  });
+
+  term.onData((data) => {
+    if (sessionId !== null) bridge.write(sessionId, data);
+  });
+  term.onResize(({ cols, rows }) => {
+    if (sessionId !== null) bridge.resize(sessionId, cols, rows);
+  });
+
+  const spawn = () => {
+    bridge
+      .spawn({ cols: term.cols, rows: term.rows }, cwd)
+      .then((id) => {
+        if (disposed) {
+          bridge.kill(id);
+          return;
+        }
+        sessionId = id;
+        for (const event of pending) {
+          if (event.id === id) term.write(event.data);
+        }
+        pending.length = 0;
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!disposed) term.write(`Failed to start shell: ${message}\r\n`);
+      });
+  };
+
+  const dispose = () => {
+    disposed = true;
+    paneSessions.delete(paneId);
+    fontSizeListeners.delete(applyFontSize);
+    offData();
+    offExit();
+    offCommandStart();
+    offCommandDone();
+    finished?.close();
+    oscHandler.dispose();
+    linkProvider.dispose();
+    if (sessionId !== null) bridge.kill(sessionId);
+    term.dispose();
+  };
+
+  const session: PaneSession = {
+    term,
+    fit,
+    moving: false,
+    attach(container, h) {
+      window.clearTimeout(disposeTimer);
+      session.moving = false;
+      host = h;
+      if (term.element) {
+        container.appendChild(term.element);
+        fit.fit();
+      } else {
+        term.open(container);
+        loadWebgl();
+        fit.fit();
+        spawn();
+      }
+      // The window it moved to learns what the old one knew.
+      if (cwd) h.current.onCwdChange(paneId, cwd);
+      if (command) h.current.onLabel(paneId, { command });
+      if (exited) h.current.onClose(paneId);
+
+      // Ctrl/Cmd + scroll wheel zooms (Tilix-style). Capture phase +
+      // stopPropagation so xterm's own wheel handler doesn't also scroll the
+      // buffer while zooming.
+      const onWheel = (e: WheelEvent) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setSharedFontSize(currentFontSize + (e.deltaY < 0 ? 1 : -1));
+      };
+      container.addEventListener('wheel', onWheel, { passive: false, capture: true });
+
+      // Refit on any container size change (window resize/maximize, pane
+      // splits, divider drags). The rAF hop coalesces bursts and avoids
+      // "ResizeObserver loop" warnings; the resulting term.onResize event
+      // forwards the new size to the pty.
+      let attached = true;
+      const observer = new ResizeObserver(() => {
+        requestAnimationFrame(() => {
+          if (attached && host === h && !disposed) fit.fit();
+        });
+      });
+      observer.observe(container);
+
+      // Focus the terminal on click anywhere in its area.
+      const focus = () => term.focus();
+      container.addEventListener('mousedown', focus);
+      container.addEventListener('webglcontextrestored', onContextRestored, true);
+
+      return () => {
+        attached = false;
+        observer.disconnect();
+        container.removeEventListener('wheel', onWheel, { capture: true });
+        container.removeEventListener('mousedown', focus);
+        container.removeEventListener('webglcontextrestored', onContextRestored, true);
+        // Another window's pane already took the session over.
+        if (host !== h) return;
+        host = null;
+        if (session.moving) {
+          disposeTimer = window.setTimeout(dispose, MOVE_GRACE_MS);
+          return;
+        }
+        h.current.onLabel(paneId, null);
+        dispose();
+      };
+    },
+  };
+  paneSessions.set(paneId, session);
+  return session;
+}
+
+/**
+ * A single terminal pane, showing its session (see PaneSession). Memoized so
+ * another pane's state change doesn't re-run this one's effects. Right-click
+ * opens a context menu with clipboard actions and Tilix-style
+ * split/close-pane actions.
  */
 const TerminalSession = memo(function TerminalSession({
   paneId,
@@ -731,334 +1176,43 @@ const TerminalSession = memo(function TerminalSession({
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<XTerm | null>(null);
-  /** Tracks the shell's current working directory via OSC 7. */
-  const cwdRef = useRef<string | undefined>(initialCwd);
-  // Always-fresh references to the callbacks so the (long-lived) effect
-  // closure never goes stale.
-  const onCwdChangeRef = useRef(onCwdChange);
-  const onLabelRef = useRef(onLabel);
-  const onCloseRef = useRef(onClose);
-  const onRevealRef = useRef(onReveal);
-  const onTabShortcutRef = useRef(onTabShortcut);
-  const openUrlRef = useRef(openUrl);
-  /** Whether the user can see this pane: its tab showing, its window on top. */
-  const visibleRef = useRef(false);
+  const initialCwdRef = useRef(initialCwd);
+  const isTop = useWindowIsTop();
+  const isTopRef = useRef(isTop);
+  // Always-fresh callbacks for the (long-lived) session.
+  const host = useRef<PaneHost>({
+    onCwdChange,
+    onLabel,
+    onClose,
+    onReveal,
+    onTabShortcut,
+    openUrl,
+    visible: false,
+  });
   useLayoutEffect(() => {
-    onCwdChangeRef.current = onCwdChange;
-    onLabelRef.current = onLabel;
-    onCloseRef.current = onClose;
-    onRevealRef.current = onReveal;
-    onTabShortcutRef.current = onTabShortcut;
-    openUrlRef.current = openUrl;
+    isTopRef.current = isTop;
+    host.current = {
+      onCwdChange,
+      onLabel,
+      onClose,
+      onReveal,
+      onTabShortcut,
+      openUrl,
+      visible: active && isTop,
+    };
   });
 
   useEffect(() => {
     const container = containerRef.current;
     if (!bridge || !container) return;
-
-    let disposed = false;
-    let sessionId: number | null = null;
-    /** Output that raced ahead of the spawn() ack, keyed by session id. */
-    const pending: Array<{ id: number; data: Uint8Array }> = [];
-
-    const term = new XTerm({
-      cursorBlink: true,
-      fontSize: currentFontSize,
-      fontFamily:
-        "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace",
-      scrollback: 5000,
-      theme: TERMINAL_THEME,
-    });
-    const fit = new FitAddon();
-    fitRef.current = fit;
-    term.loadAddon(fit);
-    term.open(container);
-
-    // Prefer the WebGL renderer: the default DOM renderer draws box-drawing
-    // and block glyphs straight from the font, leaving gaps and misaligned
-    // borders in TUI apps. WebGL synthesizes those glyphs pixel-perfectly
-    // (customGlyphs). Falls back to the DOM renderer when WebGL is
-    // unavailable (e.g. software rendering disabled).
-    //
-    // The browser can also reclaim the GL context later (context-count
-    // limits, GPU resets, suspend/resume), after which cells paint as black
-    // boxes. Recreate the addon on context loss; after repeated losses give
-    // up and let xterm fall back to the DOM renderer.
-    //
-    // A GPU reset also wipes the glyph atlas: its pages are accelerated 2D
-    // canvases, and xterm shares one atlas between every terminal with the
-    // same font settings. xterm still believes the glyphs are drawn, so every
-    // cell (in old and new tabs alike) paints as a blank block. Clear the
-    // atlas whenever a context comes back or a replacement addon loads, so
-    // glyphs are rasterized again. The addon restores the GL context itself
-    // when it returns within 3 s and only reports a loss after that.
-    let contextLosses = 0;
-    let reloadFailures = 0;
-    let currentWebgl: WebglAddon | null = null;
-    const onContextRestored = () => {
-      requestAnimationFrame(() => currentWebgl?.clearTextureAtlas());
-    };
-    container.addEventListener('webglcontextrestored', onContextRestored, true);
-    const loadWebgl = () => {
-      if (disposed) return;
-      try {
-        const webgl = new WebglAddon();
-        webgl.onContextLoss(() => {
-          if (currentWebgl === webgl) currentWebgl = null;
-          webgl.dispose();
-          contextLosses += 1;
-          if (disposed) return;
-          if (contextLosses <= 3) {
-            requestAnimationFrame(loadWebgl);
-          } else {
-            console.warn('Terminal: WebGL context lost repeatedly, falling back to DOM renderer');
-            term.refresh(0, term.rows - 1);
-          }
-        });
-        term.loadAddon(webgl);
-        currentWebgl = webgl;
-        disableAtlasMipmaps(container);
-        if (contextLosses > 0) webgl.clearTextureAtlas();
-      } catch (error) {
-        // Right after a GPU reset the restarted GPU process may not hand out
-        // contexts yet. Keep trying for a while before settling for DOM.
-        if (contextLosses > 0 && reloadFailures < 10) {
-          reloadFailures += 1;
-          setTimeout(loadWebgl, 2000);
-          return;
-        }
-        console.warn('Terminal: WebGL renderer unavailable, falling back to DOM renderer', error);
-      }
-    };
-    loadWebgl();
-
-    // OSC 7 ("file://host/path") is emitted by zsh/bash/fish on every
-    // directory change when the shell is configured to do so (or when using
-    // a terminal-aware prompt theme). Capture it to track the pane's CWD so
-    // new tabs and splits can inherit it.
-    const oscHandler = term.parser.registerOscHandler(7, (data) => {
-      try {
-        const url = new URL(data);
-        if (url.protocol === 'file:') {
-          const cwd = decodeURIComponent(url.pathname);
-          cwdRef.current = cwd;
-          onCwdChangeRef.current(paneId, cwd);
-        }
-      } catch {
-        // ignore malformed OSC 7 payloads
-      }
-      return true;
-    });
-
-    // Linkify http/https URLs in the output. xterm has no link detection of
-    // its own; this provider scans each line for URLs and, on Ctrl/Cmd+click
-    // (Tilix/VS Code convention — a plain click still selects text), routes
-    // the URL through the desktop's opener so it lands in the Web Browser (or
-    // an installed web app that owns the origin).
-    const linkProvider = term.registerLinkProvider({
-      provideLinks(lineNumber, callback) {
-        const line = term.buffer.active.getLine(lineNumber - 1);
-        if (!line) {
-          callback(undefined);
-          return;
-        }
-        const text = line.translateToString(true);
-        const links: ILink[] = [];
-        TERMINAL_URL_REGEX.lastIndex = 0;
-        let match: RegExpExecArray | null;
-        while ((match = TERMINAL_URL_REGEX.exec(text)) !== null) {
-          // Drop trailing punctuation that's more likely sentence than URL.
-          const url = match[0].replace(/[.,;:!?]+$/, '');
-          if (!url) continue;
-          const startX = match.index + 1; // xterm columns are 1-based
-          links.push({
-            text: url,
-            range: {
-              start: { x: startX, y: lineNumber },
-              end: { x: startX + url.length - 1, y: lineNumber },
-            },
-            activate: (event, href) => {
-              if (event.ctrlKey || event.metaKey) openUrlRef.current(href);
-            },
-          });
-        }
-        callback(links.length ? links : undefined);
-      },
-    });
-
-    fit.fit();
-    termRef.current = term;
-
-    // Zoom: keep this session's font size synced with the shared (persisted)
-    // value and refit so cols/rows track the new glyph metrics.
-    const applyFontSize = (size: number) => {
-      if (disposed) return;
-      term.options.fontSize = size;
-      fit.fit();
-    };
-    fontSizeListeners.add(applyFontSize);
-
-    // Ctrl/Cmd + scroll wheel zooms (Tilix-style). Capture phase + stopPropagation
-    // so xterm's own wheel handler doesn't also scroll the buffer while zooming.
-    const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setSharedFontSize(currentFontSize + (e.deltaY < 0 ? 1 : -1));
-    };
-    container.addEventListener('wheel', onWheel, { passive: false, capture: true });
-
-    // Ctrl/Cmd +/-/0 keyboard zoom and gnome-terminal/Tilix-style tab
-    // shortcuts: Ctrl+PageUp/PageDown switch tabs, Ctrl+T or Ctrl+Shift+T
-    // opens one, Ctrl+Shift+W closes the current one. Copy and paste work
-    // like elementary's terminal ("natural copy/paste"): Ctrl+C copies when
-    // there's a selection and is ^C otherwise, Ctrl+V pastes when the
-    // clipboard has text and is ^V otherwise; Shift works too. Returning
-    // false stops xterm from also sending the keystroke to the shell.
-    term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey) || e.altKey) return true;
-      if (!e.shiftKey && (e.key === 'PageUp' || e.key === 'PageDown')) {
-        e.preventDefault();
-        onTabShortcutRef.current(e.key === 'PageUp' ? 'prev-tab' : 'next-tab');
-        return false;
-      }
-      if (isLetterKey(e, 'c') && term.hasSelection()) {
-        e.preventDefault();
-        navigator.clipboard.writeText(term.getSelection()).catch(() => {});
-        return false;
-      }
-      if (isLetterKey(e, 'v')) {
-        e.preventDefault();
-        navigator.clipboard
-          .readText()
-          .catch(() => '')
-          .then((text) => {
-            if (disposed) return;
-            if (text) term.paste(text);
-            else if (sessionId !== null && !e.shiftKey) bridge.write(sessionId, '\x16');
-          });
-        return false;
-      }
-      if (isLetterKey(e, 't')) {
-        e.preventDefault();
-        onTabShortcutRef.current('new-tab');
-        return false;
-      }
-      if (e.shiftKey && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
-        onTabShortcutRef.current('close-tab');
-        return false;
-      }
-      switch (e.key) {
-        case '+':
-        case '=':
-          setSharedFontSize(currentFontSize + 1);
-          return false;
-        case '-':
-        case '_':
-          setSharedFontSize(currentFontSize - 1);
-          return false;
-        case '0':
-          setSharedFontSize(DEFAULT_FONT_SIZE);
-          return false;
-        default:
-          return true;
-      }
-    });
-
-    const offData = bridge.onData((id, data) => {
-      if (sessionId === null) {
-        pending.push({ id, data });
-      } else if (id === sessionId) {
-        term.write(data);
-      }
-    });
-    const offExit = bridge.onExit((id) => {
-      // The shell ended (Ctrl+D, `exit`, crash): close the pane right away —
-      // no interstitial. Closing a tab's last pane closes the tab, and the
-      // last tab closes the window.
-      if (id === sessionId) onCloseRef.current(paneId);
-    });
-    // Like elementary's terminal: a long command finishing out of sight
-    // (another tab, a window in front, minimized) says so. Clicking the
-    // notification brings this pane back.
-    // The tab is named after the command running in it, or the last one.
-    const offCommandStart =
-      bridge.onCommandStart?.((id, command) => {
-        if (id === sessionId && command) onLabelRef.current(paneId, { command });
-      }) ?? (() => {});
-    let finished: Notification | null = null;
-    const offCommandDone = bridge.onCommandDone((id, done) => {
-      if (id !== sessionId) return;
-      if (done.command) onLabelRef.current(paneId, { command: done.command });
-      if (done.seconds < NOTIFY_AFTER_SECONDS || visibleRef.current) return;
-      finished = new Notification(done.command || 'Command', {
-        app: 'terminal',
-        body: `Finished after ${formatDuration(done.seconds)}`,
-        tag: paneId,
-      });
-      finished.onclick = () => onRevealRef.current(paneId);
-    });
-
-    term.onData((data) => {
-      if (sessionId !== null) bridge.write(sessionId, data);
-    });
-    term.onResize(({ cols, rows }) => {
-      if (sessionId !== null) bridge.resize(sessionId, cols, rows);
-    });
-
-    bridge
-      .spawn({ cols: term.cols, rows: term.rows }, cwdRef.current)
-      .then((id) => {
-        if (disposed) {
-          bridge.kill(id);
-          return;
-        }
-        sessionId = id;
-        for (const event of pending) {
-          if (event.id === id) term.write(event.data);
-        }
-        pending.length = 0;
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        if (!disposed) term.write(`Failed to start shell: ${message}\r\n`);
-      });
-
-    // Refit on any container size change (window resize/maximize, pane
-    // splits, divider drags). The rAF hop coalesces bursts and avoids
-    // "ResizeObserver loop" warnings; the resulting term.onResize event
-    // forwards the new size to the pty.
-    const observer = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        if (!disposed) fit.fit();
-      });
-    });
-    observer.observe(container);
-
-    // Focus the terminal on click anywhere in its area.
-    const focus = () => term.focus();
-    container.addEventListener('mousedown', focus);
-
+    const session = paneSession(bridge, paneId, initialCwdRef.current);
+    termRef.current = session.term;
+    fitRef.current = session.fit;
+    const detach = session.attach(container, host);
     return () => {
-      disposed = true;
-      observer.disconnect();
-      fontSizeListeners.delete(applyFontSize);
-      container.removeEventListener('wheel', onWheel, { capture: true });
-      container.removeEventListener('mousedown', focus);
-      container.removeEventListener('webglcontextrestored', onContextRestored, true);
-      offData();
-      offExit();
-      offCommandStart();
-      offCommandDone();
-      onLabelRef.current(paneId, null);
-      finished?.close();
-      oscHandler.dispose();
-      linkProvider.dispose();
-      if (sessionId !== null) bridge.kill(sessionId);
-      fitRef.current = null;
+      detach();
       termRef.current = null;
-      term.dispose();
+      fitRef.current = null;
     };
   }, [bridge, paneId]);
 
@@ -1074,12 +1228,6 @@ const TerminalSession = memo(function TerminalSession({
   // Keep keyboard focus on the tab's active pane (new splits focus the new
   // pane; closing a pane moves focus to a survivor), and restore it whenever
   // the window comes to the front (un-minimize, raise from the dock).
-  const isTop = useWindowIsTop();
-  const isTopRef = useRef(isTop);
-  useLayoutEffect(() => {
-    isTopRef.current = isTop;
-    visibleRef.current = active && isTop;
-  });
   useEffect(() => {
     if (active && focused && isTop) termRef.current?.focus();
   }, [active, focused, isTop]);

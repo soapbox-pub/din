@@ -41,14 +41,65 @@ function settle(el: HTMLElement, delta: number): void {
   window.setTimeout(release, SETTLE_MS);
 }
 
+/** How far the pointer leaves the row, up or down, to tear an item off. */
+const TEAR_OFF_PX = 32;
+
 interface Drag {
   id: string;
   pointerId: number;
   startX: number;
+  startY: number;
   /** Where in the dragged element the pointer grabbed it. */
   grabOffset: number;
+  grabOffsetY: number;
   lastX: number;
+  lastY: number;
   active: boolean;
+  /** A copy of the item following the pointer while it's torn off the row. */
+  ghost: HTMLElement | null;
+}
+
+/** A point in viewport coordinates. */
+export interface DragPoint {
+  x: number;
+  y: number;
+}
+
+/** Dragging items off the row (tabs into other windows). */
+export interface TearOff {
+  /** Whether the item can leave the row at all. */
+  enabled: boolean;
+  /** While torn off, where the pointer is; null once it's back on the row. */
+  onHover?: (id: string, point: DragPoint | null) => void;
+  /** The item was released away from the row. */
+  onDrop: (id: string, point: DragPoint) => void;
+}
+
+/** Put a ghost of `el` under the pointer. */
+function placeGhost(ghost: HTMLElement, d: Drag): void {
+  ghost.style.transform = `translate(${d.lastX - d.grabOffset}px, ${d.lastY - d.grabOffsetY}px)`;
+}
+
+function createGhost(el: HTMLElement, d: Drag): HTMLElement {
+  const ghost = el.cloneNode(true) as HTMLElement;
+  for (const attr of ['id', 'role', 'tabindex']) ghost.removeAttribute(attr);
+  ghost.setAttribute('aria-hidden', 'true');
+  Object.assign(ghost.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: `${el.offsetWidth}px`,
+    height: `${el.offsetHeight}px`,
+    margin: '0',
+    transition: 'none',
+    pointerEvents: 'none',
+    zIndex: '2147483647',
+    opacity: '0.95',
+    boxShadow: '0 8px 24px rgb(0 0 0 / 0.25)',
+  });
+  placeGhost(ghost, d);
+  (document.getElementById('shell') ?? document.body).appendChild(ghost);
+  return ghost;
 }
 
 /**
@@ -64,10 +115,29 @@ interface Drag {
  * Positions are written straight onto the elements' transforms rather than
  * through React state, so a drag only re-renders when the order changes.
  */
+/**
+ * Drag-to-reorder for a horizontal row of items (tab strips, dock tiles).
+ *
+ * The dragged item follows the pointer, and as its center crosses a
+ * neighbor's, `onMove(id, toIndex)` reorders the list right away (Chrome's
+ * tab strip behaves the same way); neighbors slide into their new slots. The
+ * pointer is captured for the whole gesture, so moves over a <webview> below
+ * the row still count, and the click that ends a drag is swallowed so it
+ * doesn't also activate or launch the item.
+ *
+ * With `tearOff`, dragging an item well above or below the row tears it off:
+ * it stays in its slot, dimmed, while a copy follows the pointer, and
+ * releasing it there hands it to `tearOff.onDrop`. Bringing it back onto the
+ * row resumes reordering.
+ *
+ * Positions are written straight onto the elements' transforms rather than
+ * through React state, so a drag only re-renders when the order changes.
+ */
 export function useDragReorder({
   ids,
   onMove,
   relayout,
+  tearOff,
 }: {
   /** The reorderable items' ids, in display order. */
   ids: string[];
@@ -78,6 +148,7 @@ export function useDragReorder({
    * must settle synchronously here, not through a transition.
    */
   relayout?: () => void;
+  tearOff?: TearOff;
 }) {
   const elements = useRef(new Map<string, HTMLElement>());
   const drag = useRef<Drag | null>(null);
@@ -85,15 +156,15 @@ export function useDragReorder({
   // Sibling positions just before a reorder, to slide them from (FLIP).
   const before = useRef<Map<string, number> | null>(null);
 
-  const latest = useRef({ ids, onMove, relayout });
+  const latest = useRef({ ids, onMove, relayout, tearOff });
   useLayoutEffect(() => {
-    latest.current = { ids, onMove, relayout };
+    latest.current = { ids, onMove, relayout, tearOff };
   });
 
   /** Put the dragged element under the pointer, and reorder if it crossed a neighbor. */
   const follow = useCallback(() => {
     const d = drag.current;
-    if (!d?.active) return;
+    if (!d?.active || d.ghost) return;
     const el = elements.current.get(d.id);
     if (!el) return;
     const left = naturalLeft(el);
@@ -119,6 +190,33 @@ export function useDragReorder({
     onMove(d.id, to);
   }, []);
 
+  /** Tear the dragged item off the row, or put it back, as the pointer goes. */
+  const tear = useCallback(() => {
+    const d = drag.current;
+    const tearOff = latest.current.tearOff;
+    if (!d?.active || !tearOff?.enabled) return;
+    const el = elements.current.get(d.id);
+    if (!el) return;
+    const row = (el.parentElement ?? el).getBoundingClientRect();
+    if (!d.ghost) {
+      if (d.lastY > row.top - TEAR_OFF_PX && d.lastY < row.bottom + TEAR_OFF_PX) return;
+      el.style.transform = '';
+      el.style.opacity = '0.4';
+      d.ghost = createGhost(el, d);
+    } else if (
+      d.lastY >= row.top && d.lastY <= row.bottom &&
+      d.lastX >= row.left && d.lastX <= row.right
+    ) {
+      d.ghost.remove();
+      d.ghost = null;
+      el.style.opacity = '';
+      tearOff.onHover?.(d.id, null);
+      return;
+    }
+    placeGhost(d.ghost, d);
+    tearOff.onHover?.(d.id, { x: d.lastX, y: d.lastY });
+  }, []);
+
   // After a reorder commits: keep the dragged item under the pointer, and
   // slide its displaced neighbors from where they were.
   useLayoutEffect(() => {
@@ -142,7 +240,14 @@ export function useDragReorder({
     if (el) {
       delete el.dataset.reorderDragging;
       el.style.zIndex = '';
+      el.style.opacity = '';
       settle(el, el.getBoundingClientRect().left - naturalLeft(el));
+    }
+    if (d.ghost) {
+      d.ghost.remove();
+      const tearOff = latest.current.tearOff;
+      tearOff?.onHover?.(d.id, null);
+      if (!cancelled) tearOff?.onDrop(d.id, { x: d.lastX, y: d.lastY });
     }
     if (cancelled) return;
     // The click that ends the drag isn't a click on the item.
@@ -165,17 +270,31 @@ export function useDragReorder({
       id,
       pointerId: e.pointerId,
       startX: e.clientX,
+      startY: e.clientY,
       grabOffset: e.clientX - naturalLeft(el),
+      grabOffsetY: e.clientY - el.getBoundingClientRect().top,
       lastX: e.clientX,
+      lastY: e.clientY,
       active: false,
+      ghost: null,
     };
     const target = e.currentTarget;
     const onMovePointer = (ev: PointerEvent) => {
       const d = drag.current;
       if (!d || ev.pointerId !== d.pointerId) return;
+      // The button came up somewhere its release didn't reach us.
+      if (ev.buttons === 0) {
+        finish(false);
+        return;
+      }
       d.lastX = ev.clientX;
+      d.lastY = ev.clientY;
       if (!d.active) {
-        if (Math.abs(ev.clientX - d.startX) < DRAG_THRESHOLD) return;
+        // An item that can be torn off starts dragging in any direction.
+        const travel = latest.current.tearOff?.enabled
+          ? Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY)
+          : Math.abs(ev.clientX - d.startX);
+        if (travel < DRAG_THRESHOLD) return;
         d.active = true;
         target.setPointerCapture(d.pointerId);
         el.dataset.reorderDragging = '';
@@ -183,6 +302,7 @@ export function useDragReorder({
         el.style.zIndex = '10';
         setDraggingId(d.id);
       }
+      tear();
       follow();
     };
     // Reordering moves the item's node in the DOM, which drops the capture;
@@ -192,18 +312,21 @@ export function useDragReorder({
       if (d?.active && target.isConnected) target.setPointerCapture(d.pointerId);
     };
     target.addEventListener('lostpointercapture', onLostCapture);
-    const onUp = (ev: PointerEvent) => {
-      if (ev.pointerId !== drag.current?.pointerId) return;
+    const finish = (cancelled: boolean) => {
       target.removeEventListener('lostpointercapture', onLostCapture);
       window.removeEventListener('pointermove', onMovePointer);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
-      end(ev.type === 'pointercancel');
+      end(cancelled);
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag.current?.pointerId) return;
+      finish(ev.type === 'pointercancel');
     };
     window.addEventListener('pointermove', onMovePointer);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
-  }, [end, follow]);
+  }, [end, follow, tear]);
 
   /** Ref registrar for an item's moving element. Stable. */
   const register = useCallback((id: string, el: HTMLElement | null) => {

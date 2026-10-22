@@ -75,6 +75,9 @@ import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { moveItem, useDragReorder } from '@/hooks/useDragReorder';
+import { useTabTransfer, type TabTransfer, type TabTransferOptions } from '@/hooks/useTabTransfer';
+import { parkedTab } from '@/lib/tabTransfer';
+import { TabContextMenu } from '@/components/desktop/TabContextMenu';
 import {
   bareUrl,
   matchHistory,
@@ -202,6 +205,31 @@ function createTab(
   };
 }
 
+/**
+ * What a tab carries to another browser window. Its page loads afresh there:
+ * a <webview> can't move between windows without losing its guest.
+ */
+interface TabTransferPayload {
+  url: string;
+  title: string | null;
+  favicon: string | null;
+  themeColor: string | null;
+}
+
+function isTabTransferPayload(value: unknown): value is TabTransferPayload {
+  return typeof value === 'object' && value !== null && typeof (value as { url?: unknown }).url === 'string';
+}
+
+/** A tab rebuilt from one that moved over from another window. */
+function adoptTab(payload: TabTransferPayload): Tab {
+  return {
+    ...createTab(payload.url || NEW_TAB_URL),
+    title: payload.title,
+    favicon: payload.favicon,
+    themeColor: payload.themeColor,
+  };
+}
+
 /** Events a tab surface reports up to the browser. */
 type TabEvent =
   | { kind: 'loading'; value: boolean }
@@ -248,7 +276,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const { close: closeWindow, open: openWindow, focus: focusWindow } =
     useWindowActions();
   const setTitlebar = useWindowTitlebar();
-  const [tabs, setTabs] = useState<Tab[]>(() => [createTab(NEW_TAB_URL)]);
+  const [tabs, setTabs] = useState<Tab[]>(() => {
+    // A window opened for a tab dragged out of another one.
+    const adopted = parkedTab(params);
+    return [isTabTransferPayload(adopted) ? adoptTab(adopted) : createTab(NEW_TAB_URL)];
+  });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   // Tab surfaces render in the order their tabs opened, not in tab order:
   // reordering the tabs would otherwise move their <webview>s around the
@@ -395,6 +427,39 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [closeWindow, windowId, devtools],
   );
 
+  /** Hand a tab to another window, which loads its page again. */
+  const takeTab = useCallback(
+    (id: string): TabTransferPayload | undefined => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab) return undefined;
+      closeTab(id);
+      return { url: tab.url, title: tab.title, favicon: tab.favicon, themeColor: tab.themeColor };
+    },
+    [closeTab],
+  );
+
+  const receiveTab = useCallback((payload: unknown, index: number) => {
+    if (!isTabTransferPayload(payload)) return;
+    const tab = adoptTab(payload);
+    setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
+    setActiveId(tab.id);
+  }, []);
+
+  const windowTitle = activeTab.title ?? hostnameOf(activeTab.url) ?? (isPrivate ? 'Private window' : 'New tab');
+  // Tabs move only among windows of the same kind: private tabs stay private.
+  const transfer = useMemo<TabTransferOptions>(
+    () => ({
+      windowId,
+      appId: 'web-browser',
+      params: isPrivate ? { private: true } : undefined,
+      group: isPrivate ? 'web-browser:private' : 'web-browser',
+      title: windowTitle,
+      take: takeTab,
+      receive: receiveTab,
+    }),
+    [windowId, isPrivate, windowTitle, takeTab, receiveTab],
+  );
+
   // The browser opens on a blank tab; drop the cursor in the address bar so
   // the user can type a destination straight away. Runs once on mount.
   useEffect(() => {
@@ -418,10 +483,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         onCloseTab={closeTab}
         onNewTab={openNewTab}
         onMoveTab={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+        transfer={transfer}
       />,
     );
     return () => setTitlebar(null);
-  }, [treeTabs, tabs, activeId, closeTab, openNewTab, setTitlebar]);
+  }, [treeTabs, tabs, activeId, closeTab, openNewTab, transfer, setTitlebar]);
 
   /** Collapse/expand a subtree in the tree sidebar. */
   const toggleCollapsed = useCallback((id: string) => {
@@ -1453,6 +1519,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onToggleCollapsed={toggleCollapsed}
             onMoveTab={moveTab}
             onMoveTabToEnd={moveTabToEnd}
+            transfer={transfer}
           />
         )}
 
@@ -1835,6 +1902,7 @@ function TabStrip({
   onCloseTab,
   onNewTab,
   onMoveTab,
+  transfer,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -1843,10 +1911,14 @@ function TabStrip({
   onNewTab: () => void;
   /** Move a tab to a new index; tabs are dragged to reorder them. */
   onMoveTab: (id: string, toIndex: number) => void;
+  /** Let tabs move between browser windows (see useTabTransfer). */
+  transfer: TabTransferOptions;
 }) {
-  const reorder = useDragReorder({ ids: tabs.map((t) => t.id), onMove: onMoveTab });
+  const tabTransfer = useTabTransfer(transfer, tabs.length);
+  const reorder = useDragReorder({ ids: tabs.map((t) => t.id), onMove: onMoveTab, tearOff: tabTransfer.tearOff });
   return (
     <div
+      ref={(el) => tabTransfer.setList(el)}
       role="tablist"
       aria-label="Browser tabs"
       className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
@@ -1857,6 +1929,7 @@ function TabStrip({
           tab={tab}
           active={tab.id === activeId}
           dragging={reorder.draggingId === tab.id}
+          transfer={tabTransfer}
           ref={(el) => reorder.register(tab.id, el)}
           onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
           onActivate={() => onActivate(tab.id)}
@@ -1885,6 +1958,7 @@ function TabButton({
   tab,
   active,
   dragging,
+  transfer,
   ref,
   onPointerDown,
   onActivate,
@@ -1893,6 +1967,7 @@ function TabButton({
   tab: Tab;
   active: boolean;
   dragging: boolean;
+  transfer: TabTransfer;
   ref: React.Ref<HTMLDivElement>;
   onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onActivate: () => void;
@@ -1902,57 +1977,59 @@ function TabButton({
   const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
 
   return (
-    <div
-      ref={ref}
-      onPointerDown={onPointerDown}
-      role="tab"
-      aria-selected={active}
-      aria-label={label}
-      tabIndex={0}
-      onClick={onActivate}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onActivate();
-        }
-      }}
-      onAuxClick={(e) => {
-        // Middle-click closes, like every browser.
-        if (e.button === 1) onClose();
-      }}
-      title={label}
-      className={cn(
-        'group relative flex h-7 w-44 min-w-0 shrink-0 cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        active
-          ? 'border-border/60 bg-background text-foreground shadow-sm'
-          : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-        dragging && 'border-border/60 bg-background shadow-md',
-      )}
-    >
-      {icon ? (
-        <img src={icon} alt="" aria-hidden className="size-4 shrink-0 rounded-sm" />
-      ) : (
-        <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
-      )}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      <button
-        type="button"
-        aria-label={`Close ${label}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
+    <TabContextMenu tabId={tab.id} transfer={transfer} onClose={onClose}>
+      <div
+        ref={ref}
+        onPointerDown={onPointerDown}
+        role="tab"
+        aria-selected={active}
+        aria-label={label}
+        tabIndex={0}
+        onClick={onActivate}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onActivate();
+          }
         }}
+        onAuxClick={(e) => {
+          // Middle-click closes, like every browser.
+          if (e.button === 1) onClose();
+        }}
+        title={label}
         className={cn(
-          'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
-          'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-          active && 'opacity-100',
-          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'group relative flex h-7 w-44 min-w-0 shrink-0 cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          active
+            ? 'border-border/60 bg-background text-foreground shadow-sm'
+            : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+          dragging && 'border-border/60 bg-background shadow-md',
         )}
       >
-        <X className="size-3" />
-      </button>
-    </div>
+        {icon ? (
+          <img src={icon} alt="" aria-hidden draggable={false} className="size-4 shrink-0 rounded-sm" />
+        ) : (
+          <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
+        )}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <button
+          type="button"
+          aria-label={`Close ${label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          className={cn(
+            'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
+            'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
+            active && 'opacity-100',
+            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    </TabContextMenu>
   );
 }
 
@@ -2011,6 +2088,7 @@ function TreeTabStrip({
   onToggleCollapsed,
   onMoveTab,
   onMoveTabToEnd,
+  transfer,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -2021,7 +2099,13 @@ function TreeTabStrip({
   onToggleCollapsed: (id: string) => void;
   onMoveTab: (dragId: string, targetId: string, position: DropZone) => void;
   onMoveTabToEnd: (dragId: string) => void;
+  /**
+   * Let tabs move between browser windows. Only from the context menu here:
+   * the sidebar's drag and drop stays within the window.
+   */
+  transfer: TabTransferOptions;
 }) {
+  const tabTransfer = useTabTransfer(transfer, tabs.length);
   const rows = useMemo(() => flattenTabTree(tabs, collapsed), [tabs, collapsed]);
   // The tab currently being dragged, or null. Shared across rows so a row can
   // tell whether it's a valid drop target (and skip itself).
@@ -2045,6 +2129,7 @@ function TreeTabStrip({
           active={tab.id === activeId}
           dragging={dragId === tab.id}
           dragActive={dragId !== null}
+          transfer={tabTransfer}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onCloseTab(tab.id)}
           onToggleCollapsed={() => onToggleCollapsed(tab.id)}
@@ -2111,6 +2196,7 @@ function TreeTabRow({
   active,
   dragging,
   dragActive,
+  transfer,
   onActivate,
   onClose,
   onToggleCollapsed,
@@ -2127,6 +2213,7 @@ function TreeTabRow({
   dragging: boolean;
   /** Some row (this one or another) is being dragged. */
   dragActive: boolean;
+  transfer: TabTransfer;
   onActivate: () => void;
   onClose: () => void;
   onToggleCollapsed: () => void;
@@ -2169,112 +2256,114 @@ function TreeTabRow({
   };
 
   return (
-    <div
-      role="tab"
-      aria-selected={active}
-      aria-label={label}
-      tabIndex={0}
-      draggable
-      onClick={onActivate}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onActivate();
-        }
-      }}
-      onAuxClick={(e) => {
-        // Middle-click closes, like every browser.
-        if (e.button === 1) onClose();
-      }}
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = 'move';
-        // Firefox needs data set for a drag to actually start.
-        e.dataTransfer.setData('text/plain', tab.id);
-        onDragStart();
-      }}
-      onDragEnd={() => {
-        setDropZone(null);
-        onDragEnd();
-      }}
-      onDragOver={onDragOver}
-      onDragLeave={() => setDropZone(null)}
-      onDrop={(e) => {
-        e.preventDefault();
-        const zone = dropZone;
-        setDropZone(null);
-        if (zone) onDrop(zone);
-      }}
-      title={label}
-      style={{ marginInlineStart: depth * 14, paddingInlineStart: gutter }}
-      className={cn(
-        'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        dragging && 'opacity-40',
-        dropZone === 'inside' && 'ring-2 ring-inset ring-primary',
-        active
-          ? 'border-border bg-background text-foreground shadow-sm'
-          : 'border-border/50 bg-background/30 text-muted-foreground hover:border-border hover:bg-foreground/5 hover:text-foreground',
-      )}
-    >
-      {/* Sibling drop indicators: a bar in the gap above / below the row. */}
-      {dropZone === 'before' && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-1 -top-[3px] h-0.5 rounded-full bg-primary"
-        />
-      )}
-      {dropZone === 'after' && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-primary"
-        />
-      )}
-      {/* Disclosure chevron: sits in the row's gutter, out of the flex flow,
-          so it never steals width from the label. Only parents show it. */}
-      {hasChildren && (
-        <button
-          type="button"
-          aria-label={collapsed ? 'Expand' : 'Collapse'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleCollapsed();
-          }}
-          className="absolute start-0.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ChevronRight
-            className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
-          />
-        </button>
-      )}
-      {icon ? (
-        <img
-          src={icon}
-          alt=""
-          aria-hidden
-          draggable={false}
-          className="size-4 shrink-0 rounded-sm"
-        />
-      ) : (
-        <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
-      )}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      <button
-        type="button"
-        aria-label={`Close ${label}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
+    <TabContextMenu tabId={tab.id} transfer={transfer} onClose={onClose}>
+      <div
+        role="tab"
+        aria-selected={active}
+        aria-label={label}
+        tabIndex={0}
+        draggable
+        onClick={onActivate}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onActivate();
+          }
         }}
+        onAuxClick={(e) => {
+          // Middle-click closes, like every browser.
+          if (e.button === 1) onClose();
+        }}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          // Firefox needs data set for a drag to actually start.
+          e.dataTransfer.setData('text/plain', tab.id);
+          onDragStart();
+        }}
+        onDragEnd={() => {
+          setDropZone(null);
+          onDragEnd();
+        }}
+        onDragOver={onDragOver}
+        onDragLeave={() => setDropZone(null)}
+        onDrop={(e) => {
+          e.preventDefault();
+          const zone = dropZone;
+          setDropZone(null);
+          if (zone) onDrop(zone);
+        }}
+        title={label}
+        style={{ marginInlineStart: depth * 14, paddingInlineStart: gutter }}
         className={cn(
-          'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
-          'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-          active && 'opacity-100',
-          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          dragging && 'opacity-40',
+          dropZone === 'inside' && 'ring-2 ring-inset ring-primary',
+          active
+            ? 'border-border bg-background text-foreground shadow-sm'
+            : 'border-border/50 bg-background/30 text-muted-foreground hover:border-border hover:bg-foreground/5 hover:text-foreground',
         )}
       >
-        <X className="size-3" />
-      </button>
-    </div>
+        {/* Sibling drop indicators: a bar in the gap above / below the row. */}
+        {dropZone === 'before' && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-1 -top-[3px] h-0.5 rounded-full bg-primary"
+          />
+        )}
+        {dropZone === 'after' && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-primary"
+          />
+        )}
+        {/* Disclosure chevron: sits in the row's gutter, out of the flex flow,
+            so it never steals width from the label. Only parents show it. */}
+        {hasChildren && (
+          <button
+            type="button"
+            aria-label={collapsed ? 'Expand' : 'Collapse'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleCollapsed();
+            }}
+            className="absolute start-0.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronRight
+              className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
+            />
+          </button>
+        )}
+        {icon ? (
+          <img
+            src={icon}
+            alt=""
+            aria-hidden
+            draggable={false}
+            className="size-4 shrink-0 rounded-sm"
+          />
+        ) : (
+          <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
+        )}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <button
+          type="button"
+          aria-label={`Close ${label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          className={cn(
+            'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
+            'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
+            active && 'opacity-100',
+            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    </TabContextMenu>
   );
 }
 

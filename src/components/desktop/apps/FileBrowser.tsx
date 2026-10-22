@@ -51,6 +51,7 @@ import {
 import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { parkedTab } from '@/lib/tabTransfer';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
@@ -136,6 +137,17 @@ function tabTitle(cwd: string | null): string {
   return base || '/';
 }
 
+/** A Files tab; `path` is where it opens, when it came from another window. */
+interface FilesTab {
+  id: string;
+  path?: string;
+}
+
+/** What a Files tab carries to another window: its directory. */
+function isFilesTabTransfer(value: unknown): value is { path: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { path?: unknown }).path === 'string';
+}
+
 /**
  * Files - a browser for the underlying OS filesystem.
  *
@@ -146,15 +158,23 @@ function tabTitle(cwd: string | null): string {
  * visible. The tab strip is published into the window title bar. Outside the
  * Electron shell (plain-browser dev) it shows an explanatory fallback.
  */
-export function FileBrowser({ windowId }: AppComponentProps) {
+export function FileBrowser({ windowId, params }: AppComponentProps) {
   const bridge = getFsBridge();
   const { close: closeWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
 
-  const [tabs, setTabs] = useState<{ id: string }[]>(() => [{ id: newTabId() }]);
+  const [tabs, setTabs] = useState<FilesTab[]>(() => {
+    // A window opened for a tab dragged out of another one.
+    const adopted = parkedTab(params);
+    return [{ id: newTabId(), path: isFilesTabTransfer(adopted) ? adopted.path || undefined : undefined }];
+  });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   // Current directory per tab, reported up by each tab for its label.
   const [cwds, setCwds] = useState<Record<string, string | null>>({});
+  const cwdsRef = useRef(cwds);
+  useEffect(() => {
+    cwdsRef.current = cwds;
+  }, [cwds]);
 
   const openTab = useCallback(() => {
     const tab = { id: newTabId() };
@@ -185,6 +205,24 @@ export function FileBrowser({ windowId }: AppComponentProps) {
     [closeWindow, windowId],
   );
 
+  /** Hand a tab to another window, which reopens its directory. */
+  const takeTab = useCallback(
+    (id: string) => {
+      const path = cwdsRef.current[id];
+      closeTab(id);
+      // A tab still finding its home directory carries no path.
+      return { path: path ?? '' };
+    },
+    [closeTab],
+  );
+
+  const receiveTab = useCallback((payload: unknown, index: number) => {
+    if (!isFilesTabTransfer(payload)) return;
+    const tab = { id: newTabId(), path: payload.path || undefined };
+    setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
+    setActiveId(tab.id);
+  }, []);
+
   const activeCwd = cwds[activeId] ?? null;
   useWindowTitle(activeCwd && tabTitle(activeCwd));
 
@@ -208,10 +246,18 @@ export function FileBrowser({ windowId }: AppComponentProps) {
         onClose={closeTab}
         onNew={openTab}
         onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+        transfer={{
+          windowId,
+          appId: 'file-browser',
+          group: 'file-browser',
+          title: tabTitle(cwds[activeId] ?? null),
+          take: takeTab,
+          receive: receiveTab,
+        }}
       />,
     );
     return () => setTitlebar(null);
-  }, [bridge, tabs, cwds, activeId, closeTab, openTab, setTitlebar]);
+  }, [bridge, tabs, cwds, activeId, windowId, closeTab, openTab, takeTab, receiveTab, setTitlebar]);
 
   if (!bridge) {
     return (
@@ -242,6 +288,7 @@ export function FileBrowser({ windowId }: AppComponentProps) {
         >
           <FileBrowserTab
             tabId={tab.id}
+            initialPath={tab.path}
             onCwdChange={reportCwd}
           />
         </div>
@@ -257,16 +304,19 @@ export function FileBrowser({ windowId }: AppComponentProps) {
  */
 function FileBrowserTab({
   tabId,
+  initialPath,
   onCwdChange,
 }: {
   tabId: string;
+  /** Directory to open in, instead of home. */
+  initialPath?: string;
   onCwdChange: (id: string, cwd: string | null) => void;
 }) {
   const home = useHomeDir();
   const { mkdir, rename, rm } = useFsMutations();
 
-  const [history, setHistory] = useState<string[]>([]);
-  const [cursor, setCursor] = useState(-1);
+  const [history, setHistory] = useState<string[]>(() => (initialPath ? [initialPath] : []));
+  const [cursor, setCursor] = useState(initialPath ? 0 : -1);
   // While the user is editing the path bar; null shows the current path.
   const [addressEdit, setAddressEdit] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
