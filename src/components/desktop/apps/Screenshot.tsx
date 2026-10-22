@@ -13,6 +13,7 @@ import {
 import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { portalContainer } from '@/lib/portalContainer';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useMonitors } from '@/contexts/MonitorsContext';
@@ -172,7 +173,7 @@ function CaptureOverlay({
           <span className="text-muted-foreground"> &middot; Esc to cancel</span>
         </div>
       </ScreenLayer>,
-      document.body,
+      portalContainer(),
     );
   }
 
@@ -255,7 +256,7 @@ function CaptureOverlay({
         </div>
       )}
     </ScreenLayer>,
-    document.body,
+    portalContainer(),
   );
 }
 

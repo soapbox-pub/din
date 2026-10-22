@@ -27,6 +27,12 @@ const STYLE_ID = 'din-page-fullscreen';
  * and clips it there, and the main process lays the page out at that
  * monitor's size (electron/main.mts). The backdrop goes clear, so the other
  * monitors keep showing the desktop.
+ *
+ * Blink also makes everything outside a fullscreen element inert, so the
+ * desktop on the other monitors would show but ignore every click and key.
+ * Only a modal dialog outranks the fullscreen element, so the desktop's
+ * layer (index.html's `#shell`) opens as one, above the frame, with a hole
+ * cut over the frame's monitor.
  */
 export function PageFullscreenHost() {
   const { monitors } = useMonitors();
@@ -38,13 +44,23 @@ export function PageFullscreenHost() {
   useEffect(() => {
     const bridge = window.pageFullscreen;
     if (!bridge) return;
+    const shell = document.getElementById('shell');
+    const layer = shell instanceof HTMLDialogElement ? shell : null;
     let fitted: HTMLIFrameElement | null = null;
+
+    // Escape belongs to the fullscreen page, not to the desktop's layer.
+    const onCancel = (event: Event) => event.preventDefault();
+    layer?.addEventListener('cancel', onCancel);
 
     const unfit = () => {
       if (!fitted) return;
       fitted.style.translate = '';
       fitted.style.clipPath = '';
       fitted = null;
+      if (layer?.open) {
+        layer.close();
+        layer.style.clipPath = '';
+      }
     };
 
     const onChange = () => {
@@ -76,6 +92,15 @@ export function PageFullscreenHost() {
       frame.style.clipPath = `inset(0px ${Math.max(0, window.innerWidth - monitor.width)}px ${Math.max(0, window.innerHeight - monitor.height)}px 0px)`;
       fitted = frame;
 
+      if (layer && !layer.open) {
+        // Opening a modal dialog focuses into it; the page keeps the focus.
+        const focused = document.activeElement;
+        layer.showModal();
+        if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
+        const { x, y, width, height } = monitor;
+        layer.style.clipPath = `path(evenodd, 'M0 0H${window.innerWidth}V${window.innerHeight}H0Z M${x} ${y}h${width}v${height}h${-width}Z')`;
+      }
+
       const getId = (host as HTMLElement & { getWebContentsId?: () => number }).getWebContentsId;
       const zoom = getMonitorsBridge()?.zoomFactor() ?? 1;
       if (getId) {
@@ -88,6 +113,7 @@ export function PageFullscreenHost() {
     document.addEventListener('fullscreenchange', onChange);
     return () => {
       document.removeEventListener('fullscreenchange', onChange);
+      layer?.removeEventListener('cancel', onCancel);
       unfit();
     };
   }, []);

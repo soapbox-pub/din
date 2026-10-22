@@ -16,7 +16,10 @@
         </style>
     </head>
     <body>
-        <div id="root"></div>
+        <!-- The desktop's layer: in the page's flow until a web page goes fullscreen on another monitor (src/components/desktop/PageFullscreenHost.tsx). -->
+        <dialog id="shell" role="generic">
+            <div id="root"></div>
+        </dialog>
         <script type="module" src="/src/main.tsx"></script>
     </body>
 </html>

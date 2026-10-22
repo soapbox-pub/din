@@ -208,6 +208,24 @@
   }
 }
 
+/* The desktop's layer (index.html). Closed, it's as if it weren't there.
+   Open, it's a modal dialog covering the page, which keeps the desktop
+   usable while a web page is fullscreen; see PageFullscreenHost.tsx. */
+#shell {
+  all: unset;
+  position: fixed;
+  inset: 0;
+}
+
+#shell:not([open]) {
+  display: contents;
+}
+
+#shell::backdrop {
+  background: transparent;
+  pointer-events: none;
+}
+
 /* ===== Scrollbars =====
 
    Styled with ::-webkit-scrollbar so Blink treats every scrollbar as a

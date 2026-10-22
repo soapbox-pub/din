@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useBrightnessPreview, useBrightnessStatus } from '@/hooks/useBrightness';
+import { portalContainer } from '@/lib/portalContainer';
 
 /**
  * Software dimming below the backlight's floor. Brightness levels under 0
@@ -20,6 +21,6 @@ export function ScreenDimmer() {
       className="pointer-events-none fixed inset-0 z-[2147483647] bg-black"
       style={{ opacity: -level / 100 }}
     />,
-    document.body,
+    portalContainer(),
   );
 }
