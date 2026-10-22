@@ -59,7 +59,7 @@ export function PageFullscreenHost() {
       fitted = null;
       if (layer?.open) {
         layer.close();
-        layer.style.clipPath = '';
+        Object.assign(layer.style, { left: '', top: '', width: '', height: '', clipPath: '' });
       }
     };
 
@@ -97,8 +97,22 @@ export function PageFullscreenHost() {
         const focused = document.activeElement;
         layer.showModal();
         if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
+        // In the top layer the desktop leaves <body>, which MonitorsProvider
+        // shrinks to the primary monitor as the containing block for
+        // everything fixed. The layer takes over that role, or the whole
+        // desktop shifts by the primary monitor's offset.
+        const primary = monitorsRef.current.find((m) => m.primary) ?? monitorsRef.current[0];
+        const left = primary.x;
+        const top = primary.y;
         const { x, y, width, height } = monitor;
-        layer.style.clipPath = `path(evenodd, 'M0 0H${window.innerWidth}V${window.innerHeight}H0Z M${x} ${y}h${width}v${height}h${-width}Z')`;
+        Object.assign(layer.style, {
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${primary.width}px`,
+          height: `${primary.height}px`,
+          // The path is in the layer's own coordinates.
+          clipPath: `path(evenodd, 'M${-left} ${-top}h${window.innerWidth}v${window.innerHeight}h${-window.innerWidth}Z M${x - left} ${y - top}h${width}v${height}h${-width}Z')`,
+        });
       }
 
       const getId = (host as HTMLElement & { getWebContentsId?: () => number }).getWebContentsId;

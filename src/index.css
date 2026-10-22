@@ -253,6 +253,12 @@
   display: contents;
 }
 
+/* Open, it's placed over the primary monitor (PageFullscreenHost.tsx) and
+   stands in for <body> as the containing block for position: fixed. */
+#shell[open] {
+  contain: layout;
+}
+
 #shell::backdrop {
   background: transparent;
   pointer-events: none;
