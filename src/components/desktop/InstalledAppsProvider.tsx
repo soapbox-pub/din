@@ -89,6 +89,7 @@ function nativeAppToDefinition(app: NativeApp): AppDefinition {
     icon: app.icon ?? NATIVE_APP_ICON,
     component: NativeWindowView,
     native: true,
+    terminal: app.terminal,
     keywords: [...app.keywords, ...app.categories],
   };
 }

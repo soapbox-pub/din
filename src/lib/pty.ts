@@ -25,8 +25,11 @@ export interface CommandDone {
 }
 
 export interface PtyBridge {
-  /** Start a shell session; resolves to its session id. */
-  spawn(size: PtySize, cwd?: string): Promise<number>;
+  /**
+   * Start a shell session, or a terminal app's (a native app id whose entry
+   * says Terminal=true) in place of the shell; resolves to its session id.
+   */
+  spawn(size: PtySize, cwd?: string, appId?: string): Promise<number>;
   /** Send user keystrokes/paste data to a session. */
   write(id: number, data: string): void;
   /** Inform the session's pty of a new terminal size. */

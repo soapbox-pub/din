@@ -132,6 +132,12 @@ const isLetterKey = (e: KeyboardEvent, letter: string) =>
 /** Split axis: 'row' places panes side by side, 'column' stacks them. */
 type SplitDir = 'row' | 'column';
 
+/** A native app whose desktop entry says Terminal=true. */
+interface TerminalApp {
+  id: string;
+  name: string;
+}
+
 /**
  * A tab's pane layout is a binary tree (Tilix-style): leaves are terminal
  * sessions, inner nodes are splits with a draggable ratio.
@@ -141,6 +147,8 @@ interface LeafNode {
   paneId: string;
   /** Working directory to start the shell in (inherited from the source pane). */
   initialCwd?: string;
+  /** A terminal app (htop) the pane runs in place of a shell. */
+  app?: TerminalApp;
 }
 interface SplitNode {
   type: 'split';
@@ -261,6 +269,7 @@ interface Rect {
 interface LeafBox {
   paneId: string;
   initialCwd?: string;
+  app?: TerminalApp;
   rect: Rect;
 }
 interface DividerBox {
@@ -280,7 +289,7 @@ function flattenLayout(
   dividers: DividerBox[],
 ): void {
   if (node.type === 'leaf') {
-    leaves.push({ paneId: node.paneId, initialCwd: node.initialCwd, rect });
+    leaves.push({ paneId: node.paneId, initialCwd: node.initialCwd, app: node.app, rect });
     return;
   }
   if (node.dir === 'row') {
@@ -334,8 +343,13 @@ export function Terminal({ windowId, params }: AppComponentProps) {
     const paneId = newSessionId();
     // Files' "Open in Terminal" starts the first shell in a given folder.
     const initialCwd = typeof params?.cwd === 'string' ? params.cwd : undefined;
+    // The apps menu opens terminal apps (htop) here, running in the first pane.
+    const app =
+      typeof params?.app === 'string'
+        ? { id: params.app, name: typeof params.appName === 'string' ? params.appName : params.app }
+        : undefined;
     return [
-      { id: newTabId(), layout: { type: 'leaf', paneId, initialCwd }, activePaneId: paneId },
+      { id: newTabId(), layout: { type: 'leaf', paneId, initialCwd, app }, activePaneId: paneId },
     ];
   });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
@@ -692,6 +706,7 @@ const TerminalTab = memo(function TerminalTab({
             active={active}
             focused={tab.activePaneId === leaf.paneId}
             initialCwd={leaf.initialCwd}
+            app={leaf.app}
             onSplit={handleSplit}
             onClose={handleClose}
             onReveal={handleReveal}
@@ -782,8 +797,13 @@ function markMoving(node: LayoutNode): void {
   if (session) session.moving = true;
 }
 
-/** The session for a pane: the one it already has, or a new shell. */
-function paneSession(bridge: PtyBridge, paneId: string, initialCwd: string | undefined): PaneSession {
+/** The session for a pane: the one it already has, or a new shell (or app). */
+function paneSession(
+  bridge: PtyBridge,
+  paneId: string,
+  initialCwd: string | undefined,
+  app: TerminalApp | undefined,
+): PaneSession {
   const existing = paneSessions.get(paneId);
   if (existing) return existing;
 
@@ -797,7 +817,7 @@ function paneSession(bridge: PtyBridge, paneId: string, initialCwd: string | und
   /** Tracks the shell's current working directory via OSC 7. */
   let cwd = initialCwd;
   /** The command the pane's tab is named after. */
-  let command: string | undefined;
+  let command: string | undefined = app?.name;
 
   const term = new XTerm({
     cursorBlink: true,
@@ -1041,7 +1061,7 @@ function paneSession(bridge: PtyBridge, paneId: string, initialCwd: string | und
 
   const spawn = () => {
     bridge
-      .spawn({ cols: term.cols, rows: term.rows }, cwd)
+      .spawn({ cols: term.cols, rows: term.rows }, cwd, app?.id)
       .then((id) => {
         if (disposed) {
           bridge.kill(id);
@@ -1055,7 +1075,7 @@ function paneSession(bridge: PtyBridge, paneId: string, initialCwd: string | und
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        if (!disposed) term.write(`Failed to start shell: ${message}\r\n`);
+        if (!disposed) term.write(`Failed to start ${app?.name ?? 'shell'}: ${message}\r\n`);
       });
   };
 
@@ -1157,6 +1177,7 @@ const TerminalSession = memo(function TerminalSession({
   active,
   focused,
   initialCwd,
+  app,
   onSplit,
   onClose,
   onReveal,
@@ -1171,6 +1192,8 @@ const TerminalSession = memo(function TerminalSession({
   focused: boolean;
   /** Working directory to start the shell in on first spawn. */
   initialCwd?: string;
+  /** A terminal app to run in place of the shell on first spawn. */
+  app?: TerminalApp;
   onSplit: (paneId: string, dir: SplitDir) => void;
   onClose: (paneId: string) => void;
   /** Bring this pane into view. */
@@ -1185,6 +1208,7 @@ const TerminalSession = memo(function TerminalSession({
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<XTerm | null>(null);
   const initialCwdRef = useRef(initialCwd);
+  const appRef = useRef(app);
   const isTop = useWindowIsTop();
   const isTopRef = useRef(isTop);
   // Always-fresh callbacks for the (long-lived) session.
@@ -1213,7 +1237,7 @@ const TerminalSession = memo(function TerminalSession({
   useEffect(() => {
     const container = containerRef.current;
     if (!bridge || !container) return;
-    const session = paneSession(bridge, paneId, initialCwdRef.current);
+    const session = paneSession(bridge, paneId, initialCwdRef.current, appRef.current);
     termRef.current = session.term;
     fitRef.current = session.fit;
     const detach = session.attach(container, host);

@@ -34,6 +34,8 @@ export interface NativeApp {
   categories: string[];
   /** Extra search terms from the entry's Keywords. */
   keywords: string[];
+  /** Whether it runs in a terminal (htop): it opens in Din's Terminal. */
+  terminal?: boolean;
 }
 
 /** What `list()` reports. */

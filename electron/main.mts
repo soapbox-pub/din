@@ -38,7 +38,7 @@ import {
   clearNsiteManifestCache,
   clearNsiteBlobCache,
 } from './nsite.mts';
-import { registerNativeAppHandlers, runWindowsProgram, terminalEnvironment } from './native-apps.mts';
+import { registerNativeAppHandlers, runWindowsProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
 import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
@@ -416,7 +416,7 @@ function userShell(): string {
 }
 
 function registerPtyHandlers(): void {
-  ipcMain.handle('pty:spawn', async (event, size, cwd) => {
+  ipcMain.handle('pty:spawn', async (event, size, cwd, appId) => {
     assertShellSender(event);
     if (ptySessions.size >= MAX_PTY_SESSIONS) {
       throw new Error(`Too many terminal sessions (max ${MAX_PTY_SESSIONS})`);
@@ -424,11 +424,20 @@ function registerPtyHandlers(): void {
     const rows = clampDimension(size?.rows, 24);
     const cols = clampDimension(size?.cols, 80);
 
-    const spawnCwd =
+    let spawnCwd =
       typeof cwd === 'string' && cwd.length > 0 && cwd.length <= 4096 ? cwd : os.homedir();
     const env = await terminalEnvironment();
 
-    const proc = spawn('python3', [PTY_HELPER, userShell(), String(rows), String(cols)], {
+    // A Terminal=true app (htop, ...) runs in the pty instead of a shell.
+    let argv = ['shell', userShell()];
+    if (typeof appId === 'string') {
+      const command = await terminalAppCommand(appId);
+      argv = ['app', ...command.argv];
+      spawnCwd = command.cwd;
+      Object.assign(env, command.env);
+    }
+
+    const proc = spawn('python3', [PTY_HELPER, String(rows), String(cols), ...argv], {
       cwd: spawnCwd,
       env,
       // fd 3 is the helper's control channel (resize), fd 4 its events.

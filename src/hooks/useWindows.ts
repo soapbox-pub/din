@@ -183,9 +183,19 @@ export function useWindows(
     setWindows((ws) => raise(ws, id));
   }, []);
 
-  const open = useCallback((appId: string, params?: WindowParams) => {
-    const app = getApp(appId);
+  const open = useCallback((requestedId: string, requestedParams?: WindowParams) => {
+    let appId = requestedId;
+    let params = requestedParams;
+    let app = getApp(appId);
     if (!app) return undefined;
+
+    // A terminal app (htop) opens a Terminal window running it.
+    if (app.native && app.terminal) {
+      params = { ...params, app: appId, appName: app.name };
+      appId = 'terminal';
+      app = getApp(appId);
+      if (!app) return undefined;
+    }
 
     // Launching a native Linux app starts its process; its windows open Din
     // windows of their own as the app maps them (with an `xid` param, see

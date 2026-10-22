@@ -5,7 +5,11 @@ Electron's renderer is sandboxed and its main process ships no native
 modules, so instead of node-pty this tiny helper (Python stdlib only)
 owns the pseudo-terminal:
 
-    pty-host.py <shell> <rows> <cols>
+    pty-host.py <rows> <cols> shell <shell>
+    pty-host.py <rows> <cols> app <program> [args...]
+
+The second form runs a terminal app (htop) the apps menu opened in the
+Terminal, in place of a shell.
 
   - fd 0 (stdin):  bytes from the terminal UI -> written to the pty
   - fd 1 (stdout): pty output -> streamed back to the terminal UI
@@ -79,21 +83,25 @@ def command_line(pid: int) -> str:
 
 
 def main() -> int:
-    shell = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SHELL", "/bin/sh")
-    rows = int(sys.argv[2]) if len(sys.argv) > 2 else 24
-    cols = int(sys.argv[3]) if len(sys.argv) > 3 else 80
+    rows = int(sys.argv[1]) if len(sys.argv) > 1 else 24
+    cols = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+    is_shell = len(sys.argv) < 5 or sys.argv[3] != "app"
+    argv = sys.argv[4:] or [os.environ.get("SHELL", "/bin/sh")]
 
     import pty
 
     pid, master = pty.fork()
     if pid == 0:
-        # Child: become the shell, attached to the pty slave.
+        # Child: become the shell (or app), attached to the pty slave.
         os.environ["TERM"] = "xterm-256color"
         os.environ["COLORTERM"] = "truecolor"
         try:
-            os.execvp(shell, [shell])
-        except OSError:
-            os.execvp("/bin/sh", ["/bin/sh"])
+            os.execvp(argv[0], argv)
+        except OSError as error:
+            if is_shell:
+                os.execvp("/bin/sh", ["/bin/sh"])
+            sys.stderr.write(f"{argv[0]}: {error.strerror}\r\n")
+            os._exit(127)
 
     set_winsize(master, rows, cols)
 

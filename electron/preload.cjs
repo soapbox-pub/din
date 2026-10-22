@@ -272,8 +272,9 @@ contextBridge.exposeInMainWorld('pty', {
    * Start a shell session; resolves to its session id.
    * @param {{ rows: number, cols: number }} size
    * @param {string} [cwd]
+   * @param {string} [appId] a Terminal=true native app to run instead of a shell
    */
-  spawn: (size, cwd) => ipcRenderer.invoke('pty:spawn', size, cwd),
+  spawn: (size, cwd, appId) => ipcRenderer.invoke('pty:spawn', size, cwd, appId),
 
   /**
    * Send user keystrokes/paste data to a session.

@@ -52,6 +52,8 @@ export interface NativeApp {
   categories: string[];
   /** Extra search terms from the entry's Keywords. */
   keywords: string[];
+  /** Whether it runs in a terminal (Terminal=true), i.e. in Din's Terminal. */
+  terminal: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -716,6 +718,7 @@ async function listApps(): Promise<NativeApp[]> {
       icon: await resolveIcon(entry.iconName),
       categories: entry.categories,
       keywords: entry.keywords,
+      terminal: entry.terminal,
     });
     if (apps.length % BATCH === 0) await breathe();
   }
@@ -731,45 +734,52 @@ function isUninstaller(entry: DesktopEntry): boolean {
   return isWineCommand(entry.argv[0]) && /^uninstall\b/i.test(entry.name);
 }
 
-/** Terminal emulators tried, in order, for Terminal=true entries. */
-const TERMINALS = [
-  ['x-terminal-emulator', '-e'],
-  ['gnome-terminal', '--'],
-  ['konsole', '-e'],
-  ['xfce4-terminal', '-x'],
-  ['alacritty', '-e'],
-  ['foot', '-e'],
-  ['xterm', '-e'],
-];
-
-/**
- * Launch an app by registry id onto Din's embedded display. Throws when the
- * id is unknown, so the shell can surface a real error instead of a silently
- * dead click.
- */
-async function launch(appId: string): Promise<void> {
+/** The desktop entry behind a registry id, or a throw when there is none. */
+async function entryFor(appId: string): Promise<DesktopEntry> {
   const desktopId = appId.startsWith(NATIVE_PREFIX)
     ? `${appId.slice(NATIVE_PREFIX.length)}.desktop`
     : appId;
   const entry = (await entries()).get(desktopId);
   if (!entry) throw new Error(`Unknown application: ${appId}`);
+  return entry;
+}
+
+/** Where an entry's program runs: its Path=, else home. */
+function entryCwd(entry: DesktopEntry): string {
+  return entry.cwd && fs.existsSync(entry.cwd) ? entry.cwd : os.homedir();
+}
+
+/**
+ * Launch an app by registry id onto Din's embedded display. Throws when the
+ * id is unknown, so the shell can surface a real error instead of a silently
+ * dead click. Terminal apps aren't launched here: the shell opens them in
+ * its Terminal (see terminalAppCommand).
+ */
+async function launch(appId: string): Promise<void> {
+  const entry = await entryFor(appId);
+  if (entry.terminal) throw new Error(`${entry.name} runs in the Terminal`);
   const display = await embeddedDisplay();
   if (!display) throw new Error('The embedded display is unavailable');
 
-  let argv = entry.argv;
-  if (entry.terminal) {
-    const terminal = TERMINALS.find(([bin]) => which(bin));
-    if (!terminal) throw new Error(`${entry.name} needs a terminal emulator`);
-    argv = [...terminal, ...argv];
-  }
-
+  const argv = entry.argv;
   const env = await appEnvironment(display);
   if (isWineCommand(argv[0])) Object.assign(env, wineEnvironment());
   Object.assign(env, entry.env);
 
-  const cwd = entry.cwd && fs.existsSync(entry.cwd) ? entry.cwd : os.homedir();
-  const pid = spawnDetached(argv, cwd, env);
+  const pid = spawnDetached(argv, entryCwd(entry), env);
   if (pid) launchedPids.set(pid, appId);
+}
+
+/**
+ * What the Terminal runs for a Terminal=true app (htop, vim, ...) in place
+ * of a shell: the entry's command, folder, and extra variables.
+ */
+export async function terminalAppCommand(
+  appId: string,
+): Promise<{ argv: string[]; cwd: string; env: Record<string, string> }> {
+  const entry = await entryFor(appId);
+  if (!entry.terminal) throw new Error(`${entry.name} doesn't run in a terminal`);
+  return { argv: entry.argv, cwd: entryCwd(entry), env: entry.env };
 }
 
 /**

@@ -71,6 +71,11 @@ export interface AppDefinition {
    * (see src/lib/nativeDisplay.ts).
    */
   native?: boolean;
+  /**
+   * A native app that runs in a terminal (Terminal=true, e.g. htop).
+   * Launching one opens a Terminal window running it in place of a shell.
+   */
+  terminal?: boolean;
   /** Default window size when the app is launched. */
   defaultSize?: { width: number; height: number };
   /**
