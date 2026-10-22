@@ -363,6 +363,34 @@ let
     cp -a ${pkgs.capitaine-cursors}/share/icons/{capitaine-cursors,capitaine-cursors-white} $out/share/icons/
     printf '[Icon Theme]\nInherits=capitaine-cursors\n' > $out/share/icons/default/index.theme
   '';
+
+  # cage creates the gamma-control protocol but never hands it to its scene,
+  # so gamma ramps (night light's gammastep) are accepted and then silently
+  # dropped. And it draws the pointer, until Din sets its own, from the
+  # `default` theme at 24px whatever the user picked; patched, it takes
+  # XCURSOR_THEME and XCURSOR_SIZE, which the wrapper reads from dconf (the
+  # GSettings Din's Settings writes, electron/cursor.mts), so the pointer is
+  # the same from the first frame. Din inherits them too.
+  cage-patched = pkgs.cage.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      ./patches/cage-gamma-control.patch
+      ./patches/cage-xcursor-env.patch
+    ];
+  });
+  cage-launcher = pkgs.writeShellScriptBin "cage" ''
+    key=/org/gnome/desktop/interface
+    theme=$(${pkgs.dconf}/bin/dconf read $key/cursor-theme 2>/dev/null || true)
+    theme=''${theme#\'}
+    theme=''${theme%\'}
+    size=$(${pkgs.dconf}/bin/dconf read $key/cursor-size 2>/dev/null || true)
+    size=''${size##* }
+    if [ -n "$theme" ]; then export XCURSOR_THEME="$theme"; fi
+    case "$size" in
+      ""|*[!0-9]*) ;;
+      *) export XCURSOR_SIZE="$size" ;;
+    esac
+    exec ${cage-patched}/bin/cage "$@"
+  '';
 in
 {
   networking.hostName = "dinos";
@@ -602,12 +630,7 @@ in
     # cage swallows Ctrl+Alt+Fn unless told otherwise. Without it there is no
     # way to reach a text login on another VT when Din hangs.
     extraArguments = [ "-s" ];
-    # cage creates the gamma-control protocol but never hands it to its
-    # scene, so gamma ramps (night light's gammastep) are accepted and then
-    # silently dropped.
-    package = pkgs.cage.overrideAttrs (old: {
-      patches = (old.patches or [ ]) ++ [ ./patches/cage-gamma-control.patch ];
-    });
+    package = cage-launcher;
   };
   # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
   # writes (os/din-keyboard.sh). cage applies it, and Din inherits it.
