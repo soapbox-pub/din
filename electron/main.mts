@@ -4553,6 +4553,14 @@ app.whenReady().then(() => {
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
+    // Guests are transparent by default, so a page that leaves its canvas to
+    // the color scheme (a dark-scheme page with no background, a page-source
+    // view in dark mode) shows the host's white through it under dark text.
+    // Opaque, Chromium paints the canvas to match the scheme as Chrome does.
+    // Extension popups keep transparency for their own shapes.
+    if (!attachingGuestSrc.startsWith('chrome-extension://')) {
+      webPreferences.transparent = false;
+    }
     if (params.partition === WEBAPP_PARTITION) {
       webPreferences.preload = WEBAPP_PRELOAD;
     } else if (params.partition === WEBBROWSER_PARTITION) {
@@ -4640,6 +4648,52 @@ app.on('will-quit', () => {
   stopNightLight();
 });
 
+const VIEW_SOURCE_LINE_WRAP_CSS = `
+  form:has(.line-wrap-control input:checked) ~ table {
+    width: 100%;
+    min-width: 0;
+    white-space: pre-wrap;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+`;
+
+/**
+ * Replace a page-source view's "Line wrap" checkbox with a copy that wraps
+ * through CSS alone. Blink's own checkbox saves its state through a service
+ * only Chrome provides; in Electron that request is a bad IPC message and the
+ * tab's renderer is killed. Source views run no script (executeJavaScript and
+ * insertCSS never settle there), so the swap goes through the debugger: nodes
+ * parsed from markup come without Blink's native change listener.
+ */
+async function defuseViewSourceLineWrap(contents: Electron.WebContents): Promise<void> {
+  const dbg = contents.debugger;
+  // The devtools bridge may already hold the debugger for this tab.
+  const owned = !dbg.isAttached();
+  if (owned) dbg.attach('1.3');
+  try {
+    const { root } = await dbg.sendCommand('DOM.getDocument', { depth: 0 });
+    const query = async (selector: string): Promise<number> =>
+      (await dbg.sendCommand('DOM.querySelector', { nodeId: root.nodeId, selector })).nodeId;
+    const outer = async (nodeId: number): Promise<string> =>
+      (await dbg.sendCommand('DOM.getOuterHTML', { nodeId })).outerHTML;
+    const form = await query('form:has(.line-wrap-control)');
+    const gutter = await query('.line-gutter-backdrop');
+    if (!form || !gutter) return;
+    const formHTML = await outer(form);
+    const gutterHTML = await outer(gutter);
+    // Re-set in place, the form would be patched and keep its old nodes, so
+    // remove it and re-create it beside the gutter (its old place).
+    await dbg.sendCommand('DOM.removeNode', { nodeId: form });
+    await dbg.sendCommand('DOM.setOuterHTML', {
+      nodeId: gutter,
+      outerHTML: `${gutterHTML}${formHTML}<style>${VIEW_SOURCE_LINE_WRAP_CSS}</style>`,
+    });
+  } finally {
+    if (owned && dbg.isAttached()) dbg.detach();
+  }
+}
+
 // Harden any <webview> the shell embeds (the web browser app). Keep them
 // sandboxed with no Node integration, and deny requests to spawn native
 // windows - target=_blank and friends become new browser tabs instead.
@@ -4658,6 +4712,11 @@ app.on('web-contents-created', (_event, contents) => {
       if (input.key !== 'Meta' || input.isAutoRepeat) return;
       if (input.type !== 'keyDown' && input.type !== 'keyUp') return;
       sendToShell('shortcut', { action: 'super-key', down: input.type === 'keyDown' } satisfies ShellShortcut);
+    });
+
+    contents.on('dom-ready', () => {
+      if (!contents.getURL().startsWith('view-source:')) return;
+      defuseViewSourceLineWrap(contents).catch(() => {});
     });
   }
 
