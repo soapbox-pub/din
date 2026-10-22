@@ -1066,6 +1066,57 @@ function registerDisplayHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Page fullscreen bridge (window.pageFullscreen). A page in a <webview> that
+// goes fullscreen (a video's fullscreen button) makes its frame fullscreen in
+// the shell's page, which spans every monitor; Chromium sizes that frame to
+// the whole page and won't let it be resized. With several monitors, the
+// shell moves and clips the frame onto its window's monitor
+// (src/components/desktop/PageFullscreenHost.tsx), and this lays the page
+// out at that monitor's size, until it leaves fullscreen.
+// ---------------------------------------------------------------------------
+
+/** A <webview> guest of the shell window, from a renderer-supplied id. */
+function shellGuestFromId(wcId: unknown): Electron.WebContents | null {
+  if (typeof wcId !== 'number') return null;
+  const contents = webContents.fromId(wcId);
+  if (!contents || contents.isDestroyed() || contents.getType() !== 'webview') return null;
+  return contents.hostWebContents?.id === shellContentsId ? contents : null;
+}
+
+/** Guests laid out at a monitor's size, waiting to leave fullscreen. */
+const fittedGuests = new Set<number>();
+
+function registerPageFullscreenHandlers(): void {
+  ipcMain.handle('pageFullscreen:fit', (event, wcId, rawWidth, rawHeight) => {
+    assertShellSender(event);
+    const guest = shellGuestFromId(wcId);
+    const width = Math.round(Number(rawWidth));
+    const height = Math.round(Number(rawHeight));
+    if (!guest || !(width > 0 && width <= 16384 && height > 0 && height <= 16384)) {
+      throw new Error('Invalid fullscreen fit');
+    }
+    const size = { width, height };
+    guest.enableDeviceEmulation({
+      screenPosition: 'desktop',
+      screenSize: size,
+      viewPosition: { x: 0, y: 0 },
+      deviceScaleFactor: 0,
+      viewSize: size,
+      scale: 1,
+    });
+    if (!fittedGuests.has(guest.id)) {
+      fittedGuests.add(guest.id);
+      const id = guest.id;
+      guest.once('leave-html-full-screen', () => {
+        fittedGuests.delete(id);
+        if (!guest.isDestroyed()) guest.disableDeviceEmulation();
+      });
+      guest.once('destroyed', () => fittedGuests.delete(id));
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Monitors bridge (window.monitors): where each display sits inside the shell
 // window, for the desktop's layout (src/lib/monitors.ts). The production
 // window spans every display - cage stretches it over all outputs, and on bare
@@ -4149,6 +4200,7 @@ app.whenReady().then(() => {
   registerWifiHandlers();
   registerVpnHandlers();
   registerDisplayHandlers();
+  registerPageFullscreenHandlers();
   registerMonitorsHandlers();
   registerPowerHandlers();
   registerAudioHandlers();

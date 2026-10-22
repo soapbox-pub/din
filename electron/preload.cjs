@@ -10,6 +10,7 @@
 //   - window.vpn: VPN/WireGuard profile toggles for the network selector
 //   - window.display: multi-output arrangement (wlr-randr/xrandr) for the
 //     Settings app
+//   - window.pageFullscreen: fits a fullscreen web page to its monitor
 //   - window.monitors: where each display sits in the shell window, for the
 //     desktop's layout
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
@@ -300,6 +301,19 @@ contextBridge.exposeInMainWorld('display', {
    * @param {Array<{ output: string, enabled: boolean, primary: boolean, x: number, y: number, width: number, height: number }>} placements
    */
   applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
+});
+
+// Page fullscreen bridge (window.pageFullscreen), backed by the
+// pageFullscreen:* handler in main.mts: lays a fullscreen <webview> page out
+// at its monitor's size, until it leaves fullscreen.
+contextBridge.exposeInMainWorld('pageFullscreen', {
+  /**
+   * @param {number} webContentsId the <webview>'s guest
+   * @param {number} width device-independent pixels
+   * @param {number} height device-independent pixels
+   */
+  fit: (webContentsId, width, height) =>
+    ipcRenderer.invoke('pageFullscreen:fit', webContentsId, width, height),
 });
 
 // Monitors bridge (window.monitors), backed by the monitors:* handler in
