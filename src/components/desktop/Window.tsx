@@ -1160,11 +1160,11 @@ export const Window = memo(function Window({
       // <webview>/<iframe> guests: those are foreign surfaces whose input
       // never reaches this document, and their host elements don't reliably
       // fire focus events either (Electron webviews in particular, and
-      // guest-to-guest focus moves fire nothing here at all). Clicks into web
-      // content raise the window via GuestClickShield overlays instead, whose
-      // pointerdown bubbles to the handler above. Presses inside a top
-      // window's guest arrive as GuestInputHost's synthetic focusin, so the
-      // guest is still remembered as the last-focused element.
+      // guest-to-guest focus moves fire nothing here at all). Presses inside
+      // a <webview> instead arrive as GuestInputHost's synthetic pointerdown,
+      // which raises via the handler above, and focusin, which remembers the
+      // guest as the last-focused element. Iframes (plain-browser fallback)
+      // raise through GuestClickShield overlays.
       onFocus={(e) => {
         if (e.target instanceof HTMLElement) lastFocused.current = e.target;
         focus(win.id);

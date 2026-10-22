@@ -141,8 +141,9 @@ export const BrowserView = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function BrowserView(props, ref) {
     return (
       // The wrapper hosts GuestClickShield: while this surface's window is
-      // not on top, the shield covers the guest so a click into its content
-      // raises the window (guest input never reaches this document).
+      // not on top, the shield covers an iframe guest so a click into its
+      // content raises the window (iframe input never reaches this document).
+      // Webview guests don't need it; see GuestClickShield.
       <div className="relative h-full w-full">
         {isWebviewAvailable() ? (
           <WebviewSurface ref={ref} {...props} />

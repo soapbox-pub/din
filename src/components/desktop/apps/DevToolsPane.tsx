@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 import { getDevtoolsBridge } from '@/lib/devtools';
-import { GuestClickShield } from '@/components/desktop/GuestClickShield';
 
 /**
  * The docked Chrome DevTools surface for one browser tab.
@@ -71,9 +70,6 @@ export function DevToolsPane({
   }, [targetWcId, onReady]);
 
   return (
-    // The wrapper hosts GuestClickShield: while this pane's window is not on
-    // top, the shield covers the devtools guest so a click into it raises the
-    // window (guest input never reaches this document).
     <div className="relative h-full w-full" style={{ display: 'flex' }}>
       <webview
         ref={webviewRef}
@@ -85,7 +81,6 @@ export function DevToolsPane({
         className="h-full w-full bg-white"
         style={{ display: 'flex' }}
       />
-      <GuestClickShield />
     </div>
   );
 }

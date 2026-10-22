@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
+import { getGuestInput } from '@/lib/guestInput';
 
 /**
  * A transparent overlay that makes clicks on embedded web content raise the
@@ -14,15 +15,18 @@ import { useWindowIsTop } from '@/contexts/WindowFocusContext';
  * same one the Dock's hot-edge strip uses: a real DOM element sitting above
  * the guest.
  *
+ * Inside the Electron shell none of this is needed: GuestInputHost replays a
+ * press in a <webview> as a pointerdown on it, which raises the window like
+ * any other click. There the shield renders nothing, so a background page
+ * gets hover, scrolling and its first click directly, as on Linux and Windows
+ * desktops. It only stands in for the iframe fallback in a plain browser.
+ *
  * While the hosting window is not on top, this shield covers the guest and
  * eats the first pointerdown, which bubbles to the window's own
  * raise-on-pointerdown handler. Raising makes the window top, which unmounts
- * the shield, so every later event goes straight to the guest. Net effect is
- * macOS-style click-to-focus: the first click into an unfocused window's web
- * content raises the window without interacting with the page.
+ * the shield, so every later event goes straight to the guest.
  *
- * Scrolling is the exception. On macOS you can scroll a background window under
- * the cursor without raising it, so on `wheel` the shield briefly drops its
+ * Scrolling is the exception: on `wheel` the shield briefly drops its
  * pointer-events, letting the wheel reach the guest and scroll it in place. It
  * re-arms shortly after scrolling stops, so clicks still raise as usual.
  *
@@ -36,7 +40,7 @@ export function GuestClickShield() {
 
   useEffect(() => () => clearTimeout(rearmTimer.current), []);
 
-  if (isTop) return null;
+  if (isTop || getGuestInput()) return null;
 
   // Let the wheel fall through to the guest so a background window scrolls
   // under the cursor without being raised, then re-catch pointer input once
