@@ -191,6 +191,13 @@
 }
 
 @layer base {
+  /* The page is a screen and never scrolls. The wallpaper is sized to
+     innerWidth/innerHeight, which include scrollbars, so once anything
+     overflowed for a moment the scrollbars it brought kept themselves. */
+  html {
+    overflow: hidden;
+  }
+
   *,
   ::after,
   ::before,

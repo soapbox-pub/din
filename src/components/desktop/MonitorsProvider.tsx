@@ -77,8 +77,8 @@ export function MonitorsProvider({ children }: { children: React.ReactNode }) {
 
   useLayoutEffect(() => {
     if (!spans) return;
-    const { body, documentElement: html } = document;
-    const saved = { body: body.style.cssText, html: html.style.overflow };
+    const { body } = document;
+    const saved = body.style.cssText;
     Object.assign(body.style, {
       position: 'absolute',
       left: `${primary.x}px`,
@@ -89,7 +89,6 @@ export function MonitorsProvider({ children }: { children: React.ReactNode }) {
       // Makes <body> the containing block for position: fixed.
       contain: 'layout',
     });
-    html.style.overflow = 'hidden';
     // Radix's popovers and menus are placed by floating-ui, which looks for a
     // fixed element's containing block but never considers <body>: it places
     // them in viewport coordinates, as if <body> were still at the origin.
@@ -98,8 +97,7 @@ export function MonitorsProvider({ children }: { children: React.ReactNode }) {
     popperFix.textContent = `[data-radix-popper-content-wrapper] { left: ${-primary.x}px !important; top: ${-primary.y}px !important; }`;
     document.head.appendChild(popperFix);
     return () => {
-      body.style.cssText = saved.body;
-      html.style.overflow = saved.html;
+      body.style.cssText = saved;
       popperFix.remove();
     };
   }, [spans, primary.x, primary.y, primary.width, primary.height]);
