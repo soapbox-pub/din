@@ -261,7 +261,7 @@ export function embeddedDisplay(): Promise<EmbeddedDisplay | null> {
         return null;
       }
       current = display;
-      void publishToSession(display);
+      await publishToSession(display);
       return display;
     } finally {
       starting = null;
@@ -454,8 +454,12 @@ function systemctlUser(args: string[]): Promise<void> {
  * start with its environment, and without a display there GTK falls back to
  * wayland-0, which under cage is Din's own compositor: a Save dialog took
  * Din's place, fullscreen and with all the input, and couldn't be left.
- * Here they open as Din windows instead. A portal already running (it
- * starts with Din, before this display) is restarted onto it.
+ * Here they open as Din windows instead. A portal already running is
+ * restarted onto it, and one that failed is started: the portal asks for
+ * its GTK backend at login, before this display exists, so it usually dies
+ * with "cannot open display" and hits its start limit. Without it, apps
+ * get no answer for the light/dark setting and Signal and friends stay
+ * light, so the first app's launch waits for this.
  *
  * Never elsewhere: on another desktop the user manager's display is that
  * desktop's, and everything it starts would land in Din.
@@ -468,7 +472,8 @@ async function publishToSession(display: EmbeddedDisplay): Promise<void> {
   await systemctlUser(['set-environment', ...set.map((name) => `${name}=${env[name]}`)]);
   if (unset.length > 0) await systemctlUser(['unset-environment', ...unset]);
   published = true;
-  await systemctlUser(['try-restart', ...SESSION_DISPLAY_UNITS]);
+  await systemctlUser(['reset-failed', ...SESSION_DISPLAY_UNITS]);
+  await systemctlUser(['restart', ...SESSION_DISPLAY_UNITS]);
 }
 
 /** Tear down the worker and the server (apps on it exit with it). */
