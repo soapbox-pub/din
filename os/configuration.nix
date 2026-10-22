@@ -786,9 +786,12 @@ in
     }
   ];
 
-  # Emoji and broad Unicode coverage for web content.
+  # Emoji and broad Unicode coverage for web content. noto-fonts has no
+  # Chinese, Japanese or Korean, which otherwise render as boxes.
   fonts.packages = with pkgs; [
     noto-fonts
+    noto-fonts-cjk-sans
+    noto-fonts-cjk-serif
     noto-fonts-color-emoji
   ];
 
