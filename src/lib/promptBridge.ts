@@ -12,8 +12,9 @@
  * feature-detect via `getPromptHostBridge()`.
  */
 
-/** A capability a site has to ask the user for. */
-export type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications';
+import type { SiteCapability } from '@/lib/browser';
+
+export type { SiteCapability };
 
 export type ShellPromptRequest =
   | {
@@ -22,6 +23,8 @@ export type ShellPromptRequest =
       /** The requesting page's origin (e.g. `https://meet.example`). */
       origin: string;
       capabilities: SiteCapability[];
+      /** Whether the answer is kept (false in a private window). */
+      remembered: boolean;
     }
   | {
       requestId: number;
@@ -38,8 +41,11 @@ export interface PromptHostBridge {
   onRequest(callback: (request: ShellPromptRequest) => void): () => void;
   /** Subscribe to prompts main has timed out. Returns an unsubscribe fn. */
   onCancel(callback: (requestId: number) => void): () => void;
-  /** Answer a prompt. */
-  respond(response: { requestId: number; allow: boolean }): void;
+  /**
+   * Answer a prompt. `dismissed` marks a "no" the user didn't choose, which a
+   * site permission doesn't remember as a Block.
+   */
+  respond(response: { requestId: number; allow: boolean; dismissed?: boolean }): void;
 }
 
 declare global {

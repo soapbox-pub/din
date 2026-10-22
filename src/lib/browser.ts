@@ -16,6 +16,9 @@
  * must feature-detect via `getBrowserBridge()`.
  */
 
+/** A capability a site has to ask the user for. */
+export type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications';
+
 /** Details of a rejected TLS certificate for a browser tab. */
 export interface CertificateErrorInfo {
   /** The tab guest's WebContents id (matches Tab.wcId). */
@@ -123,6 +126,26 @@ export interface BrowserBridge {
   openDownload(savePath: string): Promise<void>;
   /** Reveal a completed download in the file manager. */
   showDownload(savePath: string): Promise<void>;
+  /**
+   * What a site (`origin`, e.g. `https://meet.example`) has been allowed or
+   * blocked. `isPrivate` reads the private window's answers instead.
+   */
+  getSiteInfo(origin: string, isPrivate: boolean): Promise<SiteInfo>;
+  /** Allow or block a capability for a site, or forget the answer (null). */
+  setSitePermission(
+    origin: string,
+    capability: SiteCapability,
+    allow: boolean | null,
+    isPrivate: boolean,
+  ): Promise<void>;
+}
+
+/** What the address bar's site info shows about a site. */
+export interface SiteInfo {
+  /** Capabilities the user has answered for: true allowed, false blocked. */
+  permissions: Partial<Record<SiteCapability, boolean>>;
+  /** Whether the user chose to trust an invalid certificate for its host. */
+  certificateException: boolean;
 }
 
 declare global {

@@ -101,6 +101,7 @@ import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 import { AdblockButton } from '@/components/desktop/apps/AdblockButton';
 import { PopupBlockedButton } from '@/components/desktop/apps/PopupBlockedButton';
 import { SignerSiteButton } from '@/components/desktop/apps/SignerSiteButton';
+import { SiteInfoButton } from '@/components/desktop/apps/SiteInfoButton';
 import { useUserscripts } from '@/hooks/useUserscripts';
 import {
   UserscriptInstallDialog,
@@ -1552,6 +1553,15 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           history={browsingHistory}
           onChangeValue={(text) => updateTab(activeId, { address: text })}
           onNavigate={navigate}
+          site={
+            /^(https?|nsite):\/\//i.test(activeTab.url) ? (
+              <SiteInfoButton
+                url={activeTab.url}
+                isPrivate={isPrivate}
+                onReload={() => views.current.get(activeId)?.reload()}
+              />
+            ) : null
+          }
         />
 
         {/* Extension action icons are hidden in private windows (extensions
@@ -1789,6 +1799,7 @@ function AddressBar({
   history,
   onChangeValue,
   onNavigate,
+  site,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
   /** Active tab id; switching tabs dismisses the dropdown. */
@@ -1797,6 +1808,8 @@ function AddressBar({
   history: BrowserHistoryEntry[];
   onChangeValue: (text: string) => void;
   onNavigate: (raw: string) => void;
+  /** The page's site info button, shown in place of the search icon. */
+  site?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   /** Keyboard highlight: -1 is the raw typed text, 0.. a suggestion. */
@@ -1866,7 +1879,13 @@ function AddressBar({
 
   return (
     <div className="relative flex-1">
-      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/80" aria-hidden />
+      {/* While the user types, the box is a search box; otherwise its icon
+          speaks for the page that's open. */}
+      {open || !site ? (
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/80" aria-hidden />
+      ) : (
+        site
+      )}
       <input
         ref={inputRef}
         type="text"

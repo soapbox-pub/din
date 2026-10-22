@@ -3725,26 +3725,32 @@ function hardenWebStorePreload(): void {
 /** A capability a site must ask the user for. */
 type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications';
 
+const SITE_CAPABILITIES: readonly SiteCapability[] = ['camera', 'microphone', 'geolocation', 'notifications'];
+
 type ShellPrompt =
-  | { kind: 'permission'; origin: string; capabilities: SiteCapability[] }
+  | { kind: 'permission'; origin: string; capabilities: SiteCapability[]; remembered: boolean }
   | { kind: 'extension-install'; name: string; permissions: string[]; hostPermissions: string[] };
 
 let nextPromptId = 1;
-const pendingPrompts = new Map<number, { resolve: (allow: boolean) => void; timer: NodeJS.Timeout }>();
+const pendingPrompts = new Map<number, { resolve: (allow: boolean | null) => void; timer: NodeJS.Timeout }>();
 const PROMPT_TIMEOUT_MS = 2 * 60_000;
 
-/** Ask the user a yes/no question in the shell; resolves false on timeout. */
-function askShell(prompt: ShellPrompt): Promise<boolean> {
+/**
+ * Ask the user a yes/no question in the shell. Resolves null when nobody
+ * answered (no shell, or it timed out), which callers treat as "no" without
+ * remembering it as one.
+ */
+function askShell(prompt: ShellPrompt): Promise<boolean | null> {
   return new Promise((resolve) => {
     if (!shellWindow || shellWindow.webContents.isDestroyed()) {
-      resolve(false);
+      resolve(null);
       return;
     }
     const requestId = nextPromptId++;
     const timer = setTimeout(() => {
       pendingPrompts.delete(requestId);
       sendToShell('prompt:cancel', { requestId });
-      resolve(false);
+      resolve(null);
     }, PROMPT_TIMEOUT_MS);
     pendingPrompts.set(requestId, { resolve, timer });
     sendToShell('prompt:request', { requestId, ...prompt });
@@ -3758,7 +3764,8 @@ function registerPromptBridge(): void {
     if (!pending) return;
     clearTimeout(pending.timer);
     pendingPrompts.delete(response.requestId);
-    pending.resolve(response.allow === true);
+    // A dismissed prompt (Escape, a click outside) is "not now", not "never".
+    pending.resolve(response.allow === true ? true : response.dismissed === true ? null : false);
   });
 }
 
@@ -3772,8 +3779,9 @@ function registerPromptBridge(): void {
 //   - harmless capabilities pages rely on are allowed (writing the clipboard,
 //     fullscreen video, pointer lock for games, DRM playback)
 //   - camera, microphone, location and notifications are asked in the shell,
-//     per origin; the answer holds until Din restarts (private windows forget
-//     with their session)
+//     per origin, and the answer is remembered (site-permissions.json, shared
+//     by browser tabs and installed apps; private windows forget with their
+//     session). The address bar's site info changes or forgets it.
 //   - everything else is denied: clipboard reads, keyboard lock, external
 //     protocol handlers, device pickers (HID/serial/USB/Bluetooth), ...
 // Guest sessions also refuse file:// outright: nothing legitimate loads local
@@ -3789,16 +3797,111 @@ const ALWAYS_ALLOWED_PERMISSIONS = new Set([
   'speaker-selection',
 ]);
 
-/** Per-session answers, keyed `origin\0capability`. */
-const siteDecisions = new WeakMap<Electron.Session, Map<string, boolean>>();
+/** Key of one answer in a decisions map. */
+function decisionKey(origin: string, capability: SiteCapability): string {
+  return `${origin}\u0000${capability}`;
+}
 
+/**
+ * The origin a site's answers are filed under: http(s) and nsite pages only.
+ * Node's URL gives every nsite:// URL the opaque origin "null" (Chromium,
+ * which knows the scheme is standard, does not), so it is built by hand.
+ */
+function siteOriginOf(url: string): string | null {
+  try {
+    const { protocol, host } = new URL(url);
+    return /^(https?|nsite):$/.test(protocol) && host ? `${protocol}//${host}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function sitePermissionsPath(): string {
+  return path.join(app.getPath('userData'), 'site-permissions.json');
+}
+
+/**
+ * Answers that outlive a restart, keyed like decisionsFor's. The persistent
+ * browser session and the installed apps' share them: a site's tab and its
+ * installed app are the same site, and asking twice would only teach the user
+ * to press Allow without reading.
+ */
+let savedDecisions: Map<string, boolean> | null = null;
+
+function persistedDecisions(): Map<string, boolean> {
+  if (savedDecisions) return savedDecisions;
+  savedDecisions = new Map();
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(sitePermissionsPath(), 'utf8'));
+    if (parsed && typeof parsed === 'object') {
+      for (const [origin, answers] of Object.entries(parsed)) {
+        if (!answers || typeof answers !== 'object') continue;
+        for (const capability of SITE_CAPABILITIES) {
+          const allow: unknown = (answers as Record<string, unknown>)[capability];
+          if (typeof allow === 'boolean') savedDecisions.set(decisionKey(origin, capability), allow);
+        }
+      }
+    }
+  } catch {
+    // No file yet (or corrupt): nothing has been answered.
+  }
+  return savedDecisions;
+}
+
+function saveDecisions(decisions: Map<string, boolean>): void {
+  const byOrigin: Record<string, Partial<Record<SiteCapability, boolean>>> = {};
+  for (const [k, allow] of decisions) {
+    const [origin, capability] = k.split('\u0000') as [string, SiteCapability];
+    (byOrigin[origin] ??= {})[capability] = allow;
+  }
+  try {
+    fs.writeFileSync(sitePermissionsPath(), JSON.stringify(byOrigin, null, 2));
+  } catch {
+    // Non-fatal: the answer just won't survive a restart.
+  }
+}
+
+/** Answers that only last as long as their session (private windows, devtools). */
+const sessionDecisions = new WeakMap<Electron.Session, Map<string, boolean>>();
+
+function remembersDecisions(s: Electron.Session): boolean {
+  return s === browserSession() || s === appSession();
+}
+
+/** A session's answers, keyed `origin\0capability`. */
 function decisionsFor(s: Electron.Session): Map<string, boolean> {
-  let decisions = siteDecisions.get(s);
+  if (remembersDecisions(s)) return persistedDecisions();
+  let decisions = sessionDecisions.get(s);
   if (!decisions) {
     decisions = new Map();
-    siteDecisions.set(s, decisions);
+    sessionDecisions.set(s, decisions);
   }
   return decisions;
+}
+
+/**
+ * Prompts dismissed or left to time out, per session. They are refused until
+ * Din restarts, so a page can't re-ask in a loop, but never written down as a
+ * Block the user didn't choose.
+ */
+const dismissedPrompts = new WeakMap<Electron.Session, Set<string>>();
+
+function dismissedFor(s: Electron.Session): Set<string> {
+  let dismissed = dismissedPrompts.get(s);
+  if (!dismissed) {
+    dismissed = new Set();
+    dismissedPrompts.set(s, dismissed);
+  }
+  return dismissed;
+}
+
+/** Record (or with null, forget) an answer, saving it if the session remembers. */
+function decide(s: Electron.Session, origin: string, capability: SiteCapability, allow: boolean | null): void {
+  dismissedFor(s).delete(decisionKey(origin, capability));
+  const decisions = decisionsFor(s);
+  if (allow === null) decisions.delete(decisionKey(origin, capability));
+  else decisions.set(decisionKey(origin, capability), allow);
+  if (remembersDecisions(s)) saveDecisions(decisions);
 }
 
 /** The askable capabilities a permission request needs, or null if not askable. */
@@ -3817,13 +3920,14 @@ function requestedCapabilities(
 
 /** Whether a site may notify, as the user answered (Notification.permission). */
 function siteNotificationPermission(s: Electron.Session, origin: string): NotificationPermission {
-  const allowed = decisionsFor(s).get(`${origin}\u0000notifications`);
+  const allowed = decisionsFor(s).get(decisionKey(origin, 'notifications'));
   return allowed === undefined ? 'default' : allowed ? 'granted' : 'denied';
 }
 
 function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean }): void {
   const decisions = decisionsFor(s);
-  const key = (origin: string, capability: SiteCapability) => `${origin}\u0000${capability}`;
+  const dismissed = dismissedFor(s);
+  const key = decisionKey;
   // One prompt per (origin, capabilities) at a time; repeat requests share it.
   const asking = new Map<string, Promise<boolean>>();
 
@@ -3848,12 +3952,12 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
       return;
     }
     const capabilities = prompts ? requestedCapabilities(permission, details) : null;
-    const origin = originOf(details.requestingUrl);
+    const origin = siteOriginOf(details.requestingUrl);
     if (!capabilities || !origin) {
       callback(false);
       return;
     }
-    if (capabilities.some((c) => decisions.get(key(origin, c)) === false)) {
+    if (capabilities.some((c) => decisions.get(key(origin, c)) === false || dismissed.has(key(origin, c)))) {
       callback(false);
       return;
     }
@@ -3865,10 +3969,14 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     const askKey = `${origin}\u0000${undecided.join(',')}`;
     let answer = asking.get(askKey);
     if (!answer) {
-      answer = askShell({ kind: 'permission', origin, capabilities: undecided }).then((allow) => {
-        for (const c of undecided) decisions.set(key(origin, c), allow);
+      const remembered = remembersDecisions(s);
+      answer = askShell({ kind: 'permission', origin, capabilities: undecided, remembered }).then((allow) => {
+        for (const c of undecided) {
+          if (allow === null) dismissed.add(key(origin, c));
+          else decide(s, origin, c, allow);
+        }
         asking.delete(askKey);
-        return allow;
+        return allow === true;
       });
       asking.set(askKey, answer);
     }
@@ -3902,6 +4010,41 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     status: 403,
     headers: { 'content-type': 'text/plain; charset=utf-8' },
   }));
+}
+
+/**
+ * What the Web Browser's site info (the address bar's lock) shows and
+ * changes: a site's answers, in the persistent browser session or, for a
+ * private window, the private one.
+ */
+function registerSitePermissionHandlers(): void {
+  const resolve = (origin: unknown, isPrivate: unknown): { origin: string; s: Electron.Session } => {
+    if (typeof origin !== 'string' || siteOriginOf(origin) !== origin) throw new Error('Invalid site');
+    return { origin, s: isPrivate === true ? privateBrowserSession() : browserSession() };
+  };
+
+  ipcMain.handle('site-permissions:get', (event, rawOrigin, isPrivate) => {
+    assertShellSender(event);
+    const { origin, s } = resolve(rawOrigin, isPrivate);
+    const decisions = decisionsFor(s);
+    const permissions: Partial<Record<SiteCapability, boolean>> = {};
+    for (const capability of SITE_CAPABILITIES) {
+      const allow = decisions.get(decisionKey(origin, capability));
+      if (allow !== undefined) permissions[capability] = allow;
+    }
+    const host = hostOf(origin);
+    const pinned = s === privateBrowserSession() ? privateTrustedCerts : trustedCerts;
+    const certificateException = !!host && [...pinned].some((k) => k.startsWith(`${host}\u0000`));
+    return { permissions, certificateException };
+  });
+
+  ipcMain.handle('site-permissions:set', (event, rawOrigin, capability, allow, isPrivate) => {
+    assertShellSender(event);
+    const { origin, s } = resolve(rawOrigin, isPrivate);
+    if (!SITE_CAPABILITIES.includes(capability)) throw new Error('Invalid capability');
+    if (typeof allow !== 'boolean' && allow !== null) throw new Error('Invalid decision');
+    decide(s, origin, capability, allow);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -4659,6 +4802,7 @@ app.whenReady().then(() => {
   registerBrowserDownloadHandlers();
 
   registerPromptBridge();
+  registerSitePermissionHandlers();
   hardenGuestSession(browserSession(), { prompts: true });
   hardenGuestSession(privateBrowserSession(), { prompts: true });
   hardenGuestSession(appSession(), { prompts: true });

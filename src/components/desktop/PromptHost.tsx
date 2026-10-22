@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Camera, MapPin, Mic, Puzzle, type LucideIcon } from 'lucide-react';
+import { Puzzle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -9,18 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  getPromptHostBridge,
-  type ShellPromptRequest,
-  type SiteCapability,
-} from '@/lib/promptBridge';
-
-const CAPABILITIES: Record<SiteCapability, { label: string; icon: LucideIcon }> = {
-  camera: { label: 'Use your camera', icon: Camera },
-  microphone: { label: 'Use your microphone', icon: Mic },
-  geolocation: { label: 'Know your location', icon: MapPin },
-  notifications: { label: 'Show notifications', icon: Bell },
-};
+import { getPromptHostBridge, type ShellPromptRequest } from '@/lib/promptBridge';
+import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 
 /** Match patterns that grant access to every site. */
 const ALL_SITES = new Set(['<all_urls>', '*://*/*', 'http://*/*', 'https://*/*']);
@@ -60,9 +50,9 @@ export function PromptHost() {
 
   const current = queue[0] ?? null;
 
-  const answer = (allow: boolean) => {
+  const answer = (allow: boolean, dismissed = false) => {
     if (!current) return;
-    getPromptHostBridge()?.respond({ requestId: current.requestId, allow });
+    getPromptHostBridge()?.respond({ requestId: current.requestId, allow, dismissed });
     setQueue((q) => q.filter((r) => r.requestId !== current.requestId));
   };
 
@@ -70,7 +60,7 @@ export function PromptHost() {
     <Dialog
       open={current !== null}
       onOpenChange={(open) => {
-        if (!open) answer(false);
+        if (!open) answer(false, true);
       }}
     >
       {/* Keyed so consecutive prompts don't animate as one dialog morphing. */}
@@ -100,12 +90,14 @@ function PermissionPrompt({
       <DialogHeader>
         <DialogTitle className="break-all">{displayHost(request.origin)} wants to</DialogTitle>
         <DialogDescription>
-          Your answer applies to this site until Din restarts.
+          {request.remembered
+            ? 'Din remembers your answer. Change it any time from the icon beside the address.'
+            : 'Your answer applies until this private window closes.'}
         </DialogDescription>
       </DialogHeader>
       <ul className="space-y-2">
         {request.capabilities.map((capability) => {
-          const { label, icon: Icon } = CAPABILITIES[capability];
+          const { label, icon: Icon } = SITE_CAPABILITIES[capability];
           return (
             <li key={capability} className="flex items-center gap-3 text-sm">
               <span className="grid size-8 shrink-0 place-items-center rounded-md bg-secondary">

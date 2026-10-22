@@ -1477,6 +1477,27 @@ contextBridge.exposeInMainWorld('browser', {
    * @param {string} savePath
    */
   showDownload: (savePath) => ipcRenderer.invoke('browser:showDownload', savePath),
+
+  /**
+   * What a site (`origin`) has been allowed or blocked, and whether the user
+   * accepted an untrusted certificate for its host. `isPrivate` reads the
+   * private window's session instead of the persistent one.
+   * @param {string} origin
+   * @param {boolean} isPrivate
+   */
+  getSiteInfo: (origin, isPrivate) =>
+    ipcRenderer.invoke('site-permissions:get', origin, isPrivate),
+
+  /**
+   * Allow (true) or block (false) a capability for a site, or forget the
+   * answer (null) so it asks again.
+   * @param {string} origin
+   * @param {string} capability
+   * @param {boolean | null} allow
+   * @param {boolean} isPrivate
+   */
+  setSitePermission: (origin, capability, allow, isPrivate) =>
+    ipcRenderer.invoke('site-permissions:set', origin, capability, allow, isPrivate),
 });
 
 /**
@@ -2073,7 +2094,7 @@ contextBridge.exposeInMainWorld('filePickerHost', {
 /**
  * A question the main process needs the user to answer.
  * @typedef {(
- *   { requestId: number, kind: 'permission', origin: string, capabilities: string[] } |
+ *   { requestId: number, kind: 'permission', origin: string, capabilities: string[], remembered: boolean } |
  *   { requestId: number, kind: 'extension-install', name: string, permissions: string[], hostPermissions: string[] }
  * )} ShellPromptRequest
  */
@@ -2114,8 +2135,9 @@ contextBridge.exposeInMainWorld('promptHost', {
   },
 
   /**
-   * Answer a prompt.
-   * @param {{ requestId: number, allow: boolean }} response
+   * Answer a prompt. `dismissed` marks a "no" the user didn't choose (Escape,
+   * a click outside), which a site permission doesn't remember as a Block.
+   * @param {{ requestId: number, allow: boolean, dismissed?: boolean }} response
    */
   respond: (response) => ipcRenderer.send('prompt:response', response),
 });
