@@ -1,5 +1,5 @@
-import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Power, RotateCcw, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarShape } from '@/lib/avatarShape';
@@ -60,6 +60,7 @@ import { useAudioStatus } from '@/hooks/useAudio';
 import { useBrightnessStatus } from '@/hooks/useBrightness';
 import { getWifiBridge, isEthernetConnected } from '@/lib/wifi';
 import { getPowerBridge, summarizePower } from '@/lib/power';
+import { PowerDialog, type PowerAction } from '@/components/desktop/PowerDialog';
 import { getAudioBridge } from '@/lib/audio';
 import { getBrightnessBridge } from '@/lib/brightness';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
@@ -599,6 +600,7 @@ const AccountMenuItem = memo(function AccountMenuItem() {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [quickLoginPubkey, setQuickLoginPubkey] = useState<string | null>(null);
   const [removing, setRemoving] = useState<{ pubkey: string; name: string } | null>(null);
+  const [powerAction, setPowerAction] = useState<PowerAction | null>(null);
 
   return (
     <>
@@ -633,11 +635,13 @@ const AccountMenuItem = memo(function AccountMenuItem() {
             onQuickLogin={setQuickLoginPubkey}
             onEditProfile={() => setEditProfileOpen(true)}
             onRemoveAccount={setRemoving}
+            onPower={setPowerAction}
           />
         </PopoverContent>
       </Popover>
 
       <RemoveAccountDialog account={removing} onClose={() => setRemoving(null)} />
+      <PowerDialog action={powerAction} onClose={() => setPowerAction(null)} />
 
       <Dialog open={editProfileOpen} onOpenChange={setEditProfileOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
@@ -672,37 +676,49 @@ const AccountMenuItem = memo(function AccountMenuItem() {
 });
 
 /**
- * Lock the computer: DinOS's lock screen, which takes the computer's
- * password. Only where there's one to take.
+ * Lock, restart, and shut down. Lock is DinOS's lock screen, which takes
+ * the computer's password, so it's offered only where there's one to take;
+ * restart and shut down only where logind lets this session do them.
  */
-function LockButton({ separated = false }: { separated?: boolean }) {
-  const bridge = getLockBridge();
-  const { data: available = false } = useQuery({
+function SystemButtons({ onPower }: { onPower: (action: PowerAction) => void }) {
+  const lockBridge = getLockBridge();
+  const powerBridge = getPowerBridge();
+  const { data: lockAvailable = false } = useQuery({
     queryKey: ['lock', 'available'],
-    queryFn: () => bridge?.available() ?? false,
-    enabled: !!bridge,
+    queryFn: () => lockBridge?.available() ?? false,
+    enabled: !!lockBridge,
     staleTime: 60_000,
   });
-  if (!bridge || !available) return null;
+  const { data: power } = useQuery({
+    queryKey: ['power', 'actions'],
+    queryFn: () => powerBridge?.actions() ?? { reboot: false, powerOff: false },
+    enabled: !!powerBridge,
+    staleTime: 60_000,
+  });
+  const canLock = !!lockBridge && lockAvailable;
+  if (!canLock && !power?.reboot && !power?.powerOff) return null;
 
-  const button = (
+  const item = (icon: ReactNode, label: string, onClick: () => void) => (
     <PopoverClose asChild>
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => void bridge.lock()}
+        onClick={onClick}
         className="justify-start text-muted-foreground hover:text-foreground"
       >
-        <Lock aria-hidden />
-        Lock
+        {icon}
+        {label}
       </Button>
     </PopoverClose>
   );
-  if (!separated) return button;
   return (
     <>
       <Separator />
-      <div className="flex flex-col p-2">{button}</div>
+      <div className="flex flex-col gap-1 p-2">
+        {canLock && item(<Lock aria-hidden />, 'Lock', () => void lockBridge?.lock())}
+        {power?.reboot && item(<RotateCcw aria-hidden />, 'Restart…', () => onPower('reboot'))}
+        {power?.powerOff && item(<Power aria-hidden />, 'Shut down…', () => onPower('powerOff'))}
+      </div>
     </>
   );
 }
@@ -842,19 +858,21 @@ function CalendarSection({ onOpenSettings }: { onOpenSettings: () => void }) {
   );
 }
 
-/** Account header: current user, other accounts, add-account, sign out. */
+/** Account header: current user, other accounts, add-account, sign out, lock and power. */
 function AccountPanel({
   onAddAccount,
   onJoin,
   onQuickLogin,
   onEditProfile,
   onRemoveAccount,
+  onPower,
 }: {
   onAddAccount: () => void;
   onJoin: () => void;
   onQuickLogin: (pubkey: string) => void;
   onEditProfile: () => void;
   onRemoveAccount: (account: { pubkey: string; name: string }) => void;
+  onPower: (action: PowerAction) => void;
 }) {
   const {
     currentUser,
@@ -925,7 +943,7 @@ function AccountPanel({
             </Button>
           </PopoverClose>
         </div>
-        <LockButton separated />
+        <SystemButtons onPower={onPower} />
       </div>
     );
   }
@@ -1087,8 +1105,8 @@ function AccountPanel({
             Remove account
           </Button>
         )}
-        <LockButton />
       </div>
+      <SystemButtons onPower={onPower} />
     </div>
   );
 }

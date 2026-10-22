@@ -65,6 +65,11 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Whether an update is being installed, which a restart would cut short. */
+export function isUpdating(): boolean {
+  return state.phase === 'updating';
+}
+
 export function registerUpdaterHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;

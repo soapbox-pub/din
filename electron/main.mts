@@ -57,14 +57,14 @@ import {
 import { registerTrayHandlers } from './tray.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
-import { registerInstallerHandlers } from './installer.mts';
+import { isInstalling, registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
-import { registerUpdaterHandlers } from './updater.mts';
+import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { airplayDisplays, registerAirPlayHandlers } from './airplay.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
@@ -1595,7 +1595,52 @@ async function readPowerProfiles(): Promise<PowerProfilesState> {
   }
 }
 
+// Restart and shut down, through logind. The menu offers each only where
+// logind answers a plain "yes" for this session: "challenge" would want a
+// polkit agent to ask for a password, and Din has none.
+const LOGIND_BUS = 'org.freedesktop.login1';
+const LOGIND_PATH = '/org/freedesktop/login1';
+const LOGIND_IFACE = 'org.freedesktop.login1.Manager';
+
+/** Whether logind lets this session run `method` (CanReboot, CanPowerOff) without asking. */
+async function logindAllows(method: string): Promise<boolean> {
+  try {
+    const out = await busctl(['--json=short', 'call', LOGIND_BUS, LOGIND_PATH, LOGIND_IFACE, method]);
+    const reply: { data?: unknown[] } = JSON.parse(out);
+    return reply.data?.[0] === 'yes';
+  } catch {
+    return false;
+  }
+}
+
+/** Refuse to cut short work that would leave the disk half-written. */
+function assertSafeToPowerOff(): void {
+  if (isUpdating()) throw new Error('An update is being installed. Try again when it finishes.');
+  if (isInstalling()) throw new Error('DinOS is being installed. Try again when it finishes.');
+}
+
 function registerPowerHandlers(): void {
+  ipcMain.handle('power:actions', async (event) => {
+    assertShellSender(event);
+    const [reboot, powerOff] = await Promise.all([
+      logindAllows('CanReboot'),
+      logindAllows('CanPowerOff'),
+    ]);
+    return { reboot, powerOff };
+  });
+
+  ipcMain.handle('power:reboot', async (event) => {
+    assertShellSender(event);
+    assertSafeToPowerOff();
+    await tool('systemctl', ['reboot'], 15_000);
+  });
+
+  ipcMain.handle('power:powerOff', async (event) => {
+    assertShellSender(event);
+    assertSafeToPowerOff();
+    await tool('systemctl', ['poweroff'], 15_000);
+  });
+
   ipcMain.handle('power:status', async (event) => {
     assertShellSender(event);
     let names: string[];

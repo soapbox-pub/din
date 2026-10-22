@@ -36,7 +36,7 @@
 //     unlock screen shows
 //   - window.lock: DinOS's lock screen, for the Lock menu item
 //   - window.power: battery/AC status + system power profiles for the menu
-//     bar and Settings app
+//     bar and Settings app, and restart/shut down for the account menu
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
 //   - window.brightness: backlight + night light for the menu bar, Settings, OSD
 //   - window.screenshot: capture the desktop as a PNG for the Screenshot app
@@ -861,7 +861,8 @@ contextBridge.exposeInMainWorld('theme', {
 // indicator + Settings battery panel; `available: false` with no battery).
 // `profiles`/`setProfile` drive the system power profile through the
 // net.hadess.PowerProfiles D-Bus API (power-profiles-daemon / tuned-ppd);
-// `available: false` when no such daemon is running.
+// `available: false` when no such daemon is running. `reboot`/`powerOff`
+// go through logind, and `actions` says which of them it allows.
 contextBridge.exposeInMainWorld('power', {
   /** Battery/AC state. `available: false` when no battery is present. */
   status: () => ipcRenderer.invoke('power:status'),
@@ -874,6 +875,15 @@ contextBridge.exposeInMainWorld('power', {
    * @param {string} name
    */
   setProfile: (name) => ipcRenderer.invoke('power:setProfile', name),
+
+  /** Which of restart and shut down logind allows this session. */
+  actions: () => ipcRenderer.invoke('power:actions'),
+
+  /** Restart the computer. */
+  reboot: () => ipcRenderer.invoke('power:reboot'),
+
+  /** Shut the computer down. */
+  powerOff: () => ipcRenderer.invoke('power:powerOff'),
 });
 
 // Installer bridge (window.installer), backed by electron/installer.mts:

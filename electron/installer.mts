@@ -70,6 +70,11 @@ function isValidPassphrase(value: unknown): value is string {
     /^[\x20-\x7e]+$/.test(value);
 }
 
+/** Whether an install is writing to a disk, which a restart would cut short. */
+export function isInstalling(): boolean {
+  return state.phase === 'running';
+}
+
 export function registerInstallerHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;

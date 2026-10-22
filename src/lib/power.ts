@@ -56,6 +56,23 @@ export interface PowerBridge {
   profiles(): Promise<PowerProfilesStatus>;
   /** Switch the active power profile; resolves to the new profiles state. */
   setProfile(name: string): Promise<PowerProfilesStatus>;
+  /** Which of restart and shut down this session may do without a password. */
+  actions(): Promise<PowerActions>;
+  /** Restart the computer. Rejects while an update or install is running. */
+  reboot(): Promise<void>;
+  /** Shut the computer down. Rejects while an update or install is running. */
+  powerOff(): Promise<void>;
+}
+
+export interface PowerActions {
+  reboot: boolean;
+  powerOff: boolean;
+}
+
+/** Strip Electron's IPC wrapper from an error message. */
+export function cleanPowerError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 }
 
 declare global {
