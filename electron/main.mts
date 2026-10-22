@@ -1056,6 +1056,93 @@ async function restoreSavedLayout(): Promise<void> {
   }
 }
 
+/** Whether two rectangles overlap or share a stretch of edge. */
+function rectsTouch(a: OutputPlacement, b: OutputPlacement): boolean {
+  const xs = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const ys = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return (xs >= 0 && ys > 0) || (xs > 0 && ys >= 0);
+}
+
+/**
+ * Slide OUTPUT toward ANCHOR along the axis that separates them until it sits
+ * against it, keeping some of the shared edge.
+ */
+function placeAgainst(output: OutputPlacement, anchor: OutputPlacement): void {
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+  const gapX = Math.max(anchor.x - (output.x + output.width), output.x - (anchor.x + anchor.width));
+  const gapY = Math.max(anchor.y - (output.y + output.height), output.y - (anchor.y + anchor.height));
+  if (gapY >= gapX) {
+    output.y = output.y < anchor.y ? anchor.y - output.height : anchor.y + anchor.height;
+    output.x = clamp(output.x, anchor.x - output.width + 1, anchor.x + anchor.width - 1);
+  } else {
+    output.x = output.x < anchor.x ? anchor.x - output.width : anchor.x + anchor.width;
+    output.y = clamp(output.y, anchor.y - output.height + 1, anchor.y + anchor.height - 1);
+  }
+}
+
+/**
+ * Wayland: close any gap between the enabled outputs. The pointer can't cross
+ * one, so it's stuck on whichever side it was on - as when a saved
+ * arrangement is restored and a display then changes size (deckmon's virtual
+ * display for an AirPlay receiver does). The primary stays put; each output
+ * cut off from it is moved against the nearest one that isn't. Not saved: the
+ * user's arrangement stays theirs.
+ */
+async function closeLayoutGaps(): Promise<void> {
+  if (DISPLAY_TOOL === 'xrandr') return;
+  let outputs: DisplayOutput[];
+  try {
+    outputs = await queryOutputs();
+  } catch {
+    return;
+  }
+  const on: OutputPlacement[] = outputs.flatMap((o) =>
+    o.enabled && o.current
+      ? [{ name: o.name, width: o.current.width, height: o.current.height, ...o.position, primary: o.primary }]
+      : [],
+  );
+  if (on.length < 2) return;
+
+  const placed = [on.find((p) => p.primary) ?? on[0]];
+  let rest = on.filter((p) => p !== placed[0]);
+  let moved = false;
+  while (rest.length > 0) {
+    const touching = rest.find((p) => placed.some((q) => rectsTouch(p, q)));
+    if (touching) {
+      placed.push(touching);
+      rest = rest.filter((p) => p !== touching);
+      continue;
+    }
+    // None touch: move the one closest to the placed ones against its nearest.
+    const distance = (a: OutputPlacement, b: OutputPlacement) =>
+      Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width)) +
+      Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height));
+    let best = { output: rest[0], anchor: placed[0], d: Infinity };
+    for (const output of rest) {
+      for (const anchor of placed) {
+        const d = distance(output, anchor);
+        if (d < best.d) best = { output, anchor, d };
+      }
+    }
+    placeAgainst(best.output, best.anchor);
+    moved = true;
+  }
+  if (!moved) return;
+
+  const left = Math.min(...on.map((p) => p.x));
+  const top = Math.min(...on.map((p) => p.y));
+  for (const p of on) {
+    p.x -= left;
+    p.y -= top;
+  }
+  const disabled = outputs.filter((o) => !on.some((p) => p.name === o.name)).map((o) => o.name);
+  try {
+    await applyOutputLayout(outputs, on, disabled);
+  } catch (error) {
+    console.warn('displays: could not close a gap between displays:', messageOf(error));
+  }
+}
+
 function registerDisplayHandlers(): void {
   ipcMain.handle('display:status', async (event) => {
     assertShellSender(event);
@@ -4390,7 +4477,7 @@ app.whenReady().then(() => {
   // own. Refit it over every display whenever they change (e.g. the Settings
   // display panel applying a new mode, or a monitor plugged in), and tell the
   // desktop where the monitors are now. A newly connected set of outputs gets
-  // its saved arrangement back (Wayland).
+  // its saved arrangement back, and any gap between them is closed (Wayland).
   if (production) {
     const refit = () => {
       if (win.isDestroyed()) return;
@@ -4399,9 +4486,9 @@ app.whenReady().then(() => {
         win.setBounds(screenBounds());
       }
       scheduleMonitorsUpdate();
-      void restoreSavedLayout();
+      void restoreSavedLayout().then(closeLayoutGaps);
     };
-    void restoreSavedLayout();
+    void restoreSavedLayout().then(closeLayoutGaps);
     screen.on('display-metrics-changed', refit);
     screen.on('display-added', refit);
     screen.on('display-removed', refit);
