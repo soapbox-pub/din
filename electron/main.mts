@@ -5163,6 +5163,28 @@ app.on('web-contents-created', (_event, contents) => {
         }),
       );
     }
+    // Chrome's "Search Google for “…”" on selected text, after "Copy". The
+    // search opens in a new foreground tab with the same engine the address
+    // bar uses.
+    const selection = params.selectionText.trim().replace(/\s+/g, ' ');
+    const copyIndex = menu.items.findIndex((item) => item.label === 'Copy');
+    if (selection && copyIndex !== -1) {
+      const shown = selection.length > 32 ? `${selection.slice(0, 32)}…` : selection;
+      menu.insert(
+        copyIndex + 1,
+        new MenuItem({
+          // A lone "&" would be taken as a mnemonic marker.
+          label: `Search DuckDuckGo for “${shown.replace(/&/g, '&&')}”`,
+          click: () => {
+            sendToShell('crx:openTab', {
+              url: `https://duckduckgo.com/?q=${encodeURIComponent(selection)}`,
+              openerWcId: contents.id,
+              background: false,
+            });
+          },
+        }),
+      );
+    }
     // buildChromeContextMenu always appends an "Inspect" item last, wired
     // straight to inspectElement() - which opens devtools in a detached
     // native window (unusable in the single-window kiosk shell). Rebuild the
