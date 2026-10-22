@@ -84,6 +84,12 @@ export interface AudioBridge {
   setVolume(percent: number): Promise<AudioStatus>;
   /** Mute or unmute the default sink. Resolves to the new state. */
   setMuted(muted: boolean): Promise<AudioStatus>;
+  /** Default source (microphone) volume/mute. `available: false` without one. */
+  inputStatus(): Promise<AudioStatus>;
+  /** Set the default source volume (0-MAX_VOLUME). Resolves to the new state. */
+  setInputVolume(percent: number): Promise<AudioStatus>;
+  /** Mute or unmute the default source. Resolves to the new state. */
+  setInputMuted(muted: boolean): Promise<AudioStatus>;
   /** Output (sink) and input (source) devices. */
   devices(): Promise<AudioDevices>;
   /** Per-application playback streams. */
@@ -106,6 +112,11 @@ export interface AudioBridge {
    * the new state. Returns an unsubscribe fn.
    */
   onOsd(callback: (status: AudioStatus) => void): () => void;
+  /**
+   * Subscribe to mic-mute key presses (for the OSD). The callback receives the
+   * default source's new state. Returns an unsubscribe fn.
+   */
+  onInputOsd(callback: (status: AudioStatus) => void): () => void;
 }
 
 declare global {

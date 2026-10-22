@@ -1202,6 +1202,21 @@ contextBridge.exposeInMainWorld('audio', {
    */
   setMuted: (muted) => ipcRenderer.invoke('audio:setMuted', muted),
 
+  /** Default source (microphone) volume/mute. `available: false` without one. */
+  inputStatus: () => ipcRenderer.invoke('audio:inputStatus'),
+
+  /**
+   * Set the default source volume (0-150; past 100 amplifies). Resolves to the new state.
+   * @param {number} percent
+   */
+  setInputVolume: (percent) => ipcRenderer.invoke('audio:setInputVolume', percent),
+
+  /**
+   * Mute or unmute the default source. Resolves to the new state.
+   * @param {boolean} muted
+   */
+  setInputMuted: (muted) => ipcRenderer.invoke('audio:setInputMuted', muted),
+
   /** List output (sink) and input (source) devices. */
   devices: () => ipcRenderer.invoke('audio:devices'),
 
@@ -1258,6 +1273,22 @@ contextBridge.exposeInMainWorld('audio', {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('audio:osd', listener);
     return () => ipcRenderer.removeListener('audio:osd', listener);
+  },
+
+  /**
+   * Subscribe to mic-mute key presses, for the OSD. The callback receives the
+   * default source's new { available, volume, muted } state. Returns an
+   * unsubscribe fn.
+   * @param {(status: { available: boolean, volume: number | null, muted: boolean }) => void} callback
+   */
+  onInputOsd: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ available: boolean, volume: number | null, muted: boolean }} status
+     */
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('audio:inputOsd', listener);
+    return () => ipcRenderer.removeListener('audio:inputOsd', listener);
   },
 });
 

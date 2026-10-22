@@ -24,6 +24,7 @@ import {
   Loader2,
   Lock,
   Mic,
+  MicOff,
   Minus,
   Monitor,
   Moon,
@@ -98,6 +99,8 @@ import type { AudioDevice, AudioPort, AudioStream } from '@/lib/audio';
 import {
   useAudioDeviceMutations,
   useAudioDevices,
+  useAudioInputMutations,
+  useAudioInputStatus,
   useAudioMutations,
   useAudioStatus,
   useAudioStreams,
@@ -2230,9 +2233,65 @@ function AudioStreamRow({
 }
 
 /**
+ * The default input's volume and mute, the way the output volume row above
+ * works: a smooth local drag committed on release, re-synced to changes made
+ * elsewhere (the mic-mute key, pactl).
+ */
+function InputVolumeRow() {
+  const status = useAudioInputStatus();
+  const { setVolume, setMuted } = useAudioInputMutations();
+  const serverVolume = status.data?.volume ?? 0;
+  const muted = status.data?.muted ?? false;
+  const [value, setValue] = useState(serverVolume);
+  const [lastServer, setLastServer] = useState(serverVolume);
+  if (serverVolume !== lastServer) {
+    setLastServer(serverVolume);
+    setValue(serverVolume);
+  }
+  if (!status.data?.available) return null;
+
+  const shown = Math.min(MAX_VOLUME, value);
+  const MicIcon = muted ? MicOff : Mic;
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0"
+        aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
+        title={muted ? 'Unmute microphone' : 'Mute microphone'}
+        aria-pressed={muted}
+        onClick={() => setMuted.mutate(!muted)}
+      >
+        <MicIcon className={cn('size-4', muted && 'text-muted-foreground')} />
+      </Button>
+      <span className="w-28 shrink-0 truncate text-sm">Input volume</span>
+      <VolumeSlider
+        aria-label="Input volume"
+        value={muted ? 0 : shown}
+        className="flex-1"
+        onValueChange={(v) => {
+          if (muted) setMuted.mutate(false);
+          setValue(v);
+        }}
+        onValueCommit={(v) => setVolume.mutate(v)}
+      />
+      <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        {muted ? 'Muted' : `${shown}%`}
+      </span>
+    </div>
+  );
+}
+
+/** The quietest level the mic meter shows, in dBFS; it fills at 0 dBFS. */
+const METER_FLOOR_DB = -60;
+
+/**
  * A live microphone level meter driven by getUserMedia + an AnalyserNode - the
  * standard web way to test an input. It records the system default source, so
- * it reflects whichever input is selected above. Errors (no permission, no
+ * it reflects whichever input is selected above. The bar is in decibels, as on
+ * other desktops' meters: a laptop's built-in mic peaks around -30 dBFS for
+ * speech, which a linear bar shows as barely moving. Errors (no permission, no
  * device) surface inline rather than throwing.
  */
 function MicTest() {
@@ -2262,17 +2321,23 @@ function MicTest() {
       streamRef.current = stream;
       const ctx = new AudioContext();
       ctxRef.current = ctx;
+      await ctx.resume();
       const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
+      analyser.fftSize = 1024;
       ctx.createMediaStreamSource(stream).connect(analyser);
-      const buffer = new Uint8Array(analyser.fftSize);
+      const buffer = new Float32Array(analyser.fftSize);
+      let shown = 0;
       const tick = () => {
-        analyser.getByteTimeDomainData(buffer);
+        analyser.getFloatTimeDomainData(buffer);
         let peak = 0;
         for (let i = 0; i < buffer.length; i++) {
-          peak = Math.max(peak, Math.abs(buffer[i] - 128));
+          peak = Math.max(peak, Math.abs(buffer[i]));
         }
-        setLevel(Math.min(1, peak / 128));
+        const db = 20 * Math.log10(Math.max(peak, 1e-6));
+        const next = Math.max(0, Math.min(1, (db - METER_FLOOR_DB) / -METER_FLOOR_DB));
+        // Rise at once, fall back gently, so syllables don't flicker.
+        shown = next > shown ? next : Math.max(next, shown - 0.02);
+        setLevel(shown);
         rafRef.current = requestAnimationFrame(tick);
       };
       tick();
@@ -2324,7 +2389,8 @@ function MicTest() {
 /**
  * Sound: the default sink's volume/mute plus, when the audio bridge
  * (window.audio, wpctl/PipeWire) is present, output/input device selection, a
- * per-output test tone, a microphone level test, and per-application volume.
+ * per-output test tone, microphone volume/mute and a level test, and
+ * per-application volume.
  * Falls back where PipeWire/wpctl is absent or in a plain browser. Media keys
  * drive the same default sink and show the volume OSD.
  */
@@ -2533,6 +2599,7 @@ function SoundSection() {
           ) : (
             <p className="text-xs text-muted-foreground">No input devices found.</p>
           )}
+          <InputVolumeRow />
           <MicTest />
 
           {/* Per-application volume */}

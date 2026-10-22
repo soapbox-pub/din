@@ -13,6 +13,7 @@ import type { AudioDevices, AudioStatus, AudioStreams } from '@/lib/audio';
  */
 
 const AUDIO_STATUS_KEY = ['audio', 'status'] as const;
+export const AUDIO_INPUT_KEY = ['audio', 'input'] as const;
 const AUDIO_DEVICES_KEY = ['audio', 'devices'] as const;
 const AUDIO_STREAMS_KEY = ['audio', 'streams'] as const;
 
@@ -48,6 +49,36 @@ export function useAudioMutations() {
 
   const setMuted = useMutation({
     mutationFn: (muted: boolean) => requireBridge().setMuted(muted),
+    onSuccess: prime,
+  });
+
+  return { setVolume, setMuted };
+}
+
+/** Default source (microphone) volume/mute. */
+export function useAudioInputStatus() {
+  const audio = getAudioBridge();
+  return useQuery<AudioStatus>({
+    queryKey: AUDIO_INPUT_KEY,
+    queryFn: () => requireBridge().inputStatus(),
+    enabled: audio !== undefined,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+}
+
+/** Microphone volume/mute writes; each primes the cache with the new state. */
+export function useAudioInputMutations() {
+  const queryClient = useQueryClient();
+  const prime = (status: AudioStatus) => queryClient.setQueryData(AUDIO_INPUT_KEY, status);
+
+  const setVolume = useMutation({
+    mutationFn: (percent: number) => requireBridge().setInputVolume(percent),
+    onSuccess: prime,
+  });
+
+  const setMuted = useMutation({
+    mutationFn: (muted: boolean) => requireBridge().setInputMuted(muted),
     onSuccess: prime,
   });
 

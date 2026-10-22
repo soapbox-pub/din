@@ -1818,6 +1818,80 @@ async function audioToggleMute(): Promise<AudioState> {
   return audioStatus();
 }
 
+// --- The default source (microphone): volume, mute, and the mic-mute LED. ---
+
+const DEFAULT_SOURCE = '@DEFAULT_AUDIO_SOURCE@';
+
+/**
+ * Default source volume/mute. available:false when wpctl is absent or there
+ * is no input to read (wpctl fails on @DEFAULT_AUDIO_SOURCE@ then).
+ */
+async function audioInputStatus(): Promise<AudioState> {
+  try {
+    const out = await wpctl(['get-volume', DEFAULT_SOURCE]);
+    const match = out.match(/Volume:\s*([\d.]+)/);
+    const volume = match ? Math.round(Number.parseFloat(match[1]) * 100) : null;
+    return { available: true, volume, muted: /\[MUTED\]/.test(out) };
+  } catch {
+    return { available: false, volume: null, muted: false };
+  }
+}
+
+async function audioSetInputVolume(pct: unknown): Promise<AudioState> {
+  const v = clampVolume(pct);
+  await wpctl(['set-volume', '-l', WPCTL_LIMIT, DEFAULT_SOURCE, `${v}%`]);
+  return audioInputStatus();
+}
+
+async function audioSetInputMuted(muted: boolean): Promise<AudioState> {
+  await wpctl(['set-mute', DEFAULT_SOURCE, muted ? '1' : '0']);
+  void syncMicMuteLed();
+  return audioInputStatus();
+}
+
+async function audioToggleInputMute(): Promise<AudioState> {
+  await wpctl(['set-mute', DEFAULT_SOURCE, 'toggle']);
+  void syncMicMuteLed();
+  return audioInputStatus();
+}
+
+/**
+ * Laptops with a mic-mute key light an LED on it (ThinkPads: platform::micmute).
+ * The kernel drives it with the audio-micmute trigger, which follows an ALSA
+ * capture switch - on AMD ThinkPads the HDA codec's, while the built-in mic
+ * is a digital one on a different card, so the LED stays lit whatever the mic
+ * is doing. Din drives it from the default source's mute instead. Writing 0
+ * to brightness detaches the trigger; the LED's brightness file is writable by
+ * the `input` group (brightnessctl's udev rules), and anywhere it isn't this
+ * quietly does nothing.
+ */
+const LEDS_DIR = '/sys/class/leds';
+const detachedMicLeds = new Set<string>();
+
+async function syncMicMuteLed(): Promise<void> {
+  let leds: string[];
+  try {
+    leds = fs.readdirSync(LEDS_DIR).filter((name) => name.endsWith('::micmute'));
+  } catch {
+    return;
+  }
+  if (leds.length === 0) return;
+  const status = await audioInputStatus();
+  if (!status.available) return;
+  for (const led of leds) {
+    const file = path.join(LEDS_DIR, led, 'brightness');
+    try {
+      if (!detachedMicLeds.has(led)) {
+        await fs.promises.writeFile(file, '0');
+        detachedMicLeds.add(led);
+      }
+      await fs.promises.writeFile(file, status.muted ? '1' : '0');
+    } catch {
+      // Not writable here (no udev rule, not in `input`).
+    }
+  }
+}
+
 // --- Device / stream enumeration and per-node control. ---
 
 /** A sink (output) or source (input) device from `wpctl status`. */
@@ -1963,8 +2037,23 @@ interface PactlCard {
 interface PactlNode {
   name: string;
   properties: Record<string, string>;
-  ports: { name: string }[];
+  ports: { name: string; availability?: string }[];
   active_port: string | null;
+}
+
+/**
+ * PipeWire node ids of sinks/sources whose port is unplugged (a laptop's
+ * headset mic with nothing in the jack). wpctl lists them anyway, and picking
+ * one records silence.
+ */
+function unpluggedNodeIds(nodes: PactlNode[]): Set<number> {
+  const ids = new Set<number>();
+  for (const node of nodes) {
+    const port = node.ports?.find((p) => p.name === node.active_port);
+    const id = Number(node.properties?.['object.id']);
+    if (port?.availability === 'not available' && Number.isInteger(id)) ids.add(id);
+  }
+  return ids;
 }
 
 /** Parse a `pactl -f json list ...` array; [] when pactl can't provide one. */
@@ -2021,16 +2110,21 @@ function inactivePorts(cards: PactlCard[]): { output: AudioPort[]; input: AudioP
 /** All sinks and sources, or available:false when wpctl is absent. */
 async function audioDevices(): Promise<AudioDevices> {
   try {
-    const [status, cards] = await Promise.all([
+    const [status, cards, pactlSinks, pactlSources] = await Promise.all([
       wpctl(['status']),
       pactlList<PactlCard>('cards'),
+      pactlList<PactlNode>('sinks'),
+      pactlList<PactlNode>('sources'),
     ]);
     const { sinks, sources } = parseAudioStatus(status);
     const inactive = inactivePorts(cards);
+    const unplugged = unpluggedNodeIds([...pactlSinks, ...pactlSources]);
+    // The default stays listed even unplugged, so the panel shows what's in use.
+    const plugged = (device: AudioDevice) => device.isDefault || !unplugged.has(device.id);
     return {
       available: true,
-      sinks,
-      sources,
+      sinks: sinks.filter(plugged),
+      sources: sources.filter(plugged),
       inactiveSinks: inactive.output,
       inactiveSources: inactive.input,
     };
@@ -2180,6 +2274,18 @@ function registerAudioHandlers(): void {
     assertShellSender(event);
     return audioSetMuted(muted === true);
   });
+  ipcMain.handle('audio:inputStatus', async (event) => {
+    assertShellSender(event);
+    return audioInputStatus();
+  });
+  ipcMain.handle('audio:setInputVolume', async (event, pct) => {
+    assertShellSender(event);
+    return audioSetInputVolume(pct);
+  });
+  ipcMain.handle('audio:setInputMuted', async (event, muted) => {
+    assertShellSender(event);
+    return audioSetInputMuted(muted === true);
+  });
   ipcMain.handle('audio:devices', async (event) => {
     assertShellSender(event);
     return audioDevices();
@@ -2236,9 +2342,13 @@ function registerSystemEvents(): void {
       setTimeout(() => {
         timers.delete(topic);
         sendToShell('system:changed', topic);
+        // A mute or default-source change made anywhere (Settings, an app,
+        // pactl in the Terminal) moves the mic-mute LED with it.
+        if (topic === 'audio') void syncMicMuteLed();
       }, SYSTEM_EVENT_DEBOUNCE_MS),
     );
   };
+  void syncMicMuteLed();
   watchCommand('network', 'nmcli', ['monitor'], () => changed('network'));
   watchCommand('audio', 'pactl', ['subscribe'], (line) => {
     if (AUDIO_EVENT.test(line)) changed('audio');
@@ -2248,6 +2358,11 @@ function registerSystemEvents(): void {
 /** Adjust the default sink and push the new state to the shell for the OSD. */
 function pushAudioOsd(statusPromise: Promise<AudioState>): void {
   statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
+}
+
+/** Push the default source's new state to the shell for the microphone OSD. */
+function pushInputOsd(statusPromise: Promise<AudioState>): void {
+  statusPromise.then((s) => sendToShell('audio:inputOsd', s)).catch(() => {});
 }
 
 /**
@@ -2495,7 +2610,7 @@ function undimCapture(image: Electron.NativeImage): Electron.NativeImage {
 
 
 /**
- * Brightness and volume media keys. Electron's accelerator grammar has no
+ * Brightness, volume and mic-mute media keys. Electron's accelerator grammar has no
  * brightness key names, and on Wayland globalShortcut can't grab anything,
  * but the compositor delivers XF86MonBrightness* and XF86Audio* keys to the
  * focused client as ordinary keyboard input ("BrightnessUp",
@@ -2513,6 +2628,13 @@ function attachMediaKeys(contents: Electron.WebContents): void {
       if (key === 'AudioVolumeUp') pushAudioOsd(audioAdjust(5));
       else if (key === 'AudioVolumeDown') pushAudioOsd(audioAdjust(-5));
       else pushAudioOsd(audioToggleMute());
+      return;
+    }
+    // The mic-mute key (XF86AudioMicMute). Chromium has a key value for its
+    // keysym but no code for KEY_MICMUTE.
+    if (input.key === 'MicrophoneVolumeMute') {
+      event.preventDefault();
+      pushInputOsd(audioToggleInputMute());
       return;
     }
     let delta: number | null = null;
