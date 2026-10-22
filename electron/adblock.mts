@@ -10,8 +10,9 @@
 //     installs (see the warning in main.mts).
 //   - Network requests in the private session go through session.webRequest
 //     directly: extensions never run there, so nothing is lost.
-//   - Cosmetic filters (hiding ad slots, scriptlets) run in both, through
-//     Ghostery's page preload, which asks this process what to inject.
+//   - Cosmetic filters run in both: Ghostery's page preload asks this process
+//     for the styles that hide ad slots, and adblock-scriptlets-preload.cjs
+//     runs scriptlets before the page's own scripts (YouTube's ads need that).
 //
 // The filter lists are downloaded and compiled in a utility process
 // (adblock-worker.mts), cached in userData, and refreshed every few days. This
@@ -39,6 +40,7 @@ const EXTENSION_ORIGIN = `chrome-extension://${ADBLOCK_EXTENSION_ID}`;
 const EXTENSION_DIR = path.join(import.meta.dirname, 'adblock-extension');
 const WORKER = path.join(import.meta.dirname, 'adblock-worker.mts');
 const PRELOAD = path.join(import.meta.dirname, 'adblock-preload.cjs');
+const SCRIPTLETS_PRELOAD = path.join(import.meta.dirname, 'adblock-scriptlets-preload.cjs');
 
 /** How old the cached engine may get before the lists are fetched again. */
 const ENGINE_MAX_AGE_MS = 4 * 24 * 60 * 60_000;
@@ -258,8 +260,28 @@ function blockInSession(session: Electron.Session): void {
 
 // --- Cosmetic filtering ----------------------------------------------------
 
-/** Ghostery's page preload asks for a page's cosmetics through these. */
+/**
+ * Ghostery's page preload asks for a page's cosmetics through these, but its
+ * scriptlets come from adblock-scriptlets-preload.cjs, which has to have them
+ * before the page runs anything.
+ */
 function registerCosmeticHandlers(): void {
+  ipcMain.on('adblock:scriptlets', (event, url: unknown) => {
+    event.returnValue = [];
+    const contents = event.sender;
+    if (!isBrowserTab(contents) || !engine || !activeFor(contents) || typeof url !== 'string') return;
+    const { hostname, domain } = parseDomain(url);
+    event.returnValue = engine.getCosmeticsFilters({
+      url,
+      hostname: hostname || '',
+      domain: domain || '',
+      getBaseRules: false,
+      getInjectionRules: true,
+      getExtendedRules: false,
+      getRulesFromHostname: true,
+      getRulesFromDOM: false,
+    }).scripts;
+  });
   ipcMain.handle(
     '@ghostery/adblocker/inject-cosmetic-filters',
     (event, url: unknown, msg?: { classes?: string[]; hrefs?: string[]; ids?: string[]; lifecycle?: string }) => {
@@ -268,7 +290,7 @@ function registerCosmeticHandlers(): void {
       if (typeof url !== 'string') return;
       const { hostname, domain } = parseDomain(url);
       const first = msg === undefined;
-      const { active, styles, scripts } = engine.getCosmeticsFilters({
+      const { active, styles } = engine.getCosmeticsFilters({
         url,
         hostname: hostname || '',
         domain: domain || '',
@@ -276,7 +298,7 @@ function registerCosmeticHandlers(): void {
         hrefs: msg?.hrefs,
         ids: msg?.ids,
         getBaseRules: first,
-        getInjectionRules: first,
+        getInjectionRules: false,
         getExtendedRules: false,
         getRulesFromHostname: first,
         getRulesFromDOM: !first,
@@ -284,7 +306,6 @@ function registerCosmeticHandlers(): void {
       });
       if (!active) return;
       if (styles.length > 0) contents.insertCSS(styles, { cssOrigin: 'user' }).catch(() => {});
-      for (const script of scripts) contents.executeJavaScript(script, true).catch(() => {});
     },
   );
   ipcMain.handle('@ghostery/adblocker/is-mutation-observer-enabled', (event) => {
@@ -369,6 +390,7 @@ export function setupAdblock(options: {
   // Cosmetic filtering in both sessions.
   const cosmeticPreload = require.resolve('@ghostery/adblocker-electron-preload');
   for (const s of [options.browserSession, options.privateSession]) {
+    s.registerPreloadScript({ id: 'din-adblock-scriptlets', type: 'frame', filePath: SCRIPTLETS_PRELOAD });
     s.registerPreloadScript({ id: 'din-adblock-cosmetics', type: 'frame', filePath: cosmeticPreload });
   }
   registerCosmeticHandlers();
