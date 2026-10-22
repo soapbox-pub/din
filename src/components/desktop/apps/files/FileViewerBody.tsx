@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileArchive, Folder } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -84,10 +84,72 @@ export function FileViewerBody({
   );
 }
 
+/** Each press of + or - zooms by this factor. */
+const ZOOM_STEP = 1.25;
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 32;
+/** Padding around the picture when fit to the window (Tailwind p-4). */
+const FIT_PADDING = 16;
+
 function ImageView({ url, name }: { url: string; name: string }) {
-  // Fit to the window, or actual size (click to switch).
-  const [actual, setActual] = useState(false);
+  // Fit to the window (null), or a scale of the picture's own size. Click
+  // switches between fit and actual size; + and - zoom in and out, 0 fits.
+  const [zoom, setZoom] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // The point of the picture at the middle of the view, as fractions of the
+  // scrolled area, kept there across a zoom.
+  const anchor = useRef<{ x: number; y: number } | null>(null);
+
+  const zoomTo = useCallback((next: (current: number) => number | null) => {
+    const scroller = scrollRef.current;
+    if (!scroller || !natural) return;
+    anchor.current = {
+      x: (scroller.scrollLeft + scroller.clientWidth / 2) / scroller.scrollWidth,
+      y: (scroller.scrollTop + scroller.clientHeight / 2) / scroller.scrollHeight,
+    };
+    setZoom((z) => {
+      // Zooming from fit starts at the scale fit was showing.
+      const current = z ?? Math.min(
+        (scroller.clientWidth - 2 * FIT_PADDING) / natural.width,
+        (scroller.clientHeight - 2 * FIT_PADDING) / natural.height,
+      );
+      const value = next(current);
+      return value === null ? null : Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+    });
+  }, [natural]);
+
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    const a = anchor.current;
+    anchor.current = null;
+    if (!scroller || !a) return;
+    scroller.scrollLeft = a.x * scroller.scrollWidth - scroller.clientWidth / 2;
+    scroller.scrollTop = a.y * scroller.scrollHeight - scroller.clientHeight / 2;
+  }, [zoom]);
+
+  // The keys arrive wherever focus sits around the picture (the Preview
+  // window keeps it on its own root), so listen on the document and take
+  // the ones aimed at an element holding this view.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const scroller = scrollRef.current;
+      const target = e.target;
+      if (!scroller || !(target instanceof Element) || e.altKey || e.metaKey) return;
+      if (!target.contains(scroller) && !scroller.contains(target)) return;
+      if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      let step: ((z: number) => number | null) | undefined;
+      if (e.key === '+' || e.key === '=') step = (z) => z * ZOOM_STEP;
+      else if (e.key === '-' || e.key === '_') step = (z) => z / ZOOM_STEP;
+      else if (e.key === '0') step = () => null;
+      if (!step) return;
+      e.preventDefault();
+      zoomTo(step);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [zoomTo]);
 
   if (failed) {
     return (
@@ -97,21 +159,33 @@ function ImageView({ url, name }: { url: string; name: string }) {
     );
   }
   return (
-    <div
-      className={cn(
-        'h-full overflow-auto bg-[repeating-conic-gradient(var(--color-muted)_0_25%,transparent_0_50%)] bg-[length:16px_16px]',
-        actual ? 'cursor-zoom-out' : 'cursor-zoom-in p-4',
+    <div className="relative h-full">
+      <div
+        ref={scrollRef}
+        className={cn(
+          'h-full overflow-auto bg-[repeating-conic-gradient(var(--color-muted)_0_25%,transparent_0_50%)] bg-[length:16px_16px]',
+          zoom === null ? 'cursor-zoom-in p-4' : 'cursor-zoom-out',
+        )}
+        onClick={() => zoomTo(() => (zoom === null ? 1 : null))}
+      >
+        <div className={cn(zoom === null ? 'size-full' : 'grid min-h-full w-max min-w-full place-items-center')}>
+          <img
+            key={url}
+            src={url}
+            alt={name}
+            draggable={false}
+            onLoad={(e) => setNatural({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+            onError={() => setFailed(true)}
+            style={zoom !== null && natural ? { width: natural.width * zoom, height: natural.height * zoom } : undefined}
+            className={cn(zoom === null ? 'size-full object-contain' : 'max-w-none')}
+          />
+        </div>
+      </div>
+      {zoom !== null && (
+        <span className="pointer-events-none absolute right-3 bottom-3 rounded-md bg-background/80 px-2 py-0.5 text-xs tabular-nums text-foreground shadow-sm backdrop-blur">
+          {Math.round(zoom * 100)}%
+        </span>
       )}
-      onClick={() => setActual((a) => !a)}
-    >
-      <img
-        key={url}
-        src={url}
-        alt={name}
-        draggable={false}
-        onError={() => setFailed(true)}
-        className={cn(actual ? 'max-w-none' : 'size-full object-contain')}
-      />
     </div>
   );
 }
