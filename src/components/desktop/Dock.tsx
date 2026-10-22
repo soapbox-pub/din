@@ -444,6 +444,34 @@ export function Dock({
   // Hidden only while a window overlaps it and nobody is asking for it.
   const hidden = intersecting && !revealed && !focusWithin;
 
+  // The strip's mouseleave is the only thing that ends magnification, and it
+  // doesn't always come. Moves over a <webview> reach this document only as
+  // GuestInputHost's synthetic pointermoves, which fire no boundary events;
+  // a cursor parked past the screen edge sends nothing at all; and a dock
+  // that slides away under a still cursor never sees it leave. Each of those
+  // left the last-hovered tile magnified, poking up out of a hidden dock.
+  // So a move anywhere outside the strip, the pointer leaving the window,
+  // and the dock hiding all collapse it too.
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      if (!magnified.current) return;
+      if (e.target instanceof Node && stripRef.current?.contains(e.target)) return;
+      scheduleMagnify(null);
+    };
+    const onPointerOut = (e: PointerEvent) => {
+      if (magnified.current && e.relatedTarget === null) scheduleMagnify(null);
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerout', onPointerOut);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerout', onPointerOut);
+    };
+  }, [scheduleMagnify]);
+  useEffect(() => {
+    if (hidden) scheduleMagnify(null);
+  }, [hidden, scheduleMagnify]);
+
   if (entryIds.length === 0) return null;
 
   return (
