@@ -31,6 +31,7 @@ import {
   isUserscriptInstallUrl,
 } from './userscripts.mts';
 import { attachAdblock, isAdblockExtension, setupAdblock } from './adblock.mts';
+import { attachPopups, mayOpenWindow, popupAttached, popupAttaching, setupPopups, windowOpened } from './popups.mts';
 import {
   NSITE_SCHEME,
   registerNsiteProtocol,
@@ -4295,6 +4296,17 @@ app.whenReady().then(() => {
     sendToShell,
   });
 
+  // The pop-up blocker, and window.opener for windows pages open
+  // (electron/popups.mts). Also before the first <webview>, for its preload.
+  setupPopups({
+    sessions: [browserSession(), privateBrowserSession(), appSession()],
+    isWebGuest: (contents) =>
+      contents.getType() === 'webview' &&
+      (isBrowserTabSession(contents.session) || contents.session === appSession()),
+    assertShellSender,
+    sendToShell,
+  });
+
   // Route chrome.action popups into the shell instead of native windows.
   overrideActionPopup();
 
@@ -4375,6 +4387,7 @@ app.whenReady().then(() => {
     }
     // Handed to the web-contents-created hook, which Electron runs next.
     attachingGuestSrc = typeof params.src === 'string' ? params.src : '';
+    popupAttaching(attachingGuestSrc);
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
@@ -4563,11 +4576,15 @@ app.on('web-contents-created', (_event, contents) => {
   // the host OS dialog. Real web content only - browser tabs (persistent and
   // private) and installed web-app guests; extension pages and devtools hosts
   // are left with their default behavior.
-  if (
+  const isWebPage =
     !isExtensionPageGuest &&
-    (isBrowserTabSession(contents.session) || contents.session === appSession())
-  ) {
+    (isBrowserTabSession(contents.session) || contents.session === appSession());
+  if (isWebPage) {
     attachFileChooserInterception(contents);
+    // Pop-ups need a click (electron/popups.mts); a tab one opened is linked
+    // to its opener.
+    attachPopups(contents);
+    popupAttached(contents);
   }
 
   // Register web-content tabs with the extension system (chrome.tabs sees
@@ -4610,6 +4627,9 @@ app.on('web-contents-created', (_event, contents) => {
       // shell's fresh tab would skip Chromium's web_accessible_resources check.
       (/^chrome-extension:\/\//i.test(url) && contents.getURL().startsWith('chrome-extension://'))
     ) {
+      // A web page needs a click to open one (the pop-up blocker); extension
+      // pages are trusted.
+      if (isWebPage && !mayOpenWindow(contents, url)) return { action: 'deny' };
       // Tag the popup with its opener so the shell opens the new tab in the
       // same window/session - keeps private-window links out of the
       // persistent, authenticated session (and vice versa). Middle-click and
@@ -4620,6 +4640,11 @@ app.on('web-contents-created', (_event, contents) => {
         openerWcId: contents.id,
         background: disposition === 'background-tab',
       });
+      if (isWebPage) windowOpened(contents, url);
+    } else if (isWebPage && url === 'about:blank' && mayOpenWindow(contents, url)) {
+      // An empty window the page means to send somewhere: no tab until it
+      // does (popup-preload.cjs gives the page its location).
+      windowOpened(contents, null);
     }
     return { action: 'deny' };
   });

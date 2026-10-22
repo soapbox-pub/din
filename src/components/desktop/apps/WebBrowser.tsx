@@ -93,6 +93,7 @@ import {
 } from '@/components/desktop/apps/BrowserView';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 import { AdblockButton } from '@/components/desktop/apps/AdblockButton';
+import { PopupBlockedButton } from '@/components/desktop/apps/PopupBlockedButton';
 import { useUserscripts } from '@/hooks/useUserscripts';
 import {
   UserscriptInstallDialog,
@@ -1530,6 +1531,14 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           wcId={activeTab.wcId}
           url={activeTab.url}
           onReload={() => views.current.get(activeId)?.reload()}
+        />
+
+        <PopupBlockedButton
+          wcId={activeTab.wcId}
+          url={activeTab.url}
+          onOpen={(url) => {
+            if (isAllowedTabUrl(url)) openTab(url, true, null, activeId);
+          }}
         />
 
         {isPrivate && (

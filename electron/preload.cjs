@@ -46,6 +46,7 @@
 //   - window.userscripts: userscript library sync and install
 //     requests for the Web Browser app
 //   - window.adblock: the Web Browser's built-in ad blocker
+//   - window.popups: the pop-up blocker's blocked windows and allowed sites
 //   - window.devtools: docked devtools control for the Web Browser app
 //   - window.nostrHost: relays NIP-07 requests from installed web apps to the
 //     signed-in account's signer (see NostrBridgeHost / webview-preload.cjs)
@@ -1620,6 +1621,54 @@ contextBridge.exposeInMainWorld('adblock', {
     const listener = (_event, update) => callback(update);
     ipcRenderer.on('adblock:blocked', listener);
     return () => ipcRenderer.removeListener('adblock:blocked', listener);
+  },
+});
+
+// Pop-up blocker bridge (window.popups), backed by the popups:* handlers in
+// electron/popups.mts: the windows each tab was stopped from opening, and the
+// sites allowed to open them without a click.
+contextBridge.exposeInMainWorld('popups', {
+  /** @returns {Promise<{ allowlist: string[] }>} */
+  getSettings: () => ipcRenderer.invoke('popups:getSettings'),
+
+  /**
+   * @param {string} hostname
+   * @param {boolean} allowed whether the site may open pop-ups without a click
+   */
+  setSiteAllowed: (hostname, allowed) => ipcRenderer.invoke('popups:setSiteAllowed', hostname, allowed),
+
+  /**
+   * @param {number} wcId a tab's guest
+   * @returns {Promise<string[]>}
+   */
+  blocked: (wcId) => ipcRenderer.invoke('popups:blocked', wcId),
+
+  /**
+   * Subscribe to settings changes. Returns an unsubscribe fn.
+   * @param {(settings: { allowlist: string[] }) => void} callback
+   */
+  onSettings: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ allowlist: string[] }} settings
+     */
+    const listener = (_event, settings) => callback(settings);
+    ipcRenderer.on('popups:settings', listener);
+    return () => ipcRenderer.removeListener('popups:settings', listener);
+  },
+
+  /**
+   * Subscribe to tabs' blocked pop-ups. Returns an unsubscribe fn.
+   * @param {(update: { wcId: number, urls: string[] }) => void} callback
+   */
+  onBlocked: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, urls: string[] }} update
+     */
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on('popups:blocked', listener);
+    return () => ipcRenderer.removeListener('popups:blocked', listener);
   },
 });
 

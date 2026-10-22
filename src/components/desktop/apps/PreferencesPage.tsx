@@ -5,6 +5,8 @@ import { crxIconUrl, getCrxBridge, type CrxExtension } from '@/lib/crx';
 import type { Userscript } from '@/lib/userscripts';
 import { getAdblockBridge } from '@/lib/adblock';
 import { useAdblockSettings } from '@/hooks/useAdblock';
+import { getPopupsBridge } from '@/lib/popups';
+import { usePopupSettings } from '@/hooks/usePopups';
 import { useToast } from '@/hooks/useToast';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -93,6 +95,8 @@ export function PreferencesPage(props: PreferencesProps) {
 
         <AdblockSection />
 
+        <PopupsSection />
+
         {showClearData && (
           <PreferencesSection
             title="Privacy"
@@ -167,6 +171,44 @@ function AdblockSection() {
           </ul>
         </div>
       )}
+    </PreferencesSection>
+  );
+}
+
+/**
+ * The sites allowed to open pop-ups without a click, from the toolbar's
+ * blocked pop-up button. Absent until there's one, and outside the Electron
+ * shell.
+ */
+function PopupsSection() {
+  const bridge = getPopupsBridge();
+  const settings = usePopupSettings();
+  if (!bridge || !settings || settings.allowlist.length === 0) return null;
+
+  return (
+    <PreferencesSection
+      title="Pop-ups"
+      description="Sites need a click to open a new window, except these."
+    >
+      <ul className="divide-y divide-border/60 rounded-lg border border-border/60">
+        {[...settings.allowlist].sort().map((site) => (
+          <li key={site} className="flex items-center justify-between gap-4 px-3 py-2">
+            <span className="min-w-0 truncate text-sm">{site}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0"
+              aria-label={`Block pop-ups on ${site} again`}
+              title="Block pop-ups here again"
+              onClick={() => {
+                bridge.setSiteAllowed(site, false).catch(() => {});
+              }}
+            >
+              <X className="size-4" aria-hidden />
+            </Button>
+          </li>
+        ))}
+      </ul>
     </PreferencesSection>
   );
 }
