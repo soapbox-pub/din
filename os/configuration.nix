@@ -835,10 +835,6 @@ in
     "systemd.show_status=auto"
     "rd.systemd.show_status=auto"
     "vt.global_cursor_default=0"
-    # Turn off eDP Panel Replay (DC_DISABLE_REPLAY). On the Radeon 890M
-    # (DCN 3.5) it intermittently paints a band of garbage colors across
-    # the internal screen.
-    "amdgpu.dcdebugmask=0x400"
   ];
 
   # The boot screen, which is also where the disk's password is typed. It
