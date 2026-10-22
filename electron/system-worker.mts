@@ -1,5 +1,6 @@
 // Runs Din's system tools (nmcli, wpctl, brightnessctl, busctl, xrandr,
-// pw-play, ...) on behalf of the main process, as an Electron utility process.
+// pw-play, ...) on behalf of the main process, in the services host
+// (services.mts).
 //
 // Spawning a child from Electron's main process blocks it for ~12 ms: Node
 // forks to spawn, and forking a large, many-threaded process is slow. The
@@ -25,8 +26,10 @@ type Request =
 /** How long to wait before restarting a monitor that exited. */
 const WATCH_RESTART_MS = 5_000;
 
+let port: Electron.MessagePortMain | null = null;
+
 function post(message: unknown): void {
-  process.parentPort.postMessage(message);
+  port?.postMessage(message);
 }
 
 function run(request: Extract<Request, { type: 'run' }>): void {
@@ -87,8 +90,11 @@ function watch(request: Extract<Request, { type: 'watch' }>): void {
   });
 }
 
-process.parentPort.on('message', (event) => {
-  const request = event.data as Request;
-  if (request.type === 'run') run(request);
-  else if (request.type === 'watch') watch(request);
-});
+export function start(channel: Electron.MessagePortMain): void {
+  port = channel;
+  channel.on('message', (event) => {
+    const request = event.data as Request;
+    if (request.type === 'run') run(request);
+    else if (request.type === 'watch') watch(request);
+  });
+}

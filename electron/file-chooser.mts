@@ -1,7 +1,7 @@
 // Native apps' Open and Save dialogs, in Din's file picker.
 //
 // The desktop portal sends file chooser requests to the backend in
-// file-chooser-portal.mts (a utility process: see there for why). This side
+// file-chooser-portal.mts (in the services host: see there for why). This side
 // passes each one to the shell, which shows its file picker
 // (FilePickerBridgeHost, the same one web pages' uploads use), and carries
 // the user's answer back.
@@ -9,14 +9,11 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
-import path from 'node:path';
-import { app, utilityProcess } from 'electron';
 import { sessionBusAddress } from './native-display.mts';
 import type { PortalAnswer, PortalMessage } from './file-chooser-portal.mts';
+import { startService, type Service } from './services.mts';
 
-const SERVER = path.join(import.meta.dirname, 'file-chooser-portal.mts');
-
-let server: Electron.UtilityProcess | null = null;
+let server: Service | null = null;
 let options: {
   sendToShell: (channel: string, payload?: unknown) => void;
   /** An id for a picker request, unique among the shell's. */
@@ -28,32 +25,29 @@ const pending = new Map<number, number>();
 async function startServer(): Promise<void> {
   const address = await sessionBusAddress();
   if (!address) return;
-  const child = utilityProcess.fork(SERVER, [], {
-    serviceName: 'Din file chooser',
-    stdio: 'inherit',
-    env: { ...process.env, DBUS_SESSION_BUS_ADDRESS: address },
-  });
-  server = child;
-  child.on('message', (message: PortalMessage) => {
-    if (!options) return;
-    if (message.type === 'open') {
-      const requestId = options.nextRequestId();
-      pending.set(requestId, message.id);
-      options.sendToShell('filepicker:request', { requestId, origin: '', options: message.request });
-    } else if (message.type === 'close') {
-      for (const [requestId, id] of pending) {
-        if (id !== message.id) continue;
-        pending.delete(requestId);
-        options.sendToShell('filepicker:cancel', { requestId });
+  const service = startService<PortalMessage>('file-chooser', { busAddress: address }, {
+    onMessage: (message) => {
+      if (!options) return;
+      if (message.type === 'open') {
+        const requestId = options.nextRequestId();
+        pending.set(requestId, message.id);
+        options.sendToShell('filepicker:request', { requestId, origin: '', options: message.request });
+      } else if (message.type === 'close') {
+        for (const [requestId, id] of pending) {
+          if (id !== message.id) continue;
+          pending.delete(requestId);
+          options.sendToShell('filepicker:cancel', { requestId });
+        }
       }
-    }
+    },
+    onExit: () => {
+      if (server !== service) return;
+      server = null;
+      pending.clear();
+      setTimeout(() => void startServer(), 5_000);
+    },
   });
-  child.once('exit', () => {
-    if (server !== child) return;
-    server = null;
-    pending.clear();
-    setTimeout(() => void startServer(), 5_000);
-  });
+  server = service;
 }
 
 function reply(answer: PortalAnswer): void {
@@ -85,5 +79,4 @@ export function cancelFileChoosers(): void {
 export function registerFileChooserPortal(opts: NonNullable<typeof options>): void {
   options = opts;
   void startServer();
-  app.on('will-quit', () => server?.kill());
 }
