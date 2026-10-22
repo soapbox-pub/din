@@ -80,6 +80,7 @@ import { parkedTab } from '@/lib/tabTransfer';
 import { TabContextMenu } from '@/components/desktop/TabContextMenu';
 import {
   bareUrl,
+  inlineCompletion,
   matchHistory,
   useBrowserHistory,
   type BrowserHistoryEntry,
@@ -1648,6 +1649,14 @@ function UndockedDevToolsReconciler({
  * the surrounding form with whatever the value is - a highlighted
  * suggestion's URL or the raw typed text - so navigation itself stays in the
  * parent's onSubmit.
+ *
+ * Typing forward at the end of the line also completes inline, Chrome-style:
+ * the rest of the best-matching history URL is appended and left *selected*,
+ * so Enter takes it and the next keystroke (or Backspace) discards it. The
+ * completion is written straight to the DOM node rather than awaited from a
+ * re-render, because re-completing to the value the input already had ("redd"
+ * -> "reddit.com" when it was already "reddit.com") is a no-op state update
+ * that React bails out of, which would leave the box uncompleted.
  */
 function AddressBar({
   inputRef,
@@ -1688,7 +1697,29 @@ function AddressBar({
     setHighlighted(-1);
   }, [tabId]);
 
+  /**
+   * Append the completion of `text` (if any) to the input and select the
+   * appended tail, keeping the parent's value in sync either way.
+   */
+  const complete = (input: HTMLInputElement, text: string) => {
+    const completed = inlineCompletion(history, text);
+    if (completed) {
+      input.value = completed;
+      input.setSelectionRange(text.length, completed.length);
+    }
+    onChangeValue(completed ?? text);
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowRight' || e.key === 'End') {
+      // Accepting the completion makes it part of what the user "typed", so
+      // the dropdown and Escape stop reaching back past it.
+      const input = e.currentTarget;
+      if (input.selectionEnd === input.value.length && input.selectionStart !== input.selectionEnd) {
+        setTyped(input.value);
+      }
+      return;
+    }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       if (!show) return;
       e.preventDefault();
@@ -1719,18 +1750,31 @@ function AddressBar({
         role="combobox"
         aria-label="Address and search bar"
         aria-expanded={show}
-        aria-autocomplete="list"
+        aria-autocomplete="both"
         aria-controls="address-bar-suggestions"
         aria-activedescendant={
           highlighted >= 0 ? `address-bar-suggestion-${highlighted}` : undefined
         }
         value={value}
         onChange={(e) => {
-          const text = e.target.value;
+          const input = e.currentTarget;
+          const text = input.value;
+          const native = e.nativeEvent as InputEvent;
+          // Only complete when the user is adding text at the end of the
+          // line: deleting, or editing mid-string, must leave it alone (so
+          // Backspace really does get you from "reddit.com" back to "red"),
+          // and a half-composed IME sequence isn't a URL yet.
+          const forward =
+            !native.isComposing &&
+            !(native.inputType ?? '').startsWith('delete') &&
+            input.selectionStart === text.length &&
+            input.selectionEnd === text.length;
+
           setTyped(text);
           setHighlighted(-1);
           setOpen(text.trim().length > 0);
-          onChangeValue(text);
+          if (forward) complete(input, text);
+          else onChangeValue(text);
         }}
         onKeyDown={onKeyDown}
         onFocus={(e) => e.currentTarget.select()}
