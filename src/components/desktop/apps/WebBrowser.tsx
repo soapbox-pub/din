@@ -22,6 +22,8 @@ import {
   VenetianMask,
   WifiOff,
   X,
+  ZoomIn,
+  ZoomOut,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -155,6 +157,12 @@ const DEVTOOLS_DEFAULT_WIDTH = 400;
 const DEVTOOLS_MIN_SIZE = 120;
 const PAGE_MIN_SIZE = 96;
 
+/** Page zoom steps for Ctrl+= / Ctrl+- (Chrome's). */
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
+
+/** How many closed tabs Ctrl+Shift+T can bring back, per window. */
+const CLOSED_TABS_LIMIT = 25;
+
 let nextTabId = 0;
 const newTabId = () => `tab-${nextTabId++}`;
 /** Where a tab falls in opening order, from its id. */
@@ -195,6 +203,8 @@ interface Tab {
   undockedWindowId: string | null;
   /** Selected device-emulation preset id, or null when not emulating. */
   deviceId: string | null;
+  /** Page zoom (Ctrl+= / Ctrl+- / Ctrl+0); 1 is 100%. */
+  zoom: number;
 }
 
 function createTab(
@@ -227,6 +237,7 @@ function createTab(
     dock: 'closed',
     undockedWindowId: null,
     deviceId: null,
+    zoom: 1,
   };
 }
 
@@ -363,6 +374,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const lastDock = useRef<Exclude<DockMode, 'closed'>>('bottom');
   // Context-menu "Inspect" coordinates awaiting a tab's devtools to open.
   const pendingInspect = useRef(new Map<string, { x: number; y: number }>());
+  // Pages of recently closed tabs, newest last, for Ctrl+Shift+T.
+  const closedTabs = useRef<string[]>([]);
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   useWindowTitle(activeTab.title ?? hostnameOf(activeTab.url) ?? (isPrivate ? 'Private window' : 'New tab'));
@@ -413,12 +426,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     requestAnimationFrame(focusAddress);
   }, [openTab, focusAddress]);
 
+  /**
+   * Close a tab. `remember` keeps its page for Ctrl+Shift+T (off when the tab
+   * is moving to another window rather than going away).
+   */
   const closeTab = useCallback(
-    (id: string) => {
+    (id: string, remember = true) => {
       views.current.delete(id);
       pendingInspect.current.delete(id);
       const ts = tabsRef.current;
       const closed = ts.find((t) => t.id === id);
+      if (remember && closed?.url) {
+        closedTabs.current.push(closed.url);
+        if (closedTabs.current.length > CLOSED_TABS_LIMIT) closedTabs.current.shift();
+      }
       // Tear down the tab's inspector side-effects: an undocked devtools
       // window and any active device emulation.
       if (closed?.undockedWindowId) closeWindow(closed.undockedWindowId);
@@ -452,12 +473,18 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [closeWindow, windowId, devtools],
   );
 
+  /** Bring back the most recently closed tab's page (Ctrl+Shift+T). */
+  const reopenTab = useCallback(() => {
+    const url = closedTabs.current.pop();
+    if (url) openTab(url);
+  }, [openTab]);
+
   /** Hand a tab to another window, which loads its page again. */
   const takeTab = useCallback(
     (id: string): TabTransferPayload | undefined => {
       const tab = tabsRef.current.find((t) => t.id === id);
       if (!tab) return undefined;
-      closeTab(id);
+      closeTab(id, false);
       return { url: tab.url, title: tab.title, favicon: tab.favicon, themeColor: tab.themeColor };
     },
     [closeTab],
@@ -1323,6 +1350,49 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     if (tab) setActiveId(tab.id);
   }, []);
 
+  /** Step a tab's page zoom in (+1) or out (-1), or reset it (0). */
+  const zoomTab = useCallback(
+    (id: string, direction: -1 | 0 | 1) => {
+      updateTab(id, (tab) => {
+        if (direction === 0) return { zoom: 1 };
+        const steps = direction > 0 ? ZOOM_STEPS : [...ZOOM_STEPS].reverse();
+        const next = steps.find((z) => (direction > 0 ? z > tab.zoom : z < tab.zoom));
+        return { zoom: next ?? tab.zoom };
+      });
+    },
+    [updateTab],
+  );
+
+  /**
+   * The browser keys that aren't about one tab's page: windows, reopening a
+   * closed tab, clearing data. Shared by both hotkey sources below; returns
+   * whether it handled the action.
+   */
+  const runWindowHotkey = useCallback(
+    (action: string): boolean => {
+      switch (action) {
+        case 'reopen-tab':
+          reopenTab();
+          return true;
+        case 'new-window':
+          openWindow('web-browser');
+          return true;
+        case 'new-private-window':
+          openWindow('web-browser', { private: true });
+          return true;
+        case 'close-window':
+          closeWindow(windowId);
+          return true;
+        case 'clear-data':
+          if (!isPrivate) setClearDataOpen(true);
+          return true;
+        default:
+          return false;
+      }
+    },
+    [reopenTab, openWindow, closeWindow, windowId, isPrivate],
+  );
+
   const canBack = webviewMode ? activeTab.canBack : activeTab.cursor > 0;
   const canForward = webviewMode
     ? activeTab.canForward
@@ -1402,6 +1472,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   useEffect(() => {
     return consumeBrowserHotkeys((hotkey) => {
       if (hotkey.windowId !== windowId) return;
+      if (runWindowHotkey(hotkey.action)) return;
       switch (hotkey.action) {
         case 'new-tab':
           openNewTab();
@@ -1436,10 +1507,21 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'forward':
           goTab(activeIdRef.current, 1);
           break;
+        case 'zoom-in':
+          zoomTab(activeIdRef.current, 1);
+          break;
+        case 'zoom-out':
+          zoomTab(activeIdRef.current, -1);
+          break;
+        case 'zoom-reset':
+          zoomTab(activeIdRef.current, 0);
+          break;
       }
     });
   }, [
     windowId,
+    runWindowHotkey,
+    zoomTab,
     openNewTab,
     closeTab,
     focusAddress,
@@ -1472,6 +1554,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       }
       const tab = tabsRef.current.find((t) => t.wcId === shortcut.wcId);
       if (!tab) return;
+      if (runWindowHotkey(shortcut.action)) return;
       switch (shortcut.action) {
         case 'new-tab':
           openNewTab();
@@ -1503,9 +1586,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'forward':
           goTab(tab.id, 1);
           break;
+        case 'zoom-in':
+          zoomTab(tab.id, 1);
+          break;
+        case 'zoom-out':
+          zoomTab(tab.id, -1);
+          break;
+        case 'zoom-reset':
+          zoomTab(tab.id, 0);
+          break;
       }
     });
   }, [
+    runWindowHotkey,
+    zoomTab,
     openNewTab,
     closeTab,
     focusAddress,
@@ -1584,6 +1678,27 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
 
         {/* Private tabs have no window.nostr. */}
         {!isPrivate && <SignerSiteButton url={activeTab.url} />}
+
+        {activeTab.zoom !== 1 && (
+          <button
+            type="button"
+            onClick={() => zoomTab(activeId, 0)}
+            title="Reset zoom (Ctrl+0)"
+            aria-label={`Zoom ${Math.round(activeTab.zoom * 100)}%, reset to 100%`}
+            className={cn(
+              'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium tabular-nums text-foreground/80',
+              'hover:bg-foreground/10 hover:text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            )}
+          >
+            {activeTab.zoom > 1 ? (
+              <ZoomIn className="size-3.5" aria-hidden />
+            ) : (
+              <ZoomOut className="size-3.5" aria-hidden />
+            )}
+            {Math.round(activeTab.zoom * 100)}%
+          </button>
+        )}
 
         {isPrivate && (
           <span
@@ -1664,6 +1779,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             key={tab.id}
             id={tab.id}
             initialSrc={tab.initialSrc}
+            zoom={tab.zoom}
             partition={tabPartition}
             isPrivate={isPrivate}
             active={tab.id === activeId}
@@ -2892,6 +3008,7 @@ function DownloadChip({
 const TabSurface = memo(function TabSurface({
   id,
   initialSrc,
+  zoom,
   partition,
   isPrivate,
   active,
@@ -2919,6 +3036,8 @@ const TabSurface = memo(function TabSurface({
 }: {
   id: string;
   initialSrc: string;
+  /** The tab's page zoom; 1 is 100%. */
+  zoom: number;
   /** Session partition for this tab's surface (private windows override it). */
   partition?: string;
   /** Whether this tab lives in a private window (styles the new-tab page). */
@@ -3056,6 +3175,7 @@ const TabSurface = memo(function TabSurface({
           ref={ref}
           src={initialSrc}
           partition={partition}
+          pageZoom={zoom}
           onLoadStart={onLoadStart}
           onLoadEnd={onLoadEnd}
           onLoadError={onLoadError}
@@ -3468,11 +3588,13 @@ function BrowserMenu({
           <BrowserMenuItem
             icon={SquarePlus}
             label="New window"
+            shortcut="Ctrl+N"
             onClick={() => run(onNewWindow)}
           />
           <BrowserMenuItem
             icon={VenetianMask}
             label="New private window"
+            shortcut="Ctrl+Shift+N"
             onClick={() => run(onNewPrivateWindow)}
           />
           {showFind && (
@@ -3507,6 +3629,7 @@ function BrowserMenu({
             <BrowserMenuItem
               icon={Trash2}
               label="Clear browsing data…"
+              shortcut="Ctrl+Shift+Del"
               onClick={() => run(onClearBrowsingData)}
             />
           )}

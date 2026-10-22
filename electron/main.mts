@@ -4641,7 +4641,15 @@ type ShellShortcut =
         | 'find'
         | 'view-source'
         | 'back'
-        | 'forward';
+        | 'forward'
+        | 'reopen-tab'
+        | 'new-window'
+        | 'new-private-window'
+        | 'close-window'
+        | 'clear-data'
+        | 'zoom-in'
+        | 'zoom-out'
+        | 'zoom-reset';
     }
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
@@ -4683,11 +4691,45 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   if (input.key === 'F5' && !input.control && !input.alt && !input.meta) {
     return { action: 'reload', force: Boolean(input.shift) };
   }
+  // Alt+D / F6: the address bar.
+  if (input.key === 'F6' && !input.control && !input.alt && !input.meta && !input.shift) {
+    return { action: 'focus-address' };
+  }
+  if (
+    input.alt &&
+    !input.control &&
+    !input.meta &&
+    !input.shift &&
+    input.key.toLowerCase() === 'd'
+  ) {
+    return { action: 'focus-address' };
+  }
   if (input.control && !input.alt && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-tab', backward: Boolean(input.shift) };
   }
+  if (
+    input.control &&
+    !input.shift &&
+    !input.alt &&
+    !input.meta &&
+    (input.key === 'PageDown' || input.key === 'PageUp')
+  ) {
+    return { action: 'cycle-tab', backward: input.key === 'PageUp' };
+  }
+  // Page zoom: Ctrl+= or Ctrl++ (the latter usually needs Shift), Ctrl+-,
+  // and Ctrl+0.
+  if (input.control && !input.alt && !input.meta) {
+    if (input.key === '=' || input.key === '+') return { action: 'zoom-in' };
+    if (input.key === '-' && !input.shift) return { action: 'zoom-out' };
+    if (input.key === '0' && !input.shift) return { action: 'zoom-reset' };
+  }
   if (input.control && input.shift && !input.alt && !input.meta) {
-    if (input.key.toLowerCase() === 'r') return { action: 'reload', force: true };
+    const key = input.key.toLowerCase();
+    if (key === 'r') return { action: 'reload', force: true };
+    if (key === 't') return { action: 'reopen-tab' };
+    if (key === 'n') return { action: 'new-private-window' };
+    if (key === 'w') return { action: 'close-window' };
+    if (input.key === 'Delete') return { action: 'clear-data' };
     return null;
   }
   if (input.control && !input.shift && !input.alt && !input.meta) {
@@ -4698,6 +4740,7 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
     if (key === 'f') return { action: 'find' };
     if (key === 'u') return { action: 'view-source' };
     if (key === 'r') return { action: 'reload', force: false };
+    if (key === 'n') return { action: 'new-window' };
     if (/^[1-9]$/.test(input.key)) {
       return { action: 'goto-tab', digit: Number(input.key) };
     }

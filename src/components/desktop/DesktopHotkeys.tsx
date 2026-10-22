@@ -37,7 +37,11 @@ const SCREENSHOT_APP_ID = 'screenshot';
  *   shortcut set is also scoped to a focused Web Browser window: Ctrl+F
  *   (find bar), Ctrl+R / F5 and Ctrl+Shift+R / Shift+F5 (reload),
  *   Ctrl+Tab / Ctrl+Shift+Tab (cycle tabs), Ctrl+1..9 (tab by position),
- *   and Alt+Left/Right (history). These are NOT intercepted in the
+ *   and Alt+Left/Right (history), plus Ctrl+PageUp/PageDown (cycle tabs),
+ *   Alt+D / F6 (address bar), Ctrl+Shift+T (reopen a closed tab), Ctrl+N /
+ *   Ctrl+Shift+N (new normal / private window), Ctrl+Shift+W (close the
+ *   window), Ctrl+Shift+Delete (clear browsing data), and Ctrl+= / Ctrl+- /
+ *   Ctrl+0 (page zoom). These are NOT intercepted in the
  *   plain-browser dev loop, where the host browser needs them itself
  *   (its own find bar, reload, tab and history navigation).
  *
@@ -150,20 +154,61 @@ export function DesktopHotkeys() {
         publish({ action: e.key === 'ArrowLeft' ? 'back' : 'forward' });
         return;
       }
+      // Alt+D / F6: the address bar.
+      if (e.key === 'F6' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+        publish({ action: 'focus-address' });
+        return;
+      }
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === 'd'
+      ) {
+        publish({ action: 'focus-address' });
+        return;
+      }
       // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs.
       if (e.ctrlKey && !e.altKey && !e.metaKey && e.key === 'Tab') {
         publish({ action: 'cycle-tab', backward: e.shiftKey });
         return;
       }
-      // Ctrl+Shift+R: cache-bypassing reload.
+      // Ctrl+PageDown / Ctrl+PageUp: the same.
       if (
         e.ctrlKey &&
-        e.shiftKey &&
+        !e.shiftKey &&
         !e.altKey &&
         !e.metaKey &&
-        e.key.toLowerCase() === 'r'
+        (e.key === 'PageDown' || e.key === 'PageUp')
       ) {
-        publish({ action: 'force-reload' });
+        publish({ action: 'cycle-tab', backward: e.key === 'PageUp' });
+        return;
+      }
+      // Page zoom: Ctrl+= or Ctrl++ (the latter usually needs Shift),
+      // Ctrl+-, and Ctrl+0.
+      if (e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.key === '=' || e.key === '+') {
+          publish({ action: 'zoom-in' });
+          return;
+        }
+        if (e.key === '-' && !e.shiftKey) {
+          publish({ action: 'zoom-out' });
+          return;
+        }
+        if (e.key === '0' && !e.shiftKey) {
+          publish({ action: 'zoom-reset' });
+          return;
+        }
+      }
+      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+        const key = e.key.toLowerCase();
+        // Ctrl+Shift+R: cache-bypassing reload.
+        if (key === 'r') publish({ action: 'force-reload' });
+        else if (key === 't') publish({ action: 'reopen-tab' });
+        else if (key === 'n') publish({ action: 'new-private-window' });
+        else if (key === 'w') publish({ action: 'close-window' });
+        else if (e.key === 'Delete') publish({ action: 'clear-data' });
         return;
       }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
@@ -174,6 +219,7 @@ export function DesktopHotkeys() {
         else if (key === 'f') publish({ action: 'find' });
         else if (key === 'u') publish({ action: 'view-source' });
         else if (key === 'r') publish({ action: 'reload' });
+        else if (key === 'n') publish({ action: 'new-window' });
         else if (/^[1-9]$/.test(e.key)) {
           publish({ action: 'goto-tab', digit: Number(e.key) });
         }

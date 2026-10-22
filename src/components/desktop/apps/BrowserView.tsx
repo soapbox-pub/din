@@ -119,6 +119,11 @@ export interface BrowserViewProps {
    * Only available on the Electron <webview> surface.
    */
   onWebContentsId?: (id: number) => void;
+  /**
+   * The page's own zoom (Ctrl+= / Ctrl+- / Ctrl+0), on top of the shell's
+   * interface zoom. 1 is 100%. Only applied on the Electron <webview> surface.
+   */
+  pageZoom?: number;
 }
 
 /**
@@ -230,6 +235,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       onThemeColorChange,
       onNavigate,
       onWebContentsId,
+      pageZoom = 1,
     },
     ref,
   ) {
@@ -246,7 +252,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // The shell's interface zoom, applied to the guest so its content scales
     // in lockstep with the rest of the desktop (see the zoom-sync effect).
     const { config } = useAppContext();
-    const zoomFactor = config.zoomLevel / 100;
+    const zoomFactor = (config.zoomLevel / 100) * pageZoom;
 
     // Create the <webview> imperatively and configure it *before* inserting it
     // into the DOM. Electron reads a guest's attributes when the element is
@@ -427,7 +433,8 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // 1 offsets the guest's mouse hit-testing, so links stop being clickable;
     // matching the guest's own zoom factor keeps its content scaled *and* its
     // clicks aligned. Chromium resets a guest's zoom on navigation, so it is
-    // reapplied on every dom-ready as well as when the interface zoom changes.
+    // reapplied on every dom-ready as well as when the interface zoom (or the
+    // tab's own page zoom) changes.
     useEffect(() => {
       const el = webviewRef.current;
       if (!el) return;

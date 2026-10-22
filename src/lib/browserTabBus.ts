@@ -113,7 +113,15 @@ export interface BrowserHotkey {
     | 'cycle-tab'
     | 'goto-tab'
     | 'back'
-    | 'forward';
+    | 'forward'
+    | 'reopen-tab'
+    | 'new-window'
+    | 'new-private-window'
+    | 'close-window'
+    | 'clear-data'
+    | 'zoom-in'
+    | 'zoom-out'
+    | 'zoom-reset';
   /** Direction for 'cycle-tab' (Ctrl+Shift+Tab). */
   backward?: boolean;
   /** Pressed digit for 'goto-tab' (1-9; 9 = last tab). */

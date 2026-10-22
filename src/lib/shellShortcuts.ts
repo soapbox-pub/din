@@ -15,13 +15,19 @@
  *                             -> { action: 'screenshot-area' }
  *   - Ctrl+T in a browser tab -> { action: 'new-tab', wcId }
  *   - Ctrl+W in a browser tab -> { action: 'close-tab', wcId }
- *   - Ctrl+L in a browser tab -> { action: 'focus-address', wcId }
+ *   - Ctrl+L / Alt+D / F6     -> { action: 'focus-address', wcId }
  *   - Ctrl+F in a browser tab -> { action: 'find', wcId }
  *   - Ctrl+U in a browser tab -> { action: 'view-source', wcId }
  *   - Ctrl+R / F5 (+Shift)    -> { action: 'reload', force, wcId }
- *   - Ctrl+Tab / Ctrl+Shift+Tab -> { action: 'cycle-tab', backward, wcId }
+ *   - Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PageDown / Ctrl+PageUp
+ *                             -> { action: 'cycle-tab', backward, wcId }
  *   - Ctrl+1..9 in a browser tab -> { action: 'goto-tab', digit, wcId }
  *   - Alt+Left / Alt+Right    -> { action: 'back' | 'forward', wcId }
+ *   - Ctrl+Shift+T            -> { action: 'reopen-tab', wcId }
+ *   - Ctrl+N / Ctrl+Shift+N   -> { action: 'new-window' | 'new-private-window', wcId }
+ *   - Ctrl+Shift+W            -> { action: 'close-window', wcId }
+ *   - Ctrl+Shift+Delete       -> { action: 'clear-data', wcId }
+ *   - Ctrl+= / Ctrl+- / Ctrl+0 -> { action: 'zoom-in' | 'zoom-out' | 'zoom-reset', wcId }
  *
  * Tab-scoped shortcuts carry the guest's WebContents id so only the browser
  * window owning that tab acts (mirrors the devtools command routing).
@@ -108,6 +114,24 @@ export type ShellShortcut =
   | {
       /** Alt+Left / Alt+Right: history navigation in that tab. */
       action: 'back' | 'forward';
+      wcId: number;
+    }
+  | {
+      /**
+       * Window and page keys pressed inside a browser tab: Ctrl+Shift+T
+       * (reopen a closed tab), Ctrl+N / Ctrl+Shift+N (new normal / private
+       * window), Ctrl+Shift+W (close the window), Ctrl+Shift+Delete (clear
+       * browsing data), and Ctrl+= / Ctrl+- / Ctrl+0 (page zoom).
+       */
+      action:
+        | 'reopen-tab'
+        | 'new-window'
+        | 'new-private-window'
+        | 'close-window'
+        | 'clear-data'
+        | 'zoom-in'
+        | 'zoom-out'
+        | 'zoom-reset';
       wcId: number;
     };
 
