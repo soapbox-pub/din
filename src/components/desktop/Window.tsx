@@ -757,6 +757,9 @@ export const Window = memo(function Window({
       // here would swallow their click, so bail before setPointerCapture.
       const target = e.target as HTMLElement;
       if (target.closest('button, [role="tab"], [data-window-no-drag]')) return;
+      // Presses in menus the title bar's content portals elsewhere (a tab's
+      // context menu) bubble here through React, but aren't on the title bar.
+      if (!(e.currentTarget as HTMLElement).contains(target)) return;
       startDrag(e);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
@@ -1200,7 +1203,8 @@ export const Window = memo(function Window({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onDoubleClick={() => {
+          onDoubleClick={(e) => {
+            if (!e.currentTarget.contains(e.target as Node)) return;
             stopWobble(false);
             toggleMaximize(win.id);
           }}
