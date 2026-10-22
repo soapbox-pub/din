@@ -1043,6 +1043,11 @@ in
       Restart = "on-failure";
     };
   };
+  # Ending a session tells the receiver to stop (RTSP TEARDOWN); without it the
+  # receiver freezes on the last frame. On shutdown the user manager and the
+  # network would otherwise stop together, and Wi-Fi was gone before deckmon
+  # got to say goodbye. Ordering it after network.target stops it first.
+  systemd.services."user@".after = [ "network.target" ];
   networking.firewall.allowedUDPPorts = [ 5353 ];
   networking.firewall.allowedUDPPortRanges = [ airplayPorts ];
 
