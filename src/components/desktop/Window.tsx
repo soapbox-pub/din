@@ -1,5 +1,5 @@
 import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -1190,6 +1190,18 @@ export const Window = memo(function Window({
       ? 'hover:bg-white/15 hover:text-white'
       : 'hover:bg-black/10 hover:text-black'
     : 'hover:bg-foreground/10 hover:text-foreground';
+  // App-published title-bar content (the browser's tabs) is styled with theme
+  // tokens, so re-point them at the accent the same way. The `background`
+  // the active tab sits on pushes further from the text color — darker under
+  // white text, lighter under black — so it only ever gains contrast.
+  const titlebarTint = accent
+    ? ({
+        '--foreground': accentDark ? '#ffffff' : '#000000',
+        '--muted-foreground': accentDark ? 'rgb(255 255 255 / 0.8)' : 'rgb(0 0 0 / 0.7)',
+        '--border': accentDark ? 'rgb(255 255 255 / 0.2)' : 'rgb(0 0 0 / 0.15)',
+        '--background': accentDark ? 'rgb(0 0 0 / 0.25)' : 'rgb(255 255 255 / 0.5)',
+      } as CSSProperties)
+    : undefined;
 
   return (
     <section
@@ -1265,7 +1277,7 @@ export const Window = memo(function Window({
         {titlebar ? (
           // The app owns the flexible region (drag still works on its empty
           // space; interactive controls inside handle their own events).
-          <div className="flex min-w-0 flex-1 items-center self-stretch">
+          <div className="flex min-w-0 flex-1 items-center self-stretch" style={titlebarTint}>
             {titlebar}
           </div>
         ) : (
