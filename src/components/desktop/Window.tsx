@@ -304,6 +304,29 @@ export const Window = memo(function Window({
     el.focus({ preventScroll: true });
   }, [isTop]);
 
+  // A click into an <iframe> (the browser's plain-web fallback) goes to the
+  // frame's document, so neither pointerdown nor focusin reaches the handlers
+  // below. What this document does see is losing focus to the frame: `blur`
+  // on the window, with the frame left as the active element (checked a task
+  // later, since not every browser has updated activeElement during blur).
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onBlur = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const active = document.activeElement;
+        if (!(active instanceof HTMLIFrameElement) || !sectionRef.current?.contains(active)) return;
+        lastFocused.current = active;
+        focus(win.id);
+      });
+    };
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('blur', onBlur);
+      clearTimeout(timer);
+    };
+  }, [focus, win.id]);
+
   /**
    * Put the window into "cheap to move" mode for the duration of a gesture.
    * backdrop-filter forces the compositor to re-sample everything behind the
@@ -1163,8 +1186,8 @@ export const Window = memo(function Window({
       // guest-to-guest focus moves fire nothing here at all). Presses inside
       // a <webview> instead arrive as GuestInputHost's synthetic pointerdown,
       // which raises via the handler above, and focusin, which remembers the
-      // guest as the last-focused element. Iframes (plain-browser fallback)
-      // raise through GuestClickShield overlays.
+      // guest as the last-focused element. Iframes raise from the window
+      // blur listener above.
       onFocus={(e) => {
         if (e.target instanceof HTMLElement) lastFocused.current = e.target;
         focus(win.id);
@@ -1269,9 +1292,6 @@ export const Window = memo(function Window({
       )}
 
       <div className={cn('relative flex-1 overflow-hidden', !frameless && 'bg-background/80')}>
-        {/* isTop lets guest surfaces (webview/iframe) shield themselves while
-            the window is stacked behind another, so clicking into web content
-            raises the window (see GuestClickShield). */}
         <WindowFocusContext.Provider value={isTop}>
           <WindowTitlebarContext.Provider value={setTitlebar}>
             <WindowTitleContext.Provider value={publishTitle}>
