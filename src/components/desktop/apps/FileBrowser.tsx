@@ -10,7 +10,6 @@ import {
   Home,
   LayoutGrid,
   List,
-  Menu,
   RotateCw,
   Search,
   Trash2,
@@ -53,6 +52,7 @@ import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
 import { moveItem } from '@/hooks/useDragReorder';
+import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -1425,7 +1425,7 @@ function FileBrowserTab({
               title="Menu"
               className="grid size-8 shrink-0 place-items-center rounded-md text-foreground/80 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-foreground/10"
             >
-              <Menu className="size-4" />
+              <BarsStaggeredIcon className="size-4" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60" onCloseAutoFocus={(e) => {
