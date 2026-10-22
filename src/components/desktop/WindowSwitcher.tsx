@@ -282,7 +282,7 @@ export function WindowSwitcher() {
                   <span className="relative">
                     {app && (
                       <AppIcon
-                        icon={app.icon}
+                        icon={w.icon ?? app.icon}
                         className="size-14 text-white drop-shadow"
                       />
                     )}

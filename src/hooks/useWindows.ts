@@ -114,6 +114,11 @@ export interface WindowState {
    * Tells apart several windows of one app in the Dock and the switcher.
    */
   title: string | null;
+  /**
+   * An icon the app publishes for what the window is showing (Preview's
+   * picture, video or file), or null to go by the app's icon.
+   */
+  icon: string | null;
 }
 
 /**
@@ -262,6 +267,7 @@ export function useWindows(
           restore: null,
           frameless,
           title: null,
+          icon: null,
         },
       ];
     });
@@ -370,6 +376,15 @@ export function useWindows(
     setWindows((ws) =>
       ws.some((w) => w.id === id && w.title !== title)
         ? ws.map((w) => (w.id === id ? { ...w, title } : w))
+        : ws,
+    );
+  }, []);
+
+  /** Set (or clear, with null) the icon a window's app publishes. */
+  const setIcon = useCallback((id: string, icon: string | null) => {
+    setWindows((ws) =>
+      ws.some((w) => w.id === id && w.icon !== icon)
+        ? ws.map((w) => (w.id === id ? { ...w, icon } : w))
         : ws,
     );
   }, []);
@@ -571,9 +586,10 @@ export function useWindows(
       cycleFocus,
       setFrameless,
       setTitle,
+      setIcon,
       fitToAreas,
     }),
-    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, setTitle, fitToAreas],
+    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, fitToAreas],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

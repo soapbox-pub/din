@@ -28,6 +28,8 @@ interface DockWindow {
   minimized: boolean;
   /** What the window's app says it's showing, if anything. */
   title: string | null;
+  /** The icon the window's app gave it, if any. */
+  icon: string | null;
 }
 
 /** How a tile acts on its app and its windows. */
@@ -561,7 +563,7 @@ export function Dock({
             // Closing windows are on their way out and can't be focused.
             const appWindows = windows
               .filter((w) => w.appId === appId && !w.closing)
-              .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title }));
+              .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon }));
             return (
               <DockItem
                 key={appId}
@@ -692,6 +694,11 @@ const DockItem = memo(function DockItem({
     w.at = e.timeStamp;
   };
 
+  // The tile wears the icon of the app's frontmost window, when its app
+  // gave it one (Preview's picture, video or file).
+  const frontmost = appWindows.reduce<DockWindow | null>((top, w) => (!top || w.z > top.z ? w : top), null);
+  const tileIcon = frontmost?.icon ?? app.icon;
+
   const button = (
     <button
       type="button"
@@ -715,7 +722,7 @@ const DockItem = memo(function DockItem({
       )}
     >
       <AppIcon
-        icon={app.icon}
+        icon={tileIcon}
         className="size-[82%] text-foreground drop-shadow-md"
       />
       {/* Name label, floating above the (possibly magnified) icon. */}
@@ -858,5 +865,5 @@ const DockItem = memo(function DockItem({
   prev.appWindows.length === next.appWindows.length &&
   prev.appWindows.every((w, i) => {
     const n = next.appWindows[i];
-    return w.id === n.id && w.z === n.z && w.minimized === n.minimized && w.title === n.title;
+    return w.id === n.id && w.z === n.z && w.minimized === n.minimized && w.title === n.title && w.icon === n.icon;
   }));

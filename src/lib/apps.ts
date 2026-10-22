@@ -155,10 +155,10 @@ export const APPS: readonly AppDefinition[] = [
   {
     // One file opened from Files (a picture, a video, some text). Hidden
     // from the launcher; Files opens it with the file's path in its launch
-    // params.
+    // params. Pictures and videos give their windows icons of their own.
     id: 'preview',
     name: 'Preview',
-    icon: '/icons/apps/file-browser.png',
+    icon: '/icons/apps/preview.png',
     component: FileViewer,
     defaultSize: { width: 820, height: 600 },
     hidden: true,

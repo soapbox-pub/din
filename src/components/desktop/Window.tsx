@@ -11,6 +11,7 @@ import { getScreenshotBridge } from '@/lib/screenshot';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
 import { WindowTitleContext } from '@/contexts/WindowTitleContext';
+import { WindowIconContext } from '@/contexts/WindowIconContext';
 import { WindowFocusContext } from '@/contexts/WindowFocusContext';
 import {
   WindowChromeContext,
@@ -217,7 +218,7 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object or `isTop` changes.
-  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle } =
+  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon } =
     useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
@@ -295,6 +296,7 @@ export const Window = memo(function Window({
   // manager, where the Dock and the switcher read it.
   const publishTitle = useCallback((title: string | null) => setTitle(win.id, title), [setTitle, win.id]);
   const title = win.title ?? app?.name ?? win.appId;
+  const publishIcon = useCallback((icon: string | null) => setIcon(win.id, icon), [setIcon, win.id]);
 
   // The rect the drag would snap into (if any): drives the "drop to
   // maximize"/"drop to tile" preview overlay. Only changes when a zone
@@ -1268,7 +1270,7 @@ export const Window = memo(function Window({
           </div>
         ) : (
           <>
-            <AppIcon icon={app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
+            <AppIcon icon={win.icon ?? app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
             <span className={cn('flex-1 truncate text-sm font-medium', chromeText)}>
               {title}
             </span>
@@ -1315,17 +1317,19 @@ export const Window = memo(function Window({
         <WindowFocusContext.Provider value={isTop}>
           <WindowTitlebarContext.Provider value={setTitlebar}>
             <WindowTitleContext.Provider value={publishTitle}>
-              <WindowChromeContext.Provider value={chrome}>
-                <WindowAccentContext.Provider value={setAccent}>
-                  {/* Built-in apps are code-split (React.lazy); the fallback shows
-                      while an app's chunk loads on its first launch. */}
-                  <Suspense
-                    fallback={<div className="size-full animate-pulse bg-muted/40" />}
-                  >
-                    <WindowContent component={app.component} windowId={win.id} params={win.params} />
-                  </Suspense>
-                </WindowAccentContext.Provider>
-              </WindowChromeContext.Provider>
+              <WindowIconContext.Provider value={publishIcon}>
+                <WindowChromeContext.Provider value={chrome}>
+                  <WindowAccentContext.Provider value={setAccent}>
+                    {/* Built-in apps are code-split (React.lazy); the fallback shows
+                        while an app's chunk loads on its first launch. */}
+                    <Suspense
+                      fallback={<div className="size-full animate-pulse bg-muted/40" />}
+                    >
+                      <WindowContent component={app.component} windowId={win.id} params={win.params} />
+                    </Suspense>
+                  </WindowAccentContext.Provider>
+                </WindowChromeContext.Provider>
+              </WindowIconContext.Provider>
             </WindowTitleContext.Provider>
           </WindowTitlebarContext.Provider>
         </WindowFocusContext.Provider>

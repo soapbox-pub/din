@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import { useWindowIcon } from '@/contexts/WindowIconContext';
 import { FileViewerBody } from './files/FileViewerBody';
 
 const isMedia = (name: string) => isViewableImage(name) || isPlayableVideo(name);
@@ -19,11 +20,11 @@ const isMedia = (name: string) => isViewableImage(name) || isPlayableVideo(name)
  *
  * Launch params: `{ path: string }` (absolute).
  */
-export function FileViewer({ params }: AppComponentProps) {
+export function FileViewer({ windowId, params }: AppComponentProps) {
   const initial = typeof params?.path === 'string' ? params.path : null;
   const [path, setPath] = useState(initial);
   const [dirty, setDirty] = useState(false);
-  const { open } = useWindowActions();
+  const { open, close } = useWindowActions();
 
   // A new file asked of this window (launch params merged in).
   const [prevInitial, setPrevInitial] = useState(initial);
@@ -34,6 +35,11 @@ export function FileViewer({ params }: AppComponentProps) {
 
   const name = path ? path.slice(path.lastIndexOf('/') + 1) : '';
   useWindowTitle(path ? `${dirty ? '• ' : ''}${name}` : null);
+  useWindowIcon(
+    isViewableImage(name) ? '/icons/apps/preview-photo.png'
+      : isPlayableVideo(name) ? '/icons/apps/preview-video.png'
+        : null,
+  );
 
   const dir = path ? parentPath(path) : null;
   const listing = useDirectory(dir);
@@ -95,6 +101,14 @@ export function FileViewer({ params }: AppComponentProps) {
     <div
       className="flex h-full w-full flex-col outline-none"
       onKeyDown={(e) => {
+        // Ctrl+W / Ctrl+Q close the window, from anywhere in it.
+        const key = e.key.toLowerCase();
+        if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && (key === 'w' || key === 'q')) {
+          e.preventDefault();
+          e.stopPropagation();
+          close(windowId);
+          return;
+        }
         const target = e.target as HTMLElement;
         if (target.closest('textarea, input, video, audio')) return;
         if (e.ctrlKey || e.altKey || e.metaKey) return;
