@@ -298,6 +298,43 @@ if (flag("no-blur")) {
   });
 }
 
+// The terminal scenario's stand-in for Electron's pty bridge (src/lib/pty.ts):
+// every session streams what a TUI agent sitting at its spinner sends, ~30
+// small repaints a second of a few colored lines. Only with the scenario's
+// storage flag, so every other scenario sees the plain browser's no-bridge.
+await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+  source: `if (localStorage.getItem("din:perf-fake-pty")) {
+    const data = new Set(), exits = new Set(), done = new Set();
+    const enc = new TextEncoder();
+    const spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+    let next = 1;
+    window.pty = {
+      spawn(size) {
+        const id = next++;
+        let frame = 0;
+        setInterval(() => {
+          frame++;
+          let out = "\\x1b7";
+          for (let row = 0; row < 4; row++) {
+            out += "\\x1b[" + (size.rows - 4 + row) + ";1H\\x1b[2K\\x1b[38;2;120;160;255m" + spin[(frame + row) % spin.length] +
+              " \\x1b[38;2;200;200;200mWorking\\x1b[0m · " + (frame / 30).toFixed(1) + "s \\x1b[48;2;30;30;30m" + "─".repeat(40) + "\\x1b[0m";
+          }
+          out += "\\x1b8";
+          const bytes = enc.encode(out);
+          for (const cb of data) cb(id, bytes);
+        }, 33);
+        return Promise.resolve(id);
+      },
+      write() {},
+      resize() {},
+      kill() {},
+      onData(cb) { data.add(cb); return () => data.delete(cb); },
+      onExit(cb) { exits.add(cb); return () => exits.delete(cb); },
+      onCommandDone(cb) { done.add(cb); return () => done.delete(cb); },
+    };
+  }`,
+});
+
 /** Evaluate `fn(arg)` in the page (a function, serialized), awaiting promises. */
 async function evaluate(fn, arg) {
   const expression = `(${fn})(${arg === undefined ? "" : JSON.stringify(arg)})`;
@@ -629,14 +666,15 @@ function rawDigest(r) {
 // ─── Din ────────────────────────────────────────────────────────────────────
 
 /** Fresh storage for the origin, set up the way a scenario wants it. */
-async function resetStorage({ login, config } = {}) {
+async function resetStorage({ login, config, fakePty } = {}) {
   await goto("/robots.txt");
   await evaluate(
-    ([who, cfg, offline]) => {
+    ([who, cfg, offline, pty]) => {
       localStorage.clear();
       sessionStorage.clear();
       localStorage.setItem("din:perf-swallow-publish", "1");
       if (offline) localStorage.setItem("din:perf-offline", "1");
+      if (pty) localStorage.setItem("din:perf-fake-pty", "1");
       if (cfg) localStorage.setItem("nostr:app-config", JSON.stringify(cfg));
       if (who) {
         localStorage.setItem(
@@ -653,7 +691,7 @@ async function resetStorage({ login, config } = {}) {
         );
       }
     },
-    [login, config, OFFLINE],
+    [login, config, OFFLINE, fakePty],
   );
 }
 
@@ -815,6 +853,33 @@ try {
       return out;
     });
     save("open-apps", { launches, hot, errors: errors.slice(mark) });
+  }
+
+  if (wants("terminal")) {
+    console.log(`\n▶ terminal (TUI spinners streaming, ${IDLE_SEC}s per phase)`);
+    const mark = errors.length;
+    await resetStorage({ fakePty: true });
+    await bootDesktop();
+    await launch("Terminal");
+    await waitFor(windowSettled, undefined, 15_000);
+    await sleep(1500);
+    const phases = {};
+    const { hot } = await cpuProfile("terminal", async () => {
+      // One session, on screen: the floor any visible TUI costs.
+      phases.oneVisible = (await measure(() => sleep(IDLE_SEC * 1000))).cost;
+      // A second tab in front of it: the first keeps streaming, unseen.
+      await clickSelector('[aria-label="New terminal"]');
+      await sleep(1500);
+      phases.plusHiddenTab = (await measure(() => sleep(IDLE_SEC * 1000))).cost;
+    });
+    // Back to the first tab: the screenshot must show its latest frame (the
+    // spinner's elapsed time), not a stale one. WebGL paints to a canvas, so
+    // there is no DOM text to check instead.
+    await clickSelector('[role="tab"]');
+    await sleep(500);
+    await screenshot("terminal");
+    save("terminal", { ...phases, hot, errors: errors.slice(mark), report: await report() });
+    console.log(`  one visible: cpu ${phases.oneVisible.cpuPct}%, + a hidden tab: cpu ${phases.plusHiddenTab.cpuPct}%`);
   }
 
   if (wants("drag")) {

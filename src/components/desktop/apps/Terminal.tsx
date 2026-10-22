@@ -584,7 +584,8 @@ export function Terminal({ windowId, params }: AppComponentProps) {
   }
 
   return (
-    <div className="relative h-full w-full bg-[#0a0a0a]">
+    // overflow-clip: background tabs park outside it (see TerminalTab).
+    <div className="relative h-full w-full overflow-clip bg-[#0a0a0a]">
       {/* All tabs stay mounted so background tabs keep their scrollback
           and running programs; only the active one is visible. */}
       {tabs.map((tab) => (
@@ -687,7 +688,15 @@ const TerminalTab = memo(function TerminalTab({
       className="absolute inset-0"
       // visibility (not display:none) keeps xterm's layout measurements valid
       // for background tabs, matching how minimized windows stay mounted.
-      style={active ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
+      // Shifted past the window's clip too: xterm pauses rendering while its
+      // screen doesn't intersect the viewport (an IntersectionObserver, which
+      // ignores visibility), so a TUI streaming into a background tab parses
+      // its output but no longer repaints, and repaints once on return.
+      style={
+        active
+          ? undefined
+          : { visibility: 'hidden', pointerEvents: 'none', transform: 'translateX(calc(-100% - 1px))' }
+      }
     >
       {leaves.map((leaf) => (
         <div
