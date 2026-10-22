@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getBrightnessBridge } from '@/lib/brightness';
-import type { BrightnessStatus } from '@/lib/brightness';
+import type { BrightnessBridge, BrightnessStatus } from '@/lib/brightness';
 
 /**
  * TanStack Query hooks over the OS brightness bridge (window.brightness).
@@ -86,5 +86,11 @@ export function useBrightnessMutations() {
     onSuccess: prime,
   });
 
-  return { setBrightness, setNightLight, setTemperature };
+  const setSchedule = useMutation({
+    mutationFn: (schedule: Parameters<BrightnessBridge['setNightLightSchedule']>[0]) =>
+      requireBridge().setNightLightSchedule(schedule),
+    onSuccess: prime,
+  });
+
+  return { setBrightness, setNightLight, setTemperature, setSchedule };
 }

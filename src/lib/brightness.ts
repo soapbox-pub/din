@@ -15,14 +15,27 @@
  * and render nothing / a fallback when a half is `available: false`.
  */
 
+/** When night light runs: all the time, sunset to sunrise, or custom hours. */
+export type NightLightSchedule = 'always' | 'sunset' | 'custom';
+
 /** Night-light (red shift) state. `available` reflects the gamma tool's presence. */
 export interface NightLightState {
   /** False when no gamma tool (gammastep/wlsunset) is present. */
   available: boolean;
-  /** Whether the warm tint is currently applied. */
+  /** Whether night light is on. On a schedule, it only tints in its hours. */
   enabled: boolean;
+  /** Whether the warm tint is applied right now. */
+  active: boolean;
   /** Color temperature in Kelvin (lower = warmer/redder). */
   temperature: number;
+  schedule: NightLightSchedule;
+  /** Custom hours, "HH:MM" local time; `to` may be past midnight. */
+  from: string;
+  to: string;
+  /** When the schedule next turns the tint on or off (ms since the epoch), if it will. */
+  nextChange: number | null;
+  /** The time zone whose sunset is used, or null where it has no coordinates. */
+  place: string | null;
 }
 
 export interface BrightnessStatus {
@@ -42,10 +55,16 @@ export interface BrightnessBridge {
   status(): Promise<BrightnessStatus>;
   /** Set the level (MIN_BRIGHTNESS-100). Resolves to the new state. */
   setBrightness(percent: number): Promise<BrightnessStatus>;
-  /** Turn the warm night-light tint on or off. Resolves to the new state. */
+  /** Turn night light on or off. Resolves to the new state. */
   setNightLight(enabled: boolean): Promise<BrightnessStatus>;
   /** Set the night-light color temperature in Kelvin. Resolves to the new state. */
   setTemperature(kelvin: number): Promise<BrightnessStatus>;
+  /** Set when night light runs. Resolves to the new state. */
+  setNightLightSchedule(schedule: {
+    schedule: NightLightSchedule;
+    from: string;
+    to: string;
+  }): Promise<BrightnessStatus>;
   /**
    * Subscribe to media-key brightness changes (for the OSD). The callback
    * receives the new state. Returns an unsubscribe fn.
@@ -82,6 +101,20 @@ export const MIN_TEMPERATURE = 2500;
 export const MAX_TEMPERATURE = 6500;
 /** Default night-light temperature — a gentle warm tint. */
 export const DEFAULT_TEMPERATURE = 4500;
+
+/**
+ * What a scheduled night light is doing, e.g. "On until 7:04 AM" or "Off until
+ * 6:31 PM"; null when it's off or always on.
+ */
+export function nightLightCaption(
+  nightLight: NightLightState,
+  timeOptions: Intl.DateTimeFormatOptions,
+): string | null {
+  if (!nightLight.enabled || nightLight.schedule === 'always') return null;
+  const state = nightLight.active ? 'On' : 'Off';
+  if (nightLight.nextChange === null) return nightLight.active ? 'On all day' : 'Off all day';
+  return `${state} until ${new Date(nightLight.nextChange).toLocaleTimeString([], timeOptions)}`;
+}
 
 /** The brightness bridge, or undefined when running outside the Electron shell. */
 export function getBrightnessBridge(): BrightnessBridge | undefined {

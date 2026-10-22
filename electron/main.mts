@@ -42,6 +42,16 @@ import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { registerCursorHandlers } from './cursor.mts';
+import {
+  ensureNightLightTool,
+  nightLightStatus,
+  setNightLightEnabled,
+  setNightLightSchedule,
+  setNightLightTemperature,
+  startNightLight,
+  stopNightLight,
+  type NightLightState,
+} from './night-light.mts';
 import { registerTrayHandlers } from './tray.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { registerInstallerHandlers } from './installer.mts';
@@ -2048,11 +2058,8 @@ function registerMediaKeys(): void {
 //     a dev host), fall back to reading sysfs directly (world-readable) and
 //     writing through systemd-logind's Session.SetBrightness D-Bus call,
 //     which any active session may use without extra privileges.
-//   - Night light / red shift: a warm color temperature held by a Wayland/X11
-//     gamma tool (gammastep preferred, wlsunset as a fallback) kept running in
-//     the main process. Under Wayland the gamma ramp is torn down when the
-//     client disconnects, so the tool must stay alive for the tint to persist;
-//     we run it in continuous mode with equal day/night temps.
+//   - Night light / red shift, always on or on a schedule; see
+//     night-light.mts.
 // Below the backlight's floor, Din dims in software: brightness levels under
 // 0 (down to MIN_BRIGHTNESS) hold the backlight at its lowest nonzero step and
 // set dimLevel, which the shell draws as a black layer over the whole screen
@@ -2065,9 +2072,6 @@ function registerMediaKeys(): void {
 
 const BRIGHTNESSCTL_TIMEOUT_MS = 5_000;
 const BACKLIGHT_CLASS = 'backlight';
-const NIGHT_LIGHT_TOOLS = ['gammastep', 'wlsunset'];
-const MIN_TEMPERATURE = 2500;
-const MAX_TEMPERATURE = 6500;
 /** Dimmest level, in percent below the backlight's floor. Keep in step with src/lib/brightness.ts. */
 const MIN_BRIGHTNESS = -80;
 let dimLevel = 0; // 0..-MIN_BRIGHTNESS, software dimming under the backlight's floor
@@ -2082,13 +2086,6 @@ function clampBrightness(pct: unknown): number {
   const n = Number(pct);
   if (!Number.isFinite(n)) throw new Error('Invalid brightness');
   return Math.max(MIN_BRIGHTNESS, Math.min(100, Math.round(n)));
-}
-
-/** Clamp a caller-supplied color temperature to an integer in the useful range. */
-function clampTemperature(kelvin: unknown): number {
-  const n = Number(kelvin);
-  if (!Number.isFinite(n)) throw new Error('Invalid temperature');
-  return Math.max(MIN_TEMPERATURE, Math.min(MAX_TEMPERATURE, Math.round(n)));
 }
 
 /** Backlight level 0-100 via brightnessctl, null if no backlight device. */
@@ -2213,94 +2210,6 @@ async function backlightSet(pct: number): Promise<void> {
   }
 }
 
-// --- Night light (red shift) state, held in the main process. ---
-let nightLightTool: string | null = null; // resolved tool name, or null when none is present
-let nightLightProbed = false; // whether we've looked for a tool yet
-let nightLightProc: ChildProcess | null = null; // the running gamma child, or null when off
-let nightLightEnabled = false;
-let nightLightTemp = 4500;
-
-/** Resolve whether a gamma tool exists (ENOENT = missing); cached after first probe. */
-async function probeTool(name: string): Promise<boolean> {
-  try {
-    await tool(name, ['-V'], 3_000);
-    return true;
-  } catch (error) {
-    // Any error other than a missing binary (e.g. an unknown flag) still
-    // means the tool is present and runnable.
-    return messageOf(error) !== `${name}-missing`;
-  }
-}
-
-/** Find and cache the first available gamma tool (gammastep, then wlsunset). */
-async function ensureNightLightTool(): Promise<string | null> {
-  if (nightLightProbed) return nightLightTool;
-  nightLightProbed = true;
-  for (const tool of NIGHT_LIGHT_TOOLS) {
-    if (await probeTool(tool)) {
-      nightLightTool = tool;
-      break;
-    }
-  }
-  return nightLightTool;
-}
-
-/** Argv that holds a fixed color temperature continuously (so the ramp persists). */
-function nightLightArgs(tool: string, temp: number): string[] {
-  if (tool === 'wlsunset') {
-    // wlsunset needs night < day and a schedule; pin the schedule so it stays
-    // at the night temperature essentially all day.
-    return ['-t', String(temp), '-T', String(temp + 500), '-S', '23:59', '-s', '00:00'];
-  }
-  // gammastep: manual location, equal day/night temps, no fade transition.
-  return ['-l', '0:0', '-t', `${temp}:${temp}`, '-r'];
-}
-
-/** Stop the running gamma child, if any. */
-function stopNightLight(): void {
-  if (nightLightProc) {
-    try {
-      nightLightProc.kill('SIGTERM');
-    } catch {
-      // Already gone.
-    }
-    nightLightProc = null;
-  }
-  nightLightEnabled = false;
-}
-
-/** (Re)start the gamma child at the current temperature. Throws if no tool exists. */
-async function startNightLight(): Promise<void> {
-  const tool = await ensureNightLightTool();
-  if (!tool) throw new Error('night-light-missing');
-  stopNightLight();
-  const proc = spawn(tool, nightLightArgs(tool, nightLightTemp), { stdio: 'ignore' });
-  proc.on('error', () => {}); // spawn race (e.g. tool vanished); status stays sane
-  proc.on('exit', () => {
-    if (nightLightProc === proc) {
-      nightLightProc = null;
-      nightLightEnabled = false;
-    }
-  });
-  nightLightProc = proc;
-  nightLightEnabled = true;
-}
-
-/** The night-light half of the brightness state. */
-interface NightLightState {
-  available: boolean;
-  enabled: boolean;
-  temperature: number;
-}
-
-function nightLightStatus(): NightLightState {
-  return {
-    available: nightLightTool !== null,
-    enabled: nightLightEnabled,
-    temperature: nightLightTemp,
-  };
-}
-
 /** The full brightness state as reported to the shell. */
 interface BrightnessState {
   available: boolean;
@@ -2370,17 +2279,6 @@ function undimCapture(image: Electron.NativeImage): Electron.NativeImage {
   });
 }
 
-async function brightnessSetNightLight(enabled: boolean): Promise<BrightnessState> {
-  if (enabled) await startNightLight();
-  else stopNightLight();
-  return brightnessStatus();
-}
-
-async function brightnessSetTemperature(kelvin: unknown): Promise<BrightnessState> {
-  nightLightTemp = clampTemperature(kelvin);
-  if (nightLightEnabled) await startNightLight(); // respawn with the new temp
-  return brightnessStatus();
-}
 
 /**
  * Brightness and volume media keys. Electron's accelerator grammar has no
@@ -2415,6 +2313,7 @@ function attachMediaKeys(contents: Electron.WebContents): void {
 }
 
 function registerBrightnessHandlers(): void {
+  startNightLight();
   ipcMain.handle('brightness:status', async (event) => {
     assertShellSender(event);
     return brightnessStatus();
@@ -2425,11 +2324,18 @@ function registerBrightnessHandlers(): void {
   });
   ipcMain.handle('brightness:setNightLight', async (event, enabled) => {
     assertShellSender(event);
-    return brightnessSetNightLight(enabled === true);
+    await setNightLightEnabled(enabled === true);
+    return brightnessStatus();
   });
   ipcMain.handle('brightness:setTemperature', async (event, kelvin) => {
     assertShellSender(event);
-    return brightnessSetTemperature(kelvin);
+    await setNightLightTemperature(kelvin);
+    return brightnessStatus();
+  });
+  ipcMain.handle('brightness:setNightLightSchedule', async (event, schedule) => {
+    assertShellSender(event);
+    await setNightLightSchedule(schedule);
+    return brightnessStatus();
   });
 }
 

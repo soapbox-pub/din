@@ -17,7 +17,10 @@ import {
   MIN_TEMPERATURE,
   brightnessText,
   brightnessValueText,
+  nightLightCaption,
 } from '@/lib/brightness';
+import { timeFormatOptions } from '@/lib/datetime';
+import { useAppContext } from '@/hooks/useAppContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 
 /**
@@ -76,6 +79,7 @@ export function BrightnessPopoverBody() {
   const status = useBrightnessStatus();
   const { setBrightness, setNightLight, setTemperature } = useBrightnessMutations();
   const { open } = useWindowActions();
+  const { config } = useAppContext();
 
   const backlightAvailable = status.data?.available ?? false;
   const serverBrightness = status.data?.brightness ?? 0;
@@ -98,6 +102,8 @@ export function BrightnessPopoverBody() {
     setLastTemp(serverTemp);
     setTemp(serverTemp);
   }
+
+  const caption = nightLight && nightLightCaption(nightLight, timeFormatOptions(config.clockFormat));
 
   return (
     <div className="flex flex-col">
@@ -126,10 +132,13 @@ export function BrightnessPopoverBody() {
         <div className={cn('flex flex-col gap-3 px-3 py-3', backlightAvailable && 'border-t border-border/60')}>
           <div className="flex items-center gap-2.5">
             <Moon
-              className={cn('size-5 shrink-0', nightLight.enabled ? 'text-foreground' : 'text-muted-foreground')}
+              className={cn('size-5 shrink-0', nightLight.active ? 'text-foreground' : 'text-muted-foreground')}
               aria-hidden
             />
-            <span className="flex-1 text-sm text-foreground">Night Light</span>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm text-foreground">Night Light</span>
+              {caption && <span className="text-xs text-muted-foreground">{caption}</span>}
+            </div>
             <Switch
               aria-label="Night Light"
               checked={nightLight.enabled}

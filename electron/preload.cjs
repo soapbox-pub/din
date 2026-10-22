@@ -1179,7 +1179,8 @@ contextBridge.exposeInMainWorld('brightness', {
   setBrightness: (percent) => ipcRenderer.invoke('brightness:setBrightness', percent),
 
   /**
-   * Turn the warm night-light tint on or off. Resolves to the new state.
+   * Turn night light on or off; on a schedule, it tints only in its hours.
+   * Resolves to the new state.
    * @param {boolean} enabled
    */
   setNightLight: (enabled) => ipcRenderer.invoke('brightness:setNightLight', enabled),
@@ -1189,6 +1190,13 @@ contextBridge.exposeInMainWorld('brightness', {
    * @param {number} kelvin
    */
   setTemperature: (kelvin) => ipcRenderer.invoke('brightness:setTemperature', kelvin),
+
+  /**
+   * Set when night light runs: always, sunset to sunrise, or custom hours
+   * ("HH:MM", local time). Resolves to the new state.
+   * @param {{ schedule: 'always' | 'sunset' | 'custom', from: string, to: string }} schedule
+   */
+  setNightLightSchedule: (schedule) => ipcRenderer.invoke('brightness:setNightLightSchedule', schedule),
 
   /**
    * Subscribe to media-key brightness changes (MonBrightnessUp/Down), for the

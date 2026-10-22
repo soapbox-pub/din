@@ -115,7 +115,14 @@ import {
   useRestartForKeyboardLayout,
   useSetKeyboardLayout,
 } from '@/hooks/useKeyboardLayout';
-import { brightnessText, getBrightnessBridge, MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
+import {
+  brightnessText,
+  getBrightnessBridge,
+  MAX_TEMPERATURE,
+  MIN_TEMPERATURE,
+  nightLightCaption,
+} from '@/lib/brightness';
+import type { NightLightSchedule, NightLightState } from '@/lib/brightness';
 import { useBrightnessMutations, useBrightnessStatus } from '@/hooks/useBrightness';
 import { BrightnessGlyph, BrightnessSlider } from '@/components/desktop/BrightnessIndicator';
 import { Slider } from '@/components/ui/slider';
@@ -1661,7 +1668,7 @@ function BrightnessSection() {
                 <Moon
                   className={cn(
                     'size-6 shrink-0',
-                    nightLight.enabled ? 'text-foreground/90' : 'text-muted-foreground',
+                    nightLight.active ? 'text-foreground/90' : 'text-muted-foreground',
                   )}
                   aria-hidden
                 />
@@ -1682,29 +1689,143 @@ function BrightnessSection() {
             </div>
 
             {nightLight.enabled && (
-              <div className="flex items-center gap-3 border-t border-border/60 pt-4">
-                <span className="text-xs text-muted-foreground">Cooler</span>
-                {/* Invert the axis so dragging right warms the screen. */}
-                <Slider
-                  aria-label="Color temperature"
-                  value={[MIN_TEMPERATURE + MAX_TEMPERATURE - temp]}
-                  min={MIN_TEMPERATURE}
-                  max={MAX_TEMPERATURE}
-                  step={100}
-                  className="flex-1"
-                  onValueChange={([v]) => setTemp(MIN_TEMPERATURE + MAX_TEMPERATURE - v)}
-                  onValueCommit={() => setTemperature.mutate(temp)}
-                />
-                <span className="text-xs text-muted-foreground">Warmer</span>
-                <span className="w-16 text-right text-sm tabular-nums text-muted-foreground">
-                  {temp}K
-                </span>
-              </div>
+              <>
+                <NightLightSchedulePicker nightLight={nightLight} />
+                <div className="flex items-center gap-3 border-t border-border/60 pt-4">
+                  <span className="text-xs text-muted-foreground">Cooler</span>
+                  {/* Invert the axis so dragging right warms the screen. */}
+                  <Slider
+                    aria-label="Color temperature"
+                    value={[MIN_TEMPERATURE + MAX_TEMPERATURE - temp]}
+                    min={MIN_TEMPERATURE}
+                    max={MAX_TEMPERATURE}
+                    step={100}
+                    className="flex-1"
+                    onValueChange={([v]) => setTemp(MIN_TEMPERATURE + MAX_TEMPERATURE - v)}
+                    onValueCommit={() => setTemperature.mutate(temp)}
+                  />
+                  <span className="text-xs text-muted-foreground">Warmer</span>
+                  <span className="w-16 text-right text-sm tabular-nums text-muted-foreground">
+                    {temp}K
+                  </span>
+                </div>
+              </>
             )}
           </div>
         )}
       </div>
     </SectionShell>
+  );
+}
+
+const NIGHT_LIGHT_SCHEDULES: { value: NightLightSchedule; name: string }[] = [
+  { value: 'sunset', name: 'Sunset to sunrise' },
+  { value: 'custom', name: 'Custom hours' },
+  { value: 'always', name: 'Always on' },
+];
+
+/** The hours "Sunset to sunrise" keeps where the time zone has no coordinates. */
+const FALLBACK_NIGHT = { from: new Date(2000, 0, 1, 20, 0), to: new Date(2000, 0, 1, 7, 0) };
+
+/** When night light runs, and what it's doing now. */
+function NightLightSchedulePicker({ nightLight }: { nightLight: NightLightState }) {
+  const { config } = useAppContext();
+  const { setSchedule } = useBrightnessMutations();
+  const timeOptions = timeFormatOptions(config.clockFormat);
+
+  // Local copies so a half-typed time doesn't get overwritten by a poll.
+  const [from, setFrom] = useState(nightLight.from);
+  const [to, setTo] = useState(nightLight.to);
+  const [lastSaved, setLastSaved] = useState(`${nightLight.from}-${nightLight.to}`);
+  if (`${nightLight.from}-${nightLight.to}` !== lastSaved) {
+    setLastSaved(`${nightLight.from}-${nightLight.to}`);
+    setFrom(nightLight.from);
+    setTo(nightLight.to);
+  }
+
+  const save = (change: Partial<{ schedule: NightLightSchedule; from: string; to: string }>) =>
+    setSchedule.mutate({ schedule: nightLight.schedule, from, to, ...change });
+
+  const caption = nightLightCaption(nightLight, timeOptions);
+  let description: string;
+  if (nightLight.schedule === 'always') {
+    description = 'The screen stays warm until you turn Night Light off.';
+  } else if (nightLight.schedule === 'custom') {
+    description = 'Night Light turns on and off at these times every day.';
+  } else if (nightLight.place) {
+    description = `Follows sunset and sunrise in ${describeZone(nightLight.place).city}, from your time zone.`;
+  } else {
+    description = `Din can’t place your time zone, so Night Light runs from ${FALLBACK_NIGHT.from.toLocaleTimeString([], timeOptions)} to ${FALLBACK_NIGHT.to.toLocaleTimeString([], timeOptions)}.`;
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Night Light schedule">
+        {NIGHT_LIGHT_SCHEDULES.map((option) => {
+          const checked = nightLight.schedule === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              onClick={() => save({ schedule: option.value })}
+              className={cn(
+                'rounded-lg border px-3 py-2 text-sm',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                checked
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+              )}
+            >
+              {option.name}
+            </button>
+          );
+        })}
+      </div>
+
+      {nightLight.schedule === 'custom' && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Label htmlFor="night-light-from" className="text-sm">
+            From
+          </Label>
+          <Input
+            id="night-light-from"
+            type="time"
+            value={from}
+            className="w-32"
+            onChange={(e) => {
+              setFrom(e.target.value);
+              if (e.target.value) save({ from: e.target.value });
+            }}
+          />
+          <Label htmlFor="night-light-to" className="text-sm">
+            to
+          </Label>
+          <Input
+            id="night-light-to"
+            type="time"
+            value={to}
+            className="w-32"
+            onChange={(e) => {
+              setTo(e.target.value);
+              if (e.target.value) save({ to: e.target.value });
+            }}
+          />
+        </div>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        {description}
+        {caption && <> {caption}.</>}
+      </p>
+
+      {setSchedule.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          Couldn’t change the schedule.
+        </p>
+      )}
+    </div>
   );
 }
 
