@@ -2310,10 +2310,63 @@ function attachMediaKeys(contents: Electron.WebContents): void {
     if (input.key === 'BrightnessDown' || input.code === 'BrightnessDown') delta = -5;
     if (delta === null) return;
     event.preventDefault();
-    brightnessAdjust(delta)
-      .then((s) => sendToShell('brightness:osd', s))
-      .catch(() => {});
+    brightnessKey(delta);
   });
+}
+
+/**
+ * Laptops often send the brightness keys through the ACPI video device, which
+ * never reports a key as held: holding one gives a fresh press and release
+ * every 250 ms after a 500 ms delay (measured on a ThinkPad), while the volume
+ * keys come from the keyboard and repeat every 33 ms. So a press soon after
+ * another in the same direction means the key is still down, and Din keeps
+ * stepping at the keyboard's pace until the next press is due.
+ */
+const BRIGHTNESS_HELD_GAP_MS = 550;
+const BRIGHTNESS_FIRMWARE_REPEAT_MS = 250;
+const BRIGHTNESS_REPEAT_MS = 33;
+const brightnessHold = {
+  delta: 0,
+  lastPress: 0,
+  until: 0,
+  timer: null as NodeJS.Timeout | null,
+  busy: false,
+};
+
+/** One step and its OSD, skipped while the previous step is still running. */
+function brightnessStep(delta: number): void {
+  if (brightnessHold.busy) return;
+  brightnessHold.busy = true;
+  brightnessAdjust(delta)
+    .then((s) => sendToShell('brightness:osd', s))
+    .catch(() => {})
+    .finally(() => {
+      brightnessHold.busy = false;
+    });
+}
+
+function brightnessKey(delta: number): void {
+  const hold = brightnessHold;
+  const now = Date.now();
+  const held = delta === hold.delta && now - hold.lastPress < BRIGHTNESS_HELD_GAP_MS;
+  hold.delta = delta;
+  hold.lastPress = now;
+  brightnessStep(delta);
+  if (!held) {
+    hold.until = 0;
+    return;
+  }
+  hold.until = now + BRIGHTNESS_FIRMWARE_REPEAT_MS;
+  if (hold.timer) return;
+  const timer = setInterval(() => {
+    if (Date.now() < hold.until) {
+      brightnessStep(hold.delta);
+      return;
+    }
+    clearInterval(timer);
+    hold.timer = null;
+  }, BRIGHTNESS_REPEAT_MS);
+  hold.timer = timer;
 }
 
 function registerBrightnessHandlers(): void {
