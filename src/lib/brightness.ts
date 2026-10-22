@@ -28,7 +28,11 @@ export interface NightLightState {
 export interface BrightnessStatus {
   /** False when no backlight device (or usable backend) is present. */
   available: boolean;
-  /** Backlight level 0-100, or null if it couldn't be read. */
+  /**
+   * Level MIN_BRIGHTNESS-100, or null if it couldn't be read. 0-100 is the
+   * backlight; below 0 the backlight is at its floor and the screen is dimmed
+   * in software by that many percent.
+   */
   brightness: number | null;
   nightLight: NightLightState;
 }
@@ -36,7 +40,7 @@ export interface BrightnessStatus {
 export interface BrightnessBridge {
   /** Backlight level + night-light state. See per-field `available` flags. */
   status(): Promise<BrightnessStatus>;
-  /** Set the backlight level (0-100). Resolves to the new state. */
+  /** Set the level (MIN_BRIGHTNESS-100). Resolves to the new state. */
   setBrightness(percent: number): Promise<BrightnessStatus>;
   /** Turn the warm night-light tint on or off. Resolves to the new state. */
   setNightLight(enabled: boolean): Promise<BrightnessStatus>;
@@ -54,6 +58,22 @@ declare global {
     /** Present only inside the Electron shell. */
     brightness?: BrightnessBridge;
   }
+}
+
+/**
+ * Dimmest brightness level. Below 0 a black layer covers the screen at that
+ * many percent opacity. Keep in step with MIN_BRIGHTNESS in electron/main.mts.
+ */
+export const MIN_BRIGHTNESS = -80;
+
+/** A brightness level for display, with a real minus sign below 0. */
+export function brightnessText(level: number): string {
+  return level < 0 ? `\u2212${-level}%` : `${level}%`;
+}
+
+/** Screen-reader text for a brightness level. */
+export function brightnessValueText(level: number): string {
+  return level < 0 ? `${-level}% dimmer than the lowest backlight` : `${level}%`;
 }
 
 /** Warmest useful night-light temperature (deep amber). */

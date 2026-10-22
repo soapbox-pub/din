@@ -14,6 +14,11 @@
  */
 export const MAX_VOLUME = 150;
 
+/** Screen-reader text for a volume level. */
+export function volumeText(volume: number): string {
+  return volume > 100 ? `${volume}%, amplified` : `${volume}%`;
+}
+
 export interface AudioStatus {
   /** False when wpctl/PipeWire is not present. */
   available: boolean;

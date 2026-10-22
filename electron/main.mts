@@ -18,7 +18,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme, shell } from 'electron';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import {
   installChromeWebStore,
@@ -1535,10 +1535,48 @@ async function audioSetMuted(muted: boolean): Promise<AudioState> {
   return audioStatus();
 }
 
+/**
+ * The extra range past a control's normal one (volume over 100, brightness
+ * under 0) sits behind a detent for the media keys: a step that would cross
+ * the edge stops on it, and the first press at the edge only knocks. Another
+ * press within KNOCK_MS goes through. Keep in step with stepWithDetent in
+ * src/lib/overdrive.ts, which does the same for the sliders' arrow keys.
+ */
+const KNOCK_MS = 1000;
+
+interface DetentRange {
+  min: number;
+  max: number;
+  overMax?: number;
+  underMin?: number;
+}
+
+function stepWithDetent(current: number, delta: number, range: DetentRange, knock: { at: number }): number {
+  const { min, max, overMax, underMin } = range;
+  const next = current + delta;
+  const edge = delta > 0 ? (overMax === undefined ? null : max) : underMin === undefined ? null : min;
+  if (edge !== null) {
+    const crossing = delta > 0 ? current < edge && next > edge : current > edge && next < edge;
+    if (crossing) return edge;
+    if (current === edge) {
+      const now = Date.now();
+      if (now - knock.at > KNOCK_MS) {
+        knock.at = now;
+        return current;
+      }
+    }
+  }
+  return Math.max(underMin ?? min, Math.min(overMax ?? max, next));
+}
+
+const volumeKnock = { at: 0 };
+
 async function audioAdjust(deltaPct: number): Promise<AudioState> {
-  const sign = deltaPct >= 0 ? '+' : '-';
-  await wpctl(['set-volume', '-l', WPCTL_LIMIT, DEFAULT_SINK, `${Math.abs(deltaPct)}%${sign}`]);
-  return audioStatus();
+  const status = await audioStatus();
+  if (status.volume === null) throw new Error('no-volume');
+  const next = stepWithDetent(status.volume, deltaPct, { min: 0, max: 100, overMax: MAX_VOLUME }, volumeKnock);
+  if (next === status.volume) return status;
+  return audioSetVolume(next);
 }
 
 async function audioToggleMute(): Promise<AudioState> {
@@ -1855,6 +1893,11 @@ function registerMediaKeys(): void {
 //     the main process. Under Wayland the gamma ramp is torn down when the
 //     client disconnects, so the tool must stay alive for the tint to persist;
 //     we run it in continuous mode with equal day/night temps.
+// Below the backlight's floor, Din dims in software: brightness levels under
+// 0 (down to MIN_BRIGHTNESS) hold the backlight at its lowest nonzero step and
+// set dimLevel, which the shell draws as a black layer over the whole screen
+// (src/components/desktop/ScreenDimmer.tsx). It isn't saved, so Din always
+// starts at normal brightness.
 // Either half reports available:false where its tool/device is absent. Same
 // trust boundary as the other bridges: sender guard, argv execFile/spawn,
 // values re-clamped here.
@@ -1865,17 +1908,20 @@ const BACKLIGHT_CLASS = 'backlight';
 const NIGHT_LIGHT_TOOLS = ['gammastep', 'wlsunset'];
 const MIN_TEMPERATURE = 2500;
 const MAX_TEMPERATURE = 6500;
+/** Dimmest level, in percent below the backlight's floor. Keep in step with src/lib/brightness.ts. */
+const MIN_BRIGHTNESS = -80;
+let dimLevel = 0; // 0..-MIN_BRIGHTNESS, software dimming under the backlight's floor
 
 /** Run brightnessctl with an argv array; resolves stdout, rejects with a clean message. */
 function brightnessctl(args: string[], timeout = BRIGHTNESSCTL_TIMEOUT_MS): Promise<string> {
   return tool('brightnessctl', args, timeout);
 }
 
-/** Clamp a caller-supplied percentage to an integer 1..100 (never fully dark). */
+/** Clamp a caller-supplied level to an integer MIN_BRIGHTNESS..100. */
 function clampBrightness(pct: unknown): number {
   const n = Number(pct);
   if (!Number.isFinite(n)) throw new Error('Invalid brightness');
-  return Math.max(1, Math.min(100, Math.round(n)));
+  return Math.max(MIN_BRIGHTNESS, Math.min(100, Math.round(n)));
 }
 
 /** Clamp a caller-supplied color temperature to an integer in the useful range. */
@@ -1982,11 +2028,14 @@ async function backlightGet(): Promise<number | null> {
   return null;
 }
 
-/** Set the backlight to a clamped 1-100 percentage via the active backend. */
+/**
+ * Set the backlight to a 0-100 percentage via the active backend. 0 is the
+ * lowest nonzero raw step, never off.
+ */
 async function backlightSet(pct: number): Promise<void> {
   const backend = await ensureBacklightBackend();
   if (backend === 'brightnessctl') {
-    await brightnessctl(['-c', BACKLIGHT_CLASS, 'set', `${pct}%`]);
+    await brightnessctl(['-c', BACKLIGHT_CLASS, 'set', pct > 0 ? `${pct}%` : '1']);
     return;
   }
   if (backend !== 'sysfs') throw new Error('no-backlight');
@@ -2111,19 +2160,54 @@ async function brightnessStatus(): Promise<BrightnessState> {
     // brightnessctl missing or no backlight device: keep the unavailable
     // defaults above.
   }
+  if (available && dimLevel > 0) brightness = -dimLevel;
   return { available, brightness, nightLight: nightLightStatus() };
 }
 
+/** Set a MIN_BRIGHTNESS..100 level: the backlight above 0, software dimming below. */
 async function brightnessSet(pct: unknown): Promise<BrightnessState> {
-  await backlightSet(clampBrightness(pct));
+  const level = clampBrightness(pct);
+  await backlightSet(Math.max(0, level));
+  dimLevel = Math.max(0, -level);
   return brightnessStatus();
 }
 
-/** Relative backlight nudge for the media keys; read-modify-set so it never hits 0. */
+const brightnessKnock = { at: 0 };
+
+/** Relative nudge for the media keys, with the detent at 0 (see stepWithDetent). */
 async function brightnessAdjust(deltaPct: number): Promise<BrightnessState> {
-  const current = await backlightGet();
-  if (current === null) throw new Error('no-backlight');
-  return brightnessSet(current + deltaPct);
+  const status = await brightnessStatus();
+  if (status.brightness === null) throw new Error('no-backlight');
+  const next = stepWithDetent(
+    status.brightness,
+    deltaPct,
+    { min: 0, max: 100, underMin: MIN_BRIGHTNESS },
+    brightnessKnock,
+  );
+  if (next === status.brightness) return status;
+  return brightnessSet(next);
+}
+
+/**
+ * Undo the software dimming in a capture of the shell, which includes the
+ * dimming layer. Lossy at deep dimming, but screenshots and the genie
+ * animation's snapshots come out at normal brightness.
+ */
+function undimCapture(image: Electron.NativeImage): Electron.NativeImage {
+  if (dimLevel === 0) return image;
+  const gain = 1 / (1 - dimLevel / 100);
+  const size = image.getSize();
+  const pixels = image.toBitmap();
+  for (let i = 0; i < pixels.length; i++) {
+    if ((i & 3) !== 3) pixels[i] = Math.min(255, Math.round(pixels[i] * gain));
+  }
+  // The bitmap is at device resolution; getSize() is in DIPs.
+  const scaleFactor = Math.sqrt(pixels.length / 4 / (size.width * size.height));
+  return nativeImage.createFromBitmap(pixels, {
+    width: Math.round(size.width * scaleFactor),
+    height: Math.round(size.height * scaleFactor),
+    scaleFactor,
+  });
 }
 
 async function brightnessSetNightLight(enabled: boolean): Promise<BrightnessState> {
@@ -2205,7 +2289,7 @@ function registerScreenshotHandlers(): void {
     if (!shellWindow || shellWindow.webContents.isDestroyed()) {
       throw new Error('Shell window unavailable');
     }
-    const image = await shellWindow.webContents.capturePage();
+    const image = undimCapture(await shellWindow.webContents.capturePage());
     const { width, height } = image.getSize();
     if (width === 0 || height === 0) {
       throw new Error('Captured an empty image');
@@ -2237,7 +2321,7 @@ function registerScreenshotHandlers(): void {
     const y = clamp(rect?.y, 0, contentH);
     const width = clamp(rect?.width, 1, contentW - x);
     const height = clamp(rect?.height, 1, contentH - y);
-    const image = await shellWindow.webContents.capturePage({ x, y, width, height });
+    const image = undimCapture(await shellWindow.webContents.capturePage({ x, y, width, height }));
     const size = image.getSize();
     if (size.width === 0 || size.height === 0) {
       throw new Error('Captured an empty image');

@@ -97,9 +97,9 @@ import {
   useRestartForKeyboardLayout,
   useSetKeyboardLayout,
 } from '@/hooks/useKeyboardLayout';
-import { getBrightnessBridge, MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
+import { brightnessText, getBrightnessBridge, MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
 import { useBrightnessMutations, useBrightnessStatus } from '@/hooks/useBrightness';
-import { BrightnessGlyph } from '@/components/desktop/BrightnessIndicator';
+import { BrightnessGlyph, BrightnessSlider } from '@/components/desktop/BrightnessIndicator';
 import { Slider } from '@/components/ui/slider';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -1611,18 +1611,15 @@ function BrightnessSection() {
         {backlightAvailable && (
           <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
             <BrightnessGlyph brightness={value} className="size-6 shrink-0 text-foreground/90" />
-            <Slider
+            <BrightnessSlider
               aria-label="Screen brightness"
-              value={[value]}
-              min={0}
-              max={100}
-              step={1}
+              value={value}
               className="flex-1"
-              onValueChange={([v]) => setValue(v)}
-              onValueCommit={([v]) => setBrightness.mutate(v)}
+              onValueChange={setValue}
+              onValueCommit={(v) => setBrightness.mutate(v)}
             />
             <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
-              {value}%
+              {brightnessText(value)}
             </span>
           </div>
         )}
@@ -1799,13 +1796,13 @@ function AudioStreamRow({
       </span>
       <VolumeSlider
         aria-label={`${stream.name} volume`}
-        value={[stream.muted ? 0 : shown]}
+        value={stream.muted ? 0 : shown}
         className="flex-1"
-        onValueChange={([v]) => {
+        onValueChange={(v) => {
           if (stream.muted) onMuted(false);
           setValue(v);
         }}
-        onValueCommit={([v]) => onVolume(v)}
+        onValueCommit={(v) => onVolume(v)}
       />
       <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
         {stream.muted ? 'Muted' : `${shown}%`}
@@ -2017,13 +2014,13 @@ function SoundSection() {
             </Button>
             <VolumeSlider
               aria-label="Output volume"
-              value={[muted ? 0 : value]}
+              value={muted ? 0 : value}
               className="flex-1"
-              onValueChange={([v]) => {
+              onValueChange={(v) => {
                 if (muted) setMuted.mutate(false);
                 setValue(v);
               }}
-              onValueCommit={([v]) => setVolume.mutate(v)}
+              onValueCommit={(v) => setVolume.mutate(v)}
             />
             <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
               {muted ? 'Muted' : `${value}%`}

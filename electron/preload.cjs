@@ -978,7 +978,7 @@ contextBridge.exposeInMainWorld('brightness', {
   status: () => ipcRenderer.invoke('brightness:status'),
 
   /**
-   * Set the backlight level (0-100). Resolves to the new state.
+   * Set the brightness level (-80-100; below 0 dims in software). Resolves to the new state.
    * @param {number} percent
    */
   setBrightness: (percent) => ipcRenderer.invoke('brightness:setBrightness', percent),

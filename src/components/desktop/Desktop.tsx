@@ -6,6 +6,7 @@ import { DesktopHotkeys } from './DesktopHotkeys';
 import { MenuBar } from './MenuBar';
 import { VolumeOsd } from './VolumeOsd';
 import { BrightnessOsd } from './BrightnessOsd';
+import { ScreenDimmer } from './ScreenDimmer';
 import { NostrNotifications } from './NostrNotifications';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
@@ -143,6 +144,7 @@ function DesktopSession() {
               <WindowSwitcher />
               <VolumeOsd />
               <BrightnessOsd />
+              <ScreenDimmer />
               <NostrNotifications />
               <NotificationPopups />
               <NativeDisplayHost />
