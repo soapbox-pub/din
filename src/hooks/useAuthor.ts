@@ -1,7 +1,7 @@
-import { type NostrEvent, type NostrMetadata, NSchema as n } from '@nostrify/nostrify';
+import type { NostrEvent, NostrMetadata } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
-import { readProfileCache, writeProfileCache } from '@/lib/profileCache';
+import { profileMetadataSchema, readProfileCache, writeProfileCache } from '@/lib/profileCache';
 
 type NostrClient = ReturnType<typeof useNostr>['nostr'];
 
@@ -94,7 +94,7 @@ export async function fetchAuthor(
   writeProfileCache(pubkey, event);
 
   try {
-    const metadata = n.json().pipe(n.metadata()).parse(event.content);
+    const metadata = profileMetadataSchema.parse(event.content);
     return { metadata, event };
   } catch {
     return { event };

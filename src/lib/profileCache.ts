@@ -12,6 +12,13 @@ export interface CachedProfile {
   metadata?: NostrMetadata;
 }
 
+/**
+ * Kind 0 content to metadata. Built once: NSchema constructs a new schema tree
+ * on every call, which costs far more than the parse, and profiles are parsed
+ * per card in every list of authors.
+ */
+export const profileMetadataSchema = n.json().pipe(n.metadata());
+
 const PREFIX = 'nostr:profile:';
 
 function profileCacheKey(pubkey: string): string {
@@ -34,7 +41,7 @@ export function readProfileCache(pubkey: string | undefined): CachedProfile | un
     // Re-derive metadata from the event content so a corrupt or schema-changed
     // cache never surfaces bad data.
     try {
-      const metadata = n.json().pipe(n.metadata()).parse(event.content);
+      const metadata = profileMetadataSchema.parse(event.content);
       return { event, metadata };
     } catch {
       return { event };
