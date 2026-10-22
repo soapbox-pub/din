@@ -24,7 +24,7 @@ import { runCommand } from './system.mts';
 const SCHEMA = 'org.gnome.desktop.interface';
 
 /** The sizes Settings offers, in XCursor nominal sizes (logical pixels). */
-const SIZES = [24, 32, 48, 64, 96];
+const SIZES = [24, 32, 40, 48, 64, 96];
 
 /** A theme or directory name; it ends up as a gsettings argument and a path segment. */
 const THEME_NAME = /^(?![-.])[A-Za-z0-9_ .+-]+$/;

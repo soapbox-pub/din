@@ -2959,8 +2959,9 @@ function AppearanceSection() {
 const CURSOR_SIZE_NAMES: Record<number, string> = {
   24: 'Default',
   32: 'Medium',
-  48: 'Large',
-  64: 'Larger',
+  40: 'Large',
+  48: 'Larger',
+  64: 'Extra large',
   96: 'Largest',
 };
 
