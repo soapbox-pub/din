@@ -104,10 +104,10 @@ async function gsettings(...args: string[]): Promise<string> {
   return (await runCommand('gsettings', args, { timeout: 3_000 })).stdout.trim();
 }
 
-/** The current theme and size, from GSettings, falling back to GTK's defaults. */
+/** The current theme and size, from GSettings, falling back to DinOS's defaults. */
 async function current(): Promise<{ theme: string; size: number }> {
-  let theme = 'Adwaita';
-  let size = 24;
+  let theme = 'capitaine-cursors';
+  let size = 40;
   try {
     const [rawTheme, rawSize] = await Promise.all([
       gsettings('get', SCHEMA, 'cursor-theme'),
@@ -116,7 +116,7 @@ async function current(): Promise<{ theme: string; size: number }> {
     theme = rawTheme.replace(/^'(.*)'$/, '$1') || theme;
     size = Number.parseInt(rawSize.replace(/^\D+/, ''), 10) || size;
   } catch {
-    // no gsettings here: GTK's defaults are what Chromium uses too
+    // no gsettings here
   }
   return { theme, size };
 }

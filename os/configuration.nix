@@ -334,14 +334,14 @@ let
   # Pointer themes for Settings → Appearance → Cursor (electron/cursor.mts).
   # Without any, Chromium and cage fall back to the tiny X11 arrow and
   # Chromium's own bitmaps, with no resize cursors at all. A `default` theme
-  # points X11 apps and cage's own cursor at Adwaita, GTK's default. Only a
+  # points X11 apps and cage's own cursor at Capitaine, DinOS's default. Only a
   # few of each family are copied in: all of Bibata is over 300 MB.
   din-cursor-themes = pkgs.runCommand "din-cursor-themes" { } ''
     mkdir -p $out/share/icons/default
     cp -a ${pkgs.bibata-cursors}/share/icons/{Bibata-Modern-Classic,Bibata-Modern-Ice} $out/share/icons/
     cp -a ${pkgs.phinger-cursors}/share/icons/{phinger-cursors-light,phinger-cursors-dark} $out/share/icons/
     cp -a ${pkgs.capitaine-cursors}/share/icons/{capitaine-cursors,capitaine-cursors-white} $out/share/icons/
-    printf '[Icon Theme]\nInherits=Adwaita\n' > $out/share/icons/default/index.theme
+    printf '[Icon Theme]\nInherits=capitaine-cursors\n' > $out/share/icons/default/index.theme
   '';
 in
 {
@@ -674,7 +674,7 @@ in
     ++ [ libnotify ]
     # AirPlay from the command line too (`deckmon discover`, `deckmon status`).
     ++ [ din-deckmon ]
-    # Pointer themes: GTK's default (Adwaita) and the others Settings offers.
+    # Pointer themes: Adwaita (GTK's own default) and the others Settings offers.
     ++ [ adwaita-icon-theme din-cursor-themes ];
   virtualisation.podman = {
     enable = true;
@@ -708,7 +708,17 @@ in
   # The pointer's theme and size are GSettings' (cursor-theme, cursor-size),
   # which dconf keeps and GTK - and through it Chromium - follows live
   # (electron/cursor.mts). The themes are din-cursor-themes, above.
+  # DinOS's default is Capitaine at 40 (which shows its 36px images), set
+  # in the system's dconf database, under whatever the user picks.
   programs.dconf.enable = true;
+  programs.dconf.profiles.user.databases = [
+    {
+      settings."org/gnome/desktop/interface" = {
+        cursor-theme = "capitaine-cursors";
+        cursor-size = lib.gvariant.mkInt32 40;
+      };
+    }
+  ];
 
   # Emoji and broad Unicode coverage for web content.
   fonts.packages = with pkgs; [
