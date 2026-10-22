@@ -784,13 +784,27 @@ const TerminalSession = memo(function TerminalSession({
     // limits, GPU resets, suspend/resume), after which cells paint as black
     // boxes. Recreate the addon on context loss; after repeated losses give
     // up and let xterm fall back to the DOM renderer.
+    //
+    // A GPU reset also wipes the glyph atlas: its pages are accelerated 2D
+    // canvases, and xterm shares one atlas between every terminal with the
+    // same font settings. xterm still believes the glyphs are drawn, so every
+    // cell (in old and new tabs alike) paints as a blank block. Clear the
+    // atlas whenever a context comes back or a replacement addon loads, so
+    // glyphs are rasterized again. The addon restores the GL context itself
+    // when it returns within 3 s and only reports a loss after that.
     let contextLosses = 0;
     let reloadFailures = 0;
+    let currentWebgl: WebglAddon | null = null;
+    const onContextRestored = () => {
+      requestAnimationFrame(() => currentWebgl?.clearTextureAtlas());
+    };
+    container.addEventListener('webglcontextrestored', onContextRestored, true);
     const loadWebgl = () => {
       if (disposed) return;
       try {
         const webgl = new WebglAddon();
         webgl.onContextLoss(() => {
+          if (currentWebgl === webgl) currentWebgl = null;
           webgl.dispose();
           contextLosses += 1;
           if (disposed) return;
@@ -802,7 +816,9 @@ const TerminalSession = memo(function TerminalSession({
           }
         });
         term.loadAddon(webgl);
+        currentWebgl = webgl;
         disableAtlasMipmaps(container);
+        if (contextLosses > 0) webgl.clearTextureAtlas();
       } catch (error) {
         // Right after a GPU reset the restarted GPU process may not hand out
         // contexts yet. Keep trying for a while before settling for DOM.
@@ -1030,6 +1046,7 @@ const TerminalSession = memo(function TerminalSession({
       fontSizeListeners.delete(applyFontSize);
       container.removeEventListener('wheel', onWheel, { capture: true });
       container.removeEventListener('mousedown', focus);
+      container.removeEventListener('webglcontextrestored', onContextRestored, true);
       offData();
       offExit();
       offCommandStart();
