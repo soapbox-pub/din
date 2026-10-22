@@ -46,10 +46,15 @@ export function AppDataSync() {
   const skipPushRef = useRef(false);
   // Synced fields as of the previous render; null until mounted.
   const prevConfigRef = useRef<SyncedSettings | null>(null);
+  // The remote record most recently applied. A record is applied once, when
+  // it arrives; re-applying it whenever local config changes would undo
+  // every local edit before it could be pushed.
+  const appliedRemoteRef = useRef<SyncedSettings | null>(null);
 
   // Remote → local: apply newer remote settings into AppContext.
   useEffect(() => {
-    if (!remote) return;
+    if (!remote || remote === appliedRemoteRef.current) return;
+    appliedRemoteRef.current = remote;
     if (remote.theme === theme && remote.useAppBlossomServers === useAppBlossomServers) return;
 
     skipPushRef.current = true;
