@@ -146,12 +146,15 @@ function createGhost(el: HTMLElement, d: Drag): HTMLElement {
 export function useDragReorder({
   ids,
   onMove,
+  constrain,
   relayout,
   tearOff,
 }: {
   /** The reorderable items' ids, in display order. */
   ids: string[];
   onMove: (id: string, toIndex: number) => void;
+  /** Limits where an item may go: maps the index it's over to the one it moves to. */
+  constrain?: (id: string, toIndex: number) => number;
   /**
    * Called after a reorder commits, before siblings are measured, for items
    * whose size depends on their position (the dock's magnification). Sizes
@@ -166,9 +169,9 @@ export function useDragReorder({
   // Sibling positions just before a reorder, to slide them from (FLIP).
   const before = useRef<Map<string, number> | null>(null);
 
-  const latest = useRef({ ids, onMove, relayout, tearOff });
+  const latest = useRef({ ids, onMove, constrain, relayout, tearOff });
   useLayoutEffect(() => {
-    latest.current = { ids, onMove, relayout, tearOff };
+    latest.current = { ids, onMove, constrain, relayout, tearOff };
   });
 
   /** Put the dragged element under the pointer, and reorder if it crossed a neighbor. */
@@ -181,7 +184,7 @@ export function useDragReorder({
     el.style.transform = `translateX(${d.lastX - d.grabOffset - left}px)`;
 
     const center = d.lastX - d.grabOffset + el.offsetWidth / 2;
-    const { ids, onMove } = latest.current;
+    const { ids, onMove, constrain } = latest.current;
     const others = ids.filter((id) => id !== d.id);
     let to = 0;
     for (const id of others) {
@@ -190,6 +193,7 @@ export function useDragReorder({
       // Where it's headed, not where a slide-in animation has it right now.
       if (naturalLeft(sibling) + sibling.offsetWidth / 2 < center) to++;
     }
+    if (constrain) to = constrain(d.id, to);
     if (to === ids.indexOf(d.id)) return;
     before.current = new Map(
       others.flatMap((id) => {

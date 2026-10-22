@@ -98,7 +98,8 @@ const MAX_DOTS = 4;
  * running apps that aren't pinned. Each tile groups its app's windows, with
  * a dot under it per window: click launches, toggles, or cycles through
  * them, the scroll wheel cycles too, middle-click always opens a new window,
- * and right-click offers pin/unpin, close, and uninstall.
+ * right-click offers pin/unpin, close, and uninstall, and dragging an
+ * unpinned tile left among the pinned ones pins it.
  */
 export function Dock({
   workspaceRef,
@@ -155,13 +156,23 @@ export function Dock({
     [dinActions],
   );
 
+  // Where unpinned tiles have been dragged to among themselves. Local to this
+  // session, unlike the pins; apps not in it keep launch order after it.
+  const [unpinnedOrder, setUnpinnedOrder] = useState<string[]>([]);
+
   // One dock tile per app: pinned apps first in pin order, then any
-  // running apps that aren't pinned, in launch order.
+  // running apps that aren't pinned, in the order they were dragged into or
+  // else launch order.
   const running = [...new Set(windows.map((w) => w.appId))];
-  const entryIds = [
-    ...pinned,
-    ...running.filter((id) => !pinned.includes(id)),
-  ].filter((id) => getApp(id));
+  const pinnedIds = pinned.filter((id) => getApp(id));
+  const rank = (id: string) => {
+    const i = unpinnedOrder.indexOf(id);
+    return i === -1 ? unpinnedOrder.length : i;
+  };
+  const unpinnedIds = running
+    .filter((id) => !pinned.includes(id) && getApp(id))
+    .sort((a, b) => rank(a) - rank(b));
+  const entryIds = [...pinnedIds, ...unpinnedIds];
 
   // The Din window that currently holds focus: highest z among visible ones.
   const activeWindow = windows.reduce<WindowState | null>(
@@ -264,17 +275,29 @@ export function Dock({
 
   useEffect(() => () => cancelAnimationFrame(rafId.current), []);
 
-  // Pinned tiles are dragged to reorder them; the new order is the pin order,
-  // so it roams with the pins. Pins for apps that aren't installed here stay
-  // in the list, after the visible ones.
+  // Any tile can be dragged. Among the pinned tiles the new order is the pin
+  // order, so it roams with the pins; pins for apps that aren't installed
+  // here stay in the list, after the visible ones. Dragging an unpinned tile
+  // left in among the pinned ones pins it there. Pinned tiles stay pinned:
+  // they can't be dragged past the last pinned slot (unpinning is in the
+  // tile's menu, and an unpinned app with no windows would vanish mid-drag).
   const reorder = useDragReorder({
-    ids: pinned.filter((id) => getApp(id)),
-    onMove: (appId, to) =>
-      setPinned((prev) => {
-        const shown = prev.filter((id) => getApp(id) && id !== appId);
-        shown.splice(to, 0, appId);
-        return [...shown, ...prev.filter((id) => !getApp(id))];
-      }),
+    ids: entryIds,
+    onMove: (appId, to) => {
+      if (pinned.includes(appId) || to < pinnedIds.length) {
+        setPinned((prev) => {
+          const shown = prev.filter((id) => getApp(id) && id !== appId);
+          shown.splice(to, 0, appId);
+          return [...shown, ...prev.filter((id) => !getApp(id))];
+        });
+      } else {
+        const order = unpinnedIds.filter((id) => id !== appId);
+        order.splice(to - pinnedIds.length, 0, appId);
+        setUnpinnedOrder(order);
+      }
+    },
+    constrain: (appId, to) =>
+      pinned.includes(appId) ? Math.min(to, pinnedIds.length - 1) : to,
     relayout: reduceMotion ? undefined : paint,
   });
   const dragging = reorder.draggingId !== null;
@@ -600,7 +623,8 @@ export function Dock({
  * - scrolling over the tile cycles through its windows, in either direction
  * - middle-click always opens a new window
  * - right-click: new window, pin/unpin, close all, uninstall
- * - dragging a pinned tile moves it among the pinned ones
+ * - dragging a tile moves it; dropping an unpinned one among the pinned
+ *   ones pins it
  *
  * Memoized: the dock re-renders on every window commit, but a tile (and its
  * Radix context-menu tree) only re-renders when its own app's
@@ -633,7 +657,7 @@ const DockItem = memo(function DockItem({
    */
   reordering: boolean;
   onTogglePin: (appId: string) => void;
-  /** Starts a drag to reorder the pinned tiles. */
+  /** Starts a drag to reorder the tiles. */
   onDragPointerDown: (appId: string, e: React.PointerEvent<HTMLElement>) => void;
   /** Present only for installed web apps; removes the app entirely. */
   onUninstall?: (appId: string) => void;
@@ -710,7 +734,7 @@ const DockItem = memo(function DockItem({
       onClick={handleClick}
       onWheel={handleWheel}
       onPointerDown={(e) => {
-        if (e.button === 0 && isPinned) onDragPointerDown(app.id, e);
+        if (e.button === 0) onDragPointerDown(app.id, e);
       }}
       onAuxClick={(e) => {
         if (e.button === 1) open(app.id);
