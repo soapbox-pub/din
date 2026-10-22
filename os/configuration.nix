@@ -124,7 +124,7 @@ let
     src = deckmon + "/cli";
     cargoLock.lockFile = deckmon + "/cli/Cargo.lock";
     nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
-    buildInputs = with pkgs.gst_all_1; [ gstreamer gst-plugins-base ];
+    buildInputs = (with pkgs.gst_all_1; [ gstreamer gst-plugins-base ]) ++ [ pkgs.libgbm ];
     postInstall = ''
       wrapProgram $out/bin/deckmon \
         --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : ${lib.makeSearchPath "lib/gstreamer-1.0" (map lib.getLib (deckmon-gst ++ [ pkgs.pipewire ]))} \
