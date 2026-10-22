@@ -11,6 +11,10 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-perf
+
+# Profiler output (scripts/perf-profile.mjs)
+perf-reports
 *.local
 yarn.lock
 
