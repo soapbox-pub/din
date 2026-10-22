@@ -85,6 +85,8 @@ let starting: Promise<EmbeddedDisplay | null> | null = null;
 let current: EmbeddedDisplay | null = null;
 /** The shell's WebContents, for GPU frames (set at registration). */
 let shellContents: () => Electron.WebContents | null = () => null;
+/** The shell asked to be connected, and is told whenever the display starts. */
+let shellWantsPort = false;
 
 /** Resolve a binary against PATH. */
 function which(command: string): string | null {
@@ -245,9 +247,19 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
 }
 
 /**
- * The embedded display, started on first use. Null when it can't run here
- * (no Xvfb installed, or it failed to start) - native apps then report
- * unavailable.
+ * Whether the embedded display can run here, without starting it: Xvfb is
+ * installed. (It can still fail to start; launching then reports that.)
+ */
+export function embeddedDisplayAvailable(): boolean {
+  return current !== null || which('Xvfb') !== null;
+}
+
+/**
+ * The embedded display, started on first use - the first native app
+ * launched, or the first Terminal shell (programs started there open in
+ * Din) - so a session that never uses one never pays for Xvfb, the worker
+ * and the compositor. Null when it can't run here (no Xvfb installed, or it
+ * failed to start).
  */
 export function embeddedDisplay(): Promise<EmbeddedDisplay | null> {
   if (current && server && worker) return Promise.resolve(current);
@@ -261,6 +273,8 @@ export function embeddedDisplay(): Promise<EmbeddedDisplay | null> {
         return null;
       }
       current = display;
+      // The shell connected before there was a display: hand it the port.
+      if (shellWantsPort) sendPortToShell();
       await publishToSession(display);
       return display;
     } finally {
@@ -386,21 +400,22 @@ export async function embeddedDisplayEnv(display: EmbeddedDisplay): Promise<Node
 }
 
 /**
- * A fresh MessagePort to the worker (starting the display if needed),
- * replacing whichever port it had: there is only ever one shell to draw.
+ * Give the shell a fresh MessagePort to the worker, replacing whichever port
+ * it had: there is only ever one shell to draw.
  */
-export async function connectToWorker(): Promise<Electron.MessagePortMain | null> {
-  const display = await embeddedDisplay();
-  if (!display || !worker) return null;
+function sendPortToShell(): void {
+  const shell = shellContents();
+  if (!worker || !shell || shell.isDestroyed()) return;
   const { port1, port2 } = new MessageChannelMain();
   worker.postMessage({ type: 'port' }, [port1]);
-  return port2;
+  shell.postMessage('native-display:port', null, [port2]);
 }
 
 /**
  * Register the shell-facing IPC: the renderer asks for a MessagePort to the
  * worker (again after every reload), and frames and input then flow on it
- * without touching this process.
+ * without touching this process. Asking doesn't start the display: the
+ * port comes now if it's running, else when it starts.
  */
 export function registerNativeDisplayHandlers(options: {
   assertShellSender: (event: Electron.IpcMainEvent) => void;
@@ -409,16 +424,14 @@ export function registerNativeDisplayHandlers(options: {
   shellContents = options.shell;
   // Apps type with the user's layout (see keyboard.mts), and switch with it.
   onKeymapChange((keymap) => worker?.postMessage({ type: 'keymap', keymap }));
-  ipcMain.on('native-display:connect', async (event) => {
+  ipcMain.on('native-display:connect', (event) => {
     try {
       options.assertShellSender(event);
     } catch {
       return;
     }
-    const port = await connectToWorker();
-    if (!port) return;
-    if (event.sender.isDestroyed()) port.close();
-    else event.sender.postMessage('native-display:port', null, [port]);
+    shellWantsPort = true;
+    if (current && worker) sendPortToShell();
   });
 
   app.on('will-quit', stopEmbeddedDisplay);

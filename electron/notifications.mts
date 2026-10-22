@@ -1,8 +1,8 @@
 // Notifications from outside the shell, for its notification center
 // (src/lib/notificationCenter.ts).
 //
-// Linux apps' arrive over D-Bus, at the server in notification-server.mts (a
-// utility process: see there for why). This side works out which installed
+// Linux apps' arrive over D-Bus, at the server in notification-server.mts (in
+// the services host: see there for why). This side works out which installed
 // app sent each one, turns its icon and image into data URLs the shell can
 // show, strips the body's markup to plain text, and hands it to the shell.
 // The user's clicks and dismissals go back the same way, as the
@@ -18,14 +18,12 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, ipcMain, nativeImage, utilityProcess } from 'electron';
+import { ipcMain, nativeImage } from 'electron';
 import { appIdForPid, resolveIcon } from './native-apps.mts';
 import { sessionBusAddress } from './native-display.mts';
 import type { RawImage, ServerCommand, ServerMessage } from './notification-server.mts';
-
-const SERVER = path.join(import.meta.dirname, 'notification-server.mts');
+import { startService, type Service } from './services.mts';
 
 /** Images are shown at 40px; this covers 2x displays with room. */
 const IMAGE_TARGET = 96;
@@ -62,27 +60,24 @@ type CloseReason = 'expired' | 'dismissed' | 'closed';
 
 const REASON_CODES: Record<CloseReason, 1 | 2 | 3> = { expired: 1, dismissed: 2, closed: 3 };
 
-let server: Electron.UtilityProcess | null = null;
+let server: Service | null = null;
 let sendToShell: (channel: string, payload?: unknown) => void = () => {};
 
 async function startServer(): Promise<void> {
   const address = await sessionBusAddress();
   if (!address) return;
-  const child = utilityProcess.fork(SERVER, [], {
-    serviceName: 'Din notifications',
-    stdio: 'inherit',
-    env: { ...process.env, DBUS_SESSION_BUS_ADDRESS: address },
+  const service = startService<ServerMessage>('notifications', { busAddress: address }, {
+    onMessage: (message) => {
+      if (message.type === 'notify') void show(message);
+      else if (message.type === 'close') sendToShell('notifications:close', `dbus:${message.id}`);
+    },
+    onExit: () => {
+      if (server !== service) return;
+      server = null;
+      setTimeout(() => void startServer(), 5_000);
+    },
   });
-  server = child;
-  child.on('message', (message: ServerMessage) => {
-    if (message.type === 'notify') void show(message);
-    else if (message.type === 'close') sendToShell('notifications:close', `dbus:${message.id}`);
-  });
-  child.once('exit', () => {
-    if (server !== child) return;
-    server = null;
-    setTimeout(() => void startServer(), 5_000);
-  });
+  server = service;
 }
 
 function command(message: ServerCommand): void {
@@ -326,5 +321,4 @@ export function registerNotificationHandlers(options: {
 
   registerWebHandlers(options.webPermission);
   void startServer();
-  app.on('will-quit', () => server?.kill());
 }

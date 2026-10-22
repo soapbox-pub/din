@@ -1,5 +1,6 @@
 // The desktop portal's file chooser backend
-// (org.freedesktop.impl.portal.FileChooser), as an Electron utility process.
+// (org.freedesktop.impl.portal.FileChooser), in the services host
+// (services.mts).
 //
 // Apps don't draw their own Open and Save dialogs when they can ask the
 // desktop portal (xdg-desktop-portal) instead: Chromium and Electron apps
@@ -10,8 +11,8 @@
 //
 // Each request is passed to the main process (file-chooser.mts), which has
 // the shell open its picker, and waits there until the user answers or the
-// app gives up (the portal calls Close on the request). A process of its own
-// for the same reason as the notification server: Electron's own dialogs ask
+// app gives up (the portal calls Close on the request). Out of the main
+// process for the same reason as the notification server: Electron's own dialogs ask
 // the portal too, and its UI thread is where the main process's JavaScript
 // runs.
 //
@@ -81,12 +82,14 @@ export interface PortalAnswer {
 }
 
 let bus: DBusConnection | null = null;
+let port: Electron.MessagePortMain | null = null;
+let busAddress: string | undefined;
 let lastId = 0;
 /** Requests waiting on the user, by id. */
 const waiting = new Map<number, (answer: Omit<PortalAnswer, 'type' | 'id'>) => void>();
 
 function post(message: PortalMessage): void {
-  process.parentPort.postMessage(message);
+  port?.postMessage(message);
 }
 
 const XML = `<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
@@ -128,10 +131,10 @@ const XML = `<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspecti
 </node>`;
 
 /** Connect and take the name, retrying when the bus goes away. */
-async function start(): Promise<void> {
-  const connection = await DBusConnection.connect(process.env.DBUS_SESSION_BUS_ADDRESS);
+async function connect(): Promise<void> {
+  const connection = await DBusConnection.connect(busAddress);
   if (!connection) {
-    setTimeout(() => void start(), 30_000);
+    setTimeout(() => void connect(), 30_000);
     return;
   }
   bus = connection;
@@ -140,7 +143,7 @@ async function start(): Promise<void> {
     bus = null;
     // The requests were the old connection's; their callers are gone with it.
     for (const resolve of waiting.values()) resolve({ paths: null, filter: null });
-    setTimeout(() => void start(), 5_000);
+    setTimeout(() => void connect(), 5_000);
   };
   connection.export(PATH, answer);
   const [reply] = await connection.bus('RequestName', 'su', [NAME, DO_NOT_QUEUE]).catch(() => [0]);
@@ -295,12 +298,16 @@ function byteNames(value: unknown): string[] {
     .filter((name) => name && name !== '.' && name !== '..');
 }
 
-process.parentPort.on('message', ({ data }: { data: PortalAnswer }) => {
-  if (data.type !== 'answer') return;
-  waiting.get(data.id)?.({
-    paths: Array.isArray(data.paths) ? data.paths.filter((p) => typeof p === 'string' && path.isAbsolute(p)) : null,
-    filter: typeof data.filter === 'number' ? data.filter : null,
+/** Serve on `options.busAddress`, talking to file-chooser.mts on `channel`. */
+export function start(channel: Electron.MessagePortMain, options: { busAddress?: string }): void {
+  port = channel;
+  busAddress = options.busAddress;
+  channel.on('message', ({ data }: { data: PortalAnswer }) => {
+    if (data.type !== 'answer') return;
+    waiting.get(data.id)?.({
+      paths: Array.isArray(data.paths) ? data.paths.filter((p) => typeof p === 'string' && path.isAbsolute(p)) : null,
+      filter: typeof data.filter === 'number' ? data.filter : null,
+    });
   });
-});
-
-void start();
+  void connect();
+}

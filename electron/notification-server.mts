@@ -1,5 +1,5 @@
-// The desktop's notification server (org.freedesktop.Notifications), as an
-// Electron utility process.
+// The desktop's notification server (org.freedesktop.Notifications), in the
+// services host (services.mts).
 //
 // Linux apps - Firefox, chat clients, `notify-send`, build tools - send
 // notifications to whoever owns org.freedesktop.Notifications on the session
@@ -7,7 +7,7 @@
 // session), so they reach Din's notification center. Inside a desktop that
 // has its own (GNOME, KDE), that one keeps them.
 //
-// Why a process of its own: Electron hands web notifications it shows
+// Why not in the main process: Electron hands web notifications it shows
 // itself (service workers', say) to libnotify, which calls Notify and waits
 // for the answer on Electron's UI thread - the thread the main process's
 // JavaScript runs on. A server there could never answer. This one answers
@@ -76,12 +76,14 @@ export type ServerCommand =
   | { type: 'action'; id: number; key: string };
 
 let bus: DBusConnection | null = null;
+let port: Electron.MessagePortMain | null = null;
+let busAddress: string | undefined;
 let lastId = 0;
 /** Ids handed out and not closed yet. */
 const live = new Set<number>();
 
 function post(message: ServerMessage): void {
-  process.parentPort.postMessage(message);
+  port?.postMessage(message);
 }
 
 const XML = `<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
@@ -116,17 +118,17 @@ const XML = `<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspecti
 </node>`;
 
 /** Connect and take the name, retrying when the bus or the name's owner goes away. */
-async function start(): Promise<void> {
-  const connection = await DBusConnection.connect(process.env.DBUS_SESSION_BUS_ADDRESS);
+async function connect(): Promise<void> {
+  const connection = await DBusConnection.connect(busAddress);
   if (!connection) {
-    setTimeout(() => void start(), 30_000);
+    setTimeout(() => void connect(), 30_000);
     return;
   }
   bus = connection;
   connection.onClose = () => {
     if (bus !== connection) return;
     bus = null;
-    setTimeout(() => void start(), 5_000);
+    setTimeout(() => void connect(), 5_000);
   };
   connection.export(PATH, answer);
   // Whoever has the name now may leave (a desktop's shell restarting).
@@ -228,14 +230,18 @@ function rawImage(value: unknown): RawImage | null {
   return { width, height, rowstride, hasAlpha: hasAlpha === true && channels === 4, channels, data };
 }
 
-process.parentPort.on('message', ({ data }: { data: ServerCommand }) => {
-  if (!live.has(data.id)) return;
-  if (data.type === 'action') {
-    bus?.emit(PATH, IFACE, 'ActionInvoked', 'us', [data.id, data.key]);
-  } else if (data.type === 'closed') {
-    live.delete(data.id);
-    bus?.emit(PATH, IFACE, 'NotificationClosed', 'uu', [data.id, data.reason]);
-  }
-});
-
-void start();
+/** Serve on `options.busAddress`, talking to notifications.mts on `channel`. */
+export function start(channel: Electron.MessagePortMain, options: { busAddress?: string }): void {
+  port = channel;
+  busAddress = options.busAddress;
+  channel.on('message', ({ data }: { data: ServerCommand }) => {
+    if (!live.has(data.id)) return;
+    if (data.type === 'action') {
+      bus?.emit(PATH, IFACE, 'ActionInvoked', 'us', [data.id, data.key]);
+    } else if (data.type === 'closed') {
+      live.delete(data.id);
+      bus?.emit(PATH, IFACE, 'NotificationClosed', 'uu', [data.id, data.reason]);
+    }
+  });
+  void connect();
+}
