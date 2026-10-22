@@ -27,12 +27,18 @@ interface UseAppDataOptions {
    * user has no per-pubkey cache yet (one-time migration path).
    */
   legacyKey?: string;
+  /**
+   * Keep this key on this device only: never fetch it from relays or
+   * publish it, even when sync is on. For state that is per-machine (the
+   * dock) or too private to roam (browser history).
+   */
+  localOnly?: boolean;
 }
 
 export interface AppDataMeta {
   /** Current relay-sync status of this key. */
   syncState: SyncState;
-  /** Whether encrypted relay sync is possible (logged in + NIP-44 signer + sync enabled). */
+  /** Whether encrypted relay sync is possible (logged in + NIP-44 signer + sync enabled + not local-only). */
   canSync: boolean;
   /** Unix seconds of the last local or remote write. */
   updatedAt: number;
@@ -157,7 +163,7 @@ export function useAppData<T>(
   const storageKey = appDataCacheKey(pubkey, key);
   const legacyKey = options.legacyKey;
 
-  const syncEnabled = config.syncToNostr;
+  const syncEnabled = config.syncToNostr && !options.localOnly;
   const canSync = Boolean(user?.signer.nip44) && syncEnabled;
 
   const [record, setRecordState] = useState<AppDataRecord<T>>(() =>

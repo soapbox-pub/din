@@ -153,8 +153,7 @@ export function inlineCompletion(
 
 /**
  * The web browser's persistent history, stored per-user via `useAppData`
- * (encrypted NIP-78 app data under `computer.din.browser-history`, cached
- * locally, roaming across devices when sync is on).
+ * on this device only; it never syncs to relays.
  *
  * Entries are unique by URL and ordered most-recent-first; revisiting a URL
  * moves it to the front and bumps its visit count.
@@ -164,6 +163,7 @@ export function useBrowserHistory() {
     'browser-history',
     browserHistorySchema,
     EMPTY_HISTORY,
+    { localOnly: true },
   );
 
   // Mirror for callbacks that only need to read (recordTitle's no-op check).
@@ -193,7 +193,7 @@ export function useBrowserHistory() {
     (url: string, title: string) => {
       const clean = title.trim().slice(0, MAX_TITLE_LENGTH);
       if (!clean) return;
-      // Skip the write (and the relay republish it schedules) when nothing
+      // Skip the write when nothing
       // changes — pages retitle themselves constantly.
       const current = historyRef.current.find((e) => e.url === url);
       if (!current || current.title === clean) return;

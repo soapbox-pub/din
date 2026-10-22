@@ -100,7 +100,7 @@ export function PreferencesPage(props: PreferencesProps) {
         {showClearData && (
           <PreferencesSection
             title="Privacy"
-            description="Your browsing history is encrypted to your Nostr account; cookies and cache stay on this device."
+            description="Your browsing history, cookies and cache stay on this device."
           >
             <SettingRow
               label="Clear browsing data"

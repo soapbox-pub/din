@@ -1,7 +1,83 @@
 import { useEffect, useRef } from 'react';
+import { useNostr } from '@nostrify/react';
 import { z } from 'zod';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useAppData } from '@/hooks/useAppData';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { APP_DATA_KIND, RETIRED_APP_DATA_KEYS, appDataDTag } from '@/lib/appData';
+
+/** Accounts whose retired app data has been looked for this session. */
+const retiredChecked = new Set<string>();
+
+/** localStorage flag recording that an account's retired app data is gone. */
+function retiredDoneKey(pubkey: string): string {
+  return `din:appdata-retired:${pubkey}`;
+}
+
+/**
+ * Delete the events of app-data keys Din no longer syncs (NIP-09), once per
+ * account, so relays stop holding e.g. the dock layout or browser history.
+ */
+function useDeleteRetiredAppData() {
+  const { nostr } = useNostr();
+  const { user } = useCurrentUser();
+  const { config } = useAppContext();
+
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  const pubkey = user?.pubkey;
+  const syncEnabled = config.syncToNostr;
+
+  useEffect(() => {
+    const signer = userRef.current?.signer;
+    if (!pubkey || !signer || !syncEnabled) return;
+    const marker = RETIRED_APP_DATA_KEYS.join(',');
+    if (localStorage.getItem(retiredDoneKey(pubkey)) === marker) return;
+    if (retiredChecked.has(pubkey)) return;
+    retiredChecked.add(pubkey);
+
+    (async () => {
+      const events = await nostr.query(
+        [{
+          kinds: [APP_DATA_KIND],
+          authors: [pubkey],
+          '#d': RETIRED_APP_DATA_KEYS.map(appDataDTag),
+        }],
+        { signal: AbortSignal.timeout(8000) },
+      );
+      const owned = events.filter((event) => event.pubkey === pubkey);
+      const dTags = new Set(
+        owned
+          .map((event) => event.tags.find(([name]) => name === 'd')?.[1])
+          .filter((d): d is string => d !== undefined),
+      );
+
+      if (dTags.size > 0) {
+        // Some relays only honor an `a` deletion alongside the `e` of the
+        // event it currently holds, so name every version we saw too.
+        const deletion = await signer.signEvent({
+          kind: 5,
+          content: '',
+          tags: [
+            ...[...dTags].map((d) => ['a', `${APP_DATA_KIND}:${pubkey}:${d}`]),
+            ...[...new Set(owned.map((event) => event.id))].map((id) => ['e', id]),
+            ['k', String(APP_DATA_KIND)],
+          ],
+          created_at: Math.floor(Date.now() / 1000),
+        });
+        await nostr.event(deletion, { signal: AbortSignal.timeout(10_000) });
+      }
+
+      localStorage.setItem(retiredDoneKey(pubkey), marker);
+    })().catch((error: unknown) => {
+      retiredChecked.delete(pubkey);
+      console.warn('Failed to delete retired app data:', error);
+    });
+  }, [pubkey, syncEnabled, nostr]);
+}
 
 /**
  * The subset of AppConfig that roams across devices via Din's encrypted
@@ -28,9 +104,13 @@ const StoredSchema = SyncedSettingsSchema.nullable();
  * - **Local → remote:** when the user edits a synced setting (e.g. switches
  *   theme in Settings), the change is encrypted and published.
  *
+ * It also deletes the relay copies of keys that are now local-only.
+ *
  * Mirrors the `NostrSync` pattern: renders nothing, runs globally.
  */
 export function AppDataSync() {
+  useDeleteRetiredAppData();
+
   const { config, updateConfig } = useAppContext();
   const [remote, setRemote] = useAppData<SyncedSettings | null>(
     'settings',

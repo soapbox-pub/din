@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Din's encrypted app-data layer (NIP-78).
  *
- * Din stores per-user desktop state (settings, taskbar pins, …) as kind 30078
+ * Din stores per-user desktop state (settings, installed web apps, …) as kind 30078
  * addressable events whose `content` is NIP-44 encrypted to the user's own
  * pubkey. Relays only ever see opaque ciphertext. Each piece of state gets a
  * globally-unique `d` tag under the `computer.din.*` reverse-DNS namespace,
@@ -22,6 +22,12 @@ export const APP_DATA_NAMESPACE = 'computer.din';
 export function appDataDTag(key: string): string {
   return `${APP_DATA_NAMESPACE}.${key}`;
 }
+
+/**
+ * Keys Din used to sync but now keeps local-only. Their old events are
+ * deleted from the user's relays (NIP-09) once per account.
+ */
+export const RETIRED_APP_DATA_KEYS = ['pinned-apps', 'browser-history'];
 
 /** localStorage cache key for a user's app-data record (keyed by pubkey to prevent cross-account leakage). */
 export function appDataCacheKey(pubkey: string, key: string): string {

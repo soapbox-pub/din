@@ -42,10 +42,21 @@ and never publishes plaintext.
 | `d` tag | `data` schema | Purpose |
 |---|---|---|
 | `computer.din.settings` | `{ "theme": "light" \| "dark" \| "system", "useAppBlossomServers": boolean }` | Desktop settings that roam across devices |
-| `computer.din.pinned-apps` | `string[]` (app IDs) | Apps pinned to the taskbar |
 | `computer.din.web-apps` | `{ "id": string, "name": string, "url": string, "icon"?: string }[]` | Websites installed as desktop apps (PWA-style); `url` and `icon` are https URLs |
 | `computer.din.signer-permissions` | `{ [origin: string]: { "status": "connected" \| "blocked", "name"?: string, "methods": { [method: string]: "allow" \| "deny" }, "kinds": { [kind: string]: "allow" \| "deny" }, "createdAt": number, "lastUsed": number } }` | Sites and installed apps connected to the account through Din's NIP-07 signer, and what each may do without asking: `methods` holds `nip04.encrypt` / `nip04.decrypt` / `nip44.encrypt` / `nip44.decrypt`, `kinds` holds `signEvent` per event kind; times are Unix ms |
-| `computer.din.browser-history` | `{ "url": string, "title": string \| null, "visitedAt": number, "visits": number }[]` | Web browser history (unique https URLs, most recent first; `visitedAt` is Unix seconds), powering address-bar autocomplete |
+
+### Retired keys
+
+Din used to sync these keys but now keeps them on the device only. On login
+it deletes any existing events for them with a NIP-09 kind 5 event carrying
+an `a` tag per address (`30078:<pubkey>:<d>`), an `e` tag for each version of
+those events it found (some relays only delete addressable events named by
+id), and `["k", "30078"]`.
+
+| `d` tag | Was |
+|---|---|
+| `computer.din.pinned-apps` | Apps pinned to the dock (`string[]` of app IDs) |
+| `computer.din.browser-history` | Web browser history |
 
 ### Example event
 

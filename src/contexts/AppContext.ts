@@ -27,7 +27,7 @@ export interface AppConfig {
   theme: Theme;
   /**
    * Master switch for Din's encrypted app-data sync. When true (default),
-   * desktop state (settings, taskbar pins, …) is NIP-44 encrypted and synced
+   * desktop state (settings, installed web apps, …) is NIP-44 encrypted and synced
    * to the user's relays as kind 30078 events. When false, Din operates
    * entirely locally and never publishes app data.
    */

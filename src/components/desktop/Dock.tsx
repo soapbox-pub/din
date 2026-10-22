@@ -95,7 +95,7 @@ const MAX_DOTS = 4;
  * edge of that monitor, when a finger swipes up from that edge, or when the
  * focused window no longer overlaps it.
  *
- * Shows pinned apps first (roaming via encrypted app data), then any
+ * Shows pinned apps first (kept on this device), then any
  * running apps that aren't pinned. Each tile groups its app's windows, with
  * a dot under it per window: click launches, toggles, or cycles through
  * them, the scroll wheel cycles too, middle-click always opens a new window,
@@ -114,13 +114,13 @@ export function Dock({
   const dinActions = useWindowActions();
   const { closeApp } = dinActions;
   const { getApp, webApps, uninstallWebApp } = useInstalledApps();
-  // Pinned apps roam across devices via Din's encrypted app-data layer,
-  // seeded from the pre-sync localStorage key on first run.
+  // Pinned apps belong to this device and never sync to relays, seeded from
+  // the pre-app-data localStorage key on first run.
   const [pinned, setPinned] = useAppData<string[]>(
     'pinned-apps',
     PinnedAppsSchema,
     DEFAULT_PINNED,
-    { legacyKey: 'desktop:pinned-apps' },
+    { legacyKey: 'desktop:pinned-apps', localOnly: true },
   );
 
   // Stable handlers so memo(DockItem) isn't defeated by fresh closures on
