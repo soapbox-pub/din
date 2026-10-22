@@ -7,11 +7,15 @@ import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowChrome, type ChromePoint } from '@/contexts/WindowChromeContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
+import { activeFileDrag } from '@/components/desktop/apps/files/dnd';
 import {
   getNativeSurface,
   raiseNativeWindow,
   releaseNativeKeys,
   sendNativeButton,
+  sendNativeDragLeave,
+  sendNativeDragOver,
+  sendNativeDrop,
   sendNativeKey,
   sendNativeLeave,
   sendNativeMotion,
@@ -323,6 +327,25 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         endGesture();
       }}
       onContextMenu={(event) => event.preventDefault()}
+      // Files dragged from Files go on into the app, as they would from a
+      // native file manager.
+      onDragOver={(event) => {
+        const drag = activeFileDrag(event);
+        if (!drag) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        const [x, y] = localPoint(event.currentTarget, event);
+        sendNativeDragOver(xid, x, y, drag.paths);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) sendNativeDragLeave();
+      }}
+      onDrop={(event) => {
+        if (!activeFileDrag(event)) return;
+        event.preventDefault();
+        const [x, y] = localPoint(event.currentTarget, event);
+        sendNativeDrop(xid, x, y);
+      }}
       onBlur={releaseNativeKeys}
       onKeyDown={(event) => {
         // Shell shortcuts (Alt+Tab, screenshots) are claimed in the capture

@@ -17,6 +17,8 @@
  * its canvas's viewport position, reported with `setGeometry`.
  */
 
+import { getFileClipboard, setFileClipboard } from '@/lib/fileClipboard';
+
 /** One X window as the shell knows it. */
 export interface NativeSurface {
   /** X window id. */
@@ -113,7 +115,8 @@ type WorkerMessage =
   | { type: 'cursor'; width: number; height: number; xhot: number; yhot: number; data: Uint8Array<ArrayBuffer> }
   /** A named cursor (Wayland cursor-shape: CSS cursor names). */
   | { type: 'cursor'; name: string }
-  | { type: 'clipboard'; text: string }
+  /** An app copied (files as paths, images as PNG). */
+  | { type: 'clipboard'; text?: string; files?: string[]; cut?: boolean; image?: Uint8Array<ArrayBuffer> }
   /** Where the Wayland compositor streams its pixels (see connectFrameStream). */
   | { type: 'frame-stream'; url: string };
 
@@ -356,8 +359,7 @@ function onMessage(message: WorkerMessage): void {
     case 'cursor':
       return setCursor(message);
     case 'clipboard':
-      lastClipboard = message.text;
-      void navigator.clipboard?.writeText(message.text).catch(() => {});
+      void receiveClipboard(message);
       return;
   }
 }
@@ -680,20 +682,150 @@ export function releaseNativeKeys(): void {
   heldKeys.clear();
 }
 
-/** Text last exchanged with the X clipboard, in either direction. */
+// ---------------------------------------------------------------------------
+// Clipboard
+// ---------------------------------------------------------------------------
+
+/** What's on a clipboard, as it crosses between Din and the apps. */
+interface ClipboardContents {
+  text: string;
+  /** Files cut or copied in Files (or an app): their paths are the text. */
+  files: { op: 'copy' | 'cut'; paths: string[] } | null;
+  image: Uint8Array<ArrayBuffer> | null;
+}
+
+/** Past this, an image stays on Din's side (the compositor's own limit). */
+const MAX_CLIPBOARD_IMAGE_BYTES = 32 * 1024 * 1024;
+
+/**
+ * What was last exchanged with the apps, in either direction, so the same
+ * contents aren't offered back to the app they came from (which would take
+ * the clipboard from it).
+ */
 let lastClipboard: string | null = null;
 
-/** Offer the shell's clipboard text to apps (on focus, and before a paste). */
-async function syncClipboard(): Promise<void> {
-  let text: string;
+function clipboardKey({ text, files, image }: ClipboardContents): string {
+  let hash = 0x811c9dc5;
+  for (const byte of image ?? []) hash = Math.imul(hash ^ byte, 0x01000193);
+  return JSON.stringify([text, files, image ? [image.length, hash >>> 0] : null]);
+}
+
+/**
+ * Din's clipboard. Files cut or copied in Files are on it as their paths,
+ * so that text is what says they're still the latest thing copied.
+ */
+async function readClipboard(): Promise<ClipboardContents | null> {
+  let text = '';
+  let image: Uint8Array<ArrayBuffer> | null = null;
   try {
-    text = await navigator.clipboard.readText();
+    for (const item of await navigator.clipboard.read()) {
+      if (!text && item.types.includes('text/plain')) text = await (await item.getType('text/plain')).text();
+      if (!image && item.types.includes('image/png')) {
+        const blob = await item.getType('image/png');
+        if (blob.size <= MAX_CLIPBOARD_IMAGE_BYTES) image = new Uint8Array(await blob.arrayBuffer());
+      }
+    }
   } catch {
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return null;
+    }
+  }
+  const board = getFileClipboard();
+  const files = board && text && text === board.paths.join('\n') ? board : null;
+  return { text, files, image };
+}
+
+/** Offer the shell's clipboard to apps (on focus, and before a paste). */
+async function syncClipboard(): Promise<void> {
+  const contents = await readClipboard();
+  if (!contents || (!contents.text && !contents.image)) return;
+  const key = clipboardKey(contents);
+  if (key === lastClipboard) return;
+  lastClipboard = key;
+  const { text, files, image } = contents;
+  send({
+    type: 'clipboard',
+    ...(text && { text }),
+    ...(files && { files: files.paths, cut: files.op === 'cut' }),
+    ...(image && { image }),
+  });
+}
+
+/**
+ * An app copied: files go on the Files clipboard (so they paste in Files),
+ * images and text on Din's.
+ */
+async function receiveClipboard(message: Extract<WorkerMessage, { type: 'clipboard' }>): Promise<void> {
+  const paths = message.files?.filter((path) => path.startsWith('/')) ?? [];
+  if (paths.length > 0) {
+    const files = { op: message.cut ? ('cut' as const) : ('copy' as const), paths };
+    setFileClipboard(files);
+    lastClipboard = clipboardKey({ text: paths.join('\n'), files, image: null });
     return;
   }
-  if (!text || text === lastClipboard) return;
-  lastClipboard = text;
-  send({ type: 'clipboard', text });
+  if (message.image) {
+    const items: Record<string, Blob> = { 'image/png': new Blob([message.image], { type: 'image/png' }) };
+    if (message.text) items['text/plain'] = new Blob([message.text], { type: 'text/plain' });
+    try {
+      await navigator.clipboard.write([new ClipboardItem(items)]);
+    } catch {
+      return;
+    }
+    // Chromium re-encodes the image, so what reads back is what was sent.
+    const contents = await readClipboard();
+    if (contents) lastClipboard = clipboardKey(contents);
+    return;
+  }
+  if (message.text) {
+    lastClipboard = clipboardKey({ text: message.text, files: null, image: null });
+    await navigator.clipboard?.writeText(message.text).catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Drag and drop (Files into apps)
+// ---------------------------------------------------------------------------
+
+/** Whether files dragged from the shell are in the compositor's hands. */
+let dragging = false;
+
+/**
+ * Files dragged from Files are over window `id` at (x, y): the drag goes
+ * on into the app (starting there, the first time).
+ */
+export function sendNativeDragOver(id: number, x: number, y: number, files: string[]): void {
+  if (!dragging) {
+    dragging = true;
+    // However the drag ends - dropped on a Din window, or let go nowhere -
+    // the app hears it's over. A drop on an app is handled before this
+    // runs, and has ended it already.
+    const end = () => {
+      window.removeEventListener('drop', end, true);
+      document.removeEventListener('dragend', end, true);
+      setTimeout(() => {
+        if (!dragging) return;
+        dragging = false;
+        send({ type: 'drag-end' });
+      });
+    };
+    window.addEventListener('drop', end, true);
+    document.addEventListener('dragend', end, true);
+  }
+  send({ type: 'drag-enter', id, x, y, files });
+}
+
+/** The drag left the app's window (for another, or for Din). */
+export function sendNativeDragLeave(): void {
+  if (dragging) send({ type: 'leave' });
+}
+
+/** The files were dropped on window `id`, at (x, y). */
+export function sendNativeDrop(id: number, x: number, y: number): void {
+  if (!dragging) return;
+  dragging = false;
+  send({ type: 'drag-drop', id, x, y });
 }
 
 /**

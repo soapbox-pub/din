@@ -1085,7 +1085,15 @@ type ShellMessage =
   | { type: 'button'; id: number; x: number; y: number; button: number; down: boolean }
   | { type: 'key'; keycode: number; down: boolean }
   | { type: 'leave' }
-  | { type: 'clipboard'; text: string };
+  /**
+   * What's on Din's clipboard. The X server here takes only the text; the
+   * Wayland compositor (and its Xwayland) takes files and a PNG too.
+   */
+  | { type: 'clipboard'; text?: string; files?: string[]; cut?: boolean; image?: Uint8Array }
+  /** Files dragged from the shell over a window, dropped there, or let go elsewhere (Wayland only). */
+  | { type: 'drag-enter'; id: number; x: number; y: number; files: string[] }
+  | { type: 'drag-drop'; id: number; x: number; y: number }
+  | { type: 'drag-end' };
 
 function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -1177,9 +1185,13 @@ function isWaylandId(id: unknown): boolean {
 }
 
 function onWaylandMessage(message: unknown): void {
-  const m = message as { type?: string; id?: number; kind?: string };
+  const m = message as { type?: string; id?: number; kind?: string; image?: unknown };
   if (m.type === 'popup' && m.kind && MENU_KINDS.has(m.kind) && m.id) waylandMenus.add(m.id);
   if (m.type === 'close' && m.id) waylandMenus.delete(m.id);
+  // Images cross the pipe as base64; the shell gets bytes.
+  if (m.type === 'clipboard' && typeof m.image === 'string') {
+    return toShell({ ...m, image: new Uint8Array(Buffer.from(m.image, 'base64')) });
+  }
   toShell(message);
 }
 
@@ -1204,9 +1216,17 @@ function route(message: ShellMessage): void {
       else onShellMessage(message);
       return;
     case 'leave':
-    case 'clipboard':
       bridge.send(message);
       onShellMessage(message);
+      return;
+    case 'clipboard': {
+      const { image, ...rest } = message;
+      bridge.send(image instanceof Uint8Array ? { ...rest, image: Buffer.from(image).toString('base64') } : rest);
+      onShellMessage(message);
+      return;
+    }
+    case 'drag-end':
+      bridge.send(message);
       return;
     case 'motion':
     case 'button':
