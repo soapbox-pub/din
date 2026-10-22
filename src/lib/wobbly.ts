@@ -326,6 +326,20 @@ export interface QuadPoint {
   y: number;
 }
 
+/** The projective map from the (0,0)-(width,height) box onto the quad. */
+function homography(
+  width: number,
+  height: number,
+  tl: QuadPoint,
+  tr: QuadPoint,
+  bl: QuadPoint,
+  br: QuadPoint,
+): Mat3 {
+  const source = basisToPoints(0, 0, width, 0, 0, height, width, height);
+  const destination = basisToPoints(tl.x, tl.y, tr.x, tr.y, bl.x, bl.y, br.x, br.y);
+  return multiply(destination, adjugate(source));
+}
+
 /**
  * CSS transform warping an element's untransformed (0,0)-(width,height) box
  * onto the quad given by four corner positions, all relative to the
@@ -340,9 +354,7 @@ export function quadTransform(
   bl: QuadPoint,
   br: QuadPoint,
 ): string {
-  const source = basisToPoints(0, 0, width, 0, 0, height, width, height);
-  const destination = basisToPoints(tl.x, tl.y, tr.x, tr.y, bl.x, bl.y, br.x, br.y);
-  const h = multiply(destination, adjugate(source));
+  const h = homography(width, height, tl, tr, bl, br);
 
   // Degenerate quads (never expected from sane inputs) fall back to a plain
   // translation so the element at least stays visible.
@@ -354,10 +366,58 @@ export function quadTransform(
   return `matrix3d(${m[0]}, ${m[3]}, 0, ${m[6]}, ${m[1]}, ${m[4]}, 0, ${m[7]}, 0, 0, 1, 0, ${m[2]}, ${m[5]}, 0, 1)`;
 }
 
+/*
+ * Limits on the painted quad. The lattice itself may fold (a fast flick can
+ * carry the top edge past the bottom one), but a homography onto a folded
+ * quad passes through infinity, and one onto a nearly-degenerate quad
+ * magnifies one corner enormously: either way the window blows up across
+ * the screen. Ordinary wobbles stay far inside both limits.
+ */
+/** Smallest sine allowed for any corner angle. */
+const MIN_CORNER_SIN = 0.2;
+/** Largest ratio between the projective weights at two corners. */
+const MAX_PERSPECTIVE = 3;
+
+/**
+ * Whether the quad tl→tr→br→bl is convex, clockwise, no corner is too flat,
+ * and the map onto it from the width × height box isn't too steep.
+ */
+function quadIsSafe(width: number, height: number, quad: QuadPoint[]): boolean {
+  const h = homography(width, height, quad[0], quad[1], quad[3], quad[2]);
+  const weights = [
+    h[8],
+    h[6] * width + h[8],
+    h[7] * height + h[8],
+    h[6] * width + h[7] * height + h[8],
+  ];
+  const minWeight = Math.min(...weights.map(Math.abs));
+  const maxWeight = Math.max(...weights.map(Math.abs));
+  if (!(minWeight > 0) || maxWeight > MAX_PERSPECTIVE * minWeight) return false;
+  if (!weights.every((w) => Math.sign(w) === Math.sign(h[8]))) return false;
+
+  for (let i = 0; i < 4; i++) {
+    const p = quad[i];
+    const q = quad[(i + 1) % 4];
+    const r = quad[(i + 2) % 4];
+    const ax = q.x - p.x;
+    const ay = q.y - p.y;
+    const bx = r.x - q.x;
+    const by = r.y - q.y;
+    const cross = ax * by - ay * bx;
+    if (!(cross >= MIN_CORNER_SIN * Math.hypot(ax, ay) * Math.hypot(bx, by))) return false;
+  }
+  return true;
+}
+
 /**
  * CSS transform warping the window from its layout rectangle (x, y, width,
  * height in workspace coordinates) onto the model's current corner quad.
  * Apply with `transform-origin: 0 0`.
+ *
+ * When the corners fold over or flatten (see quadIsSafe), the painted
+ * quad is eased toward the undeformed rectangle at the corners' centroid,
+ * just far enough to be safe. The model itself is untouched, so the wobble
+ * carries on and unfolds naturally.
  */
 export function modelTransform(
   model: WobblyModel,
@@ -367,17 +427,41 @@ export function modelTransform(
   height: number,
 ): string {
   const o = model.objects;
-  const tl = o[0];
-  const tr = o[GRID_WIDTH - 1];
-  const bl = o[GRID_WIDTH * (GRID_HEIGHT - 1)];
-  const br = o[GRID_WIDTH * GRID_HEIGHT - 1];
+  // Clockwise order: tl, tr, br, bl.
+  const deformed = [
+    o[0],
+    o[GRID_WIDTH - 1],
+    o[GRID_WIDTH * GRID_HEIGHT - 1],
+    o[GRID_WIDTH * (GRID_HEIGHT - 1)],
+  ].map((p) => ({ x: p.x - x, y: p.y - y }));
 
-  return quadTransform(
-    width,
-    height,
-    { x: tl.x - x, y: tl.y - y },
-    { x: tr.x - x, y: tr.y - y },
-    { x: bl.x - x, y: bl.y - y },
-    { x: br.x - x, y: br.y - y },
-  );
+  let quad = deformed;
+  if (!quadIsSafe(width, height, quad)) {
+    const cx = (deformed[0].x + deformed[1].x + deformed[2].x + deformed[3].x) / 4;
+    const cy = (deformed[0].y + deformed[1].y + deformed[2].y + deformed[3].y) / 4;
+    const left = cx - width / 2;
+    const top = cy - height / 2;
+    const rigid = [
+      { x: left, y: top },
+      { x: left + width, y: top },
+      { x: left + width, y: top + height },
+      { x: left, y: top + height },
+    ];
+    const blend = (t: number) =>
+      rigid.map((r, i) => ({
+        x: r.x + t * (deformed[i].x - r.x),
+        y: r.y + t * (deformed[i].y - r.y),
+      }));
+    // Binary-search the largest share of the deformation that stays safe.
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 12; i++) {
+      const mid = (lo + hi) / 2;
+      if (quadIsSafe(width, height, blend(mid))) lo = mid;
+      else hi = mid;
+    }
+    quad = blend(lo);
+  }
+
+  return quadTransform(width, height, quad[0], quad[1], quad[3], quad[2]);
 }
