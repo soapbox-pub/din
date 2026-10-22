@@ -757,6 +757,9 @@ function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect:
 const ClockMenuItem = memo(function ClockMenuItem() {
   const { hasUnread, doNotDisturb } = useNotificationsBadge();
   const [open, setOpen] = useState(false);
+  // The viewport can span several monitors (stacked ones make it taller than
+  // any of them), so size the panel to the primary monitor's work area.
+  const maxHeight = Math.round(primaryArea(useWorkAreas()).height * 0.85);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -780,7 +783,8 @@ const ClockMenuItem = memo(function ClockMenuItem() {
         side="bottom"
         align="center"
         sideOffset={8}
-        className="flex max-h-[85vh] w-96 flex-col overflow-hidden p-0"
+        style={{ maxHeight }}
+        className="flex w-96 flex-col overflow-hidden p-0"
       >
         <CalendarSection onOpenSettings={() => setOpen(false)} />
         <NotificationsPanel
