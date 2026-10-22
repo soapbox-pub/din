@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
+import { isDarkThemeColor } from '@/lib/themeColor';
 
 /**
  * Profile Themes ("Profile Themes" NIP, published on NostrHub as
@@ -239,12 +240,12 @@ function darken(color: Hsl, amount: number): string {
 }
 
 /**
- * Foreground for on-primary text: white or near-black, using a 0.5 luminance
- * midpoint (deliberately different from the 0.2 dark-theme cutoff — vivid
- * mid-tone primaries still want white text).
+ * Foreground for on-primary text: white or near-black, with the same cutoff
+ * as tinted window chrome ({@link isDarkThemeColor}) — vivid mid-tone
+ * primaries keep white text, bright ones get dark text.
  */
 function onColorForeground(hexColor: string): string {
-  return relativeLuminance(hexColor) > 0.5 ? 'hsl(222.2 84% 4.9%)' : 'hsl(0 0% 100%)';
+  return isDarkThemeColor(hexColor) ? 'hsl(0 0% 100%)' : 'hsl(222.2 84% 4.9%)';
 }
 
 /**
@@ -256,7 +257,11 @@ function onColorForeground(hexColor: string): string {
  * - secondary/muted: bg +8 (dark) / bg -4 (light)
  * - border/input: primary hue at reduced saturation, L 30 (dark) / 82 (light)
  * - mutedForeground: dimmed text color
- * - accent/ring: the primary color itself
+ * - ring: the primary color itself
+ *
+ * Unlike Ditto, accent is a subtle primary-tinted surface carrying the text
+ * color, as in index.css: it's the hover/selected fill for every menu item,
+ * ghost button and toggle, and the full primary there drowns the UI.
  *
  * Values are emitted as full `hsl(...)` strings, matching the token format in
  * index.css.
@@ -275,6 +280,9 @@ export function deriveThemeTokens(colors: ProfileTheme['colors']): Record<string
   const border = dark
     ? formatHsl(primary.h, primary.s * 0.4, 30)
     : formatHsl(primary.h, primary.s * 0.5, 82);
+  const accent = dark
+    ? formatHsl(primary.h, primary.s * 0.4, Math.min(bg.l + 12, 30))
+    : formatHsl(primary.h, primary.s * 0.5, Math.max(bg.l - 8, 88));
 
   // Muted foreground: a dimmer version of the main text color.
   const mutedForeground = dark
@@ -298,8 +306,8 @@ export function deriveThemeTokens(colors: ProfileTheme['colors']): Record<string
     '--secondary-foreground': textHex,
     '--muted': secondary,
     '--muted-foreground': mutedForeground,
-    '--accent': primaryHex,
-    '--accent-foreground': primaryForeground,
+    '--accent': accent,
+    '--accent-foreground': textHex,
     '--destructive': destructive,
     '--destructive-foreground': destructiveForeground,
     '--border': border,

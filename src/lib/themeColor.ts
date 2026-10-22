@@ -52,13 +52,14 @@ export function themeColorLuminance(color: string): number {
  * Whether a normalized `#rrggbb` color is "dark" — i.e. it should carry white
  * text rather than black.
  *
- * The threshold is the perceptual midpoint, not the ~0.179 crossover where
- * the WCAG contrast ratios of black and white swap. Maximizing the raw ratio
- * mishandles saturated mid-tones: Soapbox's `#0482d8` sits at luminance 0.21,
- * so black scores higher (5.2:1 against white's 4.1:1) while reading as an
- * unmistakably dark blue — black text on it looks broken. Every mainstream
- * browser tints its chrome off a midpoint for the same reason.
+ * White wins whenever it still reaches 3:1 (WCAG's floor for large text and
+ * UI), not only past the ~0.179 crossover where the contrast ratios of black
+ * and white swap. Maximizing the raw ratio mishandles saturated mid-tones:
+ * Soapbox's `#0482d8` sits at luminance 0.21, so black scores higher (5.2:1
+ * against white's 4.1:1) while reading as an unmistakably dark blue — black
+ * text on it looks broken. The perceptual midpoint (0.5) goes too far the
+ * other way: bright greens like `#20b634` (0.34) get white text at 2.7:1.
  */
 export function isDarkThemeColor(color: string): boolean {
-  return themeColorLuminance(color) <= 0.5;
+  return 1.05 / (themeColorLuminance(color) + 0.05) >= 3;
 }
