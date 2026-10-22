@@ -2,15 +2,15 @@
 
 DinOS has one password (os/din-install.sh sets it): it unlocks the disk at
 boot, it's `din`'s for sudo and the lock screen, it protects the Nostr
-account keys in nostrd, and it's the login keyring's. This changes all four,
-after checking the old one itself, so Din can run it through sudo without a
-password.
+account keys in nostrd, and it's the login keyring's and the passphrase of any
+GPG key that had it. This changes all five, after checking the old one itself,
+so Din can run it through sudo without a password.
 
     din-password change    old and new password on stdin, one per line
 
 Passwords never go on a command line, where other users could read them:
-cryptsetup gets them through pipes, nostrd over its socket, din-keyring and
-chpasswd on stdin. The disk goes first, since it's the one that can't be got around:
+cryptsetup gets them through pipes, nostrd over its socket, din-keyring,
+din-gpg and chpasswd on stdin. The disk goes first, since it's the one that can't be got around:
 if a later step fails, the message says what still has the old password.
 """
 
@@ -127,6 +127,17 @@ def change_keyring(old, new):
         raise RuntimeError(result.stderr.strip())
 
 
+def change_gpg(old, new):
+    """Only with gpg-agent up, as it is whenever `din` is logged in."""
+    if not os.path.exists(f"/run/user/{pwd.getpwnam(USER).pw_uid}/gnupg/S.gpg-agent"):
+        return
+    result = subprocess.run(
+        ["din-gpg", "change"], input=f"{old}\n{new}\n", text=True, capture_output=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip())
+
+
 def change():
     lines = sys.stdin.read().split("\n")
     if len(lines) < 2:
@@ -152,10 +163,15 @@ def change():
     except RuntimeError as error:
         fail("The disk and Nostr keys have the new password, but the keyring still has the "
              f"old one ({error}).")
+    try:
+        change_gpg(old, new)
+    except RuntimeError as error:
+        fail("The disk, Nostr keys and keyring have the new password, but the GPG keys still "
+             f"have the old one ({error}).")
     result = subprocess.run(["chpasswd"], input=f"{USER}:{new}\n", text=True, capture_output=True)
     if result.returncode != 0:
-        fail("The disk, Nostr keys and keyring have the new password, but sudo and the lock "
-             "screen still take the old one. " + result.stderr.strip())
+        fail("The disk, Nostr keys, keyring and GPG keys have the new password, but sudo and "
+             "the lock screen still take the old one. " + result.stderr.strip())
 
 
 def main():

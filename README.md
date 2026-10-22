@@ -100,9 +100,11 @@ One password runs the computer. Encrypting the disk sets its passphrase as
 `din`'s password too, which `sudo` asks for (Din's own helpers excepted), and
 as the password of **nostrd**, the signer daemon that holds the Nostr account
 keys as its own user so nothing `din` runs can read them. Din signs through
-nostrd's socket, and the passphrase typed at boot unlocks it. Without
-encryption there's no password, and `sudo` doesn't ask. Settings → Password
-changes it in all three places at once (`os/din-password.py`, disk first).
+nostrd's socket, and the passphrase typed at boot unlocks it. It unlocks the
+login keyring too, and any GPG key whose passphrase is the same, so signing
+commits doesn't ask (`os/din-gpg.py`). Without encryption there's no password,
+and `sudo` doesn't ask. Settings → Password changes it everywhere at once
+(`os/din-password.py`, disk first).
 `os/tests/accounts.nix`
 checks all of this in a VM: `nix build ./os#checks.x86_64-linux.accounts`.
 

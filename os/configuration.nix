@@ -208,11 +208,21 @@ let
     '';
   };
 
-  # Changes the computer's password: the disk's, nostrd's, the keyring's and
-  # `din`'s together (see the script).
+  # Unlocks and re-keys `din`'s GPG keys with the computer's password (see the
+  # script).
+  din-gpg = pkgs.writeShellApplication {
+    name = "din-gpg";
+    runtimeInputs = [ pkgs.python3 pkgs.util-linux config.programs.gnupg.package ];
+    text = ''
+      exec python3 ${./din-gpg.py} "$@"
+    '';
+  };
+
+  # Changes the computer's password: the disk's, nostrd's, the keyring's, the
+  # GPG keys' and `din`'s together (see the script).
   din-password = pkgs.writeShellApplication {
     name = "din-password";
-    runtimeInputs = with pkgs; [ python3 util-linux cryptsetup shadow ] ++ [ din-keyring ];
+    runtimeInputs = with pkgs; [ python3 util-linux cryptsetup shadow ] ++ [ din-keyring din-gpg ];
     text = ''
       export DIN_LIBCRYPT=${pkgs.libxcrypt}/lib/libcrypt.so.2
       exec python3 ${./din-password.py} "$@"
@@ -469,9 +479,31 @@ in
   # gpg, for signing commits. The passphrase prompt is a Qt window, which
   # opens on Din's desktop like any native app; a terminal prompt would never
   # reach anyone when git runs without a terminal, as coding agents do.
+  # Keys whose passphrase is the computer's password don't ask at all: like
+  # the keyring, they're unlocked at boot with the boot screen's passphrase
+  # (os/din-gpg.py), and stay unlocked until gpg-agent stops.
   programs.gnupg.agent = {
     enable = true;
     pinentryPackage = pkgs.pinentry-qt;
+    settings.allow-preset-passphrase = "";
+  };
+  systemd.services.din-gpg-unlock = {
+    description = "Unlock GPG keys with the disk passphrase";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "user@${toString config.users.users.din.uid}.service" ];
+    after = [ "user@${toString config.users.users.din.uid}.service" ];
+    before = [ "nostrd-unlock.service" ];
+    path = [ pkgs.keyutils din-gpg ];
+    serviceConfig = {
+      Type = "oneshot";
+      # See nostrd-unlock: reading the cached key takes root's user keyring.
+      KeyringMode = "shared";
+    };
+    script = ''
+      if id=$(keyctl search @u user cryptsetup 2>/dev/null); then
+        keyctl pipe "$id" | din-gpg unlock || true
+      fi
+    '';
   };
 
   # zsh is the login shell, so it's what the Terminal app opens, dressed in

@@ -3,7 +3,8 @@
 # The computer's accounts and password: nostrd holds the Nostr keys as its
 # own user, Din's user reaches it through the link in its home, sudo asks for
 # a password exactly when `din` has one, and the disk passphrase systemd
-# leaves in root's keyring unlocks nostrd and the login keyring at boot.
+# leaves in root's keyring unlocks nostrd, the login keyring and GPG keys at
+# boot.
 # `nix build ./os#checks.x86_64-linux.accounts`
 pkgs.testers.runNixOSTest {
   name = "dinos-accounts";
@@ -93,6 +94,19 @@ pkgs.testers.runNixOSTest {
         as_din(session + "printf hunter22 | din-keyring unlock")
         assert as_din(lookup) == "s3cret"
 
+    def gpg_sign(key, passphrase=None):
+        mode = f"--pinentry-mode loopback --passphrase {passphrase}" if passphrase else "--pinentry-mode error"
+        return session + f"gpg --batch --no-autostart {mode} --local-user {key} --sign --output /dev/null --yes /dev/null"
+
+    with subtest("the disk passphrase unlocks GPG keys that have it, and no others"):
+        as_din(session + "gpg --batch --pinentry-mode loopback --passphrase hunter22 --quick-gen-key mine@test ed25519 sign never")
+        as_din(session + "gpg --batch --pinentry-mode loopback --passphrase other123 --quick-gen-key other@test ed25519 sign never")
+        machine.succeed("keyctl add user cryptsetup hunter22 @u")
+        machine.succeed("systemctl restart din-gpg-unlock")
+        machine.succeed("keyctl unlink $(keyctl search @u user cryptsetup) @u")
+        as_din(gpg_sign("mine@test"))
+        machine.fail("su - din -c " + shlex.quote(gpg_sign("other@test")))
+
     password = machine.succeed("grep -o '/nix/store/[^ ,]*-din-password/bin/din-password' /etc/sudoers | head -1").strip()
     script = machine.succeed(f"grep -o '/nix/store/[^ ]*din-password.py' {password}").strip()
 
@@ -100,13 +114,18 @@ pkgs.testers.runNixOSTest {
         machine.fail(f"su - din -c \"printf 'nope\\nbattery-staple\\n' | sudo -n {password} change\"")
         machine.fail(f"su - din -c \"printf 'hunter22\\nshort\\n' | sudo -n {password} change\"")
 
-    with subtest("it changes sudo's, nostrd's and the keyring's together"):
+    with subtest("it changes sudo's, nostrd's, the keyring's and the GPG key's together"):
         as_din(f"printf 'hunter22\\nbattery-staple\\n' | sudo -n {password} change")
         as_din("echo battery-staple | sudo -S -k true")
         machine.fail("su - din -c 'echo hunter22 | sudo -S -k true'")
         as_din("printf 'battery-staple\\n' | nostrd call --stdin verify_password | grep -q true")
         as_din(session + "printf battery-staple | din-keyring unlock")
         machine.fail("su - din -c " + shlex.quote(session + "printf hunter22 | din-keyring unlock"))
+        as_din(gpg_sign("mine@test"))
+        as_din(session + "gpgconf --reload gpg-agent")
+        machine.fail("su - din -c " + shlex.quote(gpg_sign("mine@test", "hunter22")))
+        as_din(gpg_sign("mine@test", "battery-staple"))
+        as_din(gpg_sign("other@test", "other123"))
 
     with subtest("and the disk's"):
         machine.succeed(
