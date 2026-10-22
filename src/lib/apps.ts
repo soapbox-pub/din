@@ -1,6 +1,7 @@
 import { lazy } from 'react';
 import type { ComponentType } from 'react';
-import { AppWindow, Camera, Store, type LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { NATIVE_APP_ICON } from '@/lib/appIcons';
 
 // Built-in apps are code-split: each is its own chunk, loaded the first time
 // it's launched (windows render app content inside <Suspense>). Statically
@@ -11,6 +12,9 @@ const WebBrowser = lazy(() =>
 );
 const FileBrowser = lazy(() =>
   import('@/components/desktop/apps/FileBrowser').then((m) => ({ default: m.FileBrowser })),
+);
+const FileViewer = lazy(() =>
+  import('@/components/desktop/apps/FileViewer').then((m) => ({ default: m.FileViewer })),
 );
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
@@ -26,6 +30,9 @@ const DevTools = lazy(() =>
 );
 const AppStore = lazy(() =>
   import('@/components/desktop/apps/AppStore').then((m) => ({ default: m.AppStore })),
+);
+const Installer = lazy(() =>
+  import('@/components/desktop/apps/Installer').then((m) => ({ default: m.Installer })),
 );
 /** The window body of every native Linux app (see src/lib/nativeDisplay.ts). */
 export const NativeWindowView = lazy(() =>
@@ -119,14 +126,14 @@ export const APPS: readonly AppDefinition[] = [
   {
     id: 'app-store',
     name: 'App Store',
-    icon: Store,
+    icon: '/icons/apps/app-store.png',
     component: AppStore,
     defaultSize: { width: 900, height: 640 },
   },
   {
     id: 'screenshot',
     name: 'Screenshot',
-    icon: Camera,
+    icon: '/icons/apps/screenshot.png',
     component: Screenshot,
     defaultSize: { width: 440, height: 400 },
     // One shot at a time: the Print Screen / box-select hotkeys re-open
@@ -146,11 +153,33 @@ export const APPS: readonly AppDefinition[] = [
     hidden: true,
   },
   {
+    // One file opened from Files (a picture, a video, some text). Hidden
+    // from the launcher; Files opens it with the file's path in its launch
+    // params. Pictures and videos give their windows icons of their own.
+    id: 'preview',
+    name: 'Preview',
+    icon: '/icons/apps/preview.png',
+    component: FileViewer,
+    defaultSize: { width: 820, height: 600 },
+    hidden: true,
+  },
+  {
+    // Puts DinOS on the computer's disk. Hidden except on a live USB boot,
+    // where InstalledAppsProvider shows it and the desktop opens it.
+    id: 'installer',
+    name: 'Install DinOS',
+    icon: '/icons/apps/installer.png',
+    component: Installer,
+    defaultSize: { width: 640, height: 560 },
+    hidden: true,
+    singleInstance: true,
+  },
+  {
     // Hosts native windows that no installed app claims (a helper process,
     // an app started from a terminal). Opened only by the embedded display.
     id: 'native-window',
     name: 'Application',
-    icon: AppWindow,
+    icon: NATIVE_APP_ICON,
     component: NativeWindowView,
     native: true,
     hidden: true,

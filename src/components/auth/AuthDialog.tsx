@@ -8,6 +8,7 @@ import {
   Loader2,
   FileUp,
   ExternalLink,
+  Smartphone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +32,8 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
+import { getBluetoothLoginBridge } from '@/lib/bluetoothLogin';
+import { PhoneLogin } from './PhoneLogin';
 
 interface AuthDialogProps {
   isOpen: boolean;
@@ -105,6 +108,11 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
   // login form; once launched we swap in the progress view.
   const [hasOpenedSigner, setHasOpenedSigner] = useState(false);
 
+  // Phone login over Bluetooth: offered only inside the Electron shell, on a
+  // computer with an adapter that can advertise.
+  const [phoneAvailable, setPhoneAvailable] = useState(false);
+  const [isPhoneLogin, setIsPhoneLogin] = useState(false);
+
   const login = useLoginActions();
   // Stable refs so the nostrconnect listening effect below doesn't restart on
   // every parent render. Parents typically pass inline arrow functions for
@@ -148,10 +156,24 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
       setConnectError(null);
       setConnectStatus(null);
       setHasOpenedSigner(false);
+      setIsPhoneLogin(false);
       /* eslint-enable react-hooks/set-state-in-effect */
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
     }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const bridge = getBluetoothLoginBridge();
+    if (!isOpen || !bridge) return;
+    let active = true;
+    bridge
+      .available()
+      .then((available) => active && setPhoneAvailable(available))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [isOpen]);
 
   // Generate a nostrconnect session and return its URI. The listening effect
@@ -251,15 +273,25 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
   };
 
   // Signup: download the nsec to a file and move on to the profile step.
-  const downloadAndProceed = () => {
+  const downloadAndProceed = async () => {
     try {
       downloadNsecFile(nsec);
-      login.nsec(nsec);
-      setStep('profile');
     } catch {
       toast({
         title: 'Download failed',
         description: 'Could not download the key file. Please copy it manually.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      // The profile step signs as the new account, so it must be current first.
+      await login.nsec(nsec);
+      setStep('profile');
+    } catch (error) {
+      toast({
+        title: "Couldn't sign in",
+        description: error instanceof Error ? error.message : String(error),
         variant: 'destructive',
       });
     }
@@ -293,16 +325,13 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
 
     setIsLoggingIn(true);
     setLoginError('');
-    // Timeout gives the UI a chance to repaint before the synchronous login.
-    setTimeout(() => {
-      try {
-        login.nsec(value);
-        onClose();
-      } catch {
+    login
+      .nsec(value)
+      .then(() => onClose())
+      .catch(() => {
         setLoginError("Couldn't log in with this key.");
         setIsLoggingIn(false);
-      }
-    }, 50);
+      });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -631,7 +660,9 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
           {/* Login step. */}
           {step === 'login' && (
             <div className="space-y-4">
-              {connectError ? (
+              {isPhoneLogin ? (
+                <PhoneLogin onDone={onClose} onCancel={() => setIsPhoneLogin(false)} />
+              ) : connectError ? (
                 <div className="flex flex-col items-center space-y-3 py-4">
                   <p className="text-sm text-destructive text-center">{connectError}</p>
                   <Button variant="outline" onClick={handleConnectRetry} className="rounded-full">
@@ -653,20 +684,42 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
                   </button>
                 </div>
               ) : (
-                <NsecLoginForm
-                  loginInput={loginInput}
-                  setLoginInput={setLoginInput}
-                  loginError={loginError}
-                  setLoginError={setLoginError}
-                  isLoggingIn={isLoggingIn}
-                  onSubmit={handleLogin}
-                  onFileChange={handleFileUpload}
-                  onOpenSignerApp={handleOpenSignerApp}
-                  fileInputRef={fileInputRef}
-                />
+                <>
+                  {phoneAvailable && (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setLoginError('');
+                          setIsPhoneLogin(true);
+                        }}
+                        className="w-full h-12 rounded-full"
+                      >
+                        <Smartphone className="w-4 h-4 mr-2" />
+                        Log in with your phone
+                      </Button>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span className="h-px flex-1 bg-border" />
+                        or enter your key
+                        <span className="h-px flex-1 bg-border" />
+                      </div>
+                    </>
+                  )}
+                  <NsecLoginForm
+                    loginInput={loginInput}
+                    setLoginInput={setLoginInput}
+                    loginError={loginError}
+                    setLoginError={setLoginError}
+                    isLoggingIn={isLoggingIn}
+                    onSubmit={handleLogin}
+                    onFileChange={handleFileUpload}
+                    onOpenSignerApp={handleOpenSignerApp}
+                    fileInputRef={fileInputRef}
+                  />
+                </>
               )}
 
-              {!connectError && !showProgressView && (
+              {!isPhoneLogin && !connectError && !showProgressView && (
                 <button
                   onClick={() => setStep('welcome')}
                   className="w-full text-sm text-muted-foreground hover:text-foreground"

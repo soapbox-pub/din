@@ -1,12 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Moon, Settings2, Sun, SunDim, SunMedium } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
+import { OverdriveSlider, type OverdriveSliderProps } from '@/components/ui/overdrive-slider';
 import { Switch } from '@/components/ui/switch';
 import { PopoverClose } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import { useBrightnessMutations, useBrightnessStatus } from '@/hooks/useBrightness';
-import { MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
+import {
+  setBrightnessPreview,
+  useBrightnessMutations,
+  useBrightnessStatus,
+} from '@/hooks/useBrightness';
+import {
+  MAX_TEMPERATURE,
+  MIN_BRIGHTNESS,
+  MIN_TEMPERATURE,
+  brightnessText,
+  brightnessValueText,
+  nightLightCaption,
+} from '@/lib/brightness';
+import { timeFormatOptions } from '@/lib/datetime';
+import { useAppContext } from '@/hooks/useAppContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 
 /**
@@ -32,6 +46,31 @@ export function BrightnessGlyph({
 }
 
 /**
+ * A 0-100 backlight slider that can be pushed on down to MIN_BRIGHTNESS,
+ * where the screen is dimmed in software. Drags preview the dimming live.
+ */
+export function BrightnessSlider({
+  onValueChange,
+  ...props
+}: Omit<OverdriveSliderProps, 'min' | 'max' | 'overMax' | 'underMin' | 'step'>) {
+  // Don't leave a preview behind if the popover closes mid-drag.
+  useEffect(() => () => setBrightnessPreview(null), []);
+  return (
+    <OverdriveSlider
+      min={0}
+      max={100}
+      underMin={MIN_BRIGHTNESS}
+      getValueText={brightnessValueText}
+      onValueChange={(v) => {
+        setBrightnessPreview(v);
+        onValueChange?.(v);
+      }}
+      {...props}
+    />
+  );
+}
+
+/**
  * Popover content: a backlight slider plus a night-light (red shift) toggle
  * and warmth slider. Each half renders only when its half of the bridge is
  * available.
@@ -40,6 +79,7 @@ export function BrightnessPopoverBody() {
   const status = useBrightnessStatus();
   const { setBrightness, setNightLight, setTemperature } = useBrightnessMutations();
   const { open } = useWindowActions();
+  const { config } = useAppContext();
 
   const backlightAvailable = status.data?.available ?? false;
   const serverBrightness = status.data?.brightness ?? 0;
@@ -63,27 +103,26 @@ export function BrightnessPopoverBody() {
     setTemp(serverTemp);
   }
 
+  const caption = nightLight && nightLightCaption(nightLight, timeFormatOptions(config.clockFormat));
+
   return (
     <div className="flex flex-col">
       <header className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <h2 className="text-sm font-medium text-foreground">Display</h2>
         {backlightAvailable && (
-          <span className="text-xs tabular-nums text-muted-foreground">{value}%</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{brightnessText(value)}</span>
         )}
       </header>
 
       {backlightAvailable && (
         <div className="flex items-center gap-2.5 px-3 py-3">
           <SunDim className="size-5 shrink-0 text-muted-foreground" aria-hidden />
-          <Slider
+          <BrightnessSlider
             aria-label="Brightness"
-            value={[value]}
-            min={0}
-            max={100}
-            step={1}
+            value={value}
             className="flex-1"
-            onValueChange={([v]) => setValue(v)}
-            onValueCommit={([v]) => setBrightness.mutate(v)}
+            onValueChange={setValue}
+            onValueCommit={(v) => setBrightness.mutate(v)}
           />
           <Sun className="size-5 shrink-0 text-foreground" aria-hidden />
         </div>
@@ -93,10 +132,13 @@ export function BrightnessPopoverBody() {
         <div className={cn('flex flex-col gap-3 px-3 py-3', backlightAvailable && 'border-t border-border/60')}>
           <div className="flex items-center gap-2.5">
             <Moon
-              className={cn('size-5 shrink-0', nightLight.enabled ? 'text-foreground' : 'text-muted-foreground')}
+              className={cn('size-5 shrink-0', nightLight.active ? 'text-foreground' : 'text-muted-foreground')}
               aria-hidden
             />
-            <span className="flex-1 text-sm text-foreground">Night Light</span>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm text-foreground">Night Light</span>
+              {caption && <span className="text-xs text-muted-foreground">{caption}</span>}
+            </div>
             <Switch
               aria-label="Night Light"
               checked={nightLight.enabled}

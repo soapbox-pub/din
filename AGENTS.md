@@ -1,6 +1,6 @@
 # Project Overview
 
-**Din is a social computer** — a web-native desktop environment (windows, taskbar, apps, login) built as a Vite + React 19 + TailwindCSS 4 + shadcn/ui app, hosted by a thin Electron shell. Users sign in with their Nostr account, and Din bridges that identity into every app on the desktop, storing data on Nostr relays and Blossom servers. **Aladdin** is Din's flagship OS: a minimal NixOS system that boots straight into Din fullscreen (kernel → systemd → cage → Electron → Din). Din also runs windowed for development or as a plain web app in a browser. See `README.md` for full architecture, dev-loop tiers, and Aladdin/Nix details.
+**Din is a social computer** — a web-native desktop environment (windows, taskbar, apps, login) built as a Vite + React 19 + TailwindCSS 4 + shadcn/ui app, hosted by a thin Electron shell. Users sign in with their Nostr account, and Din bridges that identity into every app on the desktop, storing data on Nostr relays and Blossom servers. **DinOS** is Din's flagship OS: a minimal NixOS system that boots straight into Din fullscreen (kernel → systemd → cage → Electron → Din). Din also runs windowed for development or as a plain web app in a browser. See `README.md` for full architecture, dev-loop tiers, and DinOS/Nix details.
 
 ## Commands
 
@@ -9,8 +9,8 @@ npm run dev         # Din in Electron with HMR (windowed + DevTools)
 npm run dev:browser # Din in a plain browser with HMR (http://localhost:8080)
 npm test            # type-check + lint + tests + build — THE validation script
 npm run build       # build the web app into dist/
-npm run os:build    # build the installable Aladdin disk image
-npm run os:run      # demo Aladdin in a QEMU window
+npm run os:build    # build the installable DinOS disk image
+npm run os:run      # demo DinOS in a QEMU window
 ```
 
 ## Technology Stack
@@ -34,7 +34,7 @@ npm run os:run      # demo Aladdin in a QEMU window
 - `/src/test/` — testing utilities including the `TestApp` wrapper.
 - `/public/` — static assets.
 - `/electron/` — the Electron host: `main.mts`, `devtools-bridge.mts`, `userscripts.mts` (TypeScript run directly via Node's native type stripping — no build step, erasable syntax only, checked by `tsconfig.electron.json`), plus `preload.cjs`/`webview-preload.cjs` (sandboxed preloads can't be ESM/TS; plain CommonJS with JSDoc types) and `pty-host.py` (fs/pty/wifi bridges behind the Files, Terminal, and Settings apps).
-- `/os/` — Aladdin, the flagship OS: `flake.nix` (entry point; exposes the installable disk image as `./os#image` and the QEMU demo as `./os#vm`) and `configuration.nix` (the whole OS: cage + Electron launcher + Nix build of Din, targeting real hardware; QEMU-only accommodations live in its `vmVariant`). The Nix build only sees **git-tracked** files — `git add` new files before `npm run os:build` — and pins npm deps via `npmDepsHash` (refresh it after dependency changes; see README).
+- `/os/` — DinOS, the flagship OS: `flake.nix` (entry point; exposes the installable disk image as `./os#image` and the QEMU demo as `./os#vm`) and `configuration.nix` (the whole OS: cage + Electron launcher + Nix build of Din, targeting real hardware; QEMU-only accommodations live in its `vmVariant`). The Nix build only sees **git-tracked** files — `git add` new files before `npm run os:build` — and pins npm deps via `npmDepsHash` (refresh it after dependency changes; see README).
 - `App.tsx` — **already configured** with `QueryClientProvider`, `NostrProvider`, `UnheadProvider`, `AppProvider`, `NostrLoginProvider`. **Read before editing**; changes are rarely needed.
 - `AppRouter.tsx` — React Router configuration. The catch-all `/:nip19` route handles all NIP-19 identifiers (see the `nip19-routing` skill).
 
@@ -54,7 +54,7 @@ The assistant's behavior is defined by this file (`AGENTS.md`). Edit it directly
 
 Two rules that always apply, even without the skill loaded:
 
-- **Security:** `nsec` keys live in plaintext `localStorage`, so XSS = permanent key theft. Never use `dangerouslySetInnerHTML`/`innerHTML` with untrusted data, never relax the CSP, sanitize event-sourced URLs/CSS, and filter by `authors` on trust-sensitive queries (admin data, addressable/replaceable events). Full threat model: `nostr-security` skill.
+- **Security:** where nostrd is running (always on DinOS) the keys live there and Din only asks it to sign (`src/lib/nostrd.ts`, `electron/nostrd.mts`); elsewhere `nsec` keys live in plaintext `localStorage`, so XSS = permanent key theft. Even with nostrd, XSS can still sign as the user. Never use `dangerouslySetInnerHTML`/`innerHTML` with untrusted data, never relax the CSP, sanitize event-sourced URLs/CSS, and filter by `authors` on trust-sensitive queries (admin data, addressable/replaceable events). Full threat model: `nostr-security` skill.
 - **NIP-19 routing:** all identifiers (`npub1`, `note1`, `naddr1`, …) route at the URL root (`/:nip19` → `src/pages/NIP19Page.tsx`); decode to hex before querying. Details: `nip19-routing` skill.
 
 ## App Configuration

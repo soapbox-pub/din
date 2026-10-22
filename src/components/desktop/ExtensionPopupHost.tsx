@@ -11,6 +11,9 @@ import {
   type CrxPopupAnchorRect,
 } from '@/lib/crx';
 import { useAppContext } from '@/hooks/useAppContext';
+import { useMonitors } from '@/contexts/MonitorsContext';
+import { contains } from '@/lib/monitors';
+import { ScreenLayer } from './MonitorsProvider';
 
 /**
  * Hosts Chrome-extension action popups (e.g. Bitwarden's unlock bubble)
@@ -24,7 +27,8 @@ import { useAppContext } from '@/hooks/useAppContext';
  * override in electron/main.mts) and the popup page is hosted in an overlay
  * <webview> anchored to the toolbar action that opened it. The anchor rect
  * arrives in shell-viewport CSS pixels (the action element's
- * getBoundingClientRect), which is exactly this overlay's coordinate space.
+ * getBoundingClientRect), which is exactly this overlay's coordinate space
+ * (a ScreenLayer, spanning every monitor).
  *
  * The guest shares the browser session (persist:webbrowser), so the
  * extension API preload and storage work in the popup page just as they do
@@ -55,6 +59,7 @@ interface PopupState {
 
 export function ExtensionPopupHost() {
   const crx = getCrxBridge();
+  const { monitors, primary } = useMonitors();
   const [popup, setPopup] = useState<PopupState | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(
     null,
@@ -107,25 +112,26 @@ export function ExtensionPopupHost() {
   const height = size?.height ?? DEFAULT_HEIGHT;
 
   // Anchor the bubble under the action button, its right edge aligned with
-  // the button's (Chrome's default), clamped into the viewport.
-  const maxX = window.innerWidth - width - VIEWPORT_MARGIN;
-  const maxY = window.innerHeight - height - VIEWPORT_MARGIN;
+  // the button's (Chrome's default), clamped into the button's monitor.
+  const { anchorRect } = popup;
+  const screen =
+    monitors.find((m) => contains(m, anchorRect.x + anchorRect.width / 2, anchorRect.y + anchorRect.height / 2)) ??
+    primary;
+  const maxX = screen.x + screen.width - width - VIEWPORT_MARGIN;
+  const maxY = screen.y + screen.height - height - VIEWPORT_MARGIN;
   const x = Math.max(
-    VIEWPORT_MARGIN,
-    Math.min(popup.anchorRect.x + popup.anchorRect.width - width, maxX),
+    screen.x + VIEWPORT_MARGIN,
+    Math.min(anchorRect.x + anchorRect.width - width, maxX),
   );
   const y = Math.max(
-    VIEWPORT_MARGIN,
-    Math.min(
-      popup.anchorRect.y + popup.anchorRect.height + POSITION_PADDING,
-      maxY,
-    ),
+    screen.y + VIEWPORT_MARGIN,
+    Math.min(anchorRect.y + anchorRect.height + POSITION_PADDING, maxY),
   );
 
   return (
     // The transparent backdrop swallows the dismissing click (Chrome-style:
     // a click outside closes the bubble without activating what was hit).
-    <div className="fixed inset-0 z-[10000]" onPointerDown={close}>
+    <ScreenLayer className="z-[10000]" onPointerDown={close}>
       <div
         role="dialog"
         aria-label="Extension popup"
@@ -135,7 +141,7 @@ export function ExtensionPopupHost() {
       >
         <PopupWebview key={popup.url} src={popup.url} onMeasure={setSize} />
       </div>
-    </div>
+    </ScreenLayer>
   );
 }
 

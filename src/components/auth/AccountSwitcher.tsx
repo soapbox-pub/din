@@ -18,7 +18,7 @@ interface AccountSwitcherProps {
 }
 
 export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
-  const { currentUser, otherUsers, isLoading, setLogin, removeLogin } = useLoggedInAccounts();
+  const { currentUser, otherUsers, isLoading, setLogin, signOut } = useLoggedInAccounts();
 
   if (!currentUser) return null;
 
@@ -80,7 +80,7 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
           return (
             <DropdownMenuItem
               key={user.id}
-              onClick={() => setLogin(user.id)}
+              onClick={() => void setLogin(user.id)}
               className='flex items-center gap-2 cursor-pointer p-2 rounded-md'
             >
               <Avatar className='w-8 h-8' shape={getAvatarShape(user.metadata)}>
@@ -115,7 +115,7 @@ export function AccountSwitcher({ onAddAccountClick }: AccountSwitcherProps) {
           <span>Add another account</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => removeLogin(currentUser.id)}
+          onClick={() => void signOut(currentUser.id)}
           className='flex items-center gap-2 cursor-pointer p-2 rounded-md text-red-500'
         >
           <LogOut className='w-4 h-4' />

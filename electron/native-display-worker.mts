@@ -141,6 +141,8 @@ interface Surface {
   /** WM_PROTOCOLS: WM_DELETE_WINDOW / WM_TAKE_FOCUS support. */
   deleteWindow: boolean;
   takeFocus: boolean;
+  /** The app draws its own title bar (Motif hints); such a window positions itself. */
+  csd: boolean;
   /** Maximized in Din, which the app's own title bar shows (_NET_WM_STATE). */
   maximized: boolean;
 }
@@ -477,6 +479,7 @@ async function track(id: WindowId, popup: boolean): Promise<void> {
     announced: false,
     deleteWindow: false,
     takeFocus: false,
+    csd: false,
     maximized: false,
   };
   surfaces.set(id, surface);
@@ -501,6 +504,7 @@ async function announce(surface: Surface): Promise<void> {
   }
   if (!surfaces.has(surface.id)) return;
   surface.announced = true;
+  surface.csd = info.csd;
   toShell({
     type: surface.popup ? 'popup' : 'open',
     id: surface.id,
@@ -549,30 +553,35 @@ function onMapRequest(id: WindowId): void {
 /**
  * A client asked to move/resize/restack. Sizes are granted (the renderer
  * then fits the Din window to the new size); positions are the window
- * manager's call, so a managed toplevel stays where its Din window is.
+ * manager's call, so a managed toplevel stays where its Din window is -
+ * unless it draws its own title bar: with no Din one to be dragged by, it
+ * moves itself and its Din window follows.
  */
 function onConfigureRequest(packet: Buffer): void {
   const id = packet.readUInt32LE(8);
   const mask = packet.readUInt16LE(26);
   const managed = surfaces.get(id);
+  const movesItself = !managed || managed.csd;
   const values: Parameters<typeof configureWindow>[2] = {};
-  if (!managed && mask & 1) values.x = packet.readInt16LE(16);
-  if (!managed && mask & 2) values.y = packet.readInt16LE(18);
+  if (movesItself && mask & 1) values.x = packet.readInt16LE(16);
+  if (movesItself && mask & 2) values.y = packet.readInt16LE(18);
   if (mask & 4) values.width = packet.readUInt16LE(20);
   if (mask & 8) values.height = packet.readUInt16LE(22);
   if (mask & 16) values.border = 0;
   configureWindow(x, id, values);
   if (!managed) return;
-  if (values.width === undefined && values.height === undefined) {
+  const changed = Object.keys(values).some((key) => key !== 'border');
+  if (!changed) {
     // Nothing really changed, but the client waits for a ConfigureNotify.
     sendSyntheticConfigure(managed);
   } else if (!managed.popup) {
-    // The app resized itself: its Din window should follow.
+    // The app resized (or, drawing its own title bar, moved) itself: its
+    // Din window should follow.
     toShell({
       type: 'configure',
       id,
-      x: managed.x,
-      y: managed.y,
+      x: values.x ?? managed.x,
+      y: values.y ?? managed.y,
       width: values.width ?? managed.width,
       height: values.height ?? managed.height,
     });
@@ -631,7 +640,10 @@ async function onPropertyNotify(id: WindowId, atom: number): Promise<void> {
     surface.deleteWindow = protocols.includes(atoms.wmDeleteWindow);
     surface.takeFocus = protocols.includes(atoms.wmTakeFocus);
   } else if (atom === atoms.motifWmHints) {
-    toShell({ type: 'decoration', id, csd: await isClientDecorated(id).catch(() => false) });
+    const csd = await isClientDecorated(id).catch(() => false);
+    if (csd === surface.csd) return;
+    surface.csd = csd;
+    if (surface.announced) toShell({ type: 'decoration', id, csd });
   }
 }
 

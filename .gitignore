@@ -14,6 +14,9 @@ dist-ssr
 *.local
 yarn.lock
 
+# The ad blocker's bundled filter engine (scripts/build-adblock-engine.mjs)
+electron/adblock-extension/engine.js
+
 # Tooling caches
 .eslintcache
 .tsbuildinfo
@@ -23,6 +26,9 @@ yarn.lock
 
 # Nix build output symlink
 result
+
+# DinOS release files (scripts/dinos-release.sh)
+.release-artifacts
 
 # VM persistent disk
 *.qcow2

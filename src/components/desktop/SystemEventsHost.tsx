@@ -14,7 +14,6 @@ declare global {
 const QUERIES_BY_TOPIC: Record<string, string[][]> = {
   network: [['wifi'], ['vpn']],
   audio: [['audio']],
-  bluetooth: [['bluetooth']],
 };
 
 /**

@@ -1,3 +1,4 @@
+import { normalizeInternalUrl } from '@/lib/internalPages';
 import { normalizeNsiteInput, NSITE_PROTOCOL } from '@/lib/nsite';
 
 /**
@@ -71,6 +72,24 @@ export function sanitizeNavigationUrl(input: string): string | null {
   return url.toString();
 }
 
+const VIEW_SOURCE_PREFIX = 'view-source:';
+
+/**
+ * The `view-source:` URL that shows a page's source in a browser tab, or
+ * `null` for anything that isn't an http/https/nsite page (internal pages,
+ * blank tabs, extension pages, or a source view itself).
+ */
+export function viewSourceUrl(url: string): string | null {
+  if (!/^(https?|nsite):\/\//i.test(url)) return null;
+  const sanitized = sanitizeNavigationUrl(url);
+  return sanitized && `${VIEW_SOURCE_PREFIX}${sanitized}`;
+}
+
+/** Whether a tab URL is a page-source view (`view-source:…`). */
+export function isViewSourceUrl(url: string): boolean {
+  return url.toLowerCase().startsWith(VIEW_SOURCE_PREFIX);
+}
+
 /**
  * Sanitize a URL for safe use as an image `src` (favicons, avatars, banners).
  *
@@ -107,8 +126,9 @@ export function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
- * Turn a query-or-URL string into a navigable http/https/nsite URL. If it looks
- * like a bare search term, hand it to a search engine instead. Bare loopback
+ * Turn a query-or-URL string into a navigable http/https/nsite URL, or one of
+ * the browser's own internal pages. If it looks like a bare search term, hand
+ * it to a search engine instead. Bare loopback
  * addresses (`localhost:8080`, `127.0.0.1:3000`, `[::1]:8080`) default to
  * `http:` since that's what dev servers speak; every other schemeless input
  * defaults to `https:`.
@@ -116,6 +136,20 @@ export function sameOrigin(a: string, b: string): boolean {
 export function resolveNavigation(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
+
+  // The browser's own pages (about:preferences). Returned verbatim: the
+  // caller paints them as chrome UI rather than loading them, so they skip
+  // sanitizeNavigationUrl's http/nsite allowlist entirely — and, having no
+  // `://`, they would otherwise fall through to a web search below.
+  const internal = normalizeInternalUrl(trimmed);
+  if (internal) return internal;
+
+  // `view-source:<url>` shows a page's source, as in Chrome. The inner
+  // address resolves like any other, so `view-source:example.com` works.
+  if (isViewSourceUrl(trimmed)) {
+    const inner = resolveNavigation(trimmed.slice(VIEW_SOURCE_PREFIX.length));
+    return inner ? viewSourceUrl(inner) : null;
+  }
 
   // nsite addresses first, so `nsite://soapbox.pub/armada` isn't mistaken for
   // a search term. This also accepts the `name@domain` spelling and rewrites

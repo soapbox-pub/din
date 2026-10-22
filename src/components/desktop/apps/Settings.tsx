@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Airplay,
   BatteryFull,
   Bell,
+  BellOff,
   Bluetooth,
-  BluetoothOff,
   Bomb,
   Bug,
   Check,
+  CircleArrowUp,
+  Clock,
   Cloud,
   CloudOff,
   EthernetPort,
-  Gamepad2,
   Gauge,
+  Globe,
   Headphones,
+  Info,
+  KeyRound,
   Keyboard,
   Laptop,
   Loader2,
@@ -21,7 +26,6 @@ import {
   Minus,
   Monitor,
   Moon,
-  Mouse,
   MousePointer2,
   Play,
   Palette,
@@ -29,8 +33,6 @@ import {
   Plus,
   RotateCw,
   Search,
-  Smartphone,
-  Speaker,
   Sun,
   TriangleAlert,
   Trash2,
@@ -46,6 +48,15 @@ import type { AppComponentProps } from '@/lib/apps';
 import { cleanWifiError, getWifiBridge, isEthernetConnected, isSecured } from '@/lib/wifi';
 import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { VpnControls } from '@/components/desktop/VpnControls';
+import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
+import {
+  cleanBluetoothBridgeError,
+  describeDevice,
+  getBluetoothBridge,
+  sortDevices,
+} from '@/lib/bluetooth';
+import type { BluetoothDevice } from '@/lib/bluetooth';
+import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState } from '@/hooks/useBluetooth';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
   useSavedNetworks,
@@ -65,6 +76,9 @@ import {
 import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
 import { getZoomBridge } from '@/lib/zoom';
 import { useApplyDisplayLayout, useDisplayStatus } from '@/hooks/useDisplay';
+import { useAirPlayState } from '@/hooks/useAirPlay';
+import { getAirPlayBridge } from '@/lib/airplay';
+import { AirPlayReceiverList } from '@/components/desktop/AirPlayIndicator';
 import {
   describePowerProfile,
   formatTimeRemaining,
@@ -78,11 +92,8 @@ import {
   useSetPowerProfile,
 } from '@/hooks/usePower';
 import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
-import { cleanAudioError, getAudioBridge } from '@/lib/audio';
+import { MAX_VOLUME, cleanAudioError, getAudioBridge } from '@/lib/audio';
 import type { AudioDevice, AudioPort, AudioStream } from '@/lib/audio';
-import { cleanBluetoothError, getBluetoothBridge } from '@/lib/bluetooth';
-import type { BluetoothDevice } from '@/lib/bluetooth';
-import { useBluetoothMutations, useBluetoothStatus } from '@/hooks/useBluetooth';
 import {
   useAudioDeviceMutations,
   useAudioDevices,
@@ -90,28 +101,62 @@ import {
   useAudioStatus,
   useAudioStreams,
 } from '@/hooks/useAudio';
-import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
+import { VolumeGlyph, VolumeSlider } from '@/components/desktop/VolumeIndicator';
 import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
+import { cleanLockError, getLockBridge } from '@/lib/lock';
+import { useQuery } from '@tanstack/react-query';
+import {
+  describeZone,
+  getDateTimeBridge,
+  timeFormatOptions,
+  zoneLongName,
+  zoneOffset,
+} from '@/lib/datetime';
+import {
+  useDateTimeStatus,
+  useSetAutomaticTime,
+  useSetTime,
+  useSetTimeZone,
+  useTimeZones,
+} from '@/hooks/useDateTime';
+import { useClock } from '@/hooks/useClock';
+import type { ClockFormat } from '@/contexts/AppContext';
 import {
   useKeyboardLayouts,
   useKeyboardStatus,
+  useRestartForKeyboardLayout,
   useSetKeyboardLayout,
 } from '@/hooks/useKeyboardLayout';
-import { getBrightnessBridge, MAX_TEMPERATURE, MIN_TEMPERATURE } from '@/lib/brightness';
+import {
+  brightnessText,
+  getBrightnessBridge,
+  MAX_TEMPERATURE,
+  MIN_TEMPERATURE,
+  nightLightCaption,
+} from '@/lib/brightness';
+import type { NightLightSchedule, NightLightState } from '@/lib/brightness';
 import { useBrightnessMutations, useBrightnessStatus } from '@/hooks/useBrightness';
-import { BrightnessGlyph } from '@/components/desktop/BrightnessIndicator';
+import { BrightnessGlyph, BrightnessSlider } from '@/components/desktop/BrightnessIndicator';
 import { Slider } from '@/components/ui/slider';
 import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
 import { useNotificationSettings } from '@/hooks/useNotificationSettings';
+import { setDoNotDisturb, useNotificationCenter } from '@/lib/notificationCenter';
 import { NOTIFICATION_CATEGORY_META, type NotificationPreferences } from '@/lib/notifications';
 import { useToast } from '@/hooks/useToast';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { getFsBridge } from '@/lib/fs';
 import { parseCurXPTheme } from '@/lib/cursorTheme';
 import type { CursorTheme } from '@/lib/cursorTheme';
+import { getSystemCursorBridge } from '@/lib/systemCursor';
+import {
+  useSetSystemCursor,
+  useSystemCursorPreview,
+  useSystemCursorStatus,
+  useSystemCursorThemes,
+} from '@/hooks/useSystemCursor';
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { Button } from '@/components/ui/button';
@@ -119,6 +164,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
+import { getUpdaterBridge, UPDATE_STEP_LABELS } from '@/lib/updater';
+import type { UpdateState } from '@/lib/updater';
+import { cleanInstallerError } from '@/lib/installer';
+import { useUpdateState } from '@/hooks/useUpdater';
 
 type SectionId =
   | 'wifi'
@@ -129,10 +179,13 @@ type SectionId =
   | 'power'
   | 'sound'
   | 'keyboard'
+  | 'datetime'
+  | 'password'
   | 'notifications'
   | 'nostr'
   | 'appearance'
-  | 'developers';
+  | 'developers'
+  | 'about';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
@@ -143,10 +196,13 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'power', name: 'Power', icon: Gauge },
   { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'keyboard', name: 'Keyboard', icon: Keyboard },
+  { id: 'datetime', name: 'Date & Time', icon: Clock },
+  { id: 'password', name: 'Password', icon: KeyRound },
   { id: 'notifications', name: 'Notifications', icon: Bell },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
   { id: 'developers', name: 'Developers', icon: Bug },
+  { id: 'about', name: 'About', icon: Info },
 ];
 
 /**
@@ -156,27 +212,34 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
  * explanatory fallback. The Bluetooth section pairs, connects and forgets
- * devices through `window.bluetooth` (BlueZ over D-Bus). The Display section changes screen resolution through
- * `window.display` (xrandr) for the bare-X11 standalone session; on Wayland it
- * shows a fallback. The Battery section reads `window.power`
+ * devices through `window.bluetooth` (BlueZ over D-Bus). The Display section arranges the monitors through
+ * `window.display` (wlr-randr under cage, xrandr on bare X11), falling back
+ * where neither can manage them. The Battery section reads `window.power`
  * (/sys/class/power_supply) and hides on machines with no battery. The Power
  * section switches the system power profile through the same bridge
  * (net.hadess.PowerProfiles over D-Bus: power-profiles-daemon / tuned-ppd),
  * falling back where no such daemon runs. The Sound
  * section drives the default sink's volume/mute through `window.audio`
- * (wpctl/PipeWire), including outputs on a sound card's inactive profile. Keyboard picks the layout native Linux apps type with
- * through `window.keyboard`. Nostr & Storage manages Din's encrypted app-data
+ * (wpctl/PipeWire), including outputs on a sound card's inactive profile.
+ * Keyboard picks the layout native Linux apps type with
+ * through `window.keyboard`. Date & Time sets the time zone and clock
+ * through `window.datetime`, and how Din's clocks show the time. Password changes the computer's one password
+ * (disk, lock screen, Nostr keys) through `window.lock`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
  * Developers holds debug utilities such as intentionally crashing the shell
- * to test the error boundary.
+ * to test the error boundary. About shows Din's logo and DinOS's version, and
+ * the update it's staging through `window.updater`, and offers the restart
+ * that finishes one.
  */
 const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
 
 /** Extract a valid SectionId from launch params, if present. */
 function paramSection(params: AppComponentProps['params']): SectionId | undefined {
   const s = params?.section;
+  // Updates used to be a section of its own.
+  if (s === 'updates') return 'about';
   return typeof s === 'string' && SECTION_IDS.has(s) ? (s as SectionId) : undefined;
 }
 
@@ -241,14 +304,20 @@ export function Settings({ params }: AppComponentProps) {
           <SoundSection />
         ) : section === 'keyboard' ? (
           <KeyboardSection />
+        ) : section === 'datetime' ? (
+          <DateTimeSection />
+        ) : section === 'password' ? (
+          <PasswordSection />
         ) : section === 'notifications' ? (
           <NotificationsSection />
         ) : section === 'nostr' ? (
           <NostrStorageSection />
         ) : section === 'appearance' ? (
           <AppearanceSection />
-        ) : (
+        ) : section === 'developers' ? (
           <DevelopersSection />
+        ) : (
+          <AboutSection />
         )}
       </div>
     </div>
@@ -589,160 +658,126 @@ function NetworkListSkeleton() {
 // Bluetooth
 // ---------------------------------------------------------------------------
 
-/** An icon for a device from BlueZ's freedesktop icon name. */
-function BluetoothDeviceIcon({ icon, className }: { icon: string | null; className?: string }) {
-  if (icon?.startsWith('audio-head')) return <Headphones className={className} aria-hidden />;
-  if (icon?.startsWith('audio')) return <Speaker className={className} aria-hidden />;
-  if (icon === 'input-mouse' || icon === 'input-tablet') return <Mouse className={className} aria-hidden />;
-  if (icon === 'input-keyboard') return <Keyboard className={className} aria-hidden />;
-  if (icon === 'input-gaming') return <Gamepad2 className={className} aria-hidden />;
-  if (icon === 'phone') return <Smartphone className={className} aria-hidden />;
-  if (icon === 'computer') return <Laptop className={className} aria-hidden />;
-  return <Bluetooth className={className} aria-hidden />;
-}
-
 /**
- * Bluetooth: turn the adapter on or off, scan for nearby devices, and pair,
- * connect, disconnect or forget them through `window.bluetooth` (BlueZ).
- * Connected audio devices then show up as outputs in the Sound panel.
+ * The adapter's on/off switch, the paired devices, and the ones nearby to
+ * pair with, via the Bluetooth bridge (window.bluetooth -> BlueZ). Looks for
+ * devices while it's open and Bluetooth is on. Prompts that pairing needs
+ * appear from BluetoothPromptHost, wherever the pairing started.
  */
 function BluetoothSection() {
   const bridge = getBluetoothBridge();
-  const status = useBluetoothStatus();
-  const { setPowered, scan, pair, connect, disconnect, remove } = useBluetoothMutations();
-  // Last failed operation, keyed to the device address it concerned.
-  const [opError, setOpError] = useState<{ address: string; message: string } | null>(null);
-  const { toast } = useToast();
+  const status = useBluetoothState();
+  const { setPowered, pair, connect, disconnect, forget } = useBluetoothActions();
+  const [opError, setOpError] = useState<{ path: string; message: string } | null>(null);
 
-  // Look for devices as soon as the panel opens with the adapter on.
-  const powered = status.data?.powered ?? false;
-  const scanMutate = scan.mutate;
-  useEffect(() => {
-    if (powered) scanMutate();
-  }, [powered, scanMutate]);
+  const data = status.data;
+  const adapter = data?.adapter ?? null;
+  const powered = adapter?.powered ?? false;
+  useBluetoothDiscovery(powered);
 
   if (!bridge) {
     return (
       <SectionShell title="Bluetooth">
         <FallbackCard icon={Bluetooth}>
-          Bluetooth settings need the Din desktop shell; devices can't be managed
-          in a plain browser.
+          Bluetooth settings need the Din desktop shell; they aren't available in
+          a plain browser.
         </FallbackCard>
       </SectionShell>
     );
   }
 
-  const run = (
-    mutation: typeof pair,
-    device: BluetoothDevice,
-  ) => {
+  const devices = sortDevices(data?.devices ?? []);
+  const paired = devices.filter((d) => d.paired);
+  const nearby = devices.filter((d) => !d.paired);
+
+  const run = (path: string, action: typeof pair) => {
     setOpError(null);
-    mutation.mutate(device.address, {
-      onError: (error) =>
-        setOpError({ address: device.address, message: cleanBluetoothError(error) }),
+    action.mutate(path, {
+      onError: (error) => setOpError({ path, message: cleanBluetoothBridgeError(error) }),
     });
   };
-
-  const devices = status.data?.devices ?? [];
-  const known = devices.filter((d) => d.paired || d.connected);
-  const nearby = devices.filter((d) => !d.paired && !d.connected);
-  const discovering = status.data?.discovering ?? false;
-  const pendingFor = (address: string) =>
-    [pair, connect, disconnect, remove].some((m) => m.isPending && m.variables === address);
-
-  const renderList = (list: BluetoothDevice[], label: string) => (
-    <ul className="flex flex-col gap-1" aria-label={label}>
-      {list.map((device) => (
-        <BluetoothDeviceRow
-          key={device.address}
-          device={device}
-          busy={pendingFor(device.address)}
-          action={
-            pair.isPending && pair.variables === device.address
-              ? 'Pairing…'
-              : connect.isPending && connect.variables === device.address
-                ? 'Connecting…'
-                : disconnect.isPending && disconnect.variables === device.address
-                  ? 'Disconnecting…'
-                  : null
-          }
-          error={opError?.address === device.address ? opError.message : null}
-          onPair={() => run(pair, device)}
-          onConnect={() => run(connect, device)}
-          onDisconnect={() => run(disconnect, device)}
-          onForget={() => run(remove, device)}
-        />
-      ))}
-    </ul>
-  );
+  const rowProps = (device: BluetoothDevice) => ({
+    device,
+    error: opError?.path === device.path ? opError.message : null,
+    onPair: () => run(device.path, pair),
+    onConnect: () => run(device.path, connect),
+    onDisconnect: () => run(device.path, disconnect),
+    onForget: () => run(device.path, forget),
+  });
 
   return (
     <SectionShell
       title="Bluetooth"
       actions={
-        <>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Scan for devices"
-            title="Scan for devices"
-            disabled={!powered || discovering}
-            onClick={() => scan.mutate()}
-          >
-            <RotateCw className={cn('size-4', discovering && 'animate-spin')} />
-          </Button>
-          <Switch
-            aria-label="Bluetooth"
-            checked={powered}
-            disabled={!status.data?.available || setPowered.isPending}
-            onCheckedChange={(checked) =>
-              setPowered.mutate(checked, {
-                onError: (error) =>
-                  toast({
-                    title: checked ? 'Could not turn Bluetooth on' : 'Could not turn Bluetooth off',
-                    description: cleanBluetoothError(error),
-                    variant: 'destructive',
-                  }),
-              })
-            }
-          />
-        </>
+        <Switch
+          aria-label="Bluetooth"
+          checked={powered}
+          disabled={!adapter || setPowered.isPending}
+          onCheckedChange={(on) => {
+            setOpError(null);
+            setPowered.mutate(on, {
+              onError: (error) => setOpError({ path: '', message: cleanBluetoothBridgeError(error) }),
+            });
+          }}
+        />
       }
     >
+      {opError?.path === '' && (
+        <p role="alert" className="text-xs text-destructive">
+          {opError.message}
+        </p>
+      )}
       {status.isLoading ? (
         <NetworkListSkeleton />
       ) : status.isError ? (
-        <FallbackCard>Could not read Bluetooth state: {cleanBluetoothError(status.error)}</FallbackCard>
-      ) : !status.data?.available ? (
-        <FallbackCard icon={BluetoothOff}>
-          No Bluetooth adapter was found, or the Bluetooth service (BlueZ) isn't
-          running on this system.
+        <FallbackCard>Could not read Bluetooth state: {cleanBluetoothBridgeError(status.error)}</FallbackCard>
+      ) : !data?.available ? (
+        <FallbackCard icon={Bluetooth}>
+          The Bluetooth service isn't running on this system, so Bluetooth can't be
+          managed here.
         </FallbackCard>
+      ) : !adapter ? (
+        <FallbackCard icon={Bluetooth}>No Bluetooth adapter was found on this computer.</FallbackCard>
       ) : !powered ? (
-        <FallbackCard icon={BluetoothOff}>Bluetooth is turned off.</FallbackCard>
+        <FallbackCard icon={Bluetooth}>Bluetooth is turned off.</FallbackCard>
       ) : (
         <div className="flex flex-col gap-4">
-          {known.length > 0 && (
-            <>
-              <SoundGroupHeading icon={Bluetooth}>My devices</SoundGroupHeading>
-              {renderList(known, 'My devices')}
-            </>
+          <p className="text-xs text-muted-foreground">
+            Devices see this computer as “{adapter.name}”.
+          </p>
+
+          {paired.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <SubHeading>My devices</SubHeading>
+              <ul className="flex flex-col gap-1" aria-label="My devices">
+                {paired.map((device) => (
+                  <BluetoothDeviceRow key={device.path} {...rowProps(device)} />
+                ))}
+              </ul>
+            </div>
           )}
-          <SoundGroupHeading icon={Search}>
-            Nearby devices
-            {discovering && (
-              <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Scanning" />
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-end gap-2">
+              <SubHeading>Devices nearby</SubHeading>
+              {adapter.discovering && (
+                <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Searching" />
+              )}
+            </div>
+            {nearby.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
+                {adapter.discovering
+                  ? 'Looking for devices… Put the one you want to pair in pairing mode.'
+                  : 'No devices found nearby.'}
+              </div>
+            ) : (
+              <ul className="flex flex-col gap-1" aria-label="Devices nearby">
+                {nearby.map((device) => (
+                  <BluetoothDeviceRow key={device.path} {...rowProps(device)} />
+                ))}
+              </ul>
             )}
-          </SoundGroupHeading>
-          {nearby.length > 0 ? (
-            renderList(nearby, 'Nearby devices')
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              {discovering
-                ? 'Looking for devices… Put yours in pairing mode.'
-                : 'No devices found. Put yours in pairing mode and scan again.'}
-            </p>
-          )}
+          </div>
         </div>
       )}
     </SectionShell>
@@ -751,8 +786,6 @@ function BluetoothSection() {
 
 function BluetoothDeviceRow({
   device,
-  busy,
-  action,
   error,
   onPair,
   onConnect,
@@ -760,22 +793,13 @@ function BluetoothDeviceRow({
   onForget,
 }: {
   device: BluetoothDevice;
-  busy: boolean;
-  /** In-progress label for the main button, e.g. "Pairing…". */
-  action: string | null;
   error: string | null;
   onPair: () => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onForget: () => void;
 }) {
-  const detail = device.connected
-    ? device.battery !== null
-      ? `Connected · ${device.battery}% battery`
-      : 'Connected'
-    : device.paired
-      ? 'Not connected'
-      : null;
+  const busy = device.busy !== null;
 
   return (
     <li className="rounded-lg border border-border/60 bg-background/40">
@@ -786,33 +810,37 @@ function BluetoothDeviceRow({
         />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm text-foreground">{device.name}</p>
-          {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
+          <p
+            className={cn(
+              'flex items-center gap-1.5 truncate text-xs',
+              device.connected ? 'text-primary' : 'text-muted-foreground',
+            )}
+          >
+            {busy && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />}
+            {describeDevice(device)}
+          </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy}
-          onClick={device.connected ? onDisconnect : device.paired ? onConnect : onPair}
-        >
-          {action ? (
-            <>
-              <Loader2 className="size-3.5 animate-spin" aria-hidden />
-              {action}
-            </>
-          ) : device.connected ? (
-            'Disconnect'
-          ) : device.paired ? (
-            'Connect'
-          ) : (
-            'Pair'
-          )}
-        </Button>
+
+        {!device.paired ? (
+          <Button variant="outline" size="sm" disabled={busy} onClick={onPair}>
+            Pair
+          </Button>
+        ) : device.connected ? (
+          <Button variant="outline" size="sm" disabled={busy} onClick={onDisconnect}>
+            Disconnect
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" disabled={busy} onClick={onConnect}>
+            Connect
+          </Button>
+        )}
         {device.paired && (
           <Button variant="ghost" size="sm" disabled={busy} onClick={onForget}>
             Forget
           </Button>
         )}
       </div>
+
       {error !== null && (
         <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
           {error}
@@ -844,14 +872,14 @@ interface DisplayDraft {
   modes: DisplayMode[];
 }
 
-/** Seed the editable draft from xrandr's reported outputs. */
+/** Seed the editable draft from the reported outputs. */
 function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
   return outputs.map((output) => {
     const modes = uniqueModes(output.modes);
     const fallback = preferredMode(output) ?? modes[0] ?? null;
     return {
       name: output.name,
-      friendly: friendlyOutputName(output.name),
+      friendly: output.airplay ? `${output.airplay} (AirPlay)` : friendlyOutputName(output.name),
       internal: isInternalOutput(output.name),
       enabled: output.enabled,
       primary: output.primary,
@@ -899,8 +927,8 @@ function clampZoom(percent: number): number {
 /**
  * Interface zoom - DPI-style scaling of the whole desktop through Chromium
  * page zoom (window.zoom preload bridge). Lives in AppConfig (persisted
- * locally) and works in every Electron session, including Wayland/cage where
- * the xrandr arrangement below is unavailable. In a plain browser there is no
+ * locally) and works in every Electron session, including ones where the
+ * arrangement below is unavailable. In a plain browser there is no
  * bridge, so the control points at the browser's own zoom instead.
  */
 function DisplayZoomControl({
@@ -960,13 +988,13 @@ function DisplayZoomControl({
 }
 
 /**
- * The whole multi-output arrangement, via the xrandr display bridge
- * (window.display). Meaningful on the bare-X11 standalone session where Din is
- * the whole desktop: drag displays to position them, pick a resolution, choose
- * the primary, and switch any output on or off; "Apply" commits the layout in
- * one atomic xrandr call. On Wayland/cage or in a plain browser the arrangement
- * falls back to a note, since the compositor arranges the outputs automatically
- * - but the zoom control above always applies.
+ * The whole multi-output arrangement, via the display bridge (window.display:
+ * wlr-randr under cage, xrandr on bare X11), where Din is the whole desktop:
+ * drag displays to position them, pick a resolution, choose the primary (the
+ * one with the menu bar and Dock), and switch any output on or off; "Apply"
+ * commits the layout in one atomic call. Where the outputs can't be managed,
+ * or in a plain browser, the arrangement falls back to a note - but the zoom
+ * control above always applies.
  */
 function DisplaySection() {
   const bridge = getDisplayBridge();
@@ -984,7 +1012,7 @@ function DisplaySection() {
   const seededSignature = useRef<string>('');
 
   // Re-seed the draft only when the real arrangement changes (first load,
-  // hotplug, an applied layout, or an xrandr change from elsewhere) - not on
+  // hotplug, an applied layout, or a change made from elsewhere) - not on
   // every poll, so in-progress edits survive the 5s refetch.
   useEffect(() => {
     if (outputs && baseSignature !== seededSignature.current) {
@@ -1039,8 +1067,8 @@ function DisplaySection() {
     <FallbackCard>Could not read display state: {cleanDisplayError(status.error)}</FallbackCard>
   ) : !status.data?.available ? (
     <FallbackCard icon={Monitor}>
-      Displays can't be arranged here. This session uses a Wayland
-      compositor (cage), which sizes Din to the display automatically.
+      Displays can't be arranged here. This session's display server doesn't
+      let Din manage its outputs.
     </FallbackCard>
   ) : draft.length === 0 ? (
     <FallbackCard icon={Monitor}>No connected displays were found.</FallbackCard>
@@ -1106,7 +1134,29 @@ function DisplaySection() {
         onChange={setZoom}
       />
       {arrangement}
+      <AirPlayDisplays />
     </SectionShell>
+  );
+}
+
+/**
+ * AirPlay receivers nearby: mirror the screen to one, or add it as a
+ * separate display, which then appears in the arrangement above. Hidden
+ * where AirPlay isn't available.
+ */
+function AirPlayDisplays() {
+  const { data } = useAirPlayState();
+  if (!getAirPlayBridge() || !data?.available) return null;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+      <SoundGroupHeading icon={Airplay}>AirPlay</SoundGroupHeading>
+      <p className="text-xs text-muted-foreground">
+        Share the screen with an Apple TV, AirPlay TV or other receiver on this
+        network. Sound plays there too, and the volume keys control it.
+      </p>
+      <AirPlayReceiverList />
+    </div>
   );
 }
 
@@ -1814,18 +1864,15 @@ function BrightnessSection() {
         {backlightAvailable && (
           <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
             <BrightnessGlyph brightness={value} className="size-6 shrink-0 text-foreground/90" />
-            <Slider
+            <BrightnessSlider
               aria-label="Screen brightness"
-              value={[value]}
-              min={0}
-              max={100}
-              step={1}
+              value={value}
               className="flex-1"
-              onValueChange={([v]) => setValue(v)}
-              onValueCommit={([v]) => setBrightness.mutate(v)}
+              onValueChange={setValue}
+              onValueCommit={(v) => setBrightness.mutate(v)}
             />
             <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
-              {value}%
+              {brightnessText(value)}
             </span>
           </div>
         )}
@@ -1837,7 +1884,7 @@ function BrightnessSection() {
                 <Moon
                   className={cn(
                     'size-6 shrink-0',
-                    nightLight.enabled ? 'text-foreground/90' : 'text-muted-foreground',
+                    nightLight.active ? 'text-foreground/90' : 'text-muted-foreground',
                   )}
                   aria-hidden
                 />
@@ -1858,24 +1905,27 @@ function BrightnessSection() {
             </div>
 
             {nightLight.enabled && (
-              <div className="flex items-center gap-3 border-t border-border/60 pt-4">
-                <span className="text-xs text-muted-foreground">Cooler</span>
-                {/* Invert the axis so dragging right warms the screen. */}
-                <Slider
-                  aria-label="Color temperature"
-                  value={[MIN_TEMPERATURE + MAX_TEMPERATURE - temp]}
-                  min={MIN_TEMPERATURE}
-                  max={MAX_TEMPERATURE}
-                  step={100}
-                  className="flex-1"
-                  onValueChange={([v]) => setTemp(MIN_TEMPERATURE + MAX_TEMPERATURE - v)}
-                  onValueCommit={() => setTemperature.mutate(temp)}
-                />
-                <span className="text-xs text-muted-foreground">Warmer</span>
-                <span className="w-16 text-right text-sm tabular-nums text-muted-foreground">
-                  {temp}K
-                </span>
-              </div>
+              <>
+                <NightLightSchedulePicker nightLight={nightLight} />
+                <div className="flex items-center gap-3 border-t border-border/60 pt-4">
+                  <span className="text-xs text-muted-foreground">Cooler</span>
+                  {/* Invert the axis so dragging right warms the screen. */}
+                  <Slider
+                    aria-label="Color temperature"
+                    value={[MIN_TEMPERATURE + MAX_TEMPERATURE - temp]}
+                    min={MIN_TEMPERATURE}
+                    max={MAX_TEMPERATURE}
+                    step={100}
+                    className="flex-1"
+                    onValueChange={([v]) => setTemp(MIN_TEMPERATURE + MAX_TEMPERATURE - v)}
+                    onValueCommit={() => setTemperature.mutate(temp)}
+                  />
+                  <span className="text-xs text-muted-foreground">Warmer</span>
+                  <span className="w-16 text-right text-sm tabular-nums text-muted-foreground">
+                    {temp}K
+                  </span>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -1884,7 +1934,118 @@ function BrightnessSection() {
   );
 }
 
-/** A small heading that groups a subsection within the Sound panel. */
+const NIGHT_LIGHT_SCHEDULES: { value: NightLightSchedule; name: string }[] = [
+  { value: 'sunset', name: 'Sunset to sunrise' },
+  { value: 'custom', name: 'Custom hours' },
+  { value: 'always', name: 'Always on' },
+];
+
+/** The hours "Sunset to sunrise" keeps where the time zone has no coordinates. */
+const FALLBACK_NIGHT = { from: new Date(2000, 0, 1, 20, 0), to: new Date(2000, 0, 1, 7, 0) };
+
+/** When night light runs, and what it's doing now. */
+function NightLightSchedulePicker({ nightLight }: { nightLight: NightLightState }) {
+  const { config } = useAppContext();
+  const { setSchedule } = useBrightnessMutations();
+  const timeOptions = timeFormatOptions(config.clockFormat);
+
+  // Local copies so a half-typed time doesn't get overwritten by a poll.
+  const [from, setFrom] = useState(nightLight.from);
+  const [to, setTo] = useState(nightLight.to);
+  const [lastSaved, setLastSaved] = useState(`${nightLight.from}-${nightLight.to}`);
+  if (`${nightLight.from}-${nightLight.to}` !== lastSaved) {
+    setLastSaved(`${nightLight.from}-${nightLight.to}`);
+    setFrom(nightLight.from);
+    setTo(nightLight.to);
+  }
+
+  const save = (change: Partial<{ schedule: NightLightSchedule; from: string; to: string }>) =>
+    setSchedule.mutate({ schedule: nightLight.schedule, from, to, ...change });
+
+  const caption = nightLightCaption(nightLight, timeOptions);
+  let description: string;
+  if (nightLight.schedule === 'always') {
+    description = 'The screen stays warm until you turn Night Light off.';
+  } else if (nightLight.schedule === 'custom') {
+    description = 'Night Light turns on and off at these times every day.';
+  } else if (nightLight.place) {
+    description = `Follows sunset and sunrise in ${describeZone(nightLight.place).city}, from your time zone.`;
+  } else {
+    description = `Din can’t place your time zone, so Night Light runs from ${FALLBACK_NIGHT.from.toLocaleTimeString([], timeOptions)} to ${FALLBACK_NIGHT.to.toLocaleTimeString([], timeOptions)}.`;
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Night Light schedule">
+        {NIGHT_LIGHT_SCHEDULES.map((option) => {
+          const checked = nightLight.schedule === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              onClick={() => save({ schedule: option.value })}
+              className={cn(
+                'rounded-lg border px-3 py-2 text-sm',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                checked
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+              )}
+            >
+              {option.name}
+            </button>
+          );
+        })}
+      </div>
+
+      {nightLight.schedule === 'custom' && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Label htmlFor="night-light-from" className="text-sm">
+            From
+          </Label>
+          <Input
+            id="night-light-from"
+            type="time"
+            value={from}
+            className="w-32"
+            onChange={(e) => {
+              setFrom(e.target.value);
+              if (e.target.value) save({ from: e.target.value });
+            }}
+          />
+          <Label htmlFor="night-light-to" className="text-sm">
+            to
+          </Label>
+          <Input
+            id="night-light-to"
+            type="time"
+            value={to}
+            className="w-32"
+            onChange={(e) => {
+              setTo(e.target.value);
+              if (e.target.value) save({ to: e.target.value });
+            }}
+          />
+        </div>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        {description}
+        {caption && <> {caption}.</>}
+      </p>
+
+      {setSchedule.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          Couldn’t change the schedule.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A small heading that groups a subsection within a panel (Sound, Display). */
 function SoundGroupHeading({ icon: Icon, children }: { icon: LucideIcon; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 pt-1 text-sm font-medium text-foreground">
@@ -2021,7 +2182,7 @@ function AudioStreamRow({
     setLastServer(stream.volume);
     setValue(stream.volume);
   }
-  const shown = Math.min(100, value);
+  const shown = Math.min(MAX_VOLUME, value);
   return (
     <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
       <Button
@@ -2040,18 +2201,15 @@ function AudioStreamRow({
       <span className="w-28 shrink-0 truncate text-sm" title={stream.name}>
         {stream.name}
       </span>
-      <Slider
+      <VolumeSlider
         aria-label={`${stream.name} volume`}
-        value={[stream.muted ? 0 : shown]}
-        min={0}
-        max={100}
-        step={1}
+        value={stream.muted ? 0 : shown}
         className="flex-1"
-        onValueChange={([v]) => {
+        onValueChange={(v) => {
           if (stream.muted) onMuted(false);
           setValue(v);
         }}
-        onValueCommit={([v]) => onVolume(v)}
+        onValueCommit={(v) => onVolume(v)}
       />
       <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
         {stream.muted ? 'Muted' : `${shown}%`}
@@ -2280,18 +2438,15 @@ function SoundSection() {
                 className={cn('size-6', muted && 'text-muted-foreground')}
               />
             </Button>
-            <Slider
+            <VolumeSlider
               aria-label="Output volume"
-              value={[muted ? 0 : value]}
-              min={0}
-              max={100}
-              step={1}
+              value={muted ? 0 : value}
               className="flex-1"
-              onValueChange={([v]) => {
+              onValueChange={(v) => {
                 if (muted) setMuted.mutate(false);
                 setValue(v);
               }}
-              onValueCommit={([v]) => setVolume.mutate(v)}
+              onValueCommit={(v) => setVolume.mutate(v)}
             />
             <span className="w-14 text-right text-sm tabular-nums text-muted-foreground">
               {muted ? 'Muted' : `${value}%`}
@@ -2399,22 +2554,21 @@ function SoundSection() {
 // ---------------------------------------------------------------------------
 
 /**
- * The keyboard layout native Linux apps type with (window.keyboard). Din
- * sends them physical keys, and their display servers apply this layout:
- * the OS's by default, or one picked from xkeyboard-config's list. Din's own
- * windows get characters from the system Din runs on, so they keep its
- * layout either way.
+ * The system's keyboard layout (window.keyboard), which Din's own windows and
+ * the native Linux apps it runs both type with. Picking one from
+ * xkeyboard-config's list changes the system's, where Din can (DinOS, GNOME).
  */
 function KeyboardSection() {
   const bridge = getKeyboardBridge();
   const status = useKeyboardStatus();
   const layouts = useKeyboardLayouts();
   const setLayout = useSetKeyboardLayout();
+  const restart = useRestartForKeyboardLayout();
   const [query, setQuery] = useState('');
   const selectedRef = useRef<HTMLButtonElement>(null);
 
   // While a change is in flight, show the requested choice.
-  const selected = setLayout.isPending ? setLayout.variables : status.data?.selected ?? null;
+  const selected = setLayout.isPending ? setLayout.variables : status.data?.layout ?? null;
   const selectedKey = selected ? layoutKey(selected) : null;
 
   const filtered = useMemo(() => {
@@ -2427,8 +2581,8 @@ function KeyboardSection() {
     });
   }, [layouts.data, query]);
 
-  // Bring the picked layout into view when the list first appears.
-  const showList = selectedKey !== null && Boolean(layouts.data);
+  // Bring the system's layout into view when the list first appears.
+  const showList = status.data?.canChange === true && Boolean(layouts.data);
   useEffect(() => {
     if (showList) selectedRef.current?.scrollIntoView({ block: 'nearest' });
   }, [showList]);
@@ -2447,12 +2601,12 @@ function KeyboardSection() {
   if (status.isLoading) {
     return (
       <SectionShell title="Keyboard">
-        <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3" aria-hidden>
+        <div className="flex items-center gap-3 rounded-md border bg-muted/20 p-3" aria-hidden>
+          <Skeleton className="size-4 bg-foreground/10" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-4 w-32 bg-foreground/10" />
             <Skeleton className="h-3 w-56 bg-foreground/10" />
           </div>
-          <Skeleton className="h-5 w-9 rounded-full bg-foreground/10" />
         </div>
       </SectionShell>
     );
@@ -2466,24 +2620,38 @@ function KeyboardSection() {
     );
   }
 
-  const system = status.data.system;
+  const { layout, canChange, restartNeeded } = status.data;
 
   return (
     <SectionShell title="Keyboard">
-      <SettingSwitchRow
-        id="keyboard-follow-system"
-        icon={Keyboard}
-        label="Use the system layout"
-        description={`Your system is set to ${system.name}.`}
-        checked={selected === null}
-        onCheckedChange={(checked) =>
-          // Start from the system's layout, so turning this off changes nothing
-          // until a layout is picked.
-          setLayout.mutate(checked ? null : { layout: system.layout, variant: system.variant })
-        }
-      />
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <Keyboard className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-sm text-foreground">{layout.name}</p>
+          <p className="text-xs text-muted-foreground">
+            {canChange
+              ? 'The layout everything on this computer types with.'
+              : 'Din uses your system’s layout. Change it in your desktop’s keyboard settings.'}
+          </p>
+        </div>
+      </div>
 
-      {selected !== null && (
+      {restartNeeded && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Restart Din to finish switching</p>
+            <p className="text-xs text-muted-foreground">
+              Apps already use {layout.name}; Din’s own windows will after a restart. Open apps close.
+            </p>
+          </div>
+          <Button size="sm" disabled={restart.isPending} onClick={() => restart.mutate()}>
+            {restart.isPending && <Loader2 className="size-4 motion-safe:animate-spin" />}
+            Restart Din
+          </Button>
+        </div>
+      )}
+
+      {canChange && (
         <div className="flex flex-col gap-2">
           <div className="relative">
             <Search
@@ -2568,37 +2736,425 @@ function KeyboardSection() {
         </p>
       )}
 
-      <p className="text-xs text-muted-foreground">
-        Native Linux apps type with this layout. Din's own windows use the layout
-        of the system Din runs on.
-      </p>
+      {restart.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {restart.error instanceof Error ? restart.error.message : 'Could not restart Din.'}
+        </p>
+      )}
     </SectionShell>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Date & Time
+// ---------------------------------------------------------------------------
+
+/**
+ * The system's time zone and clock, through `window.datetime` (changed on
+ * DinOS, shown elsewhere), and how Din's clocks show the time. The latter is
+ * this computer's own (AppConfig, kept local) and works in a plain browser
+ * too; the boot and lock screens follow its 12/24-hour choice
+ * (BootScreenSync).
+ */
+function DateTimeSection() {
+  const bridge = getDateTimeBridge();
+
+  return (
+    <SectionShell title="Date & Time">
+      <DateTimeNow />
+      {bridge ? (
+        <SystemDateTime />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Din uses this computer’s time zone,{' '}
+          {describeZone(Intl.DateTimeFormat().resolvedOptions().timeZone).city}. Setting the
+          time and time zone needs the Din desktop shell.
+        </p>
+      )}
+      <ClockOptions />
+    </SectionShell>
+  );
+}
+
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return <h3 className="mt-2 text-sm font-medium text-muted-foreground">{children}</h3>;
+}
+
+/** The time and date right now. Its own component so only it re-renders every second. */
+function DateTimeNow() {
+  const now = useClock();
+  const { config } = useAppContext();
+
+  return (
+    <div className="flex items-center gap-4 rounded-xl border bg-muted/20 p-4">
+      <Clock className="size-8 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0">
+        <p className="text-2xl font-semibold tabular-nums text-foreground">
+          {now.toLocaleTimeString([], timeFormatOptions(config.clockFormat, true))}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SystemDateTime() {
+  const status = useDateTimeStatus();
+  const setAutomatic = useSetAutomaticTime();
+
+  if (status.isLoading) {
+    return (
+      <div className="flex flex-col gap-2" aria-hidden>
+        <Skeleton className="h-16 w-full bg-foreground/10" />
+        <Skeleton className="h-16 w-full bg-foreground/10" />
+      </div>
+    );
+  }
+
+  if (status.isError || !status.data) {
+    return <FallbackCard>Could not read the date and time.</FallbackCard>;
+  }
+
+  const { timeZone, automatic, synchronized, canChange, canAutomatic } = status.data;
+  // While a change is in flight, show the requested choice.
+  const isAutomatic = setAutomatic.isPending ? setAutomatic.variables : automatic;
+
+  return (
+    <>
+      <SubHeading>Time</SubHeading>
+      <div className="flex flex-col gap-2">
+        {isAutomatic !== null && (
+          <SettingSwitchRow
+            id="automatic-time"
+            icon={Globe}
+            label="Set time automatically"
+            description={
+              isAutomatic
+                ? synchronized
+                  ? 'Kept in step with internet time servers.'
+                  : 'Waiting to reach an internet time server.'
+                : 'The clock keeps the time you set.'
+            }
+            checked={isAutomatic}
+            disabled={!canAutomatic || setAutomatic.isPending}
+            onCheckedChange={(checked) => setAutomatic.mutate(checked)}
+          />
+        )}
+        {canChange && isAutomatic === false && <ManualTimeForm />}
+        {!canChange && (
+          <p className="text-xs text-muted-foreground">
+            Din uses your system’s date and time. Change them in your desktop’s settings.
+          </p>
+        )}
+        {setAutomatic.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            {setAutomatic.error instanceof Error
+              ? setAutomatic.error.message
+              : 'Could not change how the time is set.'}
+          </p>
+        )}
+      </div>
+
+      <SubHeading>Time zone</SubHeading>
+      <TimeZonePicker current={timeZone} canChange={canChange} />
+    </>
+  );
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Setting the clock by hand, while it isn't set from the network. */
+function ManualTimeForm() {
+  const setTime = useSetTime();
+  const [date, setDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  });
+  const [time, setTimeOfDay] = useState(() => {
+    const now = new Date();
+    return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  });
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(date) && /^\d{2}:\d{2}(:\d{2})?$/.test(time);
+
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid) setTime.mutate(`${date} ${time.length === 5 ? `${time}:00` : time}`);
+      }}
+    >
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="manual-date" className="text-xs text-muted-foreground">Date</Label>
+          <Input
+            id="manual-date"
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+            className="w-44"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="manual-time" className="text-xs text-muted-foreground">Time</Label>
+          <Input
+            id="manual-time"
+            type="time"
+            value={time}
+            onChange={(event) => setTimeOfDay(event.target.value)}
+            className="w-36"
+          />
+        </div>
+        <Button type="submit" size="sm" className="h-9" disabled={!valid || setTime.isPending}>
+          {setTime.isPending && <Loader2 className="size-4 motion-safe:animate-spin" />}
+          Set date & time
+        </Button>
+      </div>
+      {setTime.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {setTime.error instanceof Error ? setTime.error.message : 'Could not set the date and time.'}
+        </p>
+      )}
+    </form>
+  );
+}
+
+function TimeZonePicker({ current, canChange }: { current: string; canChange: boolean }) {
+  const zones = useTimeZones();
+  const setZone = useSetTimeZone();
+  const [query, setQuery] = useState('');
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  // While a change is in flight, show the requested choice.
+  const selected = setZone.isPending ? setZone.variables : current;
+  const { city, region } = describeZone(current);
+  const longName = zoneLongName(current);
+  const offset = zoneOffset(current);
+
+  const entries = useMemo(() => {
+    const at = new Date();
+    return (zones.data ?? []).map((zone) => ({ zone, ...describeZone(zone), offset: zoneOffset(zone, at) }));
+  }, [zones.data]);
+
+  const filtered = useMemo(() => {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return entries;
+    return entries.filter((entry) => {
+      const haystack = `${entry.city} ${entry.region} ${entry.zone} ${entry.offset}`.toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    });
+  }, [entries, query]);
+
+  // Bring the system's zone into view when the list first appears.
+  const showList = canChange && entries.length > 0;
+  useEffect(() => {
+    if (showList) selectedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [showList]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <Globe className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-sm text-foreground">
+            {city}
+            {region && <span className="text-muted-foreground"> · {region}</span>}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {[longName, offset].filter(Boolean).join(', ')}
+          </p>
+        </div>
+      </div>
+
+      {canChange && (
+        <>
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search cities and regions"
+              aria-label="Search time zones"
+              className="pl-8"
+            />
+          </div>
+
+          {zones.isLoading ? (
+            <div className="flex flex-col gap-1" aria-hidden>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-9 w-full bg-foreground/10" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <FallbackCard>
+              {entries.length ? 'No time zones match your search.' : 'No time zones were found.'}
+            </FallbackCard>
+          ) : (
+            <div
+              role="radiogroup"
+              aria-label="Time zone"
+              className="flex max-h-80 flex-col gap-0.5 overflow-y-auto rounded-md border bg-muted/20 p-1"
+            >
+              {filtered.map((entry) => {
+                const active = entry.zone === selected;
+                return (
+                  <button
+                    key={entry.zone}
+                    ref={active ? selectedRef : undefined}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => {
+                      if (!active) setZone.mutate(entry.zone);
+                    }}
+                    className={cn(
+                      'flex items-center gap-3 rounded-md px-2 py-1.5 text-left',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      active ? 'bg-primary/10' : 'hover:bg-foreground/5',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex size-4 shrink-0 items-center justify-center rounded-full border',
+                        active
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-muted-foreground/50',
+                      )}
+                      aria-hidden
+                    >
+                      {active && <Check className="size-3" />}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                      {entry.city}
+                      {entry.region && <span className="text-muted-foreground"> · {entry.region}</span>}
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{entry.offset}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {setZone.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {setZone.error instanceof Error ? setZone.error.message : 'Could not change the time zone.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A time of day to show each clock format with. */
+const SAMPLE_TIME = new Date(2000, 0, 1, 13, 30);
+
+/** How Din's clocks show the time. */
+function ClockOptions() {
+  const { config, updateConfig } = useAppContext();
+  const formats: { value: ClockFormat; name: string }[] = [
+    { value: 'auto', name: 'Automatic' },
+    { value: '12', name: '12-hour' },
+    { value: '24', name: '24-hour' },
+  ];
+
+  return (
+    <>
+      <SubHeading>Clock</SubHeading>
+      <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Clock format">
+          {formats.map((option) => {
+            const active = config.clockFormat === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => updateConfig((current) => ({ ...current, clockFormat: option.value }))}
+                className={cn(
+                  'flex flex-col items-center gap-1 rounded-xl border p-3',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  active
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+                )}
+              >
+                <span className="text-lg font-semibold tabular-nums">
+                  {SAMPLE_TIME.toLocaleTimeString([], timeFormatOptions(option.value))}
+                </span>
+                <span className="text-xs">{option.name}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Automatic follows your language’s custom. The menu bar, boot screen, and lock screen all use it.
+        </p>
+        <SettingSwitchRow
+          id="clock-show-date"
+          label="Show the date in the menu bar"
+          description="The weekday and date, beside the time."
+          checked={config.clockShowDate}
+          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, clockShowDate: checked }))}
+        />
+        <SettingSwitchRow
+          id="clock-show-seconds"
+          label="Show seconds in the menu bar"
+          description="The clock ticks every second."
+          checked={config.clockShowSeconds}
+          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, clockShowSeconds: checked }))}
+        />
+      </div>
+    </>
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // Notifications
 // ---------------------------------------------------------------------------
 
 /**
- * Notification preferences: which Nostr interactions (mentions, comments,
- * reposts, reactions, zaps) surface as desktop notifications, whether to gate
- * them to people you follow, and whether to show the transient on-screen
- * popup. Everything is stored through Din's encrypted app-data layer, so it
- * roams across devices. The menu-bar bell and the on-screen display read the
- * same settings.
+ * Notification preferences. Do Not Disturb applies to every notification and
+ * stays on this computer. The rest is about Nostr: which interactions
+ * (mentions, comments, reposts, reactions, zaps) surface as notifications,
+ * whether to gate them to people you follow, and whether they pop up. Those
+ * are stored through Din's encrypted app-data layer, so they roam across
+ * devices. The notification center and the popups read the same settings.
  */
 function NotificationsSection() {
   const { user } = useCurrentUser();
   const { preferences, setPreferences } = useNotificationSettings();
+  const { doNotDisturb } = useNotificationCenter();
+
+  const dndRow = (
+    <SettingSwitchRow
+      id="notif-dnd"
+      icon={BellOff}
+      label="Do Not Disturb"
+      description="Keep notifications in the list without popping them up. Urgent ones still show."
+      checked={doNotDisturb}
+      onCheckedChange={setDoNotDisturb}
+    />
+  );
 
   if (!user) {
     return (
       <SectionShell title="Notifications">
-        <FallbackCard icon={Bell}>
-          Log in with your Nostr account to receive notifications when people
-          mention, react to, repost, comment on, or zap you.
-        </FallbackCard>
+        <div className="flex flex-col gap-4">
+          {dndRow}
+          <FallbackCard icon={Bell}>
+            Log in with your Nostr account to also be notified when people
+            mention, react to, repost, comment on, or zap you.
+          </FallbackCard>
+        </div>
       </SectionShell>
     );
   }
@@ -2606,13 +3162,14 @@ function NotificationsSection() {
   return (
     <SectionShell title="Notifications">
       <div className="flex flex-col gap-4">
-        <div>
-          <h3 className="mb-2 text-sm font-medium text-foreground">Delivery</h3>
+        {dndRow}
+        <div className="border-t border-border/60 pt-4">
+          <h3 className="mb-2 text-sm font-medium text-foreground">Nostr</h3>
           <div className="flex flex-col gap-2">
             <SettingSwitchRow
               id="notif-osd"
               label="On-screen alerts"
-              description="Show a popup in the corner when a new notification arrives."
+              description="Pop up new mentions, reactions, reposts, comments and zaps in the corner."
               checked={preferences.osd}
               onCheckedChange={(checked) => setPreferences({ osd: checked })}
             />
@@ -2805,8 +3362,135 @@ function AppearanceSection() {
       </div>
 
       <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor</p>
-      <CursorThemePicker />
+      <div className="flex flex-col gap-3">
+        {getSystemCursorBridge() && <SystemCursorPicker />}
+        <CursorThemePicker />
+      </div>
     </SectionShell>
+  );
+}
+
+const CURSOR_SIZE_NAMES: Record<number, string> = {
+  24: 'Default',
+  32: 'Medium',
+  40: 'Large',
+  48: 'Larger',
+  64: 'Extra large',
+  96: 'Largest',
+};
+
+/**
+ * The system pointer: its XCursor theme and size, which apply everywhere
+ * (Din, web pages and native apps) at once. See electron/cursor.mts.
+ */
+function SystemCursorPicker() {
+  const status = useSystemCursorStatus();
+  const themes = useSystemCursorThemes();
+  const setCursor = useSetSystemCursor();
+
+  if (status.isLoading || themes.isLoading) {
+    return <Skeleton className="h-40 w-full bg-foreground/10" aria-hidden />;
+  }
+  if (status.isError || !status.data || !themes.data) {
+    return <FallbackCard>Could not read the cursor settings.</FallbackCard>;
+  }
+
+  const { canChange, sizes } = status.data;
+  // While a change is in flight, show the requested choice.
+  const { theme, size } = setCursor.isPending ? setCursor.variables : status.data;
+  const choose = (choice: { theme: string; size: number }) => {
+    if (choice.theme !== theme || choice.size !== size) setCursor.mutate(choice);
+  };
+
+  return (
+    <div className="flex flex-col gap-4 rounded-md border bg-muted/20 p-3">
+      <div>
+        <p className="mb-2 text-sm text-foreground">Style</p>
+        {themes.data.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No cursor themes are installed.</p>
+        ) : (
+          <div
+            className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-2"
+            role="radiogroup"
+            aria-label="Cursor style"
+          >
+            {themes.data.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={theme === option.id}
+                disabled={!canChange}
+                onClick={() => choose({ theme: option.id, size })}
+                className={cn(
+                  'flex flex-col items-start gap-2 rounded-xl border p-3 text-left',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'disabled:cursor-not-allowed disabled:opacity-60',
+                  theme === option.id
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
+                )}
+              >
+                <SystemCursorPreview id={option.id} />
+                <span className="w-full truncate text-sm">{option.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-2 text-sm text-foreground">Size</p>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Cursor size">
+          {sizes.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={size === option}
+              disabled={!canChange}
+              onClick={() => choose({ theme, size: option })}
+              className={cn(
+                'rounded-lg border px-3 py-1.5 text-sm',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'disabled:cursor-not-allowed disabled:opacity-60',
+                size === option
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
+              )}
+            >
+              {CURSOR_SIZE_NAMES[option] ?? `${option} px`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!canChange && (
+        <p className="text-xs text-muted-foreground">
+          Din uses your system’s cursor. Change it in your desktop’s settings.
+        </p>
+      )}
+      {setCursor.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {setCursor.error instanceof Error ? setCursor.error.message : 'Could not change the cursor.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A theme's arrow, hand, I-beam and resize cursors, side by side. */
+function SystemCursorPreview({ id }: { id: string }) {
+  const preview = useSystemCursorPreview(id);
+
+  return (
+    <div className="flex h-10 items-center gap-2" aria-hidden>
+      {preview.data
+        ? preview.data.map(({ role, src }) => (
+            <img key={role} src={src} alt="" className="size-8 object-contain" />
+          ))
+        : <Skeleton className="h-8 w-36 bg-foreground/10" />}
+    </div>
   );
 }
 
@@ -2876,8 +3560,8 @@ function CursorThemePicker() {
             <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
               .CurXPTheme
             </code>{' '}
-            file to replace the system cursor. Animated cursors play their full
-            animation.
+            file to use over Din’s own windows, in place of the style above.
+            Animated cursors play their full animation.
           </p>
         </div>
         <MousePointer2
@@ -3007,6 +3691,264 @@ function DevelopersSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Password
+// ---------------------------------------------------------------------------
+
+/**
+ * The computer's password (window.lock): one password that unlocks the disk
+ * at boot, the lock screen, sudo, and the Nostr keys in nostrd, so it changes
+ * everywhere at once. Only a computer that has one (an encrypted DinOS
+ * install) shows the form.
+ */
+function PasswordSection() {
+  const bridge = getLockBridge();
+  const { data: available, isLoading } = useQuery({
+    queryKey: ['lock', 'available'],
+    queryFn: () => bridge?.available() ?? false,
+    enabled: !!bridge,
+    staleTime: 60_000,
+  });
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+
+  if (!bridge || (!isLoading && !available)) {
+    return (
+      <SectionShell title="Password">
+        <FallbackCard icon={KeyRound}>
+          {bridge
+            ? 'This computer has no password. DinOS installed with an encrypted disk has one, which unlocks the disk, the lock screen and your Nostr keys.'
+            : 'The computer’s password is for DinOS. Elsewhere, it’s set where the system’s own settings are.'}
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const tooShort = next.length > 0 && next.length < 8;
+  const notAscii = /[^\x20-\x7e]/.test(next);
+  const mismatch = confirm.length > 0 && confirm !== next;
+  const ready = current.length > 0 && next.length >= 8 && !notAscii && confirm === next && !saving;
+
+  const save = () => {
+    setSaving(true);
+    setError(null);
+    setDone(false);
+    bridge
+      .changePassword(current, next)
+      .then(() => {
+        setCurrent('');
+        setNext('');
+        setConfirm('');
+        setDone(true);
+      })
+      .catch((e: unknown) => setError(cleanLockError(e)))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <SectionShell title="Password">
+      <p className="text-sm text-muted-foreground">
+        One password unlocks this computer: the disk when it starts, the lock screen, and the
+        Nostr accounts kept on it. Changing it here changes it everywhere.
+      </p>
+      <form
+        className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready) save();
+        }}
+      >
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="password-current">Current password</Label>
+          <Input
+            id="password-current"
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="password-new">New password</Label>
+          <Input
+            id="password-new"
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            aria-invalid={tooShort || notAscii || undefined}
+            aria-describedby="password-new-hint"
+            onChange={(e) => setNext(e.target.value)}
+          />
+          <p id="password-new-hint" className="text-xs text-muted-foreground">
+            {notAscii
+              ? 'Use only letters, numbers, spaces and symbols on a standard keyboard: it’s typed before anything else is running.'
+              : 'At least 8 characters.'}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="password-confirm">Type it again</Label>
+          <Input
+            id="password-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            aria-invalid={mismatch || undefined}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+          {mismatch && <p className="text-xs text-destructive">The passwords don’t match.</p>}
+        </div>
+        {error && (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+        {done && (
+          <p className="text-sm text-foreground" role="status">
+            The password is changed.
+          </p>
+        )}
+        <div className="flex justify-end">
+          <Button type="submit" size="sm" disabled={!ready}>
+            {saving && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
+            Change password
+          </Button>
+        </div>
+      </form>
+    </SectionShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// About
+// ---------------------------------------------------------------------------
+
+/**
+ * Din's logo and DinOS's version, and its updates (window.updater). The
+ * system looks for them by itself and stages what it finds for the next boot,
+ * so this mostly reports, and offers the restart.
+ */
+function AboutSection() {
+  const bridge = getUpdaterBridge();
+  const state = useUpdateState();
+  const dinos = !!bridge && state?.available !== false;
+
+  return (
+    <SectionShell title="About">
+      <div className="flex flex-col items-center gap-2 rounded-xl border border-border/60 bg-background/40 px-6 py-8 text-center">
+        <img src="/din-logo.svg" alt="Din" className="h-24 w-auto select-none" draggable={false} />
+        {dinos && !state ? (
+          <Skeleton className="h-4 w-24 bg-foreground/10" aria-hidden />
+        ) : (
+          <p className="text-sm font-medium text-foreground">
+            {dinos ? `DinOS ${state?.current ?? '(unknown version)'}` : 'Din'}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">A social computer.</p>
+      </div>
+
+      <SubHeading>Updates</SubHeading>
+      {!dinos ? (
+        <FallbackCard icon={CircleArrowUp}>
+          Updates are for DinOS. Elsewhere, Din is updated along with the system
+          it runs on.
+        </FallbackCard>
+      ) : !state ? (
+        <div className="space-y-2 rounded-xl border border-border/60 p-4" aria-hidden>
+          <Skeleton className="h-4 w-32 bg-foreground/10" />
+          <Skeleton className="h-3 w-56 bg-foreground/10" />
+        </div>
+      ) : state.live ? (
+        <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+          Running from a USB stick. Install DinOS to get updates.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Updates are downloaded by themselves and installed when you restart.
+          </p>
+          <UpdateStatus state={state} />
+        </>
+      )}
+    </SectionShell>
+  );
+}
+
+function UpdateStatus({ state }: { state: UpdateState }) {
+  const [error, setError] = useState<string | null>(null);
+  const [rebooting, setRebooting] = useState(false);
+  const busy = state.phase === 'checking' || state.phase === 'updating';
+
+  const check = () => {
+    setError(null);
+    getUpdaterBridge()?.check().catch((e: unknown) => setError(cleanInstallerError(e)));
+  };
+
+  const reboot = () => {
+    setRebooting(true);
+    setError(null);
+    getUpdaterBridge()
+      ?.reboot()
+      .catch((e: unknown) => {
+        setRebooting(false);
+        setError(cleanInstallerError(e));
+      });
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      {state.phase === 'updating' && state.updatingTo ? (
+        <div className="flex flex-col gap-2 rounded-xl border border-border/60 p-4">
+          <div className="flex items-center gap-2 text-sm text-foreground">
+            <Loader2 className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">
+              {state.step ? UPDATE_STEP_LABELS[state.step] : 'Getting'} DinOS {state.updatingTo}
+            </span>
+            {state.step && state.step !== 'install' && (
+              <span className="tabular-nums text-muted-foreground">{state.percent}%</span>
+            )}
+          </div>
+          {state.step && state.step !== 'install' && (
+            <Progress value={state.percent} aria-label="Update progress" />
+          )}
+        </div>
+      ) : state.staged ? (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">DinOS {state.staged} is ready</p>
+            <p className="text-xs text-muted-foreground">Restart to finish updating.</p>
+          </div>
+          <Button size="sm" disabled={rebooting} onClick={reboot}>
+            {rebooting && <Loader2 className="size-4 motion-safe:animate-spin" />}
+            Restart now
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <p className="min-w-0 text-xs text-muted-foreground">
+          {state.phase === 'checking'
+            ? 'Looking for updates…'
+            : state.phase === 'failed'
+              ? state.error ?? 'The last check didn’t finish.'
+              : state.checkedAt
+                ? `${state.staged ? 'Checked' : 'Up to date. Checked'} ${new Date(state.checkedAt).toLocaleString()}.`
+                : 'Not checked yet.'}
+        </p>
+        <Button variant="outline" size="sm" disabled={busy} onClick={check}>
+          <RotateCw className={cn('size-4', state.phase === 'checking' && 'motion-safe:animate-spin')} aria-hidden />
+          Check now
+        </Button>
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Shared layout bits
 // ---------------------------------------------------------------------------
 
@@ -3037,6 +3979,7 @@ function SettingSwitchRow({
   label,
   description,
   checked,
+  disabled,
   onCheckedChange,
 }: {
   id: string;
@@ -3044,6 +3987,7 @@ function SettingSwitchRow({
   label: string;
   description: string;
   checked: boolean;
+  disabled?: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
@@ -3057,7 +4001,7 @@ function SettingSwitchRow({
           <p className="text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </div>
   );
 }

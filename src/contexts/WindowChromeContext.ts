@@ -11,17 +11,15 @@ export interface ChromePoint {
 
 /**
  * Lets an app that draws its own title bar stand in for the window's chrome
- * (a native app with client-side decorations): it can leave Din's title bar
- * off, and turn a drag on its own title bar or edges into the same move or
- * resize gesture Din's chrome runs.
+ * (a native app with client-side decorations, in a frameless window): it
+ * turns a drag on its own title bar or edges into the same move or resize
+ * gesture Din's chrome runs.
  *
  * A gesture is begun with the pointer where it is, then driven by the app,
  * which already holds the pointer: it feeds every move to `gestureMove` and
  * the release to `gestureEnd`.
  */
 export interface WindowChrome {
-  /** Leave Din's title bar off. */
-  setFrameless(frameless: boolean): void;
   /** Start moving the window, as a title-bar drag would. */
   beginMove(point: ChromePoint): boolean;
   /**
@@ -34,7 +32,6 @@ export interface WindowChrome {
 }
 
 const NO_CHROME: WindowChrome = {
-  setFrameless: () => {},
   beginMove: () => false,
   beginResize: () => false,
   gestureMove: () => {},

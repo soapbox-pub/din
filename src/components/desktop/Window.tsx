@@ -10,6 +10,8 @@ import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
 import { getScreenshotBridge } from '@/lib/screenshot';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
+import { WindowTitleContext } from '@/contexts/WindowTitleContext';
+import { WindowIconContext } from '@/contexts/WindowIconContext';
 import { WindowFocusContext } from '@/contexts/WindowFocusContext';
 import {
   WindowChromeContext,
@@ -18,6 +20,7 @@ import {
   type WindowChrome,
 } from '@/contexts/WindowChromeContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
+import { useSuperHeld } from '@/lib/superKey';
 import {
   createModel,
   grabModel,
@@ -34,24 +37,80 @@ import {
 import { useAppContext } from '@/hooks/useAppContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { MIN_HEIGHT, MIN_WIDTH, type WindowState } from '@/hooks/useWindows';
+import { useWorkAreas } from '@/contexts/MonitorsContext';
+import { MIN_HEIGHT, MIN_WIDTH, windowRect, type WindowState } from '@/hooks/useWindows';
+import { areaFor, areaNear, hasNeighbor, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
 
 /**
- * Dragging with the pointer within this many pixels of the workspace's top
- * edge arms the snap-to-maximize (drop to maximize, GNOME/Windows style).
+ * Dragging with the pointer within this many pixels of a monitor's top edge
+ * arms the snap-to-maximize (drop to maximize, GNOME/Windows style).
  */
 const SNAP_TOP_PX = 6;
 
 /**
- * Dragging with the pointer within this many pixels of the workspace's left
- * or right edge arms a half-workspace tile (drop to snap the window to that
+ * Dragging with the pointer within this many pixels of a monitor's left or
+ * right edge arms a half-monitor tile (drop to snap the window to that
  * half, GNOME/Windows style). More generous than the top zone: you shove the
- * window into the side rather than clip a thin strip.
+ * window into the side rather than clip a thin strip. Edges another monitor
+ * continues past don't snap - the window is on its way over there.
  */
 const SNAP_EDGE_PX = 24;
 
 /** Which edge a title-bar drag is currently snapping to, or null. */
 type SnapZone = 'top' | 'left' | 'right' | null;
+
+/** The snap a drag would drop into: the zone and the monitor it's on. */
+interface SnapTarget {
+  zone: Exclude<SnapZone, null>;
+  area: WorkArea;
+}
+
+/** The monitor a pointer is on (or nearest), and the pointer clamped onto it. */
+function pointerOn(areas: WorkArea[], px: number, py: number): { area: WorkArea; x: number; y: number } {
+  const area = areaNear(areas, px, py);
+  const { bounds: b } = area;
+  return {
+    area,
+    x: Math.min(Math.max(px, b.x), b.x + b.width - 1),
+    y: Math.min(Math.max(py, b.y), b.y + b.height - 1),
+  };
+}
+
+/** The snap zone under a pointer (workspace coordinates), if any. */
+function snapTargetAt(areas: WorkArea[], px: number, py: number): SnapTarget | null {
+  const { area, x, y } = pointerOn(areas, px, py);
+  // Top wins its (thinner) corner overlap. On the primary monitor the
+  // pointer can be above the work area, over the menu bar: that's the top.
+  if (y - area.y <= SNAP_TOP_PX && !hasNeighbor(areas, area, 'top', x)) return { zone: 'top', area };
+  if (x - area.x <= SNAP_EDGE_PX && !hasNeighbor(areas, area, 'left', y)) return { zone: 'left', area };
+  if (area.x + area.width - x <= SNAP_EDGE_PX && !hasNeighbor(areas, area, 'right', y)) {
+    return { zone: 'right', area };
+  }
+  return null;
+}
+
+/**
+ * A monitor's top edge with another monitor above it doesn't stop the
+ * pointer, so its maximize zone arms only once the pointer rests just below
+ * it this long. Passing straight through carries the window up there.
+ */
+const SHARED_TOP_DWELL_MS = 350;
+
+/** The monitor whose shared top edge the pointer rides, if any. */
+function sharedTopAt(areas: WorkArea[], px: number, py: number): WorkArea | null {
+  const { area, x, y } = pointerOn(areas, px, py);
+  if (y - area.y > SNAP_TOP_PX || !hasNeighbor(areas, area, 'top', x)) return null;
+  return area;
+}
+
+/**
+ * The highest a window's top edge may go with the pointer at a spot: the top
+ * of the monitor it's on, or nearest. Never the monitor the drag began on,
+ * which would yank the window back there while the pointer stays put.
+ */
+function topLimit(areas: WorkArea[], x: number, y: number): number {
+  return areaNear(areas, x, y).y;
+}
 
 /**
  * Dragging a maximized window's title bar farther than this tears it away:
@@ -60,16 +119,23 @@ type SnapZone = 'top' | 'left' | 'right' | null;
  */
 const TEAR_AWAY_PX = 8;
 
-/** The eight resize handles: edges + corners. */
+/** Gap between the snap preview and the edges of the area it previews. */
+const SNAP_HINT_INSET = 6;
+
+/**
+ * The eight resize handles: edges + corners. They straddle the window's
+ * edge, mostly outside it, so there's a grip of 10px without covering much
+ * of the title bar or the app; corners are larger, being the usual grip.
+ */
 const RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
-  { dir: 'n', className: 'top-0 inset-x-3 h-1.5 cursor-ns-resize' },
-  { dir: 's', className: 'bottom-0 inset-x-3 h-1.5 cursor-ns-resize' },
-  { dir: 'w', className: 'left-0 inset-y-3 w-1.5 cursor-ew-resize' },
-  { dir: 'e', className: 'right-0 inset-y-3 w-1.5 cursor-ew-resize' },
-  { dir: 'nw', className: 'top-0 left-0 size-3 cursor-nwse-resize' },
-  { dir: 'ne', className: 'top-0 right-0 size-3 cursor-nesw-resize' },
-  { dir: 'sw', className: 'bottom-0 left-0 size-3 cursor-nesw-resize' },
-  { dir: 'se', className: 'bottom-0 right-0 size-3 cursor-nwse-resize' },
+  { dir: 'n', className: '-top-1.5 inset-x-3 h-2.5 cursor-ns-resize' },
+  { dir: 's', className: '-bottom-1.5 inset-x-3 h-2.5 cursor-ns-resize' },
+  { dir: 'w', className: '-left-1.5 inset-y-3 w-2.5 cursor-ew-resize' },
+  { dir: 'e', className: '-right-1.5 inset-y-3 w-2.5 cursor-ew-resize' },
+  { dir: 'nw', className: '-top-1.5 -left-1.5 size-4.5 cursor-nwse-resize' },
+  { dir: 'ne', className: '-top-1.5 -right-1.5 size-4.5 cursor-nesw-resize' },
+  { dir: 'sw', className: '-bottom-1.5 -left-1.5 size-4.5 cursor-nesw-resize' },
+  { dir: 'se', className: '-bottom-1.5 -right-1.5 size-4.5 cursor-nwse-resize' },
 ];
 
 /**
@@ -152,11 +218,17 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object or `isTop` changes.
-  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize } =
+  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon } =
     useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
+  const areas = useWorkAreas();
+  // For gesture handlers, which shouldn't re-bind whenever monitors change.
+  const areasRef = useRef(areas);
+  useLayoutEffect(() => {
+    areasRef.current = areas;
+  });
   const sectionRef = useRef<HTMLElement>(null);
   // Drag state: pointer origin, window origin, and the latest position (so
   // pointer-up/cancel can commit without needing event coordinates). The
@@ -169,14 +241,15 @@ export const Window = memo(function Window({
     wy: number;
     x: number;
     y: number;
-    /** Workspace origin/width in viewport coordinates, cached at grab. */
+    /** Workspace origin in viewport coordinates, cached at grab. */
     wsLeft: number;
     wsTop: number;
-    wsWidth: number;
     /** Armed tear-away from maximized/tiled: the size to restore to, or null. */
     tearAway: { width: number; height: number } | null;
-    /** Which snap zone (top/left/right) the pointer currently rides, or null. */
-    snap: SnapZone;
+    /** Which snap zone the pointer currently rides, and on which monitor. */
+    snap: SnapTarget | null;
+    /** The shared top edge the pointer is resting under, and whether it's armed yet. */
+    dwell?: { areaId: string; timer: number; armed: boolean };
   } | null>(null);
   const resizeState = useRef<{
     dir: ResizeDir;
@@ -186,6 +259,8 @@ export const Window = memo(function Window({
     y: number;
     width: number;
     height: number;
+    /** The highest the top edge may go (its monitor's work area top). */
+    minTop: number;
     cur: { x: number; y: number; width: number; height: number };
   } | null>(null);
   const wobblyRef = useRef<WobblyDrag | null>(null);
@@ -217,10 +292,60 @@ export const Window = memo(function Window({
   // from an untrusted page, so it's strictly normalized before styling.
   const [accentRaw, setAccent] = useState<string | null>(null);
 
-  // Which snap zone (if any) the drag pointer is riding: drives the "drop to
-  // maximize"/"drop to tile" preview overlay. Only flips when a zone boundary
-  // is crossed, so pointer moves still avoid React state churn.
-  const [snapHint, setSnapHint] = useState<SnapZone>(null);
+  // What the hosted app says the window is showing; kept in the window
+  // manager, where the Dock and the switcher read it.
+  const publishTitle = useCallback((title: string | null) => setTitle(win.id, title), [setTitle, win.id]);
+  const title = win.title ?? app?.name ?? win.appId;
+  const publishIcon = useCallback((icon: string | null) => setIcon(win.id, icon), [setIcon, win.id]);
+
+  // The rect the drag would snap into (if any): drives the "drop to
+  // maximize"/"drop to tile" preview overlay. Only changes when a zone
+  // boundary is crossed, so pointer moves still avoid React state churn.
+  const [snapHint, setSnapHint] = useState<Rect | null>(null);
+
+  // Holding Super covers the whole window with a grab layer, so it can be
+  // dragged from anywhere (web content and native apps included). The layer
+  // stays up until a drag it started ends, even if Super is let go first,
+  // since it holds that drag's pointer capture.
+  const superHeld = useSuperHeld();
+  const [superDragging, setSuperDragging] = useState(false);
+
+  // The element in this window that last held focus. Coming back on top -
+  // Alt+Tab, a dock click, restoring from minimized - gives it focus again,
+  // the way native windows get keyboard focus back when raised, so typing
+  // and arrow keys pick up where they left off. A focused <webview> guest
+  // registers through GuestInputHost's focusin.
+  const lastFocused = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!isTop) return;
+    const section = sectionRef.current;
+    const el = lastFocused.current;
+    if (!section || !el?.isConnected || section.contains(document.activeElement)) return;
+    el.focus({ preventScroll: true });
+  }, [isTop]);
+
+  // A click into an <iframe> (the browser's plain-web fallback) goes to the
+  // frame's document, so neither pointerdown nor focusin reaches the handlers
+  // below. What this document does see is losing focus to the frame: `blur`
+  // on the window, with the frame left as the active element (checked a task
+  // later, since not every browser has updated activeElement during blur).
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onBlur = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const active = document.activeElement;
+        if (!(active instanceof HTMLIFrameElement) || !sectionRef.current?.contains(active)) return;
+        lastFocused.current = active;
+        focus(win.id);
+      });
+    };
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('blur', onBlur);
+      clearTimeout(timer);
+    };
+  }, [focus, win.id]);
 
   /**
    * Put the window into "cheap to move" mode for the duration of a gesture.
@@ -280,7 +405,8 @@ export const Window = memo(function Window({
       if (commit) {
         const rest = modelTopLeft(st.model);
         const x = Math.round(rest.x);
-        const y = Math.max(0, Math.round(rest.y));
+        const area = areaFor(areasRef.current, { ...st.layout, x, y: rest.y });
+        const y = Math.max(area.y, Math.round(rest.y));
         if (el) {
           el.style.left = `${x}px`;
           el.style.top = `${y}px`;
@@ -332,7 +458,7 @@ export const Window = memo(function Window({
   // instead of blinking (see src/lib/genie.ts). The window stays mounted
   // either way. Watching the flag here (rather than wrapping the
   // minimize/focus actions) covers every trigger: title-bar button, dock
-  // tile clicks, and the dock's window picker.
+  // tile clicks and scrolls.
   //
   // Inside the Electron shell the warp runs on a *bitmap snapshot* of the
   // window, not the live element: the section wraps a <webview>/WebGL guest
@@ -586,7 +712,6 @@ export const Window = memo(function Window({
       const ws = sectionRef.current?.parentElement?.getBoundingClientRect();
       const wsLeft = ws?.left ?? 0;
       const wsTop = ws?.top ?? 0;
-      const wsWidth = ws?.width ?? window.innerWidth;
       if (win.maximized || win.snapped) {
         // Arm a tear-away: nothing moves yet - once the pointer travels past
         // TEAR_AWAY_PX (see onPointerMove), the window un-maximizes/un-tiles
@@ -606,7 +731,6 @@ export const Window = memo(function Window({
           y: 0,
           wsLeft,
           wsTop,
-          wsWidth,
           tearAway: { width: restore.width, height: restore.height },
           snap: null,
         };
@@ -621,7 +745,6 @@ export const Window = memo(function Window({
         y: win.y,
         wsLeft,
         wsTop,
-        wsWidth,
         tearAway: null,
         snap: null,
       };
@@ -677,6 +800,9 @@ export const Window = memo(function Window({
       // here would swallow their click, so bail before setPointerCapture.
       const target = e.target as HTMLElement;
       if (target.closest('button, [role="tab"], [data-window-no-drag]')) return;
+      // Presses in menus the title bar's content portals elsewhere (a tab's
+      // context menu) bubble here through React, but aren't on the title bar.
+      if (!(e.currentTarget as HTMLElement).contains(target)) return;
       startDrag(e);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
@@ -689,20 +815,18 @@ export const Window = memo(function Window({
       const el = sectionRef.current;
       if (!s || !el) return;
 
+      const areas = areasRef.current;
+      const px = e.clientX - s.wsLeft;
+      const py = e.clientY - s.wsTop;
+
       if (s.tearAway) {
         // Maximized window being dragged: past the threshold, restore it
         // under the cursor (horizontally proportional, like Windows/GNOME)
         // and continue as a normal drag.
         if (Math.hypot(e.clientX - s.px, e.clientY - s.py) < TEAR_AWAY_PX) return;
         const { width, height } = s.tearAway;
-        const fraction = s.wsWidth > 0
-          ? Math.min(Math.max((e.clientX - s.wsLeft) / s.wsWidth, 0), 1)
-          : 0.5;
-        const x = Math.round(e.clientX - s.wsLeft - width * fraction);
-        // Keep the grab point's offset within the title bar (window top was 0).
-        const y = Math.max(0, e.clientY - s.py);
         // The rect the window is painted at right now (the maximized/tiled
-        // CSS layout, in pixels) - measured before the style writes below
+        // layout, in pixels) - measured before the style writes below
         // replace it. The wobbly shrink springs from here.
         const prevRect = {
           x: el.offsetLeft,
@@ -710,6 +834,15 @@ export const Window = memo(function Window({
           width: el.offsetWidth,
           height: el.offsetHeight,
         };
+        const fraction = prevRect.width > 0
+          ? Math.min(Math.max((s.px - s.wsLeft - prevRect.x) / prevRect.width, 0), 1)
+          : 0.5;
+        const x = Math.round(px - width * fraction);
+        // Keep the grab point's offset within the title bar.
+        const y = Math.max(
+          topLimit(areas, px, py),
+          prevRect.y + (e.clientY - s.py),
+        );
         s.tearAway = null;
         s.wx = x;
         s.wy = y;
@@ -751,11 +884,7 @@ export const Window = memo(function Window({
           };
           // Grab first (the anchor point near the cursor snaps to the hand
           // immediately), then spread the rest of the lattice.
-          const anchor = grabModel(
-            st.model,
-            e.clientX - s.wsLeft,
-            e.clientY - s.wsTop,
-          );
+          const anchor = grabModel(st.model, px, py);
           st.anchorOrigin = { x: anchor.x, y: anchor.y };
           spreadModel(st.model, prevRect.x, prevRect.y, prevRect.width, prevRect.height);
           wobblyRef.current = st;
@@ -768,17 +897,35 @@ export const Window = memo(function Window({
       }
 
       s.x = s.wx + (e.clientX - s.px);
-      s.y = Math.max(0, s.wy + (e.clientY - s.py));
+      s.y = Math.max(
+        topLimit(areas, px, py),
+        s.wy + (e.clientY - s.py),
+      );
 
-      // Snap hint while the pointer rides a workspace edge: top maximizes,
-      // left/right tile to that half. Top wins its (thinner) corner overlap.
-      let zone: SnapZone = null;
-      if (e.clientY - s.wsTop <= SNAP_TOP_PX) zone = 'top';
-      else if (e.clientX - s.wsLeft <= SNAP_EDGE_PX) zone = 'left';
-      else if (s.wsLeft + s.wsWidth - e.clientX <= SNAP_EDGE_PX) zone = 'right';
-      if (zone !== s.snap) {
-        s.snap = zone;
-        setSnapHint(zone);
+      // Snap hint while the pointer rides a monitor's edge: top maximizes,
+      // left/right tile to that half.
+      let snap = snapTargetAt(areas, px, py);
+      const shared = snap ? null : sharedTopAt(areas, px, py);
+      if (shared && s.dwell?.areaId === shared.id) {
+        if (s.dwell.armed) snap = { zone: 'top', area: shared };
+      } else {
+        if (s.dwell) window.clearTimeout(s.dwell.timer);
+        s.dwell = undefined;
+        if (shared) {
+          const dwell = { areaId: shared.id, armed: false, timer: 0 };
+          // The pointer may rest without moving, so arm from a timer.
+          dwell.timer = window.setTimeout(() => {
+            if (dragState.current !== s || s.dwell !== dwell) return;
+            dwell.armed = true;
+            s.snap = { zone: 'top', area: shared };
+            setSnapHint(snapRect(shared, 'max'));
+          }, SHARED_TOP_DWELL_MS);
+          s.dwell = dwell;
+        }
+      }
+      if (snap?.zone !== s.snap?.zone || snap?.area.id !== s.snap?.area.id) {
+        s.snap = snap;
+        setSnapHint(snap ? snapRect(snap.area, snap.zone === 'top' ? 'max' : snap.zone) : null);
       }
 
       const st = wobblyRef.current;
@@ -803,6 +950,7 @@ export const Window = memo(function Window({
       const s = dragState.current;
       if (!s) return;
       dragState.current = null;
+      if (s.dwell) window.clearTimeout(s.dwell.timer);
 
       // An armed tear-away that never crossed the threshold is just a click
       // on a maximized title bar - nothing moved, nothing to commit.
@@ -822,8 +970,8 @@ export const Window = memo(function Window({
         // The FLIP into the snap target starts from the drop position, where
         // the window visually sat (the drag never committed geometry).
         paintedRect.current = { x: s.x, y: s.y, width: win.width, height: win.height };
-        if (s.snap === 'top') maximize(win.id, restore);
-        else tile(win.id, s.snap, restore);
+        if (s.snap.zone === 'top') maximize(win.id, restore, s.snap.area.id);
+        else tile(win.id, s.snap.zone, restore, s.snap.area.id);
         return;
       }
 
@@ -870,6 +1018,25 @@ export const Window = memo(function Window({
     [endDrag],
   );
 
+  const onSuperPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0 || dragState.current || resizeState.current) return;
+      e.preventDefault();
+      startDrag(e);
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      setSuperDragging(true);
+    },
+    [startDrag],
+  );
+
+  const onSuperPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      onPointerUp(e);
+      setSuperDragging(false);
+    },
+    [onPointerUp],
+  );
+
   /** Begin a resize from `dir`, like startDrag; false while maximized/tiled. */
   const startResize = useCallback(
     (dir: ResizeDir, e: ChromePoint) => {
@@ -885,6 +1052,7 @@ export const Window = memo(function Window({
         y: win.y,
         width: win.width,
         height: win.height,
+        minTop: areaFor(areasRef.current, { x: win.x, y: win.y, width: win.width, height: win.height }).y,
         cur: { x: win.x, y: win.y, width: win.width, height: win.height },
       };
       beginGesture();
@@ -920,7 +1088,7 @@ export const Window = memo(function Window({
     }
     if (o.dir.includes('n')) {
       const clampedDy = Math.min(dy, o.height - MIN_HEIGHT);
-      y = Math.max(0, o.y + clampedDy);
+      y = Math.max(Math.min(o.minTop, o.y), o.y + clampedDy);
       height = o.height - (y - o.y);
     }
 
@@ -950,17 +1118,15 @@ export const Window = memo(function Window({
     [endResize],
   );
 
-  // An app that draws its own title bar (WindowChromeContext): it can hide
-  // Din's, and run the same gestures from its own. The context value is
-  // stable, so apps never re-render for it; it calls the latest handlers.
-  const [frameless, setFrameless] = useState(false);
+  // An app that draws its own title bar (WindowChromeContext) runs the same
+  // gestures from its own. The context value is stable, so apps never
+  // re-render for it; it calls the latest handlers.
   const gestures = useRef({ startDrag, onPointerMove, endDrag, startResize, onResizePointerMove, endResize });
   useLayoutEffect(() => {
     gestures.current = { startDrag, onPointerMove, endDrag, startResize, onResizePointerMove, endResize };
   });
   const chrome = useMemo<WindowChrome>(
     () => ({
-      setFrameless,
       beginMove: (point) => {
         if (dragState.current || resizeState.current) return false;
         gestures.current.startDrag(point);
@@ -983,15 +1149,17 @@ export const Window = memo(function Window({
   // An app uninstalled while its window is open renders nothing.
   if (!app) return null;
 
-  // maximized/tiled are CSS-driven (the window's own x/y/width/height keep
-  // their pre-snap values); a normal window renders at its stored geometry.
-  const geometry: React.CSSProperties = win.maximized
-    ? { left: 0, top: 0, width: '100%', height: '100%', zIndex: win.z }
-    : win.snapped === 'left'
-      ? { left: 0, top: 0, width: '50%', height: '100%', zIndex: win.z }
-      : win.snapped === 'right'
-        ? { left: '50%', top: 0, width: '50%', height: '100%', zIndex: win.z }
-        : { left: win.x, top: win.y, width: win.width, height: win.height, zIndex: win.z };
+  // Maximized/tiled windows fill (half) their monitor's work area; the
+  // window's own x/y/width/height keep their pre-snap values. A normal
+  // window renders at its stored geometry.
+  const rect = windowRect(win, areas);
+  const geometry: React.CSSProperties = {
+    left: rect.x,
+    top: rect.y,
+    width: rect.width,
+    height: rect.height,
+    zIndex: win.z,
+  };
 
   // Minimized windows stay mounted but hidden so app state (terminal
   // sessions, browser pages, navigation history) survives restore.
@@ -1002,6 +1170,9 @@ export const Window = memo(function Window({
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
   const flush = win.maximized || win.snapped !== null;
+  // A window whose app draws its own title bar (or none) is just the app:
+  // no title bar, border, shadow, background or resize handles.
+  const frameless = win.frameless;
 
   // Sanitized chrome accent. Theme tokens can't guarantee contrast against
   // an arbitrary page color, so tinted chrome flips its foregrounds to plain
@@ -1023,7 +1194,8 @@ export const Window = memo(function Window({
   return (
     <section
       ref={sectionRef}
-      aria-label={app.name}
+      aria-label={title}
+      data-window-id={win.id}
       onPointerDown={() => focus(win.id)}
       // Raise when focus lands anywhere inside the window (React's onFocus is
       // the bubbling focusin), so keyboard users tabbing into a window's
@@ -1031,10 +1203,15 @@ export const Window = memo(function Window({
       // <webview>/<iframe> guests: those are foreign surfaces whose input
       // never reaches this document, and their host elements don't reliably
       // fire focus events either (Electron webviews in particular, and
-      // guest-to-guest focus moves fire nothing here at all). Clicks into web
-      // content raise the window via GuestClickShield overlays instead, whose
-      // pointerdown bubbles to the handler above.
-      onFocus={() => focus(win.id)}
+      // guest-to-guest focus moves fire nothing here at all). Presses inside
+      // a <webview> instead arrive as GuestInputHost's synthetic pointerdown,
+      // which raises via the handler above, and focusin, which remembers the
+      // guest as the last-focused element. Iframes raise from the window
+      // blur listener above.
+      onFocus={(e) => {
+        if (e.target instanceof HTMLElement) lastFocused.current = e.target;
+        focus(win.id);
+      }}
       style={geometry}
       onAnimationEnd={(e) => {
         // The exit animation finished: remove the window for real. Guarded
@@ -1045,7 +1222,10 @@ export const Window = memo(function Window({
         }
       }}
       className={cn(
-        'absolute flex flex-col overflow-hidden bg-card/90 backdrop-blur-xl',
+        // Not clipped, so the resize handles can reach past the edges; the
+        // title bar and the content round their own corners instead.
+        'absolute flex flex-col',
+        !frameless && 'bg-card/90 backdrop-blur-xl',
         // Open/close animations: a quick macOS-style pop in (fade + zoom
         // from 95%) on mount, and its reverse on close - swapping the
         // classes restarts the element's animation as the exit. CSS
@@ -1056,10 +1236,10 @@ export const Window = memo(function Window({
         win.closing
           ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:duration-150 motion-safe:fill-mode-forwards'
           : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200',
-        flush
+        flush || frameless
           ? 'rounded-none'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
-        !flush && isTop && 'ring-ring/50',
+        !flush && !frameless && isTop && 'ring-ring/50',
       )}
     >
       {!frameless && (
@@ -1068,13 +1248,14 @@ export const Window = memo(function Window({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onDoubleClick={() => {
+          onDoubleClick={(e) => {
+            if (!e.currentTarget.contains(e.target as Node)) return;
             stopWobble(false);
             toggleMaximize(win.id);
           }}
           style={accent ? { backgroundColor: accent } : undefined}
           className={cn(
-            'flex h-9 shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b pr-3 active:cursor-grabbing',
+            'flex h-9 shrink-0 touch-none select-none items-center gap-2 rounded-t-[inherit] border-b pr-3',
             accent
               ? accentDark ? 'border-white/10' : 'border-black/10'
               : 'border-border/60 bg-background/60',
@@ -1089,9 +1270,9 @@ export const Window = memo(function Window({
           </div>
         ) : (
           <>
-            <AppIcon icon={app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
+            <AppIcon icon={win.icon ?? app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
             <span className={cn('flex-1 truncate text-sm font-medium', chromeText)}>
-              {app.name}
+              {title}
             </span>
           </>
         )}
@@ -1132,28 +1313,30 @@ export const Window = memo(function Window({
       </header>
       )}
 
-      <div className="relative flex-1 overflow-hidden bg-background/80">
-        {/* isTop lets guest surfaces (webview/iframe) shield themselves while
-            the window is stacked behind another, so clicking into web content
-            raises the window (see GuestClickShield). */}
+      <div className={cn('relative flex-1 overflow-hidden rounded-b-[inherit]', !frameless && 'bg-background/80')}>
         <WindowFocusContext.Provider value={isTop}>
           <WindowTitlebarContext.Provider value={setTitlebar}>
-            <WindowChromeContext.Provider value={chrome}>
-              <WindowAccentContext.Provider value={setAccent}>
-                {/* Built-in apps are code-split (React.lazy); the fallback shows
-                    while an app's chunk loads on its first launch. */}
-                <Suspense
-                  fallback={<div className="size-full animate-pulse bg-muted/40" />}
-                >
-                  <WindowContent component={app.component} windowId={win.id} params={win.params} />
-                </Suspense>
-              </WindowAccentContext.Provider>
-            </WindowChromeContext.Provider>
+            <WindowTitleContext.Provider value={publishTitle}>
+              <WindowIconContext.Provider value={publishIcon}>
+                <WindowChromeContext.Provider value={chrome}>
+                  <WindowAccentContext.Provider value={setAccent}>
+                    {/* Built-in apps are code-split (React.lazy); the fallback shows
+                        while an app's chunk loads on its first launch. */}
+                    <Suspense
+                      fallback={<div className="size-full animate-pulse bg-muted/40" />}
+                    >
+                      <WindowContent component={app.component} windowId={win.id} params={win.params} />
+                    </Suspense>
+                  </WindowAccentContext.Provider>
+                </WindowChromeContext.Provider>
+              </WindowIconContext.Provider>
+            </WindowTitleContext.Provider>
           </WindowTitlebarContext.Provider>
         </WindowFocusContext.Provider>
       </div>
 
       {!flush &&
+        !frameless &&
         RESIZE_HANDLES.map(({ dir, className }) => (
           <div
             key={dir}
@@ -1165,21 +1348,33 @@ export const Window = memo(function Window({
           />
         ))}
 
-      {/* Snap preview while the drag rides a workspace edge: full target for
-          "drop to maximize" (top), the left/right half for "drop to tile".
-          Portaled to the workspace so it outlines the full snap target
-          instead of being clipped to the window's own box. */}
+      {(superHeld || superDragging) && !win.minimized && !win.closing && (
+        <div
+          aria-hidden
+          onPointerDown={onSuperPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onSuperPointerUp}
+          onPointerCancel={onSuperPointerUp}
+          className="absolute inset-0 z-20 cursor-grab touch-none select-none active:cursor-grabbing"
+        />
+      )}
+
+      {/* Snap preview while the drag rides a monitor's edge: its whole work
+          area for "drop to maximize" (top), the left/right half for "drop to
+          tile". Portaled to the workspace so it outlines the full snap
+          target instead of being clipped to the window's own box. */}
       {snapHint &&
         sectionRef.current?.parentElement &&
         createPortal(
           <div
             aria-hidden
-            className={cn(
-              'pointer-events-none absolute z-[9000] rounded-xl border-2 border-primary/50 bg-primary/10 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-150',
-              snapHint === 'top' && 'inset-1.5',
-              snapHint === 'left' && 'inset-y-1.5 left-1.5 right-1/2',
-              snapHint === 'right' && 'inset-y-1.5 left-1/2 right-1.5',
-            )}
+            className="pointer-events-none absolute z-[9000] rounded-xl border-2 border-primary/50 bg-primary/10 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-150"
+            style={{
+              left: snapHint.x + SNAP_HINT_INSET,
+              top: snapHint.y + SNAP_HINT_INSET,
+              width: snapHint.width - SNAP_HINT_INSET * 2,
+              height: snapHint.height - SNAP_HINT_INSET * 2,
+            }}
           />,
           sectionRef.current.parentElement,
         )}

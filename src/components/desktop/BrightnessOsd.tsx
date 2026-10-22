@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { getBrightnessBridge } from '@/lib/brightness';
+import { MIN_BRIGHTNESS, brightnessText, getBrightnessBridge } from '@/lib/brightness';
 import type { BrightnessStatus } from '@/lib/brightness';
 import { BrightnessGlyph } from '@/components/desktop/BrightnessIndicator';
+import { OverdriveMeter } from '@/components/ui/overdrive-slider';
+import { knockAnimation } from '@/lib/overdrive';
 
 /** How long the OSD stays on screen after the last brightness change. */
 const OSD_VISIBLE_MS = 1500;
@@ -21,12 +23,17 @@ export function BrightnessOsd() {
   const [status, setStatus] = useState<BrightnessStatus | null>(null);
   const [visible, setVisible] = useState(false);
   const hideTimer = useRef<number | undefined>(undefined);
+  const meterRef = useRef<HTMLDivElement>(null);
+  const lastLevel = useRef<number | null>(null);
 
   useEffect(() => {
     const brightness = getBrightnessBridge();
     if (!brightness) return;
 
     const unsubscribe = brightness.onOsd((next) => {
+      // The brightness keys stop at 0 and knock once before dimming past it.
+      if (next.brightness === 0 && lastLevel.current === 0) knockAnimation(meterRef.current, -1);
+      lastLevel.current = next.brightness;
       setStatus(next);
       setVisible(true);
       queryClient.setQueryData(['brightness', 'status'], next);
@@ -58,14 +65,17 @@ export function BrightnessOsd() {
           brightness={status.brightness}
           className="size-6 shrink-0 text-foreground"
         />
-        <div className="h-2 w-40 overflow-hidden rounded-full bg-foreground/15">
-          <div
-            className="h-full rounded-full bg-primary transition-[width] duration-150 motion-reduce:transition-none"
-            style={{ width: `${level}%` }}
-          />
-        </div>
-        <span className="w-9 text-right text-sm font-medium tabular-nums text-foreground">
-          {`${level}%`}
+        <OverdriveMeter
+          ref={meterRef}
+          value={level}
+          min={0}
+          max={100}
+          underMin={MIN_BRIGHTNESS}
+          width={160}
+          makeRoom
+        />
+        <span className="w-11 text-right text-sm font-medium tabular-nums text-foreground">
+          {brightnessText(level)}
         </span>
       </div>
     </div>

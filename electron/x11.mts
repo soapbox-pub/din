@@ -8,7 +8,7 @@
 //
 // Why raw protocol instead of a native binding (xcb via an addon): no
 // Electron-ABI rebuild in the Nix build, no runtime dependency, nothing to
-// add to Aladdin's closure, and the protocol surface a compositor needs is
+// add to DinOS's closure, and the protocol surface a compositor needs is
 // small. Replies arrive on the event loop like any other socket data.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable

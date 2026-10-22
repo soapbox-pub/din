@@ -2,11 +2,9 @@
  * Typed access to the keyboard layout bridge exposed by the Electron preload
  * (`window.keyboard`, see electron/preload.cjs + electron/keyboard.mts).
  *
- * The layout here is the one native Linux apps type with: Din sends them
- * physical keys, and their display servers apply this keymap. It follows the
- * OS's layout unless the user picks another. Din's own windows get their
- * characters from the system Din runs on, so they aren't affected. In a plain
- * browser the bridge is absent.
+ * The layout here is the system's: Din's own windows and the native Linux
+ * apps it runs both type with it. Din can change it on DinOS and on GNOME;
+ * elsewhere it's only shown. In a plain browser the bridge is absent.
  */
 
 export interface KeyboardLayoutChoice {
@@ -22,18 +20,22 @@ export interface KeyboardLayout extends KeyboardLayoutChoice {
 }
 
 export interface KeyboardStatus {
-  /** The OS's layout (its first, if it has several). */
-  system: KeyboardLayout;
-  /** The layout picked in Settings, or null to follow the OS. */
-  selected: KeyboardLayoutChoice | null;
+  /** The system's layout (its first, if it has several). */
+  layout: KeyboardLayout;
+  /** Whether Din can change the system's layout here. */
+  canChange: boolean;
+  /** DinOS: the layout changed, and Din's own windows switch after a restart. */
+  restartNeeded: boolean;
 }
 
 export interface KeyboardBridge {
   status(): Promise<KeyboardStatus>;
   /** Every layout and variant installed, sorted by name. */
   layouts(): Promise<KeyboardLayout[]>;
-  /** Use a layout for native apps, or null to follow the OS. */
-  set(choice: KeyboardLayoutChoice | null): Promise<void>;
+  /** Make a layout the system's. */
+  set(choice: KeyboardLayoutChoice): Promise<void>;
+  /** Restart Din, so its own windows take a changed layout (DinOS). */
+  restart(): Promise<void>;
 }
 
 declare global {

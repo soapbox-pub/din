@@ -7,15 +7,15 @@ import {
   ChevronUp,
   Code,
   Download,
-  EllipsisVertical,
+  FileCode,
   FolderOpen,
   Globe,
   History,
   MonitorDown,
   Plus,
-  Puzzle,
   RotateCw,
   Search,
+  Settings,
   ShieldAlert,
   SquarePlus,
   Trash2,
@@ -25,15 +25,21 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { resolveNavigation, sanitizeImageUrl, sanitizeUrl } from '@/lib/sanitizeUrl';
+import {
+  resolveNavigation,
+  sanitizeImageUrl,
+  sanitizeUrl,
+  viewSourceUrl,
+} from '@/lib/sanitizeUrl';
 import { nsiteDisplayUrl } from '@/lib/nsite';
 import { pickBestIcon, type IconCandidate } from '@/lib/appIcon';
-import { getCrxBridge, isAllowedTabUrl, crxIconUrl, type CrxExtension } from '@/lib/crx';
 import {
-  getUserscriptsBridge,
-  isUserscriptUrl,
-  type Userscript,
-} from '@/lib/userscripts';
+  internalPageTitle,
+  isInternalUrl,
+  PREFERENCES_URL,
+} from '@/lib/internalPages';
+import { getCrxBridge, isAllowedTabUrl } from '@/lib/crx';
+import { getUserscriptsBridge, isUserscriptUrl } from '@/lib/userscripts';
 import { getDevtoolsBridge } from '@/lib/devtools';
 import {
   getBrowserBridge,
@@ -59,7 +65,6 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import {
   Popover,
   PopoverContent,
@@ -69,12 +74,19 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { moveItem, useDragReorder } from '@/hooks/useDragReorder';
+import { useTabTransfer, type TabTransfer, type TabTransferOptions } from '@/hooks/useTabTransfer';
+import { parkedTab } from '@/lib/tabTransfer';
+import { TabContextMenu } from '@/components/desktop/TabContextMenu';
+import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
   bareUrl,
+  inlineCompletion,
   matchHistory,
   useBrowserHistory,
   type BrowserHistoryEntry,
@@ -85,14 +97,18 @@ import {
   type BrowserViewHandle,
   type LoadErrorInfo,
 } from '@/components/desktop/apps/BrowserView';
-import { Separator } from '@/components/ui/separator';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
+import { AdblockButton } from '@/components/desktop/apps/AdblockButton';
+import { PopupBlockedButton } from '@/components/desktop/apps/PopupBlockedButton';
 import { useUserscripts } from '@/hooks/useUserscripts';
 import {
-  UserscriptsSection,
   UserscriptInstallDialog,
   type UserscriptInstallRequest,
 } from '@/components/desktop/apps/UserscriptManager';
+import {
+  PreferencesPage,
+  type PreferencesProps,
+} from '@/components/desktop/apps/PreferencesPage';
 import {
   InspectorToolbar,
   type DockMode,
@@ -100,7 +116,6 @@ import {
 import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
 
 const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
-const WEB_STORE_URL = 'https://chromewebstore.google.com/';
 
 /**
  * Chrome tint for private ("incognito") windows: a fixed dark indigo used for
@@ -122,6 +137,16 @@ const PRIVATE_CHROME_COLOR = '#2a2540';
  */
 const NEW_TAB_URL = 'about:blank';
 
+/**
+ * What a tab's surface should actually load for a given tab URL. Internal
+ * pages (about:preferences) are React overlays with nothing behind them, so
+ * their surface parks on about:blank — which also stops whatever page the tab
+ * was showing, rather than leaving it running, invisible, under the overlay.
+ */
+function surfaceUrl(url: string): string {
+  return isInternalUrl(url) ? NEW_TAB_URL : url;
+}
+
 /** Devtools pane sizing (px): default, minimum, and minimum page size. */
 const DEVTOOLS_DEFAULT_HEIGHT = 288;
 const DEVTOOLS_DEFAULT_WIDTH = 400;
@@ -130,6 +155,8 @@ const PAGE_MIN_SIZE = 96;
 
 let nextTabId = 0;
 const newTabId = () => `tab-${nextTabId++}`;
+/** Where a tab falls in opening order, from its id. */
+const tabSeq = (id: string) => Number(id.slice('tab-'.length));
 
 /** One browser tab: UI state plus its rendering surface's identity. */
 interface Tab {
@@ -176,10 +203,13 @@ function createTab(
   // A blank new tab shows an empty address bar (ready to type), even though
   // its surface loads about:blank.
   const blank = url === NEW_TAB_URL;
+  // An internal page (about:preferences) is chrome UI painted over a parked
+  // surface, so the tab keeps the internal URL while the surface loads blank.
+  const internal = isInternalUrl(url);
   return {
     id: newTabId(),
     parentId,
-    initialSrc: url,
+    initialSrc: blank || internal ? NEW_TAB_URL : url,
     address: blank ? '' : url,
     url: blank ? '' : url,
     title: null,
@@ -195,6 +225,31 @@ function createTab(
     dock: 'closed',
     undockedWindowId: null,
     deviceId: null,
+  };
+}
+
+/**
+ * What a tab carries to another browser window. Its page loads afresh there:
+ * a <webview> can't move between windows without losing its guest.
+ */
+interface TabTransferPayload {
+  url: string;
+  title: string | null;
+  favicon: string | null;
+  themeColor: string | null;
+}
+
+function isTabTransferPayload(value: unknown): value is TabTransferPayload {
+  return typeof value === 'object' && value !== null && typeof (value as { url?: unknown }).url === 'string';
+}
+
+/** A tab rebuilt from one that moved over from another window. */
+function adoptTab(payload: TabTransferPayload): Tab {
+  return {
+    ...createTab(payload.url || NEW_TAB_URL),
+    title: payload.title,
+    favicon: payload.favicon,
+    themeColor: payload.themeColor,
   };
 }
 
@@ -244,8 +299,19 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const { close: closeWindow, open: openWindow, focus: focusWindow } =
     useWindowActions();
   const setTitlebar = useWindowTitlebar();
-  const [tabs, setTabs] = useState<Tab[]>(() => [createTab(NEW_TAB_URL)]);
+  const [tabs, setTabs] = useState<Tab[]>(() => {
+    // A window opened for a tab dragged out of another one.
+    const adopted = parkedTab(params);
+    return [isTabTransferPayload(adopted) ? adoptTab(adopted) : createTab(NEW_TAB_URL)];
+  });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
+  // Tab surfaces render in the order their tabs opened, not in tab order:
+  // reordering the tabs would otherwise move their <webview>s around the
+  // DOM, and a moved <webview> loses its guest page.
+  const surfaceTabs = useMemo(
+    () => [...tabs].sort((a, b) => tabSeq(a.id) - tabSeq(b.id)),
+    [tabs],
+  );
   const views = useRef(new Map<string, BrowserViewHandle>());
   // The address/search input, for Ctrl+L and focusing fresh blank tabs.
   const addressRef = useRef<HTMLInputElement>(null);
@@ -297,6 +363,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const pendingInspect = useRef(new Map<string, { x: number; y: number }>());
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  useWindowTitle(activeTab.title ?? hostnameOf(activeTab.url) ?? (isPrivate ? 'Private window' : 'New tab'));
 
   const updateTab = useCallback(
     (id: string, patch: Partial<Tab> | ((tab: Tab) => Partial<Tab>)) => {
@@ -383,6 +450,39 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [closeWindow, windowId, devtools],
   );
 
+  /** Hand a tab to another window, which loads its page again. */
+  const takeTab = useCallback(
+    (id: string): TabTransferPayload | undefined => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab) return undefined;
+      closeTab(id);
+      return { url: tab.url, title: tab.title, favicon: tab.favicon, themeColor: tab.themeColor };
+    },
+    [closeTab],
+  );
+
+  const receiveTab = useCallback((payload: unknown, index: number) => {
+    if (!isTabTransferPayload(payload)) return;
+    const tab = adoptTab(payload);
+    setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
+    setActiveId(tab.id);
+  }, []);
+
+  const windowTitle = activeTab.title ?? hostnameOf(activeTab.url) ?? (isPrivate ? 'Private window' : 'New tab');
+  // Tabs move only among windows of the same kind: private tabs stay private.
+  const transfer = useMemo<TabTransferOptions>(
+    () => ({
+      windowId,
+      appId: 'web-browser',
+      params: isPrivate ? { private: true } : undefined,
+      group: isPrivate ? 'web-browser:private' : 'web-browser',
+      title: windowTitle,
+      take: takeTab,
+      receive: receiveTab,
+    }),
+    [windowId, isPrivate, windowTitle, takeTab, receiveTab],
+  );
+
   // The browser opens on a blank tab; drop the cursor in the address bar so
   // the user can type a destination straight away. Runs once on mount.
   useEffect(() => {
@@ -405,10 +505,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         onActivate={setActiveId}
         onCloseTab={closeTab}
         onNewTab={openNewTab}
+        onMoveTab={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+        transfer={transfer}
       />,
     );
     return () => setTitlebar(null);
-  }, [treeTabs, tabs, activeId, closeTab, openNewTab, setTitlebar]);
+  }, [treeTabs, tabs, activeId, closeTab, openNewTab, transfer, setTitlebar]);
 
   /** Collapse/expand a subtree in the tree sidebar. */
   const toggleCollapsed = useCallback((id: string) => {
@@ -687,15 +789,24 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           updateTab(id, { themeColor: event.value });
           break;
         case 'navigate':
-          updateTab(id, {
-            url: event.url === NEW_TAB_URL ? '' : event.url,
-            // An nsite's committed URL is its canonical, key-derived host; the
-            // address bar shows the name it was reached through when Din
-            // resolved one (and the canonical host when it didn't).
-            address:
-              event.url === NEW_TAB_URL ? '' : nsiteDisplayUrl(event.url),
-            canBack: event.canBack,
-            canForward: event.canForward,
+          updateTab(id, (tab) => {
+            // The surface under an internal page is parked at about:blank, and
+            // its own commit must not overwrite the URL the chrome navigated
+            // to. Any *other* commit does supersede it - that's how going back
+            // out of about:preferences lands on the real page again.
+            if (event.url === NEW_TAB_URL && isInternalUrl(tab.url)) {
+              return { canBack: event.canBack, canForward: event.canForward };
+            }
+            return {
+              url: event.url === NEW_TAB_URL ? '' : event.url,
+              // An nsite's committed URL is its canonical, key-derived host; the
+              // address bar shows the name it was reached through when Din
+              // resolved one (and the canonical host when it didn't).
+              address:
+                event.url === NEW_TAB_URL ? '' : nsiteDisplayUrl(event.url),
+              canBack: event.canBack,
+              canForward: event.canForward,
+            };
           });
           // A committed navigation means the load succeeded, so any pending
           // certificate warning for this tab no longer applies (a rejected
@@ -1110,7 +1221,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           cursor: trimmed.length,
         };
       });
-      views.current.get(id)?.loadURL(resolved);
+      views.current.get(id)?.loadURL(surfaceUrl(resolved));
       // The iframe fallback emits no navigate events, so record here (never
       // in a private window).
       if (!webviewMode && !isPrivate) recordVisit(resolved);
@@ -1122,6 +1233,25 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     (raw: string) => navigateTab(activeId, raw),
     [navigateTab, activeId],
   );
+
+  /**
+   * Show the settings page, reusing this window's existing preferences tab if
+   * it has one — the way every browser treats its settings tab. An empty tab
+   * is navigated in place rather than stranded behind a new one.
+   */
+  const openPreferences = useCallback(() => {
+    const existing = tabsRef.current.find((t) => t.url === PREFERENCES_URL);
+    if (existing) {
+      setActiveId(existing.id);
+      return;
+    }
+    const active = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (active && active.url === '') {
+      navigateTab(active.id, PREFERENCES_URL);
+      return;
+    }
+    openTab(PREFERENCES_URL);
+  }, [navigateTab, openTab]);
 
   /** Move a tab through its history by `delta` (-1 back, +1 forward). */
   const goTab = useCallback(
@@ -1139,7 +1269,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       const target = tab.cursor + delta;
       if (target < 0 || target >= tab.history.length) return;
       const url = tab.history[target];
-      view.loadURL(url);
+      view.loadURL(surfaceUrl(url));
       updateTab(id, { cursor: target, address: url, url, title: null, favicon: null, themeColor: null });
       if (!isPrivate) recordVisit(url);
     },
@@ -1158,6 +1288,22 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     if (force) view.reloadIgnoringCache();
     else view.reload();
   }, []);
+
+  /**
+   * Show a tab's page source in a new tab beside it (Ctrl+U), the way Chrome
+   * does. Pages with no source to show (blank tabs, internal and extension
+   * pages, a source view itself) are left alone. Webview mode only: the
+   * iframe fallback can't load view-source: URLs.
+   */
+  const viewSource = useCallback(
+    (id: string) => {
+      if (!webviewMode) return;
+      const tab = tabsRef.current.find((t) => t.id === id);
+      const url = tab && viewSourceUrl(tab.url);
+      if (url) openTab(url, true, null, id);
+    },
+    [webviewMode, openTab],
+  );
 
   /** Activate the next/previous tab (Ctrl+Tab / Ctrl+Shift+Tab), wrapping. */
   const cycleTab = useCallback((backward: boolean) => {
@@ -1179,6 +1325,40 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const canForward = webviewMode
     ? activeTab.canForward
     : activeTab.cursor < activeTab.history.length - 1;
+
+  // What about:preferences renders. Memoized because TabSurface is memo()'d
+  // and this arrives as one object; a fresh literal each render would defeat
+  // that and re-render the settings surface on every keystroke in the
+  // address bar.
+  const preferences = useMemo<PreferencesProps>(
+    () => ({
+      treeTabs,
+      onTreeTabsChange: setTreeTabs,
+      onOpenUrl: (url) => openTab(url),
+      showExtensions: !isPrivate && (!!crx || !!userscriptsBridge),
+      userscripts: userscriptsBridge ? userscriptList : null,
+      onSetUserscriptEnabled: setUserscriptEnabled,
+      onRemoveUserscript: (script) => {
+        removeUserscript(script.id);
+        toast({ title: `${script.name} removed` });
+      },
+      onAddUserscript: () => setScriptInstall({ code: '' }),
+      showClearData: !isPrivate,
+      onClearBrowsingData: () => setClearDataOpen(true),
+    }),
+    [
+      treeTabs,
+      setTreeTabs,
+      openTab,
+      isPrivate,
+      crx,
+      userscriptsBridge,
+      userscriptList,
+      setUserscriptEnabled,
+      removeUserscript,
+      toast,
+    ],
+  );
 
   // Tint the toolbar with the active tab's theme color, matching the title
   // bar (the Window tints it from the same value via useWindowAccent). The
@@ -1233,6 +1413,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'find':
           openFind();
           break;
+        case 'view-source':
+          viewSource(activeIdRef.current);
+          break;
         case 'reload':
           reloadTab(activeIdRef.current, false);
           break;
@@ -1259,6 +1442,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     closeTab,
     focusAddress,
     openFind,
+    viewSource,
     reloadTab,
     cycleTab,
     gotoTabDigit,
@@ -1273,9 +1457,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     const bridge = getShellShortcuts();
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
-      // Window cycling and screenshot keys are desktop-wide; DesktopHotkeys owns them.
+      // Window cycling, the apps menu, and screenshot keys are desktop-wide;
+      // DesktopHotkeys and the WindowSwitcher own them.
       if (
         shortcut.action === 'cycle-windows' ||
+        shortcut.action === 'apps-menu' ||
+        shortcut.action === 'super-key' ||
         shortcut.action === 'screenshot' ||
         shortcut.action === 'screenshot-area'
       ) {
@@ -1295,6 +1482,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           break;
         case 'find':
           openFind();
+          break;
+        case 'view-source':
+          viewSource(tab.id);
           break;
         case 'reload':
           reloadTab(tab.id, shortcut.force);
@@ -1318,6 +1508,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     closeTab,
     focusAddress,
     openFind,
+    viewSource,
     reloadTab,
     cycleTab,
     gotoTabDigit,
@@ -1366,6 +1557,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             don't run in the ephemeral private session). */}
         {crx && !isPrivate && <BrowserActionList tabWcId={activeTab.wcId} />}
 
+        <AdblockButton
+          wcId={activeTab.wcId}
+          url={activeTab.url}
+          onReload={() => views.current.get(activeId)?.reload()}
+        />
+
+        <PopupBlockedButton
+          wcId={activeTab.wcId}
+          url={activeTab.url}
+          onOpen={(url) => {
+            if (isAllowedTabUrl(url)) openTab(url, true, null, activeId);
+          }}
+        />
+
         {isPrivate && (
           <span
             className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-secondary/60 px-2.5 py-1 text-xs font-medium text-foreground/80"
@@ -1386,24 +1591,18 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           }
         />
 
-        {/* One overflow menu gathers the browser's less-frequent controls:
-            new/private windows, find-in-page, developer tools, extensions,
-            and settings. */}
+        {/* One overflow menu gathers the browser's less-frequent *actions*:
+            new/private windows, find-in-page, page source, developer tools,
+            clearing data.
+            Anything with a body to it - extensions, userscripts, preferences -
+            lives on the settings page this menu links to, so the menu stays
+            short enough that a small window can't clip it. */}
         <BrowserMenu
-          showExtensions={!isPrivate && (!!crx || !!userscriptsBridge)}
-          onOpenUrl={(url) => openTab(url)}
-          userscripts={userscriptsBridge ? userscriptList : null}
-          onSetUserscriptEnabled={setUserscriptEnabled}
-          onRemoveUserscript={(script) => {
-            removeUserscript(script.id);
-            toast({ title: `${script.name} removed` });
-          }}
-          onAddUserscript={() => setScriptInstall({ code: '' })}
-          treeTabs={treeTabs}
-          onTreeTabsChange={setTreeTabs}
           showFind={webviewMode}
           findDisabled={activeTab.wcId === null}
           onFind={openFind}
+          viewSourceDisabled={viewSourceUrl(activeTab.url) === null}
+          onViewSource={() => viewSource(activeId)}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -1412,6 +1611,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onNewPrivateWindow={() => openWindow('web-browser', { private: true })}
           showClearData={!isPrivate}
           onClearBrowsingData={() => setClearDataOpen(true)}
+          onOpenPreferences={openPreferences}
         />
 
         {activeTab.loading && (
@@ -1437,6 +1637,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onToggleCollapsed={toggleCollapsed}
             onMoveTab={moveTab}
             onMoveTabToEnd={moveTabToEnd}
+            transfer={transfer}
           />
         )}
 
@@ -1444,7 +1645,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             only the active one is visible. (visibility, not display:none -
             Electron <webview>s misbehave when display is toggled.) */}
         <div className="relative min-w-0 flex-1 overflow-hidden bg-white">
-        {tabs.map((tab) => (
+        {surfaceTabs.map((tab) => (
           <TabSurface
             key={tab.id}
             id={tab.id}
@@ -1455,6 +1656,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             // A blank tab (empty url) shows the custom new-tab page overlaid
             // on its (about:blank) surface until the user navigates.
             isNewTab={tab.url === ''}
+            // Non-null only for the settings tab, where it both selects the
+            // about:preferences overlay and supplies what it renders.
+            preferences={tab.url === PREFERENCES_URL ? preferences : null}
             onNavigate={navigateTab}
             // Only render a docked pane for bottom/right; 'window' hosts its
             // own pane in a separate desktop window.
@@ -1565,6 +1769,14 @@ function UndockedDevToolsReconciler({
  * the surrounding form with whatever the value is - a highlighted
  * suggestion's URL or the raw typed text - so navigation itself stays in the
  * parent's onSubmit.
+ *
+ * Typing forward at the end of the line also completes inline, Chrome-style:
+ * the rest of the best-matching history URL is appended and left *selected*,
+ * so Enter takes it and the next keystroke (or Backspace) discards it. The
+ * completion is written straight to the DOM node rather than awaited from a
+ * re-render, because re-completing to the value the input already had ("redd"
+ * -> "reddit.com" when it was already "reddit.com") is a no-op state update
+ * that React bails out of, which would leave the box uncompleted.
  */
 function AddressBar({
   inputRef,
@@ -1605,7 +1817,29 @@ function AddressBar({
     setHighlighted(-1);
   }, [tabId]);
 
+  /**
+   * Append the completion of `text` (if any) to the input and select the
+   * appended tail, keeping the parent's value in sync either way.
+   */
+  const complete = (input: HTMLInputElement, text: string) => {
+    const completed = inlineCompletion(history, text);
+    if (completed) {
+      input.value = completed;
+      input.setSelectionRange(text.length, completed.length);
+    }
+    onChangeValue(completed ?? text);
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowRight' || e.key === 'End') {
+      // Accepting the completion makes it part of what the user "typed", so
+      // the dropdown and Escape stop reaching back past it.
+      const input = e.currentTarget;
+      if (input.selectionEnd === input.value.length && input.selectionStart !== input.selectionEnd) {
+        setTyped(input.value);
+      }
+      return;
+    }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       if (!show) return;
       e.preventDefault();
@@ -1636,18 +1870,31 @@ function AddressBar({
         role="combobox"
         aria-label="Address and search bar"
         aria-expanded={show}
-        aria-autocomplete="list"
+        aria-autocomplete="both"
         aria-controls="address-bar-suggestions"
         aria-activedescendant={
           highlighted >= 0 ? `address-bar-suggestion-${highlighted}` : undefined
         }
         value={value}
         onChange={(e) => {
-          const text = e.target.value;
+          const input = e.currentTarget;
+          const text = input.value;
+          const native = e.nativeEvent as InputEvent;
+          // Only complete when the user is adding text at the end of the
+          // line: deleting, or editing mid-string, must leave it alone (so
+          // Backspace really does get you from "reddit.com" back to "red"),
+          // and a half-composed IME sequence isn't a URL yet.
+          const forward =
+            !native.isComposing &&
+            !(native.inputType ?? '').startsWith('delete') &&
+            input.selectionStart === text.length &&
+            input.selectionEnd === text.length;
+
           setTyped(text);
           setHighlighted(-1);
           setOpen(text.trim().length > 0);
-          onChangeValue(text);
+          if (forward) complete(input, text);
+          else onChangeValue(text);
         }}
         onKeyDown={onKeyDown}
         onFocus={(e) => e.currentTarget.select()}
@@ -1818,15 +2065,24 @@ function TabStrip({
   onActivate,
   onCloseTab,
   onNewTab,
+  onMoveTab,
+  transfer,
 }: {
   tabs: Tab[];
   activeId: string;
   onActivate: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: () => void;
+  /** Move a tab to a new index; tabs are dragged to reorder them. */
+  onMoveTab: (id: string, toIndex: number) => void;
+  /** Let tabs move between browser windows (see useTabTransfer). */
+  transfer: TabTransferOptions;
 }) {
+  const tabTransfer = useTabTransfer(transfer, tabs.length);
+  const reorder = useDragReorder({ ids: tabs.map((t) => t.id), onMove: onMoveTab, tearOff: tabTransfer.tearOff });
   return (
     <div
+      ref={(el) => tabTransfer.setList(el)}
       role="tablist"
       aria-label="Browser tabs"
       className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
@@ -1836,6 +2092,10 @@ function TabStrip({
           key={tab.id}
           tab={tab}
           active={tab.id === activeId}
+          dragging={reorder.draggingId === tab.id}
+          transfer={tabTransfer}
+          ref={(el) => reorder.register(tab.id, el)}
+          onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onCloseTab(tab.id)}
         />
@@ -1861,66 +2121,79 @@ function TabStrip({
 function TabButton({
   tab,
   active,
+  dragging,
+  transfer,
+  ref,
+  onPointerDown,
   onActivate,
   onClose,
 }: {
   tab: Tab;
   active: boolean;
+  dragging: boolean;
+  transfer: TabTransfer;
+  ref: React.Ref<HTMLDivElement>;
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onActivate: () => void;
   onClose: () => void;
 }) {
-  const label = tab.title ?? hostnameOf(tab.url) ?? 'New tab';
+  const label = tabLabel(tab);
   const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
 
   return (
-    <div
-      role="tab"
-      aria-selected={active}
-      aria-label={label}
-      tabIndex={0}
-      onClick={onActivate}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onActivate();
-        }
-      }}
-      onAuxClick={(e) => {
-        // Middle-click closes, like every browser.
-        if (e.button === 1) onClose();
-      }}
-      title={label}
-      className={cn(
-        'group flex h-7 w-44 min-w-0 shrink-0 cursor-default items-center gap-2 rounded-md border px-2.5 text-xs',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        active
-          ? 'border-border/60 bg-background text-foreground shadow-sm'
-          : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-      )}
-    >
-      {icon ? (
-        <img src={icon} alt="" aria-hidden className="size-4 shrink-0 rounded-sm" />
-      ) : (
-        <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
-      )}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      <button
-        type="button"
-        aria-label={`Close ${label}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
+    <TabContextMenu tabId={tab.id} transfer={transfer} onClose={onClose}>
+      <div
+        ref={ref}
+        onPointerDown={onPointerDown}
+        role="tab"
+        aria-selected={active}
+        aria-label={label}
+        tabIndex={0}
+        onClick={onActivate}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onActivate();
+          }
         }}
+        onAuxClick={(e) => {
+          // Middle-click closes, like every browser.
+          if (e.button === 1) onClose();
+        }}
+        title={label}
         className={cn(
-          'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
-          'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-          active && 'opacity-100',
-          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'group relative flex h-7 w-44 min-w-0 shrink-0 cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          active
+            ? 'border-border/60 bg-background text-foreground shadow-sm'
+            : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+          dragging && 'border-border/60 bg-background shadow-md',
         )}
       >
-        <X className="size-3" />
-      </button>
-    </div>
+        {icon ? (
+          <img src={icon} alt="" aria-hidden draggable={false} className="size-4 shrink-0 rounded-sm" />
+        ) : (
+          <TabGlyph tab={tab} className="size-4 shrink-0 opacity-60" />
+        )}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <button
+          type="button"
+          aria-label={`Close ${label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          className={cn(
+            'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
+            'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
+            active && 'opacity-100',
+            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    </TabContextMenu>
   );
 }
 
@@ -1979,6 +2252,7 @@ function TreeTabStrip({
   onToggleCollapsed,
   onMoveTab,
   onMoveTabToEnd,
+  transfer,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -1989,7 +2263,13 @@ function TreeTabStrip({
   onToggleCollapsed: (id: string) => void;
   onMoveTab: (dragId: string, targetId: string, position: DropZone) => void;
   onMoveTabToEnd: (dragId: string) => void;
+  /**
+   * Let tabs move between browser windows. Only from the context menu here:
+   * the sidebar's drag and drop stays within the window.
+   */
+  transfer: TabTransferOptions;
 }) {
+  const tabTransfer = useTabTransfer(transfer, tabs.length);
   const rows = useMemo(() => flattenTabTree(tabs, collapsed), [tabs, collapsed]);
   // The tab currently being dragged, or null. Shared across rows so a row can
   // tell whether it's a valid drop target (and skip itself).
@@ -2013,6 +2293,7 @@ function TreeTabStrip({
           active={tab.id === activeId}
           dragging={dragId === tab.id}
           dragActive={dragId !== null}
+          transfer={tabTransfer}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onCloseTab(tab.id)}
           onToggleCollapsed={() => onToggleCollapsed(tab.id)}
@@ -2079,6 +2360,7 @@ function TreeTabRow({
   active,
   dragging,
   dragActive,
+  transfer,
   onActivate,
   onClose,
   onToggleCollapsed,
@@ -2095,6 +2377,7 @@ function TreeTabRow({
   dragging: boolean;
   /** Some row (this one or another) is being dragged. */
   dragActive: boolean;
+  transfer: TabTransfer;
   onActivate: () => void;
   onClose: () => void;
   onToggleCollapsed: () => void;
@@ -2102,7 +2385,7 @@ function TreeTabRow({
   onDragEnd: () => void;
   onDrop: (position: DropZone) => void;
 }) {
-  const label = tab.title ?? hostnameOf(tab.url) ?? 'New tab';
+  const label = tabLabel(tab);
   const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
   // The drop indicator to draw while another tab hovers over this row, or
   // null. The top/bottom thirds re-order (sibling before/after), the middle
@@ -2137,112 +2420,114 @@ function TreeTabRow({
   };
 
   return (
-    <div
-      role="tab"
-      aria-selected={active}
-      aria-label={label}
-      tabIndex={0}
-      draggable
-      onClick={onActivate}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onActivate();
-        }
-      }}
-      onAuxClick={(e) => {
-        // Middle-click closes, like every browser.
-        if (e.button === 1) onClose();
-      }}
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = 'move';
-        // Firefox needs data set for a drag to actually start.
-        e.dataTransfer.setData('text/plain', tab.id);
-        onDragStart();
-      }}
-      onDragEnd={() => {
-        setDropZone(null);
-        onDragEnd();
-      }}
-      onDragOver={onDragOver}
-      onDragLeave={() => setDropZone(null)}
-      onDrop={(e) => {
-        e.preventDefault();
-        const zone = dropZone;
-        setDropZone(null);
-        if (zone) onDrop(zone);
-      }}
-      title={label}
-      style={{ marginInlineStart: depth * 14, paddingInlineStart: gutter }}
-      className={cn(
-        'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        dragging && 'opacity-40',
-        dropZone === 'inside' && 'ring-2 ring-inset ring-primary',
-        active
-          ? 'border-border bg-background text-foreground shadow-sm'
-          : 'border-border/50 bg-background/30 text-muted-foreground hover:border-border hover:bg-foreground/5 hover:text-foreground',
-      )}
-    >
-      {/* Sibling drop indicators: a bar in the gap above / below the row. */}
-      {dropZone === 'before' && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-1 -top-[3px] h-0.5 rounded-full bg-primary"
-        />
-      )}
-      {dropZone === 'after' && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-primary"
-        />
-      )}
-      {/* Disclosure chevron: sits in the row's gutter, out of the flex flow,
-          so it never steals width from the label. Only parents show it. */}
-      {hasChildren && (
-        <button
-          type="button"
-          aria-label={collapsed ? 'Expand' : 'Collapse'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleCollapsed();
-          }}
-          className="absolute start-0.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ChevronRight
-            className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
-          />
-        </button>
-      )}
-      {icon ? (
-        <img
-          src={icon}
-          alt=""
-          aria-hidden
-          draggable={false}
-          className="size-4 shrink-0 rounded-sm"
-        />
-      ) : (
-        <Globe className="size-4 shrink-0 opacity-60" aria-hidden />
-      )}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      <button
-        type="button"
-        aria-label={`Close ${label}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
+    <TabContextMenu tabId={tab.id} transfer={transfer} onClose={onClose}>
+      <div
+        role="tab"
+        aria-selected={active}
+        aria-label={label}
+        tabIndex={0}
+        draggable
+        onClick={onActivate}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onActivate();
+          }
         }}
+        onAuxClick={(e) => {
+          // Middle-click closes, like every browser.
+          if (e.button === 1) onClose();
+        }}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          // Firefox needs data set for a drag to actually start.
+          e.dataTransfer.setData('text/plain', tab.id);
+          onDragStart();
+        }}
+        onDragEnd={() => {
+          setDropZone(null);
+          onDragEnd();
+        }}
+        onDragOver={onDragOver}
+        onDragLeave={() => setDropZone(null)}
+        onDrop={(e) => {
+          e.preventDefault();
+          const zone = dropZone;
+          setDropZone(null);
+          if (zone) onDrop(zone);
+        }}
+        title={label}
+        style={{ marginInlineStart: depth * 14, paddingInlineStart: gutter }}
         className={cn(
-          'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
-          'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-          active && 'opacity-100',
-          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          dragging && 'opacity-40',
+          dropZone === 'inside' && 'ring-2 ring-inset ring-primary',
+          active
+            ? 'border-border bg-background text-foreground shadow-sm'
+            : 'border-border/50 bg-background/30 text-muted-foreground hover:border-border hover:bg-foreground/5 hover:text-foreground',
         )}
       >
-        <X className="size-3" />
-      </button>
-    </div>
+        {/* Sibling drop indicators: a bar in the gap above / below the row. */}
+        {dropZone === 'before' && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-1 -top-[3px] h-0.5 rounded-full bg-primary"
+          />
+        )}
+        {dropZone === 'after' && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-primary"
+          />
+        )}
+        {/* Disclosure chevron: sits in the row's gutter, out of the flex flow,
+            so it never steals width from the label. Only parents show it. */}
+        {hasChildren && (
+          <button
+            type="button"
+            aria-label={collapsed ? 'Expand' : 'Collapse'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleCollapsed();
+            }}
+            className="absolute start-0.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronRight
+              className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
+            />
+          </button>
+        )}
+        {icon ? (
+          <img
+            src={icon}
+            alt=""
+            aria-hidden
+            draggable={false}
+            className="size-4 shrink-0 rounded-sm"
+          />
+        ) : (
+          <TabGlyph tab={tab} className="size-4 shrink-0 opacity-60" />
+        )}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <button
+          type="button"
+          aria-label={`Close ${label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          className={cn(
+            'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
+            'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
+            active && 'opacity-100',
+            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    </TabContextMenu>
   );
 }
 
@@ -2588,6 +2873,7 @@ const TabSurface = memo(function TabSurface({
   isPrivate,
   active,
   isNewTab,
+  preferences,
   onNavigate: onNavigateToUrl,
   dock,
   deviceId,
@@ -2617,6 +2903,8 @@ const TabSurface = memo(function TabSurface({
   active: boolean;
   /** Show the custom new-tab page over the surface (blank tab). */
   isNewTab: boolean;
+  /** Settings to render over the surface, or null for a non-settings tab. */
+  preferences: PreferencesProps | null;
   /** Navigate this tab to a URL/search (from the new-tab page). */
   onNavigate: (id: string, raw: string) => void;
   /** Docked pane position, or null when not docked in this surface. */
@@ -2763,6 +3051,8 @@ const TabSurface = memo(function TabSurface({
           onNavigate={(raw) => onNavigateToUrl(id, raw)}
         />
       )}
+      {/* about:preferences, over the same kind of parked blank surface. */}
+      {preferences && <PreferencesPage {...preferences} />}
       {/* Untrusted-TLS warning, over the failed page until the user decides. */}
       {certError && (
         <CertificateWarning
@@ -3037,6 +3327,25 @@ function hostnameOf(url: string): string | null {
 }
 
 /**
+ * What a tab calls itself in the strip: its page title, else the internal
+ * page's own name, else the hostname it's loading, else "New tab".
+ */
+function tabLabel(tab: Tab): string {
+  return (
+    tab.title ?? internalPageTitle(tab.url) ?? hostnameOf(tab.url) ?? 'New tab'
+  );
+}
+
+/**
+ * The glyph a tab falls back to without a favicon. Internal pages never get
+ * one (nothing loads), so they wear the icon of the thing they are.
+ */
+function TabGlyph({ tab, className }: { tab: Tab; className?: string }) {
+  const Icon = tab.url === PREFERENCES_URL ? Settings : Globe;
+  return <Icon className={className} aria-hidden />;
+}
+
+/**
  * The Chrome extension toolbar actions (<browser-action-list>, a custom
  * element injected by electron-chrome-extensions' preload).
  *
@@ -3061,24 +3370,22 @@ function BrowserActionList({ tabWcId }: { tabWcId: number | null }) {
 }
 
 /**
- * The browser's overflow menu (the toolbar's ⋮ button): one popover that
- * gathers the controls that don't each warrant a toolbar button - opening a
- * new or private window, toggling developer tools, managing extensions and
- * userscripts, and per-browser settings (vertical tabs). Consolidating them
- * here keeps the toolbar to the essentials (navigation + address bar).
+ * The browser's overflow menu (the toolbar's menu button): one popover for the
+ * controls that don't each warrant a toolbar button - opening a new or private
+ * window, find-in-page, page source, developer tools, clearing browsing data -
+ * plus a way into the settings page.
+ *
+ * Deliberately actions-only and one screenful short. Everything with a body to
+ * it (extensions, userscripts, preferences) lives on about:preferences
+ * instead; when those sections were inline the popover could outgrow a short
+ * window and get clipped off the bottom of the screen.
  */
 function BrowserMenu({
-  showExtensions,
-  onOpenUrl,
-  userscripts,
-  onSetUserscriptEnabled,
-  onRemoveUserscript,
-  onAddUserscript,
-  treeTabs,
-  onTreeTabsChange,
   showFind,
   findDisabled,
   onFind,
+  viewSourceDisabled,
+  onViewSource,
   hasDevtools,
   devtoolsActive,
   devtoolsDisabled,
@@ -3087,21 +3394,15 @@ function BrowserMenu({
   onNewPrivateWindow,
   showClearData,
   onClearBrowsingData,
+  onOpenPreferences,
 }: {
-  /** Show the extensions + userscripts section (hidden in private windows). */
-  showExtensions: boolean;
-  onOpenUrl: (url: string) => void;
-  /** Installed userscripts, or null when the userscript bridge is absent. */
-  userscripts: Userscript[] | null;
-  onSetUserscriptEnabled: (id: string, enabled: boolean) => void;
-  onRemoveUserscript: (script: Userscript) => void;
-  onAddUserscript: () => void;
-  treeTabs: boolean;
-  onTreeTabsChange: (value: boolean) => void;
   /** Show the find-in-page item (webview mode). */
   showFind: boolean;
   findDisabled: boolean;
   onFind: () => void;
+  /** No source to show (a blank tab, internal page, or source view). */
+  viewSourceDisabled: boolean;
+  onViewSource: () => void;
   /** Whether the docked-devtools control is available (webview mode). */
   hasDevtools: boolean;
   devtoolsActive: boolean;
@@ -3112,6 +3413,8 @@ function BrowserMenu({
   /** Show the "Clear browsing data" item (hidden in private windows). */
   showClearData: boolean;
   onClearBrowsingData: () => void;
+  /** Open the about:preferences tab. */
+  onOpenPreferences: () => void;
 }) {
   const [open, setOpen] = useState(false);
   /** Run an action and dismiss the menu. */
@@ -3134,7 +3437,7 @@ function BrowserMenu({
             open && 'bg-foreground/10 text-foreground',
           )}
         >
-          <EllipsisVertical className="size-4" />
+          <BarsStaggeredIcon className="size-4" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-72 p-0">
@@ -3158,6 +3461,15 @@ function BrowserMenu({
               onClick={() => run(onFind)}
             />
           )}
+          {showFind && (
+            <BrowserMenuItem
+              icon={FileCode}
+              label="View page source"
+              shortcut="Ctrl+U"
+              disabled={viewSourceDisabled}
+              onClick={() => run(onViewSource)}
+            />
+          )}
           {hasDevtools && (
             <BrowserMenuItem
               icon={Code}
@@ -3175,41 +3487,11 @@ function BrowserMenu({
               onClick={() => run(onClearBrowsingData)}
             />
           )}
-        </div>
-
-        {showExtensions && (
-          <>
-            <Separator />
-            <div className="p-3">
-              <ExtensionsSection
-                onOpenUrl={(url) => run(() => onOpenUrl(url))}
-                userscripts={userscripts}
-                onSetUserscriptEnabled={onSetUserscriptEnabled}
-                onRemoveUserscript={onRemoveUserscript}
-                onAddUserscript={() => run(onAddUserscript)}
-              />
-            </div>
-          </>
-        )}
-
-        <Separator />
-        <div className="space-y-3 p-3">
-          <h3 className="text-sm font-medium">Settings</h3>
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0 space-y-0.5">
-              <Label htmlFor="browser-vertical-tabs" className="text-sm">
-                Vertical tabs
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Show tabs in a sidebar, nested under the tab that opened them.
-              </p>
-            </div>
-            <Switch
-              id="browser-vertical-tabs"
-              checked={treeTabs}
-              onCheckedChange={onTreeTabsChange}
-            />
-          </div>
+          <BrowserMenuItem
+            icon={Settings}
+            label="Settings"
+            onClick={() => run(onOpenPreferences)}
+          />
         </div>
       </PopoverContent>
     </Popover>
@@ -3392,145 +3674,6 @@ function ClearDataOption({
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
     </div>
-  );
-}
-
-/**
- * The extensions + userscripts body of the {@link BrowserMenu}: installed
- * Chrome extensions (with per-item uninstall and a Chrome Web Store link) plus
- * the userscript library (enable toggles, removal, manual add). Refreshes its
- * extension list each time it mounts - i.e. whenever the menu opens.
- */
-function ExtensionsSection({
-  onOpenUrl,
-  userscripts,
-  onSetUserscriptEnabled,
-  onRemoveUserscript,
-  onAddUserscript,
-}: {
-  onOpenUrl: (url: string) => void;
-  userscripts: Userscript[] | null;
-  onSetUserscriptEnabled: (id: string, enabled: boolean) => void;
-  onRemoveUserscript: (script: Userscript) => void;
-  onAddUserscript: () => void;
-}) {
-  const crx = getCrxBridge();
-  const { toast } = useToast();
-  const [extensions, setExtensions] = useState<CrxExtension[] | null>(null);
-
-  const refresh = useCallback(async () => {
-    if (!crx) return;
-    try {
-      setExtensions(await crx.listExtensions());
-    } catch {
-      setExtensions([]);
-    }
-  }, [crx]);
-
-  useEffect(() => {
-    // refresh() only setState()s after an await (an async IPC round-trip), so
-    // this can't cascade synchronously.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh();
-  }, [refresh]);
-
-  const uninstall = async (extension: CrxExtension) => {
-    if (!crx) return;
-    try {
-      await crx.uninstallExtension(extension.id);
-      toast({ title: `${extension.name} removed` });
-      refresh();
-    } catch {
-      toast({
-        title: `Couldn't remove ${extension.name}`,
-        variant: 'destructive',
-      });
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <h3 className="text-sm font-medium">Extensions</h3>
-        <p className="text-xs text-muted-foreground">
-          Extensions run on the sites you browse in this app.
-        </p>
-      </div>
-
-      {crx &&
-        (extensions === null ? null : extensions.length === 0 ? (
-          <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-            No extensions installed yet.
-          </p>
-        ) : (
-          <ul className="max-h-64 space-y-1 overflow-y-auto">
-            {extensions.map((extension) => (
-              <li key={extension.id} className="flex items-center gap-2 rounded-md px-1 py-1">
-                <ExtensionIcon id={extension.id} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{extension.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {extension.version}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  aria-label={`Remove ${extension.name}`}
-                  title={`Remove ${extension.name}`}
-                  onClick={() => uninstall(extension)}
-                  className={cn(
-                    'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60',
-                    'hover:bg-destructive/10 hover:text-destructive',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  )}
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        ))}
-
-      {crx && (
-        <Button
-          variant="secondary"
-          className="w-full"
-          onClick={() => onOpenUrl(WEB_STORE_URL)}
-        >
-          Browse the Chrome Web Store
-        </Button>
-      )}
-
-      {userscripts !== null && (
-        <UserscriptsSection
-          scripts={userscripts}
-          onSetEnabled={onSetUserscriptEnabled}
-          onRemove={onRemoveUserscript}
-          onAdd={onAddUserscript}
-        />
-      )}
-    </div>
-  );
-}
-
-/** Extension icon via the crx:// protocol, with a glyph fallback. */
-function ExtensionIcon({ id }: { id: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) {
-    return (
-      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-secondary">
-        <Puzzle className="size-3.5 text-muted-foreground" aria-hidden />
-      </span>
-    );
-  }
-  return (
-    <img
-      src={crxIconUrl(id, 32)}
-      alt=""
-      aria-hidden
-      className="size-6 shrink-0 rounded-md"
-      onError={() => setFailed(true)}
-    />
   );
 }
 

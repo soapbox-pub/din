@@ -191,6 +191,22 @@
 }
 
 @layer base {
+  /* The page is a screen and never scrolls. The wallpaper is sized to
+     innerWidth/innerHeight, which include scrollbars, so once anything
+     overflowed for a moment the scrollbars it brought kept themselves. */
+  html {
+    overflow: hidden;
+  }
+
+  /* <body> must cover the screen even though everything in it is
+     positioned: Radix's scroll lock (open menus and dialogs) makes it
+     `position: relative; overflow: hidden`, and an empty body would then
+     clip the whole desktop away. */
+  html,
+  body {
+    height: 100%;
+  }
+
   *,
   ::after,
   ::before,
@@ -206,6 +222,24 @@
        profile-theme overrides) simply ignore them. */
     font-feature-settings: 'cv05', 'ss03';
   }
+}
+
+/* The desktop's layer (index.html). Closed, it's as if it weren't there.
+   Open, it's a modal dialog covering the page, which keeps the desktop
+   usable while a web page is fullscreen; see PageFullscreenHost.tsx. */
+#shell {
+  all: unset;
+  position: fixed;
+  inset: 0;
+}
+
+#shell:not([open]) {
+  display: contents;
+}
+
+#shell::backdrop {
+  background: transparent;
+  pointer-events: none;
 }
 
 /* ===== Scrollbars =====

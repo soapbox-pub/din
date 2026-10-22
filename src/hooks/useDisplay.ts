@@ -6,8 +6,8 @@ import type { DisplayPlacement, DisplayStatus } from '@/lib/display';
  * TanStack Query hooks over the OS display bridge (window.display).
  *
  * Status polls on a short interval so the Settings panel tracks changes made
- * elsewhere (e.g. xrandr in the Terminal app, or the automatic lid-close
- * re-arrangement in the main process). Applying a layout invalidates the
+ * elsewhere (e.g. wlr-randr or xrandr in the Terminal app, or the automatic
+ * lid-close re-arrangement in the main process). Applying a layout invalidates the
  * status so the UI converges on the new arrangement.
  */
 

@@ -7,7 +7,7 @@ import { join } from 'node:path';
  * (`os/x11/din-session.sh` + `os/x11/din.desktop`).
  *
  * That path runs the *production* Electron shell with no DIN_DEV_URL and is
- * exercised by neither `npm test`'s build nor the Nix/Aladdin image, so it can
+ * exercised by neither `npm test`'s build nor the Nix/DinOS image, so it can
  * silently drift when `electron/main.mts`, the app layout, or the two session
  * files change. These assertions pin the couplings the launcher relies on.
  */

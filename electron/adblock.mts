@@ -1,0 +1,399 @@
+// Din's built-in ad blocker for the Web Browser app, on Ghostery's
+// open-source filter engine with EasyList, EasyPrivacy, and uBlock Origin's
+// lists.
+//
+// Blocking has three parts:
+//   - Network requests in the persistent browser session are blocked by an
+//     extension Din ships (electron/adblock-extension/), through
+//     chrome.webRequest. A session.webRequest listener would be simpler, but
+//     it silently switches chrome.webRequest off for every extension the user
+//     installs (see the warning in main.mts).
+//   - Network requests in the private session go through session.webRequest
+//     directly: extensions never run there, so nothing is lost.
+//   - Cosmetic filters (hiding ad slots, scriptlets) run in both, through
+//     Ghostery's page preload, which asks this process what to inject.
+//
+// The filter lists are downloaded and compiled in a utility process
+// (adblock-worker.mts), cached in userData, and refreshed every few days. This
+// process keeps one engine for cosmetics and private tabs, and hands the
+// extension the same serialized engine.
+//
+// Settings (on/off, sites the user allowed ads on) live in userData and are
+// changed by the shell over adblock:*.
+//
+// Runs as TypeScript directly via Node's native type stripping - erasable
+// syntax only, like the rest of electron/.
+
+import path from 'node:path';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import { app, ipcMain, utilityProcess, webContents } from 'electron';
+import { FiltersEngine, Request } from '@ghostery/adblocker';
+import { parse as parseDomain } from 'tldts-experimental';
+
+const require = createRequire(import.meta.url);
+
+/** The extension's id, fixed by the `key` in its manifest. */
+export const ADBLOCK_EXTENSION_ID = 'gmmdegmbkcjkjfbacghangmkafhmkoeb';
+const EXTENSION_ORIGIN = `chrome-extension://${ADBLOCK_EXTENSION_ID}`;
+const EXTENSION_DIR = path.join(import.meta.dirname, 'adblock-extension');
+const WORKER = path.join(import.meta.dirname, 'adblock-worker.mts');
+const PRELOAD = path.join(import.meta.dirname, 'adblock-preload.cjs');
+
+/** How old the cached engine may get before the lists are fetched again. */
+const ENGINE_MAX_AGE_MS = 4 * 24 * 60 * 60_000;
+/** How long to wait after a failed build (offline, say) before trying again. */
+const RETRY_MS = 30 * 60_000;
+
+interface Settings {
+  enabled: boolean;
+  /** Hostnames the user turned blocking off for. */
+  allowlist: string[];
+}
+
+let settings: Settings = { enabled: true, allowlist: [] };
+let allowlist = new Set<string>();
+let engine: FiltersEngine | null = null;
+let building = false;
+
+/**
+ * What was blocked since each tab's page last loaded, by WebContents id. URLs,
+ * not requests: a page that retries a blocked request in a loop would
+ * otherwise count into the tens of thousands.
+ */
+const blockedUrls = new Map<number, Set<string>>();
+const dirtyCounts = new Set<number>();
+let countsTimer: NodeJS.Timeout | null = null;
+
+let sendToShell: (channel: string, payload?: unknown) => void = () => {};
+let isBrowserTab: (contents: Electron.WebContents) => boolean = () => false;
+
+function settingsFile(): string {
+  return path.join(app.getPath('userData'), 'adblock.json');
+}
+
+function engineFile(): string {
+  return path.join(app.getPath('userData'), 'adblock-engine.bin');
+}
+
+function loadSettings(): void {
+  try {
+    const raw = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) as Record<string, unknown>;
+    settings = {
+      enabled: raw.enabled !== false,
+      allowlist: Array.isArray(raw.allowlist)
+        ? raw.allowlist.filter((h): h is string => typeof h === 'string')
+        : [],
+    };
+  } catch {
+    // First run, or a corrupt file: blocking on, nothing allowed.
+  }
+  allowlist = new Set(settings.allowlist);
+}
+
+function saveSettings(): void {
+  settings.allowlist = [...allowlist];
+  try {
+    fs.writeFileSync(settingsFile(), JSON.stringify(settings));
+  } catch (error) {
+    console.error('adblock: failed to save settings:', error);
+  }
+  for (const page of backgroundPages()) page.send('adblock-ext:settings', settings);
+  sendToShell('adblock:settings', settings);
+}
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/** Whether blocking applies to what the given tab is showing. */
+function activeFor(contents: Electron.WebContents): boolean {
+  return settings.enabled && !!engine && !allowlist.has(hostnameOf(contents.getURL()));
+}
+
+// --- The engine ------------------------------------------------------------
+
+function loadEngine(): boolean {
+  try {
+    engine = FiltersEngine.deserialize(new Uint8Array(fs.readFileSync(engineFile())));
+    return true;
+  } catch {
+    engine = null;
+    return false;
+  }
+}
+
+function engineAge(): number {
+  try {
+    return Date.now() - fs.statSync(engineFile()).mtimeMs;
+  } catch {
+    return Infinity;
+  }
+}
+
+/** Fetch and compile the lists in the worker, then switch to the result. */
+function buildEngine(): void {
+  if (building) return;
+  building = true;
+  const child = utilityProcess.fork(WORKER, [engineFile()], {
+    serviceName: 'Din ad blocker lists',
+    stdio: 'inherit',
+  });
+  child.once('exit', (code) => {
+    building = false;
+    if (code === 0 && loadEngine()) {
+      for (const page of backgroundPages()) page.send('adblock-ext:engineChanged');
+      sendToShell('adblock:settings', settings);
+    } else {
+      setTimeout(buildEngine, RETRY_MS);
+    }
+  });
+}
+
+/** Keep the engine fresh: rebuild once it's old, checking twice a day. */
+function scheduleUpdates(): void {
+  const check = () => {
+    if (engineAge() > ENGINE_MAX_AGE_MS) buildEngine();
+  };
+  check();
+  setInterval(check, 12 * 60 * 60_000).unref();
+}
+
+// --- Blocked counts --------------------------------------------------------
+
+function countBlocked(wcId: number, url: string): void {
+  let urls = blockedUrls.get(wcId);
+  if (!urls) blockedUrls.set(wcId, (urls = new Set()));
+  if (urls.has(url)) return;
+  urls.add(url);
+  dirtyCounts.add(wcId);
+  countsTimer ??= setTimeout(flushCounts, 250);
+}
+
+function flushCounts(): void {
+  countsTimer = null;
+  for (const wcId of dirtyCounts) {
+    sendToShell('adblock:blocked', { wcId, count: blockedUrls.get(wcId)?.size ?? 0 });
+  }
+  dirtyCounts.clear();
+}
+
+// --- The extension ---------------------------------------------------------
+
+function backgroundPages(): Electron.WebContents[] {
+  return webContents
+    .getAllWebContents()
+    .filter((c) => !c.isDestroyed() && c.getType() === 'backgroundPage' && c.getURL().startsWith(EXTENSION_ORIGIN));
+}
+
+/** Whether an IPC message comes from the extension's own background page. */
+function isExtensionSender(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean {
+  return (
+    event.sender.getType() === 'backgroundPage' &&
+    !!event.senderFrame &&
+    event.senderFrame.origin === EXTENSION_ORIGIN
+  );
+}
+
+// --- Network blocking in the private session -------------------------------
+
+function requestOf(details: Electron.OnBeforeRequestListenerDetails | Electron.OnHeadersReceivedListenerDetails): Request {
+  return Request.fromRawDetails({
+    requestId: `${details.id}`,
+    tabId: details.webContentsId,
+    url: details.url,
+    sourceUrl: details.referrer || details.frame?.url,
+    type: details.resourceType || 'other',
+  });
+}
+
+function blockInSession(session: Electron.Session): void {
+  const tabOf = (details: { webContentsId?: number }) =>
+    details.webContentsId === undefined ? undefined : webContents.fromId(details.webContentsId);
+
+  session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    const tab = tabOf(details);
+    if (details.resourceType === 'mainFrame' || !tab || !engine || !activeFor(tab)) {
+      callback({});
+      return;
+    }
+    const { match, redirect } = engine.match(requestOf(details));
+    if (redirect) {
+      countBlocked(tab.id, details.url);
+      callback({ redirectURL: redirect.dataUrl });
+    } else if (match) {
+      countBlocked(tab.id, details.url);
+      callback({ cancel: true });
+    } else {
+      callback({});
+    }
+  });
+
+  session.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
+    const tab = tabOf(details);
+    if (
+      (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') ||
+      !tab || !engine || !(settings.enabled && !allowlist.has(hostnameOf(details.url)))
+    ) {
+      callback({});
+      return;
+    }
+    const policy = engine.getCSPDirectives(requestOf(details));
+    if (!policy) {
+      callback({});
+      return;
+    }
+    const responseHeaders = details.responseHeaders ?? {};
+    responseHeaders['Content-Security-Policy'] = [
+      ...(responseHeaders['Content-Security-Policy'] ?? []),
+      policy,
+    ];
+    callback({ responseHeaders });
+  });
+}
+
+// --- Cosmetic filtering ----------------------------------------------------
+
+/** Ghostery's page preload asks for a page's cosmetics through these. */
+function registerCosmeticHandlers(): void {
+  ipcMain.handle(
+    '@ghostery/adblocker/inject-cosmetic-filters',
+    (event, url: unknown, msg?: { classes?: string[]; hrefs?: string[]; ids?: string[]; lifecycle?: string }) => {
+      const contents = event.sender;
+      if (!isBrowserTab(contents) || !engine || !activeFor(contents)) return;
+      if (typeof url !== 'string') return;
+      const { hostname, domain } = parseDomain(url);
+      const first = msg === undefined;
+      const { active, styles, scripts } = engine.getCosmeticsFilters({
+        url,
+        hostname: hostname || '',
+        domain: domain || '',
+        classes: msg?.classes,
+        hrefs: msg?.hrefs,
+        ids: msg?.ids,
+        getBaseRules: first,
+        getInjectionRules: first,
+        getExtendedRules: false,
+        getRulesFromHostname: first,
+        getRulesFromDOM: !first,
+        callerContext: { frameId: event.frameId, processId: event.processId, lifecycle: msg?.lifecycle },
+      });
+      if (!active) return;
+      if (styles.length > 0) contents.insertCSS(styles, { cssOrigin: 'user' }).catch(() => {});
+      for (const script of scripts) contents.executeJavaScript(script, true).catch(() => {});
+    },
+  );
+  ipcMain.handle('@ghostery/adblocker/is-mutation-observer-enabled', (event) => {
+    return isBrowserTab(event.sender) && !!engine && engine.config.enableMutationObserver;
+  });
+}
+
+// --- Wiring ----------------------------------------------------------------
+
+/** Track a browser tab's blocked count from page load to page load. */
+export function attachAdblock(contents: Electron.WebContents): void {
+  contents.on('did-start-navigation', (event) => {
+    if (!event.isMainFrame || event.isSameDocument) return;
+    blockedUrls.delete(contents.id);
+    sendToShell('adblock:blocked', { wcId: contents.id, count: 0 });
+  });
+  contents.once('destroyed', () => {
+    blockedUrls.delete(contents.id);
+    dirtyCounts.delete(contents.id);
+  });
+}
+
+/** Whether an installed extension is the ad blocker (hidden from the list). */
+export function isAdblockExtension(id: string): boolean {
+  return id === ADBLOCK_EXTENSION_ID;
+}
+
+export function setupAdblock(options: {
+  /** The persistent session, where the extension blocks. */
+  browserSession: Electron.Session;
+  /** The private session, blocked here in the main process. */
+  privateSession: Electron.Session;
+  isBrowserTab: (contents: Electron.WebContents) => boolean;
+  assertShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => void;
+  sendToShell: (channel: string, payload?: unknown) => void;
+}): void {
+  sendToShell = options.sendToShell;
+  isBrowserTab = options.isBrowserTab;
+  const { assertShellSender } = options;
+
+  loadSettings();
+  loadEngine();
+  scheduleUpdates();
+
+  // The extension's line to this process (adblock-preload.cjs).
+  options.browserSession.registerPreloadScript({ id: 'din-adblock-extension', type: 'frame', filePath: PRELOAD });
+  ipcMain.handle('adblock-ext:settings', (event) => {
+    if (!isExtensionSender(event)) throw new Error('adblock: unauthorized sender');
+    return settings;
+  });
+  ipcMain.handle('adblock-ext:engine', (event) => {
+    if (!isExtensionSender(event)) throw new Error('adblock: unauthorized sender');
+    try {
+      return new Uint8Array(fs.readFileSync(engineFile()));
+    } catch {
+      return null;
+    }
+  });
+  // The extension can't tell tabs apart (see its background.js), only sites,
+  // so what it blocked counts for every tab on that site.
+  ipcMain.on('adblock-ext:blocked', (event, reports: unknown) => {
+    if (!isExtensionSender(event) || !Array.isArray(reports)) return;
+    const tabs = webContents
+      .getAllWebContents()
+      .filter((c) => !c.isDestroyed() && c.session === options.browserSession && isBrowserTab(c));
+    for (const entry of reports) {
+      if (!Array.isArray(entry)) continue;
+      const [site, urls] = entry;
+      if (typeof site !== 'string' || !Array.isArray(urls)) continue;
+      for (const tab of tabs) {
+        if (hostnameOf(tab.getURL()) !== site) continue;
+        for (const url of urls) if (typeof url === 'string') countBlocked(tab.id, url);
+      }
+    }
+  });
+  options.browserSession.extensions.loadExtension(EXTENSION_DIR).catch((error) => {
+    console.error('adblock: failed to load the extension:', error);
+  });
+
+  blockInSession(options.privateSession);
+
+  // Cosmetic filtering in both sessions.
+  const cosmeticPreload = require.resolve('@ghostery/adblocker-electron-preload');
+  for (const s of [options.browserSession, options.privateSession]) {
+    s.registerPreloadScript({ id: 'din-adblock-cosmetics', type: 'frame', filePath: cosmeticPreload });
+  }
+  registerCosmeticHandlers();
+
+  // The shell's controls.
+  ipcMain.handle('adblock:getSettings', (event) => {
+    assertShellSender(event);
+    return settings;
+  });
+  ipcMain.handle('adblock:setEnabled', (event, enabled: unknown) => {
+    assertShellSender(event);
+    settings.enabled = enabled === true;
+    saveSettings();
+  });
+  ipcMain.handle('adblock:setSiteAllowed', (event, hostname: unknown, allowed: unknown) => {
+    assertShellSender(event);
+    if (typeof hostname !== 'string' || !/^[a-z0-9.:[\]-]{1,253}$/i.test(hostname)) {
+      throw new Error('Invalid hostname');
+    }
+    if (allowed === true) allowlist.add(hostname.toLowerCase());
+    else allowlist.delete(hostname.toLowerCase());
+    saveSettings();
+  });
+  ipcMain.handle('adblock:blockedCount', (event, wcId: unknown) => {
+    assertShellSender(event);
+    return typeof wcId === 'number' ? (blockedUrls.get(wcId)?.size ?? 0) : 0;
+  });
+}

@@ -13,8 +13,11 @@ import {
 import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { portalContainer } from '@/lib/portalContainer';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useMonitors } from '@/contexts/MonitorsContext';
+import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 import { getFsBridge, cleanFsError, joinPath } from '@/lib/fs';
 import {
   cleanScreenshotError,
@@ -126,8 +129,8 @@ async function cropCapture(shot: Capture, region: ViewportRect): Promise<Capture
 }
 
 /**
- * The full-viewport capture overlay, portaled to <body> so it floats above
- * every desktop layer (dock included) while our window is minimized. The
+ * The capture overlay, over every monitor and portaled to <body> so it floats
+ * above every desktop layer (dock included) while our window is minimized. The
  * 'select' phase dims the desktop and takes a drag rectangle (releasing a
  * sub-threshold drag just re-arms; Esc cancels). The 'countdown' phase is
  * pointer-transparent, so the user can keep arranging the desktop - hover
@@ -143,10 +146,13 @@ function CaptureOverlay({
 }) {
   const [drag, setDrag] = useState<ViewportRect | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
+  const { primary } = useMonitors();
+  // Hints sit at the top middle of the primary monitor.
+  const hintStyle = { left: primary.x + primary.width / 2, top: primary.y + 20 };
 
   if (session.phase === 'countdown') {
     return createPortal(
-      <div aria-live="polite" className="pointer-events-none fixed inset-0 z-[10000]">
+      <ScreenLayer aria-live="polite" className="pointer-events-none z-[10000]">
         {session.region && (
           <div
             aria-hidden
@@ -159,12 +165,15 @@ function CaptureOverlay({
             }}
           />
         )}
-        <div className="absolute left-1/2 top-5 -translate-x-1/2 rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur">
+        <div
+          style={hintStyle}
+          className="absolute -translate-x-1/2 rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur"
+        >
           Capturing in <span className="font-semibold tabular-nums">{session.left}</span>s
           <span className="text-muted-foreground"> &middot; Esc to cancel</span>
         </div>
-      </div>,
-      document.body,
+      </ScreenLayer>,
+      portalContainer(),
     );
   }
 
@@ -206,11 +215,11 @@ function CaptureOverlay({
   };
 
   return createPortal(
-    <div
+    <ScreenLayer
       role="dialog"
       aria-modal="true"
       aria-label="Select an area to capture"
-      className="fixed inset-0 z-[10000] cursor-crosshair touch-none select-none"
+      className="z-[10000] cursor-crosshair touch-none select-none"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -239,12 +248,15 @@ function CaptureOverlay({
         </div>
       )}
       {!drag && (
-        <div className="pointer-events-none absolute left-1/2 top-5 -translate-x-1/2 whitespace-nowrap rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur">
+        <div
+          style={hintStyle}
+          className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur"
+        >
           Drag to select an area<span className="text-muted-foreground"> &middot; Esc to cancel</span>
         </div>
       )}
-    </div>,
-    document.body,
+    </ScreenLayer>,
+    portalContainer(),
   );
 }
 

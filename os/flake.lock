@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "deckmon": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792678816,
+        "narHash": "sha256-a8cHbuYYJ5KeUSogmfzPNihyUDK8xtYw4nt83ocTjXg=",
+        "ref": "refs/heads/main",
+        "rev": "e9b84b4c0534de0167496798bbcdb8bb2f096af6",
+        "revCount": 43,
+        "type": "git",
+        "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/deckmon.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/deckmon.git"
+      }
+    },
     "din": {
       "flake": false,
       "locked": {
@@ -28,10 +44,32 @@
         "type": "github"
       }
     },
+    "nostrd": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792442699,
+        "narHash": "sha256-IyZ75oubfL8OGJG2YO5wQmOlrxTjYhMwWp9Sf9cgjss=",
+        "ref": "refs/heads/main",
+        "rev": "5e88008b35140b592c3dbbae1c627ae180a66251",
+        "revCount": 3,
+        "type": "git",
+        "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/nostrd.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/nostrd.git"
+      }
+    },
     "root": {
       "inputs": {
+        "deckmon": "deckmon",
         "din": "din",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "nostrd": "nostrd"
       }
     }
   },

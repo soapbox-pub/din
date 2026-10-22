@@ -107,6 +107,7 @@ export interface BrowserHotkey {
     | 'close-tab'
     | 'focus-address'
     | 'find'
+    | 'view-source'
     | 'reload'
     | 'force-reload'
     | 'cycle-tab'

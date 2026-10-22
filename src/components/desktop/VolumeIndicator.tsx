@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Settings2, Volume1, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
+import { OverdriveSlider, type OverdriveSliderProps } from '@/components/ui/overdrive-slider';
 import { PopoverClose } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
+import { MAX_VOLUME, volumeText } from '@/lib/audio';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 
 /**
@@ -29,6 +30,16 @@ export function VolumeGlyph({
           ? Volume1
           : Volume2;
   return <Icon className={className} aria-hidden />;
+}
+
+/**
+ * A 0-100 volume slider that can be pushed on to MAX_VOLUME, where PipeWire
+ * amplifies past the device's full volume.
+ */
+export function VolumeSlider(
+  props: Omit<OverdriveSliderProps, 'min' | 'max' | 'overMax' | 'underMin' | 'step'>,
+) {
+  return <OverdriveSlider min={0} max={100} overMax={MAX_VOLUME} getValueText={volumeText} {...props} />;
 }
 
 /** Popover content: a volume slider, mute toggle, and settings link. */
@@ -74,18 +85,15 @@ export function VolumePopoverBody() {
             className={cn('size-5', muted && 'text-muted-foreground')}
           />
         </Button>
-        <Slider
+        <VolumeSlider
           aria-label="Volume"
-          value={[muted ? 0 : value]}
-          min={0}
-          max={100}
-          step={1}
+          value={muted ? 0 : value}
           className="flex-1"
-          onValueChange={([v]) => {
+          onValueChange={(v) => {
             if (muted) setMuted.mutate(false);
             setValue(v);
           }}
-          onValueCommit={([v]) => setVolume.mutate(v)}
+          onValueCommit={(v) => setVolume.mutate(v)}
         />
       </div>
 

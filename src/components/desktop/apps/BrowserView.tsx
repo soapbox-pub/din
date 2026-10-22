@@ -7,7 +7,6 @@ import {
 } from 'react';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { useAppContext } from '@/hooks/useAppContext';
-import { GuestClickShield } from '@/components/desktop/GuestClickShield';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
 
 /**
@@ -133,24 +132,16 @@ export interface BrowserViewProps {
  *     sites' framing policies, so many sites will refuse to load. Back and
  *     forward are handled by the caller (manual history).
  *
- * Surfaces only ever receive https URLs - plus chrome-extension:// URLs on
- * the webview surface, for extension options/dashboard pages (validated
- * upstream, see `isAllowedTabUrl`).
+ * Surfaces only ever receive https URLs (and view-source: views of them) -
+ * plus chrome-extension:// URLs on the webview surface, for extension
+ * options/dashboard pages (validated upstream, see `isAllowedTabUrl`).
  */
 export const BrowserView = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function BrowserView(props, ref) {
-    return (
-      // The wrapper hosts GuestClickShield: while this surface's window is
-      // not on top, the shield covers the guest so a click into its content
-      // raises the window (guest input never reaches this document).
-      <div className="relative h-full w-full">
-        {isWebviewAvailable() ? (
-          <WebviewSurface ref={ref} {...props} />
-        ) : (
-          <IframeSurface ref={ref} {...props} />
-        )}
-        <GuestClickShield />
-      </div>
+    return isWebviewAvailable() ? (
+      <WebviewSurface ref={ref} {...props} />
+    ) : (
+      <IframeSurface ref={ref} {...props} />
     );
   },
 );
@@ -383,7 +374,14 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       if (!el) return;
       const report = (url: unknown) => {
         if (typeof url !== 'string') return;
-        onNavigate?.(url, el.canGoBack(), el.canGoForward());
+        // A page-source view commits its inner URL; only getURL() has the
+        // `view-source:` prefix the tab must keep.
+        const current = el.getURL();
+        onNavigate?.(
+          current === `view-source:${url}` ? current : url,
+          el.canGoBack(),
+          el.canGoForward(),
+        );
       };
       const navigate = (e: Event) => {
         report((e as Event & { url?: string }).url);
@@ -460,6 +458,7 @@ interface ElectronWebviewElement extends HTMLElement {
   setZoomFactor(factor: number): void;
   canGoBack(): boolean;
   canGoForward(): boolean;
+  getURL(): string;
   getWebContentsId(): number;
   executeJavaScript(code: string): Promise<unknown>;
 }

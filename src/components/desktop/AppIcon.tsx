@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Globe } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { WEB_APP_ICON } from '@/lib/appIcons';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 
 /**
@@ -8,7 +8,7 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
  * (bundled under public/icons/apps/), a remote image (favicon) for installed
  * web apps, or a Lucide component. Remote URLs are sanitized (https or inline
  * data:image URIs); local paths must be root-relative (`/...` but not `//...`).
- * Anything that fails validation or loading falls back to a Globe glyph.
+ * Anything that fails validation or loading falls back to the globe icon.
  */
 export function AppIcon({
   icon,
@@ -28,13 +28,10 @@ export function AppIcon({
   // the https-only sanitizer (protocol-relative `//` is remote, not local).
   const isLocal = icon.startsWith('/') && !icon.startsWith('//');
   const src = isLocal ? icon : sanitizeImageUrl(icon);
-  if (!src || failed) {
-    return <Globe className={className} aria-hidden />;
-  }
 
   return (
     <img
-      src={src}
+      src={!src || failed ? WEB_APP_ICON : src}
       alt=""
       aria-hidden
       draggable={false}

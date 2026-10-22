@@ -94,6 +94,64 @@ export function matchHistory(
 }
 
 /**
+ * The forms of a history URL that address-bar typing may complete to, shortest
+ * first: `www.` and a bare trailing slash are noise, so "https://www.reddit.com/"
+ * offers "reddit.com" and "www.reddit.com".
+ */
+function completionTargets(url: string): string[] {
+  const noScheme = url.replace(/^(?:https?|nsite):\/\//i, '').replace(/\/$/, '');
+  const bare = noScheme.replace(/^www\./i, '');
+  return bare === noScheme ? [bare] : [bare, noScheme];
+}
+
+/**
+ * Chrome-style inline autocomplete: the most-visited history URL that the
+ * typed text is a prefix of, returned as `typed` plus the characters that
+ * complete it (so the caller can select the appended tail and let Enter take
+ * it, or backspace throw it away). Null when nothing matches confidently.
+ *
+ * Only start-of-URL matches qualify - the dropdown handles the fuzzier ones.
+ * A scheme the user typed is honored (and preserved verbatim, along with
+ * their capitalization); anything with whitespace is a search, not a URL.
+ * Typing a visited URL out in full ends the completion: having reached
+ * "reddit.com", Enter should go there and not to a deeper page.
+ */
+export function inlineCompletion(
+  history: BrowserHistoryEntry[],
+  typed: string,
+): string | null {
+  if (/\s/.test(typed)) return null;
+
+  const scheme = /^(?:https?|nsite):\/\//i.exec(typed)?.[0] ?? '';
+  const q = typed.slice(scheme.length).toLowerCase();
+  if (!q) return null;
+
+  let best: { entry: BrowserHistoryEntry; completion: string } | null = null;
+
+  for (const entry of history) {
+    if (scheme && !entry.url.toLowerCase().startsWith(scheme.toLowerCase())) continue;
+
+    const targets = completionTargets(entry.url);
+    if (targets.some((t) => t.toLowerCase() === q)) return null;
+
+    const target = targets.find(
+      (t) => t.length > q.length && t.toLowerCase().startsWith(q),
+    );
+    if (!target) continue;
+
+    if (
+      !best ||
+      entry.visits > best.entry.visits ||
+      (entry.visits === best.entry.visits && entry.visitedAt > best.entry.visitedAt)
+    ) {
+      best = { entry, completion: target };
+    }
+  }
+
+  return best ? typed + best.completion.slice(q.length) : null;
+}
+
+/**
  * The web browser's persistent history, stored per-user via `useAppData`
  * (encrypted NIP-78 app data under `computer.din.browser-history`, cached
  * locally, roaming across devices when sync is on).

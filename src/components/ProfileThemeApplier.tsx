@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useProfileTheme } from '@/hooks/useProfileTheme';
 import { useAppContext } from '@/hooks/useAppContext';
+import { getColorSchemeBridge } from '@/lib/colorScheme';
 import { deriveThemeTokens, isDarkTheme } from '@/lib/profileTheme';
 
 const FONT_SANS_FALLBACK =
@@ -25,6 +26,13 @@ export function ProfileThemeApplier() {
   const theme = useProfileTheme();
   const { config } = useAppContext();
   const configuredTheme = config.theme;
+
+  // Pages (browser tabs, web apps) see the mode the desktop is in. "system"
+  // leaves it to Chromium, which is also what useApplyTheme reads it from.
+  const scheme = theme ? (isDarkTheme(theme.colors.background) ? 'dark' : 'light') : configuredTheme;
+  useEffect(() => {
+    getColorSchemeBridge()?.set(scheme);
+  }, [scheme]);
 
   // Apply color tokens.
   useEffect(() => {

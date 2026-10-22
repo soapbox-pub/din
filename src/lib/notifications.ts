@@ -8,7 +8,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
  *
  * Din surfaces the standard Nostr interactions that name the logged-in user in
  * a `p` tag — mentions/replies, reposts, reactions, comments, and zaps — as
- * desktop notifications (a menu-bar bell + a transient on-screen display).
+ * desktop notifications (the menu-bar clock's panel + a transient on-screen display).
  *
  * Per-type preferences and the read cursor roam across devices through the
  * encrypted app-data layer (see `useNotificationSettings`), so relays never

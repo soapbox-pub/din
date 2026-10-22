@@ -2,7 +2,7 @@
 //
 // Native apps used to be left to the host window manager, stacked above the
 // shell, which made them strangers on the desktop: no Din chrome, no Dock
-// grouping, no Alt+Tab, and nothing at all under Aladdin's cage, which has no
+// grouping, no Alt+Tab, and nothing at all under DinOS's cage, which has no
 // window manager. Instead, Din now runs its own X server (Xvfb) that only it
 // can see, launches apps against it, and composites their windows into its
 // own (native-display-worker.mts does the window management and compositing;
@@ -34,7 +34,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electron';
 import { connectGpuBuffers, dinFd } from './native-gpu.mts';
 import { keyboardKeymap, onKeymapChange } from './keyboard.mts';
@@ -141,8 +141,11 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
   writeXauthority(xauthority, displayNumber, crypto.randomBytes(16));
 
   // The X screen is the shell's viewport (see the worker's coordinate notes):
-  // a popup an app clamps to the screen then stays inside Din's.
-  const { width, height } = screen.getPrimaryDisplay().size;
+  // a popup an app clamps to the screen then stays inside Din's. The shell
+  // spans every display, so that's their union.
+  const displays = screen.getAllDisplays().map((d) => d.bounds);
+  const width = Math.max(...displays.map((b) => b.x + b.width)) - Math.min(...displays.map((b) => b.x));
+  const height = Math.max(...displays.map((b) => b.y + b.height)) - Math.min(...displays.map((b) => b.y));
   const child = spawn(
     xvfb,
     [
@@ -258,6 +261,7 @@ export function embeddedDisplay(): Promise<EmbeddedDisplay | null> {
         return null;
       }
       current = display;
+      void publishToSession(display);
       return display;
     } finally {
       starting = null;
@@ -420,8 +424,61 @@ export function registerNativeDisplayHandlers(options: {
   app.on('will-quit', stopEmbeddedDisplay);
 }
 
+/**
+ * What the session's own services need to open windows inside Din (see
+ * publishToSession).
+ */
+const SESSION_DISPLAY_VARIABLES = ['WAYLAND_DISPLAY', 'DISPLAY', 'XAUTHORITY', 'GDK_BACKEND'];
+
+/** The session services that draw windows, restarted onto a new display. */
+const SESSION_DISPLAY_UNITS = ['xdg-desktop-portal-gtk.service'];
+
+/** Whether the user manager holds the embedded display's variables. */
+let published = false;
+
+function systemctlUser(args: string[]): Promise<void> {
+  return new Promise((resolve) => {
+    execFile('systemctl', ['--user', ...args], { timeout: 5_000 }, (error) => {
+      if (error) console.error(`native-display: systemctl --user ${args[0]}:`, error.message);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Point the session's services at the embedded display, where Din is the
+ * whole desktop (DinOS's launcher sets DIN_DESKTOP_SESSION).
+ *
+ * The user manager starts services like the desktop portal, which draws the
+ * file chooser Flatpak apps (and Chromium, for Din's own) ask it for. They
+ * start with its environment, and without a display there GTK falls back to
+ * wayland-0, which under cage is Din's own compositor: a Save dialog took
+ * Din's place, fullscreen and with all the input, and couldn't be left.
+ * Here they open as Din windows instead. A portal already running (it
+ * starts with Din, before this display) is restarted onto it.
+ *
+ * Never elsewhere: on another desktop the user manager's display is that
+ * desktop's, and everything it starts would land in Din.
+ */
+async function publishToSession(display: EmbeddedDisplay): Promise<void> {
+  if (!process.env.DIN_DESKTOP_SESSION) return;
+  const env = await embeddedDisplayEnv(display);
+  const set = SESSION_DISPLAY_VARIABLES.filter((name) => env[name]);
+  const unset = SESSION_DISPLAY_VARIABLES.filter((name) => !env[name]);
+  await systemctlUser(['set-environment', ...set.map((name) => `${name}=${env[name]}`)]);
+  if (unset.length > 0) await systemctlUser(['unset-environment', ...unset]);
+  published = true;
+  await systemctlUser(['try-restart', ...SESSION_DISPLAY_UNITS]);
+}
+
 /** Tear down the worker and the server (apps on it exit with it). */
 export function stopEmbeddedDisplay(): void {
+  // The user manager outlives Din; nothing should look for this display
+  // once it's gone.
+  if (published) {
+    spawnSync('systemctl', ['--user', 'unset-environment', ...SESSION_DISPLAY_VARIABLES], { timeout: 2_000 });
+    published = false;
+  }
   worker?.kill();
   worker = null;
   server?.kill();

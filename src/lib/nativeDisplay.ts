@@ -35,7 +35,11 @@ export interface NativeSurface {
   pid: number | null;
   wmClass: string[];
   transientFor: number | null;
-  /** The app draws its own title bar, so Din's is left off. */
+  /**
+   * The app draws its own title bar (or none: a Windows program's
+   * popup-style window, a splash screen, a desktop widget), so Din's is
+   * left off, and the window positions itself.
+   */
   csd: boolean;
   canvas: HTMLCanvasElement;
 }
@@ -62,6 +66,8 @@ export type NativeDisplayEvent =
   /** The app's own maximize/minimize buttons. */
   | { type: 'maximize'; surface: NativeSurface; maximized: boolean }
   | { type: 'minimize'; surface: NativeSurface }
+  /** Asked to close twice, and still open: offer to force quit. */
+  | { type: 'close-ignored'; surface: NativeSurface }
   /** The app locked the pointer (mouse-look) or let it go. */
   | { type: 'pointer-lock'; surface: NativeSurface; locked: boolean };
 
@@ -76,6 +82,7 @@ interface WindowInfo {
   pid: number | null;
   kind: string;
   transientFor: number | null;
+  /** Absent from servers that predate it. */
   csd?: boolean;
 }
 
@@ -128,12 +135,12 @@ declare global {
 
 /**
  * What a Din window adds around its content: the 1px border on each side,
- * and the 36px title bar (src/components/desktop/Window.tsx) unless the app
- * draws its own. A native window of W x H content needs a Din window this
- * much larger.
+ * and the 36px title bar (src/components/desktop/Window.tsx) - nothing, if
+ * the app draws its own. A native window of W x H content needs a Din
+ * window this much larger.
  */
 export function windowChrome(surface: { csd: boolean }): { width: number; height: number } {
-  return { width: 2, height: surface.csd ? 2 : 38 };
+  return surface.csd ? { width: 0, height: 0 } : { width: 2, height: 38 };
 }
 
 const RESIZE_EDGES = new Set<string>(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']);
@@ -288,6 +295,7 @@ function onMessage(message: WorkerMessage): void {
       const surface = surfaces.get(message.id);
       if (!surface) return;
       surfaces.delete(message.id);
+      closeRequests.delete(message.id);
       window.nativeDisplay?.detachCanvas(message.id);
       emit({ type: 'close', surface });
       return;
@@ -506,9 +514,30 @@ export function raiseNativeWindow(id: number): void {
   send({ type: 'raise', id });
 }
 
-/** Ask an app to close a window (it may prompt first, or refuse). */
+/**
+ * How long after asking a window to close another close click means "it
+ * didn't listen" rather than "close it again".
+ */
+const CLOSE_PATIENCE_MS = 60_000;
+
+/** X window id -> when the shell last asked it to close. */
+const closeRequests = new Map<number, number>();
+
+/**
+ * Ask an app to close a window (it may prompt first, or refuse).
+ *
+ * Asking again while an earlier request is still unanswered reports the
+ * window as `close-ignored`, so the shell can offer to force quit - some
+ * programs (desktop toys, hung apps) never close on request.
+ */
 export function closeNativeWindow(id: number): void {
+  const asked = closeRequests.get(id);
+  const surface = surfaces.get(id);
+  closeRequests.set(id, Date.now());
   send({ type: 'close', id });
+  if (surface && asked !== undefined && Date.now() - asked < CLOSE_PATIENCE_MS) {
+    emit({ type: 'close-ignored', surface });
+  }
 }
 
 /** Whether an X window is still alive. */
@@ -525,6 +554,9 @@ export function isNativeWindowOpen(id: number): boolean {
  * only after the text it pastes does.
  */
 let keyQueue: Promise<void> = Promise.resolve();
+
+/** Keys the servers have seen go down and not yet come up. */
+const heldKeys = new Set<number>();
 
 /** DOM mouse button -> X button. */
 const BUTTONS = [1, 2, 3, 8, 9];
@@ -623,9 +655,29 @@ function isPaste(event: KeyboardEvent): boolean {
 export function sendNativeKey(event: KeyboardEvent, down: boolean): boolean {
   const keycode = KEYCODES[event.code];
   if (!keycode) return false;
+  if (down) {
+    heldKeys.add(keycode);
+  } else if (!heldKeys.delete(keycode)) {
+    // Pressed elsewhere (the Tab of an Alt+Tab the shell claimed): the
+    // servers never saw it go down.
+    return true;
+  }
   if (down && isPaste(event)) keyQueue = keyQueue.then(syncClipboard);
   keyQueue = keyQueue.then(() => send({ type: 'key', keycode, down }));
   return true;
+}
+
+/**
+ * Let go of every held key: focus left the native window, and the keyups
+ * will land elsewhere. The servers count presses, so an Alt that went down
+ * in an app and came up in the window switcher would stay held for every
+ * app after it.
+ */
+export function releaseNativeKeys(): void {
+  for (const keycode of heldKeys) {
+    keyQueue = keyQueue.then(() => send({ type: 'key', keycode, down: false }));
+  }
+  heldKeys.clear();
 }
 
 /** Text last exchanged with the X clipboard, in either direction. */

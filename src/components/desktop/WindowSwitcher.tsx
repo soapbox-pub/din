@@ -222,12 +222,16 @@ export function WindowSwitcher() {
 
   const selectedId = session.ids[session.index];
 
-  // Human label per window: the app name, disambiguated with a running index
-  // when the app has more than one window (matching the Dock's picker).
+  // Human label per window: what its app says it's showing, else the app
+  // name, disambiguated with a running index when the app has more than one
+  // untitled window.
   const totals = new Map<string, number>();
-  for (const w of windows) totals.set(w.appId, (totals.get(w.appId) ?? 0) + 1);
+  for (const w of windows) {
+    if (!w.title) totals.set(w.appId, (totals.get(w.appId) ?? 0) + 1);
+  }
   const seen = new Map<string, number>();
   const labelFor = (w: WindowState) => {
+    if (w.title) return w.title;
     const name = getApp(w.appId)?.name ?? w.appId;
     const n = (seen.get(w.appId) ?? 0) + 1;
     seen.set(w.appId, n);
@@ -278,7 +282,7 @@ export function WindowSwitcher() {
                   <span className="relative">
                     {app && (
                       <AppIcon
-                        icon={app.icon}
+                        icon={w.icon ?? app.icon}
                         className="size-14 text-white drop-shadow"
                       />
                     )}

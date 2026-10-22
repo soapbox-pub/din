@@ -1,47 +1,80 @@
 /**
- * Typed access to the OS Bluetooth bridge exposed by the Electron preload
- * (`window.bluetooth`, see electron/preload.cjs + electron/main.mts).
+ * Typed access to the Bluetooth bridge exposed by the Electron preload
+ * (`window.bluetooth`, see electron/preload.cjs + electron/bluetooth.mts).
  *
- * Backed by BlueZ over D-Bus in the main process. Without BlueZ or an
- * adapter `status()` resolves with `available: false`; in a plain browser the
- * bridge is absent. Callers must feature-detect and render a fallback.
+ * Backed by BlueZ over the system bus. The main process pushes the whole
+ * state whenever it changes; `available: false` where bluetoothd isn't
+ * running. Absent in a plain browser; callers feature-detect via
+ * `getBluetoothBridge()`.
  */
 
+export interface BluetoothAdapter {
+  /** What other devices see this computer as. */
+  name: string;
+  address: string;
+  powered: boolean;
+  discovering: boolean;
+}
+
+export type BluetoothBusy = 'pairing' | 'connecting' | 'disconnecting';
+
 export interface BluetoothDevice {
-  /** MAC address, e.g. "50:5E:5C:94:E5:09". */
+  /** BlueZ's object path, which the actions take. */
+  path: string;
   address: string;
   name: string;
-  /** BlueZ's freedesktop icon name, e.g. "audio-headphones", or null. */
+  /** BlueZ's freedesktop icon name, e.g. "audio-headset", "input-keyboard". */
   icon: string | null;
   paired: boolean;
   connected: boolean;
-  /** Battery percentage the device reports, or null. */
+  /** Battery level, 0-100, for devices that report one. */
   battery: number | null;
+  busy: BluetoothBusy | null;
 }
 
-export interface BluetoothStatus {
-  /** False when BlueZ or a Bluetooth adapter isn't present. */
+export type BluetoothRequestKind =
+  | 'confirm'
+  | 'authorize'
+  | 'pin'
+  | 'passkey'
+  | 'display-pin'
+  | 'display-passkey';
+
+/** A pairing that needs the user. */
+export interface BluetoothRequest {
+  id: number;
+  /** The device's path. */
+  device: string;
+  name: string;
+  kind: BluetoothRequestKind;
+  /** The code to compare (confirm) or to type on the device (display-*). */
+  code: string | null;
+}
+
+export interface BluetoothState {
   available: boolean;
-  powered: boolean;
-  /** True while a scan for nearby devices runs. */
-  discovering: boolean;
-  /** Connected first, then paired, then nearby. */
+  adapter: BluetoothAdapter | null;
   devices: BluetoothDevice[];
+  request: BluetoothRequest | null;
 }
 
 export interface BluetoothBridge {
-  status(): Promise<BluetoothStatus>;
-  /** Turn the adapter on or off. Resolves to the new status. */
-  setPowered(powered: boolean): Promise<BluetoothStatus>;
-  /** Look for nearby devices for a short while. */
-  scan(): Promise<void>;
-  /** Pair with, trust and connect to a nearby device. */
-  pair(address: string): Promise<void>;
-  /** Connect to a paired device. */
-  connect(address: string): Promise<void>;
-  disconnect(address: string): Promise<void>;
-  /** Unpair and forget a device. */
-  remove(address: string): Promise<void>;
+  state(): Promise<BluetoothState>;
+  setPowered(on: boolean): Promise<void>;
+  /** Start or stop looking for devices; a search stops by itself after a while. */
+  discover(on: boolean): Promise<void>;
+  /** Pair with a device, then connect to it. */
+  pair(path: string): Promise<void>;
+  connect(path: string): Promise<void>;
+  disconnect(path: string): Promise<void>;
+  /** Remove a device and its pairing. */
+  forget(path: string): Promise<void>;
+  /** Stop a pairing in progress. */
+  cancel(path: string): Promise<void>;
+  answer(id: number, accept: boolean, value?: string): Promise<void>;
+  /** Whether the shell is there to answer pairing prompts. */
+  setPrompts(enabled: boolean): Promise<void>;
+  onChanged(callback: (state: BluetoothState) => void): () => void;
 }
 
 declare global {
@@ -51,19 +84,68 @@ declare global {
   }
 }
 
-/** The Bluetooth bridge, or undefined when running outside the Electron shell. */
+/** The Bluetooth bridge, or undefined outside the Electron shell. */
 export function getBluetoothBridge(): BluetoothBridge | undefined {
   if (typeof window === 'undefined') return undefined;
   return window.bluetooth;
 }
 
-/**
- * Strip Electron's IPC error prefix and busctl's "Call failed: " so users
- * see just the underlying message.
- */
-export function cleanBluetoothError(error: unknown): string {
+/** Strip Electron's IPC error prefix so users see just the underlying message. */
+export function cleanBluetoothBridgeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message
-    .replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '')
-    .replace(/^Call failed:\s*/, '');
+  return message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
+}
+
+/** Paired devices first (connected ones on top), then the rest by name. */
+export function sortDevices(devices: BluetoothDevice[]): BluetoothDevice[] {
+  return [...devices].sort(
+    (a, b) =>
+      Number(b.connected) - Number(a.connected) ||
+      Number(b.paired) - Number(a.paired) ||
+      a.name.localeCompare(b.name),
+  );
+}
+
+/** What a device is doing, or what it is, in a few words. */
+export function describeDevice(device: BluetoothDevice): string {
+  if (device.busy === 'pairing') return 'Pairing…';
+  if (device.busy === 'connecting') return 'Connecting…';
+  if (device.busy === 'disconnecting') return 'Disconnecting…';
+  const battery = device.battery !== null ? ` · ${device.battery}% battery` : '';
+  if (device.connected) return `Connected${battery}`;
+  if (device.paired) return `Not connected${battery}`;
+  return deviceKind(device.icon);
+}
+
+/** A plain name for BlueZ's icon name. */
+export function deviceKind(icon: string | null): string {
+  switch (icon) {
+    case 'audio-headset':
+      return 'Headset';
+    case 'audio-headphones':
+      return 'Headphones';
+    case 'audio-card':
+      return 'Speaker';
+    case 'input-keyboard':
+      return 'Keyboard';
+    case 'input-mouse':
+      return 'Mouse';
+    case 'input-tablet':
+      return 'Tablet';
+    case 'input-gaming':
+      return 'Game controller';
+    case 'phone':
+      return 'Phone';
+    case 'computer':
+      return 'Computer';
+    case 'video-display':
+      return 'Display';
+    case 'printer':
+      return 'Printer';
+    case 'camera-photo':
+    case 'camera-video':
+      return 'Camera';
+    default:
+      return 'Device';
+  }
 }

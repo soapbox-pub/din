@@ -14,6 +14,9 @@
 //      display, detached from the shell, remembering the pid so its windows
 //      can be matched back to the app that owns them.
 //
+// Windows programs ride on both: Wine's Start-menu shortcuts are desktop
+// entries, and opening an .exe launches Wine (see windows-apps.mts).
+//
 // Everything degrades to "unavailable" where the embedded display can't run
 // (no Xvfb installed).
 
@@ -22,7 +25,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ipcMain, nativeImage } from 'electron';
-import { embeddedDisplay, embeddedDisplayEnv } from './native-display.mts';
+import {
+  embeddedDisplay,
+  embeddedDisplayEnv,
+  type EmbeddedDisplay,
+} from './native-display.mts';
+import {
+  isWindowsProgram,
+  isWineCommand,
+  wineEnvironment,
+  windowsProgramCommand,
+} from './windows-apps.mts';
 
 /** An installed native application, as the shell sees it. */
 export interface NativeApp {
@@ -60,6 +73,8 @@ interface DesktopEntry {
   startupWmClass: string | null;
   /** Working directory (Path=), when set. */
   cwd: string | null;
+  /** Variables set by an `env NAME=value ...` Exec prefix (Wine's entries). */
+  env: Record<string, string>;
 }
 
 /** `$XDG_DATA_HOME`, per the base-directory spec. */
@@ -222,7 +237,21 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
   const tryExec = values.get('TryExec');
   if (tryExec && !which(tryExec)) return null;
 
-  const argv = parseExec(exec);
+  // Exec is a string value like any other: its escapes (\\ -> \) come off
+  // before the quoting rules apply.
+  let argv = parseExec(unescapeValue(exec));
+  // `env NAME=value cmd` is how Wine's entries pick their prefix. Lifting
+  // the assignments out keeps argv[0] the real program, for window matching
+  // and for launch() to recognize Wine.
+  const env: Record<string, string> = {};
+  if (argv[0] === 'env') {
+    let i = 1;
+    for (; i < argv.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[i]); i += 1) {
+      const eq = argv[i].indexOf('=');
+      env[argv[i].slice(0, eq)] = argv[i].slice(eq + 1);
+    }
+    argv = argv.slice(i);
+  }
   if (argv.length === 0 || !argv[0]) return null;
 
   const list = (key: string): string[] =>
@@ -242,6 +271,7 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
     keywords: list('Keywords'),
     startupWmClass: values.get('StartupWMClass') ?? null,
     cwd: values.get('Path') ?? null,
+    env,
   };
 }
 
@@ -293,6 +323,8 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
   const entries = new Map<string, DesktopEntry>();
   let sinceBreath = 0;
   // Entries may nest in subdirectories; the id then joins them with '-'.
+  // Wine nests Start-menu folders as wine/Programs/<Vendor>/<Product>/, so
+  // the walk goes several levels down.
   const walk = async (current: string, prefix: string, depth: number): Promise<void> => {
     let dirents: fs.Dirent[];
     try {
@@ -319,7 +351,7 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
       }
     }
   };
-  for (const dir of applicationDirs()) await walk(dir, '', 3);
+  for (const dir of applicationDirs()) await walk(dir, '', 6);
   return entries;
 }
 
@@ -658,7 +690,11 @@ function buildWmClassIndex(scanned: Map<string, DesktopEntry>): Map<string, stri
 
   for (const entry of all) add(entry.startupWmClass, appIdOf(entry));
   for (const entry of all) add(entry.id.replace(/\.desktop$/, ''), appIdOf(entry));
-  for (const entry of all) add(path.basename(entry.argv[0]), appIdOf(entry));
+  // Every Windows program's command is "wine"; its WM_CLASS is the .exe name,
+  // which Wine's entries carry as StartupWMClass.
+  for (const entry of all) {
+    if (!isWineCommand(entry.argv[0])) add(path.basename(entry.argv[0]), appIdOf(entry));
+  }
   for (const entry of all) {
     const base = entry.id.replace(/\.desktop$/, '');
     if (base.includes('.')) add(base.slice(base.lastIndexOf('.') + 1), appIdOf(entry));
@@ -671,6 +707,7 @@ async function listApps(): Promise<NativeApp[]> {
   const scanned = [...(await entries()).values()];
   const apps: NativeApp[] = [];
   for (const entry of scanned) {
+    if (isUninstaller(entry)) continue;
     apps.push({
       id: NATIVE_PREFIX + entry.id.replace(/\.desktop$/, ''),
       desktopId: entry.id,
@@ -683,6 +720,15 @@ async function listApps(): Promise<NativeApp[]> {
     if (apps.length % BATCH === 0) await breathe();
   }
   return apps.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * A Windows program's "Uninstall Foo" Start-menu shortcut. Windows keeps
+ * these out of sight in Apps & Features; listed beside the app itself they
+ * look like a second, destructive app.
+ */
+function isUninstaller(entry: DesktopEntry): boolean {
+  return isWineCommand(entry.argv[0]) && /^uninstall\b/i.test(entry.name);
 }
 
 /** Terminal emulators tried, in order, for Terminal=true entries. */
@@ -717,26 +763,122 @@ async function launch(appId: string): Promise<void> {
     argv = [...terminal, ...argv];
   }
 
-  // Electron's own Node/Chromium variables would otherwise leak into every
-  // app the user starts (ELECTRON_RUN_AS_NODE in particular turns an
-  // Electron-based app into a bare Node process).
+  const env = await appEnvironment(display);
+  if (isWineCommand(argv[0])) Object.assign(env, wineEnvironment());
+  Object.assign(env, entry.env);
+
+  const cwd = entry.cwd && fs.existsSync(entry.cwd) ? entry.cwd : os.homedir();
+  const pid = spawnDetached(argv, cwd, env);
+  if (pid) launchedPids.set(pid, appId);
+}
+
+/**
+ * The environment an app starts with: the embedded display's, minus
+ * Electron's own Node/Chromium variables, which would otherwise leak into
+ * every app the user starts (ELECTRON_RUN_AS_NODE in particular turns an
+ * Electron-based app into a bare Node process).
+ */
+async function appEnvironment(display: EmbeddedDisplay): Promise<NodeJS.ProcessEnv> {
   const env = await embeddedDisplayEnv(display);
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.NODE_OPTIONS;
   delete env.CHROME_DESKTOP;
+  return env;
+}
 
-  const child = spawn(argv[0], argv.slice(1), {
-    cwd: entry.cwd && fs.existsSync(entry.cwd) ? entry.cwd : os.homedir(),
-    env,
-    detached: true,
-    stdio: 'ignore',
-  });
+/**
+ * The environment for the Terminal's shells: the apps' own, so a program
+ * started from a shell opens as a window in Din like any launched app, not
+ * on the display Din itself is drawn to (under cage, that put it in Din's
+ * place, fullscreen). Din's own environment where the embedded display
+ * can't run.
+ */
+export async function terminalEnvironment(): Promise<NodeJS.ProcessEnv> {
+  const display = await embeddedDisplay().catch(() => null);
+  return display ? appEnvironment(display) : { ...process.env };
+}
+
+/** Start a process detached from the shell, returning its pid. */
+function spawnDetached(argv: string[], cwd: string, env: NodeJS.ProcessEnv): number | undefined {
+  const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: 'ignore' });
   // Detached and unreferenced: never holds the event loop open.
   child.unref();
   child.on('error', () => {
     if (child.pid) launchedPids.delete(child.pid);
   });
-  if (child.pid) launchedPids.set(child.pid, appId);
+  return child.pid;
+}
+
+/**
+ * Open a Windows program file (.exe, .msi, .bat, .lnk) onto the embedded
+ * display, through Wine. Runs in the file's own folder, as double-clicking
+ * it in Explorer would. Throws with a user-facing message when it can't.
+ */
+export async function runWindowsProgram(file: string): Promise<void> {
+  if (!path.isAbsolute(file) || !isWindowsProgram(file) || !fs.statSync(file).isFile()) {
+    throw new Error('Not a Windows program');
+  }
+  const display = await embeddedDisplay();
+  if (!display) throw new Error('The embedded display is unavailable');
+  const env = await appEnvironment(display);
+  const command = await windowsProgramCommand(file, env);
+  spawnDetached(command.argv, path.dirname(file), { ...env, ...command.env });
+}
+
+/**
+ * Force quit the program behind a window that won't close.
+ *
+ * Only a process started onto Din's embedded display qualifies - its
+ * environment names one of the display's servers - so the shell can't be
+ * used to kill Din itself or anything else the user runs. Throws when the
+ * pid doesn't qualify.
+ */
+async function forceQuit(pid: number): Promise<void> {
+  const display = await embeddedDisplay();
+  if (!display || pid <= 1 || pid === process.pid) throw new Error('Not an app on Din’s display');
+  const servers = new Set([
+    `DISPLAY=${display.display}`,
+    display.xwayland && `DISPLAY=${display.xwayland}`,
+    display.wayland && `WAYLAND_DISPLAY=${display.wayland}`,
+  ]);
+  let environ: string[];
+  try {
+    environ = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0');
+  } catch {
+    // Gone already, which is what was wanted.
+    return;
+  }
+  if (!environ.some((entry) => servers.has(entry))) throw new Error('Not an app on Din’s display');
+  process.kill(pid, 'SIGKILL');
+}
+
+/**
+ * Watch the user's applications folder, where installers - Wine's Start-menu
+ * shortcuts above all - drop new entries, and report changes so the shell's
+ * app list follows along without waiting out the scan cache.
+ */
+function watchUserApplications(onChange: () => void): void {
+  const dir = path.join(dataHome(), 'applications');
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const watcher = fs.watch(dir, { recursive: true }, () => {
+      // An install writes a burst of files (entries, icons, MIME caches);
+      // settle once it's over.
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        entryCache = null;
+        // New programs bring new icons, which the index hasn't seen.
+        iconIndex = new Map();
+        onChange();
+      }, 1_000);
+    });
+    watcher.on('error', () => watcher.close());
+    watcher.unref();
+  } catch {
+    // No watching; the scan cache's TTL still catches up eventually.
+  }
 }
 
 /** Walk a pid's ancestry, looking for a process Din launched. */
@@ -788,8 +930,11 @@ async function appIdForWindow(pid: number | null, wmClass: string[]): Promise<st
  */
 export function registerNativeAppHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
+  shell: () => Electron.WebContents | null;
 }): void {
   const { assertShellSender } = options;
+
+  watchUserApplications(() => options.shell()?.send('native-apps:changed'));
 
   ipcMain.handle('native-apps:list', async (event) => {
     assertShellSender(event);
@@ -801,6 +946,18 @@ export function registerNativeAppHandlers(options: {
     assertShellSender(event);
     if (typeof appId !== 'string') throw new Error('An app id is required');
     await launch(appId);
+  });
+
+  ipcMain.handle('native-apps:run-windows-program', async (event, file) => {
+    assertShellSender(event);
+    if (typeof file !== 'string') throw new Error('A file path is required');
+    await runWindowsProgram(file);
+  });
+
+  ipcMain.handle('native-apps:force-quit', async (event, pid) => {
+    assertShellSender(event);
+    if (!Number.isInteger(pid)) throw new Error('A pid is required');
+    await forceQuit(pid);
   });
 
   ipcMain.handle('native-apps:resolve', async (event, pid, wmClass) => {

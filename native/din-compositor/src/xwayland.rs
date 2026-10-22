@@ -145,8 +145,12 @@ impl XwmHandler for State {
             return;
         }
         // Cascade until the shell places it, at the size the app asked for.
+        // A window drawing its own title bar (or none) that names its own
+        // position (a splash screen centered on the screen, a widget where
+        // it was left) keeps it: where it goes is the app's business.
         let offset = 40 * (self.toplevels.len() as i32 % 8);
-        let pos = (80 + offset, 80 + offset).into();
+        let placed = window.is_decorated() && window.size_hints().is_some_and(|h| h.position.is_some());
+        let pos = if placed { window.geometry().loc } else { (80 + offset, 80 + offset).into() };
         let _ = window.set_mapped(true);
         let _ = window.configure(Rectangle::new(pos, window.geometry().size));
         let id = self.allocate_id();
@@ -175,7 +179,9 @@ impl XwmHandler for State {
     }
 
     /// Sizes are granted (the shell then fits the Din window to the app);
-    /// positions are Din's, except for a window that isn't mapped yet.
+    /// positions are Din's, except for a window that isn't mapped yet, or one
+    /// that draws its own title bar: it has no Din one to be dragged by, so
+    /// it moves itself and the Din window follows.
     fn configure_request(
         &mut self,
         _xwm: XwmId,
@@ -193,13 +199,29 @@ impl XwmHandler for State {
         if let Some(h) = h {
             geometry.size.h = (h as i32).max(1);
         }
-        if self.x11_toplevel(&window).is_none() {
+        let toplevel = self.x11_toplevel(&window);
+        let moves_itself = toplevel.is_none() || window.is_decorated();
+        if moves_itself {
             geometry.loc.x = x.unwrap_or(geometry.loc.x);
             geometry.loc.y = y.unwrap_or(geometry.loc.y);
         }
         // Configuring an unchanged window still sends the synthetic
         // ConfigureNotify the client waits for.
         let _ = window.configure(geometry);
+        let Some(index) = toplevel else { return };
+        let t = &mut self.toplevels[index];
+        if !moves_itself || t.pos == geometry.loc {
+            return;
+        }
+        t.pos = geometry.loc;
+        if t.announced {
+            let message = serde_json::json!({
+                "type": "configure", "id": t.id, "x": geometry.loc.x, "y": geometry.loc.y,
+                "width": geometry.size.w, "height": geometry.size.h,
+            });
+            t.known_size = Some(geometry.size);
+            self.wire.json(message);
+        }
     }
 
     /// Override-redirect windows move and resize themselves.

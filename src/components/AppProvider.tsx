@@ -57,6 +57,9 @@ const AppConfigSchema = z.object({
   wobblyWindows: z.boolean(),
   zoomLevel: z.number(),
   customCursor: CursorThemeSchema.nullable(),
+  clockFormat: z.enum(['auto', '12', '24']),
+  clockShowDate: z.boolean(),
+  clockShowSeconds: z.boolean(),
 }) satisfies z.ZodType<AppConfig>;
 
 export function AppProvider(props: AppProviderProps) {

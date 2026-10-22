@@ -3,6 +3,7 @@ import { useNostr } from '@nostrify/react';
 import { useCallback, useMemo } from 'react';
 
 import { useAuthor } from './useAuthor.ts';
+import { NOSTRD_LOGIN, NostrdSigner } from '@/lib/nostrd';
 
 export function useCurrentUser() {
   const { nostr } = useNostr();
@@ -16,6 +17,8 @@ export function useCurrentUser() {
         return NUser.fromBunkerLogin(login, nostr);
       case 'extension': // Nostr login with NIP-07 browser extension
         return NUser.fromExtensionLogin(login);
+      case NOSTRD_LOGIN: // An account kept in nostrd, the system's signer
+        return new NUser(NOSTRD_LOGIN, login.pubkey, new NostrdSigner(login.pubkey));
       // Other login types can be defined here
       default:
         throw new Error(`Unsupported login type: ${login.type}`);

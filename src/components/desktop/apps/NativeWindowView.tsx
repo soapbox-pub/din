@@ -3,12 +3,14 @@ import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowChrome, type ChromePoint } from '@/contexts/WindowChromeContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import {
   getNativeSurface,
   raiseNativeWindow,
+  releaseNativeKeys,
   sendNativeButton,
   sendNativeKey,
   sendNativeLeave,
@@ -21,6 +23,7 @@ import {
   setNativeMaximized,
   subscribeNativeDisplay,
   windowChrome,
+  type NativeSurface,
 } from '@/lib/nativeDisplay';
 
 /**
@@ -51,16 +54,42 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const chrome = useWindowChrome();
   const { getApp } = useInstalledApps();
   const { windows } = useWindowManager();
-  const { resize, maximize, minimize, toggleMaximize } = useWindowActions();
+  const { move, resize, setFrameless, maximize, minimize, toggleMaximize } = useWindowActions();
   const [title, setTitle] = useState(() => getNativeSurface(xid)?.title ?? '');
-  const [csd, setCsd] = useState(() => getNativeSurface(xid)?.csd ?? false);
   /** Whether the app holds a pointer lock, which the canvas mirrors. */
   const lockedRef = useRef(false);
   /** The pointer, and whether a button is held on the canvas. */
   const pointerRef = useRef<ChromePoint & { held: boolean }>({ clientX: 0, clientY: 0, held: false });
+  /** Where the last button went down on the canvas. */
+  const pressRef = useRef<ChromePoint>({ clientX: 0, clientY: 0 });
   /** A move or resize the app asked for is under way: the pointer drives it. */
   const gestureRef = useRef(false);
   const app = getApp(appId);
+  useWindowTitle(title);
+
+  const current = windows.find((w) => w.id === windowId);
+  const currentRef = useRef(current);
+  useEffect(() => {
+    currentRef.current = current;
+  });
+
+  /**
+   * Where the Din window of an app that draws its own title bar must be for
+   * the app to sit at the root position it asked for: the window is all
+   * app, so that's its position in workspace coordinates - kept on the
+   * workspace, though. Apps place themselves by the screen, which the
+   * workspace may be smaller than (a windowed Din), and a window remembered
+   * on a bigger monitor can be off this one; with no Din title bar, it
+   * couldn't be dragged back. The app is told where it landed, as with any
+   * window manager.
+   */
+  const placeFor = useCallback((surface: NativeSurface) => {
+    const area = workspaceOrigin(hostRef.current);
+    return {
+      x: clamp(surface.x - area.x, 0, area.width - surface.width),
+      y: clamp(surface.y - area.y, 0, area.height - surface.height),
+    };
+  }, []);
 
   /** Report where the canvas is (viewport) and how big its box is. */
   const syncGeometry = useCallback(() => {
@@ -83,7 +112,15 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     const surface = getNativeSurface(xid);
     if (!host || !surface) return;
     host.appendChild(surface.canvas);
-    syncGeometry();
+    // An app that draws its own title bar opens where it put itself (the
+    // Din window comes to it); everything else is placed by Din (the app
+    // goes to it). The observer's first callback reports the result.
+    if (surface.csd) {
+      const place = placeFor(surface);
+      move(windowId, place.x, place.y);
+    } else {
+      syncGeometry();
+    }
     const observer = new ResizeObserver(syncGeometry);
     observer.observe(host);
     const timer = window.setInterval(syncGeometry, POSITION_SYNC_MS);
@@ -92,6 +129,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       window.clearInterval(timer);
       if (surface.canvas.parentElement === host) surface.canvas.remove();
     };
+    // Placement happens once, on adoption, not whenever the actions re-bind.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [xid, syncGeometry]);
 
   // The window on top holds the app's keyboard focus.
@@ -105,18 +144,13 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   }, [xid, isTop, syncGeometry]);
   useEffect(() => () => setNativeFocus(xid, false), [xid]);
 
-  // Title changes, and the app resizing itself (the Din window follows).
-  const current = windows.find((w) => w.id === windowId);
-  const currentRef = useRef(current);
-  useEffect(() => {
-    currentRef.current = current;
-  });
+  // Title changes, and the app resizing (or moving) itself, drawing its own
+  // title bar, or driving the window from it: the Din window follows.
   useEffect(
     () =>
       subscribeNativeDisplay((event) => {
         if (event.surface.id !== xid) return;
         if (event.type === 'title') setTitle(event.surface.title);
-        if (event.type === 'decoration') setCsd(event.surface.csd);
         if (event.type === 'pointer-lock') {
           lockedRef.current = event.locked;
           const host = hostRef.current;
@@ -132,24 +166,34 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         }
         const win = currentRef.current;
         if (!win) return;
-        // The app resized itself, or Din's title bar came or went: the Din
-        // window keeps the app at its size.
-        if ((event.type === 'configure' || event.type === 'decoration') && !win.maximized && !win.snapped) {
-          const extra = windowChrome(event.surface);
-          resize(windowId, {
-            x: win.x,
-            y: win.y,
-            width: event.surface.width + extra.width,
-            height: event.surface.height + extra.height,
+        const { surface } = event;
+        const extra = windowChrome(surface);
+        const size = { width: surface.width + extra.width, height: surface.height + extra.height };
+        // The app resized (or, drawing its own title bar, moved) itself: the
+        // Din window follows. Mid-gesture the window is the pointer's, and the
+        // app's echo of the move would only pull it back.
+        if (event.type === 'configure' && !win.maximized && !win.snapped) {
+          const place = surface.csd && !gestureRef.current ? placeFor(surface) : win;
+          resize(windowId, { x: place.x, y: place.y, ...size });
+        }
+        // Din's title bar came or went: the Din window keeps the app at its
+        // size, and in one commit, so the content doesn't jump.
+        if (event.type === 'decoration') {
+          setFrameless(windowId, surface.csd, {
+            ...(surface.csd ? placeFor(surface) : { x: win.x, y: win.y }),
+            ...size,
           });
         }
         // Drags on the app's own title bar and edges. Only while a button
         // is still held on the canvas, so a late request can't start a
-        // gesture nobody is driving.
+        // gesture nobody is driving. A move is anchored where the button
+        // went down, not where the pointer is now: apps ask only once it
+        // has travelled past their drag threshold, and the point grabbed
+        // should stay under the pointer.
         const pointer = pointerRef.current;
         if ((event.type === 'move' || event.type === 'resize') && pointer.held && !gestureRef.current) {
           gestureRef.current =
-            event.type === 'move' ? chrome.beginMove(pointer) : chrome.beginResize(event.edge, pointer);
+            event.type === 'move' ? chrome.beginMove(pressRef.current) : chrome.beginResize(event.edge, pointer);
         }
         if (event.type === 'maximize') {
           if (event.maximized && !win.maximized) maximize(windowId);
@@ -159,15 +203,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         }
         if (event.type === 'minimize') minimize(windowId);
       }),
-    [xid, windowId, resize, maximize, minimize, toggleMaximize, chrome],
+    [xid, windowId, resize, setFrameless, placeFor, maximize, minimize, toggleMaximize, chrome],
   );
-
-  // No Din title bar for an app that draws its own. A layout effect, so a
-  // new window never paints with both.
-  useLayoutEffect(() => {
-    chrome.setFrameless(csd);
-    return () => chrome.setFrameless(false);
-  }, [chrome, csd]);
 
   // The app's own title bar shows whether the window is maximized.
   const maximized = current?.maximized ?? false;
@@ -218,6 +255,9 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     };
   }, [xid]);
 
+  // Closing with a key down (Alt+F4) leaves no window to hear it come up.
+  useEffect(() => releaseNativeKeys, []);
+
   // Wheel needs a non-passive listener to keep the page from scrolling.
   useEffect(() => {
     const host = hostRef.current;
@@ -264,6 +304,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       }}
       onPointerDown={(event) => {
         pointerRef.current = { clientX: event.clientX, clientY: event.clientY, held: true };
+        pressRef.current = { clientX: event.clientX, clientY: event.clientY };
         event.currentTarget.setPointerCapture(event.pointerId);
         event.currentTarget.focus({ preventScroll: true });
         syncGeometry();
@@ -282,6 +323,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         endGesture();
       }}
       onContextMenu={(event) => event.preventDefault()}
+      onBlur={releaseNativeKeys}
       onKeyDown={(event) => {
         // Shell shortcuts (Alt+Tab, screenshots) are claimed in the capture
         // phase before they get here.
@@ -315,6 +357,28 @@ async function lockPointer(host: HTMLElement): Promise<boolean> {
       return false;
     }
   }
+}
+
+/**
+ * The workspace's top-left corner in the viewport (what a Din window's x/y
+ * are relative to) and its size. Read off the window's offset parent rather
+ * than the window itself, whose box an open animation or a wobble may be
+ * distorting.
+ */
+function workspaceOrigin(host: HTMLElement | null): { x: number; y: number; width: number; height: number } {
+  const parent = host?.closest('section')?.offsetParent;
+  const rect = parent?.getBoundingClientRect();
+  return {
+    x: rect?.left ?? 0,
+    y: rect?.top ?? 0,
+    width: parent?.clientWidth ?? window.innerWidth,
+    height: parent?.clientHeight ?? window.innerHeight,
+  };
+}
+
+/** `value` held within [min, max], preferring min when the range is empty. */
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max));
 }
 
 /** A pointer position relative to an element, in its untransformed pixels. */

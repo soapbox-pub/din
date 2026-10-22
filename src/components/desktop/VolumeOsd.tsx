@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { getAudioBridge } from '@/lib/audio';
+import { MAX_VOLUME, getAudioBridge } from '@/lib/audio';
 import type { AudioStatus } from '@/lib/audio';
 import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
+import { OverdriveMeter } from '@/components/ui/overdrive-slider';
+import { knockAnimation } from '@/lib/overdrive';
 
 /** How long the OSD stays on screen after the last volume change. */
 const OSD_VISIBLE_MS = 1500;
@@ -21,12 +23,19 @@ export function VolumeOsd() {
   const [status, setStatus] = useState<AudioStatus | null>(null);
   const [visible, setVisible] = useState(false);
   const hideTimer = useRef<number | undefined>(undefined);
+  const meterRef = useRef<HTMLDivElement>(null);
+  const last = useRef<AudioStatus | null>(null);
 
   useEffect(() => {
     const audio = getAudioBridge();
     if (!audio) return;
 
     const unsubscribe = audio.onOsd((next) => {
+      // The volume keys stop at 100 and knock once before going past it.
+      if (next.volume === 100 && last.current?.volume === 100 && last.current.muted === next.muted) {
+        knockAnimation(meterRef.current, 1);
+      }
+      last.current = next;
       setStatus(next);
       setVisible(true);
       queryClient.setQueryData(['audio', 'status'], next);
@@ -60,16 +69,17 @@ export function VolumeOsd() {
           muted={status.muted}
           className={cn('size-6 shrink-0', muted ? 'text-muted-foreground' : 'text-foreground')}
         />
-        <div className="h-2 w-40 overflow-hidden rounded-full bg-foreground/15">
-          <div
-            className={cn(
-              'h-full rounded-full transition-[width] duration-150 motion-reduce:transition-none',
-              muted ? 'bg-muted-foreground' : 'bg-primary',
-            )}
-            style={{ width: `${level}%` }}
-          />
-        </div>
-        <span className="w-9 text-right text-sm font-medium tabular-nums text-foreground">
+        <OverdriveMeter
+          ref={meterRef}
+          value={level}
+          min={0}
+          max={100}
+          overMax={MAX_VOLUME}
+          muted={muted}
+          width={160}
+          makeRoom
+        />
+        <span className="w-11 text-right text-sm font-medium tabular-nums text-foreground">
           {muted ? '—' : `${level}%`}
         </span>
       </div>

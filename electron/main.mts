@@ -15,9 +15,10 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme, shell } from 'electron';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import {
   installChromeWebStore,
@@ -29,17 +30,42 @@ import {
   attachUserscripts,
   isUserscriptInstallUrl,
 } from './userscripts.mts';
+import { attachAdblock, isAdblockExtension, setupAdblock } from './adblock.mts';
+import { attachPopups, mayOpenWindow, popupAttached, popupAttaching, setupPopups, windowOpened } from './popups.mts';
 import {
   NSITE_SCHEME,
   registerNsiteProtocol,
   clearNsiteManifestCache,
   clearNsiteBlobCache,
 } from './nsite.mts';
-import { registerNativeAppHandlers } from './native-apps.mts';
+import { registerNativeAppHandlers, runWindowsProgram, terminalEnvironment } from './native-apps.mts';
+import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
+import { registerDateTimeHandlers } from './datetime.mts';
+import { registerCursorHandlers } from './cursor.mts';
+import {
+  ensureNightLightTool,
+  nightLightStatus,
+  setNightLightEnabled,
+  setNightLightSchedule,
+  setNightLightTemperature,
+  startNightLight,
+  stopNightLight,
+  type NightLightState,
+} from './night-light.mts';
 import { registerTrayHandlers } from './tray.mts';
+import { registerNotificationHandlers } from './notifications.mts';
+import { registerInstallerHandlers } from './installer.mts';
+import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
+import { registerBluetoothHandlers } from './bluetooth.mts';
+import { registerNostrdHandlers } from './nostrd.mts';
+import { registerBootScreenHandlers } from './boot-screen.mts';
+import { registerLockHandlers } from './lock.mts';
+import { registerUpdaterHandlers } from './updater.mts';
+import { airplayDisplays, registerAirPlayHandlers } from './airplay.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
+import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
 // named export too, which Node's ESM-CJS interop resolves statically.
@@ -57,7 +83,7 @@ function messageOf(error: unknown): string {
 }
 
 // Locate the built Vite app. Two supported layouts:
-//   - Aladdin/Nix: main.mts and dist/ are installed side by side (dirname/dist)
+//   - DinOS/Nix: main.mts and dist/ are installed side by side (dirname/dist)
 //   - repo/standalone launcher (os/x11/din-session.sh): main.mts lives in
 //     electron/, dist/ sits at the repo root (dirname/../dist)
 // DIN_DIST_DIR overrides both. Without this, the standalone session loads
@@ -114,7 +140,24 @@ protocol.registerSchemesAsPrivileged([
       allowServiceWorkers: true,
     },
   },
+  {
+    // Local files for the Files app's thumbnails and the Preview window
+    // (electron/files.mts): fetchable, and streamable so video can seek.
+    scheme: LOCAL_FILE_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
 ]);
+
+// After a GPU reset, Chromium blocks WebGL for the pages it blames (or for
+// every page, when it can't tell). Din is the whole desktop: losing WebGL
+// leaves the Terminal on its DOM renderer until Din restarts.
+app.disableDomainBlockingFor3DAPIs();
 
 /** Map a request pathname to a file inside dist/, with SPA fallback. */
 function resolveFile(pathname: string): string {
@@ -337,7 +380,7 @@ function registerFsHandlers(): void {
 // module we'd have to rebuild against Electron's ABI inside the Nix build),
 // each session spawns pty-host.py: a stdlib-only Python helper that owns the
 // pseudo-terminal and proxies bytes over pipes (stdin/stdout for terminal
-// I/O, fd 3 for resize commands).
+// I/O, fd 3 for resize commands, fd 4 for "a command finished" events).
 //
 // Threat model: this is deliberately an arbitrary-command-execution API for
 // the shell's origin, so it adds nothing beyond what the fs bridge already
@@ -373,7 +416,7 @@ function userShell(): string {
 }
 
 function registerPtyHandlers(): void {
-  ipcMain.handle('pty:spawn', (event, size, cwd) => {
+  ipcMain.handle('pty:spawn', async (event, size, cwd) => {
     assertShellSender(event);
     if (ptySessions.size >= MAX_PTY_SESSIONS) {
       throw new Error(`Too many terminal sessions (max ${MAX_PTY_SESSIONS})`);
@@ -383,11 +426,13 @@ function registerPtyHandlers(): void {
 
     const spawnCwd =
       typeof cwd === 'string' && cwd.length > 0 && cwd.length <= 4096 ? cwd : os.homedir();
+    const env = await terminalEnvironment();
 
     const proc = spawn('python3', [PTY_HELPER, userShell(), String(rows), String(cols)], {
       cwd: spawnCwd,
-      // fd 3 is the helper's control channel (resize).
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      env,
+      // fd 3 is the helper's control channel (resize), fd 4 its events.
+      stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
     });
 
     const id = nextPtyId++;
@@ -406,6 +451,24 @@ function registerPtyHandlers(): void {
     proc.stdout?.on('data', (chunk) => send('pty:data', id, chunk));
     // Helper diagnostics (e.g. exec failures) surface in the terminal too.
     proc.stderr?.on('data', (chunk) => send('pty:data', id, chunk));
+    const events = proc.stdio[4];
+    if (events && 'read' in events) {
+      createInterface({ input: events }).on('line', (line) => {
+        let event: unknown;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          return;
+        }
+        const { type, command, seconds } = (event ?? {}) as Record<string, unknown>;
+        if (type === 'start' && typeof command === 'string') {
+          send('pty:commandStart', id, command.slice(0, 200));
+        }
+        if (type === 'done' && typeof command === 'string' && typeof seconds === 'number') {
+          send('pty:commandDone', id, { command: command.slice(0, 200), seconds });
+        }
+      });
+    }
     proc.on('error', (err) => {
       send('pty:data', id, Buffer.from(`pty host failed: ${err.message}\r\n`));
       ptySessions.delete(id);
@@ -618,47 +681,64 @@ async function savedVpnConnections(): Promise<VpnConnection[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Display bridge (window.display), backed by xrandr. Meaningful only on a bare
-// X11 session (the os/x11 standalone launcher), where Din is the whole desktop
-// and nothing else manages the outputs. It models the full multi-output layout
-// - resolution, position, on/off and which output is primary - and applies a
-// whole desired arrangement atomically. On Wayland/cage (Aladdin) xrandr isn't
-// applicable, so status reports `available: false` and the Settings panel
-// renders a fallback - same shape as the WiFi bridge in QEMU.
+// Display bridge (window.display): the arrangement of the outputs Din's one
+// window spans - resolution, position, on/off and which output is primary -
+// applied as a whole desired layout at once. Two backends:
+//   - wlr-randr on Wayland (cage on DinOS), through the compositor's
+//     wlr-output-management protocol. "Primary" isn't a Wayland notion: it's
+//     Din's own (the monitor with the menu bar and Dock), so it's saved with
+//     the arrangement, and the arrangement is reapplied whenever the same set
+//     of outputs is connected again - cage itself forgets, laying outputs out
+//     left to right at their preferred modes.
+//   - xrandr on a bare X11 session (the os/x11 standalone launcher), where
+//     Din is the whole desktop and nothing else manages the outputs.
+// Where neither applies (a desktop compositor without the protocol, a
+// windowed dev shell), status reports `available: false` and the Settings
+// panel renders a fallback - same shape as the WiFi bridge in QEMU.
+//
+// Positions are in the compositor's layout coordinates, which match output
+// pixels at scale 1. (Scaled outputs are laid out by their scaled size, which
+// the arrangement editor doesn't model yet.)
 //
 // Threat model: same boundaries as the other bridges (strict CSP, sender
-// guard, arguments re-validated). xrandr runs via execFile with an argv array
-// - no shell - and the output name / mode are matched against xrandr's own
-// parsed output before use, so neither can inject or select an invalid mode.
+// guard, arguments re-validated). Both tools run via execFile with an argv
+// array - no shell - and the output name / mode are matched against the
+// tool's own report before use, so neither can inject or select an invalid
+// mode.
 // ---------------------------------------------------------------------------
 
-const XRANDR_TIMEOUT_MS = 15_000;
+const DISPLAY_TIMEOUT_MS = 15_000;
 
-/** Run xrandr with an argv array; resolves stdout, rejects with a clean message. */
-function xrandr(args: string[], timeout = XRANDR_TIMEOUT_MS): Promise<string> {
-  return tool('xrandr', args, timeout, 4 * 1024 * 1024);
+/** The tool that drives the outputs: the compositor's on Wayland, else X's. */
+const DISPLAY_TOOL = process.env.WAYLAND_DISPLAY ? 'wlr-randr' : 'xrandr';
+
+/** Run the display tool with an argv array; resolves stdout, rejects with a clean message. */
+function displayTool(args: string[], timeout = DISPLAY_TIMEOUT_MS): Promise<string> {
+  return tool(DISPLAY_TOOL, args, timeout, 4 * 1024 * 1024);
 }
 
-/** One mode line of an xrandr output. */
-interface XrandrMode {
+/** One mode of an output. */
+interface DisplayMode {
   width: number;
   height: number;
   current: boolean;
   preferred: boolean;
 }
 
-/** One output of `xrandr --query`. */
-interface XrandrOutput {
+/** One connected output, as either tool reports it. */
+interface DisplayOutput {
   name: string;
   connected: boolean;
   primary: boolean;
   enabled: boolean;
   current: { width: number; height: number } | null;
   position: { x: number; y: number };
-  modes: XrandrMode[];
+  modes: DisplayMode[];
+  /** The AirPlay receiver this display is, for the ones deckmon adds. */
+  airplay?: string;
 }
 
-/** A desired on-state for one output in an xrandr layout call. */
+/** A desired on-state for one output in a layout call. */
 interface OutputPlacement {
   name: string;
   width: number;
@@ -674,9 +754,9 @@ interface OutputPlacement {
  * followed by indented mode lines
  *   1920x1200     60.00*+     ('*' = current mode, '+' = preferred/native)
  */
-function parseXrandr(stdout: string): XrandrOutput[] {
-  const outputs: XrandrOutput[] = [];
-  let current: XrandrOutput | null = null;
+function parseXrandr(stdout: string): DisplayOutput[] {
+  const outputs: DisplayOutput[] = [];
+  let current: DisplayOutput | null = null;
   for (const line of stdout.split('\n')) {
     const head = line.match(
       /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+(\d+)\+(\d+))?/,
@@ -708,23 +788,127 @@ function parseXrandr(stdout: string): XrandrOutput[] {
   return outputs;
 }
 
+/** `wlr-randr --json`: one entry per head the compositor knows (all connected). */
+interface WlrHead {
+  name?: unknown;
+  enabled?: unknown;
+  position?: { x?: unknown; y?: unknown };
+  modes?: { width?: unknown; height?: unknown; current?: unknown; preferred?: unknown }[];
+}
+
+/** Parse `wlr-randr --json`. Primary is left unset: it's Din's to decide. */
+function parseWlrRandr(stdout: string): DisplayOutput[] {
+  const heads: unknown = JSON.parse(stdout);
+  if (!Array.isArray(heads)) return [];
+  return (heads as WlrHead[]).flatMap((head) => {
+    if (typeof head?.name !== 'string') return [];
+    const modes = (Array.isArray(head.modes) ? head.modes : []).map((m) => ({
+      width: Number(m.width) || 0,
+      height: Number(m.height) || 0,
+      current: m.current === true,
+      preferred: m.preferred === true,
+    }));
+    const enabled = head.enabled === true;
+    const now = enabled ? modes.find((m) => m.current) : undefined;
+    return [{
+      name: head.name,
+      connected: true,
+      primary: false,
+      enabled,
+      current: now ? { width: now.width, height: now.height } : null,
+      position: enabled
+        ? { x: Number(head.position?.x) || 0, y: Number(head.position?.y) || 0 }
+        : { x: 0, y: 0 },
+      modes,
+    }];
+  });
+}
+
+/** A failure that just means this session's outputs can't be managed. */
+function displayUnavailable(error: unknown): boolean {
+  const message = messageOf(error);
+  return (
+    message === `${DISPLAY_TOOL}-missing` ||
+    /doesn't support wlr-output-management|failed to connect to display/i.test(message)
+  );
+}
+
+// ---- Saved arrangements (Wayland) -----------------------------------------
+
+/** An arrangement, as saved for one set of connected outputs. */
+interface SavedLayout {
+  enabled: OutputPlacement[];
+  disabled: string[];
+}
+
+/** Saved arrangements by outputSetKey, in the user's config. */
+function savedLayoutsPath(): string {
+  return path.join(app.getPath('userData'), 'displays.json');
+}
+
+/** Key for a set of connected outputs: the arrangement saved for it. */
+function outputSetKey(outputs: DisplayOutput[]): string {
+  return outputs.map((o) => o.name).sort().join('+');
+}
+
+function readSavedLayouts(): Record<string, SavedLayout> {
+  try {
+    const data: unknown = JSON.parse(fs.readFileSync(savedLayoutsPath(), 'utf8'));
+    return data && typeof data === 'object' ? (data as Record<string, SavedLayout>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLayout(key: string, layout: SavedLayout): void {
+  const layouts = readSavedLayouts();
+  layouts[key] = layout;
+  try {
+    fs.writeFileSync(savedLayoutsPath(), JSON.stringify(layouts, null, 2));
+  } catch (error) {
+    console.warn('displays: could not save the arrangement:', messageOf(error));
+  }
+}
+
+/** Din's primary among Wayland outputs: the saved choice, if it's on. */
+function savedPrimary(outputs: DisplayOutput[]): string | null {
+  const saved = readSavedLayouts()[outputSetKey(outputs)];
+  const name = saved?.enabled.find((p) => p.primary)?.name;
+  return name && outputs.some((o) => o.name === name && o.enabled) ? name : null;
+}
+
 /**
- * Connected outputs, via xrandr. Throws 'xrandr-missing' where xrandr absent.
+ * Connected outputs. Throws '<tool>-missing' where the tool is absent.
  *
  * `probe` asks the X server to re-probe every connector first (--query),
  * which can stall it for ~10 ms - fine before changing the layout, not for
  * the Settings panel's status poll, which reads the state the server already
- * keeps current from hotplug events (--current).
+ * keeps current from hotplug events (--current). Wayland compositors always
+ * report live state.
  */
-async function queryOutputs(probe = false): Promise<XrandrOutput[]> {
-  return parseXrandr(await xrandr([probe ? '--query' : '--current'])).filter((o) => o.connected);
+async function queryOutputs(probe = false): Promise<DisplayOutput[]> {
+  if (DISPLAY_TOOL === 'xrandr') {
+    return parseXrandr(await displayTool([probe ? '--query' : '--current'])).filter((o) => o.connected);
+  }
+  const outputs = parseWlrRandr(await displayTool(['--json']));
+  // No saved choice: the laptop's own panel, so plugging a display in (an
+  // AirPlay receiver's, say) doesn't take the menu bar and windows with it.
+  // Under cage, Electron calls the newest output primary. Without a panel,
+  // Electron's choice, else the first on.
+  const primaryBounds = screen.getPrimaryDisplay().bounds;
+  const primary =
+    savedPrimary(outputs) ??
+    outputs.find((o) => o.enabled && INTERNAL_OUTPUT.test(o.name))?.name ??
+    outputs.find((o) => o.enabled && o.position.x === primaryBounds.x && o.position.y === primaryBounds.y)?.name ??
+    outputs.find((o) => o.enabled)?.name;
+  return outputs.map((o) => ({ ...o, primary: o.name === primary }));
 }
 
 /** Laptop built-in panels (the ones that switch off when the lid shuts). */
 const INTERNAL_OUTPUT = /^(eDP|LVDS|DSI)/i;
 
 /** An output's best default mode: preferred, else current, else the largest. */
-function preferredMode(output: XrandrOutput): XrandrMode | null {
+function preferredMode(output: DisplayOutput): DisplayMode | null {
   return (
     output.modes.find((m) => m.preferred) ||
     output.modes.find((m) => m.current) ||
@@ -733,29 +917,243 @@ function preferredMode(output: XrandrOutput): XrandrMode | null {
   );
 }
 
-/**
- * Run one xrandr call that turns each enabled output on at its mode/position
- * (marking one primary) and each disabled output off. With no window manager,
- * follow up by fitting the shell window to the primary's new bounds instead of
- * waiting on a RandR event.
- */
-async function applyXrandrLayout(enabled: OutputPlacement[], disabled: string[]): Promise<void> {
-  const args: string[] = [];
-  for (const e of enabled) {
-    args.push('--output', e.name, '--mode', `${e.width}x${e.height}`, '--pos', `${e.x}x${e.y}`);
-    if (e.primary) args.push('--primary');
-  }
-  for (const name of disabled) args.push('--output', name, '--off');
-  await xrandr(args);
+/** The bounding box of a set of rectangles. */
+function unionRect(rects: { x: number; y: number; width: number; height: number }[]): Electron.Rectangle {
+  const x = Math.min(...rects.map((r) => r.x));
+  const y = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.width));
+  const bottom = Math.max(...rects.map((r) => r.y + r.height));
+  return { x, y, width: right - x, height: bottom - y };
+}
 
-  const primary = enabled.find((e) => e.primary);
-  if (primary && shellWindow && !shellWindow.isDestroyed()) {
-    shellWindow.setBounds({
-      x: primary.x,
-      y: primary.y,
-      width: primary.width,
-      height: primary.height,
+/**
+ * Turn each enabled output on at its mode/position (marking one primary) and
+ * each disabled output off, in one tool call. Under X there's no window
+ * manager, so the shell window is refitted to the new outputs right away
+ * instead of waiting on a RandR event. `remember` saves the arrangement (and
+ * with it the primary) for this set of outputs - for the user's own
+ * arrangements, not automatic ones like the lid hand-off.
+ */
+async function applyOutputLayout(
+  outputs: DisplayOutput[],
+  enabled: OutputPlacement[],
+  disabled: string[],
+  remember = false,
+): Promise<void> {
+  const args: string[] = [];
+  if (DISPLAY_TOOL === 'xrandr') {
+    for (const e of enabled) {
+      args.push('--output', e.name, '--mode', `${e.width}x${e.height}`, '--pos', `${e.x}x${e.y}`);
+      if (e.primary) args.push('--primary');
+    }
+    for (const name of disabled) args.push('--output', name, '--off');
+  } else {
+    const byName = new Map(outputs.map((o) => [o.name, o]));
+    for (const e of enabled) {
+      args.push('--output', e.name, '--on');
+      // Re-setting the current size could drop it to another refresh rate.
+      const now = byName.get(e.name)?.current;
+      if (!now || now.width !== e.width || now.height !== e.height) {
+        args.push('--mode', `${e.width}x${e.height}`);
+      }
+      args.push('--pos', `${e.x},${e.y}`);
+    }
+    for (const name of disabled) args.push('--output', name, '--off');
+  }
+  await displayTool(args);
+
+  if (remember && DISPLAY_TOOL !== 'xrandr') saveLayout(outputSetKey(outputs), { enabled, disabled });
+
+  if (DISPLAY_TOOL === 'xrandr' && enabled.length > 0 && shellWindow && !shellWindow.isDestroyed()) {
+    shellWindow.setBounds(unionRect(enabled));
+  }
+  // The primary may have moved without any output changing.
+  scheduleMonitorsUpdate();
+}
+
+/**
+ * Validate a renderer-supplied arrangement against the outputs the tool
+ * reports - never trust the renderer's strings directly.
+ */
+function placementsFor(
+  outputs: DisplayOutput[],
+  rawPlacements: unknown,
+): { enabled: OutputPlacement[]; disabled: string[] } {
+  if (!Array.isArray(rawPlacements)) throw new Error('Invalid layout');
+  const byName = new Map(outputs.map((o) => [o.name, o]));
+  const enabled: OutputPlacement[] = [];
+  const disabled: string[] = [];
+  const mentioned = new Set<string>();
+  for (const p of rawPlacements) {
+    const output = byName.get(String(p && p.output));
+    if (!output) throw new Error('Unknown display output');
+    if (mentioned.has(output.name)) throw new Error('Duplicate display output');
+    mentioned.add(output.name);
+    if (!p.enabled) {
+      disabled.push(output.name);
+      continue;
+    }
+    const width = Number(p.width);
+    const height = Number(p.height);
+    if (!output.modes.some((m) => m.width === width && m.height === height)) {
+      throw new Error(`Unsupported mode for ${output.name}`);
+    }
+    enabled.push({
+      name: output.name,
+      width,
+      height,
+      x: Math.max(0, Math.round(Number(p.x)) || 0),
+      y: Math.max(0, Math.round(Number(p.y)) || 0),
+      primary: Boolean(p.primary),
     });
+  }
+  // Any connected output the renderer didn't mention is turned off.
+  for (const o of outputs) if (!mentioned.has(o.name)) disabled.push(o.name);
+
+  if (enabled.length === 0) throw new Error('At least one display must stay on');
+  if (enabled.filter((e) => e.primary).length !== 1) {
+    throw new Error('Exactly one display must be primary');
+  }
+  return { enabled, disabled };
+}
+
+/** Whether the outputs are already arranged as `layout` says. */
+function layoutMatches(outputs: DisplayOutput[], layout: SavedLayout): boolean {
+  const byName = new Map(outputs.map((o) => [o.name, o]));
+  return (
+    layout.enabled.every((e) => {
+      const o = byName.get(e.name);
+      return (
+        o?.enabled &&
+        o.current?.width === e.width &&
+        o.current?.height === e.height &&
+        o.position.x === e.x &&
+        o.position.y === e.y
+      );
+    }) && layout.disabled.every((name) => !byName.get(name)?.enabled)
+  );
+}
+
+/** The set of outputs last seen, so only a change of set restores a layout. */
+let lastOutputSet: string | null = null;
+
+/**
+ * Wayland: when a set of outputs is connected that the user has arranged
+ * before, put it back that way. Only on a change of set: switching an output
+ * off (the lid hand-off, say) keeps it in the set, and must stick.
+ */
+async function restoreSavedLayout(): Promise<void> {
+  if (DISPLAY_TOOL === 'xrandr') return;
+  let outputs: DisplayOutput[];
+  try {
+    outputs = await queryOutputs();
+  } catch {
+    return;
+  }
+  const key = outputSetKey(outputs);
+  if (key === lastOutputSet) return;
+  lastOutputSet = key;
+  const saved = readSavedLayouts()[key];
+  if (!saved || lidAutoArranged || layoutMatches(outputs, saved)) return;
+  try {
+    // Re-validated like a fresh request: modes can disappear with a new cable.
+    const { enabled, disabled } = placementsFor(
+      outputs,
+      [
+        ...saved.enabled.map((e) => ({ output: e.name, enabled: true, ...e })),
+        ...saved.disabled.map((name) => ({ output: name, enabled: false })),
+      ],
+    );
+    await applyOutputLayout(outputs, enabled, disabled);
+  } catch (error) {
+    console.warn('displays: could not restore the saved arrangement:', messageOf(error));
+  }
+}
+
+/** Whether two rectangles overlap or share a stretch of edge. */
+function rectsTouch(a: OutputPlacement, b: OutputPlacement): boolean {
+  const xs = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const ys = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return (xs >= 0 && ys > 0) || (xs > 0 && ys >= 0);
+}
+
+/**
+ * Slide OUTPUT toward ANCHOR along the axis that separates them until it sits
+ * against it, keeping some of the shared edge.
+ */
+function placeAgainst(output: OutputPlacement, anchor: OutputPlacement): void {
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+  const gapX = Math.max(anchor.x - (output.x + output.width), output.x - (anchor.x + anchor.width));
+  const gapY = Math.max(anchor.y - (output.y + output.height), output.y - (anchor.y + anchor.height));
+  if (gapY >= gapX) {
+    output.y = output.y < anchor.y ? anchor.y - output.height : anchor.y + anchor.height;
+    output.x = clamp(output.x, anchor.x - output.width + 1, anchor.x + anchor.width - 1);
+  } else {
+    output.x = output.x < anchor.x ? anchor.x - output.width : anchor.x + anchor.width;
+    output.y = clamp(output.y, anchor.y - output.height + 1, anchor.y + anchor.height - 1);
+  }
+}
+
+/**
+ * Wayland: close any gap between the enabled outputs. The pointer can't cross
+ * one, so it's stuck on whichever side it was on - as when a saved
+ * arrangement is restored and a display then changes size (deckmon's virtual
+ * display for an AirPlay receiver does). The primary stays put; each output
+ * cut off from it is moved against the nearest one that isn't. Not saved: the
+ * user's arrangement stays theirs.
+ */
+async function closeLayoutGaps(): Promise<void> {
+  if (DISPLAY_TOOL === 'xrandr') return;
+  let outputs: DisplayOutput[];
+  try {
+    outputs = await queryOutputs();
+  } catch {
+    return;
+  }
+  const on: OutputPlacement[] = outputs.flatMap((o) =>
+    o.enabled && o.current
+      ? [{ name: o.name, width: o.current.width, height: o.current.height, ...o.position, primary: o.primary }]
+      : [],
+  );
+  if (on.length < 2) return;
+
+  const placed = [on.find((p) => p.primary) ?? on[0]];
+  let rest = on.filter((p) => p !== placed[0]);
+  let moved = false;
+  while (rest.length > 0) {
+    const touching = rest.find((p) => placed.some((q) => rectsTouch(p, q)));
+    if (touching) {
+      placed.push(touching);
+      rest = rest.filter((p) => p !== touching);
+      continue;
+    }
+    // None touch: move the one closest to the placed ones against its nearest.
+    const distance = (a: OutputPlacement, b: OutputPlacement) =>
+      Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width)) +
+      Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height));
+    let best = { output: rest[0], anchor: placed[0], d: Infinity };
+    for (const output of rest) {
+      for (const anchor of placed) {
+        const d = distance(output, anchor);
+        if (d < best.d) best = { output, anchor, d };
+      }
+    }
+    placeAgainst(best.output, best.anchor);
+    moved = true;
+  }
+  if (!moved) return;
+
+  const left = Math.min(...on.map((p) => p.x));
+  const top = Math.min(...on.map((p) => p.y));
+  for (const p of on) {
+    p.x -= left;
+    p.y -= top;
+  }
+  const disabled = outputs.filter((o) => !on.some((p) => p.name === o.name)).map((o) => o.name);
+  try {
+    await applyOutputLayout(outputs, on, disabled);
+  } catch (error) {
+    console.warn('displays: could not close a gap between displays:', messageOf(error));
   }
 }
 
@@ -763,69 +1161,166 @@ function registerDisplayHandlers(): void {
   ipcMain.handle('display:status', async (event) => {
     assertShellSender(event);
     try {
-      return { available: true, outputs: await queryOutputs() };
+      const airplay = airplayDisplays();
+      const outputs = (await queryOutputs()).map((o) => {
+        const receiver = airplay.get(o.name);
+        return receiver ? { ...o, airplay: receiver } : o;
+      });
+      return { available: true, outputs };
     } catch (error) {
-      if (messageOf(error) === 'xrandr-missing') return { available: false, outputs: [] };
+      if (displayUnavailable(error)) return { available: false, outputs: [] };
       throw error;
     }
   });
 
   ipcMain.handle('display:applyLayout', async (event, rawPlacements) => {
     assertShellSender(event);
-    if (!Array.isArray(rawPlacements)) throw new Error('Invalid layout');
-
-    // Re-derive the real outputs and only act on names/modes that xrandr
-    // actually reports - never trust the renderer's strings directly.
     const outputs = await queryOutputs(true);
-    const byName = new Map(outputs.map((o) => [o.name, o]));
-
-    const enabled: OutputPlacement[] = [];
-    const disabled: string[] = [];
-    const mentioned = new Set<string>();
-    for (const p of rawPlacements) {
-      const output = byName.get(String(p && p.output));
-      if (!output) throw new Error('Unknown display output');
-      if (mentioned.has(output.name)) throw new Error('Duplicate display output');
-      mentioned.add(output.name);
-      if (!p.enabled) {
-        disabled.push(output.name);
-        continue;
-      }
-      const width = Number(p.width);
-      const height = Number(p.height);
-      if (!output.modes.some((m) => m.width === width && m.height === height)) {
-        throw new Error(`Unsupported mode for ${output.name}`);
-      }
-      enabled.push({
-        name: output.name,
-        width,
-        height,
-        x: Math.max(0, Math.round(Number(p.x)) || 0),
-        y: Math.max(0, Math.round(Number(p.y)) || 0),
-        primary: Boolean(p.primary),
-      });
-    }
-    // Any connected output the renderer didn't mention is turned off.
-    for (const o of outputs) if (!mentioned.has(o.name)) disabled.push(o.name);
-
-    if (enabled.length === 0) throw new Error('At least one display must stay on');
-    if (enabled.filter((e) => e.primary).length !== 1) {
-      throw new Error('Exactly one display must be primary');
-    }
-
-    await applyXrandrLayout(enabled, disabled);
+    const { enabled, disabled } = placementsFor(outputs, rawPlacements);
+    await applyOutputLayout(outputs, enabled, disabled, true);
     // A manual arrangement supersedes any automatic lid re-arrangement.
     lidAutoArranged = false;
   });
 }
 
 // ---------------------------------------------------------------------------
-// Lid switch (bare X11 only). When the laptop is docked to an external display
-// and the lid is closed, the built-in panel should switch off and an external
-// output take over as primary; opening the lid again restores the built-in
-// panel. There is no window manager or logind seat handling this, so the shell
-// watches the ACPI lid state itself and drives xrandr through the same path as
-// the Settings panel. If the lid closes with no external attached we leave the
+// Page fullscreen bridge (window.pageFullscreen). A page in a <webview> that
+// goes fullscreen (a video's fullscreen button) makes its frame fullscreen in
+// the shell's page, which spans every monitor; Chromium sizes that frame to
+// the whole page and won't let it be resized. With several monitors, the
+// shell moves and clips the frame onto its window's monitor
+// (src/components/desktop/PageFullscreenHost.tsx), and this lays the page
+// out at that monitor's size, until it leaves fullscreen.
+// ---------------------------------------------------------------------------
+
+/** A <webview> guest of the shell window, from a renderer-supplied id. */
+function shellGuestFromId(wcId: unknown): Electron.WebContents | null {
+  if (typeof wcId !== 'number') return null;
+  const contents = webContents.fromId(wcId);
+  if (!contents || contents.isDestroyed() || contents.getType() !== 'webview') return null;
+  return contents.hostWebContents?.id === shellContentsId ? contents : null;
+}
+
+/** Guests laid out at a monitor's size, waiting to leave fullscreen. */
+const fittedGuests = new Set<number>();
+
+function registerPageFullscreenHandlers(): void {
+  ipcMain.handle('pageFullscreen:fit', (event, wcId, rawWidth, rawHeight) => {
+    assertShellSender(event);
+    const guest = shellGuestFromId(wcId);
+    const width = Math.round(Number(rawWidth));
+    const height = Math.round(Number(rawHeight));
+    if (!guest || !(width > 0 && width <= 16384 && height > 0 && height <= 16384)) {
+      throw new Error('Invalid fullscreen fit');
+    }
+    const size = { width, height };
+    guest.enableDeviceEmulation({
+      screenPosition: 'desktop',
+      screenSize: size,
+      viewPosition: { x: 0, y: 0 },
+      deviceScaleFactor: 0,
+      viewSize: size,
+      scale: 1,
+    });
+    if (!fittedGuests.has(guest.id)) {
+      fittedGuests.add(guest.id);
+      const id = guest.id;
+      guest.once('leave-html-full-screen', () => {
+        fittedGuests.delete(id);
+        if (!guest.isDestroyed()) guest.disableDeviceEmulation();
+      });
+      guest.once('destroyed', () => fittedGuests.delete(id));
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Monitors bridge (window.monitors): where each display sits inside the shell
+// window, for the desktop's layout (src/lib/monitors.ts). The production
+// window spans every display - cage stretches it over all outputs, and on bare
+// X11 it's sized to their union below - so positions are relative to the
+// union's top-left. Reports null for a single display, or in the windowed dev
+// shell, where the viewport is the one monitor.
+// ---------------------------------------------------------------------------
+
+/** One display, in DIPs relative to the shell window's top-left. */
+interface ShellMonitor {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  primary: boolean;
+}
+
+/** The union of every display: what the production shell window covers. */
+function screenBounds(): Electron.Rectangle {
+  return unionRect(screen.getAllDisplays().map((d) => d.bounds));
+}
+
+/**
+ * The display Din treats as primary. On Wayland that's Din's saved choice of
+ * output (matched to a display by position), else what Electron reports.
+ */
+async function primaryDisplay(displays: Electron.Display[]): Promise<Electron.Display> {
+  if (DISPLAY_TOOL !== 'xrandr') {
+    try {
+      const output = (await queryOutputs()).find((o) => o.primary);
+      const match = output && displays.find((d) => d.bounds.x === output.position.x && d.bounds.y === output.position.y);
+      if (match) return match;
+    } catch {
+      // No output management: fall through.
+    }
+  }
+  return screen.getPrimaryDisplay();
+}
+
+async function shellMonitors(): Promise<ShellMonitor[] | null> {
+  if (DEV_URL) return null;
+  const displays = screen.getAllDisplays();
+  if (displays.length < 2) return null;
+  const origin = screenBounds();
+  const primary = await primaryDisplay(displays);
+  return displays.map((d, i) => ({
+    id: String(d.id),
+    name: d.label || `Display ${i + 1}`,
+    x: d.bounds.x - origin.x,
+    y: d.bounds.y - origin.y,
+    width: d.bounds.width,
+    height: d.bounds.height,
+    primary: d.id === primary.id,
+  }));
+}
+
+let monitorsTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Tell the shell the monitors changed, once things settle: a hotplug arrives
+ * as a burst of display events while the compositor rearranges.
+ */
+function scheduleMonitorsUpdate(): void {
+  if (monitorsTimer) clearTimeout(monitorsTimer);
+  monitorsTimer = setTimeout(() => {
+    monitorsTimer = null;
+    void shellMonitors().then((monitors) => sendToShell('monitors:changed', monitors));
+  }, 150);
+}
+
+function registerMonitorsHandlers(): void {
+  ipcMain.handle('monitors:get', (event) => {
+    assertShellSender(event);
+    return shellMonitors();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lid switch. When the laptop is docked to an external display and the lid is
+// closed, the built-in panel should switch off and an external output take
+// over as primary; opening the lid again restores the built-in panel. There
+// is no window manager or logind seat handling this, so the shell watches the
+// ACPI lid state itself and drives the outputs through the same path as the
+// Settings panel. If the lid closes with no external attached we leave the
 // only screen alone rather than blanking the machine.
 // ---------------------------------------------------------------------------
 
@@ -858,11 +1353,11 @@ async function readLidState(): Promise<'open' | 'closed' | null> {
 /**
  * Lay a set of outputs left-to-right starting at the origin, first one primary,
  * each at its preferred mode. Returns the { enabled, disabled } pair for
- * applyXrandrLayout, or null if none can be driven.
+ * applyOutputLayout, or null if none can be driven.
  */
 function packLeftToRight(
-  on: XrandrOutput[],
-  off: XrandrOutput[],
+  on: DisplayOutput[],
+  off: DisplayOutput[],
 ): { enabled: OutputPlacement[]; disabled: string[] } | null {
   const enabled: OutputPlacement[] = [];
   let x = 0;
@@ -885,7 +1380,7 @@ function packLeftToRight(
 
 /** Lid closed: if docked, switch the built-in panel off and hand off to externals. */
 async function onLidClosed(): Promise<void> {
-  let outputs: XrandrOutput[];
+  let outputs: DisplayOutput[];
   try {
     outputs = await queryOutputs(true);
   } catch {
@@ -899,7 +1394,7 @@ async function onLidClosed(): Promise<void> {
   const layout = packLeftToRight(external, internal);
   if (!layout) return;
   try {
-    await applyXrandrLayout(layout.enabled, layout.disabled);
+    await applyOutputLayout(outputs, layout.enabled, layout.disabled);
     lidAutoArranged = true;
   } catch {
     // Leave the current arrangement in place on failure.
@@ -910,7 +1405,7 @@ async function onLidClosed(): Promise<void> {
 async function onLidOpened(): Promise<void> {
   if (!lidAutoArranged) return; // only reverse our own change
   lidAutoArranged = false;
-  let outputs: XrandrOutput[];
+  let outputs: DisplayOutput[];
   try {
     outputs = await queryOutputs(true);
   } catch {
@@ -924,7 +1419,7 @@ async function onLidOpened(): Promise<void> {
   const layout = packLeftToRight([...internal, ...external], []);
   if (!layout) return;
   try {
-    await applyXrandrLayout(layout.enabled, layout.disabled);
+    await applyOutputLayout(outputs, layout.enabled, layout.disabled);
   } catch {
     // Leave the current arrangement in place on failure.
   }
@@ -950,7 +1445,7 @@ function registerLidWatch(): void {
 // ---------------------------------------------------------------------------
 // Power bridge (window.power), backed by /sys/class/power_supply. Read-only
 // sysfs, so it needs no external binary and works on any Linux session (cage
-// on Aladdin or the bare-X11 standalone launcher). Reports `available: false`
+// on DinOS or the bare-X11 standalone launcher). Reports `available: false`
 // where there's no battery (desktops, the QEMU VM) so the menu-bar indicator
 // hides and the Settings panel shows a fallback. Sender-guarded like the
 // other bridges.
@@ -1138,7 +1633,7 @@ function registerPowerHandlers(): void {
   });
 
   // Log out: quit cleanly. din-session.sh treats exit 0 as "the user quit"
-  // and ends the login session, returning to the display manager; on Aladdin
+  // and ends the login session, returning to the display manager; on DinOS
   // the cage service brings a fresh Din back up.
   ipcMain.on('shell:endSession', (event) => {
     if (!isShellSender(event)) return;
@@ -1166,11 +1661,19 @@ function wpctl(args: string[], timeout = WPCTL_TIMEOUT_MS): Promise<string> {
   return tool('wpctl', args, timeout);
 }
 
-/** Clamp a caller-supplied percentage to an integer 0..100. */
+/**
+ * Loudest volume Din will set, in percent. Past 100 PipeWire amplifies in
+ * software, which can clip, so it stops at 150 like GNOME's over-amplification.
+ * Keep in step with MAX_VOLUME in src/lib/audio.ts.
+ */
+const MAX_VOLUME = 150;
+const WPCTL_LIMIT = String(MAX_VOLUME / 100);
+
+/** Clamp a caller-supplied percentage to an integer 0..MAX_VOLUME. */
 function clampVolume(pct: unknown): number {
   const n = Number(pct);
   if (!Number.isFinite(n)) throw new Error('Invalid volume');
-  return Math.max(0, Math.min(100, Math.round(n)));
+  return Math.max(0, Math.min(MAX_VOLUME, Math.round(n)));
 }
 
 /** The default sink's state as reported to the shell. */
@@ -1198,8 +1701,7 @@ async function audioStatus(): Promise<AudioState> {
 
 async function audioSetVolume(pct: unknown): Promise<AudioState> {
   const v = clampVolume(pct);
-  // -l 1.0 caps at 100% so we never push into PipeWire's >1.0 boost range.
-  await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${v}%`]);
+  await wpctl(['set-volume', '-l', WPCTL_LIMIT, DEFAULT_SINK, `${v}%`]);
   return audioStatus();
 }
 
@@ -1208,10 +1710,51 @@ async function audioSetMuted(muted: boolean): Promise<AudioState> {
   return audioStatus();
 }
 
+/**
+ * The extra range past a control's normal one (volume over 100, brightness
+ * under 0) sits behind a detent for the media keys: a step that would cross
+ * the edge stops on it, and the first press at the edge only knocks. Another
+ * press within KNOCK_MS goes through. Keep in step with stepWithDetent in
+ * src/lib/overdrive.ts, which does the same for the sliders' arrow keys.
+ */
+const KNOCK_MS = 1000;
+
+interface DetentRange {
+  min: number;
+  max: number;
+  overMax?: number;
+  underMin?: number;
+}
+
+function stepWithDetent(current: number, delta: number, range: DetentRange, knock: { at: number }): number {
+  const { min, max, overMax, underMin } = range;
+  const next = current + delta;
+  const edge = delta > 0 ? (overMax === undefined ? null : max) : underMin === undefined ? null : min;
+  if (edge !== null) {
+    const crossing = delta > 0 ? current < edge && next > edge : current > edge && next < edge;
+    if (crossing) return edge;
+    if (current === edge) {
+      const now = Date.now();
+      if (now - knock.at > KNOCK_MS) {
+        knock.at = now;
+        return current;
+      }
+    }
+  }
+  return Math.max(underMin ?? min, Math.min(overMax ?? max, next));
+}
+
+const volumeKnock = { at: 0 };
+
 async function audioAdjust(deltaPct: number): Promise<AudioState> {
-  const sign = deltaPct >= 0 ? '+' : '-';
-  await wpctl(['set-volume', '-l', '1.0', DEFAULT_SINK, `${Math.abs(deltaPct)}%${sign}`]);
-  return audioStatus();
+  const status = await audioStatus();
+  if (status.volume === null) throw new Error('no-volume');
+  // Turning it up while muted unmutes, as on other desktops; turning it down leaves it muted.
+  const unmute = deltaPct > 0 && status.muted;
+  if (unmute) await wpctl(['set-mute', DEFAULT_SINK, '0']);
+  const next = stepWithDetent(status.volume, deltaPct, { min: 0, max: 100, overMax: MAX_VOLUME }, volumeKnock);
+  if (next === status.volume) return unmute ? audioStatus() : status;
+  return audioSetVolume(next);
 }
 
 async function audioToggleMute(): Promise<AudioState> {
@@ -1512,11 +2055,11 @@ async function audioSetDefault(id: unknown): Promise<AudioDevices> {
   return audioDevices();
 }
 
-/** Set any node's volume (0-100) by id - used for per-device and per-app control. */
+/** Set any node's volume (0-MAX_VOLUME) by id - used for per-device and per-app control. */
 async function audioSetNodeVolume(id: unknown, pct: unknown): Promise<void> {
   const node = validNodeId(id);
   const v = clampVolume(pct);
-  await wpctl(['set-volume', '-l', '1.0', String(node), `${v}%`]);
+  await wpctl(['set-volume', '-l', WPCTL_LIMIT, String(node), `${v}%`]);
 }
 
 /** Mute or unmute any node by id. */
@@ -1612,204 +2155,6 @@ function registerAudioHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Bluetooth bridge (window.bluetooth), backed by BlueZ on the system bus via
-// busctl, like the power-profiles bridge. One GetManagedObjects call reads
-// the adapter and every known device; pairing, connecting and removal are
-// Device1/Adapter1 method calls. Discovery is the exception: BlueZ stops a
-// scan when the D-Bus client that started it leaves, so a short-lived busctl
-// can't hold one, and `bluetoothctl --timeout` keeps a scan running instead.
-// Pairing registers no agent, so BlueZ pairs as a device with no input or
-// output ("just works") - enough for headphones, speakers, mice and the like,
-// not for devices that need a PIN typed. Missing BlueZ, adapter or busctl ->
-// available:false and the Settings panel falls back.
-// ---------------------------------------------------------------------------
-
-const BLUEZ = 'org.bluez';
-const BLUETOOTH_SCAN_SECONDS = 30;
-const BLUETOOTH_PAIR_TIMEOUT_S = 60;
-const BLUETOOTH_CONNECT_TIMEOUT_S = 30;
-const BLUETOOTH_ADDRESS = /^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/i;
-
-type DbusVariant = { type: string; data: unknown };
-type DbusInterfaces = Record<string, Record<string, DbusVariant> | undefined>;
-
-interface BluetoothDevice {
-  address: string;
-  name: string;
-  /** BlueZ's freedesktop icon name, e.g. "audio-headphones", or null. */
-  icon: string | null;
-  paired: boolean;
-  connected: boolean;
-  /** Battery percentage the device reports, or null. */
-  battery: number | null;
-}
-
-interface BluetoothStatus {
-  available: boolean;
-  powered: boolean;
-  discovering: boolean;
-  devices: BluetoothDevice[];
-}
-
-/** Every BlueZ object path with its interfaces and properties. */
-async function bluezObjects(): Promise<Record<string, DbusInterfaces>> {
-  const out = await busctl([
-    '--json=short', 'call', BLUEZ, '/', 'org.freedesktop.DBus.ObjectManager', 'GetManagedObjects',
-  ]);
-  const parsed = JSON.parse(out) as { data?: unknown[] };
-  const objects = parsed.data?.[0];
-  return objects && typeof objects === 'object' ? (objects as Record<string, DbusInterfaces>) : {};
-}
-
-/** The first adapter's object path, or null when there is none. */
-function bluezAdapter(objects: Record<string, DbusInterfaces>): string | null {
-  return Object.keys(objects).sort().find((p) => objects[p]['org.bluez.Adapter1']) ?? null;
-}
-
-function variantData<T>(props: Record<string, DbusVariant> | undefined, key: string, type: string): T | null {
-  const v = props?.[key];
-  return v && v.type === type ? (v.data as T) : null;
-}
-
-async function bluetoothStatus(): Promise<BluetoothStatus> {
-  const none = { available: false, powered: false, discovering: false, devices: [] };
-  let objects: Record<string, DbusInterfaces>;
-  try {
-    objects = await bluezObjects();
-  } catch {
-    // busctl missing, or BlueZ isn't running on the bus.
-    return none;
-  }
-  const adapterPath = bluezAdapter(objects);
-  if (!adapterPath) return none;
-  const adapter = objects[adapterPath]['org.bluez.Adapter1'];
-
-  const devices: BluetoothDevice[] = [];
-  for (const interfaces of Object.values(objects)) {
-    const dev = interfaces['org.bluez.Device1'];
-    if (!dev || variantData<string>(dev, 'Adapter', 'o') !== adapterPath) continue;
-    const address = variantData<string>(dev, 'Address', 's');
-    if (!address) continue;
-    const paired = variantData<boolean>(dev, 'Paired', 'b') === true;
-    const connected = variantData<boolean>(dev, 'Connected', 'b') === true;
-    const name = variantData<string>(dev, 'Name', 's');
-    // Scans turn up plenty of nameless beacons; only show those already in use.
-    if (!name && !paired && !connected) continue;
-    devices.push({
-      address,
-      name: variantData<string>(dev, 'Alias', 's') ?? name ?? address,
-      icon: variantData<string>(dev, 'Icon', 's'),
-      paired,
-      connected,
-      battery: variantData<number>(interfaces['org.bluez.Battery1'], 'Percentage', 'y'),
-    });
-  }
-  devices.sort(
-    (a, b) =>
-      Number(b.connected) - Number(a.connected) ||
-      Number(b.paired) - Number(a.paired) ||
-      a.name.localeCompare(b.name),
-  );
-
-  return {
-    available: true,
-    powered: variantData<boolean>(adapter, 'Powered', 'b') === true,
-    discovering: variantData<boolean>(adapter, 'Discovering', 'b') === true,
-    devices,
-  };
-}
-
-/**
- * Resolve a caller-supplied address to a device BlueZ currently knows on the
- * first adapter, so only real object paths reach busctl.
- */
-async function bluezDevice(rawAddress: unknown): Promise<{ adapter: string; path: string }> {
-  if (typeof rawAddress !== 'string' || !BLUETOOTH_ADDRESS.test(rawAddress)) {
-    throw new Error('Invalid Bluetooth address');
-  }
-  const objects = await bluezObjects();
-  const adapter = bluezAdapter(objects);
-  const address = rawAddress.toUpperCase();
-  const path = Object.keys(objects).find((p) => {
-    const dev = objects[p]['org.bluez.Device1'];
-    return dev && variantData<string>(dev, 'Adapter', 'o') === adapter &&
-      variantData<string>(dev, 'Address', 's')?.toUpperCase() === address;
-  });
-  if (!adapter || !path) throw new Error('That device is no longer nearby');
-  return { adapter, path };
-}
-
-/** Call a BlueZ method with a D-Bus timeout (pairing waits on the device). */
-function bluezCall(path: string, iface: string, method: string, timeoutS: number, ...args: string[]) {
-  return busctl(
-    [`--timeout=${timeoutS}`, 'call', BLUEZ, path, iface, method, ...args],
-    (timeoutS + 5) * 1000,
-  );
-}
-
-let bluetoothScanning = false;
-
-function registerBluetoothHandlers(): void {
-  ipcMain.handle('bluetooth:status', async (event) => {
-    assertShellSender(event);
-    return bluetoothStatus();
-  });
-
-  ipcMain.handle('bluetooth:setPowered', async (event, powered) => {
-    assertShellSender(event);
-    const adapter = bluezAdapter(await bluezObjects());
-    if (!adapter) throw new Error('No Bluetooth adapter found');
-    await busctl([
-      'set-property', BLUEZ, adapter, 'org.bluez.Adapter1', 'Powered', 'b', powered === true ? 'true' : 'false',
-    ]);
-    return bluetoothStatus();
-  });
-
-  ipcMain.handle('bluetooth:scan', async (event) => {
-    assertShellSender(event);
-    if (!bluetoothScanning) {
-      bluetoothScanning = true;
-      tool(
-        'bluetoothctl',
-        ['--timeout', String(BLUETOOTH_SCAN_SECONDS), 'scan', 'on'],
-        (BLUETOOTH_SCAN_SECONDS + 5) * 1000,
-      )
-        .catch((error) => console.warn('[bluetooth] scan failed:', messageOf(error)))
-        .finally(() => {
-          bluetoothScanning = false;
-        });
-    }
-  });
-
-  ipcMain.handle('bluetooth:pair', async (event, address) => {
-    assertShellSender(event);
-    const { path: dev } = await bluezDevice(address);
-    await bluezCall(dev, 'org.bluez.Device1', 'Pair', BLUETOOTH_PAIR_TIMEOUT_S);
-    // Trusted devices may reconnect on their own, like they do elsewhere.
-    await busctl(['set-property', BLUEZ, dev, 'org.bluez.Device1', 'Trusted', 'b', 'true']);
-    await bluezCall(dev, 'org.bluez.Device1', 'Connect', BLUETOOTH_CONNECT_TIMEOUT_S);
-  });
-
-  ipcMain.handle('bluetooth:connect', async (event, address) => {
-    assertShellSender(event);
-    const { path: dev } = await bluezDevice(address);
-    await bluezCall(dev, 'org.bluez.Device1', 'Connect', BLUETOOTH_CONNECT_TIMEOUT_S);
-  });
-
-  ipcMain.handle('bluetooth:disconnect', async (event, address) => {
-    assertShellSender(event);
-    const { path: dev } = await bluezDevice(address);
-    await bluezCall(dev, 'org.bluez.Device1', 'Disconnect', BLUETOOTH_CONNECT_TIMEOUT_S);
-  });
-
-  ipcMain.handle('bluetooth:remove', async (event, address) => {
-    assertShellSender(event);
-    const { adapter, path: dev } = await bluezDevice(address);
-    await bluezCall(adapter, 'org.bluez.Adapter1', 'RemoveDevice', BLUETOOTH_CONNECT_TIMEOUT_S, 'o', dev);
-  });
-}
-
-// ---------------------------------------------------------------------------
 // System change events. The menu bar's network and audio indicators used to
 // poll every few seconds; now long-running monitors (via the system worker,
 // see system.mts) report changes as they happen, and the shell refreshes on
@@ -1826,16 +2171,9 @@ const SYSTEM_EVENT_DEBOUNCE_MS = 250;
  */
 const AUDIO_EVENT = /on (sink|source|server|card|sink-input) /;
 
-/**
- * BlueZ signals as `gdbus monitor` prints them. Scans stream RSSI updates
- * several times a second; only these changes matter to the Bluetooth panel.
- */
-const BLUETOOTH_EVENT =
-  /Interfaces(Added|Removed)|'(Powered|Discovering|Connected|Paired|Name|Alias|Percentage)'/;
-
 function registerSystemEvents(): void {
   const timers = new Map<string, NodeJS.Timeout>();
-  const changed = (topic: 'network' | 'audio' | 'bluetooth') => {
+  const changed = (topic: 'network' | 'audio') => {
     if (timers.has(topic)) return;
     timers.set(
       topic,
@@ -1849,38 +2187,42 @@ function registerSystemEvents(): void {
   watchCommand('audio', 'pactl', ['subscribe'], (line) => {
     if (AUDIO_EVENT.test(line)) changed('audio');
   });
-  watchCommand('bluetooth', 'gdbus', ['monitor', '--system', '--dest', BLUEZ], (line) => {
-    if (BLUETOOTH_EVENT.test(line)) changed('bluetooth');
-  });
+}
+
+/** Adjust the default sink and push the new state to the shell for the OSD. */
+function pushAudioOsd(statusPromise: Promise<AudioState>): void {
+  statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
 }
 
 /**
- * Global media keys (VolumeUp/Down/Mute). Din owns the whole session, so it
- * grabs these directly, adjusts the default sink, and pushes the new state to
- * the shell so it can show the volume OSD. Harmless when wpctl is absent (the
- * adjust rejects and no OSD is shown).
+ * Global volume keys (VolumeUp/Down/Mute) under X11. Wayland has no global
+ * key grabs (cage offers no GlobalShortcuts portal), so there these calls
+ * would silently fail; the keys reach Din as ordinary input instead and
+ * attachMediaKeys handles them. Harmless when wpctl is absent (the adjust
+ * rejects and no OSD is shown).
  */
 function registerMediaKeys(): void {
-  const push = (statusPromise: Promise<AudioState>) =>
-    statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
-  globalShortcut.register('VolumeUp', () => push(audioAdjust(5)));
-  globalShortcut.register('VolumeDown', () => push(audioAdjust(-5)));
-  globalShortcut.register('VolumeMute', () => push(audioToggleMute()));
+  if (process.env.WAYLAND_DISPLAY) return;
+  globalShortcut.register('VolumeUp', () => pushAudioOsd(audioAdjust(5)));
+  globalShortcut.register('VolumeDown', () => pushAudioOsd(audioAdjust(-5)));
+  globalShortcut.register('VolumeMute', () => pushAudioOsd(audioToggleMute()));
 }
 
 // ---------------------------------------------------------------------------
 // Brightness bridge (window.brightness). Two independent halves:
 //   - Screen backlight (/sys/class/backlight), via brightnessctl where
-//     installed (Aladdin ships it with udev rules that grant the `video`
+//     installed (DinOS ships it with udev rules that grant the `video`
 //     group write access; see os/configuration.nix). Where it's absent (e.g.
 //     a dev host), fall back to reading sysfs directly (world-readable) and
 //     writing through systemd-logind's Session.SetBrightness D-Bus call,
 //     which any active session may use without extra privileges.
-//   - Night light / red shift: a warm color temperature held by a Wayland/X11
-//     gamma tool (gammastep preferred, wlsunset as a fallback) kept running in
-//     the main process. Under Wayland the gamma ramp is torn down when the
-//     client disconnects, so the tool must stay alive for the tint to persist;
-//     we run it in continuous mode with equal day/night temps.
+//   - Night light / red shift, always on or on a schedule; see
+//     night-light.mts.
+// Below the backlight's floor, Din dims in software: brightness levels under
+// 0 (down to MIN_BRIGHTNESS) hold the backlight at its lowest nonzero step and
+// set dimLevel, which the shell draws as a black layer over the whole screen
+// (src/components/desktop/ScreenDimmer.tsx). It isn't saved, so Din always
+// starts at normal brightness.
 // Either half reports available:false where its tool/device is absent. Same
 // trust boundary as the other bridges: sender guard, argv execFile/spawn,
 // values re-clamped here.
@@ -1888,27 +2230,20 @@ function registerMediaKeys(): void {
 
 const BRIGHTNESSCTL_TIMEOUT_MS = 5_000;
 const BACKLIGHT_CLASS = 'backlight';
-const NIGHT_LIGHT_TOOLS = ['gammastep', 'wlsunset'];
-const MIN_TEMPERATURE = 2500;
-const MAX_TEMPERATURE = 6500;
+/** Dimmest level, in percent below the backlight's floor. Keep in step with src/lib/brightness.ts. */
+const MIN_BRIGHTNESS = -80;
+let dimLevel = 0; // 0..-MIN_BRIGHTNESS, software dimming under the backlight's floor
 
 /** Run brightnessctl with an argv array; resolves stdout, rejects with a clean message. */
 function brightnessctl(args: string[], timeout = BRIGHTNESSCTL_TIMEOUT_MS): Promise<string> {
   return tool('brightnessctl', args, timeout);
 }
 
-/** Clamp a caller-supplied percentage to an integer 1..100 (never fully dark). */
+/** Clamp a caller-supplied level to an integer MIN_BRIGHTNESS..100. */
 function clampBrightness(pct: unknown): number {
   const n = Number(pct);
   if (!Number.isFinite(n)) throw new Error('Invalid brightness');
-  return Math.max(1, Math.min(100, Math.round(n)));
-}
-
-/** Clamp a caller-supplied color temperature to an integer in the useful range. */
-function clampTemperature(kelvin: unknown): number {
-  const n = Number(kelvin);
-  if (!Number.isFinite(n)) throw new Error('Invalid temperature');
-  return Math.max(MIN_TEMPERATURE, Math.min(MAX_TEMPERATURE, Math.round(n)));
+  return Math.max(MIN_BRIGHTNESS, Math.min(100, Math.round(n)));
 }
 
 /** Backlight level 0-100 via brightnessctl, null if no backlight device. */
@@ -2008,11 +2343,14 @@ async function backlightGet(): Promise<number | null> {
   return null;
 }
 
-/** Set the backlight to a clamped 1-100 percentage via the active backend. */
+/**
+ * Set the backlight to a 0-100 percentage via the active backend. 0 is the
+ * lowest nonzero raw step, never off.
+ */
 async function backlightSet(pct: number): Promise<void> {
   const backend = await ensureBacklightBackend();
   if (backend === 'brightnessctl') {
-    await brightnessctl(['-c', BACKLIGHT_CLASS, 'set', `${pct}%`]);
+    await brightnessctl(['-c', BACKLIGHT_CLASS, 'set', pct > 0 ? `${pct}%` : '1']);
     return;
   }
   if (backend !== 'sysfs') throw new Error('no-backlight');
@@ -2028,94 +2366,6 @@ async function backlightSet(pct: number): Promise<void> {
   } catch {
     await logindSetBrightness(device, raw);
   }
-}
-
-// --- Night light (red shift) state, held in the main process. ---
-let nightLightTool: string | null = null; // resolved tool name, or null when none is present
-let nightLightProbed = false; // whether we've looked for a tool yet
-let nightLightProc: ChildProcess | null = null; // the running gamma child, or null when off
-let nightLightEnabled = false;
-let nightLightTemp = 4500;
-
-/** Resolve whether a gamma tool exists (ENOENT = missing); cached after first probe. */
-async function probeTool(name: string): Promise<boolean> {
-  try {
-    await tool(name, ['-V'], 3_000);
-    return true;
-  } catch (error) {
-    // Any error other than a missing binary (e.g. an unknown flag) still
-    // means the tool is present and runnable.
-    return messageOf(error) !== `${name}-missing`;
-  }
-}
-
-/** Find and cache the first available gamma tool (gammastep, then wlsunset). */
-async function ensureNightLightTool(): Promise<string | null> {
-  if (nightLightProbed) return nightLightTool;
-  nightLightProbed = true;
-  for (const tool of NIGHT_LIGHT_TOOLS) {
-    if (await probeTool(tool)) {
-      nightLightTool = tool;
-      break;
-    }
-  }
-  return nightLightTool;
-}
-
-/** Argv that holds a fixed color temperature continuously (so the ramp persists). */
-function nightLightArgs(tool: string, temp: number): string[] {
-  if (tool === 'wlsunset') {
-    // wlsunset needs night < day and a schedule; pin the schedule so it stays
-    // at the night temperature essentially all day.
-    return ['-t', String(temp), '-T', String(temp + 500), '-S', '23:59', '-s', '00:00'];
-  }
-  // gammastep: manual location, equal day/night temps, no fade transition.
-  return ['-l', '0:0', '-t', `${temp}:${temp}`, '-r'];
-}
-
-/** Stop the running gamma child, if any. */
-function stopNightLight(): void {
-  if (nightLightProc) {
-    try {
-      nightLightProc.kill('SIGTERM');
-    } catch {
-      // Already gone.
-    }
-    nightLightProc = null;
-  }
-  nightLightEnabled = false;
-}
-
-/** (Re)start the gamma child at the current temperature. Throws if no tool exists. */
-async function startNightLight(): Promise<void> {
-  const tool = await ensureNightLightTool();
-  if (!tool) throw new Error('night-light-missing');
-  stopNightLight();
-  const proc = spawn(tool, nightLightArgs(tool, nightLightTemp), { stdio: 'ignore' });
-  proc.on('error', () => {}); // spawn race (e.g. tool vanished); status stays sane
-  proc.on('exit', () => {
-    if (nightLightProc === proc) {
-      nightLightProc = null;
-      nightLightEnabled = false;
-    }
-  });
-  nightLightProc = proc;
-  nightLightEnabled = true;
-}
-
-/** The night-light half of the brightness state. */
-interface NightLightState {
-  available: boolean;
-  enabled: boolean;
-  temperature: number;
-}
-
-function nightLightStatus(): NightLightState {
-  return {
-    available: nightLightTool !== null,
-    enabled: nightLightEnabled,
-    temperature: nightLightTemp,
-  };
 }
 
 /** The full brightness state as reported to the shell. */
@@ -2137,45 +2387,78 @@ async function brightnessStatus(): Promise<BrightnessState> {
     // brightnessctl missing or no backlight device: keep the unavailable
     // defaults above.
   }
+  if (available && dimLevel > 0) brightness = -dimLevel;
   return { available, brightness, nightLight: nightLightStatus() };
 }
 
+/** Set a MIN_BRIGHTNESS..100 level: the backlight above 0, software dimming below. */
 async function brightnessSet(pct: unknown): Promise<BrightnessState> {
-  await backlightSet(clampBrightness(pct));
+  const level = clampBrightness(pct);
+  await backlightSet(Math.max(0, level));
+  dimLevel = Math.max(0, -level);
   return brightnessStatus();
 }
 
-/** Relative backlight nudge for the media keys; read-modify-set so it never hits 0. */
+const brightnessKnock = { at: 0 };
+
+/** Relative nudge for the media keys, with the detent at 0 (see stepWithDetent). */
 async function brightnessAdjust(deltaPct: number): Promise<BrightnessState> {
-  const current = await backlightGet();
-  if (current === null) throw new Error('no-backlight');
-  return brightnessSet(current + deltaPct);
-}
-
-async function brightnessSetNightLight(enabled: boolean): Promise<BrightnessState> {
-  if (enabled) await startNightLight();
-  else stopNightLight();
-  return brightnessStatus();
-}
-
-async function brightnessSetTemperature(kelvin: unknown): Promise<BrightnessState> {
-  nightLightTemp = clampTemperature(kelvin);
-  if (nightLightEnabled) await startNightLight(); // respawn with the new temp
-  return brightnessStatus();
+  const status = await brightnessStatus();
+  if (status.brightness === null) throw new Error('no-backlight');
+  const next = stepWithDetent(
+    status.brightness,
+    deltaPct,
+    { min: 0, max: 100, underMin: MIN_BRIGHTNESS },
+    brightnessKnock,
+  );
+  if (next === status.brightness) return status;
+  return brightnessSet(next);
 }
 
 /**
- * Brightness media keys. Electron's accelerator grammar has no brightness key
- * names (globalShortcut can only grab the audio media keys), but the
- * compositor delivers XF86MonBrightnessUp/Down to the focused client as
- * ordinary keyboard input with the DOM key "BrightnessUp"/"BrightnessDown".
- * Din is that client, so intercept them in before-input-event - attached to
- * every webContents, since focus may live inside a <webview> guest - adjust
- * the backlight, and push the new state to the shell for the OSD.
+ * Undo the software dimming in a capture of the shell, which includes the
+ * dimming layer. Lossy at deep dimming, but screenshots and the genie
+ * animation's snapshots come out at normal brightness.
  */
-function attachBrightnessMediaKeys(contents: Electron.WebContents): void {
+function undimCapture(image: Electron.NativeImage): Electron.NativeImage {
+  if (dimLevel === 0) return image;
+  const gain = 1 / (1 - dimLevel / 100);
+  const size = image.getSize();
+  const pixels = image.toBitmap();
+  for (let i = 0; i < pixels.length; i++) {
+    if ((i & 3) !== 3) pixels[i] = Math.min(255, Math.round(pixels[i] * gain));
+  }
+  // The bitmap is at device resolution; getSize() is in DIPs.
+  const scaleFactor = Math.sqrt(pixels.length / 4 / (size.width * size.height));
+  return nativeImage.createFromBitmap(pixels, {
+    width: Math.round(size.width * scaleFactor),
+    height: Math.round(size.height * scaleFactor),
+    scaleFactor,
+  });
+}
+
+
+/**
+ * Brightness and volume media keys. Electron's accelerator grammar has no
+ * brightness key names, and on Wayland globalShortcut can't grab anything,
+ * but the compositor delivers XF86MonBrightness* and XF86Audio* keys to the
+ * focused client as ordinary keyboard input ("BrightnessUp",
+ * "AudioVolumeUp", ...). Din is that client, so intercept them in
+ * before-input-event - attached to every webContents, since focus may live
+ * inside a <webview> guest - adjust the backlight or sink, and push the new
+ * state to the shell for the OSD.
+ */
+function attachMediaKeys(contents: Electron.WebContents): void {
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
+    const key = input.key === 'Unidentified' ? input.code : input.key;
+    if (key === 'AudioVolumeUp' || key === 'AudioVolumeDown' || key === 'AudioVolumeMute') {
+      event.preventDefault();
+      if (key === 'AudioVolumeUp') pushAudioOsd(audioAdjust(5));
+      else if (key === 'AudioVolumeDown') pushAudioOsd(audioAdjust(-5));
+      else pushAudioOsd(audioToggleMute());
+      return;
+    }
     let delta: number | null = null;
     if (input.key === 'BrightnessUp' || input.code === 'BrightnessUp') delta = 5;
     if (input.key === 'BrightnessDown' || input.code === 'BrightnessDown') delta = -5;
@@ -2188,6 +2471,7 @@ function attachBrightnessMediaKeys(contents: Electron.WebContents): void {
 }
 
 function registerBrightnessHandlers(): void {
+  startNightLight();
   ipcMain.handle('brightness:status', async (event) => {
     assertShellSender(event);
     return brightnessStatus();
@@ -2198,11 +2482,18 @@ function registerBrightnessHandlers(): void {
   });
   ipcMain.handle('brightness:setNightLight', async (event, enabled) => {
     assertShellSender(event);
-    return brightnessSetNightLight(enabled === true);
+    await setNightLightEnabled(enabled === true);
+    return brightnessStatus();
   });
   ipcMain.handle('brightness:setTemperature', async (event, kelvin) => {
     assertShellSender(event);
-    return brightnessSetTemperature(kelvin);
+    await setNightLightTemperature(kelvin);
+    return brightnessStatus();
+  });
+  ipcMain.handle('brightness:setNightLightSchedule', async (event, schedule) => {
+    assertShellSender(event);
+    await setNightLightSchedule(schedule);
+    return brightnessStatus();
   });
 }
 
@@ -2222,7 +2513,7 @@ function registerScreenshotHandlers(): void {
     if (!shellWindow || shellWindow.webContents.isDestroyed()) {
       throw new Error('Shell window unavailable');
     }
-    const image = await shellWindow.webContents.capturePage();
+    const image = undimCapture(await shellWindow.webContents.capturePage());
     const { width, height } = image.getSize();
     if (width === 0 || height === 0) {
       throw new Error('Captured an empty image');
@@ -2254,7 +2545,7 @@ function registerScreenshotHandlers(): void {
     const y = clamp(rect?.y, 0, contentH);
     const width = clamp(rect?.width, 1, contentW - x);
     const height = clamp(rect?.height, 1, contentH - y);
-    const image = await shellWindow.webContents.capturePage({ x, y, width, height });
+    const image = undimCapture(await shellWindow.webContents.capturePage({ x, y, width, height }));
     const size = image.getSize();
     if (size.width === 0 || size.height === 0) {
       throw new Error('Captured an empty image');
@@ -2273,7 +2564,7 @@ function registerScreenshotHandlers(): void {
 // the evdev level; do the same: read the keyboard event nodes directly and
 // forward presses to the shell as the 'screenshot-area' shortcut.
 //
-// Reading /dev/input needs the `input` group (Aladdin grants it to the
+// Reading /dev/input needs the `input` group (DinOS grants it to the
 // desktop user); anywhere else the watcher just stays off. The main process
 // already observes every keystroke via before-input-event, and nothing here
 // is exposed to renderers, so no new capability crosses a trust boundary.
@@ -2304,13 +2595,20 @@ function keyboardEventNodes(): string[] {
 
 function watchSelectiveScreenshotKey(): void {
   if (process.platform !== 'linux') return;
-  const watched = new Set<string>();
+  const watched = new Map<string, ChildProcess>();
   const scan = () => {
     for (const node of keyboardEventNodes()) {
       if (watched.has(node)) continue;
-      watched.add(node);
       let leftover: Buffer = Buffer.alloc(0);
-      const stream = fs.createReadStream(node);
+      // Read through `cat` and a pipe, not fs.createReadStream: a file stream
+      // parks one of libuv's four threadpool threads in read() for as long as
+      // the device is open, and laptops have four or more "keyboards" (sleep
+      // button, video bus, vendor hotkeys...). With the pool full, every
+      // async fs call in this process waits forever and the shell never
+      // loads - a black screen on a ThinkPad P14s Gen 7 AMD.
+      const reader = spawn('cat', [node], { stdio: ['ignore', 'pipe', 'ignore'] });
+      watched.set(node, reader);
+      const stream = reader.stdout;
       stream.on('data', (chunk: string | Buffer) => {
         const data = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
         const buf = leftover.length > 0 ? Buffer.concat([leftover, data]) : data;
@@ -2327,13 +2625,20 @@ function watchSelectiveScreenshotKey(): void {
         }
         leftover = buf.subarray(full);
       });
-      const unwatch = () => watched.delete(node);
+      const unwatch = () => {
+        if (watched.get(node) === reader) watched.delete(node);
+      };
       // Unreadable (permissions) or unplugged: drop it so the next rescan
       // can retry (or pick up a replacement keyboard).
-      stream.on('error', unwatch);
-      stream.on('close', unwatch);
+      reader.on('error', unwatch);
+      reader.on('exit', unwatch);
     }
   };
+  // cat only notices its reader is gone on its next write, which may never
+  // come; stop the readers with the app.
+  app.on('will-quit', () => {
+    for (const reader of watched.values()) reader.kill();
+  });
   scan();
   // Keyboards come and go (docks, USB/BT keyboards): rescan periodically.
   setInterval(scan, 10_000).unref();
@@ -2545,6 +2850,13 @@ const WEBAPP_PRELOAD = path.join(import.meta.dirname, 'webview-preload.cjs');
  */
 const HIGHLIGHT_PRELOAD = path.join(import.meta.dirname, 'browser-highlight-preload.cjs');
 
+/**
+ * Absolute path to the session preload that puts web pages' notifications
+ * in Din's notification center (see electron/notifications.mts). Every page
+ * gets it - browser tabs, private ones, and installed web apps.
+ */
+const NOTIFICATION_PRELOAD = path.join(import.meta.dirname, 'notification-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow: BrowserWindow | null = null;
 
@@ -2590,6 +2902,52 @@ function sendToShell(channel: string, payload?: unknown): void {
   if (shellWindow && !shellWindow.webContents.isDestroyed()) {
     shellWindow.webContents.send(channel, payload);
   }
+}
+
+/** How often, at most, a guest's pointer moves are forwarded to the shell. */
+const GUEST_MOVE_INTERVAL_MS = 16;
+
+/**
+ * Pointer input inside a <webview> guest goes to the guest's own document and
+ * never reaches the shell's, so the shell can't react to it: popovers and
+ * menus stay open over a click into the page, and the dock can't tell the
+ * pointer moved over one. Forward what the shell reacts to - button presses
+ * and moves (at most one per frame) - so GuestInputHost can replay it on the
+ * guest's <webview> element. Coordinates are in the guest's view, in DIPs
+ * (verified on Electron 41: the shell's interface zoom isn't applied).
+ *
+ * A guest's own `focus` event would be the obvious way to report focus too,
+ * but it never fires for <webview> guests (also verified), so the shell
+ * treats a press as focusing the page instead.
+ */
+function forwardGuestInput(contents: Electron.WebContents): void {
+  const wcId = contents.id;
+  let pendingMove: { x: number; y: number; meta: boolean } | null = null;
+  let moveTimer: NodeJS.Timeout | null = null;
+  const flushMove = (): void => {
+    if (moveTimer) clearTimeout(moveTimer);
+    moveTimer = null;
+    if (!pendingMove) return;
+    sendToShell('guest:input', { wcId, type: 'move', ...pendingMove });
+    pendingMove = null;
+  };
+  contents.on('before-mouse-event', (_event, mouse) => {
+    // Super's state rides along: the shell reads it off pointer events to
+    // keep its Super+drag grab layer in sync (src/lib/superKey.ts), and a
+    // replayed move without it would read as Super released.
+    const meta = mouse.modifiers?.includes('meta') ?? false;
+    if (mouse.type === 'mouseMove') {
+      pendingMove = { x: mouse.x, y: mouse.y, meta };
+      moveTimer ??= setTimeout(flushMove, GUEST_MOVE_INTERVAL_MS);
+    } else if (mouse.type === 'mouseDown') {
+      // Keep the order the guest saw: the move that led here comes first.
+      flushMove();
+      sendToShell('guest:input', { wcId, type: 'down', x: mouse.x, y: mouse.y, button: mouse.button ?? 'left', meta });
+    }
+  });
+  contents.once('destroyed', () => {
+    if (moveTimer) clearTimeout(moveTimer);
+  });
 }
 
 /**
@@ -3182,6 +3540,12 @@ function requestedCapabilities(
   return capabilities.length > 0 ? capabilities : null;
 }
 
+/** Whether a site may notify, as the user answered (Notification.permission). */
+function siteNotificationPermission(s: Electron.Session, origin: string): NotificationPermission {
+  const allowed = decisionsFor(s).get(`${origin}\u0000notifications`);
+  return allowed === undefined ? 'default' : allowed ? 'granted' : 'denied';
+}
+
 function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean }): void {
   const decisions = decisionsFor(s);
   const key = (origin: string, capability: SiteCapability) => `${origin}\u0000${capability}`;
@@ -3624,6 +3988,8 @@ function registerBrowserDownloadHandlers(): void {
   ipcMain.handle('browser:openDownload', async (event, filePath) => {
     assertShellSender(event);
     if (!isDownloadsPath(filePath) || !fs.existsSync(filePath)) return;
+    // A downloaded setup.exe runs, the way it would on Windows.
+    if (isWindowsProgram(filePath)) return runWindowsProgram(filePath);
     await shell.openPath(filePath);
   });
   ipcMain.handle('browser:showDownload', (event, filePath) => {
@@ -3663,6 +4029,20 @@ function registerBrowserDataHandlers(): void {
       // No `storages` filter: clear every storage type (cookies included).
       await s.clearStorageData();
     }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Color scheme. Chromium answers `prefers-color-scheme` from the host
+// desktop's setting, which under cage doesn't exist, so every page saw light.
+// Din is the desktop here: the shell reports its own light/dark mode and
+// nativeTheme passes it on to every web contents, browser tabs included.
+// ---------------------------------------------------------------------------
+function registerThemeHandler(): void {
+  ipcMain.on('theme:set', (event, source: unknown) => {
+    if (!isShellSender(event)) return;
+    if (source !== 'light' && source !== 'dark' && source !== 'system') return;
+    nativeTheme.themeSource = source;
   });
 }
 
@@ -3737,6 +4117,7 @@ function registerCrxHandlers(): void {
     assertShellSender(event);
     return browserSession()
       .extensions.getAllExtensions()
+      .filter((extension) => !isAdblockExtension(extension.id))
       .map((extension) => ({
         id: extension.id,
         name: extension.manifest?.name ?? extension.name,
@@ -3817,8 +4198,18 @@ function isDevtoolsToggleInput(input: Electron.Input): boolean {
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
-  | { action: 'screenshot' | 'screenshot-area' }
-  | { action: 'new-tab' | 'close-tab' | 'focus-address' | 'find' | 'back' | 'forward' }
+  | { action: 'apps-menu' | 'screenshot' | 'screenshot-area' }
+  | { action: 'super-key'; down: boolean }
+  | {
+      action:
+        | 'new-tab'
+        | 'close-tab'
+        | 'focus-address'
+        | 'find'
+        | 'view-source'
+        | 'back'
+        | 'forward';
+    }
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
   | { action: 'goto-tab'; digit: number };
@@ -3839,6 +4230,9 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   // watchSelectiveScreenshotKey).
   if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
     return { action: input.shift ? 'screenshot-area' : 'screenshot' };
+  }
+  if (input.meta && !input.alt && !input.control && !input.shift && input.key === ' ') {
+    return { action: 'apps-menu' };
   }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
@@ -3869,6 +4263,7 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
     if (key === 'w') return { action: 'close-tab' };
     if (key === 'l') return { action: 'focus-address' };
     if (key === 'f') return { action: 'find' };
+    if (key === 'u') return { action: 'view-source' };
     if (key === 'r') return { action: 'reload', force: false };
     if (/^[1-9]$/.test(input.key)) {
       return { action: 'goto-tab', digit: Number(input.key) };
@@ -3978,6 +4373,10 @@ app.whenReady().then(() => {
   hardenGuestSession(privateBrowserSession(), { prompts: true });
   hardenGuestSession(appSession(), { prompts: true });
   hardenGuestSession(devtoolsSession(), { prompts: false });
+  // Web pages' notifications go to Din's notification center.
+  for (const s of [browserSession(), privateBrowserSession(), appSession()]) {
+    s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
+  }
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
@@ -3985,13 +4384,16 @@ app.whenReady().then(() => {
   });
 
   registerFsHandlers();
+  registerFileOpsHandlers({ assertShellSender, sendToShell });
+  registerLocalFileProtocol(SHELL_ORIGIN);
   registerPtyHandlers();
   registerWifiHandlers();
   registerVpnHandlers();
   registerDisplayHandlers();
+  registerPageFullscreenHandlers();
+  registerMonitorsHandlers();
   registerPowerHandlers();
   registerAudioHandlers();
-  registerBluetoothHandlers();
   registerMediaKeys();
   registerSystemEvents();
   registerBrightnessHandlers();
@@ -4001,14 +4403,33 @@ app.whenReady().then(() => {
   registerCertificateHandling();
   registerBrowserDataHandlers();
   registerFindHandlers();
+  registerThemeHandler();
   registerUserscriptHandlers({ assertShellSender });
   registerDevtoolsHandlers();
   registerNostrBridge();
   registerHighlightBridge();
   registerFilePickerBridge();
-  registerNativeAppHandlers({ assertShellSender });
+  registerNativeAppHandlers({
+    assertShellSender,
+    shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
+  });
   registerKeyboardHandlers({ assertShellSender });
+  registerDateTimeHandlers({ assertShellSender });
+  registerCursorHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
+  registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
+  registerInstallerHandlers({ assertShellSender, sendToShell });
+  registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
+  registerBluetoothHandlers({ assertShellSender, sendToShell });
+  registerNostrdHandlers({ assertShellSender, sendToShell });
+  registerBootScreenHandlers({ assertShellSender });
+  registerLockHandlers({ assertShellSender });
+  registerUpdaterHandlers({ assertShellSender, sendToShell });
+  registerAirPlayHandlers({
+    assertShellSender,
+    sendToShell,
+    primaryOutput: async () => (await queryOutputs()).find((o) => o.primary && o.enabled)?.name ?? null,
+  });
   registerNativeDisplayHandlers({
     assertShellSender,
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
@@ -4027,29 +4448,51 @@ app.whenReady().then(() => {
   // preload/APIs are in place when the first tab loads.
   setupChromeExtensions();
 
+  // The built-in ad blocker (electron/adblock.mts). Also before the first
+  // <webview>: its extension and preloads must be in place for the first tab.
+  setupAdblock({
+    browserSession: browserSession(),
+    privateSession: privateBrowserSession(),
+    isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents,
+    assertShellSender,
+    sendToShell,
+  });
+
+  // The pop-up blocker, and window.opener for windows pages open
+  // (electron/popups.mts). Also before the first <webview>, for its preload.
+  setupPopups({
+    sessions: [browserSession(), privateBrowserSession(), appSession()],
+    isWebGuest: (contents) =>
+      contents.getType() === 'webview' &&
+      (isBrowserTabSession(contents.session) || contents.session === appSession()),
+    assertShellSender,
+    sendToShell,
+  });
+
   // Route chrome.action popups into the shell instead of native windows.
   overrideActionPopup();
 
-  // Production runs with no window manager (cage on Aladdin, or a bare X11
-  // login session via os/x11). cage force-fills the one app, but bare X11 has
-  // nothing to honor the EWMH fullscreen hint, so the window would sit at its
-  // default size letterboxed on a black screen. Size it to the primary
-  // display's bounds explicitly and drop the frame; fullscreen/kiosk still
-  // apply where a compositor does honor them.
+  // Production runs with no window manager (cage on DinOS, or a bare X11
+  // login session via os/x11). cage force-fills the one app across every
+  // output, but bare X11 has nothing to honor the EWMH fullscreen hint, so
+  // the window would sit at its default size letterboxed on a black screen.
+  // Size it to cover every display explicitly and drop the frame;
+  // fullscreen/kiosk still apply where a compositor does honor them. The
+  // desktop itself works out where each monitor is (window.monitors).
   const production = !DEV_URL;
-  const primaryBounds = screen.getPrimaryDisplay().bounds;
+  // Bare X11 fullscreens a window onto one display; across several, the
+  // explicit bounds have to do.
+  const spanX11 = DISPLAY_TOOL === 'xrandr' && screen.getAllDisplays().length > 1;
   const win = new BrowserWindow({
-    // Dev: normal windowed shell. Production: fills the display, frameless.
-    fullscreen: production,
-    kiosk: production,
+    // Dev: normal windowed shell. Production: fills the displays, frameless.
+    fullscreen: production && !spanX11,
+    kiosk: production && !spanX11,
     frame: !production,
-    ...(production
-      ? { x: primaryBounds.x, y: primaryBounds.y, width: primaryBounds.width, height: primaryBounds.height }
-      : { width: 1280, height: 800 }),
+    ...(production ? screenBounds() : { width: 1280, height: 800 }),
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
     // Stay hidden until the renderer reports its first frame is ready (the
-    // shell:bootReady gate below). With no window manager (cage on Aladdin,
+    // shell:bootReady gate below). With no window manager (cage on DinOS,
     // bare X11 otherwise), showing early presents an unpainted surface — a
     // white/pixelated glitch frame. The renderer then fades in from black.
     show: false,
@@ -4106,6 +4549,7 @@ app.whenReady().then(() => {
     }
     // Handed to the web-contents-created hook, which Electron runs next.
     attachingGuestSrc = typeof params.src === 'string' ? params.src : '';
+    popupAttaching(attachingGuestSrc);
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
@@ -4134,14 +4578,21 @@ app.whenReady().then(() => {
   });
 
   // With no window manager, the shell won't follow a resolution change on its
-  // own. Refit it to the primary display whenever the display metrics change
-  // (e.g. the Settings display panel applying a new xrandr mode).
+  // own. Refit it over every display whenever they change (e.g. the Settings
+  // display panel applying a new mode, or a monitor plugged in), and tell the
+  // desktop where the monitors are now. A newly connected set of outputs gets
+  // its saved arrangement back, and any gap between them is closed (Wayland).
   if (production) {
     const refit = () => {
       if (win.isDestroyed()) return;
-      const b = screen.getPrimaryDisplay().bounds;
-      win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+      if (DISPLAY_TOOL === 'xrandr') {
+        if (screen.getAllDisplays().length > 1 && win.isKiosk()) win.setKiosk(false);
+        win.setBounds(screenBounds());
+      }
+      scheduleMonitorsUpdate();
+      void restoreSavedLayout().then(closeLayoutGaps);
     };
+    void restoreSavedLayout().then(closeLayoutGaps);
     screen.on('display-metrics-changed', refit);
     screen.on('display-added', refit);
     screen.on('display-removed', refit);
@@ -4195,9 +4646,20 @@ app.on('will-quit', () => {
 // Browser-partition guests are also registered as tabs with the Chrome
 // extension system (chrome.tabs sees them; content scripts inject).
 app.on('web-contents-created', (_event, contents) => {
-  // Brightness keys arrive as ordinary keyboard input to whichever contents
-  // holds focus (shell or any guest), so hook them everywhere.
-  attachBrightnessMediaKeys(contents);
+  // Brightness and volume keys arrive as ordinary keyboard input to whichever
+  // contents holds focus (shell or any guest), so hook them everywhere.
+  attachMediaKeys(contents);
+
+  // Holding Super lets the shell drag windows from anywhere, but it can't
+  // see the key while focus is inside a guest, so forward its presses (not
+  // consumed: Super is still a modifier for the page).
+  if (contents.getType() === 'webview') {
+    contents.on('before-input-event', (_event, input) => {
+      if (input.key !== 'Meta' || input.isAutoRepeat) return;
+      if (input.type !== 'keyDown' && input.type !== 'keyUp') return;
+      sendToShell('shortcut', { action: 'super-key', down: input.type === 'keyDown' } satisfies ShellShortcut);
+    });
+  }
 
   if (contents.getType() !== 'webview') {
     // The shell renderer (address bar, inputs, etc.) gets no context menu by
@@ -4222,6 +4684,8 @@ app.on('web-contents-created', (_event, contents) => {
     });
     return;
   }
+
+  forwardGuestInput(contents);
 
   const isBrowserTab = contents.session === browserSession();
 
@@ -4274,11 +4738,15 @@ app.on('web-contents-created', (_event, contents) => {
   // the host OS dialog. Real web content only - browser tabs (persistent and
   // private) and installed web-app guests; extension pages and devtools hosts
   // are left with their default behavior.
-  if (
+  const isWebPage =
     !isExtensionPageGuest &&
-    (isBrowserTabSession(contents.session) || contents.session === appSession())
-  ) {
+    (isBrowserTabSession(contents.session) || contents.session === appSession());
+  if (isWebPage) {
     attachFileChooserInterception(contents);
+    // Pop-ups need a click (electron/popups.mts); a tab one opened is linked
+    // to its opener.
+    attachPopups(contents);
+    popupAttached(contents);
   }
 
   // Register web-content tabs with the extension system (chrome.tabs sees
@@ -4297,6 +4765,11 @@ app.on('web-contents-created', (_event, contents) => {
   // electron/userscripts.mts): inject matching scripts as pages load, and
   // turn navigations to *.user.js files into install prompts in the shell
   // instead of pages of raw source. Extension pages are off limits.
+  // The ad blocker's per-page blocked count (electron/adblock.mts).
+  if (isBrowserTabSession(contents.session) && !isExtensionPageGuest) {
+    attachAdblock(contents);
+  }
+
   if (isBrowserTab && !isExtensionPageGuest) {
     attachUserscripts(contents);
     contents.on('will-navigate', (event, url) => {
@@ -4316,6 +4789,9 @@ app.on('web-contents-created', (_event, contents) => {
       // shell's fresh tab would skip Chromium's web_accessible_resources check.
       (/^chrome-extension:\/\//i.test(url) && contents.getURL().startsWith('chrome-extension://'))
     ) {
+      // A web page needs a click to open one (the pop-up blocker); extension
+      // pages are trusted.
+      if (isWebPage && !mayOpenWindow(contents, url)) return { action: 'deny' };
       // Tag the popup with its opener so the shell opens the new tab in the
       // same window/session - keeps private-window links out of the
       // persistent, authenticated session (and vice versa). Middle-click and
@@ -4326,6 +4802,11 @@ app.on('web-contents-created', (_event, contents) => {
         openerWcId: contents.id,
         background: disposition === 'background-tab',
       });
+      if (isWebPage) windowOpened(contents, url);
+    } else if (isWebPage && url === 'about:blank' && mayOpenWindow(contents, url)) {
+      // An empty window the page means to send somewhere: no tab until it
+      // does (popup-preload.cjs gives the page its location).
+      windowOpened(contents, null);
     }
     return { action: 'deny' };
   });
@@ -4346,6 +4827,7 @@ app.on('web-contents-created', (_event, contents) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
+        shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {
@@ -4385,13 +4867,14 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   // Installed web-app guests aren't browser tabs, but focus still lands inside
-  // them, so the shell's window-cycling and screenshot shortcuts must be
-  // forwarded too.
+  // them, so the shell's window-cycling, apps-menu, and screenshot shortcuts
+  // must be forwarded too.
   if (isAppGuest(contents)) {
     contents.on('before-input-event', (event, input) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
+        shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {

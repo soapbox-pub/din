@@ -8,6 +8,8 @@
  * `before-input-event` and forwards them to the shell:
  *
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
+ *   - Super+Space             -> { action: 'apps-menu' }
+ *   - Super down / up         -> { action: 'super-key', down }
  *   - Print Screen            -> { action: 'screenshot' }
  *   - Shift+Print Screen, or the laptop box-select key
  *                             -> { action: 'screenshot-area' }
@@ -15,6 +17,7 @@
  *   - Ctrl+W in a browser tab -> { action: 'close-tab', wcId }
  *   - Ctrl+L in a browser tab -> { action: 'focus-address', wcId }
  *   - Ctrl+F in a browser tab -> { action: 'find', wcId }
+ *   - Ctrl+U in a browser tab -> { action: 'view-source', wcId }
  *   - Ctrl+R / F5 (+Shift)    -> { action: 'reload', force, wcId }
  *   - Ctrl+Tab / Ctrl+Shift+Tab -> { action: 'cycle-tab', backward, wcId }
  *   - Ctrl+1..9 in a browser tab -> { action: 'goto-tab', digit, wcId }
@@ -37,6 +40,15 @@ export type ShellShortcut =
       /** Alt+Tab pressed inside a guest: cycle window focus. */
       action: 'cycle-windows';
       backward: boolean;
+    }
+  | {
+      /** Super+Space pressed inside a guest: toggle the apps menu. */
+      action: 'apps-menu';
+    }
+  | {
+      /** Super pressed or released inside a guest (Super+drag moves windows). */
+      action: 'super-key';
+      down: boolean;
     }
   | {
       /** Print Screen pressed inside a guest: full-screen capture. */
@@ -68,6 +80,11 @@ export type ShellShortcut =
   | {
       /** Ctrl+F pressed inside a browser tab: open the find bar. */
       action: 'find';
+      wcId: number;
+    }
+  | {
+      /** Ctrl+U pressed inside a browser tab: view its page source. */
+      action: 'view-source';
       wcId: number;
     }
   | {

@@ -9,7 +9,7 @@ import htmlEslint from "@html-eslint/eslint-plugin";
 import customRules from "./eslint-rules/index.js";
 
 export default defineConfig(
-  globalIgnores(["dist", ".agents"]),
+  globalIgnores(["dist", ".agents", "electron/adblock-extension/engine.js"]),
   {
     name: "app/ts",
     files: ["**/*.{ts,tsx}"],
@@ -75,11 +75,11 @@ export default defineConfig(
     },
   },
   {
-    // The browser-tab highlight preload runs in the guest renderer and drives
-    // the page DOM directly (window/document/Element/requestAnimationFrame), so
-    // it needs browser globals on top of the electron block's node globals.
+    // The guest preloads run in the guest renderer and drive the page DOM
+    // directly (window/document/Element/requestAnimationFrame), so they need
+    // browser globals on top of the electron block's node globals.
     name: "app/electron-dom-preload",
-    files: ["electron/browser-highlight-preload.cjs"],
+    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/adblock-preload.cjs", "electron/popup-preload.cjs"],
     languageOptions: {
       globals: globals.browser,
     },

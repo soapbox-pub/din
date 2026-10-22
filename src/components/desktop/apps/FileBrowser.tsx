@@ -1,160 +1,193 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Download,
-  Eye,
-  EyeOff,
-  File,
-  FileArchive,
-  FileCode,
-  FileImage,
-  FileText,
+  ChevronRight,
   Folder,
-  FolderPlus,
   HardDrive,
   Home,
-  Link as LinkIcon,
-  Pencil,
+  LayoutGrid,
+  List,
   RotateCw,
+  Search,
   Trash2,
   X,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import {
   cleanFsError,
   formatBytes,
   getFsBridge,
-  isValidEntryName,
   joinPath,
   parentPath,
-  sortEntries,
+  sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
+import { isExtractable } from '@/lib/fileTypes';
 import {
+  invalidateListings,
+  useBookmarks,
   useDirectory,
-  useFileContent,
-  useFsMutations,
+  useFsDetails,
   useHomeDir,
+  useTrashDir,
+  useWatchDirectory,
 } from '@/hooks/useFileSystem';
-import { useVirtualRows } from '@/hooks/useVirtualRows';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
+import {
+  getFileClipboard,
+  popUndo,
+  pushUndo,
+  setFileClipboard,
+  useFileClipboard,
+} from '@/lib/fileClipboard';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { parkedTab } from '@/lib/tabTransfer';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
+import { moveItem } from '@/hooks/useDragReorder';
+import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
   ContextMenu,
+  ContextMenuCheckboxItem,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-
-/** Cap for image preview reads: enough for big images, cheap over IPC. */
-const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
-/** Cap for text preview reads (we only render the beginning anyway). */
-const TEXT_PREVIEW_MAX_BYTES = 1024 * 1024;
-/** Never render more text than this (keeps the DOM responsive). */
-const TEXT_PREVIEW_MAX_CHARS = 512 * 1024;
-
-/**
- * Shared date formatter. Constructing an Intl.DateTimeFormat is expensive
- * (~0.1ms), so per-row `toLocaleString` calls dominate render time on large
- * directories; a single cached instance makes formatting nearly free.
- */
-const MTIME_FORMAT = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-});
-
-const IMAGE_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  avif: 'image/avif',
-  bmp: 'image/bmp',
-  ico: 'image/x-icon',
-  svg: 'image/svg+xml',
-};
-
-const CODE_EXTENSIONS = new Set([
-  'js', 'cjs', 'mjs', 'ts', 'tsx', 'jsx', 'json', 'css', 'html', 'xml',
-  'sh', 'bash', 'zsh', 'py', 'rs', 'go', 'c', 'h', 'cpp', 'nix', 'toml',
-  'yaml', 'yml', 'lock',
-]);
-
-const ARCHIVE_EXTENSIONS = new Set([
-  'zip', 'tar', 'gz', 'xz', 'zst', 'bz2', '7z', 'rar', 'qcow2', 'iso', 'img',
-]);
-
-function extensionOf(name: string): string {
-  const idx = name.lastIndexOf('.');
-  return idx > 0 ? name.slice(idx + 1).toLowerCase() : '';
-}
-
-/** Icon for a directory entry, keyed off its kind and file extension. */
-function EntryIcon({ entry }: { entry: FsEntry }) {
-  const className = cn(
-    'size-4 shrink-0',
-    entry.kind === 'directory' ? 'text-primary' : 'text-muted-foreground',
-  );
-  if (entry.kind === 'directory') return <Folder className={className} aria-hidden />;
-  const ext = extensionOf(entry.name);
-  if (ext in IMAGE_MIME) return <FileImage className={className} aria-hidden />;
-  if (CODE_EXTENSIONS.has(ext)) return <FileCode className={className} aria-hidden />;
-  if (ARCHIVE_EXTENSIONS.has(ext)) return <FileArchive className={className} aria-hidden />;
-  if (ext === 'md' || ext === 'txt' || ext === 'log') {
-    return <FileText className={className} aria-hidden />;
-  }
-  return <File className={className} aria-hidden />;
-}
+import { EntryView } from './files/EntryViews';
+import { GRID_ZOOMS } from './files/layout';
+import type { SortKey, SortOrder, ViewMode } from './files/EntryViews';
+import { Sidebar } from './files/Sidebar';
+import { CompressDialog, ConfirmDialog, PropertiesDialog, ShortcutsDialog } from './files/Dialogs';
+import { FileViewerBody } from './files/FileViewerBody';
+import { endFileDrag, startFileDrag } from './files/dnd';
 
 let nextTabId = 0;
 const newTabId = () => `files-${nextTabId++}`;
 
-/** Basename shown on a tab for a given directory (root shows "/"). */
-function tabTitle(cwd: string | null): string {
+/** How long type-ahead keeps adding to what's been typed (ms). */
+const TYPEAHEAD_MS = 1000;
+
+const SORT_LABELS: Record<SortKey, string> = {
+  name: 'Name',
+  size: 'Size',
+  type: 'Type',
+  modified: 'Modified',
+};
+
+interface FilesPrefs {
+  showHidden: boolean;
+  view: ViewMode;
+  zoom: number;
+  sort: SortOrder;
+  sidebar: boolean;
+}
+
+const DEFAULT_PREFS: FilesPrefs = {
+  showHidden: false,
+  view: 'list',
+  zoom: 1,
+  sort: { key: 'name', descending: false },
+  sidebar: true,
+};
+
+/** Display name for a folder (tab labels, window title). */
+function folderTitle(cwd: string | null, home: string | undefined, trash: string | undefined): string {
   if (!cwd) return 'Files';
-  if (cwd === '/') return '/';
-  const base = cwd.slice(cwd.lastIndexOf('/') + 1);
-  return base || '/';
+  if (cwd === trash) return 'Trash';
+  if (cwd === home) return 'Home';
+  if (cwd === '/') return 'Computer';
+  return cwd.slice(cwd.lastIndexOf('/') + 1) || '/';
+}
+
+interface TabSpec {
+  id: string;
+  path?: string;
+  select?: string;
+}
+
+/** What a Files tab carries to another window: its directory. */
+function isFilesTabTransfer(value: unknown): value is { path: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { path?: unknown }).path === 'string';
 }
 
 /**
- * Files - a browser for the underlying OS filesystem.
+ * Files - a browser for the OS filesystem, in the manner of Nautilus or
+ * Finder: click to select, double-click to open, marquee and modifier-click
+ * selection, drag and drop, cut/copy/paste, the Trash, undo, archives,
+ * thumbnails, and a keyboard shortcut for nearly everything.
  *
- * Backed by `window.fs` (Electron preload + IPC into the main process), so it
- * sees the VM's real filesystem. This shell manages tabs: each tab is an
- * independent navigation context (its own history, cwd, and preview), all
- * kept mounted so background tabs retain their state; only the active one is
- * visible. The tab strip is published into the window title bar. Outside the
- * Electron shell (plain-browser dev) it shows an explanatory fallback.
+ * Backed by `window.fs` (Electron preload + IPC into the main process, see
+ * electron/files.mts for the heavier operations). Each tab is an
+ * independent navigation context, all kept mounted so background tabs keep
+ * their state; the tab strip is published into the window title bar.
+ *
+ * Launch params: `{ path?: string, select?: string }` - the folder to show
+ * and an item in it to select.
  */
-export function FileBrowser({ windowId }: AppComponentProps) {
+export function FileBrowser({ windowId, params }: AppComponentProps) {
   const bridge = getFsBridge();
-  const { close: closeWindow } = useWindowActions();
+  const { close: closeWindow, open } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
+  const home = useHomeDir();
+  const trash = useTrashDir();
+  const [prefs, setPrefs] = useLocalStorage<FilesPrefs>('din:files:prefs', DEFAULT_PREFS);
+  const mergedPrefs = useMemo(() => ({ ...DEFAULT_PREFS, ...prefs }), [prefs]);
 
-  const [tabs, setTabs] = useState<{ id: string }[]>(() => [{ id: newTabId() }]);
+  const [tabs, setTabs] = useState<TabSpec[]>(() => {
+    // A window opened for a tab dragged out of another one.
+    const adopted = parkedTab(params);
+    if (isFilesTabTransfer(adopted)) return [{ id: newTabId(), path: adopted.path || undefined }];
+    return [
+      {
+        id: newTabId(),
+        path: typeof params?.path === 'string' ? params.path : undefined,
+        select: typeof params?.select === 'string' ? params.select : undefined,
+      },
+    ];
+  });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   // Current directory per tab, reported up by each tab for its label.
   const [cwds, setCwds] = useState<Record<string, string | null>>({});
 
-  const openTab = useCallback(() => {
-    const tab = { id: newTabId() };
+  const openTab = useCallback((path?: string) => {
+    const tab = { id: newTabId(), path };
     setTabs((ts) => [...ts, tab]);
     setActiveId(tab.id);
   }, []);
+
+  const openWindow = useCallback(
+    (path?: string) => open('file-browser', path ? { path } : undefined),
+    [open],
+  );
 
   const closeTab = useCallback(
     (id: string) => {
@@ -179,6 +212,42 @@ export function FileBrowser({ windowId }: AppComponentProps) {
     [closeWindow, windowId],
   );
 
+  const cycleTab = useCallback(
+    (delta: number) => {
+      setActiveId((current) => {
+        const index = tabs.findIndex((t) => t.id === current);
+        return tabs[(index + delta + tabs.length) % tabs.length].id;
+      });
+    },
+    [tabs],
+  );
+
+  const activeCwd = cwds[activeId] ?? null;
+  useWindowTitle(activeCwd && folderTitle(activeCwd, home.data, trash.data));
+
+  const cwdsRef = useRef(cwds);
+  useEffect(() => {
+    cwdsRef.current = cwds;
+  }, [cwds]);
+
+  /** Hand a tab to another window, which reopens its directory. */
+  const takeTab = useCallback(
+    (id: string) => {
+      const path = cwdsRef.current[id];
+      closeTab(id);
+      // A tab still finding its home directory carries no path.
+      return { path: path ?? '' };
+    },
+    [closeTab],
+  );
+
+  const receiveTab = useCallback((payload: unknown, index: number) => {
+    if (!isFilesTabTransfer(payload)) return;
+    const tab = { id: newTabId(), path: payload.path || undefined };
+    setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
+    setActiveId(tab.id);
+  }, []);
+
   const reportCwd = useCallback((id: string, cwd: string | null) => {
     setCwds((c) => (c[id] === cwd ? c : { ...c, [id]: cwd }));
   }, []);
@@ -189,19 +258,33 @@ export function FileBrowser({ windowId }: AppComponentProps) {
       <TabStrip
         tabs={tabs.map((t) => ({
           id: t.id,
-          title: tabTitle(cwds[t.id] ?? null),
-          icon: <Folder className="size-3.5 text-primary" />,
+          title: folderTitle(cwds[t.id] ?? null, home.data, trash.data),
+          icon:
+            cwds[t.id] && cwds[t.id] === trash.data ? (
+              <Trash2 className="size-3.5 text-muted-foreground" />
+            ) : (
+              <Folder className="size-3.5 text-primary" />
+            ),
         }))}
         activeId={activeId}
         label="Files tabs"
         newTabLabel="New tab"
         onActivate={setActiveId}
         onClose={closeTab}
-        onNew={openTab}
+        onNew={() => openTab(activeCwd ?? undefined)}
+        onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+        transfer={{
+          windowId,
+          appId: 'file-browser',
+          group: 'file-browser',
+          title: folderTitle(activeCwd, home.data, trash.data),
+          take: takeTab,
+          receive: receiveTab,
+        }}
       />,
     );
     return () => setTitlebar(null);
-  }, [bridge, tabs, cwds, activeId, closeTab, openTab, setTitlebar]);
+  }, [bridge, tabs, cwds, activeId, activeCwd, windowId, closeTab, openTab, takeTab, receiveTab, setTitlebar, home.data, trash.data]);
 
   if (!bridge) {
     return (
@@ -210,8 +293,8 @@ export function FileBrowser({ windowId }: AppComponentProps) {
           <HardDrive className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
           <p className="text-sm text-muted-foreground">
             Files needs the Electron shell to access the OS filesystem. Run{' '}
-            <code className="rounded bg-foreground/10 px-1 py-0.5">make dev</code> or
-            boot the VM; the bridge is not available in a plain browser.
+            <code className="rounded bg-foreground/10 px-1 py-0.5">npm run dev</code> or
+            boot DinOS; the bridge is not available in a plain browser.
           </p>
         </div>
       </div>
@@ -232,7 +315,16 @@ export function FileBrowser({ windowId }: AppComponentProps) {
         >
           <FileBrowserTab
             tabId={tab.id}
+            active={tab.id === activeId}
+            initialPath={tab.path}
+            initialSelect={tab.select}
+            prefs={mergedPrefs}
+            setPrefs={setPrefs}
             onCwdChange={reportCwd}
+            onNewTab={openTab}
+            onNewWindow={openWindow}
+            onCloseTab={() => closeTab(tab.id)}
+            onCycleTab={cycleTab}
           />
         </div>
       ))}
@@ -240,686 +332,1636 @@ export function FileBrowser({ windowId }: AppComponentProps) {
   );
 }
 
+type Dialog =
+  | { type: 'properties'; names: string[] }
+  | { type: 'compress'; names: string[]; error: string | null; pending: boolean }
+  | { type: 'delete'; names: string[]; reason?: string }
+  | { type: 'emptyTrash' }
+  | { type: 'shortcuts' };
+
+type Status = { kind: 'busy' | 'error' | 'info'; text: string } | null;
+
+/** Grouped item counts for messages: "3 items", "“notes.txt”". */
+function describe(names: string[]): string {
+  return names.length === 1 ? `“${names[0]}”` : `${names.length} items`;
+}
+
+/** A name in `entries` not taken yet: "New Folder", "New Folder 2", ... */
+function freshName(entries: FsEntry[] | undefined, base: string): string {
+  const taken = new Set((entries ?? []).map((e) => e.name));
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
+}
+
+const basename = (p: string) => p.slice(p.lastIndexOf('/') + 1);
+
 /**
- * One Files tab: an independent navigation context (history, cwd, preview,
- * and inline-edit UI state). Reports its current directory up via
+ * One Files tab: an independent navigation context with its own history,
+ * selection, and dialogs. Reports its current directory up via
  * `onCwdChange` so the shell can label the tab.
  */
 function FileBrowserTab({
   tabId,
+  active,
+  initialPath,
+  initialSelect,
+  prefs,
+  setPrefs,
   onCwdChange,
+  onNewTab,
+  onNewWindow,
+  onCloseTab,
+  onCycleTab,
 }: {
   tabId: string;
+  active: boolean;
+  initialPath?: string;
+  initialSelect?: string;
+  prefs: FilesPrefs;
+  setPrefs: (update: (prev: FilesPrefs) => FilesPrefs) => void;
   onCwdChange: (id: string, cwd: string | null) => void;
+  onNewTab: (path?: string) => void;
+  onNewWindow: (path?: string) => void;
+  onCloseTab: () => void;
+  onCycleTab: (delta: number) => void;
 }) {
+  const queryClient = useQueryClient();
+  const { open } = useWindowActions();
+  const isTop = useWindowIsTop();
   const home = useHomeDir();
-  const { mkdir, rename, rm } = useFsMutations();
+  const trash = useTrashDir();
+  const bookmarks = useBookmarks(home.data);
+  const clipboard = useFileClipboard();
+  const fs = getFsBridge()!;
 
-  const [history, setHistory] = useState<string[]>([]);
-  const [cursor, setCursor] = useState(-1);
-  // While the user is editing the path bar; null shows the current path.
+  const [history, setHistory] = useState<string[]>(() => (initialPath ? [initialPath] : []));
+  const [historyIndex, setHistoryIndex] = useState(initialPath ? 0 : -1);
+  // While the user is typing a location; null shows the breadcrumbs.
   const [addressEdit, setAddressEdit] = useState<string | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
-  const [previewPath, setPreviewPath] = useState<string | null>(null);
-  // Whether the "new folder" name editor row is open.
-  const [creating, setCreating] = useState(false);
-  // Name of the entry currently being renamed inline, if any.
-  const [renamingName, setRenamingName] = useState<string | null>(null);
-  // Entry awaiting delete confirmation, if any.
-  const [confirmDelete, setConfirmDelete] = useState<FsEntry | null>(null);
-  // Last failed operation, shown in the status bar.
-  const [opError, setOpError] = useState<string | null>(null);
+  // Filter for the current folder (Ctrl+F); null hides the field.
+  const [filter, setFilter] = useState<string | null>(null);
+
+  const [selection, setSelection] = useState<Set<string>>(() => new Set());
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<string | null>(null);
+  // Items to select once they show up in the listing (new, pasted, the
+  // folder just left), and whether to start renaming the first.
+  const [pending, setPending] = useState<{ names: string[]; rename?: boolean } | null>(() =>
+    initialSelect ? { names: [initialSelect] } : null,
+  );
+  const [revealToken, setRevealToken] = useState(0);
+  const reveal = useCallback(() => setRevealToken((t) => t + 1), []);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [quickLook, setQuickLook] = useState(false);
+  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [status, setStatus] = useState<Status>(null);
+  const [focused, setFocused] = useState(false);
+  const [columns, setColumns] = useState(1);
+  const [menuFor, setMenuFor] = useState<'items' | 'background'>('background');
+  const typeahead = useRef({ text: '', at: 0 });
+  const startingRef = useRef(new Set<string>());
+  const rootRef = useRef<HTMLDivElement>(null);
+  const addressRef = useRef<HTMLInputElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
 
   // Until the user navigates, the current directory is the home directory.
-  const cwd = cursor >= 0 ? history[cursor] : (home.data ?? null);
-  const address = addressEdit ?? cwd ?? '';
+  const cwd = historyIndex >= 0 ? history[historyIndex] : (home.data ?? null);
+  const isTrash = cwd !== null && cwd === trash.data;
 
-  // Report the current directory up so the shell can label this tab.
   useEffect(() => {
     onCwdChange(tabId, cwd);
   }, [tabId, cwd, onCwdChange]);
 
+  const listing = useDirectory(cwd);
+  useWatchDirectory(active ? cwd : null);
+  const cwdDetails = useFsDetails(cwd);
+
+  const entries = useMemo(() => {
+    let items = listing.data?.entries ?? [];
+    if (!prefs.showHidden) items = items.filter((e) => !e.name.startsWith('.'));
+    if (filter) {
+      const needle = filter.toLowerCase();
+      items = items.filter((e) => e.name.toLowerCase().includes(needle));
+    }
+    return sortEntriesBy(items, prefs.sort.key, prefs.sort.descending);
+  }, [listing.data, prefs.showHidden, prefs.sort, filter]);
+
+  const byName = useMemo(() => new Map(entries.map((e, i) => [e.name, i])), [entries]);
+  // The selection, less anything that's gone (deleted, filtered, hidden).
+  const selected = useMemo(
+    () => new Set([...selection].filter((n) => byName.has(n))),
+    [selection, byName],
+  );
+  const selectedNames = useMemo(
+    () => entries.filter((e) => selected.has(e.name)).map((e) => e.name),
+    [entries, selected],
+  );
+  const selectedEntries = useMemo(
+    () => selectedNames.map((n) => entries[byName.get(n)!]),
+    [selectedNames, entries, byName],
+  );
+  const cut = useMemo(() => {
+    if (!clipboard || clipboard.op !== 'cut' || cwd === null) return new Set<string>();
+    return new Set(clipboard.paths.filter((p) => parentPath(p) === cwd).map(basename));
+  }, [clipboard, cwd]);
+
+  const focusView = useCallback(() => {
+    rootRef.current?.querySelector<HTMLElement>('[data-files-view]')?.focus({ preventScroll: true });
+  }, []);
+
+  // Select what was waiting for the listing to catch up (adjusting state
+  // during render, so the new items never draw unselected).
+  if (pending) {
+    const present = pending.names.filter((n) => byName.has(n));
+    if (present.length > 0) {
+      setSelection(new Set(present));
+      setCursor(present[0]);
+      setAnchor(present[0]);
+      if (pending.rename) setRenaming(present[0]);
+      setPending(null);
+      setRevealToken((t) => t + 1);
+    }
+  }
+
+  // Focus follows the tab and window: activating either puts it on the view.
+  useEffect(() => {
+    if (!active || !isTop) return;
+    const el = rootRef.current;
+    if (el && !el.contains(document.activeElement)) focusView();
+  }, [active, isTop, focusView, cwd, listing.isSuccess]);
+
+  // ---- Navigation ------------------------------------------------------------
+
   const navigate = useCallback(
-    (target: string) => {
+    (target: string, select?: string) => {
       const normalized = target.length > 1 ? target.replace(/\/+$/, '') : '/';
-      setPreviewPath(null);
       setAddressEdit(null);
-      setCreating(false);
-      setRenamingName(null);
-      setConfirmDelete(null);
-      setOpError(null);
+      setFilter(null);
+      setRenaming(null);
+      setQuickLook(false);
+      setSelection(new Set());
+      setCursor(null);
+      setAnchor(null);
+      setPending(select ? { names: [select] } : null);
+      if (normalized === cwd) return;
       setHistory((h) => {
-        const base = cursor >= 0 ? h.slice(0, cursor + 1) : cwd ? [cwd] : [];
-        setCursor(base.length);
+        const base = historyIndex >= 0 ? h.slice(0, historyIndex + 1) : cwd ? [cwd] : [];
+        setHistoryIndex(base.length);
         return [...base, normalized];
       });
+      requestAnimationFrame(focusView);
     },
-    [cursor, cwd],
+    [historyIndex, cwd, focusView],
   );
 
   const go = useCallback(
     (delta: number) => {
-      const target = cursor + delta;
+      const target = historyIndex + delta;
       if (target < 0 || target >= history.length) return;
-      setPreviewPath(null);
+      // Going back selects the folder just left, when it's in this one.
+      const leaving = cwd;
       setAddressEdit(null);
-      setCreating(false);
-      setRenamingName(null);
-      setConfirmDelete(null);
-      setCursor(target);
+      setFilter(null);
+      setRenaming(null);
+      setQuickLook(false);
+      setSelection(new Set());
+      setCursor(null);
+      setPending(leaving && parentPath(leaving) === history[target] ? { names: [basename(leaving)] } : null);
+      setHistoryIndex(target);
     },
-    [cursor, history],
+    [historyIndex, history, cwd],
   );
 
-  const listing = useDirectory(cwd);
+  const goUp = useCallback(() => {
+    if (cwd && cwd !== '/') navigate(parentPath(cwd), basename(cwd));
+  }, [cwd, navigate]);
 
-  const entries = useMemo(() => {
-    const items = listing.data?.entries ?? [];
-    const visible = showHidden
-      ? items
-      : items.filter((e) => !e.name.startsWith('.'));
-    return sortEntries(visible);
-  }, [listing.data, showHidden]);
-
-  const places = useMemo(() => {
-    const list: { name: string; path: string; icon: LucideIcon }[] = [];
-    if (home.data) {
-      list.push({ name: 'Home', path: home.data, icon: Home });
-      list.push({ name: 'Downloads', path: joinPath(home.data, 'Downloads'), icon: Download });
+  const submitAddress = async (raw: string) => {
+    let target = raw.trim();
+    if (target === '~' || target.startsWith('~/')) target = `${home.data ?? ''}${target.slice(1)}`;
+    if (!target.startsWith('/') && cwd) target = joinPath(cwd, target);
+    try {
+      const stat = await fs.stat(target);
+      if (stat.kind === 'directory') navigate(target);
+      else navigate(parentPath(target), basename(target));
+    } catch (error) {
+      setStatus({ kind: 'error', text: cleanFsError(error) });
     }
-    list.push({ name: 'System', path: '/', icon: HardDrive });
-    return list;
-  }, [home.data]);
+  };
 
-  const openEntry = useCallback(
-    (entry: FsEntry) => {
-      if (cwd === null) return;
-      const target = joinPath(cwd, entry.name);
-      if (entry.kind === 'directory') {
-        navigate(target);
-      } else if (entry.kind === 'file') {
-        setPreviewPath(target);
+  // ---- Operations ------------------------------------------------------------
+
+  const run = useCallback(
+    async (label: string, fn: () => Promise<void>) => {
+      setStatus({ kind: 'busy', text: label });
+      try {
+        await fn();
+        setStatus((s) => (s?.kind === 'busy' && s.text === label ? null : s));
+      } catch (error) {
+        setStatus({ kind: 'error', text: cleanFsError(error) });
       }
     },
-    [cwd, navigate],
+    [],
   );
 
-  const createFolder = useCallback(
-    (name: string) => {
-      if (cwd === null) return;
-      setOpError(null);
-      mkdir.mutate(joinPath(cwd, name), {
-        onSuccess: () => setCreating(false),
-        onError: (error) => setOpError(cleanFsError(error)),
+  const refresh = useCallback(
+    (...paths: string[]) => {
+      void invalidateListings(queryClient, ...paths);
+      void queryClient.invalidateQueries({ queryKey: ['fs', 'du'] });
+    },
+    [queryClient],
+  );
+
+  const pathsOf = useCallback(
+    (names: string[]) => (cwd === null ? [] : names.map((n) => joinPath(cwd, n))),
+    [cwd],
+  );
+
+  const openNames = useCallback(
+    (names: string[], how: 'default' | 'tab' | 'window' = 'default') => {
+      if (cwd === null || names.length === 0) return;
+      const items = names.map((n) => entries[byName.get(n)!]).filter(Boolean);
+      const folders = items.filter((e) => e.kind === 'directory');
+      const files = items.filter((e) => e.kind === 'file');
+      if (how === 'default' && folders.length === 1 && files.length === 0) {
+        navigate(joinPath(cwd, folders[0].name));
+        return;
+      }
+      for (const folder of folders) {
+        const path = joinPath(cwd, folder.name);
+        if (how === 'window') onNewWindow(path);
+        else onNewTab(path);
+      }
+      const nativeApps = getNativeAppsBridge();
+      for (const file of files) {
+        const target = joinPath(cwd, file.name);
+        if (nativeApps && isWindowsProgram(file.name)) {
+          // Windows programs run, as they would from Explorer. The first one
+          // also sets up Wine, which takes a while, so say something meanwhile.
+          // Habitual double-clicks land here twice; one copy is plenty.
+          if (startingRef.current.has(target)) continue;
+          startingRef.current.add(target);
+          setStatus({ kind: 'busy', text: `Opening ${file.name}…` });
+          nativeApps
+            .runWindowsProgram(target)
+            .then(() => setStatus((s) => (s?.text === `Opening ${file.name}…` ? null : s)))
+            .catch((error: unknown) => setStatus({ kind: 'error', text: cleanFsError(error) }))
+            .finally(() => {
+              // Wine takes a moment more to put the window up.
+              setTimeout(() => startingRef.current.delete(target), 3_000);
+            });
+        } else {
+          open('preview', { path: target });
+        }
+      }
+    },
+    [cwd, entries, byName, navigate, onNewTab, onNewWindow, open],
+  );
+
+  const copyOrCut = useCallback(
+    (op: 'copy' | 'cut', names: string[]) => {
+      if (names.length === 0) return;
+      setFileClipboard({ op, paths: pathsOf(names) });
+      setStatus({
+        kind: 'info',
+        text: `${op === 'copy' ? 'Copied' : 'Cut'} ${describe(names)} - paste with Ctrl+V`,
       });
     },
-    [cwd, mkdir],
+    [pathsOf],
+  );
+
+  const trashPaths = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      const names = paths.map(basename);
+      void run(`Moving ${describe(names)} to the Trash…`, async () => {
+        const trashed: string[] = [];
+        try {
+          for (const p of paths) trashed.push(await fs.trash(p));
+        } catch (error) {
+          const message = cleanFsError(error);
+          if (/another drive/.test(message)) {
+            const rest = paths.slice(trashed.length).map(basename);
+            setDialog({ type: 'delete', names: rest, reason: message });
+            return;
+          }
+          throw error;
+        } finally {
+          refresh(...paths);
+          if (trashed.length > 0) {
+            pushUndo({
+              label: `trashing ${describe(names.slice(0, trashed.length))}`,
+              undo: async () => {
+                const restored: string[] = [];
+                for (const t of trashed) restored.push(await fs.restore(t));
+                refresh(...restored);
+              },
+            });
+          }
+        }
+      });
+    },
+    [fs, run, refresh],
+  );
+
+  const deleteNames = useCallback(
+    (names: string[]) => {
+      if (cwd === null) return;
+      void run(`Deleting ${describe(names)}…`, async () => {
+        try {
+          for (const name of names) {
+            if (isTrash) await fs.purge(name);
+            else {
+              const entry = entries[byName.get(name) ?? -1];
+              await fs.rm(joinPath(cwd, name), { recursive: entry?.kind === 'directory' });
+            }
+          }
+        } finally {
+          setDialog(null);
+          refresh(...pathsOf(names));
+        }
+      });
+    },
+    [cwd, isTrash, fs, run, refresh, pathsOf, entries, byName],
+  );
+
+  const requestTrash = useCallback(
+    (names: string[]) => {
+      if (names.length === 0) return;
+      // Things in the Trash can only go for good.
+      if (isTrash) setDialog({ type: 'delete', names });
+      else trashPaths(pathsOf(names));
+    },
+    [isTrash, trashPaths, pathsOf],
+  );
+
+  /** Copy or move `paths` into `target` (paste, drag and drop). */
+  const transfer = useCallback(
+    (target: string, paths: string[], copy: boolean) => {
+      if (paths.length === 0) return;
+      if (target === trash.data && !copy) {
+        trashPaths(paths);
+        return;
+      }
+      const names = paths.map(basename);
+      void run(`${copy ? 'Copying' : 'Moving'} ${describe(names)}…`, async () => {
+        const done: { from: string; to: string }[] = [];
+        try {
+          for (const from of paths) {
+            const to = copy ? await fs.copyInto(from, target) : await fs.moveInto(from, target);
+            if (to !== from) done.push({ from, to });
+          }
+        } finally {
+          refresh(target, ...paths, ...done.map((d) => d.to));
+          if (target === cwd && done.length > 0) setPending({ names: done.map((d) => basename(d.to)) });
+          if (done.length > 0) {
+            pushUndo({
+              label: `${copy ? 'copy' : 'move'} of ${describe(done.map((d) => basename(d.to)))}`,
+              undo: async () => {
+                if (copy) {
+                  for (const d of done) await fs.trash(d.to);
+                } else {
+                  for (const d of [...done].reverse()) await fs.move(d.to, d.from);
+                }
+                refresh(target, ...done.flatMap((d) => [d.from, d.to]));
+              },
+            });
+          }
+        }
+      });
+    },
+    [trash.data, trashPaths, run, fs, refresh, cwd],
+  );
+
+  const paste = useCallback(
+    (into?: string) => {
+      const board = getFileClipboard();
+      const target = into ?? cwd;
+      if (!board || target === null) return;
+      transfer(target, board.paths, board.op === 'copy');
+      if (board.op === 'cut') setFileClipboard(null);
+    },
+    [cwd, transfer],
   );
 
   const renameEntry = useCallback(
     (from: string, to: string) => {
-      if (cwd === null) return;
-      setRenamingName(null);
-      if (from === to) return;
-      setOpError(null);
-      rename.mutate(
-        { from: joinPath(cwd, from), to: joinPath(cwd, to) },
-        { onError: (error) => setOpError(cleanFsError(error)) },
-      );
+      setRenaming(null);
+      requestAnimationFrame(focusView);
+      if (cwd === null || from === to) return;
+      const src = joinPath(cwd, from);
+      const dest = joinPath(cwd, to);
+      void run(`Renaming ${from}…`, async () => {
+        await fs.move(src, dest);
+        refresh(src, dest);
+        setPending({ names: [to] });
+        pushUndo({
+          label: `rename of “${to}”`,
+          undo: async () => {
+            await fs.move(dest, src);
+            refresh(src, dest);
+          },
+        });
+      });
     },
-    [cwd, rename],
+    [cwd, fs, run, refresh, focusView],
   );
 
-  const deleteEntry = useCallback(
-    (entry: FsEntry) => {
-      if (cwd === null) return;
-      setOpError(null);
-      rm.mutate(
-        {
-          path: joinPath(cwd, entry.name),
-          recursive: entry.kind === 'directory',
-        },
-        {
-          onSettled: () => setConfirmDelete(null),
-          onError: (error) => setOpError(cleanFsError(error)),
-        },
-      );
+  const createNew = useCallback(
+    (kind: 'folder' | 'file') => {
+      if (cwd === null || isTrash) return;
+      const name = freshName(listing.data?.entries, kind === 'folder' ? 'New Folder' : 'New Document');
+      const path = joinPath(cwd, name);
+      void run(`Creating ${name}…`, async () => {
+        if (kind === 'folder') await fs.mkdir(path);
+        else await fs.writeFile(path, '');
+        refresh(path);
+        setPending({ names: [name], rename: true });
+        pushUndo({
+          label: `creation of “${name}”`,
+          undo: async () => {
+            await fs.rm(path);
+            refresh(path);
+          },
+        });
+      });
     },
-    [cwd, rm],
+    [cwd, isTrash, listing.data, fs, run, refresh],
   );
 
-  const startRename = useCallback((entry: FsEntry) => {
-    setCreating(false);
-    setRenamingName(entry.name);
+  const duplicate = useCallback(
+    (names: string[]) => {
+      if (cwd === null || names.length === 0) return;
+      void run(`Duplicating ${describe(names)}…`, async () => {
+        const made: string[] = [];
+        try {
+          for (const name of names) made.push(await fs.copyInto(joinPath(cwd, name), cwd));
+        } finally {
+          refresh(cwd);
+          if (made.length > 0) {
+            setPending({ names: made.map(basename) });
+            pushUndo({
+              label: `duplicate of ${describe(made.map(basename))}`,
+              undo: async () => {
+                for (const p of made) await fs.trash(p);
+                refresh(cwd);
+              },
+            });
+          }
+        }
+      });
+    },
+    [cwd, fs, run, refresh],
+  );
+
+  const extract = useCallback(
+    (names: string[]) => {
+      if (cwd === null) return;
+      const archives = names.filter(isExtractable);
+      if (archives.length === 0) return;
+      void run(`Extracting ${describe(archives)}…`, async () => {
+        const made: string[] = [];
+        try {
+          for (const name of archives) made.push(await fs.extract(joinPath(cwd, name), cwd));
+        } finally {
+          refresh(cwd);
+          if (made.length > 0) {
+            setPending({ names: made.map(basename) });
+            pushUndo({
+              label: `extraction of ${describe(made.map(basename))}`,
+              undo: async () => {
+                for (const p of made) await fs.trash(p);
+                refresh(cwd);
+              },
+            });
+          }
+        }
+      });
+    },
+    [cwd, fs, run, refresh],
+  );
+
+  const compress = useCallback(
+    (names: string[], fileName: string) => {
+      if (cwd === null) return;
+      setDialog({ type: 'compress', names, error: null, pending: true });
+      fs.compress(cwd, names, fileName).then(
+        (out) => {
+          setDialog(null);
+          refresh(cwd);
+          setPending({ names: [basename(out)] });
+          pushUndo({
+            label: `creation of “${basename(out)}”`,
+            undo: async () => {
+              await fs.trash(out);
+              refresh(cwd);
+            },
+          });
+          requestAnimationFrame(focusView);
+        },
+        (error: unknown) =>
+          setDialog({ type: 'compress', names, error: cleanFsError(error), pending: false }),
+      );
+    },
+    [cwd, fs, refresh, focusView],
+  );
+
+  const restore = useCallback(
+    (names: string[]) => {
+      void run(`Restoring ${describe(names)}…`, async () => {
+        const restored: string[] = [];
+        try {
+          for (const name of names) restored.push(await fs.restore(name));
+        } finally {
+          refresh(...pathsOf(names), ...restored);
+        }
+      });
+    },
+    [fs, run, refresh, pathsOf],
+  );
+
+  const emptyTrash = useCallback(() => {
+    void run('Emptying the Trash…', async () => {
+      try {
+        await fs.purge();
+      } finally {
+        setDialog(null);
+        if (trash.data) refresh(trash.data);
+      }
+    });
+  }, [fs, run, refresh, trash.data]);
+
+  const undo = useCallback(() => {
+    const entry = popUndo();
+    if (!entry) {
+      setStatus({ kind: 'info', text: 'Nothing to undo' });
+      return;
+    }
+    void run(`Undoing ${entry.label}…`, entry.undo);
+  }, [run]);
+
+  const openInTerminal = useCallback((path: string) => open('terminal', { cwd: path }), [open]);
+
+  const copyPaths = useCallback((paths: string[]) => {
+    void navigator.clipboard?.writeText(paths.join('\n'));
+    setStatus({ kind: 'info', text: paths.length === 1 ? 'Copied the path' : `Copied ${paths.length} paths` });
   }, []);
 
-  const requestDelete = useCallback((entry: FsEntry) => {
-    setConfirmDelete(entry);
+  const toggleBookmark = useCallback(
+    (path: string) => {
+      if (bookmarks.bookmarks.some((b) => b.path === path)) bookmarks.remove(path);
+      else bookmarks.add(path);
+    },
+    [bookmarks],
+  );
+
+  const setSort = useCallback(
+    (key: SortKey) =>
+      setPrefs((p) => ({
+        ...p,
+        sort: { key, descending: p.sort.key === key ? !p.sort.descending : key === 'modified' || key === 'size' },
+      })),
+    [setPrefs],
+  );
+
+  // ---- Selection -------------------------------------------------------------
+
+  const selectOnly = useCallback((name: string | null) => {
+    setSelection(name === null ? new Set() : new Set([name]));
+    setCursor(name);
+    setAnchor(name);
   }, []);
 
-  const cancelRename = useCallback(() => setRenamingName(null), []);
+  const selectRange = useCallback(
+    (to: string, additive: boolean) => {
+      const from = anchor ?? to;
+      const a = byName.get(from) ?? 0;
+      const b = byName.get(to) ?? 0;
+      const [lo, hi] = a < b ? [a, b] : [b, a];
+      const range = entries.slice(lo, hi + 1).map((e) => e.name);
+      setSelection((s) => new Set(additive ? [...s, ...range] : range));
+      setCursor(to);
+    },
+    [anchor, byName, entries],
+  );
+
+  const onItemPointerDown = useCallback(
+    (name: string, e: React.MouseEvent) => {
+      if (renaming !== null && renaming !== name) setRenaming(null);
+      if (e.shiftKey) selectRange(name, e.ctrlKey || e.metaKey);
+      else if (e.ctrlKey || e.metaKey) setCursor(name);
+      else if (!selected.has(name)) selectOnly(name);
+      else setCursor(name);
+    },
+    [renaming, selected, selectRange, selectOnly],
+  );
+
+  const onItemClick = useCallback(
+    (name: string, e: React.MouseEvent) => {
+      if (e.shiftKey) return;
+      if (e.ctrlKey || e.metaKey) {
+        setSelection((s) => {
+          const next = new Set(s);
+          if (next.has(name)) next.delete(name);
+          else next.add(name);
+          return next;
+        });
+        setAnchor(name);
+        return;
+      }
+      // A plain click on one of several selected items narrows to it.
+      selectOnly(name);
+    },
+    [selectOnly],
+  );
+
+  const onItemOpen = useCallback(
+    (name: string, e: React.MouseEvent) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+      openNames([name]);
+    },
+    [openNames],
+  );
+
+  const onMarqueeSelect = useCallback((names: Set<string>, last: string | null) => {
+    setSelection(names);
+    if (last !== null) {
+      setCursor(last);
+      setAnchor(last);
+    } else if (names.size === 0) {
+      setCursor(null);
+      setAnchor(null);
+    }
+  }, []);
+
+  const onItemContextMenu = useCallback(
+    (name: string) => {
+      setMenuFor('items');
+      if (!selected.has(name)) selectOnly(name);
+    },
+    [selected, selectOnly],
+  );
+
+  const onBackgroundContextMenu = useCallback(() => {
+    setMenuFor('background');
+    selectOnly(null);
+  }, [selectOnly]);
+
+  const onItemDragStart = useCallback(
+    (name: string, e: React.DragEvent) => {
+      if (cwd === null) return;
+      const names = selected.has(name) ? selectedNames : [name];
+      if (!selected.has(name)) selectOnly(name);
+      const folders = new Set(
+        names.filter((n) => entries[byName.get(n)!]?.kind === 'directory').map((n) => joinPath(cwd, n)),
+      );
+      startFileDrag(e, { paths: pathsOf(names), folders }, names.length === 1 ? names[0] : `${names.length} items`);
+    },
+    [cwd, selected, selectedNames, selectOnly, entries, byName, pathsOf],
+  );
+
+  // ---- Keyboard --------------------------------------------------------------
+
+  const moveCursor = (index: number, e: React.KeyboardEvent) => {
+    if (entries.length === 0) return;
+    const clamped = Math.max(0, Math.min(entries.length - 1, index));
+    const name = entries[clamped].name;
+    if (e.shiftKey) selectRange(name, false);
+    else if (e.ctrlKey || e.metaKey) setCursor(name);
+    else selectOnly(name);
+    reveal();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const target = e.target as HTMLElement;
+    const inField = target.matches('input, textarea, select, [contenteditable="true"]');
+    const ctrl = e.ctrlKey || e.metaKey;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const handled = () => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    // Window and tab shortcuts work everywhere, fields included.
+    if (ctrl && !e.altKey) {
+      if (key === 't' && !e.shiftKey) return handled(), onNewTab(cwd ?? undefined);
+      if (key === 'n' && !e.shiftKey) return handled(), onNewWindow(cwd ?? undefined);
+      if (key === 'n' && e.shiftKey) return handled(), createNew('folder');
+      if (key === 'w' && !e.shiftKey) return handled(), onCloseTab();
+      if (key === 'Tab') return handled(), onCycleTab(e.shiftKey ? -1 : 1);
+      if (key === 'PageDown' || key === 'PageUp') return handled(), onCycleTab(key === 'PageUp' ? -1 : 1);
+      if (key === 'l' && !e.shiftKey) {
+        handled();
+        setAddressEdit(cwd ?? '');
+        requestAnimationFrame(() => addressRef.current?.select());
+        return;
+      }
+      if (key === 'f' && !e.shiftKey) {
+        handled();
+        setFilter((f) => f ?? '');
+        requestAnimationFrame(() => filterRef.current?.select());
+        return;
+      }
+      if (key === 'h' && !e.shiftKey) {
+        handled();
+        setPrefs((p) => ({ ...p, showHidden: !p.showHidden }));
+        return;
+      }
+      if (key === 'r' && !e.shiftKey) return handled(), void listing.refetch();
+    }
+    if (e.altKey && !ctrl) {
+      if (key === 'ArrowLeft') return handled(), go(-1);
+      if (key === 'ArrowRight') return handled(), go(1);
+      if (key === 'ArrowUp') return handled(), goUp();
+      if (key === 'Home' && home.data) return handled(), navigate(home.data);
+      if (key === 'Enter' && !inField) {
+        handled();
+        setDialog({ type: 'properties', names: selectedNames });
+        return;
+      }
+    }
+    if (key === 'F5' && !ctrl) return handled(), void listing.refetch();
+    if (key === 'F9') return handled(), setPrefs((p) => ({ ...p, sidebar: !p.sidebar }));
+    if (inField) return;
+
+    if (ctrl && !e.altKey) {
+      if (key === 'a') {
+        handled();
+        setSelection(new Set(entries.map((x) => x.name)));
+        return;
+      }
+      if (key === 'c' && !e.shiftKey) return handled(), copyOrCut('copy', selectedNames);
+      if (key === 'x') return handled(), copyOrCut('cut', selectedNames);
+      if (key === 'v') return handled(), paste();
+      if (key === 'z' && !e.shiftKey) return handled(), undo();
+      if (key === 'd' && cwd) {
+        handled();
+        const one = selectedEntries.length === 1 && selectedEntries[0].kind === 'directory';
+        toggleBookmark(one ? joinPath(cwd, selectedNames[0]) : cwd);
+        return;
+      }
+      if (key === '1') return handled(), setPrefs((p) => ({ ...p, view: 'list' }));
+      if (key === '2') return handled(), setPrefs((p) => ({ ...p, view: 'grid' }));
+      if (key === '=' || key === '+') {
+        handled();
+        setPrefs((p) => ({ ...p, view: 'grid', zoom: Math.min(GRID_ZOOMS.length - 1, p.zoom + (p.view === 'grid' ? 1 : 0)) }));
+        return;
+      }
+      if (key === '-') {
+        handled();
+        setPrefs((p) => (p.view === 'grid' && p.zoom === 0 ? { ...p, view: 'list' } : { ...p, zoom: Math.max(0, p.zoom - 1) }));
+        return;
+      }
+      if (key === ' ' && cursor) {
+        handled();
+        setSelection((s) => {
+          const next = new Set(s);
+          if (next.has(cursor)) next.delete(cursor);
+          else next.add(cursor);
+          return next;
+        });
+        return;
+      }
+      if (key === '/' || key === '?') return handled(), setDialog({ type: 'shortcuts' });
+    }
+    if (ctrl || e.altKey) return;
+
+    const index = cursor !== null ? (byName.get(cursor) ?? -1) : -1;
+    const page = Math.max(1, Math.floor((rootRef.current?.querySelector('[data-files-view]')?.clientHeight ?? 320) / 40)) * columns;
+    switch (key) {
+      case 'ArrowDown':
+        return handled(), moveCursor(index === -1 ? 0 : index + columns, e);
+      case 'ArrowUp':
+        return handled(), moveCursor(index === -1 ? 0 : index - columns, e);
+      case 'ArrowRight':
+        if (columns > 1) return handled(), moveCursor(index + 1, e);
+        return;
+      case 'ArrowLeft':
+        if (columns > 1) return handled(), moveCursor(index === -1 ? 0 : index - 1, e);
+        return;
+      case 'Home':
+        return handled(), moveCursor(0, e);
+      case 'End':
+        return handled(), moveCursor(entries.length - 1, e);
+      case 'PageDown':
+        return handled(), moveCursor(index + page, e);
+      case 'PageUp':
+        return handled(), moveCursor(index - page, e);
+      case 'Enter':
+        return handled(), openNames(selectedNames);
+      case 'Backspace':
+        return handled(), goUp();
+      case 'Delete':
+        handled();
+        if (e.shiftKey) setDialog({ type: 'delete', names: selectedNames });
+        else requestTrash(selectedNames);
+        return;
+      case 'F2':
+        if (selectedNames.length >= 1) {
+          handled();
+          setRenaming(cursor && selected.has(cursor) ? cursor : selectedNames[0]);
+        }
+        return;
+      case 'F1':
+        return handled(), setDialog({ type: 'shortcuts' });
+      case 'Escape':
+        handled();
+        if (quickLook) setQuickLook(false);
+        else if (filter !== null) setFilter(null);
+        else selectOnly(null);
+        return;
+      case ' ':
+        if (typeahead.current.text === '' || Date.now() - typeahead.current.at > TYPEAHEAD_MS) {
+          handled();
+          if (quickLook) setQuickLook(false);
+          else if (cursor ?? selectedNames[0]) {
+            if (!cursor) setCursor(selectedNames[0]);
+            setQuickLook(true);
+          }
+          return;
+        }
+        break;
+    }
+
+    // Type-ahead: typing a name's first letters selects it.
+    if (e.key.length === 1) {
+      const now = Date.now();
+      const t = typeahead.current;
+      t.text = now - t.at > TYPEAHEAD_MS ? e.key.toLowerCase() : t.text + e.key.toLowerCase();
+      t.at = now;
+      const from = index === -1 ? 0 : t.text.length === 1 ? index + 1 : index;
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[(from + i) % entries.length];
+        if (entry.name.toLowerCase().startsWith(t.text)) {
+          handled();
+          selectOnly(entry.name);
+          reveal();
+          return;
+        }
+      }
+    }
+  };
+
+  // ---- Render ----------------------------------------------------------------
+
+  const quickLookEntry = quickLook && cursor !== null ? entries[byName.get(cursor) ?? -1] : undefined;
+  const bookmarked = new Set(bookmarks.bookmarks.map((b) => b.path));
+  const single = selectedEntries.length === 1 ? selectedEntries[0] : null;
+  const singleFolderPath = single?.kind === 'directory' && cwd ? joinPath(cwd, single.name) : null;
+  const anyExtractable = selectedNames.some(isExtractable);
+  const selectionBytes = selectedEntries.reduce((n, e) => n + (e.kind === 'file' ? (e.size ?? 0) : 0), 0);
+
+  const viewMenuItems = (
+    parts: {
+      Checkbox: typeof ContextMenuCheckboxItem | typeof DropdownMenuCheckboxItem;
+      Sub: typeof ContextMenuSub | typeof DropdownMenuSub;
+      SubTrigger: typeof ContextMenuSubTrigger | typeof DropdownMenuSubTrigger;
+      SubContent: typeof ContextMenuSubContent | typeof DropdownMenuSubContent;
+      RadioGroup: typeof ContextMenuRadioGroup | typeof DropdownMenuRadioGroup;
+      Radio: typeof ContextMenuRadioItem | typeof DropdownMenuRadioItem;
+      Separator: typeof ContextMenuSeparator | typeof DropdownMenuSeparator;
+      Shortcut: typeof ContextMenuShortcut | typeof DropdownMenuShortcut;
+    },
+  ) => {
+    const { Checkbox, Sub, SubTrigger, SubContent, RadioGroup, Radio, Separator, Shortcut } = parts;
+    return (
+      <>
+        <Sub>
+          <SubTrigger>Sort By</SubTrigger>
+          <SubContent>
+            <RadioGroup
+              value={prefs.sort.key}
+              onValueChange={(v) => setPrefs((p) => ({ ...p, sort: { ...p.sort, key: v as SortKey } }))}
+            >
+              {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+                <Radio key={k} value={k}>
+                  {SORT_LABELS[k]}
+                </Radio>
+              ))}
+            </RadioGroup>
+            <Separator />
+            <Checkbox
+              checked={prefs.sort.descending}
+              onCheckedChange={(v) => setPrefs((p) => ({ ...p, sort: { ...p.sort, descending: v === true } }))}
+            >
+              Reversed
+            </Checkbox>
+          </SubContent>
+        </Sub>
+        <Sub>
+          <SubTrigger>View As</SubTrigger>
+          <SubContent>
+            <RadioGroup value={prefs.view} onValueChange={(v) => setPrefs((p) => ({ ...p, view: v as ViewMode }))}>
+              <Radio value="list">
+                List <Shortcut>Ctrl+1</Shortcut>
+              </Radio>
+              <Radio value="grid">
+                Icons <Shortcut>Ctrl+2</Shortcut>
+              </Radio>
+            </RadioGroup>
+          </SubContent>
+        </Sub>
+        <Checkbox
+          checked={prefs.showHidden}
+          onCheckedChange={(v) => setPrefs((p) => ({ ...p, showHidden: v === true }))}
+        >
+          Show Hidden Files <Shortcut>Ctrl+H</Shortcut>
+        </Checkbox>
+      </>
+    );
+  };
+
+  const contextParts = {
+    Checkbox: ContextMenuCheckboxItem,
+    Sub: ContextMenuSub,
+    SubTrigger: ContextMenuSubTrigger,
+    SubContent: ContextMenuSubContent,
+    RadioGroup: ContextMenuRadioGroup,
+    Radio: ContextMenuRadioItem,
+    Separator: ContextMenuSeparator,
+    Shortcut: ContextMenuShortcut,
+  };
+  const dropdownParts = {
+    Checkbox: DropdownMenuCheckboxItem,
+    Sub: DropdownMenuSub,
+    SubTrigger: DropdownMenuSubTrigger,
+    SubContent: DropdownMenuSubContent,
+    RadioGroup: DropdownMenuRadioGroup,
+    Radio: DropdownMenuRadioItem,
+    Separator: DropdownMenuSeparator,
+    Shortcut: DropdownMenuShortcut,
+  };
 
   return (
-    <div className="flex h-full w-full flex-col">
+    <div
+      ref={rootRef}
+      className="flex h-full w-full flex-col"
+      onKeyDown={onKeyDown}
+      onFocusCapture={(e) => setFocused((e.target as HTMLElement).hasAttribute('data-files-view'))}
+      onBlurCapture={() => setFocused(false)}
+    >
       {/* Toolbar */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const raw = address.trim();
-          if (raw.startsWith('/')) navigate(raw);
-        }}
-        className="flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/50 px-2 py-1.5"
-      >
-        <ToolButton label="Go back" disabled={cursor <= 0} onClick={() => go(-1)}>
+      <div className="flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/50 px-2 py-1.5">
+        <ToolButton label="Back (Alt+Left)" disabled={historyIndex <= 0} onClick={() => go(-1)}>
           <ArrowLeft className="size-4" />
         </ToolButton>
         <ToolButton
-          label="Go forward"
-          disabled={cursor >= history.length - 1}
+          label="Forward (Alt+Right)"
+          disabled={historyIndex >= history.length - 1}
           onClick={() => go(1)}
         >
           <ArrowRight className="size-4" />
         </ToolButton>
-        <ToolButton
-          label="Go to parent directory"
-          disabled={cwd === null || cwd === '/'}
-          onClick={() => cwd && navigate(parentPath(cwd))}
-        >
+        <ToolButton label="Up (Alt+Up)" disabled={cwd === null || cwd === '/'} onClick={goUp}>
           <ArrowUp className="size-4" />
         </ToolButton>
-        <ToolButton
-          label="Refresh"
-          onClick={() => listing.refetch()}
-        >
-          <RotateCw className={cn('size-4', listing.isFetching && 'animate-spin')} />
-        </ToolButton>
 
-        <input
-          type="text"
-          aria-label="Current directory path"
-          value={address}
-          onChange={(e) => setAddressEdit(e.target.value)}
-          onFocus={(e) => e.currentTarget.select()}
-          spellCheck={false}
-          autoComplete="off"
-          className="h-8 min-w-0 flex-1 rounded-md border border-border/60 bg-secondary/80 px-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        />
+        {addressEdit !== null ? (
+          <form
+            className="min-w-0 flex-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitAddress(addressEdit);
+            }}
+          >
+            <input
+              ref={addressRef}
+              type="text"
+              aria-label="Location"
+              value={addressEdit}
+              onChange={(e) => setAddressEdit(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  setAddressEdit(null);
+                  focusView();
+                }
+              }}
+              onBlur={() => setAddressEdit(null)}
+              autoFocus
+              spellCheck={false}
+              autoComplete="off"
+              className="h-8 w-full rounded-md border border-ring/60 bg-background px-3 font-mono text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+          </form>
+        ) : (
+          <Breadcrumbs
+            cwd={cwd}
+            home={home.data}
+            trash={trash.data}
+            onNavigate={navigate}
+            onEdit={() => {
+              setAddressEdit(cwd ?? '');
+              requestAnimationFrame(() => addressRef.current?.select());
+            }}
+            onDrop={transfer}
+          />
+        )}
 
-        <ToolButton
-          label="New folder"
-          disabled={listing.data === undefined}
-          onClick={() => {
-            setRenamingName(null);
-            setCreating(true);
-          }}
-        >
-          <FolderPlus className="size-4" />
-        </ToolButton>
-        <ToolButton
-          label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
-          onClick={() => setShowHidden((v) => !v)}
-        >
-          {showHidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
-        </ToolButton>
-      </form>
+        {filter !== null ? (
+          <div className="relative w-40 shrink-0 sm:w-48">
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <input
+              ref={filterRef}
+              type="search"
+              aria-label="Filter this folder"
+              placeholder="Filter"
+              value={filter}
+              autoFocus
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  setFilter(null);
+                  focusView();
+                } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (entries.length > 0 && selected.size === 0) selectOnly(entries[0].name);
+                  focusView();
+                }
+              }}
+              className="h-8 w-full rounded-md border border-border/60 bg-background pl-7 pr-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+          </div>
+        ) : (
+          <ToolButton
+            label="Filter (Ctrl+F)"
+            onClick={() => {
+              setFilter('');
+              requestAnimationFrame(() => filterRef.current?.focus());
+            }}
+          >
+            <Search className="size-4" />
+          </ToolButton>
+        )}
 
-      <div className="relative flex min-h-0 flex-1">
-        {/* Sidebar */}
-        <nav
-          aria-label="Places"
-          className="hidden w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/60 bg-background/30 p-2 sm:flex"
-        >
-          {places.map((place) => (
+        <div role="radiogroup" aria-label="View" className="flex shrink-0 rounded-md bg-foreground/5 p-0.5">
+          {(['list', 'grid'] as const).map((mode) => (
             <button
-              key={place.path}
+              key={mode}
               type="button"
-              onClick={() => navigate(place.path)}
+              role="radio"
+              aria-checked={prefs.view === mode}
+              aria-label={mode === 'list' ? 'List view (Ctrl+1)' : 'Icon view (Ctrl+2)'}
+              title={mode === 'list' ? 'List view (Ctrl+1)' : 'Icon view (Ctrl+2)'}
+              onClick={() => setPrefs((p) => ({ ...p, view: mode }))}
               className={cn(
-                'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+                'grid size-7 place-items-center rounded text-foreground/70',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                cwd === place.path
-                  ? 'bg-foreground/15 text-foreground'
-                  : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+                prefs.view === mode ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground',
               )}
             >
-              <place.icon className="size-4 shrink-0" aria-hidden />
-              <span className="truncate">{place.name}</span>
+              {mode === 'list' ? <List className="size-4" /> : <LayoutGrid className="size-4" />}
             </button>
           ))}
-        </nav>
+        </div>
 
-        {/* Entry list */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Menu"
+              title="Menu"
+              className="grid size-8 shrink-0 place-items-center rounded-md text-foreground/80 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-foreground/10"
+            >
+              <BarsStaggeredIcon className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60" onCloseAutoFocus={(e) => {
+            if (document.activeElement === document.body || !document.activeElement) {
+              e.preventDefault();
+              focusView();
+            }
+          }}>
+            <DropdownMenuItem onSelect={() => onNewTab(cwd ?? undefined)}>
+              New Tab <DropdownMenuShortcut>Ctrl+T</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onNewWindow(cwd ?? undefined)}>
+              New Window <DropdownMenuShortcut>Ctrl+N</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={isTrash} onSelect={() => createNew('folder')}>
+              New Folder <DropdownMenuShortcut>Ctrl+Shift+N</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={isTrash} onSelect={() => createNew('file')}>
+              New Document
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={undo}>
+              Undo <DropdownMenuShortcut>Ctrl+Z</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {viewMenuItems(dropdownParts)}
+            <DropdownMenuCheckboxItem
+              checked={prefs.sidebar}
+              onCheckedChange={(v) => setPrefs((p) => ({ ...p, sidebar: v === true }))}
+            >
+              Show Sidebar <DropdownMenuShortcut>F9</DropdownMenuShortcut>
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            {cwd && (
+              <DropdownMenuItem onSelect={() => toggleBookmark(cwd)}>
+                {bookmarked.has(cwd) ? 'Remove from Favorites' : 'Add to Favorites'}
+                <DropdownMenuShortcut>Ctrl+D</DropdownMenuShortcut>
+              </DropdownMenuItem>
+            )}
+            {cwd && <DropdownMenuItem onSelect={() => openInTerminal(cwd)}>Open in Terminal</DropdownMenuItem>}
+            {isTrash && (
+              <DropdownMenuItem variant="destructive" onSelect={() => setDialog({ type: 'emptyTrash' })}>
+                Empty Trash…
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => setDialog({ type: 'properties', names: [] })}>
+              Folder Properties
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setDialog({ type: 'shortcuts' })}>
+              Keyboard Shortcuts <DropdownMenuShortcut>F1</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <div className="relative flex min-h-0 flex-1">
+        {prefs.sidebar && (
+          <div className="hidden sm:block">
+            <Sidebar
+              home={home.data}
+              trashDir={trash.data}
+              cwd={cwd}
+              bookmarks={bookmarks.bookmarks}
+              onNavigate={(p) => navigate(p)}
+              onOpenInNewTab={onNewTab}
+              onOpenInNewWindow={onNewWindow}
+              onAddBookmark={bookmarks.add}
+              onRemoveBookmark={bookmarks.remove}
+              onDrop={transfer}
+              onEmptyTrash={() => setDialog({ type: 'emptyTrash' })}
+              onProperties={(p) => {
+                if (p !== cwd) navigate(p);
+                setDialog({ type: 'properties', names: [] });
+              }}
+            />
+          </div>
+        )}
+
         <div className="flex min-w-0 flex-1 flex-col">
-          {creating && (
-            <div className="border-b border-border/60 px-1 py-1">
-              <NameEditor
-                icon={<Folder className="size-4 shrink-0 text-primary" aria-hidden />}
-                initialValue="untitled folder"
-                label="New folder name"
-                pending={mkdir.isPending}
-                onSubmit={createFolder}
-                onCancel={() => setCreating(false)}
-              />
+          {isTrash && (
+            <div className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-foreground/5 px-4 py-2 text-sm">
+              <Trash2 className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                Items in the Trash can be restored, or deleted for good.
+              </span>
+              <button
+                type="button"
+                disabled={entries.length === 0}
+                onClick={() => setDialog({ type: 'emptyTrash' })}
+                className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+              >
+                Empty Trash
+              </button>
             </div>
           )}
+
           {listing.isLoading || cwd === null ? (
             <ListSkeleton />
           ) : listing.isError ? (
             <div className="grid flex-1 place-items-center p-6">
               <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
                 <p className="text-sm text-muted-foreground">
-                  Could not open this directory: {cleanFsError(listing.error)}
+                  Couldn’t open this folder: {cleanFsError(listing.error)}
                 </p>
               </div>
             </div>
-          ) : entries.length === 0 && !creating ? (
-            <div className="grid flex-1 place-items-center p-6">
-              <p className="text-sm text-muted-foreground">This folder is empty.</p>
-            </div>
           ) : (
-            // Keyed by path so scroll position resets on navigation.
-            <EntryList
-              key={cwd}
-              entries={entries}
-              onOpen={openEntry}
-              onRenameStart={startRename}
-              onDelete={requestDelete}
-              renamingName={renamingName}
-              onRenameSubmit={renameEntry}
-              onRenameCancel={cancelRename}
-            />
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  <EntryView
+                    key={cwd}
+                    dir={cwd}
+                    entries={entries}
+                    mode={prefs.view}
+                    zoom={prefs.zoom}
+                    selection={selected}
+                    cursor={cursor}
+                    cut={cut}
+                    renaming={renaming}
+                    sort={prefs.sort}
+                    focused={focused}
+                    revealToken={revealToken}
+                    onSort={setSort}
+                    onItemPointerDown={onItemPointerDown}
+                    onItemClick={onItemClick}
+                    onItemOpen={onItemOpen}
+                    onItemMiddleClick={(name) => {
+                      if (entries[byName.get(name) ?? -1]?.kind === 'directory') openNames([name], 'tab');
+                    }}
+                    onSelect={onMarqueeSelect}
+                    onItemContextMenu={onItemContextMenu}
+                    onBackgroundContextMenu={onBackgroundContextMenu}
+                    onItemDragStart={onItemDragStart}
+                    onDragEnd={endFileDrag}
+                    onDrop={transfer}
+                    onRenameSubmit={renameEntry}
+                    onRenameCancel={() => {
+                      setRenaming(null);
+                      requestAnimationFrame(focusView);
+                    }}
+                    onColumnsChange={setColumns}
+                  />
+                  {entries.length === 0 && (
+                    <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
+                      <p className="text-sm text-muted-foreground">
+                        {filter ? `Nothing here matches “${filter}”.` : isTrash ? 'The Trash is empty.' : 'This folder is empty.'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent
+                className="w-60"
+                onCloseAutoFocus={(e) => {
+                  e.preventDefault();
+                  if (document.activeElement === document.body || !document.activeElement) focusView();
+                }}
+              >
+                {menuFor === 'items' && selectedNames.length > 0 ? (
+                  <>
+                    <ContextMenuItem onSelect={() => openNames(selectedNames)}>
+                      {single && isWindowsProgram(single.name) ? 'Run' : 'Open'}
+                      <ContextMenuShortcut>Enter</ContextMenuShortcut>
+                    </ContextMenuItem>
+                    {selectedEntries.some((e) => e.kind === 'directory') && (
+                      <>
+                        <ContextMenuItem onSelect={() => openNames(selectedNames.filter((n) => entries[byName.get(n)!].kind === 'directory'), 'tab')}>
+                          Open in New Tab
+                        </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => openNames(selectedNames.filter((n) => entries[byName.get(n)!].kind === 'directory'), 'window')}>
+                          Open in New Window
+                        </ContextMenuItem>
+                      </>
+                    )}
+                    {single?.kind === 'file' && (
+                      <ContextMenuItem onSelect={() => setQuickLook(true)}>
+                        Quick Look <ContextMenuShortcut>Space</ContextMenuShortcut>
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuSeparator />
+                    {isTrash ? (
+                      <ContextMenuItem onSelect={() => restore(selectedNames)}>Restore</ContextMenuItem>
+                    ) : (
+                      <>
+                        <ContextMenuItem onSelect={() => copyOrCut('cut', selectedNames)}>
+                          Cut <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+                        </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => copyOrCut('copy', selectedNames)}>
+                          Copy <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+                        </ContextMenuItem>
+                        {singleFolderPath && (
+                          <ContextMenuItem disabled={!clipboard} onSelect={() => paste(singleFolderPath)}>
+                            Paste Into Folder
+                          </ContextMenuItem>
+                        )}
+                        <ContextMenuItem onSelect={() => duplicate(selectedNames)}>Duplicate</ContextMenuItem>
+                        {single && (
+                          <ContextMenuItem onSelect={() => setRenaming(single.name)}>
+                            Rename… <ContextMenuShortcut>F2</ContextMenuShortcut>
+                          </ContextMenuItem>
+                        )}
+                        <ContextMenuSeparator />
+                        {anyExtractable && (
+                          <ContextMenuItem onSelect={() => extract(selectedNames)}>Extract Here</ContextMenuItem>
+                        )}
+                        <ContextMenuItem
+                          onSelect={() =>
+                            setDialog({ type: 'compress', names: selectedNames, error: null, pending: false })
+                          }
+                        >
+                          Compress…
+                        </ContextMenuItem>
+                      </>
+                    )}
+                    {singleFolderPath && (
+                      <>
+                        <ContextMenuItem onSelect={() => toggleBookmark(singleFolderPath)}>
+                          {bookmarked.has(singleFolderPath) ? 'Remove from Favorites' : 'Add to Favorites'}
+                          <ContextMenuShortcut>Ctrl+D</ContextMenuShortcut>
+                        </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => openInTerminal(singleFolderPath)}>
+                          Open in Terminal
+                        </ContextMenuItem>
+                      </>
+                    )}
+                    <ContextMenuItem onSelect={() => copyPaths(pathsOf(selectedNames))}>
+                      Copy {selectedNames.length === 1 ? 'Path' : 'Paths'}
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    {!isTrash && (
+                      <ContextMenuItem onSelect={() => requestTrash(selectedNames)}>
+                        Move to Trash <ContextMenuShortcut>Delete</ContextMenuShortcut>
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuItem
+                      variant="destructive"
+                      onSelect={() => setDialog({ type: 'delete', names: selectedNames })}
+                    >
+                      Delete Permanently… <ContextMenuShortcut>Shift+Del</ContextMenuShortcut>
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => setDialog({ type: 'properties', names: selectedNames })}>
+                      Properties <ContextMenuShortcut>Alt+Enter</ContextMenuShortcut>
+                    </ContextMenuItem>
+                  </>
+                ) : (
+                  <>
+                    {!isTrash && (
+                      <>
+                        <ContextMenuItem onSelect={() => createNew('folder')}>
+                          New Folder <ContextMenuShortcut>Ctrl+Shift+N</ContextMenuShortcut>
+                        </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => createNew('file')}>New Document</ContextMenuItem>
+                        <ContextMenuItem disabled={!clipboard} onSelect={() => paste()}>
+                          Paste <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                      </>
+                    )}
+                    <ContextMenuItem
+                      disabled={entries.length === 0}
+                      onSelect={() => setSelection(new Set(entries.map((x) => x.name)))}
+                    >
+                      Select All <ContextMenuShortcut>Ctrl+A</ContextMenuShortcut>
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    {viewMenuItems(contextParts)}
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => cwd && openInTerminal(cwd)}>Open in Terminal</ContextMenuItem>
+                    {cwd && (
+                      <ContextMenuItem onSelect={() => toggleBookmark(cwd)}>
+                        {bookmarked.has(cwd) ? 'Remove from Favorites' : 'Add to Favorites'}
+                      </ContextMenuItem>
+                    )}
+                    {isTrash && (
+                      <ContextMenuItem variant="destructive" disabled={entries.length === 0} onSelect={() => setDialog({ type: 'emptyTrash' })}>
+                        Empty Trash…
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuItem onSelect={() => setDialog({ type: 'properties', names: [] })}>
+                      Properties
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
           )}
         </div>
 
-        {previewPath !== null && (
-          <FilePreview path={previewPath} onClose={() => setPreviewPath(null)} />
+        {quickLookEntry && cwd && (
+          <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0">
+            <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                {quickLookEntry.name}
+              </span>
+              <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                Arrow keys browse · Enter opens
+              </span>
+              <ToolButton label="Close (Space)" onClick={() => { setQuickLook(false); focusView(); }}>
+                <X className="size-4" />
+              </ToolButton>
+            </div>
+            <div className="min-h-0 flex-1">
+              {quickLookEntry.kind === 'directory' ? (
+                <div className="grid h-full place-items-center text-sm text-muted-foreground">
+                  A folder - press Enter to open it.
+                </div>
+              ) : (
+                <FileViewerBody
+                  key={quickLookEntry.name}
+                  path={joinPath(cwd, quickLookEntry.name)}
+                  size={quickLookEntry.size}
+                  mtimeMs={quickLookEntry.mtimeMs}
+                  onExtract={() => {
+                    setQuickLook(false);
+                    extract([quickLookEntry.name]);
+                  }}
+                />
+              )}
+            </div>
+          </div>
         )}
 
-        {confirmDelete !== null && (
-          <DeleteConfirm
-            entry={confirmDelete}
-            pending={rm.isPending}
-            onConfirm={() => deleteEntry(confirmDelete)}
-            onCancel={() => setConfirmDelete(null)}
+        {dialog?.type === 'properties' && cwd && (
+          <PropertiesDialog
+            dir={cwd}
+            entries={dialog.names.map((n) => entries[byName.get(n) ?? -1]).filter(Boolean)}
+            onClose={() => {
+              setDialog(null);
+              focusView();
+            }}
+          />
+        )}
+        {dialog?.type === 'compress' && (
+          <CompressDialog
+            defaultName={dialog.names.length === 1 ? dialog.names[0].replace(/(\.[^.]+)+$/, '') || dialog.names[0] : 'Archive'}
+            count={dialog.names.length}
+            pending={dialog.pending}
+            error={dialog.error}
+            onSubmit={(fileName) => compress(dialog.names, fileName)}
+            onCancel={() => {
+              setDialog(null);
+              focusView();
+            }}
+          />
+        )}
+        {dialog?.type === 'delete' && dialog.names.length > 0 && (
+          <ConfirmDialog
+            title={`Delete ${describe(dialog.names)} permanently?`}
+            message={`${dialog.reason ? `${dialog.reason}. ` : ''}This can’t be undone.`}
+            confirmLabel="Delete"
+            pending={status?.kind === 'busy'}
+            onConfirm={() => deleteNames(dialog.names)}
+            onCancel={() => {
+              setDialog(null);
+              focusView();
+            }}
+          />
+        )}
+        {dialog?.type === 'emptyTrash' && (
+          <ConfirmDialog
+            title="Empty the Trash?"
+            message="Everything in it will be deleted for good. This can’t be undone."
+            confirmLabel="Empty Trash"
+            pending={status?.kind === 'busy'}
+            onConfirm={emptyTrash}
+            onCancel={() => {
+              setDialog(null);
+              focusView();
+            }}
+          />
+        )}
+        {dialog?.type === 'shortcuts' && (
+          <ShortcutsDialog
+            onClose={() => {
+              setDialog(null);
+              focusView();
+            }}
           />
         )}
       </div>
 
       {/* Status bar */}
       <div className="flex shrink-0 items-center gap-2 border-t border-border/60 bg-background/50 px-3 py-1 text-xs text-muted-foreground">
-        <span>
-          {listing.data
-            ? `${entries.length} item${entries.length === 1 ? '' : 's'}`
-            : '…'}
+        <span className="shrink-0 tabular-nums">
+          {!listing.data
+            ? '…'
+            : selectedNames.length === 0
+              ? `${entries.length.toLocaleString()} item${entries.length === 1 ? '' : 's'}`
+              : selectedNames.length === 1
+                ? `“${selectedNames[0]}” selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`
+                : `${selectedNames.length.toLocaleString()} of ${entries.length.toLocaleString()} selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`}
         </span>
         {listing.data?.truncated && (
-          <span className="text-amber-400/80">
-            Listing truncated - directory has more entries than shown.
+          <span className="shrink-0 text-amber-600 dark:text-amber-400">
+            Showing the first {listing.data.entries.length.toLocaleString()} items.
           </span>
         )}
-        {opError !== null && (
-          <span role="alert" className="min-w-0 flex-1 truncate text-right text-destructive">
-            {opError}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Fixed row height for the virtualized entry list (px). */
-const ROW_HEIGHT = 32;
-/** Extra rows rendered above/below the viewport to hide scroll pop-in. */
-const OVERSCAN = 10;
-
-/**
- * Virtualized directory listing.
- *
- * Directories like /nix/store can hit the 5000-entry cap; rendering that many
- * rows makes every render (and layout) of the app expensive. Windowing (see
- * useVirtualRows) keeps render cost constant regardless of directory size.
- * Memoized so parent re-renders (toolbar typing, preview open/close) skip it
- * entirely when the listing is unchanged.
- */
-const EntryList = memo(function EntryList({
-  entries,
-  onOpen,
-  onRenameStart,
-  onDelete,
-  renamingName,
-  onRenameSubmit,
-  onRenameCancel,
-}: {
-  entries: FsEntry[];
-  onOpen: (entry: FsEntry) => void;
-  onRenameStart: (entry: FsEntry) => void;
-  onDelete: (entry: FsEntry) => void;
-  renamingName: string | null;
-  onRenameSubmit: (from: string, to: string) => void;
-  onRenameCancel: () => void;
-}) {
-  const { containerRef, onScroll, start, end, totalHeight } = useVirtualRows({
-    count: entries.length,
-    rowHeight: ROW_HEIGHT,
-    overscan: OVERSCAN,
-  });
-
-  return (
-    <div
-      ref={containerRef}
-      onScroll={onScroll}
-      className="min-h-0 flex-1 overflow-y-auto px-1 py-1"
-    >
-      <ul className="relative" style={{ height: totalHeight }}>
-        {entries.slice(start, end).map((entry, i) => (
-          <EntryRow
-            key={entry.name}
-            entry={entry}
-            top={(start + i) * ROW_HEIGHT}
-            onOpen={onOpen}
-            onRenameStart={onRenameStart}
-            onDelete={onDelete}
-            isRenaming={entry.name === renamingName}
-            onRenameSubmit={onRenameSubmit}
-            onRenameCancel={onRenameCancel}
-          />
-        ))}
-      </ul>
-    </div>
-  );
-});
-
-/** One row in the entry list, absolutely positioned within the virtual list. */
-const EntryRow = memo(function EntryRow({
-  entry,
-  top,
-  onOpen,
-  onRenameStart,
-  onDelete,
-  isRenaming,
-  onRenameSubmit,
-  onRenameCancel,
-}: {
-  entry: FsEntry;
-  top: number;
-  onOpen: (entry: FsEntry) => void;
-  onRenameStart: (entry: FsEntry) => void;
-  onDelete: (entry: FsEntry) => void;
-  isRenaming: boolean;
-  onRenameSubmit: (from: string, to: string) => void;
-  onRenameCancel: () => void;
-}) {
-  if (isRenaming) {
-    return (
-      <li className="absolute inset-x-0" style={{ top, height: ROW_HEIGHT }}>
-        <NameEditor
-          icon={<EntryIcon entry={entry} />}
-          initialValue={entry.name}
-          label={`Rename ${entry.name}`}
-          onSubmit={(name) => onRenameSubmit(entry.name, name)}
-          onCancel={onRenameCancel}
-        />
-      </li>
-    );
-  }
-
-  return (
-    <li
-      className="absolute inset-x-0"
-      style={{ top, height: ROW_HEIGHT }}
-    >
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <button
-            type="button"
-            onClick={() => onOpen(entry)}
-            disabled={entry.kind === 'other'}
-            className={cn(
-              'flex h-full w-full items-center gap-2 rounded-md px-2 text-left',
-              'hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              'disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent',
-            )}
-          >
-            <EntryIcon entry={entry} />
-            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-              {entry.name}
-            </span>
-            {entry.symlink && (
-              <LinkIcon
-                className="size-3 shrink-0 text-muted-foreground/80"
-                aria-label="Symbolic link"
-              />
-            )}
-            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-              {entry.kind === 'file' && entry.size !== null
-                ? formatBytes(entry.size)
-                : ''}
-            </span>
-            <span className="hidden w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground md:block">
-              {entry.mtimeMs !== null ? MTIME_FORMAT.format(entry.mtimeMs) : ''}
-            </span>
-          </button>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem onSelect={() => onRenameStart(entry)}>
-            <Pencil className="size-4" aria-hidden />
-            Rename
-          </ContextMenuItem>
-          <ContextMenuItem variant="destructive" onSelect={() => onDelete(entry)}>
-            <Trash2 className="size-4" aria-hidden />
-            Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-    </li>
-  );
-});
-
-/**
- * Inline single-name editor row (new folder, rename). Enter submits, Escape
- * or blur cancels; invalid names (slashes, '.', '..') can't be submitted.
- */
-function NameEditor({
-  icon,
-  initialValue,
-  label,
-  pending,
-  onSubmit,
-  onCancel,
-}: {
-  icon: React.ReactNode;
-  initialValue: string;
-  label: string;
-  pending?: boolean;
-  onSubmit: (name: string) => void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initialValue);
-  const valid = isValidEntryName(value.trim());
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (valid && !pending) onSubmit(value.trim());
-      }}
-      className="flex items-center gap-2 rounded-md px-2"
-      style={{ height: ROW_HEIGHT }}
-    >
-      {icon}
-      <input
-        type="text"
-        aria-label={label}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onCancel();
-        }}
-        onBlur={() => {
-          if (!pending) onCancel();
-        }}
-        onFocus={(e) => e.currentTarget.select()}
-        disabled={pending}
-        autoFocus
-        spellCheck={false}
-        autoComplete="off"
-        className={cn(
-          'h-6 min-w-0 flex-1 rounded border bg-secondary/80 px-2 text-sm text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2',
-          valid
-            ? 'border-border focus-visible:ring-ring/70'
-            : 'border-destructive/60 focus-visible:ring-destructive/40',
-          'disabled:opacity-50',
-        )}
-      />
-    </form>
-  );
-}
-
-/** In-window confirmation overlay for deleting an entry. */
-function DeleteConfirm({
-  entry,
-  pending,
-  onConfirm,
-  onCancel,
-}: {
-  entry: FsEntry;
-  pending: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-label={`Delete ${entry.name}?`}
-      className="absolute inset-0 z-20 grid place-items-center bg-black/60 p-6"
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') onCancel();
-      }}
-    >
-      <div className="w-full max-w-sm rounded-xl border border-border/60 bg-popover p-4 shadow-2xl">
-        <p className="text-sm text-foreground">
-          Delete <span className="font-mono">{entry.name}</span>
-          {entry.kind === 'directory' ? ' and everything inside it' : ''}?
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">This cannot be undone.</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={pending}
-            autoFocus
-            className="h-8 rounded-md px-3 text-sm text-foreground/80 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={pending}
-            className="h-8 rounded-md bg-destructive px-3 text-sm font-medium text-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive disabled:opacity-50"
-          >
-            {pending ? 'Deleting…' : 'Delete'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** In-window preview overlay for a single file (text or image). */
-function FilePreview({ path, onClose }: { path: string; onClose: () => void }) {
-  const name = path.slice(path.lastIndexOf('/') + 1);
-  const mime = IMAGE_MIME[extensionOf(name)];
-  // Text/binary files only need the first chunk; images need full bytes.
-  const content = useFileContent(
-    path,
-    mime ? PREVIEW_MAX_BYTES : TEXT_PREVIEW_MAX_BYTES,
-  );
-
-  const imageUrl = useMemo(() => {
-    if (!mime || !content.data || content.data.truncated) return null;
-    return URL.createObjectURL(
-      new Blob([content.data.data.slice().buffer], { type: mime }),
-    );
-  }, [mime, content.data]);
-
-  // Release each object URL once it is no longer rendered.
-  useEffect(() => {
-    return () => {
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
-    };
-  }, [imageUrl]);
-
-  const text = useMemo(() => {
-    if (mime || !content.data) return null;
-    const bytes = content.data.data;
-    // Null byte in the head -> treat as binary.
-    const head = bytes.subarray(0, Math.min(bytes.length, 8192));
-    if (head.includes(0)) return null;
-    const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-    return decoded.slice(0, TEXT_PREVIEW_MAX_CHARS);
-  }, [mime, content.data]);
-
-  return (
-    <div className="absolute inset-0 z-10 flex flex-col bg-background">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-background/50 px-3 py-1.5">
-        <span className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">
-          {name}
+        <span
+          role={status?.kind === 'error' ? 'alert' : 'status'}
+          className={cn(
+            'min-w-0 flex-1 truncate text-right',
+            status?.kind === 'error' && 'text-destructive',
+          )}
+        >
+          {status?.text}
         </span>
-        {content.data && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatBytes(content.data.size)}
-          </span>
+        {status && status.kind !== 'busy' && (
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setStatus(null)}
+            className="grid size-4 shrink-0 place-items-center rounded hover:bg-foreground/10"
+          >
+            <X className="size-3" />
+          </button>
         )}
-        <ToolButton label="Close preview" onClick={onClose}>
-          <X className="size-4" />
-        </ToolButton>
+        {status?.kind === 'busy' && <RotateCw className="size-3 shrink-0 animate-spin" aria-hidden />}
+        {cwdDetails.data?.free != null && !status && (
+          <span className="shrink-0 tabular-nums">{formatBytes(cwdDetails.data.free)} free</span>
+        )}
       </div>
+    </div>
+  );
+}
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        {content.isLoading ? (
-          <div className="space-y-2 p-4">
-            <Skeleton className="h-4 w-3/4 bg-foreground/10" />
-            <Skeleton className="h-4 w-full bg-foreground/10" />
-            <Skeleton className="h-4 w-2/3 bg-foreground/10" />
-          </div>
-        ) : content.isError ? (
-          <p className="p-4 text-sm text-muted-foreground">
-            Could not read file: {cleanFsError(content.error)}
-          </p>
-        ) : imageUrl ? (
-          <div className="grid h-full place-items-center p-4">
-            <img
-              src={imageUrl}
-              alt={name}
-              className="max-h-full max-w-full rounded-md object-contain"
-            />
-          </div>
-        ) : text !== null ? (
-          <>
-            {(content.data?.truncated ||
-              text.length >= TEXT_PREVIEW_MAX_CHARS) && (
-              <p className="border-b border-border/60 bg-amber-950/40 px-4 py-1.5 text-xs text-amber-300/90">
-                Preview truncated - showing the beginning of the file.
-              </p>
-            )}
-            <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground/90">
-              {text}
-            </pre>
-          </>
-        ) : (
-          <div className="grid h-full place-items-center p-6">
-            <div className="text-center">
-              <File className="mx-auto mb-3 size-8 text-muted-foreground/60" aria-hidden />
-              <p className="text-sm text-muted-foreground">
-                Binary file - no preview available.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
+/**
+ * The path as clickable segments (Home › Projects › din). Each segment is a
+ * drop target too; clicking the empty space after them types a location.
+ */
+function Breadcrumbs({
+  cwd,
+  home,
+  trash,
+  onNavigate,
+  onEdit,
+  onDrop,
+}: {
+  cwd: string | null;
+  home: string | undefined;
+  trash: string | undefined;
+  onNavigate: (path: string) => void;
+  onEdit: () => void;
+  onDrop: (target: string, paths: string[], copy: boolean) => void;
+}) {
+  const [over, setOver] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const crumbs = useMemo(() => {
+    if (!cwd) return [];
+    const list: { path: string; label: string; icon?: 'home' | 'root' | 'trash' }[] = [];
+    let rest: string;
+    let base: string;
+    if (trash && (cwd === trash || cwd.startsWith(`${trash}/`))) {
+      list.push({ path: trash, label: 'Trash', icon: 'trash' });
+      rest = cwd.slice(trash.length);
+      base = trash;
+    } else if (home && (cwd === home || cwd.startsWith(`${home}/`))) {
+      list.push({ path: home, label: 'Home', icon: 'home' });
+      rest = cwd.slice(home.length);
+      base = home;
+    } else {
+      list.push({ path: '/', label: 'Computer', icon: 'root' });
+      rest = cwd;
+      base = '';
+    }
+    let acc = base;
+    for (const part of rest.split('/').filter(Boolean)) {
+      acc = `${acc}/${part}`;
+      list.push({ path: acc, label: part });
+    }
+    return list;
+  }, [cwd, home, trash]);
+
+  // Keep the deepest segment in view.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [crumbs]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className="flex h-8 min-w-0 flex-1 cursor-text items-center overflow-x-auto rounded-md border border-border/60 bg-secondary/60 px-1 [scrollbar-width:none]"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onEdit();
+      }}
+      title="Click to type a location (Ctrl+L)"
+    >
+      {crumbs.map((c, i) => {
+        const last = i === crumbs.length - 1;
+        return (
+          <span key={c.path} className="flex shrink-0 items-center">
+            {i > 0 && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden />}
+            <button
+              type="button"
+              onClick={() => onNavigate(c.path)}
+              aria-current={last ? 'location' : undefined}
+              onDragOver={(e) => {
+                if (last || !e.dataTransfer.types.includes('application/x-din-files')) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+                setOver(c.path);
+              }}
+              onDragLeave={() => setOver((o) => (o === c.path ? null : o))}
+              onDrop={(e) => {
+                setOver(null);
+                const raw = e.dataTransfer.getData('application/x-din-files');
+                if (!raw) return;
+                e.preventDefault();
+                try {
+                  onDrop(c.path, JSON.parse(raw) as string[], e.ctrlKey);
+                } catch {
+                  // Not ours after all.
+                }
+              }}
+              className={cn(
+                'flex h-6 items-center gap-1.5 rounded px-1.5 text-sm',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                over === c.path
+                  ? 'bg-primary/20 ring-2 ring-primary'
+                  : last
+                    ? 'font-medium text-foreground'
+                    : 'text-foreground/70 hover:bg-foreground/10 hover:text-foreground',
+              )}
+            >
+              {c.icon === 'home' && <Home className="size-3.5" aria-hidden />}
+              {c.icon === 'root' && <HardDrive className="size-3.5" aria-hidden />}
+              {c.icon === 'trash' && <Trash2 className="size-3.5" aria-hidden />}
+              <span className="max-w-48 truncate">{c.label}</span>
+            </button>
+          </span>
+        );
+      })}
+      <span className="h-full min-w-8 flex-1" onClick={onEdit} />
     </div>
   );
 }
@@ -929,7 +1971,7 @@ function ListSkeleton() {
     <div className="space-y-1 p-2" aria-hidden>
       {Array.from({ length: 8 }, (_, i) => (
         <div key={i} className="flex items-center gap-2 px-2 py-1.5">
-          <Skeleton className="size-4 rounded bg-foreground/10" />
+          <Skeleton className="size-5 rounded bg-foreground/10" />
           <Skeleton
             className="h-4 bg-foreground/10"
             style={{ width: `${30 + ((i * 17) % 40)}%` }}

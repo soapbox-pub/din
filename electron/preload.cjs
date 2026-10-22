@@ -7,12 +7,34 @@
 //   - window.fs: filesystem access for the Files app
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
-//   - window.bluetooth: BlueZ pairing and connections for the Settings app
 //   - window.vpn: VPN/WireGuard profile toggles for the network selector
-//   - window.display: xrandr multi-output arrangement for the Settings app
+//   - window.display: multi-output arrangement (wlr-randr/xrandr) for the
+//     Settings app
+//   - window.pageFullscreen: fits a fullscreen web page to its monitor
+//   - window.monitors: where each display sits in the shell window, for the
+//     desktop's layout
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
-//   - window.keyboard: the keyboard layout native apps use, for Settings
+//   - window.theme: the light/dark mode pages see through prefers-color-scheme
+//   - window.keyboard: the system's keyboard layout, for Settings
+//   - window.datetime: the system's time zone and clock, for Settings
+//   - window.cursor: the pointer's theme and size, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
+//   - window.systemNotifications: Linux apps' and web pages' notifications,
+//     for the notification center
+//   - window.installer: put DinOS on this computer's disk, for the
+//     Installer app (live USB boots only)
+//   - window.updater: DinOS system updates, for the Settings app
+//   - window.airplay: sharing the screen with AirPlay receivers, for the menu
+//     bar and Settings
+//   - window.bluetooth: BlueZ adapter and devices (pairing, connecting), for
+//     the menu bar and Settings
+//   - window.bluetoothLogin: receive the account key from a phone over
+//     Bluetooth LE, for the login screen
+//   - window.nostrd: the signer daemon that holds the account keys, for the
+//     shell's signer and account menu
+//   - window.bootScreen: the wallpaper and clock format DinOS's boot and
+//     unlock screen shows
+//   - window.lock: DinOS's lock screen, for the Lock menu item
 //   - window.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app
 //   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
@@ -23,6 +45,8 @@
 //   - window.crx: Chrome extension coordination for the Web Browser app
 //   - window.userscripts: userscript library sync and install
 //     requests for the Web Browser app
+//   - window.adblock: the Web Browser's built-in ad blocker
+//   - window.popups: the pop-up blocker's blocked windows and allowed sites
 //   - window.devtools: docked devtools control for the Web Browser app
 //   - window.nostrHost: relays NIP-07 requests from installed web apps to the
 //     signed-in account's signer (see NostrBridgeHost / webview-preload.cjs)
@@ -128,6 +152,116 @@ contextBridge.exposeInMainWorld('fs', {
    * @param {{ recursive?: boolean }} [options]
    */
   rm: (path, options) => ipcRenderer.invoke('fs:rm', path, options),
+
+  // The Files app's richer operations (electron/files.mts).
+
+  /**
+   * Copy a file or folder into `dir` (as `name`, default its own), renaming
+   * to "name (2)" if taken. Resolves to the new path.
+   * @param {string} from
+   * @param {string} dir
+   * @param {string} [name]
+   */
+  copyInto: (from, dir, name) => ipcRenderer.invoke('fs:copyInto', from, dir, name),
+
+  /**
+   * Move a file or folder into `dir`, renaming to "name (2)" if taken.
+   * Resolves to the new path.
+   * @param {string} from
+   * @param {string} dir
+   */
+  moveInto: (from, dir) => ipcRenderer.invoke('fs:moveInto', from, dir),
+
+  /**
+   * Move to an exact path, failing if something is already there.
+   * @param {string} from
+   * @param {string} to
+   */
+  move: (from, to) => ipcRenderer.invoke('fs:move', from, to),
+
+  /**
+   * Move to the Trash; resolves to the item's name in the Trash.
+   * @param {string} path
+   */
+  trash: (path) => ipcRenderer.invoke('fs:trash', path),
+
+  /**
+   * Put a trashed item back; resolves to where it went.
+   * @param {string} name
+   */
+  restore: (name) => ipcRenderer.invoke('fs:restore', name),
+
+  /**
+   * Delete one trashed item for good, or (no name) empty the Trash.
+   * @param {string} [name]
+   */
+  purge: (name) => ipcRenderer.invoke('fs:purge', name),
+
+  /** The Trash's files folder (created if missing). */
+  trashDir: () => ipcRenderer.invoke('fs:trashDir'),
+
+  /**
+   * Everything the Properties dialog shows about a path.
+   * @param {string} path
+   */
+  details: (path) => ipcRenderer.invoke('fs:details', path),
+
+  /**
+   * Total size and item counts beneath a folder.
+   * @param {string} path
+   */
+  du: (path) => ipcRenderer.invoke('fs:du', path),
+
+  /**
+   * @param {string} path
+   * @param {number} mode
+   */
+  chmod: (path, mode) => ipcRenderer.invoke('fs:chmod', path, mode),
+
+  /**
+   * Extract an archive into `dir`; resolves to what was created.
+   * @param {string} archive
+   * @param {string} dir
+   */
+  extract: (archive, dir) => ipcRenderer.invoke('fs:extract', archive, dir),
+
+  /**
+   * Pack entries of `dir` into `dir/outName` (format by extension).
+   * @param {string} dir
+   * @param {string[]} names
+   * @param {string} outName
+   */
+  compress: (dir, names, outName) => ipcRenderer.invoke('fs:compress', dir, names, outName),
+
+  /**
+   * An archive's member names.
+   * @param {string} archive
+   */
+  listArchive: (archive) => ipcRenderer.invoke('fs:listArchive', archive),
+
+  /**
+   * Watch a folder for changes; resolves to a watch id (null if it can't be
+   * watched). Changes arrive through onChange.
+   * @param {string} path
+   */
+  watch: (path) => ipcRenderer.invoke('fs:watch', path),
+
+  /** @param {number} id */
+  unwatch: (id) => ipcRenderer.invoke('fs:unwatch', id),
+
+  /**
+   * Subscribe to changes in watched folders. Returns an unsubscribe fn.
+   * @param {(path: string) => void} callback
+   */
+  onChange: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string} path
+     */
+    const listener = (_event, path) => callback(path);
+    ipcRenderer.on('fs:changed', listener);
+    return () => ipcRenderer.removeListener('fs:changed', listener);
+  },
 });
 
 // Terminal bridge (window.pty), backed by the pty:* handlers in main.mts.
@@ -191,6 +325,38 @@ contextBridge.exposeInMainWorld('pty', {
     ipcRenderer.on('pty:exit', listener);
     return () => ipcRenderer.removeListener('pty:exit', listener);
   },
+
+  /**
+   * Subscribe to commands starting (one took the terminal from the shell),
+   * in all sessions. Returns an unsubscribe fn.
+   * @param {(id: number, command: string) => void} callback
+   */
+  onCommandStart: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {number} id
+     * @param {string} command
+     */
+    const listener = (_event, id, command) => callback(id, command);
+    ipcRenderer.on('pty:commandStart', listener);
+    return () => ipcRenderer.removeListener('pty:commandStart', listener);
+  },
+
+  /**
+   * Subscribe to commands finishing (the shell got the terminal back), in
+   * all sessions. Returns an unsubscribe fn.
+   * @param {(id: number, done: { command: string, seconds: number }) => void} callback
+   */
+  onCommandDone: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {number} id
+     * @param {{ command: string, seconds: number }} done
+     */
+    const listener = (_event, id, done) => callback(id, done);
+    ipcRenderer.on('pty:commandDone', listener);
+    return () => ipcRenderer.removeListener('pty:commandDone', listener);
+  },
 });
 
 // WiFi bridge (window.wifi), backed by the wifi:* handlers in main.mts
@@ -231,46 +397,6 @@ contextBridge.exposeInMainWorld('wifi', {
   setRadio: (enabled) => ipcRenderer.invoke('wifi:setRadio', enabled),
 });
 
-// Bluetooth bridge (window.bluetooth), backed by the bluetooth:* handlers in
-// main.mts (BlueZ over D-Bus). Used by the Settings app.
-contextBridge.exposeInMainWorld('bluetooth', {
-  /** Adapter state and known/nearby devices. `available: false` without BlueZ or an adapter. */
-  status: () => ipcRenderer.invoke('bluetooth:status'),
-
-  /**
-   * Turn the adapter on or off. Resolves to the new status.
-   * @param {boolean} powered
-   */
-  setPowered: (powered) => ipcRenderer.invoke('bluetooth:setPowered', powered),
-
-  /** Look for nearby devices for a short while. */
-  scan: () => ipcRenderer.invoke('bluetooth:scan'),
-
-  /**
-   * Pair with, trust and connect to a nearby device.
-   * @param {string} address
-   */
-  pair: (address) => ipcRenderer.invoke('bluetooth:pair', address),
-
-  /**
-   * Connect to a paired device.
-   * @param {string} address
-   */
-  connect: (address) => ipcRenderer.invoke('bluetooth:connect', address),
-
-  /**
-   * Disconnect a device.
-   * @param {string} address
-   */
-  disconnect: (address) => ipcRenderer.invoke('bluetooth:disconnect', address),
-
-  /**
-   * Unpair and forget a device.
-   * @param {string} address
-   */
-  remove: (address) => ipcRenderer.invoke('bluetooth:remove', address),
-});
-
 // VPN bridge (window.vpn), backed by the vpn:* handlers in main.mts (nmcli /
 // NetworkManager). Toggles existing VPN/WireGuard profiles from the network
 // selector; profiles are created out of band (imported config / Terminal).
@@ -292,21 +418,60 @@ contextBridge.exposeInMainWorld('vpn', {
 });
 
 // Display bridge (window.display), backed by the display:* handlers in
-// main.mts (xrandr). Used by the Settings app to arrange the outputs on a bare
-// X11 session: resolution, position, on/off and which one is primary.
-// `available: false` where xrandr doesn't apply (Wayland/cage), so the panel
-// can render a fallback.
+// main.mts (wlr-randr under cage, xrandr on bare X11). Used by the Settings
+// app to arrange the outputs: resolution, position, on/off and which one is
+// primary. `available: false` where the outputs can't be managed, so the
+// panel can render a fallback.
 contextBridge.exposeInMainWorld('display', {
-  /** Connected outputs with their available modes/positions. `available: false` = no xrandr. */
+  /** Connected outputs with their available modes/positions. `available: false` = unmanageable. */
   status: () => ipcRenderer.invoke('display:status'),
 
   /**
-   * Apply a complete output arrangement in one atomic xrandr call. Each
+   * Apply a complete output arrangement in one atomic call. Each
    * placement is { output, enabled, primary, x, y, width, height }; every
    * field is re-validated in the main process against xrandr's own report.
    * @param {Array<{ output: string, enabled: boolean, primary: boolean, x: number, y: number, width: number, height: number }>} placements
    */
   applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
+});
+
+// Page fullscreen bridge (window.pageFullscreen), backed by the
+// pageFullscreen:* handler in main.mts: lays a fullscreen <webview> page out
+// at its monitor's size, until it leaves fullscreen.
+contextBridge.exposeInMainWorld('pageFullscreen', {
+  /**
+   * @param {number} webContentsId the <webview>'s guest
+   * @param {number} width device-independent pixels
+   * @param {number} height device-independent pixels
+   */
+  fit: (webContentsId, width, height) =>
+    ipcRenderer.invoke('pageFullscreen:fit', webContentsId, width, height),
+});
+
+// Monitors bridge (window.monitors), backed by the monitors:* handler in
+// main.mts: each display's rectangle within the shell window (null when the
+// window covers just one), so the desktop can keep its menu bar and Dock on
+// the primary monitor and maximize windows to the monitor they're on.
+contextBridge.exposeInMainWorld('monitors', {
+  /** The displays, in DIPs relative to the window's top-left, or null. */
+  get: () => ipcRenderer.invoke('monitors:get'),
+
+  /**
+   * Subscribe to display changes. Returns an unsubscribe function.
+   * @param {(monitors: unknown) => void} callback
+   */
+  onChange: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} monitors
+     */
+    const handler = (_event, monitors) => callback(monitors);
+    ipcRenderer.on('monitors:changed', handler);
+    return () => ipcRenderer.removeListener('monitors:changed', handler);
+  },
+
+  /** CSS pixels per DIP: the shell's page zoom. */
+  zoomFactor: () => webFrame.getZoomFactor(),
 });
 
 // Native-app bridge (window.nativeApps), backed by the native-apps:* handlers
@@ -330,6 +495,31 @@ contextBridge.exposeInMainWorld('nativeApps', {
    * @param {string[]} wmClass
    */
   resolve: (pid, wmClass) => ipcRenderer.invoke('native-apps:resolve', pid, wmClass),
+
+  /**
+   * Open a Windows program (.exe, .msi, .bat, .lnk) by absolute path,
+   * through Wine (electron/windows-apps.mts).
+   * @param {string} file
+   */
+  runWindowsProgram: (file) => ipcRenderer.invoke('native-apps:run-windows-program', file),
+
+  /**
+   * Force quit the program that owns a window (by its pid), for windows
+   * that won't close. Only apps on Din's embedded display qualify.
+   * @param {number} pid
+   */
+  forceQuit: (pid) => ipcRenderer.invoke('native-apps:force-quit', pid),
+
+  /**
+   * Subscribe to "the installed apps changed" (a program was installed or
+   * removed). Returns an unsubscribe fn.
+   * @param {() => void} callback
+   */
+  onChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('native-apps:changed', handler);
+    return () => ipcRenderer.removeListener('native-apps:changed', handler);
+  },
 });
 
 // Embedded display (src/lib/nativeDisplay.ts): pixels and input travel on a
@@ -431,20 +621,76 @@ contextBridge.exposeInMainWorld('nativeDisplay', {
 });
 
 // Keyboard bridge (window.keyboard), backed by the keyboard:* handlers in
-// electron/keyboard.mts: the layout native apps type with - the OS's, or
-// one picked in Settings from xkeyboard-config's list.
+// electron/keyboard.mts: the system's keyboard layout, which Settings shows
+// and, where Din knows how, changes to one from xkeyboard-config's list.
 contextBridge.exposeInMainWorld('keyboard', {
-  /** The OS's layout ({ layout, variant, name }) and the one picked, if any. */
+  /** The system's layout ({ layout, variant, name }), whether it can be changed, and whether Din needs a restart for it. */
   status: () => ipcRenderer.invoke('keyboard:status'),
 
   /** Every layout and variant there is: { layout, variant, name }[]. */
   layouts: () => ipcRenderer.invoke('keyboard:layouts'),
 
   /**
-   * Use a layout for native apps, or null to follow the OS.
-   * @param {{ layout: string, variant: string } | null} choice
+   * Make a layout the system's.
+   * @param {{ layout: string, variant: string }} choice
    */
   set: (choice) => ipcRenderer.invoke('keyboard:set', choice),
+
+  /** Restart Din, so its own windows take a changed layout (DinOS). */
+  restart: () => ipcRenderer.invoke('keyboard:restart'),
+});
+
+// Date & time bridge (window.datetime), backed by the datetime:* handlers in
+// electron/datetime.mts: the system's time zone and clock, which Settings
+// shows and, on DinOS, changes.
+contextBridge.exposeInMainWorld('datetime', {
+  /** { timeZone, automatic, synchronized, canChange, canAutomatic }. */
+  status: () => ipcRenderer.invoke('datetime:status'),
+
+  /** Every time zone there is, as IANA names. */
+  zones: () => ipcRenderer.invoke('datetime:zones'),
+
+  /**
+   * Make a time zone the system's.
+   * @param {string} zone
+   */
+  setZone: (zone) => ipcRenderer.invoke('datetime:set-zone', zone),
+
+  /**
+   * Set the clock from the network, or don't.
+   * @param {boolean} automatic
+   */
+  setAutomatic: (automatic) => ipcRenderer.invoke('datetime:set-automatic', automatic),
+
+  /**
+   * Set the clock, as local time "YYYY-MM-DD HH:MM:SS".
+   * @param {string} time
+   */
+  setTime: (time) => ipcRenderer.invoke('datetime:set-time', time),
+});
+
+// Cursor bridge (window.cursor), backed by the cursor:* handlers in
+// electron/cursor.mts: the pointer's XCursor theme and size, which Settings
+// shows and, on DinOS, changes.
+contextBridge.exposeInMainWorld('cursor', {
+  /** { theme, size, sizes, canChange }. */
+  status: () => ipcRenderer.invoke('cursor:status'),
+
+  /** The installed cursor themes: { id, name }[]. */
+  themes: () => ipcRenderer.invoke('cursor:themes'),
+
+  /**
+   * A few of a theme's cursors as RGBA: { role, width, height, rgba }[].
+   * @param {string} id
+   * @param {number} size
+   */
+  preview: (id, size) => ipcRenderer.invoke('cursor:preview', id, size),
+
+  /**
+   * Make a theme and size the pointer's.
+   * @param {{ theme: string, size: number }} choice
+   */
+  set: (choice) => ipcRenderer.invoke('cursor:set', choice),
 });
 
 // Tray bridge (window.tray), backed by the tray:* handlers in
@@ -530,6 +776,54 @@ contextBridge.exposeInMainWorld('tray', {
   },
 });
 
+// System notifications bridge (window.systemNotifications), backed by
+// electron/notifications.mts: notifications from Linux apps (over D-Bus) and
+// web pages, for the notification center, and what the user did with them.
+contextBridge.exposeInMainWorld('systemNotifications', {
+  /**
+   * Subscribe to new (or replaced) notifications. Returns an unsubscribe fn.
+   * @param {(notification: unknown) => void} callback
+   */
+  onShow: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} notification
+     */
+    const handler = (_event, notification) => callback(notification);
+    ipcRenderer.on('notifications:show', handler);
+    return () => ipcRenderer.removeListener('notifications:show', handler);
+  },
+
+  /**
+   * Subscribe to notifications their sender closed (their id). Returns an
+   * unsubscribe fn.
+   * @param {(id: string) => void} callback
+   */
+  onClose: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string} id
+     */
+    const handler = (_event, id) => callback(id);
+    ipcRenderer.on('notifications:close', handler);
+    return () => ipcRenderer.removeListener('notifications:close', handler);
+  },
+
+  /**
+   * The user clicked a notification ('default') or one of its actions.
+   * @param {string} id
+   * @param {string} action
+   */
+  activate: (id, action) => ipcRenderer.send('notifications:activate', id, action),
+
+  /**
+   * A notification went away.
+   * @param {string} id
+   * @param {'expired' | 'dismissed' | 'closed'} reason
+   */
+  closed: (id, reason) => ipcRenderer.send('notifications:closed', id, reason),
+});
+
 // Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -
 // true DPI-style scaling: the layout viewport shrinks/grows so innerWidth,
 // viewport units and canvas measurements all stay consistent (unlike CSS
@@ -544,6 +838,17 @@ contextBridge.exposeInMainWorld('zoom', {
     if (!Number.isFinite(factor)) return;
     webFrame.setZoomFactor(Math.min(2, Math.max(0.5, factor)));
   },
+});
+
+// Theme bridge (window.theme), backed by the theme:set handler in main.mts:
+// the shell's light/dark mode becomes Chromium's, so `prefers-color-scheme`
+// in browser tabs and web apps follows it.
+contextBridge.exposeInMainWorld('theme', {
+  /**
+   * Set the color scheme pages see.
+   * @param {'light' | 'dark' | 'system'} source
+   */
+  set: (source) => ipcRenderer.send('theme:set', source),
 });
 
 // Power bridge (window.power), backed by the power:* handlers in main.mts.
@@ -566,13 +871,286 @@ contextBridge.exposeInMainWorld('power', {
   setProfile: (name) => ipcRenderer.invoke('power:setProfile', name),
 });
 
+// Installer bridge (window.installer), backed by electron/installer.mts:
+// copies a live USB boot of DinOS onto the computer's own disk.
+contextBridge.exposeInMainWorld('installer', {
+  /** Whether this is a live boot, the space an install needs, and the disks. */
+  status: () => ipcRenderer.invoke('installer:status'),
+
+  /** The install in progress (or finished, or failed). */
+  state: () => ipcRenderer.invoke('installer:state'),
+
+  /**
+   * Start installing. Progress arrives through onProgress.
+   * @param {string} disk
+   * @param {'wipe' | 'free' | 'keep'} mode
+   * @param {string | null} passphrase Encrypts the disk under it (for
+   *   `keep`, unlocks it), or null.
+   */
+  install: (disk, mode, passphrase) =>
+    ipcRenderer.invoke('installer:install', disk, mode, passphrase),
+
+  /** Run the failed install again, with the same choices. */
+  retry: () => ipcRenderer.invoke('installer:retry'),
+
+  /** Restart the computer, into the installed system. */
+  reboot: () => ipcRenderer.invoke('installer:reboot'),
+
+  /**
+   * Subscribe to install progress. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onProgress: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('installer:progress', handler);
+    return () => ipcRenderer.removeListener('installer:progress', handler);
+  },
+});
+
+// Bluetooth bridge (window.bluetooth), backed by electron/bluetooth.mts:
+// BlueZ's adapter and devices, and the prompts pairing needs.
+contextBridge.exposeInMainWorld('bluetooth', {
+  /** The adapter, the devices it knows or sees, and any pairing prompt. */
+  state: () => ipcRenderer.invoke('bluetooth:state'),
+
+  /**
+   * Turn the adapter on or off.
+   * @param {boolean} on
+   */
+  setPowered: (on) => ipcRenderer.invoke('bluetooth:setPowered', on),
+
+  /**
+   * Start or stop looking for devices nearby. A search stops by itself
+   * after a couple of minutes.
+   * @param {boolean} on
+   */
+  discover: (on) => ipcRenderer.invoke('bluetooth:discover', on),
+
+  /**
+   * Pair with a device, then connect to it.
+   * @param {string} path
+   */
+  pair: (path) => ipcRenderer.invoke('bluetooth:pair', path),
+
+  /** @param {string} path */
+  connect: (path) => ipcRenderer.invoke('bluetooth:connect', path),
+
+  /** @param {string} path */
+  disconnect: (path) => ipcRenderer.invoke('bluetooth:disconnect', path),
+
+  /**
+   * Remove a device and its pairing.
+   * @param {string} path
+   */
+  forget: (path) => ipcRenderer.invoke('bluetooth:forget', path),
+
+  /**
+   * Stop a pairing in progress.
+   * @param {string} path
+   */
+  cancel: (path) => ipcRenderer.invoke('bluetooth:cancel', path),
+
+  /**
+   * Answer a pairing prompt.
+   * @param {number} id
+   * @param {boolean} accept
+   * @param {string} [value] The PIN or passkey typed, for those prompts.
+   */
+  answer: (id, accept, value) => ipcRenderer.invoke('bluetooth:answer', id, accept, value),
+
+  /**
+   * Whether the shell is there to answer pairing prompts.
+   * @param {boolean} enabled
+   */
+  setPrompts: (enabled) => ipcRenderer.invoke('bluetooth:prompts', enabled),
+
+  /**
+   * Subscribe to state changes. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('bluetooth:changed', handler);
+    return () => ipcRenderer.removeListener('bluetooth:changed', handler);
+  },
+});
+
+// Bluetooth login bridge (window.bluetoothLogin), backed by
+// electron/bluetooth-login.mts: advertises a GATT service a phone (Tenna)
+// sends the account key to, encrypted to the renderer's ephemeral key.
+contextBridge.exposeInMainWorld('bluetoothLogin', {
+  /** Whether this computer has a Bluetooth adapter that can do it. */
+  available: () => ipcRenderer.invoke('bluetooth-login:available'),
+
+  /**
+   * Start advertising. Progress arrives through onEvent.
+   * @param {string} din The renderer's ephemeral x-only pubkey, hex.
+   */
+  start: (din) => ipcRenderer.invoke('bluetooth-login:start', din),
+
+  /** Stop advertising. */
+  stop: () => ipcRenderer.invoke('bluetooth-login:stop'),
+
+  /**
+   * Subscribe to login progress. Returns an unsubscribe fn.
+   * @param {(event: unknown) => void} callback
+   */
+  onEvent: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} payload
+     */
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('bluetooth-login:event', handler);
+    return () => ipcRenderer.removeListener('bluetooth-login:event', handler);
+  },
+});
+
+// Signer bridge (window.nostrd), backed by electron/nostrd.mts: nostrd, the
+// signer daemon that holds the account keys, signs for the shell and manages
+// its accounts.
+contextBridge.exposeInMainWorld('nostrd', {
+  /** Whether to keep accounts in nostrd ({ use, connected, managed }). */
+  info: () => ipcRenderer.invoke('nostrd:info'),
+
+  /**
+   * Call a nostrd method. Resolves to { result } or { error: { code, message } }.
+   * @param {string} method
+   * @param {unknown[]} params
+   */
+  call: (method, params) => ipcRenderer.invoke('nostrd:call', method, params),
+
+  /**
+   * Subscribe to nostrd's events ({ event }). Returns an unsubscribe fn.
+   * @param {(event: unknown) => void} callback
+   */
+  onEvent: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} payload
+     */
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('nostrd:event', handler);
+    return () => ipcRenderer.removeListener('nostrd:event', handler);
+  },
+});
+
+// Boot screen bridge (window.bootScreen), backed by electron/boot-screen.mts:
+// copies the wallpaper to the boot partition, for DinOS's unlock screen.
+contextBridge.exposeInMainWorld('bootScreen', {
+  /**
+   * Show this wallpaper on the boot screen, with a 12- or 24-hour clock.
+   * @param {string | null} wallpaper A URL, or null for none.
+   * @param {boolean} hour12
+   */
+  update: (wallpaper, hour12) => ipcRenderer.invoke('boot-screen:update', wallpaper, hour12),
+});
+
+// Lock bridge (window.lock), backed by electron/lock.mts: DinOS's lock
+// screen, which runs outside Din.
+contextBridge.exposeInMainWorld('lock', {
+  /** Whether this computer can be locked (it has a password). */
+  available: () => ipcRenderer.invoke('lock:available'),
+
+  /** Lock now. */
+  lock: () => ipcRenderer.invoke('lock:lock'),
+
+  /**
+   * Change the computer's password: the disk's, the lock screen's, and the
+   * Nostr keys'.
+   * @param {string} oldPassword
+   * @param {string} newPassword
+   */
+  changePassword: (oldPassword, newPassword) =>
+    ipcRenderer.invoke('lock:change-password', oldPassword, newPassword),
+});
+
+// Updater bridge (window.updater), backed by electron/updater.mts: stages
+// newer DinOS releases for the next boot.
+contextBridge.exposeInMainWorld('updater', {
+  /** Versions, and the check or update in progress (or the failed one). */
+  state: () => ipcRenderer.invoke('updater:state'),
+
+  /** Look for a newer release now, and stage it. Progress arrives through onProgress. */
+  check: () => ipcRenderer.invoke('updater:check'),
+
+  /** Restart the computer, into the staged release. */
+  reboot: () => ipcRenderer.invoke('updater:reboot'),
+
+  /**
+   * Subscribe to update progress. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onProgress: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('updater:progress', handler);
+    return () => ipcRenderer.removeListener('updater:progress', handler);
+  },
+});
+
+// AirPlay bridge (window.airplay), backed by electron/airplay.mts: mirrors
+// or extends the screen to AirPlay receivers through deckmon.
+contextBridge.exposeInMainWorld('airplay', {
+  /** Receivers found nearby and the sessions in progress. */
+  state: () => ipcRenderer.invoke('airplay:state'),
+
+  /** Look for receivers now. */
+  scan: () => ipcRenderer.invoke('airplay:scan'),
+
+  /**
+   * Start sharing with a receiver; resolves once it's streaming.
+   * @param {string} target
+   * @param {'mirror' | 'extend'} mode
+   */
+  connect: (target, mode) => ipcRenderer.invoke('airplay:connect', target, mode),
+
+  /**
+   * Answer a receiver's request for the PIN it shows, or its password.
+   * @param {string} target
+   * @param {string} code
+   */
+  code: (target, code) => ipcRenderer.invoke('airplay:code', target, code),
+
+  /**
+   * Stop sharing with a receiver.
+   * @param {string} target
+   */
+  disconnect: (target) => ipcRenderer.invoke('airplay:disconnect', target),
+
+  /**
+   * Subscribe to state changes. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('airplay:changed', handler);
+    return () => ipcRenderer.removeListener('airplay:changed', handler);
+  },
+});
+
 // System change events (window.systemEvents): the main process watches
-// NetworkManager, PipeWire and BlueZ for changes (`nmcli monitor`, `pactl
-// subscribe`, `gdbus monitor`) and says which area changed, so the menu bar
-// and Settings refresh on events instead of polling every few seconds.
+// NetworkManager and PipeWire for changes (`nmcli monitor`, `pactl
+// subscribe`) and says which area changed, so the menu bar and Settings
+// refresh on events instead of polling every few seconds.
 contextBridge.exposeInMainWorld('systemEvents', {
   /**
-   * Subscribe to change notices ('network' | 'audio' | 'bluetooth'). Returns an
+   * Subscribe to change notices ('network' | 'audio'). Returns an
    * unsubscribe fn.
    * @param {(topic: string) => void} callback
    */
@@ -598,7 +1176,7 @@ contextBridge.exposeInMainWorld('audio', {
   status: () => ipcRenderer.invoke('audio:status'),
 
   /**
-   * Set the default sink volume (0-100). Resolves to the new state.
+   * Set the default sink volume (0-150; past 100 amplifies). Resolves to the new state.
    * @param {number} percent
    */
   setVolume: (percent) => ipcRenderer.invoke('audio:setVolume', percent),
@@ -632,7 +1210,7 @@ contextBridge.exposeInMainWorld('audio', {
   selectPort: (card, port) => ipcRenderer.invoke('audio:selectPort', card, port),
 
   /**
-   * Set any node's volume (0-100) by id (per-app streams, per-device).
+   * Set any node's volume (0-150) by id (per-app streams, per-device).
    * @param {number} id
    * @param {number} percent
    */
@@ -680,13 +1258,14 @@ contextBridge.exposeInMainWorld('brightness', {
   status: () => ipcRenderer.invoke('brightness:status'),
 
   /**
-   * Set the backlight level (0-100). Resolves to the new state.
+   * Set the brightness level (-80-100; below 0 dims in software). Resolves to the new state.
    * @param {number} percent
    */
   setBrightness: (percent) => ipcRenderer.invoke('brightness:setBrightness', percent),
 
   /**
-   * Turn the warm night-light tint on or off. Resolves to the new state.
+   * Turn night light on or off; on a schedule, it tints only in its hours.
+   * Resolves to the new state.
    * @param {boolean} enabled
    */
   setNightLight: (enabled) => ipcRenderer.invoke('brightness:setNightLight', enabled),
@@ -696,6 +1275,13 @@ contextBridge.exposeInMainWorld('brightness', {
    * @param {number} kelvin
    */
   setTemperature: (kelvin) => ipcRenderer.invoke('brightness:setTemperature', kelvin),
+
+  /**
+   * Set when night light runs: always, sunset to sunrise, or custom hours
+   * ("HH:MM", local time). Resolves to the new state.
+   * @param {{ schedule: 'always' | 'sunset' | 'custom', from: string, to: string }} schedule
+   */
+  setNightLightSchedule: (schedule) => ipcRenderer.invoke('brightness:setNightLightSchedule', schedule),
 
   /**
    * Subscribe to media-key brightness changes (MonBrightnessUp/Down), for the
@@ -999,6 +1585,102 @@ contextBridge.exposeInMainWorld('userscripts', {
   },
 });
 
+// Ad blocker bridge (window.adblock), backed by the adblock:* handlers in
+// electron/adblock.mts: on/off, the sites ads are allowed on, and how much
+// each browser tab has had blocked.
+contextBridge.exposeInMainWorld('adblock', {
+  /** @returns {Promise<{ enabled: boolean, allowlist: string[] }>} */
+  getSettings: () => ipcRenderer.invoke('adblock:getSettings'),
+
+  /** @param {boolean} enabled */
+  setEnabled: (enabled) => ipcRenderer.invoke('adblock:setEnabled', enabled),
+
+  /**
+   * @param {string} hostname
+   * @param {boolean} allowed whether ads are allowed (blocking off) there
+   */
+  setSiteAllowed: (hostname, allowed) => ipcRenderer.invoke('adblock:setSiteAllowed', hostname, allowed),
+
+  /** @param {number} wcId a browser tab's guest */
+  blockedCount: (wcId) => ipcRenderer.invoke('adblock:blockedCount', wcId),
+
+  /**
+   * Subscribe to settings changes. Returns an unsubscribe fn.
+   * @param {(settings: { enabled: boolean, allowlist: string[] }) => void} callback
+   */
+  onSettings: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ enabled: boolean, allowlist: string[] }} settings
+     */
+    const listener = (_event, settings) => callback(settings);
+    ipcRenderer.on('adblock:settings', listener);
+    return () => ipcRenderer.removeListener('adblock:settings', listener);
+  },
+
+  /**
+   * Subscribe to tabs' blocked counts. Returns an unsubscribe fn.
+   * @param {(update: { wcId: number, count: number }) => void} callback
+   */
+  onBlocked: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, count: number }} update
+     */
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on('adblock:blocked', listener);
+    return () => ipcRenderer.removeListener('adblock:blocked', listener);
+  },
+});
+
+// Pop-up blocker bridge (window.popups), backed by the popups:* handlers in
+// electron/popups.mts: the windows each tab was stopped from opening, and the
+// sites allowed to open them without a click.
+contextBridge.exposeInMainWorld('popups', {
+  /** @returns {Promise<{ allowlist: string[] }>} */
+  getSettings: () => ipcRenderer.invoke('popups:getSettings'),
+
+  /**
+   * @param {string} hostname
+   * @param {boolean} allowed whether the site may open pop-ups without a click
+   */
+  setSiteAllowed: (hostname, allowed) => ipcRenderer.invoke('popups:setSiteAllowed', hostname, allowed),
+
+  /**
+   * @param {number} wcId a tab's guest
+   * @returns {Promise<string[]>}
+   */
+  blocked: (wcId) => ipcRenderer.invoke('popups:blocked', wcId),
+
+  /**
+   * Subscribe to settings changes. Returns an unsubscribe fn.
+   * @param {(settings: { allowlist: string[] }) => void} callback
+   */
+  onSettings: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ allowlist: string[] }} settings
+     */
+    const listener = (_event, settings) => callback(settings);
+    ipcRenderer.on('popups:settings', listener);
+    return () => ipcRenderer.removeListener('popups:settings', listener);
+  },
+
+  /**
+   * Subscribe to tabs' blocked pop-ups. Returns an unsubscribe fn.
+   * @param {(update: { wcId: number, urls: string[] }) => void} callback
+   */
+  onBlocked: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, urls: string[] }} update
+     */
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on('popups:blocked', listener);
+    return () => ipcRenderer.removeListener('popups:blocked', listener);
+  },
+});
+
 /**
  * Device/responsive emulation metrics for a browser tab.
  * @typedef {{ width: number, height: number, deviceScaleFactor?: number, mobile?: boolean, userAgent?: string }} DevtoolsEmulationMetrics
@@ -1096,12 +1778,15 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
   /**
    * Subscribe to forwarded shortcuts. Returns an unsubscribe fn. Payloads:
    *   { action: 'cycle-windows', backward }   (Alt+Tab / Alt+Shift+Tab)
+   *   { action: 'apps-menu' }                 (Super+Space)
+   *   { action: 'super-key', down }           (Super pressed / released)
    *   { action: 'screenshot' }                (Print Screen)
    *   { action: 'screenshot-area' }           (Shift+Print Screen or the box-select key)
    *   { action: 'new-tab', wcId }             (Ctrl+T in a browser tab)
    *   { action: 'close-tab', wcId }           (Ctrl+W in a browser tab)
    *   { action: 'focus-address', wcId }       (Ctrl+L in a browser tab)
    *   { action: 'find', wcId }                (Ctrl+F in a browser tab)
+   *   { action: 'view-source', wcId }         (Ctrl+U in a browser tab)
    *   { action: 'reload', force, wcId }       (Ctrl+R / F5, Ctrl+Shift+R / Shift+F5)
    *   { action: 'cycle-tab', backward, wcId } (Ctrl+Tab / Ctrl+Shift+Tab)
    *   { action: 'goto-tab', digit, wcId }     (Ctrl+1..9 in a browser tab)
@@ -1116,6 +1801,27 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('shortcut', handler);
     return () => ipcRenderer.removeListener('shortcut', handler);
+  },
+});
+
+// Pointer input inside <webview> guests, forwarded from the main process
+// (forwardGuestInput in main.mts) because it never reaches the shell's
+// document. See src/lib/guestInput.ts for the typed renderer-side accessor.
+contextBridge.exposeInMainWorld('guestInput', {
+  /**
+   * Subscribe to forwarded guest input. Returns an unsubscribe fn. Payloads:
+   *   { wcId, type: 'move', x, y, meta }
+   *   { wcId, type: 'down', x, y, button, meta }
+   * @param {(data: { wcId: number, type: string, x: number, y: number, button?: string, meta: boolean }) => void} callback
+   */
+  onInput: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, type: string, x: number, y: number, button?: string, meta: boolean }} data
+     */
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('guest:input', handler);
+    return () => ipcRenderer.removeListener('guest:input', handler);
   },
 });
 

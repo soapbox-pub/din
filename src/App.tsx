@@ -7,6 +7,7 @@ import { InferSeoMetaPlugin } from 'unhead/plugins';
 import { Suspense } from 'react';
 import NostrProvider from '@/components/NostrProvider';
 import { NostrSync } from '@/components/NostrSync';
+import { NostrdSync } from '@/components/NostrdSync';
 import { AppDataSync } from '@/components/AppDataSync';
 import { ProfileThemeApplier } from '@/components/ProfileThemeApplier';
 import { CursorThemeApplier } from '@/components/CursorThemeApplier';
@@ -55,6 +56,9 @@ const defaultConfig: AppConfig = {
   wobblyWindows: true,
   zoomLevel: 100,
   customCursor: null,
+  clockFormat: 'auto',
+  clockShowDate: true,
+  clockShowSeconds: false,
 };
 
 export function App() {
@@ -65,6 +69,7 @@ export function App() {
           <NostrLoginProvider storageKey='nostr:login'>
             <NostrProvider>
               <NostrSync />
+              <NostrdSync />
               <AppDataSync />
               <ProfileThemeApplier />
               <CursorThemeApplier />

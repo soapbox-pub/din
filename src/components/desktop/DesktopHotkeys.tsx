@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
+import { toggleAppsMenu } from '@/lib/appsMenu';
 import { publishBrowserHotkey, type BrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { isScreenshotSessionActive } from '@/lib/screenshot';
@@ -26,6 +27,8 @@ const SCREENSHOT_APP_ID = 'screenshot';
  *   as the 'screenshot-area' bridge shortcut instead - see electron/main.mts).
  *   Both are ignored while a capture session is already running, so they
  *   can't re-raise the deliberately hidden window mid-shot.
+ * - Super+Space opens the menu bar's apps menu with its search focused (or
+ *   closes it again).
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
@@ -49,7 +52,7 @@ const SCREENSHOT_APP_ID = 'screenshot';
  *
  * Note: when Din runs windowed inside a desktop environment, the host
  * window manager usually consumes Alt+Tab (and the OS may grab Print
- * Screen) first; in the Aladdin kiosk (cage) and the plain-browser dev
+ * Screen) first; in the DinOS kiosk (cage) and the plain-browser dev
  * loop the shortcuts reach us.
  */
 export function DesktopHotkeys() {
@@ -99,6 +102,14 @@ export function DesktopHotkeys() {
             start: e.shiftKey ? 'area' : 'screen',
           });
         }
+        return;
+      }
+
+      // Super+Space: open the apps menu, search focused.
+      if (e.key === ' ' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleAppsMenu();
         return;
       }
 
@@ -161,6 +172,7 @@ export function DesktopHotkeys() {
         else if (key === 'w') publish({ action: 'close-tab' });
         else if (key === 'l') publish({ action: 'focus-address' });
         else if (key === 'f') publish({ action: 'find' });
+        else if (key === 'u') publish({ action: 'view-source' });
         else if (key === 'r') publish({ action: 'reload' });
         else if (/^[1-9]$/.test(e.key)) {
           publish({ action: 'goto-tab', digit: Number(e.key) });
@@ -177,8 +189,10 @@ export function DesktopHotkeys() {
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
       // Alt+Tab from a guest is handled by the WindowSwitcher's own bridge
-      // subscription; here we only service screenshot captures.
-      if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {
+      // subscription; here we only service the apps menu and screenshots.
+      if (shortcut.action === 'apps-menu') {
+        toggleAppsMenu();
+      } else if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {
         if (!isScreenshotSessionActive()) {
           actionsRef.current.open(SCREENSHOT_APP_ID, {
             start: shortcut.action === 'screenshot-area' ? 'area' : 'screen',
