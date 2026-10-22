@@ -76,6 +76,20 @@ function snapTargetAt(areas: WorkArea[], x: number, y: number): SnapTarget | nul
   return null;
 }
 
+/**
+ * A monitor's top edge with another monitor above it doesn't stop the
+ * pointer, so its maximize zone arms only once the pointer rests just below
+ * it this long. Passing straight through carries the window up there.
+ */
+const SHARED_TOP_DWELL_MS = 350;
+
+/** The monitor whose shared top edge the pointer rides, if any. */
+function sharedTopAt(areas: WorkArea[], x: number, y: number): WorkArea | null {
+  const area = areaAt(areas, x, y);
+  if (!area || y - area.y > SNAP_TOP_PX || !hasNeighbor(areas, area, 'top', x)) return null;
+  return area;
+}
+
 /** The highest a window's top edge may go with the pointer (or window) at a spot. */
 function topLimit(areas: WorkArea[], x: number, y: number, rect: Rect): number {
   return (areaAt(areas, x, y) ?? areaFor(areas, rect)).y;
@@ -213,6 +227,8 @@ export const Window = memo(function Window({
     tearAway: { width: number; height: number } | null;
     /** Which snap zone the pointer currently rides, and on which monitor. */
     snap: SnapTarget | null;
+    /** The shared top edge the pointer is resting under, and whether it's armed yet. */
+    dwell?: { areaId: string; timer: number; armed: boolean };
   } | null>(null);
   const resizeState = useRef<{
     dir: ResizeDir;
@@ -828,7 +844,25 @@ export const Window = memo(function Window({
 
       // Snap hint while the pointer rides a monitor's edge: top maximizes,
       // left/right tile to that half.
-      const snap = snapTargetAt(areas, px, py);
+      let snap = snapTargetAt(areas, px, py);
+      const shared = snap ? null : sharedTopAt(areas, px, py);
+      if (shared && s.dwell?.areaId === shared.id) {
+        if (s.dwell.armed) snap = { zone: 'top', area: shared };
+      } else {
+        if (s.dwell) window.clearTimeout(s.dwell.timer);
+        s.dwell = undefined;
+        if (shared) {
+          const dwell = { areaId: shared.id, armed: false, timer: 0 };
+          // The pointer may rest without moving, so arm from a timer.
+          dwell.timer = window.setTimeout(() => {
+            if (dragState.current !== s || s.dwell !== dwell) return;
+            dwell.armed = true;
+            s.snap = { zone: 'top', area: shared };
+            setSnapHint(snapRect(shared, 'max'));
+          }, SHARED_TOP_DWELL_MS);
+          s.dwell = dwell;
+        }
+      }
       if (snap?.zone !== s.snap?.zone || snap?.area.id !== s.snap?.area.id) {
         s.snap = snap;
         setSnapHint(snap ? snapRect(snap.area, snap.zone === 'top' ? 'max' : snap.zone) : null);
@@ -856,6 +890,7 @@ export const Window = memo(function Window({
       const s = dragState.current;
       if (!s) return;
       dragState.current = null;
+      if (s.dwell) window.clearTimeout(s.dwell.timer);
 
       // An armed tear-away that never crossed the threshold is just a click
       // on a maximized title bar - nothing moved, nothing to commit.
