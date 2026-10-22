@@ -67,10 +67,17 @@ interface Drag {
 export function useDragReorder({
   ids,
   onMove,
+  relayout,
 }: {
   /** The reorderable items' ids, in display order. */
   ids: string[];
   onMove: (id: string, toIndex: number) => void;
+  /**
+   * Called after a reorder commits, before siblings are measured, for items
+   * whose size depends on their position (the dock's magnification). Sizes
+   * must settle synchronously here, not through a transition.
+   */
+  relayout?: () => void;
 }) {
   const elements = useRef(new Map<string, HTMLElement>());
   const drag = useRef<Drag | null>(null);
@@ -78,9 +85,9 @@ export function useDragReorder({
   // Sibling positions just before a reorder, to slide them from (FLIP).
   const before = useRef<Map<string, number> | null>(null);
 
-  const latest = useRef({ ids, onMove });
+  const latest = useRef({ ids, onMove, relayout });
   useLayoutEffect(() => {
-    latest.current = { ids, onMove };
+    latest.current = { ids, onMove, relayout };
   });
 
   /** Put the dragged element under the pointer, and reorder if it crossed a neighbor. */
@@ -118,6 +125,7 @@ export function useDragReorder({
     const old = before.current;
     if (!old) return;
     before.current = null;
+    latest.current.relayout?.();
     for (const [id, left] of old) {
       const el = elements.current.get(id);
       if (el) settle(el, left - el.getBoundingClientRect().left);

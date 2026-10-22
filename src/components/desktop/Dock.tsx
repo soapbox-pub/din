@@ -161,19 +161,6 @@ export function Dock({
     ...running.filter((id) => !pinned.includes(id)),
   ].filter((id) => getApp(id));
 
-  // Pinned tiles are dragged to reorder them; the new order is the pin order,
-  // so it roams with the pins. Pins for apps that aren't installed here stay
-  // in the list, after the visible ones.
-  const reorder = useDragReorder({
-    ids: pinned.filter((id) => getApp(id)),
-    onMove: (appId, to) =>
-      setPinned((prev) => {
-        const shown = prev.filter((id) => getApp(id) && id !== appId);
-        shown.splice(to, 0, appId);
-        return [...shown, ...prev.filter((id) => !getApp(id))];
-      }),
-  });
-
   // The Din window that currently holds focus: highest z among visible ones.
   const activeWindow = windows.reduce<WindowState | null>(
     (top, w) => (!w.minimized && !w.closing && (!top || w.z > top.z) ? w : top),
@@ -210,6 +197,85 @@ export function Dock({
   // fully magnified icon's height so the hover holds.
   const hoverPadRef = useRef<HTMLDivElement>(null);
   const magnified = useRef(false);
+  // The visible strip of tiles; its untransformed layout box is the dock's
+  // footprint for window-intersection checks (offsets ignore the slide
+  // transform, unlike getBoundingClientRect).
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  // Where the cursor sat within the tile under it, in slots from that tile's
+  // center, as of the last paint before a drag. A drag keeps it, so the
+  // magnification stays exactly as it was when the tile was picked up.
+  const grabFrac = useRef(0);
+
+  // Tiles come from the DOM in DOM order, not from entryIds, so a paint run
+  // right after a drag reorders the tiles (before effects refresh any
+  // closures) already sizes them for the new order.
+  const paint = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const tiles = [...strip.children].filter(
+      (el): el is HTMLElement => el instanceof HTMLElement && el !== hoverPadRef.current,
+    );
+    // Cursor position in "slot" units (fractional index into the tiles), or
+    // null when the pointer is off the dock. While a tile is dragged, it's
+    // the dragged tile's slot: the tile rides the pointer and overlaps its
+    // neighbors, so hit-testing would flip between them, and the sizes have
+    // to follow the order, which only changes when the drag reorders. The
+    // reorder hook relies on that: it measures layout right after a reorder.
+    // Otherwise it comes from the tile under the pointer, so the math stays
+    // stable while widths animate; rects are read before the width writes
+    // below, so the frame does one layout, not many.
+    let cursor: number | null = null;
+    const dragged = tiles.findIndex((el) => el.dataset.reorderDragging !== undefined);
+    const clientX = pointerX.current;
+    if (dragged !== -1) {
+      cursor = dragged + grabFrac.current;
+    } else if (clientX !== null) {
+      tiles.forEach((el, i) => {
+        const rect = el.getBoundingClientRect();
+        if (clientX >= rect.left && clientX < rect.right) {
+          grabFrac.current = (clientX - rect.left) / rect.width - 0.5;
+          cursor = i + grabFrac.current;
+        }
+      });
+    }
+    tiles.forEach((el, i) => {
+      const scale = cursor === null ? 1 : magnify(Math.abs(i - cursor));
+      el.style.width = `${Math.round(BASE_WIDTH * scale)}px`;
+    });
+    magnified.current = cursor !== null;
+    if (hoverPadRef.current) hoverPadRef.current.hidden = cursor === null;
+  }, []);
+
+  const scheduleMagnify = useCallback(
+    (clientX: number | null) => {
+      if (reduceMotion) return;
+      pointerX.current = clientX;
+      if (rafId.current) return;
+      rafId.current = requestAnimationFrame(() => {
+        rafId.current = 0;
+        paint();
+      });
+    },
+    [reduceMotion, paint],
+  );
+
+  useEffect(() => () => cancelAnimationFrame(rafId.current), []);
+
+  // Pinned tiles are dragged to reorder them; the new order is the pin order,
+  // so it roams with the pins. Pins for apps that aren't installed here stay
+  // in the list, after the visible ones.
+  const reorder = useDragReorder({
+    ids: pinned.filter((id) => getApp(id)),
+    onMove: (appId, to) =>
+      setPinned((prev) => {
+        const shown = prev.filter((id) => getApp(id) && id !== appId);
+        shown.splice(to, 0, appId);
+        return [...shown, ...prev.filter((id) => !getApp(id))];
+      }),
+    relayout: reduceMotion ? undefined : paint,
+  });
+  const dragging = reorder.draggingId !== null;
 
   /** Stable tile-ref registrar (identity matters for memo'd DockItems). */
   const { register: registerReorder } = reorder;
@@ -221,59 +287,6 @@ export function Dock({
     // targets (see src/lib/dockTiles.ts).
     registerDockTile(appId, el);
   }, [registerReorder]);
-
-  // Kept fresh via an every-render effect so the rAF callback sees the
-  // current tile list.
-  const paintRef = useRef<() => void>(() => {});
-  const paint = () => {
-    const clientX = pointerX.current;
-    // Cursor position in "slot" units (fractional index into entryIds), or
-    // null when the pointer is off the dock. Derived from the tile under the
-    // pointer so the math stays stable while widths animate; rects are read
-    // before the width writes below, so the frame does one layout, not many.
-    let cursor: number | null = null;
-    if (clientX !== null) {
-      entryIds.forEach((id, i) => {
-        const el = itemRefs.current.get(id);
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        if (clientX >= rect.left && clientX < rect.right) {
-          cursor = i + (clientX - rect.left) / rect.width - 0.5;
-        }
-      });
-    }
-    entryIds.forEach((id, i) => {
-      const el = itemRefs.current.get(id);
-      if (!el) return;
-      const scale = cursor === null ? 1 : magnify(Math.abs(i - cursor));
-      el.style.width = `${Math.round(BASE_WIDTH * scale)}px`;
-    });
-    magnified.current = cursor !== null;
-    if (hoverPadRef.current) hoverPadRef.current.hidden = cursor === null;
-  };
-  useEffect(() => {
-    paintRef.current = paint;
-  });
-
-  const scheduleMagnify = useCallback(
-    (clientX: number | null) => {
-      if (reduceMotion) return;
-      pointerX.current = clientX;
-      if (rafId.current) return;
-      rafId.current = requestAnimationFrame(() => {
-        rafId.current = 0;
-        paintRef.current();
-      });
-    },
-    [reduceMotion],
-  );
-
-  useEffect(() => () => cancelAnimationFrame(rafId.current), []);
-
-  // The visible strip of tiles; its untransformed layout box is the dock's
-  // footprint for window-intersection checks (offsets ignore the slide
-  // transform, unlike getBoundingClientRect).
-  const stripRef = useRef<HTMLDivElement>(null);
 
   // Does the focused window overlap the dock's footprint? Windows behind it
   // don't count, so a small window raised over a maximized one brings the
@@ -530,6 +543,7 @@ export function Dock({
                 activeWindowId={activeWindow?.id ?? null}
                 controls={dinControls}
                 isPinned={pinned.includes(appId)}
+                reordering={dragging}
                 onTogglePin={togglePin}
                 onDragPointerDown={reorder.onPointerDown}
                 onUninstall={
@@ -571,6 +585,7 @@ const DockItem = memo(function DockItem({
   activeWindowId,
   controls,
   isPinned,
+  reordering,
   onTogglePin,
   onDragPointerDown,
   onUninstall,
@@ -582,6 +597,11 @@ const DockItem = memo(function DockItem({
   /** The window manager's actions, in the shape a tile consumes. */
   controls: DockControls;
   isPinned: boolean;
+  /**
+   * A tile is being dragged. Widths then jump rather than animate: the
+   * reorder measures where tiles land right after each move.
+   */
+  reordering: boolean;
   onTogglePin: (appId: string) => void;
   /** Starts a drag to reorder the pinned tiles. */
   onDragPointerDown: (appId: string, e: React.PointerEvent<HTMLElement>) => void;
@@ -756,7 +776,7 @@ const DockItem = memo(function DockItem({
     ref: tileRef,
     className: cn(
       'group/dock-item relative h-20',
-      'motion-safe:transition-[width] motion-safe:duration-150 motion-safe:ease-out',
+      !reordering && 'motion-safe:transition-[width] motion-safe:duration-150 motion-safe:ease-out',
     ),
     // Rest width only; magnification writes widths directly onto the node
     // (see Dock). React re-renders never change this value, so they don't
@@ -803,6 +823,7 @@ const DockItem = memo(function DockItem({
   prev.activeWindowId === next.activeWindowId &&
   prev.controls === next.controls &&
   prev.isPinned === next.isPinned &&
+  prev.reordering === next.reordering &&
   prev.onTogglePin === next.onTogglePin &&
   prev.onDragPointerDown === next.onDragPointerDown &&
   prev.onUninstall === next.onUninstall &&
