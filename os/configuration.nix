@@ -291,6 +291,10 @@ let
     fi
     # Chromium logging into the journal (via cage), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
+    # Chromium dlopens libva for hardware video decoding (VA-API), and
+    # Electron's wrapper doesn't put it on the library path, so without this
+    # every video is decoded on the CPU.
+    export LD_LIBRARY_PATH=${pkgs.libva-minimal.out}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     # pam_systemd gives the session's processes CAP_WAKE_ALARM as an ambient
     # capability (its default for a seat), which everything Din and its
     # Terminal start would inherit. Programs that drop all their capabilities
