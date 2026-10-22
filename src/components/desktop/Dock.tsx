@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/popover';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useAppData } from '@/hooks/useAppData';
+import { useDragReorder } from '@/hooks/useDragReorder';
 import { registerDockTile } from '@/lib/dockTiles';
 import { cn } from '@/lib/utils';
 import { APPS } from '@/lib/apps';
@@ -159,6 +160,19 @@ export function Dock({
     ...running.filter((id) => !pinned.includes(id)),
   ].filter((id) => getApp(id));
 
+  // Pinned tiles are dragged to reorder them; the new order is the pin order,
+  // so it roams with the pins. Pins for apps that aren't installed here stay
+  // in the list, after the visible ones.
+  const reorder = useDragReorder({
+    ids: pinned.filter((id) => getApp(id)),
+    onMove: (appId, to) =>
+      setPinned((prev) => {
+        const shown = prev.filter((id) => getApp(id) && id !== appId);
+        shown.splice(to, 0, appId);
+        return [...shown, ...prev.filter((id) => !getApp(id))];
+      }),
+  });
+
   // The Din window that currently holds focus: highest z among visible ones.
   const activeWindow = windows.reduce<WindowState | null>(
     (top, w) => (!w.minimized && !w.closing && (!top || w.z > top.z) ? w : top),
@@ -197,13 +211,15 @@ export function Dock({
   const magnified = useRef(false);
 
   /** Stable tile-ref registrar (identity matters for memo'd DockItems). */
+  const { register: registerReorder } = reorder;
   const registerRef = useCallback((appId: string, el: HTMLDivElement | null) => {
     if (el) itemRefs.current.set(appId, el);
     else itemRefs.current.delete(appId);
+    registerReorder(appId, el);
     // Mirror into the module-level registry the genie minimize animation
     // targets (see src/lib/dockTiles.ts).
     registerDockTile(appId, el);
-  }, []);
+  }, [registerReorder]);
 
   // Kept fresh via an every-render effect so the rAF callback sees the
   // current tile list.
@@ -516,6 +532,7 @@ export function Dock({
                 controls={dinControls}
                 isPinned={pinned.includes(appId)}
                 onTogglePin={togglePin}
+                onDragPointerDown={reorder.onPointerDown}
                 onUninstall={
                   webApps.some((webApp) => webApp.id === appId)
                     ? uninstall
@@ -538,6 +555,7 @@ export function Dock({
  * - multiple windows: click opens a picker listing every window
  * - middle-click always opens a new window
  * - right-click: new window, pin/unpin, close all, uninstall
+ * - dragging a pinned tile moves it among the pinned ones
  *
  * Memoized: the dock re-renders on every window commit, but a tile (and its
  * Radix context-menu/popover tree) only re-renders when its own app's
@@ -553,6 +571,7 @@ const DockItem = memo(function DockItem({
   controls,
   isPinned,
   onTogglePin,
+  onDragPointerDown,
   onUninstall,
 }: {
   app: AppDefinition;
@@ -563,6 +582,8 @@ const DockItem = memo(function DockItem({
   controls: DockControls;
   isPinned: boolean;
   onTogglePin: (appId: string) => void;
+  /** Starts a drag to reorder the pinned tiles. */
+  onDragPointerDown: (appId: string, e: React.PointerEvent<HTMLElement>) => void;
   /** Present only for installed web apps; removes the app entirely. */
   onUninstall?: (appId: string) => void;
 }) {
@@ -602,6 +623,7 @@ const DockItem = memo(function DockItem({
         // PopoverTrigger, which would otherwise toggle the window picker mid-
         // gesture and make the menu flicker open/closed.
         if (e.button !== 0) e.stopPropagation();
+        else if (isPinned) onDragPointerDown(app.id, e);
       }}
       onAuxClick={(e) => {
         if (e.button === 1) open(app.id);
@@ -770,6 +792,7 @@ const DockItem = memo(function DockItem({
   prev.controls === next.controls &&
   prev.isPinned === next.isPinned &&
   prev.onTogglePin === next.onTogglePin &&
+  prev.onDragPointerDown === next.onDragPointerDown &&
   prev.onUninstall === next.onUninstall &&
   prev.appWindows.length === next.appWindows.length &&
   prev.appWindows.every((w, i) => {

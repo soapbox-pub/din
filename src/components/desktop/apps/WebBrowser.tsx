@@ -73,6 +73,7 @@ import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { moveItem, useDragReorder } from '@/hooks/useDragReorder';
 import {
   bareUrl,
   matchHistory,
@@ -130,6 +131,8 @@ const PAGE_MIN_SIZE = 96;
 
 let nextTabId = 0;
 const newTabId = () => `tab-${nextTabId++}`;
+/** Where a tab falls in opening order, from its id. */
+const tabSeq = (id: string) => Number(id.slice('tab-'.length));
 
 /** One browser tab: UI state plus its rendering surface's identity. */
 interface Tab {
@@ -246,6 +249,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const setTitlebar = useWindowTitlebar();
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab(NEW_TAB_URL)]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
+  // Tab surfaces render in the order their tabs opened, not in tab order:
+  // reordering the tabs would otherwise move their <webview>s around the
+  // DOM, and a moved <webview> loses its guest page.
+  const surfaceTabs = useMemo(
+    () => [...tabs].sort((a, b) => tabSeq(a.id) - tabSeq(b.id)),
+    [tabs],
+  );
   const views = useRef(new Map<string, BrowserViewHandle>());
   // The address/search input, for Ctrl+L and focusing fresh blank tabs.
   const addressRef = useRef<HTMLInputElement>(null);
@@ -405,6 +415,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         onActivate={setActiveId}
         onCloseTab={closeTab}
         onNewTab={openNewTab}
+        onMoveTab={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
       />,
     );
     return () => setTitlebar(null);
@@ -1444,7 +1455,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             only the active one is visible. (visibility, not display:none -
             Electron <webview>s misbehave when display is toggled.) */}
         <div className="relative min-w-0 flex-1 overflow-hidden bg-white">
-        {tabs.map((tab) => (
+        {surfaceTabs.map((tab) => (
           <TabSurface
             key={tab.id}
             id={tab.id}
@@ -1818,13 +1829,17 @@ function TabStrip({
   onActivate,
   onCloseTab,
   onNewTab,
+  onMoveTab,
 }: {
   tabs: Tab[];
   activeId: string;
   onActivate: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: () => void;
+  /** Move a tab to a new index; tabs are dragged to reorder them. */
+  onMoveTab: (id: string, toIndex: number) => void;
 }) {
+  const reorder = useDragReorder({ ids: tabs.map((t) => t.id), onMove: onMoveTab });
   return (
     <div
       role="tablist"
@@ -1836,6 +1851,9 @@ function TabStrip({
           key={tab.id}
           tab={tab}
           active={tab.id === activeId}
+          dragging={reorder.draggingId === tab.id}
+          ref={(el) => reorder.register(tab.id, el)}
+          onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onCloseTab(tab.id)}
         />
@@ -1861,11 +1879,17 @@ function TabStrip({
 function TabButton({
   tab,
   active,
+  dragging,
+  ref,
+  onPointerDown,
   onActivate,
   onClose,
 }: {
   tab: Tab;
   active: boolean;
+  dragging: boolean;
+  ref: React.Ref<HTMLDivElement>;
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onActivate: () => void;
   onClose: () => void;
 }) {
@@ -1874,6 +1898,8 @@ function TabButton({
 
   return (
     <div
+      ref={ref}
+      onPointerDown={onPointerDown}
       role="tab"
       aria-selected={active}
       aria-label={label}
@@ -1891,11 +1917,12 @@ function TabButton({
       }}
       title={label}
       className={cn(
-        'group flex h-7 w-44 min-w-0 shrink-0 cursor-default items-center gap-2 rounded-md border px-2.5 text-xs',
+        'group relative flex h-7 w-44 min-w-0 shrink-0 cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         active
           ? 'border-border/60 bg-background text-foreground shadow-sm'
           : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+        dragging && 'border-border/60 bg-background shadow-md',
       )}
     >
       {icon ? (

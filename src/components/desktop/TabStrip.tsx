@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
+import { useDragReorder } from '@/hooks/useDragReorder';
 import { cn } from '@/lib/utils';
 
 /**
@@ -19,7 +20,8 @@ export interface TabDescriptor {
  * window's title bar via `useWindowTitlebar` so tabs sit on the same line as
  * the window controls (Chrome-style). The surrounding <header> is the window
  * drag handle; tab buttons and the new-tab button handle their own clicks, so
- * dragging empty space still moves the window.
+ * dragging empty space still moves the window, while dragging a tab moves the
+ * tab along the strip.
  *
  * Used by the Terminal and Files apps; the Web Browser has its own richer
  * variant (favicons, loading state) but the same interaction model.
@@ -32,6 +34,7 @@ export function TabStrip({
   onActivate,
   onClose,
   onNew,
+  onMove,
 }: {
   tabs: TabDescriptor[];
   activeId: string;
@@ -42,7 +45,10 @@ export function TabStrip({
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
   onNew: () => void;
+  /** Move a tab to a new index; tabs are dragged to reorder them. */
+  onMove: (id: string, toIndex: number) => void;
 }) {
+  const reorder = useDragReorder({ ids: tabs.map((t) => t.id), onMove });
   return (
     <div
       role="tablist"
@@ -56,6 +62,9 @@ export function TabStrip({
           key={tab.id}
           tab={tab}
           active={tab.id === activeId}
+          dragging={reorder.draggingId === tab.id}
+          ref={(el) => reorder.register(tab.id, el)}
+          onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onClose(tab.id)}
         />
@@ -84,16 +93,24 @@ export function TabStrip({
 function TabButton({
   tab,
   active,
+  dragging,
+  ref,
+  onPointerDown,
   onActivate,
   onClose,
 }: {
   tab: TabDescriptor;
   active: boolean;
+  dragging: boolean;
+  ref: React.Ref<HTMLDivElement>;
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onActivate: () => void;
   onClose: () => void;
 }) {
   return (
     <div
+      ref={ref}
+      onPointerDown={onPointerDown}
       role="tab"
       aria-selected={active}
       aria-label={tab.title}
@@ -111,11 +128,12 @@ function TabButton({
       }}
       title={tab.title}
       className={cn(
-        'group flex h-7 w-44 min-w-9 shrink cursor-default items-center gap-2 rounded-md border px-2.5 text-xs',
+        'group relative flex h-7 w-44 min-w-9 shrink cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         active
           ? 'border-border/60 bg-background text-foreground shadow-sm'
           : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+        dragging && 'border-border/60 bg-background shadow-md',
       )}
     >
       {tab.icon && <span className="shrink-0 opacity-80">{tab.icon}</span>}

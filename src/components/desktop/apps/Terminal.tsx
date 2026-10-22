@@ -9,6 +9,7 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
+import { moveItem } from '@/hooks/useDragReorder';
 import { TabStrip } from '@/components/desktop/TabStrip';
 import {
   ContextMenu,
@@ -472,6 +473,7 @@ export function Terminal({ windowId }: AppComponentProps) {
         onActivate={setActiveId}
         onClose={closeTab}
         onNew={openTab}
+        onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
       />,
     );
     return () => setTitlebar(null);

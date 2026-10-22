@@ -53,6 +53,7 @@ import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
+import { moveItem } from '@/hooks/useDragReorder';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -202,6 +203,7 @@ export function FileBrowser({ windowId }: AppComponentProps) {
         onActivate={setActiveId}
         onClose={closeTab}
         onNew={openTab}
+        onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
       />,
     );
     return () => setTitlebar(null);
