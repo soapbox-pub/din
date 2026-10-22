@@ -72,6 +72,24 @@ export function sanitizeNavigationUrl(input: string): string | null {
   return url.toString();
 }
 
+const VIEW_SOURCE_PREFIX = 'view-source:';
+
+/**
+ * The `view-source:` URL that shows a page's source in a browser tab, or
+ * `null` for anything that isn't an http/https/nsite page (internal pages,
+ * blank tabs, extension pages, or a source view itself).
+ */
+export function viewSourceUrl(url: string): string | null {
+  if (!/^(https?|nsite):\/\//i.test(url)) return null;
+  const sanitized = sanitizeNavigationUrl(url);
+  return sanitized && `${VIEW_SOURCE_PREFIX}${sanitized}`;
+}
+
+/** Whether a tab URL is a page-source view (`view-source:…`). */
+export function isViewSourceUrl(url: string): boolean {
+  return url.toLowerCase().startsWith(VIEW_SOURCE_PREFIX);
+}
+
 /**
  * Sanitize a URL for safe use as an image `src` (favicons, avatars, banners).
  *
@@ -125,6 +143,13 @@ export function resolveNavigation(input: string): string | null {
   // `://`, they would otherwise fall through to a web search below.
   const internal = normalizeInternalUrl(trimmed);
   if (internal) return internal;
+
+  // `view-source:<url>` shows a page's source, as in Chrome. The inner
+  // address resolves like any other, so `view-source:example.com` works.
+  if (isViewSourceUrl(trimmed)) {
+    const inner = resolveNavigation(trimmed.slice(VIEW_SOURCE_PREFIX.length));
+    return inner ? viewSourceUrl(inner) : null;
+  }
 
   // nsite addresses first, so `nsite://soapbox.pub/armada` isn't mistaken for
   // a search term. This also accepts the `name@domain` spelling and rewrites

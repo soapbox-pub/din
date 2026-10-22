@@ -17,6 +17,7 @@
  *   - Ctrl+W in a browser tab -> { action: 'close-tab', wcId }
  *   - Ctrl+L in a browser tab -> { action: 'focus-address', wcId }
  *   - Ctrl+F in a browser tab -> { action: 'find', wcId }
+ *   - Ctrl+U in a browser tab -> { action: 'view-source', wcId }
  *   - Ctrl+R / F5 (+Shift)    -> { action: 'reload', force, wcId }
  *   - Ctrl+Tab / Ctrl+Shift+Tab -> { action: 'cycle-tab', backward, wcId }
  *   - Ctrl+1..9 in a browser tab -> { action: 'goto-tab', digit, wcId }
@@ -79,6 +80,11 @@ export type ShellShortcut =
   | {
       /** Ctrl+F pressed inside a browser tab: open the find bar. */
       action: 'find';
+      wcId: number;
+    }
+  | {
+      /** Ctrl+U pressed inside a browser tab: view its page source. */
+      action: 'view-source';
       wcId: number;
     }
   | {

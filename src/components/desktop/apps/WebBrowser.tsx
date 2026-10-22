@@ -7,6 +7,7 @@ import {
   ChevronUp,
   Code,
   Download,
+  FileCode,
   FolderOpen,
   Globe,
   History,
@@ -24,7 +25,12 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { resolveNavigation, sanitizeImageUrl, sanitizeUrl } from '@/lib/sanitizeUrl';
+import {
+  resolveNavigation,
+  sanitizeImageUrl,
+  sanitizeUrl,
+  viewSourceUrl,
+} from '@/lib/sanitizeUrl';
 import { nsiteDisplayUrl } from '@/lib/nsite';
 import { pickBestIcon, type IconCandidate } from '@/lib/appIcon';
 import {
@@ -1283,6 +1289,22 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     else view.reload();
   }, []);
 
+  /**
+   * Show a tab's page source in a new tab beside it (Ctrl+U), the way Chrome
+   * does. Pages with no source to show (blank tabs, internal and extension
+   * pages, a source view itself) are left alone. Webview mode only: the
+   * iframe fallback can't load view-source: URLs.
+   */
+  const viewSource = useCallback(
+    (id: string) => {
+      if (!webviewMode) return;
+      const tab = tabsRef.current.find((t) => t.id === id);
+      const url = tab && viewSourceUrl(tab.url);
+      if (url) openTab(url, true, null, id);
+    },
+    [webviewMode, openTab],
+  );
+
   /** Activate the next/previous tab (Ctrl+Tab / Ctrl+Shift+Tab), wrapping. */
   const cycleTab = useCallback((backward: boolean) => {
     const ts = tabsRef.current;
@@ -1391,6 +1413,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'find':
           openFind();
           break;
+        case 'view-source':
+          viewSource(activeIdRef.current);
+          break;
         case 'reload':
           reloadTab(activeIdRef.current, false);
           break;
@@ -1417,6 +1442,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     closeTab,
     focusAddress,
     openFind,
+    viewSource,
     reloadTab,
     cycleTab,
     gotoTabDigit,
@@ -1457,6 +1483,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'find':
           openFind();
           break;
+        case 'view-source':
+          viewSource(tab.id);
+          break;
         case 'reload':
           reloadTab(tab.id, shortcut.force);
           break;
@@ -1479,6 +1508,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     closeTab,
     focusAddress,
     openFind,
+    viewSource,
     reloadTab,
     cycleTab,
     gotoTabDigit,
@@ -1562,7 +1592,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         />
 
         {/* One overflow menu gathers the browser's less-frequent *actions*:
-            new/private windows, find-in-page, developer tools, clearing data.
+            new/private windows, find-in-page, page source, developer tools,
+            clearing data.
             Anything with a body to it - extensions, userscripts, preferences -
             lives on the settings page this menu links to, so the menu stays
             short enough that a small window can't clip it. */}
@@ -1570,6 +1601,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           showFind={webviewMode}
           findDisabled={activeTab.wcId === null}
           onFind={openFind}
+          viewSourceDisabled={viewSourceUrl(activeTab.url) === null}
+          onViewSource={() => viewSource(activeId)}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -3339,8 +3372,8 @@ function BrowserActionList({ tabWcId }: { tabWcId: number | null }) {
 /**
  * The browser's overflow menu (the toolbar's menu button): one popover for the
  * controls that don't each warrant a toolbar button - opening a new or private
- * window, find-in-page, developer tools, clearing browsing data - plus a way
- * into the settings page.
+ * window, find-in-page, page source, developer tools, clearing browsing data -
+ * plus a way into the settings page.
  *
  * Deliberately actions-only and one screenful short. Everything with a body to
  * it (extensions, userscripts, preferences) lives on about:preferences
@@ -3351,6 +3384,8 @@ function BrowserMenu({
   showFind,
   findDisabled,
   onFind,
+  viewSourceDisabled,
+  onViewSource,
   hasDevtools,
   devtoolsActive,
   devtoolsDisabled,
@@ -3365,6 +3400,9 @@ function BrowserMenu({
   showFind: boolean;
   findDisabled: boolean;
   onFind: () => void;
+  /** No source to show (a blank tab, internal page, or source view). */
+  viewSourceDisabled: boolean;
+  onViewSource: () => void;
   /** Whether the docked-devtools control is available (webview mode). */
   hasDevtools: boolean;
   devtoolsActive: boolean;
@@ -3421,6 +3459,15 @@ function BrowserMenu({
               shortcut="Ctrl+F"
               disabled={findDisabled}
               onClick={() => run(onFind)}
+            />
+          )}
+          {showFind && (
+            <BrowserMenuItem
+              icon={FileCode}
+              label="View page source"
+              shortcut="Ctrl+U"
+              disabled={viewSourceDisabled}
+              onClick={() => run(onViewSource)}
             />
           )}
           {hasDevtools && (

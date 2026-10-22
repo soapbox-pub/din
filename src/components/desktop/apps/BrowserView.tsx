@@ -132,9 +132,9 @@ export interface BrowserViewProps {
  *     sites' framing policies, so many sites will refuse to load. Back and
  *     forward are handled by the caller (manual history).
  *
- * Surfaces only ever receive https URLs - plus chrome-extension:// URLs on
- * the webview surface, for extension options/dashboard pages (validated
- * upstream, see `isAllowedTabUrl`).
+ * Surfaces only ever receive https URLs (and view-source: views of them) -
+ * plus chrome-extension:// URLs on the webview surface, for extension
+ * options/dashboard pages (validated upstream, see `isAllowedTabUrl`).
  */
 export const BrowserView = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function BrowserView(props, ref) {
@@ -374,7 +374,14 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       if (!el) return;
       const report = (url: unknown) => {
         if (typeof url !== 'string') return;
-        onNavigate?.(url, el.canGoBack(), el.canGoForward());
+        // A page-source view commits its inner URL; only getURL() has the
+        // `view-source:` prefix the tab must keep.
+        const current = el.getURL();
+        onNavigate?.(
+          current === `view-source:${url}` ? current : url,
+          el.canGoBack(),
+          el.canGoForward(),
+        );
       };
       const navigate = (e: Event) => {
         report((e as Event & { url?: string }).url);
@@ -451,6 +458,7 @@ interface ElectronWebviewElement extends HTMLElement {
   setZoomFactor(factor: number): void;
   canGoBack(): boolean;
   canGoForward(): boolean;
+  getURL(): string;
   getWebContentsId(): number;
   executeJavaScript(code: string): Promise<unknown>;
 }

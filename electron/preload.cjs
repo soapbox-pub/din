@@ -1777,6 +1777,7 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
    *   { action: 'close-tab', wcId }           (Ctrl+W in a browser tab)
    *   { action: 'focus-address', wcId }       (Ctrl+L in a browser tab)
    *   { action: 'find', wcId }                (Ctrl+F in a browser tab)
+   *   { action: 'view-source', wcId }         (Ctrl+U in a browser tab)
    *   { action: 'reload', force, wcId }       (Ctrl+R / F5, Ctrl+Shift+R / Shift+F5)
    *   { action: 'cycle-tab', backward, wcId } (Ctrl+Tab / Ctrl+Shift+Tab)
    *   { action: 'goto-tab', digit, wcId }     (Ctrl+1..9 in a browser tab)

@@ -4048,7 +4048,16 @@ type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
   | { action: 'apps-menu' | 'screenshot' | 'screenshot-area' }
   | { action: 'super-key'; down: boolean }
-  | { action: 'new-tab' | 'close-tab' | 'focus-address' | 'find' | 'back' | 'forward' }
+  | {
+      action:
+        | 'new-tab'
+        | 'close-tab'
+        | 'focus-address'
+        | 'find'
+        | 'view-source'
+        | 'back'
+        | 'forward';
+    }
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
   | { action: 'goto-tab'; digit: number };
@@ -4102,6 +4111,7 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
     if (key === 'w') return { action: 'close-tab' };
     if (key === 'l') return { action: 'focus-address' };
     if (key === 'f') return { action: 'find' };
+    if (key === 'u') return { action: 'view-source' };
     if (key === 'r') return { action: 'reload', force: false };
     if (/^[1-9]$/.test(input.key)) {
       return { action: 'goto-tab', digit: Number(input.key) };

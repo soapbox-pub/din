@@ -172,6 +172,7 @@ export function DesktopHotkeys() {
         else if (key === 'w') publish({ action: 'close-tab' });
         else if (key === 'l') publish({ action: 'focus-address' });
         else if (key === 'f') publish({ action: 'find' });
+        else if (key === 'u') publish({ action: 'view-source' });
         else if (key === 'r') publish({ action: 'reload' });
         else if (/^[1-9]$/.test(e.key)) {
           publish({ action: 'goto-tab', digit: Number(e.key) });
