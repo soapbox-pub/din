@@ -12,9 +12,11 @@ owns the pseudo-terminal:
   - fd 3:          control channel; newline-delimited "resize <rows> <cols>"
                    commands (TIOCSWINSZ needs an fd to the pty, which only
                    this process holds)
-  - fd 4:          events; a JSON line {"type": "done", "command", "seconds"}
-                   each time the shell gets the terminal back from a command,
-                   so the Terminal can say when a long one finishes
+  - fd 4:          events; a JSON line {"type": "start", "command"} each time
+                   a command takes the terminal (the Terminal names its tab
+                   after it), and {"type": "done", "command", "seconds"} each
+                   time the shell gets it back, so the Terminal can say when
+                   a long one finishes
 
 Commands are followed through the terminal's foreground process group:
 whatever isn't the shell holds it while it runs. That works with any shell
@@ -127,6 +129,7 @@ def main() -> int:
         if foreground > 0 and foreground != pid:
             if job is None:
                 job = (time.monotonic(), command_line(foreground))
+                emit({"type": "start", "command": job[1]})
         elif job is not None:
             started, command = job
             job = None

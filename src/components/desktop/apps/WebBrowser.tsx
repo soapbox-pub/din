@@ -69,6 +69,7 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
@@ -307,6 +308,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const pendingInspect = useRef(new Map<string, { x: number; y: number }>());
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  useWindowTitle(activeTab.title ?? hostnameOf(activeTab.url) ?? (isPrivate ? 'Private window' : 'New tab'));
 
   const updateTab = useCallback(
     (id: string, patch: Partial<Tab> | ((tab: Tab) => Partial<Tab>)) => {

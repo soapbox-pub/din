@@ -52,6 +52,7 @@ import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { TabStrip } from '@/components/desktop/TabStrip';
 import { moveItem } from '@/hooks/useDragReorder';
 import {
@@ -183,6 +184,9 @@ export function FileBrowser({ windowId }: AppComponentProps) {
     },
     [closeWindow, windowId],
   );
+
+  const activeCwd = cwds[activeId] ?? null;
+  useWindowTitle(activeCwd && tabTitle(activeCwd));
 
   const reportCwd = useCallback((id: string, cwd: string | null) => {
     setCwds((c) => (c[id] === cwd ? c : { ...c, [id]: cwd }));

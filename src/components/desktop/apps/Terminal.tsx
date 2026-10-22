@@ -7,6 +7,7 @@ import type { AppComponentProps } from '@/lib/apps';
 import { getPtyBridge } from '@/lib/pty';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { moveItem } from '@/hooks/useDragReorder';
@@ -153,14 +154,25 @@ type LayoutNode = LeafNode | SplitNode;
 /** Tab-management actions triggered by keyboard shortcuts inside a pane. */
 type TabShortcut = 'next-tab' | 'prev-tab' | 'new-tab' | 'close-tab';
 
-/** One terminal tab: its identity, tab label, and pane layout. */
+/** One terminal tab: its identity and pane layout. */
 interface TermTab {
   id: string;
-  /** Sequential number shown in the tab (1-based, stable per tab). */
-  index: number;
   layout: LayoutNode;
   /** The pane that holds (or should hold) keyboard focus. */
   activePaneId: string;
+}
+
+/** What a pane's tab is named after: its last command, else its directory. */
+interface PaneLabel {
+  command?: string;
+  cwd?: string;
+}
+
+function paneTitle(label: PaneLabel | undefined): string {
+  if (label?.command) return label.command;
+  const cwd = label?.cwd;
+  if (cwd) return cwd === '/' ? '/' : cwd.slice(cwd.lastIndexOf('/') + 1) || '/';
+  return 'Terminal';
 }
 
 /** Replace the leaf `paneId` with a split of itself and a new pane. */
@@ -312,18 +324,32 @@ export function Terminal({ windowId }: AppComponentProps) {
   const [tabs, setTabs] = useState<TermTab[]>(() => {
     const paneId = newSessionId();
     return [
-      { id: newTabId(), index: 1, layout: { type: 'leaf', paneId }, activePaneId: paneId },
+      { id: newTabId(), layout: { type: 'leaf', paneId }, activePaneId: paneId },
     ];
   });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
-  // Counter so each new tab gets a stable, increasing "Terminal N" label.
-  const nextIndex = useRef(2);
   // Tracks last known CWD per pane, updated via OSC 7 from each shell.
   const panesCwd = useRef<Map<string, string>>(new Map());
+  // What each pane's tab is named after.
+  const [labels, setLabels] = useState<Record<string, PaneLabel>>({});
+
+  const updateLabel = useCallback((paneId: string, patch: PaneLabel | null) => {
+    setLabels((ls) => {
+      if (patch === null) {
+        if (!(paneId in ls)) return ls;
+        const { [paneId]: _, ...rest } = ls;
+        return rest;
+      }
+      const current = ls[paneId];
+      if (current && Object.entries(patch).every(([k, v]) => current[k as keyof PaneLabel] === v)) return ls;
+      return { ...ls, [paneId]: { ...current, ...patch } };
+    });
+  }, []);
 
   const handleCwdChange = useCallback((paneId: string, cwd: string) => {
     panesCwd.current.set(paneId, cwd);
-  }, []);
+    updateLabel(paneId, { cwd });
+  }, [updateLabel]);
 
   const openTab = useCallback(() => {
     const paneId = newSessionId();
@@ -331,7 +357,6 @@ export function Terminal({ windowId }: AppComponentProps) {
     const initialCwd = activeTab ? panesCwd.current.get(activeTab.activePaneId) : undefined;
     const tab: TermTab = {
       id: newTabId(),
-      index: nextIndex.current++,
       layout: { type: 'leaf', paneId, initialCwd },
       activePaneId: paneId,
     };
@@ -456,6 +481,10 @@ export function Terminal({ windowId }: AppComponentProps) {
     );
   }, []);
 
+  // Each tab is named after its focused pane, and the window after its tab.
+  const activeTab = tabs.find((t) => t.id === activeId);
+  useWindowTitle(activeTab ? paneTitle(labels[activeTab.activePaneId]) : null);
+
   // Publish the tab strip into the window title bar (Chrome-style), so tabs
   // share a line with the window controls. Cleared on unmount.
   useEffect(() => {
@@ -464,7 +493,7 @@ export function Terminal({ windowId }: AppComponentProps) {
       <TabStrip
         tabs={tabs.map((t) => ({
           id: t.id,
-          title: `Terminal ${t.index}`,
+          title: paneTitle(labels[t.activePaneId]),
           icon: <SquareTerminal className="size-3.5" />,
         }))}
         activeId={activeId}
@@ -477,7 +506,7 @@ export function Terminal({ windowId }: AppComponentProps) {
       />,
     );
     return () => setTitlebar(null);
-  }, [bridge, tabs, activeId, closeTab, openTab, setTitlebar]);
+  }, [bridge, tabs, labels, activeId, closeTab, openTab, setTitlebar]);
 
   if (!bridge) {
     return (
@@ -509,6 +538,7 @@ export function Terminal({ windowId }: AppComponentProps) {
           onRevealPane={revealPane}
           onResizeSplit={resizeSplit}
           onCwdChange={handleCwdChange}
+          onLabel={updateLabel}
           onTabShortcut={onTabShortcut}
         />
       ))}
@@ -530,6 +560,7 @@ const TerminalTab = memo(function TerminalTab({
   onRevealPane,
   onResizeSplit,
   onCwdChange,
+  onLabel,
   onTabShortcut,
 }: {
   tab: TermTab;
@@ -540,6 +571,7 @@ const TerminalTab = memo(function TerminalTab({
   onRevealPane: (tabId: string, paneId: string) => void;
   onResizeSplit: (tabId: string, splitId: string, ratio: number) => void;
   onCwdChange: (paneId: string, cwd: string) => void;
+  onLabel: (paneId: string, label: PaneLabel | null) => void;
   onTabShortcut: (action: TabShortcut) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -618,6 +650,7 @@ const TerminalTab = memo(function TerminalTab({
             onClose={handleClose}
             onReveal={handleReveal}
             onCwdChange={onCwdChange}
+            onLabel={onLabel}
             onTabShortcut={onTabShortcut}
           />
         </div>
@@ -675,6 +708,7 @@ const TerminalSession = memo(function TerminalSession({
   onClose,
   onReveal,
   onCwdChange,
+  onLabel,
   onTabShortcut,
 }: {
   paneId: string;
@@ -689,6 +723,7 @@ const TerminalSession = memo(function TerminalSession({
   /** Bring this pane into view. */
   onReveal: (paneId: string) => void;
   onCwdChange: (paneId: string, cwd: string) => void;
+  onLabel: (paneId: string, label: PaneLabel | null) => void;
   onTabShortcut: (action: TabShortcut) => void;
 }) {
   const bridge = getPtyBridge();
@@ -701,6 +736,7 @@ const TerminalSession = memo(function TerminalSession({
   // Always-fresh references to the callbacks so the (long-lived) effect
   // closure never goes stale.
   const onCwdChangeRef = useRef(onCwdChange);
+  const onLabelRef = useRef(onLabel);
   const onCloseRef = useRef(onClose);
   const onRevealRef = useRef(onReveal);
   const onTabShortcutRef = useRef(onTabShortcut);
@@ -709,6 +745,7 @@ const TerminalSession = memo(function TerminalSession({
   const visibleRef = useRef(false);
   useLayoutEffect(() => {
     onCwdChangeRef.current = onCwdChange;
+    onLabelRef.current = onLabel;
     onCloseRef.current = onClose;
     onRevealRef.current = onReveal;
     onTabShortcutRef.current = onTabShortcut;
@@ -929,9 +966,16 @@ const TerminalSession = memo(function TerminalSession({
     // Like elementary's terminal: a long command finishing out of sight
     // (another tab, a window in front, minimized) says so. Clicking the
     // notification brings this pane back.
+    // The tab is named after the command running in it, or the last one.
+    const offCommandStart =
+      bridge.onCommandStart?.((id, command) => {
+        if (id === sessionId && command) onLabelRef.current(paneId, { command });
+      }) ?? (() => {});
     let finished: Notification | null = null;
     const offCommandDone = bridge.onCommandDone((id, done) => {
-      if (id !== sessionId || done.seconds < NOTIFY_AFTER_SECONDS || visibleRef.current) return;
+      if (id !== sessionId) return;
+      if (done.command) onLabelRef.current(paneId, { command: done.command });
+      if (done.seconds < NOTIFY_AFTER_SECONDS || visibleRef.current) return;
       finished = new Notification(done.command || 'Command', {
         app: 'terminal',
         body: `Finished after ${formatDuration(done.seconds)}`,
@@ -988,7 +1032,9 @@ const TerminalSession = memo(function TerminalSession({
       container.removeEventListener('mousedown', focus);
       offData();
       offExit();
+      offCommandStart();
       offCommandDone();
+      onLabelRef.current(paneId, null);
       finished?.close();
       oscHandler.dispose();
       linkProvider.dispose();

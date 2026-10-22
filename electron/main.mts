@@ -433,6 +433,9 @@ function registerPtyHandlers(): void {
           return;
         }
         const { type, command, seconds } = (event ?? {}) as Record<string, unknown>;
+        if (type === 'start' && typeof command === 'string') {
+          send('pty:commandStart', id, command.slice(0, 200));
+        }
         if (type === 'done' && typeof command === 'string' && typeof seconds === 'number') {
           send('pty:commandDone', id, { command: command.slice(0, 200), seconds });
         }

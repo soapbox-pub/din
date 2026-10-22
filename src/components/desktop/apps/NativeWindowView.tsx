@@ -3,6 +3,7 @@ import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowChrome, type ChromePoint } from '@/contexts/WindowChromeContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -64,6 +65,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   /** A move or resize the app asked for is under way: the pointer drives it. */
   const gestureRef = useRef(false);
   const app = getApp(appId);
+  useWindowTitle(title);
 
   const current = windows.find((w) => w.id === windowId);
   const currentRef = useRef(current);

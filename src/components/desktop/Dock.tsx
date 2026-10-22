@@ -26,6 +26,8 @@ interface DockWindow {
   /** Stacking order; the frontmost window has the highest. */
   z: number;
   minimized: boolean;
+  /** What the window's app says it's showing, if anything. */
+  title: string | null;
 }
 
 /** How a tile acts on its app and its windows. */
@@ -518,7 +520,7 @@ export function Dock({
             // Closing windows are on their way out and can't be focused.
             const appWindows = windows
               .filter((w) => w.appId === appId && !w.closing)
-              .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized }));
+              .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title }));
             return (
               <DockItem
                 key={appId}
@@ -685,6 +687,22 @@ const DockItem = memo(function DockItem({
 
   const menu = (
     <ContextMenuContent className="z-[10000] w-52">
+      {/* Every window by what it's showing, to jump straight to one rather
+          than cycling there. */}
+      {appWindows.length > 1 && (
+        <>
+          {appWindows.map((w, i) => (
+            <ContextMenuItem
+              key={w.id}
+              onSelect={() => focus(w.id)}
+              className={cn(w.id === activeWindowId && 'font-semibold', w.minimized && 'text-muted-foreground')}
+            >
+              <span className="truncate">{w.title ?? `${app.name} ${i + 1}`}</span>
+            </ContextMenuItem>
+          ))}
+          <ContextMenuSeparator />
+        </>
+      )}
       {!app.singleInstance && (
         <ContextMenuItem onSelect={() => open(app.id)}>
           {/* Native apps decide for themselves whether a second launch opens
@@ -791,5 +809,5 @@ const DockItem = memo(function DockItem({
   prev.appWindows.length === next.appWindows.length &&
   prev.appWindows.every((w, i) => {
     const n = next.appWindows[i];
-    return w.id === n.id && w.z === n.z && w.minimized === n.minimized;
+    return w.id === n.id && w.z === n.z && w.minimized === n.minimized && w.title === n.title;
   }));

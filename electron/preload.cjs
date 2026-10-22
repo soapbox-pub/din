@@ -211,6 +211,22 @@ contextBridge.exposeInMainWorld('pty', {
   },
 
   /**
+   * Subscribe to commands starting (one took the terminal from the shell),
+   * in all sessions. Returns an unsubscribe fn.
+   * @param {(id: number, command: string) => void} callback
+   */
+  onCommandStart: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {number} id
+     * @param {string} command
+     */
+    const listener = (_event, id, command) => callback(id, command);
+    ipcRenderer.on('pty:commandStart', listener);
+    return () => ipcRenderer.removeListener('pty:commandStart', listener);
+  },
+
+  /**
    * Subscribe to commands finishing (the shell got the terminal back), in
    * all sessions. Returns an unsubscribe fn.
    * @param {(id: number, done: { command: string, seconds: number }) => void} callback

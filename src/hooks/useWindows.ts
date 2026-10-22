@@ -108,6 +108,12 @@ export interface WindowState {
    * none), which also move themselves.
    */
   frameless: boolean;
+  /**
+   * What the window is showing, as published by its app (the browser's
+   * page title, the terminal's command), or null to go by the app's name.
+   * Tells apart several windows of one app in the Dock and the switcher.
+   */
+  title: string | null;
 }
 
 /**
@@ -248,6 +254,7 @@ export function useWindows(
           monitor: null,
           restore: null,
           frameless,
+          title: null,
         },
       ];
     });
@@ -350,6 +357,15 @@ export function useWindows(
     },
     [],
   );
+
+  /** Set (or clear, with null) the title a window's app publishes. */
+  const setTitle = useCallback((id: string, title: string | null) => {
+    setWindows((ws) =>
+      ws.some((w) => w.id === id && w.title !== title)
+        ? ws.map((w) => (w.id === id ? { ...w, title } : w))
+        : ws,
+    );
+  }, []);
 
   /**
    * Maximize a window (no-op if already maximized). `restore` overrides the
@@ -547,9 +563,10 @@ export function useWindows(
       toggleMaximize,
       cycleFocus,
       setFrameless,
+      setTitle,
       fitToAreas,
     }),
-    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, fitToAreas],
+    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, setTitle, fitToAreas],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

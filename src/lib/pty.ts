@@ -38,6 +38,12 @@ export interface PtyBridge {
   /** Subscribe to session exits. Returns an unsubscribe fn. */
   onExit(callback: (id: number, code: number) => void): () => void;
   /**
+   * Subscribe to commands starting in any session: one took the terminal
+   * from the shell. Returns an unsubscribe fn. Absent from a preload older
+   * than the renderer (the shell hasn't been restarted since).
+   */
+  onCommandStart?(callback: (id: number, command: string) => void): () => void;
+  /**
    * Subscribe to commands finishing in any session: the shell got the
    * terminal back. Returns an unsubscribe fn.
    */
