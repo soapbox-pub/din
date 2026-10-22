@@ -47,8 +47,13 @@ const SCRIPTLETS_PRELOAD = path.join(import.meta.dirname, 'adblock-scriptlets-pr
  * Origin's quick fixes, where YouTube's rules live, expire this often.
  */
 const ENGINE_MAX_AGE_MS = 8 * 60 * 60_000;
-/** How long to wait after a failed build (offline, say) before trying again. */
-const RETRY_MS = 30 * 60_000;
+/**
+ * How long to wait after a failed build before trying again: a minute at
+ * first, since the first build usually runs at boot before Wi-Fi is up, then
+ * doubling up to half an hour while the computer stays offline.
+ */
+const FIRST_RETRY_MS = 60_000;
+const MAX_RETRY_MS = 30 * 60_000;
 
 interface Settings {
   enabled: boolean;
@@ -60,6 +65,7 @@ let settings: Settings = { enabled: true, allowlist: [] };
 let allowlist = new Set<string>();
 let engine: FiltersEngine | null = null;
 let building = false;
+let retryMs = FIRST_RETRY_MS;
 
 /**
  * What was blocked since each tab's page last loaded, by WebContents id. URLs,
@@ -153,12 +159,14 @@ function buildEngine(): void {
   });
   child.once('exit', (code) => {
     building = false;
+    if (code === 0 || code === 2) retryMs = FIRST_RETRY_MS;
     if (code === 0 && loadEngine()) {
       for (const page of backgroundPages()) page.send('adblock-ext:engineChanged');
       sendToShell('adblock:settings', settings);
     } else if (code !== 2) {
       // (2 is the lists not having changed: the engine we have is current.)
-      setTimeout(buildEngine, RETRY_MS);
+      setTimeout(buildEngine, retryMs);
+      retryMs = Math.min(retryMs * 2, MAX_RETRY_MS);
     }
   });
 }
