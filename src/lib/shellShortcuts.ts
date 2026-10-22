@@ -9,6 +9,7 @@
  *
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
  *   - Super+Space             -> { action: 'apps-menu' }
+ *   - Super down / up         -> { action: 'super-key', down }
  *   - Print Screen            -> { action: 'screenshot' }
  *   - Shift+Print Screen, or the laptop box-select key
  *                             -> { action: 'screenshot-area' }
@@ -42,6 +43,11 @@ export type ShellShortcut =
   | {
       /** Super+Space pressed inside a guest: toggle the apps menu. */
       action: 'apps-menu';
+    }
+  | {
+      /** Super pressed or released inside a guest (Super+drag moves windows). */
+      action: 'super-key';
+      down: boolean;
     }
   | {
       /** Print Screen pressed inside a guest: full-screen capture. */

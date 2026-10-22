@@ -19,6 +19,7 @@ import {
   type WindowChrome,
 } from '@/contexts/WindowChromeContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
+import { useSuperHeld } from '@/lib/superKey';
 import {
   createModel,
   grabModel,
@@ -281,6 +282,13 @@ export const Window = memo(function Window({
   // maximize"/"drop to tile" preview overlay. Only changes when a zone
   // boundary is crossed, so pointer moves still avoid React state churn.
   const [snapHint, setSnapHint] = useState<Rect | null>(null);
+
+  // Holding Super covers the whole window with a grab layer, so it can be
+  // dragged from anywhere (web content and native apps included). The layer
+  // stays up until a drag it started ends, even if Super is let go first,
+  // since it holds that drag's pointer capture.
+  const superHeld = useSuperHeld();
+  const [superDragging, setSuperDragging] = useState(false);
 
   // The element in this window that last held focus. Coming back on top -
   // Alt+Tab, a dock click, restoring from minimized - gives it focus again,
@@ -964,6 +972,25 @@ export const Window = memo(function Window({
     [endDrag],
   );
 
+  const onSuperPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0 || dragState.current || resizeState.current) return;
+      e.preventDefault();
+      startDrag(e);
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      setSuperDragging(true);
+    },
+    [startDrag],
+  );
+
+  const onSuperPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      onPointerUp(e);
+      setSuperDragging(false);
+    },
+    [onPointerUp],
+  );
+
   /** Begin a resize from `dir`, like startDrag; false while maximized/tiled. */
   const startResize = useCallback(
     (dir: ResizeDir, e: ChromePoint) => {
@@ -1272,6 +1299,17 @@ export const Window = memo(function Window({
             className={cn('absolute z-10 touch-none', className)}
           />
         ))}
+
+      {(superHeld || superDragging) && !win.minimized && !win.closing && (
+        <div
+          aria-hidden
+          onPointerDown={onSuperPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onSuperPointerUp}
+          onPointerCancel={onSuperPointerUp}
+          className="absolute inset-0 z-20 cursor-grab touch-none select-none active:cursor-grabbing"
+        />
+      )}
 
       {/* Snap preview while the drag rides a monitor's edge: its whole work
           area for "drop to maximize" (top), the left/right half for "drop to

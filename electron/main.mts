@@ -4028,6 +4028,7 @@ function isDevtoolsToggleInput(input: Electron.Input): boolean {
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
   | { action: 'apps-menu' | 'screenshot' | 'screenshot-area' }
+  | { action: 'super-key'; down: boolean }
   | { action: 'new-tab' | 'close-tab' | 'focus-address' | 'find' | 'back' | 'forward' }
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
@@ -4440,6 +4441,17 @@ app.on('web-contents-created', (_event, contents) => {
   // Brightness and volume keys arrive as ordinary keyboard input to whichever
   // contents holds focus (shell or any guest), so hook them everywhere.
   attachMediaKeys(contents);
+
+  // Holding Super lets the shell drag windows from anywhere, but it can't
+  // see the key while focus is inside a guest, so forward its presses (not
+  // consumed: Super is still a modifier for the page).
+  if (contents.getType() === 'webview') {
+    contents.on('before-input-event', (_event, input) => {
+      if (input.key !== 'Meta' || input.isAutoRepeat) return;
+      if (input.type !== 'keyDown' && input.type !== 'keyUp') return;
+      sendToShell('shortcut', { action: 'super-key', down: input.type === 'keyDown' } satisfies ShellShortcut);
+    });
+  }
 
   if (contents.getType() !== 'webview') {
     // The shell renderer (address bar, inputs, etc.) gets no context menu by

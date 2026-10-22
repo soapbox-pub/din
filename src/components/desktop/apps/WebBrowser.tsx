@@ -1291,6 +1291,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       if (
         shortcut.action === 'cycle-windows' ||
         shortcut.action === 'apps-menu' ||
+        shortcut.action === 'super-key' ||
         shortcut.action === 'screenshot' ||
         shortcut.action === 'screenshot-area'
       ) {
