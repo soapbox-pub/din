@@ -1,4 +1,4 @@
-import { Airplay, BellOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -35,6 +35,9 @@ import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIn
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
 import { BrightnessGlyph, BrightnessPopoverBody } from '@/components/desktop/BrightnessIndicator';
 import { AirPlayPopoverBody } from '@/components/desktop/AirPlayIndicator';
+import { BluetoothPopoverBody } from '@/components/desktop/BluetoothIndicator';
+import { useBluetoothState } from '@/hooks/useBluetooth';
+import { getBluetoothBridge } from '@/lib/bluetooth';
 import { useAirPlayState } from '@/hooks/useAirPlay';
 import { getAirPlayBridge } from '@/lib/airplay';
 import { NotificationsPanel } from '@/components/desktop/NotificationsIndicator';
@@ -122,6 +125,7 @@ export function MenuBar() {
         <BrightnessMenuItem />
         <VolumeMenuItem />
         <BatteryMenuItem />
+        <BluetoothMenuItem />
         <WifiMenuItem />
         <AccountMenuItem />
       </div>
@@ -479,6 +483,49 @@ const BatteryMenuItem = memo(function BatteryMenuItem() {
       </PopoverTrigger>
       <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">
         <BatteryPopoverBody />
+      </PopoverContent>
+    </Popover>
+  );
+});
+
+/**
+ * Bluetooth status item: the glyph says whether it's off, on, or connected
+ * to something; clicking lists the paired devices. Renders nothing outside
+ * the Electron shell or without an adapter.
+ */
+const BluetoothMenuItem = memo(function BluetoothMenuItem() {
+  const bridge = getBluetoothBridge();
+  const { data } = useBluetoothState();
+
+  if (!bridge || !data?.available || !data.adapter) return null;
+  const powered = data.adapter.powered;
+  const connected = powered ? data.devices.filter((d) => d.connected) : [];
+
+  const label = !powered
+    ? 'Bluetooth off'
+    : connected.length > 0
+      ? `Bluetooth connected to ${connected.map((d) => d.name).join(', ')}`
+      : 'Bluetooth on';
+  const Icon = !powered ? BluetoothOff : connected.length > 0 ? BluetoothConnected : Bluetooth;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          title={label}
+          className={cn(
+            'size-7 rounded-md hover:bg-foreground/10 hover:text-foreground',
+            powered ? 'text-foreground/90' : 'text-muted-foreground',
+          )}
+        >
+          <Icon className="size-4.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">
+        <BluetoothPopoverBody />
       </PopoverContent>
     </Popover>
   );

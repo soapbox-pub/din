@@ -27,6 +27,7 @@ import { SystemEventsHost } from './SystemEventsHost';
 import { InstallerAutoOpen } from './InstallerAutoOpen';
 import { UpdateNotifier } from './UpdateNotifier';
 import { AirPlayPromptHost } from './AirPlayIndicator';
+import { BluetoothPromptHost } from './BluetoothIndicator';
 import { PageFullscreenHost } from './PageFullscreenHost';
 import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
@@ -137,6 +138,7 @@ function DesktopSession() {
             <InstallerAutoOpen />
             <UpdateNotifier />
             <AirPlayPromptHost />
+            <BluetoothPromptHost />
             <PageFullscreenHost />
             <BootScreenSync />
             <Wallpaper>

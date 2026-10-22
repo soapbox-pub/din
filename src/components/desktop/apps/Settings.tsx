@@ -4,6 +4,7 @@ import {
   BatteryFull,
   Bell,
   BellOff,
+  Bluetooth,
   Bomb,
   Bug,
   Check,
@@ -45,6 +46,15 @@ import type { AppComponentProps } from '@/lib/apps';
 import { cleanWifiError, getWifiBridge, isEthernetConnected, isSecured } from '@/lib/wifi';
 import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { VpnControls } from '@/components/desktop/VpnControls';
+import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
+import {
+  cleanBluetoothBridgeError,
+  describeDevice,
+  getBluetoothBridge,
+  sortDevices,
+} from '@/lib/bluetooth';
+import type { BluetoothDevice } from '@/lib/bluetooth';
+import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState } from '@/hooks/useBluetooth';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
   useSavedNetworks,
@@ -160,6 +170,7 @@ import { useUpdateState } from '@/hooks/useUpdater';
 
 type SectionId =
   | 'wifi'
+  | 'bluetooth'
   | 'display'
   | 'brightness'
   | 'battery'
@@ -176,6 +187,7 @@ type SectionId =
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
+  { id: 'bluetooth', name: 'Bluetooth', icon: Bluetooth },
   { id: 'display', name: 'Display', icon: Monitor },
   { id: 'brightness', name: 'Brightness', icon: Sun },
   { id: 'battery', name: 'Battery', icon: BatteryFull },
@@ -197,7 +209,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * The Wi-Fi section drives NetworkManager through `window.wifi` (Electron
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
- * explanatory fallback. The Display section arranges the monitors through
+ * explanatory fallback. The Bluetooth section pairs, connects and forgets
+ * devices through `window.bluetooth` (BlueZ over D-Bus). The Display section arranges the monitors through
  * `window.display` (wlr-randr under cage, xrandr on bare X11), falling back
  * where neither can manage them. The Battery section reads `window.power`
  * (/sys/class/power_supply) and hides on machines with no battery. The Power
@@ -272,6 +285,8 @@ export function Settings({ params }: AppComponentProps) {
       <div className="min-w-0 flex-1 overflow-y-auto">
         {section === 'wifi' ? (
           <WifiSection />
+        ) : section === 'bluetooth' ? (
+          <BluetoothSection />
         ) : section === 'display' ? (
           <DisplaySection />
         ) : section === 'brightness' ? (
@@ -631,6 +646,202 @@ function NetworkListSkeleton() {
         </div>
       ))}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bluetooth
+// ---------------------------------------------------------------------------
+
+/**
+ * The adapter's on/off switch, the paired devices, and the ones nearby to
+ * pair with, via the Bluetooth bridge (window.bluetooth -> BlueZ). Looks for
+ * devices while it's open and Bluetooth is on. Prompts that pairing needs
+ * appear from BluetoothPromptHost, wherever the pairing started.
+ */
+function BluetoothSection() {
+  const bridge = getBluetoothBridge();
+  const status = useBluetoothState();
+  const { setPowered, pair, connect, disconnect, forget } = useBluetoothActions();
+  const [opError, setOpError] = useState<{ path: string; message: string } | null>(null);
+
+  const data = status.data;
+  const adapter = data?.adapter ?? null;
+  const powered = adapter?.powered ?? false;
+  useBluetoothDiscovery(powered);
+
+  if (!bridge) {
+    return (
+      <SectionShell title="Bluetooth">
+        <FallbackCard icon={Bluetooth}>
+          Bluetooth settings need the Din desktop shell; they aren't available in
+          a plain browser.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  const devices = sortDevices(data?.devices ?? []);
+  const paired = devices.filter((d) => d.paired);
+  const nearby = devices.filter((d) => !d.paired);
+
+  const run = (path: string, action: typeof pair) => {
+    setOpError(null);
+    action.mutate(path, {
+      onError: (error) => setOpError({ path, message: cleanBluetoothBridgeError(error) }),
+    });
+  };
+  const rowProps = (device: BluetoothDevice) => ({
+    device,
+    error: opError?.path === device.path ? opError.message : null,
+    onPair: () => run(device.path, pair),
+    onConnect: () => run(device.path, connect),
+    onDisconnect: () => run(device.path, disconnect),
+    onForget: () => run(device.path, forget),
+  });
+
+  return (
+    <SectionShell
+      title="Bluetooth"
+      actions={
+        <Switch
+          aria-label="Bluetooth"
+          checked={powered}
+          disabled={!adapter || setPowered.isPending}
+          onCheckedChange={(on) => {
+            setOpError(null);
+            setPowered.mutate(on, {
+              onError: (error) => setOpError({ path: '', message: cleanBluetoothBridgeError(error) }),
+            });
+          }}
+        />
+      }
+    >
+      {opError?.path === '' && (
+        <p role="alert" className="text-xs text-destructive">
+          {opError.message}
+        </p>
+      )}
+      {status.isLoading ? (
+        <NetworkListSkeleton />
+      ) : status.isError ? (
+        <FallbackCard>Could not read Bluetooth state: {cleanBluetoothBridgeError(status.error)}</FallbackCard>
+      ) : !data?.available ? (
+        <FallbackCard icon={Bluetooth}>
+          The Bluetooth service isn't running on this system, so Bluetooth can't be
+          managed here.
+        </FallbackCard>
+      ) : !adapter ? (
+        <FallbackCard icon={Bluetooth}>No Bluetooth adapter was found on this computer.</FallbackCard>
+      ) : !powered ? (
+        <FallbackCard icon={Bluetooth}>Bluetooth is turned off.</FallbackCard>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <p className="text-xs text-muted-foreground">
+            Devices see this computer as “{adapter.name}”.
+          </p>
+
+          {paired.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <SubHeading>My devices</SubHeading>
+              <ul className="flex flex-col gap-1" aria-label="My devices">
+                {paired.map((device) => (
+                  <BluetoothDeviceRow key={device.path} {...rowProps(device)} />
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-end gap-2">
+              <SubHeading>Devices nearby</SubHeading>
+              {adapter.discovering && (
+                <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Searching" />
+              )}
+            </div>
+            {nearby.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
+                {adapter.discovering
+                  ? 'Looking for devices… Put the one you want to pair in pairing mode.'
+                  : 'No devices found nearby.'}
+              </div>
+            ) : (
+              <ul className="flex flex-col gap-1" aria-label="Devices nearby">
+                {nearby.map((device) => (
+                  <BluetoothDeviceRow key={device.path} {...rowProps(device)} />
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+function BluetoothDeviceRow({
+  device,
+  error,
+  onPair,
+  onConnect,
+  onDisconnect,
+  onForget,
+}: {
+  device: BluetoothDevice;
+  error: string | null;
+  onPair: () => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onForget: () => void;
+}) {
+  const busy = device.busy !== null;
+
+  return (
+    <li className="rounded-lg border border-border/60 bg-background/40">
+      <div className="flex items-center gap-3 px-3 py-2">
+        <BluetoothDeviceIcon
+          icon={device.icon}
+          className={cn('size-5 shrink-0', device.connected ? 'text-primary' : 'text-muted-foreground')}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-foreground">{device.name}</p>
+          <p
+            className={cn(
+              'flex items-center gap-1.5 truncate text-xs',
+              device.connected ? 'text-primary' : 'text-muted-foreground',
+            )}
+          >
+            {busy && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />}
+            {describeDevice(device)}
+          </p>
+        </div>
+
+        {!device.paired ? (
+          <Button variant="outline" size="sm" disabled={busy} onClick={onPair}>
+            Pair
+          </Button>
+        ) : device.connected ? (
+          <Button variant="outline" size="sm" disabled={busy} onClick={onDisconnect}>
+            Disconnect
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" disabled={busy} onClick={onConnect}>
+            Connect
+          </Button>
+        )}
+        {device.paired && (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onForget}>
+            Forget
+          </Button>
+        )}
+      </div>
+
+      {error !== null && (
+        <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </li>
   );
 }
 

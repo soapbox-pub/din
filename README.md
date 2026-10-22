@@ -294,6 +294,11 @@ files — `git add` new source files before `npm run os:build`.
   Electron IPC bridge). NetworkManager picks up physical adapters (wired and
   wireless) automatically. Note that QEMU has no wireless hardware, so the
   WiFi panel will show no networks inside the demo VM.
+- The Settings app and the menu bar manage Bluetooth through BlueZ over the
+  system bus (`electron/bluetooth.mts`): turning it on and off, finding,
+  pairing, connecting and forgetting devices. Prompts a pairing needs (a code
+  to compare or type) appear on the desktop. Headsets show up in the Sound
+  panel through WirePlumber once connected.
 - On hardware, Din runs GPU-accelerated (Mesa via `hardware.graphics`, plus
   redistributable firmware). Only the QEMU demo variant passes
   `--disable-gpu` (no virgl) and falls back to software rendering.

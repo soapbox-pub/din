@@ -26,6 +26,8 @@
 //   - window.updater: DinOS system updates, for the Settings app
 //   - window.airplay: sharing the screen with AirPlay receivers, for the menu
 //     bar and Settings
+//   - window.bluetooth: BlueZ adapter and devices (pairing, connecting), for
+//     the menu bar and Settings
 //   - window.bluetoothLogin: receive the account key from a phone over
 //     Bluetooth LE, for the login screen
 //   - window.nostrd: the signer daemon that holds the account keys, for the
@@ -904,6 +906,78 @@ contextBridge.exposeInMainWorld('installer', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('installer:progress', handler);
     return () => ipcRenderer.removeListener('installer:progress', handler);
+  },
+});
+
+// Bluetooth bridge (window.bluetooth), backed by electron/bluetooth.mts:
+// BlueZ's adapter and devices, and the prompts pairing needs.
+contextBridge.exposeInMainWorld('bluetooth', {
+  /** The adapter, the devices it knows or sees, and any pairing prompt. */
+  state: () => ipcRenderer.invoke('bluetooth:state'),
+
+  /**
+   * Turn the adapter on or off.
+   * @param {boolean} on
+   */
+  setPowered: (on) => ipcRenderer.invoke('bluetooth:setPowered', on),
+
+  /**
+   * Start or stop looking for devices nearby. A search stops by itself
+   * after a couple of minutes.
+   * @param {boolean} on
+   */
+  discover: (on) => ipcRenderer.invoke('bluetooth:discover', on),
+
+  /**
+   * Pair with a device, then connect to it.
+   * @param {string} path
+   */
+  pair: (path) => ipcRenderer.invoke('bluetooth:pair', path),
+
+  /** @param {string} path */
+  connect: (path) => ipcRenderer.invoke('bluetooth:connect', path),
+
+  /** @param {string} path */
+  disconnect: (path) => ipcRenderer.invoke('bluetooth:disconnect', path),
+
+  /**
+   * Remove a device and its pairing.
+   * @param {string} path
+   */
+  forget: (path) => ipcRenderer.invoke('bluetooth:forget', path),
+
+  /**
+   * Stop a pairing in progress.
+   * @param {string} path
+   */
+  cancel: (path) => ipcRenderer.invoke('bluetooth:cancel', path),
+
+  /**
+   * Answer a pairing prompt.
+   * @param {number} id
+   * @param {boolean} accept
+   * @param {string} [value] The PIN or passkey typed, for those prompts.
+   */
+  answer: (id, accept, value) => ipcRenderer.invoke('bluetooth:answer', id, accept, value),
+
+  /**
+   * Whether the shell is there to answer pairing prompts.
+   * @param {boolean} enabled
+   */
+  setPrompts: (enabled) => ipcRenderer.invoke('bluetooth:prompts', enabled),
+
+  /**
+   * Subscribe to state changes. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('bluetooth:changed', handler);
+    return () => ipcRenderer.removeListener('bluetooth:changed', handler);
   },
 });
 

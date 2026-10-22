@@ -1092,9 +1092,11 @@ in
   hardware.graphics.enable = true;
   hardware.enableRedistributableFirmware = true;
 
-  # BlueZ, for logging in with a phone: the login screen advertises a GATT
-  # service the phone sends the account key to (electron/bluetooth-login.mts).
-  # BlueZ's D-Bus policy lets any user register one, so `din` needs no group.
+  # BlueZ, for Bluetooth devices (Settings and the menu bar pair and connect
+  # them through electron/bluetooth.mts, whose agent answers pairing) and for
+  # logging in with a phone: the login screen advertises a GATT service the
+  # phone sends the account key to (electron/bluetooth-login.mts). BlueZ's
+  # D-Bus policy lets any user do both, so `din` needs no group.
   #
   # One ATT channel, no Enhanced ATT: when a phone connects, BlueZ otherwise
   # opens extra EATT channels to it, and those need an encrypted link, so it

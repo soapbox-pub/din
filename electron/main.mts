@@ -56,6 +56,7 @@ import { registerTrayHandlers } from './tray.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
+import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
@@ -4247,6 +4248,7 @@ app.whenReady().then(() => {
   registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
   registerInstallerHandlers({ assertShellSender, sendToShell });
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
+  registerBluetoothHandlers({ assertShellSender, sendToShell });
   registerNostrdHandlers({ assertShellSender, sendToShell });
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
