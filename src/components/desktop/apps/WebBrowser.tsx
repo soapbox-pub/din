@@ -7,7 +7,6 @@ import {
   ChevronUp,
   Code,
   Download,
-  EllipsisVertical,
   FolderOpen,
   Globe,
   History,
@@ -78,6 +77,7 @@ import { moveItem, useDragReorder } from '@/hooks/useDragReorder';
 import { useTabTransfer, type TabTransfer, type TabTransferOptions } from '@/hooks/useTabTransfer';
 import { parkedTab } from '@/lib/tabTransfer';
 import { TabContextMenu } from '@/components/desktop/TabContextMenu';
+import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
   bareUrl,
   inlineCompletion,
@@ -3321,7 +3321,7 @@ function BrowserActionList({ tabWcId }: { tabWcId: number | null }) {
 }
 
 /**
- * The browser's overflow menu (the toolbar's ⋮ button): one popover for the
+ * The browser's overflow menu (the toolbar's menu button): one popover for the
  * controls that don't each warrant a toolbar button - opening a new or private
  * window, find-in-page, developer tools, clearing browsing data - plus a way
  * into the settings page.
@@ -3383,7 +3383,7 @@ function BrowserMenu({
             open && 'bg-foreground/10 text-foreground',
           )}
         >
-          <EllipsisVertical className="size-4" />
+          <BarsStaggeredIcon className="size-4" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-72 p-0">
