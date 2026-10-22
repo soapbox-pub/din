@@ -2610,8 +2610,9 @@ function undimCapture(image: Electron.NativeImage): Electron.NativeImage {
 
 
 /**
- * Brightness, volume and mic-mute media keys. Electron's accelerator grammar has no
- * brightness key names, and on Wayland globalShortcut can't grab anything,
+ * Brightness and volume media keys (mic-mute is read from evdev; see
+ * watchEvdevKeys). Electron's accelerator grammar has no brightness key
+ * names, and on Wayland globalShortcut can't grab anything,
  * but the compositor delivers XF86MonBrightness* and XF86Audio* keys to the
  * focused client as ordinary keyboard input ("BrightnessUp",
  * "AudioVolumeUp", ...). Din is that client, so intercept them in
@@ -2628,13 +2629,6 @@ function attachMediaKeys(contents: Electron.WebContents): void {
       if (key === 'AudioVolumeUp') pushAudioOsd(audioAdjust(5));
       else if (key === 'AudioVolumeDown') pushAudioOsd(audioAdjust(-5));
       else pushAudioOsd(audioToggleMute());
-      return;
-    }
-    // The mic-mute key (XF86AudioMicMute). Chromium has a key value for its
-    // keysym but no code for KEY_MICMUTE.
-    if (input.key === 'MicrophoneVolumeMute') {
-      event.preventDefault();
-      pushInputOsd(audioToggleInputMute());
       return;
     }
     let delta: number | null = null;
@@ -2733,14 +2727,22 @@ function registerScreenshotHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// The laptop "box select" screenshot key. Newer laptop keyboards carry a
-// dedicated area-screenshot key (dashed-box icon) next to Print Screen; the
-// kernel delivers it as evdev KEY_SELECTIVE_SCREENSHOT, which XKB turns into
-// the XF86SelectiveScreenshot keysym. Chromium has no DOM mapping for that
-// keysym, so before-input-event can only report it as "Unidentified" -
-// indistinguishable from any other unmapped key. GNOME/KDE handle the key at
-// the evdev level; do the same: read the keyboard event nodes directly and
-// forward presses to the shell as the 'screenshot-area' shortcut.
+// Keys Chromium can't identify, read from evdev instead:
+//
+// - The laptop "box select" screenshot key. Newer laptop keyboards carry a
+//   dedicated area-screenshot key (dashed-box icon) next to Print Screen; the
+//   kernel delivers it as evdev KEY_SELECTIVE_SCREENSHOT, which XKB turns
+//   into the XF86SelectiveScreenshot keysym. It becomes the
+//   'screenshot-area' shortcut.
+// - The mic-mute key (KEY_MICMUTE, keysym XF86AudioMicMute; on ThinkPads it
+//   comes from the "ThinkPad Extra Buttons" device). It toggles the default
+//   source's mute.
+//
+// Chromium has no DOM key for either keysym, and its code for KEY_MICMUTE
+// has no name, so before-input-event reports both as key "Unidentified",
+// code "" - indistinguishable from any other unmapped key. GNOME/KDE handle
+// these at the evdev level; do the same: read the keyboard event nodes
+// directly.
 //
 // Reading /dev/input needs the `input` group (DinOS grants it to the
 // desktop user); anywhere else the watcher just stays off. The main process
@@ -2749,6 +2751,7 @@ function registerScreenshotHandlers(): void {
 // ---------------------------------------------------------------------------
 
 const EV_KEY = 0x01;
+const KEY_MICMUTE = 0xf8;
 const KEY_SELECTIVE_SCREENSHOT = 0x27a;
 /** struct input_event on 64-bit Linux: 16-byte timeval + type + code + value. */
 const INPUT_EVENT_SIZE = 24;
@@ -2771,7 +2774,7 @@ function keyboardEventNodes(): string[] {
   return nodes;
 }
 
-function watchSelectiveScreenshotKey(): void {
+function watchEvdevKeys(): void {
   if (process.platform !== 'linux') return;
   const watched = new Map<string, ChildProcess>();
   const scan = () => {
@@ -2793,13 +2796,10 @@ function watchSelectiveScreenshotKey(): void {
         const full = buf.length - (buf.length % INPUT_EVENT_SIZE);
         for (let off = 0; off < full; off += INPUT_EVENT_SIZE) {
           // value 1 = press (0 = release, 2 = autorepeat).
-          if (
-            buf.readUInt16LE(off + 16) === EV_KEY &&
-            buf.readUInt16LE(off + 18) === KEY_SELECTIVE_SCREENSHOT &&
-            buf.readInt32LE(off + 20) === 1
-          ) {
-            sendToShell('shortcut', { action: 'screenshot-area' });
-          }
+          if (buf.readUInt16LE(off + 16) !== EV_KEY || buf.readInt32LE(off + 20) !== 1) continue;
+          const code = buf.readUInt16LE(off + 18);
+          if (code === KEY_SELECTIVE_SCREENSHOT) sendToShell('shortcut', { action: 'screenshot-area' });
+          else if (code === KEY_MICMUTE) pushInputOsd(audioToggleInputMute());
         }
         leftover = buf.subarray(full);
       });
@@ -4668,7 +4668,7 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   // Shift+Print Screen: select an area. The dedicated box-select key on
   // newer laptops can't reach here - Chromium reports its keysym as
   // "Unidentified" - so it's read from evdev directly instead (see
-  // watchSelectiveScreenshotKey).
+  // watchEvdevKeys).
   if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
     return { action: input.shift ? 'screenshot-area' : 'screenshot' };
   }
@@ -4879,7 +4879,7 @@ app.whenReady().then(() => {
   registerSystemEvents();
   registerBrightnessHandlers();
   registerScreenshotHandlers();
-  watchSelectiveScreenshotKey();
+  watchEvdevKeys();
   registerCrxHandlers();
   registerCertificateHandling();
   registerBrowserDataHandlers();

@@ -410,7 +410,8 @@ in
   # rules below) without root; `audio` grants access to the sound devices the
   # PipeWire sound bridge drives. `input` lets the Electron host read keyboard
   # event nodes directly for the laptop box-select screenshot key
-  # (KEY_SELECTIVE_SCREENSHOT), whose keysym Chromium can't identify - see
+  # (KEY_SELECTIVE_SCREENSHOT) and the mic-mute key (KEY_MICMUTE), whose
+  # keysyms Chromium can't identify - see
   # electron/main.mts. The main process already observes every keystroke via
   # before-input-event; nothing new is exposed to renderers. `wheel` gives
   # the developer the machine: sudo, behind the computer's password.
