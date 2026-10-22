@@ -198,6 +198,15 @@
     overflow: hidden;
   }
 
+  /* <body> must cover the screen even though everything in it is
+     positioned: Radix's scroll lock (open menus and dialogs) makes it
+     `position: relative; overflow: hidden`, and an empty body would then
+     clip the whole desktop away. */
+  html,
+  body {
+    height: 100%;
+  }
+
   *,
   ::after,
   ::before,
