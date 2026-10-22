@@ -4027,7 +4027,7 @@ function isDevtoolsToggleInput(input: Electron.Input): boolean {
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
-  | { action: 'screenshot' | 'screenshot-area' }
+  | { action: 'apps-menu' | 'screenshot' | 'screenshot-area' }
   | { action: 'new-tab' | 'close-tab' | 'focus-address' | 'find' | 'back' | 'forward' }
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
@@ -4049,6 +4049,9 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   // watchSelectiveScreenshotKey).
   if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
     return { action: input.shift ? 'screenshot-area' : 'screenshot' };
+  }
+  if (input.meta && !input.alt && !input.control && !input.shift && input.key === ' ') {
+    return { action: 'apps-menu' };
   }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
@@ -4587,6 +4590,7 @@ app.on('web-contents-created', (_event, contents) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
+        shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {
@@ -4626,13 +4630,14 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   // Installed web-app guests aren't browser tabs, but focus still lands inside
-  // them, so the shell's window-cycling and screenshot shortcuts must be
-  // forwarded too.
+  // them, so the shell's window-cycling, apps-menu, and screenshot shortcuts
+  // must be forwarded too.
   if (isAppGuest(contents)) {
     contents.on('before-input-event', (event, input) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
+        shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {

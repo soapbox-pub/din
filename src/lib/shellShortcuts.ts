@@ -8,6 +8,7 @@
  * `before-input-event` and forwards them to the shell:
  *
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
+ *   - Super+Space             -> { action: 'apps-menu' }
  *   - Print Screen            -> { action: 'screenshot' }
  *   - Shift+Print Screen, or the laptop box-select key
  *                             -> { action: 'screenshot-area' }
@@ -37,6 +38,10 @@ export type ShellShortcut =
       /** Alt+Tab pressed inside a guest: cycle window focus. */
       action: 'cycle-windows';
       backward: boolean;
+    }
+  | {
+      /** Super+Space pressed inside a guest: toggle the apps menu. */
+      action: 'apps-menu';
     }
   | {
       /** Print Screen pressed inside a guest: full-screen capture. */

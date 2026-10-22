@@ -1,5 +1,5 @@
 import { Airplay, BellOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
-import { memo, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarShape } from '@/lib/avatarShape';
@@ -42,6 +42,7 @@ import { useNotificationsBadge } from '@/hooks/useNotificationsBadge';
 import { Calendar } from '@/components/ui/calendar';
 import { TrayItems } from '@/components/desktop/TrayMenu';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
+import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { useClock } from '@/hooks/useClock';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useNostrd } from '@/hooks/useNostrd';
@@ -148,7 +149,23 @@ const AppsMenu = memo(function AppsMenu() {
   // Actions only: keeps the launcher (a large Radix popover tree) out of
   // the per-window-commit re-render cascade.
   const { open, closeApp } = useWindowActions();
+  const [menuOpen, setMenuOpenState] = useState(false);
   const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+  const menuOpenRef = useRef(menuOpen);
+
+  /** Open or close the menu; it always opens on a fresh search. */
+  const setMenuOpen = useCallback((next: boolean) => {
+    if (next && !menuOpenRef.current) setQuery('');
+    menuOpenRef.current = next;
+    setMenuOpenState(next);
+  }, []);
+
+  // Super+Space (see DesktopHotkeys) toggles the menu.
+  useEffect(
+    () => onToggleAppsMenu(() => setMenuOpen(!menuOpenRef.current)),
+    [setMenuOpen],
+  );
 
   /** Uninstall a web app: close its windows, then drop the entry. */
   const uninstall = (appId: string) => {
@@ -172,8 +189,16 @@ const AppsMenu = memo(function AppsMenu() {
   const dinApps = launcherApps.filter((app) => !app.native);
   const nativeApps = launcherApps.filter((app) => app.native);
 
+  /** Enter in the search launches the first match, as shown. */
+  const launchFirst = () => {
+    const first = dinApps[0] ?? nativeApps[0];
+    if (!first) return;
+    setMenuOpen(false);
+    open(first.id);
+  };
+
   return (
-    <Popover>
+    <Popover open={menuOpen} onOpenChange={setMenuOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -190,13 +215,23 @@ const AppsMenu = memo(function AppsMenu() {
         align="start"
         sideOffset={8}
         className="w-96 rounded-2xl p-0"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          searchRef.current?.focus();
+        }}
       >
         <div className="flex items-center gap-2.5 border-b border-border/60 px-4 py-3">
           <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <input
+            ref={searchRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              e.preventDefault();
+              launchFirst();
+            }}
             placeholder="Search your apps…"
             aria-label="Search apps"
             className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
