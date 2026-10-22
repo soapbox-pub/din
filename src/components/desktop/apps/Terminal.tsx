@@ -331,8 +331,10 @@ export function Terminal({ windowId, params }: AppComponentProps) {
     const adopted = parkedTab(params);
     if (isTermTab(adopted)) return [adopted];
     const paneId = newSessionId();
+    // Files' "Open in Terminal" starts the first shell in a given folder.
+    const initialCwd = typeof params?.cwd === 'string' ? params.cwd : undefined;
     return [
-      { id: newTabId(), layout: { type: 'leaf', paneId }, activePaneId: paneId },
+      { id: newTabId(), layout: { type: 'leaf', paneId, initialCwd }, activePaneId: paneId },
     ];
   });
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);

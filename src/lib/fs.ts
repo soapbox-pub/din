@@ -70,6 +70,83 @@ export interface FsBridge {
    * requires an explicit `recursive: true`.
    */
   rm(path: string, options?: { recursive?: boolean }): Promise<void>;
+
+  // The Files app's richer operations (electron/files.mts).
+
+  /**
+   * Copy a file or folder into `dir` (as `name`, default its own name),
+   * renaming to "name (2)" when taken. Resolves to the new path.
+   */
+  copyInto(from: string, dir: string, name?: string): Promise<string>;
+  /** Move into `dir`, renaming to "name (2)" when taken. Resolves to the new path. */
+  moveInto(from: string, dir: string): Promise<string>;
+  /** Move to an exact path; fails if something is already there. */
+  move(from: string, to: string): Promise<void>;
+  /** Move to the Trash; resolves to the item's name in the Trash. */
+  trash(path: string): Promise<string>;
+  /** Put a trashed item (by its name in the Trash) back; resolves to where it went. */
+  restore(name: string): Promise<string>;
+  /** Delete one trashed item for good, or with no name, empty the Trash. */
+  purge(name?: string): Promise<void>;
+  /** The Trash's files folder (created when missing). */
+  trashDir(): Promise<string>;
+  /** Everything the Properties dialog shows about a path. */
+  details(path: string): Promise<FsDetails>;
+  /** Total size and item counts beneath a folder. */
+  du(path: string): Promise<FsDiskUsage>;
+  chmod(path: string, mode: number): Promise<void>;
+  /** Extract an archive into `dir`; resolves to what was created. */
+  extract(archive: string, dir: string): Promise<string>;
+  /** Pack entries of `dir` into `dir/outName` (format by its extension). */
+  compress(dir: string, names: string[], outName: string): Promise<string>;
+  /** An archive's member names (capped; `total` counts them all). */
+  listArchive(archive: string): Promise<{ entries: string[]; total: number }>;
+  /** Watch a folder for changes; resolves to a watch id, or null if it can't be watched. */
+  watch(path: string): Promise<number | null>;
+  unwatch(id: number): Promise<void>;
+  /** Subscribe to changes in watched folders. Returns an unsubscribe fn. */
+  onChange(callback: (path: string) => void): () => void;
+}
+
+export interface FsDetails {
+  path: string;
+  kind: FsEntryKind;
+  symlink: boolean;
+  linkTarget: string | null;
+  size: number;
+  /** Permission bits (mode & 0o7777). */
+  mode: number;
+  uid: number;
+  gid: number;
+  owner: string;
+  group: string;
+  /** Whether Din's user owns it (and so can change its permissions). */
+  isOwner: boolean;
+  atimeMs: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  birthtimeMs: number | null;
+  /** Free and total space on its filesystem, when reported. */
+  free: number | null;
+  total: number | null;
+  /** For an item in the Trash: where it came from and when it was trashed. */
+  trashOrigin: { path: string; deletedAt: string | null } | null;
+}
+
+export interface FsDiskUsage {
+  files: number;
+  dirs: number;
+  bytes: number;
+  /** True when the folder was too big to count completely. */
+  truncated: boolean;
+}
+
+/**
+ * A URL the shell can load a local file from (img, video, fetch), served by
+ * electron/files.mts with Range support.
+ */
+export function localFileUrl(path: string): string {
+  return `din-file://localhost${path.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 declare global {
@@ -147,6 +224,33 @@ export function sortEntries(entries: readonly FsEntry[]): FsEntry[] {
       return a.kind === 'directory' ? -1 : 1;
     }
     return NAME_COLLATOR.compare(a.name, b.name);
+  });
+}
+
+/**
+ * Sort by a column, folders always first. Ties fall back to name order, and
+ * `type` compares by extension. Returns a new array.
+ */
+export function sortEntriesBy(
+  entries: readonly FsEntry[],
+  key: 'name' | 'size' | 'type' | 'modified',
+  descending: boolean,
+): FsEntry[] {
+  const ext = (name: string) => {
+    const idx = name.lastIndexOf('.');
+    return idx > 0 ? name.slice(idx + 1).toLowerCase() : '';
+  };
+  const sign = descending ? -1 : 1;
+  return [...entries].sort((a, b) => {
+    if ((a.kind === 'directory') !== (b.kind === 'directory')) {
+      return a.kind === 'directory' ? -1 : 1;
+    }
+    let order = 0;
+    if (key === 'size') order = (a.size ?? -1) - (b.size ?? -1);
+    else if (key === 'modified') order = (a.mtimeMs ?? 0) - (b.mtimeMs ?? 0);
+    else if (key === 'type') order = NAME_COLLATOR.compare(ext(a.name), ext(b.name));
+    if (order === 0) order = NAME_COLLATOR.compare(a.name, b.name);
+    return order * sign;
   });
 }
 

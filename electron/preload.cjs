@@ -147,6 +147,116 @@ contextBridge.exposeInMainWorld('fs', {
    * @param {{ recursive?: boolean }} [options]
    */
   rm: (path, options) => ipcRenderer.invoke('fs:rm', path, options),
+
+  // The Files app's richer operations (electron/files.mts).
+
+  /**
+   * Copy a file or folder into `dir` (as `name`, default its own), renaming
+   * to "name (2)" if taken. Resolves to the new path.
+   * @param {string} from
+   * @param {string} dir
+   * @param {string} [name]
+   */
+  copyInto: (from, dir, name) => ipcRenderer.invoke('fs:copyInto', from, dir, name),
+
+  /**
+   * Move a file or folder into `dir`, renaming to "name (2)" if taken.
+   * Resolves to the new path.
+   * @param {string} from
+   * @param {string} dir
+   */
+  moveInto: (from, dir) => ipcRenderer.invoke('fs:moveInto', from, dir),
+
+  /**
+   * Move to an exact path, failing if something is already there.
+   * @param {string} from
+   * @param {string} to
+   */
+  move: (from, to) => ipcRenderer.invoke('fs:move', from, to),
+
+  /**
+   * Move to the Trash; resolves to the item's name in the Trash.
+   * @param {string} path
+   */
+  trash: (path) => ipcRenderer.invoke('fs:trash', path),
+
+  /**
+   * Put a trashed item back; resolves to where it went.
+   * @param {string} name
+   */
+  restore: (name) => ipcRenderer.invoke('fs:restore', name),
+
+  /**
+   * Delete one trashed item for good, or (no name) empty the Trash.
+   * @param {string} [name]
+   */
+  purge: (name) => ipcRenderer.invoke('fs:purge', name),
+
+  /** The Trash's files folder (created if missing). */
+  trashDir: () => ipcRenderer.invoke('fs:trashDir'),
+
+  /**
+   * Everything the Properties dialog shows about a path.
+   * @param {string} path
+   */
+  details: (path) => ipcRenderer.invoke('fs:details', path),
+
+  /**
+   * Total size and item counts beneath a folder.
+   * @param {string} path
+   */
+  du: (path) => ipcRenderer.invoke('fs:du', path),
+
+  /**
+   * @param {string} path
+   * @param {number} mode
+   */
+  chmod: (path, mode) => ipcRenderer.invoke('fs:chmod', path, mode),
+
+  /**
+   * Extract an archive into `dir`; resolves to what was created.
+   * @param {string} archive
+   * @param {string} dir
+   */
+  extract: (archive, dir) => ipcRenderer.invoke('fs:extract', archive, dir),
+
+  /**
+   * Pack entries of `dir` into `dir/outName` (format by extension).
+   * @param {string} dir
+   * @param {string[]} names
+   * @param {string} outName
+   */
+  compress: (dir, names, outName) => ipcRenderer.invoke('fs:compress', dir, names, outName),
+
+  /**
+   * An archive's member names.
+   * @param {string} archive
+   */
+  listArchive: (archive) => ipcRenderer.invoke('fs:listArchive', archive),
+
+  /**
+   * Watch a folder for changes; resolves to a watch id (null if it can't be
+   * watched). Changes arrive through onChange.
+   * @param {string} path
+   */
+  watch: (path) => ipcRenderer.invoke('fs:watch', path),
+
+  /** @param {number} id */
+  unwatch: (id) => ipcRenderer.invoke('fs:unwatch', id),
+
+  /**
+   * Subscribe to changes in watched folders. Returns an unsubscribe fn.
+   * @param {(path: string) => void} callback
+   */
+  onChange: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string} path
+     */
+    const listener = (_event, path) => callback(path);
+    ipcRenderer.on('fs:changed', listener);
+    return () => ipcRenderer.removeListener('fs:changed', listener);
+  },
 });
 
 // Terminal bridge (window.pty), backed by the pty:* handlers in main.mts.

@@ -51,6 +51,7 @@ import { registerLockHandlers } from './lock.mts';
 import { registerUpdaterHandlers } from './updater.mts';
 import { airplayDisplays, registerAirPlayHandlers } from './airplay.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
+import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
 // named export too, which Node's ESM-CJS interop resolves statically.
@@ -123,6 +124,18 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
       stream: true,
       allowServiceWorkers: true,
+    },
+  },
+  {
+    // Local files for the Files app's thumbnails and the Preview window
+    // (electron/files.mts): fetchable, and streamable so video can seek.
+    scheme: LOCAL_FILE_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
     },
   },
 ]);
@@ -4204,6 +4217,8 @@ app.whenReady().then(() => {
   });
 
   registerFsHandlers();
+  registerFileOpsHandlers({ assertShellSender, sendToShell });
+  registerLocalFileProtocol(SHELL_ORIGIN);
   registerPtyHandlers();
   registerWifiHandlers();
   registerVpnHandlers();

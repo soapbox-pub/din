@@ -13,6 +13,9 @@ const WebBrowser = lazy(() =>
 const FileBrowser = lazy(() =>
   import('@/components/desktop/apps/FileBrowser').then((m) => ({ default: m.FileBrowser })),
 );
+const FileViewer = lazy(() =>
+  import('@/components/desktop/apps/FileViewer').then((m) => ({ default: m.FileViewer })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -147,6 +150,17 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/devtools.png',
     component: DevTools,
     defaultSize: { width: 720, height: 560 },
+    hidden: true,
+  },
+  {
+    // One file opened from Files (a picture, a video, some text). Hidden
+    // from the launcher; Files opens it with the file's path in its launch
+    // params.
+    id: 'preview',
+    name: 'Preview',
+    icon: '/icons/apps/file-browser.png',
+    component: FileViewer,
+    defaultSize: { width: 820, height: 600 },
     hidden: true,
   },
   {
