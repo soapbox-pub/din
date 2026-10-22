@@ -1179,6 +1179,13 @@ const waylandMenus = new Set<number>();
 const MENU_KINDS = new Set(['MENU', 'DROPDOWN_MENU', 'POPUP_MENU', 'COMBO']);
 /** Whether the keyboard belongs to a Wayland window (else an X one). */
 let keyboardOnWayland = false;
+/**
+ * Keys down on the Wayland side. Their releases go back there even if the
+ * keyboard has since moved to X: an Alt that went down in a Wayland app and
+ * came up after Alt+Tab would otherwise stay held, turning every later key
+ * in that app into a menu shortcut.
+ */
+const waylandKeys = new Set<number>();
 
 function isWaylandId(id: unknown): boolean {
   return typeof id === 'number' && id >= FIRST_WAYLAND_ID;
@@ -1211,10 +1218,13 @@ function route(message: ShellMessage): void {
       bridge.send({ type: 'focus', id: keyboardOnWayland ? message.id : 0 });
       onShellMessage({ type: 'focus', id: keyboardOnWayland ? 0 : message.id });
       return;
-    case 'key':
-      if (keyboardOnWayland) bridge.send(message);
-      else onShellMessage(message);
+    case 'key': {
+      const toWayland = message.down ? keyboardOnWayland : waylandKeys.delete(message.keycode);
+      if (!toWayland) return onShellMessage(message);
+      if (message.down) waylandKeys.add(message.keycode);
+      bridge.send(message);
       return;
+    }
     case 'leave':
       bridge.send(message);
       onShellMessage(message);
