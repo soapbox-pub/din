@@ -656,16 +656,21 @@ in
   # (on top of its own base set): roughly what desktop, Electron and game
   # binaries link against. envfs fills /bin and /usr/bin from PATH so
   # `#!/bin/bash` scripts run. AppImages launch directly via binfmt.
+  #
+  # WebKitGTK is the system webview: Tauri, wry and other GTK webview apps
+  # load it from the system instead of bundling a browser engine. It adds
+  # about 190 MiB on top of what the system already has.
   programs.nix-ld = {
     enable = true;
     libraries = with pkgs; [
-      glib gtk3 gtk4 gdk-pixbuf pango cairo atk at-spi2-atk at-spi2-core
+      glib gtk3 gtk4 gdk-pixbuf pango harfbuzz cairo atk at-spi2-atk at-spi2-core
       fontconfig freetype dbus expat icu libuuid libnotify libsecret
       nss nspr cups krb5 libusb1 fuse fuse3
       libdrm libgbm libglvnd libGL vulkan-loader wayland libxkbcommon
       libx11 libxcb libxext libxfixes libxrandr libxrender libxi libxcursor
       libxcomposite libxdamage libxtst libxscrnsaver libxshmfence libxkbfile
       alsa-lib libpulseaudio pipewire SDL2
+      webkitgtk_4_1 libsoup_3
     ];
   };
   services.envfs.enable = true;
