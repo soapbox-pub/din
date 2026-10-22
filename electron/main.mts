@@ -860,10 +860,14 @@ async function queryOutputs(probe = false): Promise<DisplayOutput[]> {
     return parseXrandr(await displayTool([probe ? '--query' : '--current'])).filter((o) => o.connected);
   }
   const outputs = parseWlrRandr(await displayTool(['--json']));
-  // No saved choice: the display Electron calls primary, else the first on.
+  // No saved choice: the laptop's own panel, so plugging a display in (an
+  // AirPlay receiver's, say) doesn't take the menu bar and windows with it.
+  // Under cage, Electron calls the newest output primary. Without a panel,
+  // Electron's choice, else the first on.
   const primaryBounds = screen.getPrimaryDisplay().bounds;
   const primary =
     savedPrimary(outputs) ??
+    outputs.find((o) => o.enabled && INTERNAL_OUTPUT.test(o.name))?.name ??
     outputs.find((o) => o.enabled && o.position.x === primaryBounds.x && o.position.y === primaryBounds.y)?.name ??
     outputs.find((o) => o.enabled)?.name;
   return outputs.map((o) => ({ ...o, primary: o.name === primary }));
