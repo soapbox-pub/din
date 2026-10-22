@@ -1745,8 +1745,11 @@ const volumeKnock = { at: 0 };
 async function audioAdjust(deltaPct: number): Promise<AudioState> {
   const status = await audioStatus();
   if (status.volume === null) throw new Error('no-volume');
+  // Turning it up while muted unmutes, as on other desktops; turning it down leaves it muted.
+  const unmute = deltaPct > 0 && status.muted;
+  if (unmute) await wpctl(['set-mute', DEFAULT_SINK, '0']);
   const next = stepWithDetent(status.volume, deltaPct, { min: 0, max: 100, overMax: MAX_VOLUME }, volumeKnock);
-  if (next === status.volume) return status;
+  if (next === status.volume) return unmute ? audioStatus() : status;
   return audioSetVolume(next);
 }
 
