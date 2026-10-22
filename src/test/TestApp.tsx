@@ -42,6 +42,9 @@ export function TestApp({ children }: TestAppProps) {
     wobblyWindows: true,
     zoomLevel: 100,
     customCursor: null,
+    clockFormat: 'auto',
+    clockShowDate: true,
+    clockShowSeconds: false,
   };
 
   return (

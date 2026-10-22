@@ -16,6 +16,7 @@
 //   - window.zoom: Chromium page zoom (interface scale) for the Settings app
 //   - window.theme: the light/dark mode pages see through prefers-color-scheme
 //   - window.keyboard: the system's keyboard layout, for Settings
+//   - window.datetime: the system's time zone and clock, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
 //   - window.systemNotifications: Linux apps' and web pages' notifications,
 //     for the notification center
@@ -522,6 +523,35 @@ contextBridge.exposeInMainWorld('keyboard', {
 
   /** Restart Din, so its own windows take a changed layout (DinOS). */
   restart: () => ipcRenderer.invoke('keyboard:restart'),
+});
+
+// Date & time bridge (window.datetime), backed by the datetime:* handlers in
+// electron/datetime.mts: the system's time zone and clock, which Settings
+// shows and, on DinOS, changes.
+contextBridge.exposeInMainWorld('datetime', {
+  /** { timeZone, automatic, synchronized, canChange, canAutomatic }. */
+  status: () => ipcRenderer.invoke('datetime:status'),
+
+  /** Every time zone there is, as IANA names. */
+  zones: () => ipcRenderer.invoke('datetime:zones'),
+
+  /**
+   * Make a time zone the system's.
+   * @param {string} zone
+   */
+  setZone: (zone) => ipcRenderer.invoke('datetime:set-zone', zone),
+
+  /**
+   * Set the clock from the network, or don't.
+   * @param {boolean} automatic
+   */
+  setAutomatic: (automatic) => ipcRenderer.invoke('datetime:set-automatic', automatic),
+
+  /**
+   * Set the clock, as local time "YYYY-MM-DD HH:MM:SS".
+   * @param {string} time
+   */
+  setTime: (time) => ipcRenderer.invoke('datetime:set-time', time),
 });
 
 // Tray bridge (window.tray), backed by the tray:* handlers in

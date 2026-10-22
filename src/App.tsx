@@ -56,6 +56,9 @@ const defaultConfig: AppConfig = {
   wobblyWindows: true,
   zoomLevel: 100,
   customCursor: null,
+  clockFormat: 'auto',
+  clockShowDate: true,
+  clockShowSeconds: false,
 };
 
 export function App() {

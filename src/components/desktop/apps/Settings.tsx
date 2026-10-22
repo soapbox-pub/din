@@ -8,10 +8,12 @@ import {
   Bug,
   Check,
   CircleArrowUp,
+  Clock,
   Cloud,
   CloudOff,
   EthernetPort,
   Gauge,
+  Globe,
   KeyRound,
   Keyboard,
   Laptop,
@@ -92,6 +94,22 @@ import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
 import { cleanLockError, getLockBridge } from '@/lib/lock';
 import { useQuery } from '@tanstack/react-query';
 import {
+  describeZone,
+  getDateTimeBridge,
+  timeFormatOptions,
+  zoneLongName,
+  zoneOffset,
+} from '@/lib/datetime';
+import {
+  useDateTimeStatus,
+  useSetAutomaticTime,
+  useSetTime,
+  useSetTimeZone,
+  useTimeZones,
+} from '@/hooks/useDateTime';
+import { useClock } from '@/hooks/useClock';
+import type { ClockFormat } from '@/contexts/AppContext';
+import {
   useKeyboardLayouts,
   useKeyboardStatus,
   useRestartForKeyboardLayout,
@@ -134,6 +152,7 @@ type SectionId =
   | 'power'
   | 'sound'
   | 'keyboard'
+  | 'datetime'
   | 'password'
   | 'notifications'
   | 'nostr'
@@ -149,6 +168,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'power', name: 'Power', icon: Gauge },
   { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'keyboard', name: 'Keyboard', icon: Keyboard },
+  { id: 'datetime', name: 'Date & Time', icon: Clock },
   { id: 'password', name: 'Password', icon: KeyRound },
   { id: 'notifications', name: 'Notifications', icon: Bell },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
@@ -172,7 +192,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * falling back where no such daemon runs. The Sound
  * section drives the default sink's volume/mute through `window.audio`
  * (wpctl/PipeWire). Keyboard picks the layout native Linux apps type with
- * through `window.keyboard`. Password changes the computer's one password
+ * through `window.keyboard`. Date & Time sets the time zone and clock
+ * through `window.datetime`, and how Din's clocks show the time. Password changes the computer's one password
  * (disk, lock screen, Nostr keys) through `window.lock`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
@@ -249,6 +270,8 @@ export function Settings({ params }: AppComponentProps) {
           <SoundSection />
         ) : section === 'keyboard' ? (
           <KeyboardSection />
+        ) : section === 'datetime' ? (
+          <DateTimeSection />
         ) : section === 'password' ? (
           <PasswordSection />
         ) : section === 'notifications' ? (
@@ -2302,6 +2325,378 @@ function KeyboardSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Date & Time
+// ---------------------------------------------------------------------------
+
+/**
+ * The system's time zone and clock, through `window.datetime` (changed on
+ * DinOS, shown elsewhere), and how Din's clocks show the time. The latter is
+ * this computer's own (AppConfig, kept local) and works in a plain browser
+ * too; the boot and lock screens follow its 12/24-hour choice
+ * (BootScreenSync).
+ */
+function DateTimeSection() {
+  const bridge = getDateTimeBridge();
+
+  return (
+    <SectionShell title="Date & Time">
+      <DateTimeNow />
+      {bridge ? (
+        <SystemDateTime />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Din uses this computer’s time zone,{' '}
+          {describeZone(Intl.DateTimeFormat().resolvedOptions().timeZone).city}. Setting the
+          time and time zone needs the Din desktop shell.
+        </p>
+      )}
+      <ClockOptions />
+    </SectionShell>
+  );
+}
+
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return <h3 className="mt-2 text-sm font-medium text-muted-foreground">{children}</h3>;
+}
+
+/** The time and date right now. Its own component so only it re-renders every second. */
+function DateTimeNow() {
+  const now = useClock();
+  const { config } = useAppContext();
+
+  return (
+    <div className="flex items-center gap-4 rounded-xl border bg-muted/20 p-4">
+      <Clock className="size-8 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0">
+        <p className="text-2xl font-semibold tabular-nums text-foreground">
+          {now.toLocaleTimeString([], timeFormatOptions(config.clockFormat, true))}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SystemDateTime() {
+  const status = useDateTimeStatus();
+  const setAutomatic = useSetAutomaticTime();
+
+  if (status.isLoading) {
+    return (
+      <div className="flex flex-col gap-2" aria-hidden>
+        <Skeleton className="h-16 w-full bg-foreground/10" />
+        <Skeleton className="h-16 w-full bg-foreground/10" />
+      </div>
+    );
+  }
+
+  if (status.isError || !status.data) {
+    return <FallbackCard>Could not read the date and time.</FallbackCard>;
+  }
+
+  const { timeZone, automatic, synchronized, canChange, canAutomatic } = status.data;
+  // While a change is in flight, show the requested choice.
+  const isAutomatic = setAutomatic.isPending ? setAutomatic.variables : automatic;
+
+  return (
+    <>
+      <SubHeading>Time</SubHeading>
+      <div className="flex flex-col gap-2">
+        {isAutomatic !== null && (
+          <SettingSwitchRow
+            id="automatic-time"
+            icon={Globe}
+            label="Set time automatically"
+            description={
+              isAutomatic
+                ? synchronized
+                  ? 'Kept in step with internet time servers.'
+                  : 'Waiting to reach an internet time server.'
+                : 'The clock keeps the time you set.'
+            }
+            checked={isAutomatic}
+            disabled={!canAutomatic || setAutomatic.isPending}
+            onCheckedChange={(checked) => setAutomatic.mutate(checked)}
+          />
+        )}
+        {canChange && isAutomatic === false && <ManualTimeForm />}
+        {!canChange && (
+          <p className="text-xs text-muted-foreground">
+            Din uses your system’s date and time. Change them in your desktop’s settings.
+          </p>
+        )}
+        {setAutomatic.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            {setAutomatic.error instanceof Error
+              ? setAutomatic.error.message
+              : 'Could not change how the time is set.'}
+          </p>
+        )}
+      </div>
+
+      <SubHeading>Time zone</SubHeading>
+      <TimeZonePicker current={timeZone} canChange={canChange} />
+    </>
+  );
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Setting the clock by hand, while it isn't set from the network. */
+function ManualTimeForm() {
+  const setTime = useSetTime();
+  const [date, setDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  });
+  const [time, setTimeOfDay] = useState(() => {
+    const now = new Date();
+    return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  });
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(date) && /^\d{2}:\d{2}(:\d{2})?$/.test(time);
+
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid) setTime.mutate(`${date} ${time.length === 5 ? `${time}:00` : time}`);
+      }}
+    >
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="manual-date" className="text-xs text-muted-foreground">Date</Label>
+          <Input
+            id="manual-date"
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+            className="w-44"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="manual-time" className="text-xs text-muted-foreground">Time</Label>
+          <Input
+            id="manual-time"
+            type="time"
+            value={time}
+            onChange={(event) => setTimeOfDay(event.target.value)}
+            className="w-36"
+          />
+        </div>
+        <Button type="submit" size="sm" className="h-9" disabled={!valid || setTime.isPending}>
+          {setTime.isPending && <Loader2 className="size-4 motion-safe:animate-spin" />}
+          Set date & time
+        </Button>
+      </div>
+      {setTime.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {setTime.error instanceof Error ? setTime.error.message : 'Could not set the date and time.'}
+        </p>
+      )}
+    </form>
+  );
+}
+
+function TimeZonePicker({ current, canChange }: { current: string; canChange: boolean }) {
+  const zones = useTimeZones();
+  const setZone = useSetTimeZone();
+  const [query, setQuery] = useState('');
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  // While a change is in flight, show the requested choice.
+  const selected = setZone.isPending ? setZone.variables : current;
+  const { city, region } = describeZone(current);
+  const longName = zoneLongName(current);
+  const offset = zoneOffset(current);
+
+  const entries = useMemo(() => {
+    const at = new Date();
+    return (zones.data ?? []).map((zone) => ({ zone, ...describeZone(zone), offset: zoneOffset(zone, at) }));
+  }, [zones.data]);
+
+  const filtered = useMemo(() => {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return entries;
+    return entries.filter((entry) => {
+      const haystack = `${entry.city} ${entry.region} ${entry.zone} ${entry.offset}`.toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    });
+  }, [entries, query]);
+
+  // Bring the system's zone into view when the list first appears.
+  const showList = canChange && entries.length > 0;
+  useEffect(() => {
+    if (showList) selectedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [showList]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <Globe className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-sm text-foreground">
+            {city}
+            {region && <span className="text-muted-foreground"> · {region}</span>}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {[longName, offset].filter(Boolean).join(', ')}
+          </p>
+        </div>
+      </div>
+
+      {canChange && (
+        <>
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search cities and regions"
+              aria-label="Search time zones"
+              className="pl-8"
+            />
+          </div>
+
+          {zones.isLoading ? (
+            <div className="flex flex-col gap-1" aria-hidden>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-9 w-full bg-foreground/10" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <FallbackCard>
+              {entries.length ? 'No time zones match your search.' : 'No time zones were found.'}
+            </FallbackCard>
+          ) : (
+            <div
+              role="radiogroup"
+              aria-label="Time zone"
+              className="flex max-h-80 flex-col gap-0.5 overflow-y-auto rounded-md border bg-muted/20 p-1"
+            >
+              {filtered.map((entry) => {
+                const active = entry.zone === selected;
+                return (
+                  <button
+                    key={entry.zone}
+                    ref={active ? selectedRef : undefined}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => {
+                      if (!active) setZone.mutate(entry.zone);
+                    }}
+                    className={cn(
+                      'flex items-center gap-3 rounded-md px-2 py-1.5 text-left',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      active ? 'bg-primary/10' : 'hover:bg-foreground/5',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex size-4 shrink-0 items-center justify-center rounded-full border',
+                        active
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-muted-foreground/50',
+                      )}
+                      aria-hidden
+                    >
+                      {active && <Check className="size-3" />}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                      {entry.city}
+                      {entry.region && <span className="text-muted-foreground"> · {entry.region}</span>}
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{entry.offset}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {setZone.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {setZone.error instanceof Error ? setZone.error.message : 'Could not change the time zone.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A time of day to show each clock format with. */
+const SAMPLE_TIME = new Date(2000, 0, 1, 13, 30);
+
+/** How Din's clocks show the time. */
+function ClockOptions() {
+  const { config, updateConfig } = useAppContext();
+  const formats: { value: ClockFormat; name: string }[] = [
+    { value: 'auto', name: 'Automatic' },
+    { value: '12', name: '12-hour' },
+    { value: '24', name: '24-hour' },
+  ];
+
+  return (
+    <>
+      <SubHeading>Clock</SubHeading>
+      <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Clock format">
+          {formats.map((option) => {
+            const active = config.clockFormat === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => updateConfig((current) => ({ ...current, clockFormat: option.value }))}
+                className={cn(
+                  'flex flex-col items-center gap-1 rounded-xl border p-3',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  active
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+                )}
+              >
+                <span className="text-lg font-semibold tabular-nums">
+                  {SAMPLE_TIME.toLocaleTimeString([], timeFormatOptions(option.value))}
+                </span>
+                <span className="text-xs">{option.name}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Automatic follows your language’s custom. The menu bar, boot screen, and lock screen all use it.
+        </p>
+        <SettingSwitchRow
+          id="clock-show-date"
+          label="Show the date in the menu bar"
+          description="The weekday and date, beside the time."
+          checked={config.clockShowDate}
+          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, clockShowDate: checked }))}
+        />
+        <SettingSwitchRow
+          id="clock-show-seconds"
+          label="Show seconds in the menu bar"
+          description="The clock ticks every second."
+          checked={config.clockShowSeconds}
+          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, clockShowSeconds: checked }))}
+        />
+      </div>
+    </>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
 // Notifications
 // ---------------------------------------------------------------------------
 
@@ -3033,6 +3428,7 @@ function SettingSwitchRow({
   label,
   description,
   checked,
+  disabled,
   onCheckedChange,
 }: {
   id: string;
@@ -3040,6 +3436,7 @@ function SettingSwitchRow({
   label: string;
   description: string;
   checked: boolean;
+  disabled?: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
@@ -3053,7 +3450,7 @@ function SettingSwitchRow({
           <p className="text-xs text-muted-foreground">{description}</p>
         </div>
       </div>
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </div>
   );
 }

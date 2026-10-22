@@ -1,4 +1,4 @@
-import { Airplay, BellOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { Airplay, BellOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -44,6 +44,8 @@ import { TrayItems } from '@/components/desktop/TrayMenu';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { useClock } from '@/hooks/useClock';
+import { useAppContext } from '@/hooks/useAppContext';
+import { timeFormatOptions } from '@/lib/datetime';
 import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useNostrd } from '@/hooks/useNostrd';
 import { useQuery } from '@tanstack/react-query';
@@ -716,7 +718,7 @@ const ClockMenuItem = memo(function ClockMenuItem() {
         sideOffset={8}
         className="flex max-h-[85vh] w-96 flex-col overflow-hidden p-0"
       >
-        <CalendarSection />
+        <CalendarSection onOpenSettings={() => setOpen(false)} />
         <NotificationsPanel
           onNavigate={() => setOpen(false)}
           className="min-h-0 flex-1 border-t border-border/60"
@@ -729,20 +731,29 @@ const ClockMenuItem = memo(function ClockMenuItem() {
 /** The clock's text. Its own component so only it re-renders every second. */
 function ClockText() {
   const now = useClock();
+  const { config } = useAppContext();
 
   return (
     <time dateTime={now.toISOString()} className="tabular-nums">
-      {now.toLocaleDateString([], { weekday: 'short' })}{' '}
-      {now.toLocaleDateString([], { month: 'short', day: 'numeric' })}{' '}
-      {now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+      {config.clockShowDate && (
+        <>
+          {now.toLocaleDateString([], { weekday: 'short' })}{' '}
+          {now.toLocaleDateString([], { month: 'short', day: 'numeric' })}{' '}
+        </>
+      )}
+      {now.toLocaleTimeString([], timeFormatOptions(config.clockFormat, config.clockShowSeconds))}
     </time>
   );
 }
 
-/** Today's date and a month calendar, at the top of the clock's panel. */
-function CalendarSection() {
+/**
+ * Today's date and a month calendar, at the top of the clock's panel, with
+ * the way into Settings → Date & Time.
+ */
+function CalendarSection({ onOpenSettings }: { onOpenSettings: () => void }) {
   // The panel mounts each time it opens, so this is today as of opening.
   const [today] = useState(() => new Date());
+  const { open } = useWindowActions();
 
   return (
     <section aria-label="Calendar" className="shrink-0">
@@ -765,6 +776,20 @@ function CalendarSection() {
           today: 'rounded-md bg-primary font-semibold text-primary-foreground',
         }}
       />
+      <div className="px-1.5 pb-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            onOpenSettings();
+            open('settings', { section: 'datetime' });
+          }}
+        >
+          <Settings2 aria-hidden />
+          Date & time settings
+        </Button>
+      </div>
     </section>
   );
 }

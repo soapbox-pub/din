@@ -224,6 +224,13 @@ the layout and changes it on DinOS and GNOME. DinOS keeps it in
 `/var/lib/din/keyboard`, which cage reads when it starts (`os/din-keyboard.sh`
 writes it as root), so Din's own windows switch after Din restarts.
 
+Settings → Date & Time shows the system's time zone and clock, read from
+systemd-timedated (`electron/datetime.mts`), and on DinOS changes them
+through `os/din-time.sh`, which runs timedatectl as root. Chromium follows
+`/etc/localtime`, so the new zone takes effect without a restart. The clock's
+12/24-hour format, and whether the menu bar shows the date and seconds, are
+Din's own settings; the boot and lock screens follow the format too.
+
 Build both crates with `npm run build:native`. Without the compositor, every
 app runs on Xvfb; without din-fd, the compositor stays on the CPU path.
 `DIN_NATIVE_DISPLAY=x11` forces X and `DIN_COMPOSITOR_GPU=0` the CPU path,

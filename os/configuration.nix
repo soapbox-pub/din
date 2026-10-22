@@ -171,6 +171,14 @@ let
     text = builtins.readFile ./din-keyboard.sh;
   };
 
+  # The privileged half of Settings → Date & Time, which sets the time zone
+  # and the clock (see the script, and electron/datetime.mts).
+  din-time = pkgs.writeShellApplication {
+    name = "din-time";
+    runtimeInputs = with pkgs; [ coreutils gnugrep systemd din-boot-screen ];
+    text = builtins.readFile ./din-time.sh;
+  };
+
   # Puts what the boot screen shows on the boot partition (see the script,
   # and electron/boot-screen.mts).
   din-boot-screen = pkgs.writeShellApplication {
@@ -259,7 +267,7 @@ let
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
   # their keyboard layout (electron/keyboard.mts), Wine for Windows
   # programs, and sudo (from /run/wrappers) for the Installer's, the
-  # updater's, and the keyboard layout's helpers.
+  # updater's, the keyboard layout's, and the time zone's helpers.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${wine}/bin:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
@@ -269,6 +277,7 @@ let
     export DIN_UPDATER=${din-updater}/bin/din-update
     export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
     export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
+    export DIN_TIME=${din-time}/bin/din-time
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
@@ -360,6 +369,7 @@ in
       "${din-updater}/bin/din-update"
       "${din-keyboard}/bin/din-keyboard"
       "${din-boot-screen}/bin/din-boot-screen"
+      "${din-time}/bin/din-time"
       "${din-lock}/bin/din-lock start"
       "${din-lock}/bin/din-lock status"
       # It checks the old password itself.
@@ -885,6 +895,11 @@ in
   };
   # The text consoles take the layout din-keyboard writes, not a fixed one.
   environment.etc."vconsole.conf".source = lib.mkForce "/var/lib/din/console.conf";
+
+  # Settings → Date & Time turns setting the clock from the network off by
+  # leaving this file (os/din-time.sh): timedated would disable the unit,
+  # which NixOS's read-only /etc doesn't allow.
+  systemd.services.systemd-timesyncd.unitConfig.ConditionPathExists = "!/var/lib/din/manual-time";
 
   # The same image is a live USB stick and, copied by the Installer app, the
   # system on a computer's own disk - often with the stick still plugged in.

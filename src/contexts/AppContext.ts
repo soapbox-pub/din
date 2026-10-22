@@ -4,6 +4,9 @@ import type { CursorTheme } from "@/lib/cursorTheme";
 
 export type Theme = "dark" | "light" | "system";
 
+/** 12- or 24-hour time, or whichever the locale uses. */
+export type ClockFormat = "auto" | "12" | "24";
+
 export interface RelayMetadata {
   /** List of relays with read/write permissions */
   relays: { url: string; read: boolean; write: boolean }[];
@@ -65,6 +68,12 @@ export interface AppConfig {
    * across reloads without re-selecting the file.
    */
   customCursor: CursorTheme | null;
+  /** Whether clocks (menu bar, boot and lock screens) show 12- or 24-hour time. */
+  clockFormat: ClockFormat;
+  /** Whether the menu-bar clock shows the weekday and date beside the time. */
+  clockShowDate: boolean;
+  /** Whether the menu-bar clock shows seconds. */
+  clockShowSeconds: boolean;
 }
 
 export interface AppContextType {

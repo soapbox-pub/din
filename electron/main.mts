@@ -40,6 +40,7 @@ import { registerNativeAppHandlers, runWindowsProgram, terminalEnvironment } fro
 import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
+import { registerDateTimeHandlers } from './datetime.mts';
 import { registerTrayHandlers } from './tray.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { registerInstallerHandlers } from './installer.mts';
@@ -4231,6 +4232,7 @@ app.whenReady().then(() => {
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
   });
   registerKeyboardHandlers({ assertShellSender });
+  registerDateTimeHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
   registerInstallerHandlers({ assertShellSender, sendToShell });
