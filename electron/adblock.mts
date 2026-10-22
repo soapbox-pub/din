@@ -15,7 +15,7 @@
 //     runs scriptlets before the page's own scripts (YouTube's ads need that).
 //
 // The filter lists are downloaded and compiled in a utility process
-// (adblock-worker.mts), cached in userData, and refreshed every few days. This
+// (adblock-worker.mts), cached in userData, and refreshed every few hours. This
 // process keeps one engine for cosmetics and private tabs, and hands the
 // extension the same serialized engine.
 //
@@ -42,8 +42,11 @@ const WORKER = path.join(import.meta.dirname, 'adblock-worker.mts');
 const PRELOAD = path.join(import.meta.dirname, 'adblock-preload.cjs');
 const SCRIPTLETS_PRELOAD = path.join(import.meta.dirname, 'adblock-scriptlets-preload.cjs');
 
-/** How old the cached engine may get before the lists are fetched again. */
-const ENGINE_MAX_AGE_MS = 4 * 24 * 60 * 60_000;
+/**
+ * How old the cached engine may get before the lists are checked again. uBlock
+ * Origin's quick fixes, where YouTube's rules live, expire this often.
+ */
+const ENGINE_MAX_AGE_MS = 8 * 60 * 60_000;
 /** How long to wait after a failed build (offline, say) before trying again. */
 const RETRY_MS = 30 * 60_000;
 
@@ -131,6 +134,9 @@ function loadEngine(): boolean {
 
 function engineAge(): number {
   try {
+    // An engine with no revisions beside it predates the worker reading
+    // Ghostery's CDN, and was built from lists months out of date.
+    fs.statSync(`${engineFile()}.revisions`);
     return Date.now() - fs.statSync(engineFile()).mtimeMs;
   } catch {
     return Infinity;
@@ -150,19 +156,20 @@ function buildEngine(): void {
     if (code === 0 && loadEngine()) {
       for (const page of backgroundPages()) page.send('adblock-ext:engineChanged');
       sendToShell('adblock:settings', settings);
-    } else {
+    } else if (code !== 2) {
+      // (2 is the lists not having changed: the engine we have is current.)
       setTimeout(buildEngine, RETRY_MS);
     }
   });
 }
 
-/** Keep the engine fresh: rebuild once it's old, checking twice a day. */
+/** Keep the engine fresh: rebuild once it's old, checking every hour. */
 function scheduleUpdates(): void {
   const check = () => {
     if (engineAge() > ENGINE_MAX_AGE_MS) buildEngine();
   };
   check();
-  setInterval(check, 12 * 60 * 60_000).unref();
+  setInterval(check, 60 * 60_000).unref();
 }
 
 // --- Blocked counts --------------------------------------------------------
