@@ -57,6 +57,12 @@ interface Drag {
   active: boolean;
   /** A copy of the item following the pointer while it's torn off the row. */
   ghost: HTMLElement | null;
+  /**
+   * Where the ghost's `left: 0; top: 0` lands in the viewport. Not always the
+   * origin: with several monitors, <body> is the containing block for fixed
+   * elements and sits at the primary monitor's offset (MonitorsProvider).
+   */
+  ghostOrigin: DragPoint;
 }
 
 /** A point in viewport coordinates. */
@@ -77,7 +83,9 @@ export interface TearOff {
 
 /** Put a ghost of `el` under the pointer. */
 function placeGhost(ghost: HTMLElement, d: Drag): void {
-  ghost.style.transform = `translate(${d.lastX - d.grabOffset}px, ${d.lastY - d.grabOffsetY}px)`;
+  const x = d.lastX - d.grabOffset - d.ghostOrigin.x;
+  const y = d.lastY - d.grabOffsetY - d.ghostOrigin.y;
+  ghost.style.transform = `translate(${x}px, ${y}px)`;
 }
 
 function createGhost(el: HTMLElement, d: Drag): HTMLElement {
@@ -97,8 +105,10 @@ function createGhost(el: HTMLElement, d: Drag): HTMLElement {
     opacity: '0.95',
     boxShadow: '0 8px 24px rgb(0 0 0 / 0.25)',
   });
-  placeGhost(ghost, d);
   (document.getElementById('shell') ?? document.body).appendChild(ghost);
+  const origin = ghost.getBoundingClientRect();
+  d.ghostOrigin = { x: origin.left, y: origin.top };
+  placeGhost(ghost, d);
   return ghost;
 }
 
@@ -277,6 +287,7 @@ export function useDragReorder({
       lastY: e.clientY,
       active: false,
       ghost: null,
+      ghostOrigin: { x: 0, y: 0 },
     };
     const target = e.currentTarget;
     const onMovePointer = (ev: PointerEvent) => {
