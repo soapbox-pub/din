@@ -1,3 +1,4 @@
+import { normalizeInternalUrl } from '@/lib/internalPages';
 import { normalizeNsiteInput, NSITE_PROTOCOL } from '@/lib/nsite';
 
 /**
@@ -107,8 +108,9 @@ export function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
- * Turn a query-or-URL string into a navigable http/https/nsite URL. If it looks
- * like a bare search term, hand it to a search engine instead. Bare loopback
+ * Turn a query-or-URL string into a navigable http/https/nsite URL, or one of
+ * the browser's own internal pages. If it looks like a bare search term, hand
+ * it to a search engine instead. Bare loopback
  * addresses (`localhost:8080`, `127.0.0.1:3000`, `[::1]:8080`) default to
  * `http:` since that's what dev servers speak; every other schemeless input
  * defaults to `https:`.
@@ -116,6 +118,13 @@ export function sameOrigin(a: string, b: string): boolean {
 export function resolveNavigation(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
+
+  // The browser's own pages (about:preferences). Returned verbatim: the
+  // caller paints them as chrome UI rather than loading them, so they skip
+  // sanitizeNavigationUrl's http/nsite allowlist entirely — and, having no
+  // `://`, they would otherwise fall through to a web search below.
+  const internal = normalizeInternalUrl(trimmed);
+  if (internal) return internal;
 
   // nsite addresses first, so `nsite://soapbox.pub/armada` isn't mistaken for
   // a search term. This also accepts the `name@domain` spelling and rewrites
