@@ -10,6 +10,19 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
  * data:image URIs); local paths must be root-relative (`/...` but not `//...`).
  * Anything that fails validation or loading falls back to the globe icon.
  */
+/**
+ * Cancel a still-loading image when its icon unmounts. An <img> with a fetch
+ * in flight stays alive until the fetch settles, and with it everything it
+ * still references - for a closed App Store, its whole detached card grid
+ * and the React tree behind it, held for as long as a slow host takes.
+ * Module-level, so React only runs it at mount and its cleanup at unmount.
+ */
+function cancelLoadOnUnmount(img: HTMLImageElement | null) {
+  return () => {
+    if (img && !img.complete) img.removeAttribute('src');
+  };
+}
+
 export function AppIcon({
   icon,
   className,
@@ -31,6 +44,7 @@ export function AppIcon({
 
   return (
     <img
+      ref={cancelLoadOnUnmount}
       src={!src || failed ? WEB_APP_ICON : src}
       alt=""
       aria-hidden
