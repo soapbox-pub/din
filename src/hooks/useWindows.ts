@@ -158,10 +158,13 @@ const CASCADE_PX = 28;
  *   web app). Must be referentially stable while the app list is unchanged.
  * @param getAreas The monitors' work areas, in workspace coordinates (read
  *   when an action needs them, so it must be stable but always current).
+ * @param getLaunchMonitor The monitor the user just clicked on, if any: new
+ *   windows open there (stable, like getAreas).
  */
 export function useWindows(
   getApp: (id: string) => AppDefinition | undefined,
   getAreas: () => WorkArea[],
+  getLaunchMonitor: () => string | null,
 ) {
   const [windows, setWindows] = useState<WindowState[]>([]);
   // For actions that must look before they leap without re-binding on every
@@ -220,21 +223,25 @@ export function useWindows(
         : (app.defaultSize ?? { width: 800, height: 560 });
     const id = nextWindowId();
 
+    const launchMonitor = getLaunchMonitor();
     setWindows((ws) => {
-      // New windows open on the monitor of the focused window, cascading
-      // from its top-left corner.
+      // New windows open on the monitor the user just clicked on, else the
+      // focused window's, cascading from its top-left corner.
       const areas = getAreas();
       const focused = ws.reduce<WindowState | null>(
         (top, w) => (!w.minimized && !w.closing && (!top || w.z > top.z) ? w : top),
         null,
       );
-      const area = focused
-        ? focused.monitor
-          ? areas.find((a) => a.id === focused.monitor) ?? areaOf(areas, focused)
-          : areaOf(areas, focused)
-        : areas.length > 0
-          ? primaryArea(areas)
-          : null;
+      const clicked = launchMonitor ? areas.find((a) => a.id === launchMonitor) : undefined;
+      const area =
+        clicked ??
+        (focused
+          ? focused.monitor
+            ? areas.find((a) => a.id === focused.monitor) ?? areaOf(areas, focused)
+            : areaOf(areas, focused)
+          : areas.length > 0
+            ? primaryArea(areas)
+            : null);
       const offset = (area ? ws.filter((w) => areaOf(areas, w) === area).length : ws.length) * CASCADE_PX;
       return [
         ...ws,
@@ -259,7 +266,7 @@ export function useWindows(
       ];
     });
     return id;
-  }, [getApp, getAreas, windows]);
+  }, [getApp, getAreas, getLaunchMonitor, windows]);
 
   /**
    * Begin closing a window: it stays mounted, marked `closing`, while the

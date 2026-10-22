@@ -32,7 +32,10 @@ import { useWindows } from '@/hooks/useWindows';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
 import { useMonitors, WorkAreasContext } from '@/contexts/MonitorsContext';
-import { workAreas, type WorkArea } from '@/lib/monitors';
+import { contains, workAreas, type WorkArea } from '@/lib/monitors';
+
+/** How long after a click a window it opens still counts as opened by it. */
+const LAUNCH_POINTER_MS = 2000;
 
 /** The desktop session: top menu bar, wallpaper workspace, bottom dock. */
 export function Desktop() {
@@ -79,7 +82,30 @@ function DesktopSession() {
   }, [areas]);
   const getAreas = useCallback(() => areasRef.current, []);
 
-  const manager = useWindows(getApp, getAreas);
+  // The monitor the last click or tap in the shell landed on. Launchers (the
+  // Dock, the apps menu) live on the primary monitor, so a window opened
+  // from them belongs there, not wherever the focused window happens to be.
+  // Clicks inside web pages never reach the shell; those launches fall back
+  // to the focused window's monitor.
+  const lastPointer = useRef<{ monitor: string; time: number } | null>(null);
+  const monitorsRef = useRef(monitors);
+  useLayoutEffect(() => {
+    monitorsRef.current = monitors;
+  }, [monitors]);
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const monitor = monitorsRef.current.find((m) => contains(m, e.clientX, e.clientY));
+      lastPointer.current = monitor ? { monitor: monitor.id, time: e.timeStamp } : null;
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+  }, []);
+  const getLaunchMonitor = useCallback(() => {
+    const last = lastPointer.current;
+    return last && performance.now() - last.time < LAUNCH_POINTER_MS ? last.monitor : null;
+  }, []);
+
+  const manager = useWindows(getApp, getAreas, getLaunchMonitor);
   const { fitToAreas } = manager.actions;
   // Windows stranded by a monitor going away (or shrinking) come home.
   useEffect(() => {
