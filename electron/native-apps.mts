@@ -863,32 +863,52 @@ async function forceQuit(pid: number): Promise<void> {
 }
 
 /**
- * Watch the user's applications folder, where installers - Wine's Start-menu
- * shortcuts above all - drop new entries, and report changes so the shell's
- * app list follows along without waiting out the scan cache.
+ * Watch where user installs land, and report changes so the shell's app list
+ * follows along without waiting out the scan cache:
+ *
+ *   - the user's applications folder, where installers - Wine's Start-menu
+ *     shortcuts above all - drop new entries;
+ *   - the user's Nix profiles folder, where `nix profile add/remove/upgrade`
+ *     repoints the `profile` symlink behind ~/.nix-profile. Nothing under
+ *     ~/.nix-profile/share/applications changes in place (it's a store path),
+ *     so this symlink flip is the only sign of an install.
  */
 function watchUserApplications(onChange: () => void): void {
-  const dir = path.join(dataHome(), 'applications');
+  const applications = path.join(dataHome(), 'applications');
+  const stateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state');
+  const nixProfiles = path.join(stateHome, 'nix/profiles');
+
   let timer: NodeJS.Timeout | null = null;
+  const changed = (): void => {
+    // An install writes a burst of files (entries, icons, MIME caches);
+    // settle once it's over.
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      entryCache = null;
+      // New programs bring new icons, which the index hasn't seen.
+      iconIndex = new Map();
+      onChange();
+    }, 1_000);
+  };
+  const watch = (dir: string, recursive: boolean): void => {
+    try {
+      const watcher = fs.watch(dir, { recursive }, changed);
+      watcher.on('error', () => watcher.close());
+      watcher.unref();
+    } catch {
+      // No watching; the scan cache's TTL still catches up eventually.
+    }
+  };
+
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    const watcher = fs.watch(dir, { recursive: true }, () => {
-      // An install writes a burst of files (entries, icons, MIME caches);
-      // settle once it's over.
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        entryCache = null;
-        // New programs bring new icons, which the index hasn't seen.
-        iconIndex = new Map();
-        onChange();
-      }, 1_000);
-    });
-    watcher.on('error', () => watcher.close());
-    watcher.unref();
+    fs.mkdirSync(applications, { recursive: true });
   } catch {
-    // No watching; the scan cache's TTL still catches up eventually.
+    // Watching below fails too, and is handled there.
   }
+  watch(applications, true);
+  // Only where Nix has made it; non-Nix systems have nothing to watch.
+  if (fs.existsSync(nixProfiles)) watch(nixProfiles, false);
 }
 
 /** Walk a pid's ancestry, looking for a process Din launched. */
