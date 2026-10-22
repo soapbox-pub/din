@@ -1126,10 +1126,14 @@ in
       mount -t ext4 /dev/mapper/dinos-home /sysroot/home
     '';
   };
+  # Waiting for root also waits out the passphrase prompt, so it has no time
+  # limit: systemd's default 90 seconds dropped a computer left at the prompt
+  # into emergency mode.
   fileSystems."/" = {
     device = "/dev/gpt-auto-root";
     fsType = "ext4";
     autoResize = true;
+    options = [ "x-systemd.device-timeout=0" ];
   };
   fileSystems."/boot" = {
     device = "/dev/disk/dinos-esp";
