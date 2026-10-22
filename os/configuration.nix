@@ -275,13 +275,14 @@ let
   # bridge's monitor arrangement (via cage), Xwayland for X11 apps on the
   # embedded display native Linux apps run on (electron/native-display.mts)
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
-  # their keyboard layout (electron/keyboard.mts), Wine for Windows
+  # their keyboard layout (electron/keyboard.mts), gsettings (glib) for the
+  # pointer's theme and size (electron/cursor.mts), Wine for Windows
   # programs, bsdtar (libarchive) plus gzip/xz/bzip2/zstd for the Files
   # app's archives (electron/files.mts), and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, and the time
   # zone's helpers.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd ]}:/run/wrappers/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd ]}:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
@@ -329,6 +330,19 @@ let
       --ozone-platform=wayland ${extraFlags}
   '';
   din-launcher = makeDinLauncher "";
+
+  # Pointer themes for Settings → Appearance → Cursor (electron/cursor.mts).
+  # Without any, Chromium and cage fall back to the tiny X11 arrow and
+  # Chromium's own bitmaps, with no resize cursors at all. A `default` theme
+  # points X11 apps and cage's own cursor at Adwaita, GTK's default. Only a
+  # few of each family are copied in: all of Bibata is over 300 MB.
+  din-cursor-themes = pkgs.runCommand "din-cursor-themes" { } ''
+    mkdir -p $out/share/icons/default
+    cp -a ${pkgs.bibata-cursors}/share/icons/{Bibata-Modern-Classic,Bibata-Modern-Ice} $out/share/icons/
+    cp -a ${pkgs.phinger-cursors}/share/icons/{phinger-cursors-light,phinger-cursors-dark} $out/share/icons/
+    cp -a ${pkgs.capitaine-cursors}/share/icons/{capitaine-cursors,capitaine-cursors-white} $out/share/icons/
+    printf '[Icon Theme]\nInherits=Adwaita\n' > $out/share/icons/default/index.theme
+  '';
 in
 {
   networking.hostName = "dinos";
@@ -659,7 +673,9 @@ in
     # notify-send, for scripts and long builds: Din is the notification server.
     ++ [ libnotify ]
     # AirPlay from the command line too (`deckmon discover`, `deckmon status`).
-    ++ [ din-deckmon ];
+    ++ [ din-deckmon ]
+    # Pointer themes: GTK's default (Adwaita) and the others Settings offers.
+    ++ [ adwaita-icon-theme din-cursor-themes ];
   virtualisation.podman = {
     enable = true;
     dockerCompat = true;
@@ -688,6 +704,11 @@ in
         https://dl.flathub.org/repo/flathub.flatpakrepo
     '';
   };
+
+  # The pointer's theme and size are GSettings' (cursor-theme, cursor-size),
+  # which dconf keeps and GTK - and through it Chromium - follows live
+  # (electron/cursor.mts). The themes are din-cursor-themes, above.
+  programs.dconf.enable = true;
 
   # Emoji and broad Unicode coverage for web content.
   fonts.packages = with pkgs; [

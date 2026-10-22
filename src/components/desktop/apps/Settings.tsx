@@ -131,6 +131,13 @@ import { useFilePicker } from '@/contexts/FilePickerContext';
 import { getFsBridge } from '@/lib/fs';
 import { parseCurXPTheme } from '@/lib/cursorTheme';
 import type { CursorTheme } from '@/lib/cursorTheme';
+import { getSystemCursorBridge } from '@/lib/systemCursor';
+import {
+  useSetSystemCursor,
+  useSystemCursorPreview,
+  useSystemCursorStatus,
+  useSystemCursorThemes,
+} from '@/hooks/useSystemCursor';
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { Button } from '@/components/ui/button';
@@ -2941,8 +2948,134 @@ function AppearanceSection() {
       </div>
 
       <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor</p>
-      <CursorThemePicker />
+      <div className="flex flex-col gap-3">
+        {getSystemCursorBridge() && <SystemCursorPicker />}
+        <CursorThemePicker />
+      </div>
     </SectionShell>
+  );
+}
+
+const CURSOR_SIZE_NAMES: Record<number, string> = {
+  24: 'Default',
+  32: 'Medium',
+  48: 'Large',
+  64: 'Larger',
+  96: 'Largest',
+};
+
+/**
+ * The system pointer: its XCursor theme and size, which apply everywhere
+ * (Din, web pages and native apps) at once. See electron/cursor.mts.
+ */
+function SystemCursorPicker() {
+  const status = useSystemCursorStatus();
+  const themes = useSystemCursorThemes();
+  const setCursor = useSetSystemCursor();
+
+  if (status.isLoading || themes.isLoading) {
+    return <Skeleton className="h-40 w-full bg-foreground/10" aria-hidden />;
+  }
+  if (status.isError || !status.data || !themes.data) {
+    return <FallbackCard>Could not read the cursor settings.</FallbackCard>;
+  }
+
+  const { canChange, sizes } = status.data;
+  // While a change is in flight, show the requested choice.
+  const { theme, size } = setCursor.isPending ? setCursor.variables : status.data;
+  const choose = (choice: { theme: string; size: number }) => {
+    if (choice.theme !== theme || choice.size !== size) setCursor.mutate(choice);
+  };
+
+  return (
+    <div className="flex flex-col gap-4 rounded-md border bg-muted/20 p-3">
+      <div>
+        <p className="mb-2 text-sm text-foreground">Style</p>
+        {themes.data.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No cursor themes are installed.</p>
+        ) : (
+          <div
+            className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-2"
+            role="radiogroup"
+            aria-label="Cursor style"
+          >
+            {themes.data.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={theme === option.id}
+                disabled={!canChange}
+                onClick={() => choose({ theme: option.id, size })}
+                className={cn(
+                  'flex flex-col items-start gap-2 rounded-xl border p-3 text-left',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'disabled:cursor-not-allowed disabled:opacity-60',
+                  theme === option.id
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
+                )}
+              >
+                <SystemCursorPreview id={option.id} />
+                <span className="w-full truncate text-sm">{option.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-2 text-sm text-foreground">Size</p>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Cursor size">
+          {sizes.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={size === option}
+              disabled={!canChange}
+              onClick={() => choose({ theme, size: option })}
+              className={cn(
+                'rounded-lg border px-3 py-1.5 text-sm',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'disabled:cursor-not-allowed disabled:opacity-60',
+                size === option
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
+              )}
+            >
+              {CURSOR_SIZE_NAMES[option] ?? `${option} px`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!canChange && (
+        <p className="text-xs text-muted-foreground">
+          Din uses your system’s cursor. Change it in your desktop’s settings.
+        </p>
+      )}
+      {setCursor.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {setCursor.error instanceof Error ? setCursor.error.message : 'Could not change the cursor.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A theme's arrow, hand, I-beam and resize cursors, side by side. */
+function SystemCursorPreview({ id }: { id: string }) {
+  const preview = useSystemCursorPreview(id);
+
+  return (
+    <div className="flex h-10 items-center gap-2" aria-hidden>
+      {preview.data
+        ? preview.data.map(({ role, src }) => (
+            <img key={role} src={src} alt="" className="size-8 object-contain" />
+          ))
+        : <Skeleton className="h-8 w-36 bg-foreground/10" />}
+    </div>
   );
 }
 
@@ -3012,8 +3145,8 @@ function CursorThemePicker() {
             <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
               .CurXPTheme
             </code>{' '}
-            file to replace the system cursor. Animated cursors play their full
-            animation.
+            file to use over Din’s own windows, in place of the style above.
+            Animated cursors play their full animation.
           </p>
         </div>
         <MousePointer2

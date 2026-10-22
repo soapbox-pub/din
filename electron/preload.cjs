@@ -17,6 +17,7 @@
 //   - window.theme: the light/dark mode pages see through prefers-color-scheme
 //   - window.keyboard: the system's keyboard layout, for Settings
 //   - window.datetime: the system's time zone and clock, for Settings
+//   - window.cursor: the pointer's theme and size, for Settings
 //   - window.tray: apps' status icons and their menus, for the menu bar
 //   - window.systemNotifications: Linux apps' and web pages' notifications,
 //     for the notification center
@@ -662,6 +663,30 @@ contextBridge.exposeInMainWorld('datetime', {
    * @param {string} time
    */
   setTime: (time) => ipcRenderer.invoke('datetime:set-time', time),
+});
+
+// Cursor bridge (window.cursor), backed by the cursor:* handlers in
+// electron/cursor.mts: the pointer's XCursor theme and size, which Settings
+// shows and, on DinOS, changes.
+contextBridge.exposeInMainWorld('cursor', {
+  /** { theme, size, sizes, canChange }. */
+  status: () => ipcRenderer.invoke('cursor:status'),
+
+  /** The installed cursor themes: { id, name }[]. */
+  themes: () => ipcRenderer.invoke('cursor:themes'),
+
+  /**
+   * A few of a theme's cursors as RGBA: { role, width, height, rgba }[].
+   * @param {string} id
+   * @param {number} size
+   */
+  preview: (id, size) => ipcRenderer.invoke('cursor:preview', id, size),
+
+  /**
+   * Make a theme and size the pointer's.
+   * @param {{ theme: string, size: number }} choice
+   */
+  set: (choice) => ipcRenderer.invoke('cursor:set', choice),
 });
 
 // Tray bridge (window.tray), backed by the tray:* handlers in
