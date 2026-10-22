@@ -17,6 +17,7 @@ import { NostrLoginProvider } from '@nostrify/react/login';
 import { AppProvider } from '@/components/AppProvider';
 import { AppConfig } from '@/contexts/AppContext';
 import { APP_RELAYS } from '@/lib/appRelays';
+import { instrumentQueryCache } from '@/lib/perfRuntime';
 import AppRouter from './AppRouter';
 
 const head = createHead({
@@ -34,6 +35,9 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Profiling builds only (`__dinPerf.runtime()`).
+if (import.meta.env.VITE_PROFILE === "1") instrumentQueryCache(queryClient.getQueryCache());
 
 const defaultConfig: AppConfig = {
   theme: "dark",

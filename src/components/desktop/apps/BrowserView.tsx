@@ -147,6 +147,20 @@ export const BrowserView = forwardRef<BrowserViewHandle, BrowserViewProps>(
   },
 );
 
+/**
+ * Whether `iframe` is showing `url`, fully loaded. Only answerable for a
+ * same-origin document (about:blank); a cross-origin one, or a navigation
+ * still pending on the initial empty document, reads as not finished.
+ */
+function finishedLoading(iframe: HTMLIFrameElement | null, url: string): boolean {
+  try {
+    const win = iframe?.contentWindow;
+    return win?.location.href === url && win.document.readyState === 'complete';
+  } catch {
+    return false;
+  }
+}
+
 const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function IframeSurface({ src, onLoadStart, onLoadEnd }, ref) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -155,19 +169,21 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
     useImperativeHandle(ref, () => ({
       reload: () => {
-        if (iframeRef.current) iframeRef.current.src = currentSrc.current;
         onLoadStart?.();
+        if (iframeRef.current) iframeRef.current.src = currentSrc.current;
       },
       // The iframe fallback has no cache-bypassing reload; re-requesting the
       // URL is the closest available.
       reloadIgnoringCache: () => {
-        if (iframeRef.current) iframeRef.current.src = currentSrc.current;
         onLoadStart?.();
+        if (iframeRef.current) iframeRef.current.src = currentSrc.current;
       },
       loadURL: (url: string) => {
         currentSrc.current = url;
-        if (iframeRef.current) iframeRef.current.src = url;
+        // Start before navigating: about:blank can finish synchronously,
+        // inside the assignment, and an end before its start sticks.
         onLoadStart?.();
+        if (iframeRef.current) iframeRef.current.src = url;
       },
       goBack: () => {},
       goForward: () => {},
@@ -178,8 +194,12 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
     // An <iframe> has no reliable "load started" event, so signal start once
     // on mount and end on its `load` event (loadURL signals its own starts).
+    // Unless the requested document already finished: about:blank (every new
+    // tab) loads synchronously as React inserts the iframe, and React drops
+    // events fired during its commit, so that `load` never arrives and the
+    // tab would sit "loading" - spinner and progress bar animating - forever.
     useEffect(() => {
-      onLoadStart?.();
+      if (!finishedLoading(iframeRef.current, currentSrc.current)) onLoadStart?.();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

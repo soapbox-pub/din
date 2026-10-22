@@ -776,10 +776,10 @@ const ClockMenuItem = memo(function ClockMenuItem() {
   );
 });
 
-/** The clock's text. Its own component so only it re-renders every second. */
+/** The clock's text. Its own component so only it re-renders as the time turns over. */
 function ClockText() {
-  const now = useClock();
   const { config } = useAppContext();
+  const now = useClock(config.clockShowSeconds ? 'second' : 'minute');
 
   return (
     <time dateTime={now.toISOString()} className="tabular-nums">

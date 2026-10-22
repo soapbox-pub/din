@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AppDefinition } from '@/lib/apps';
 import { endLaunching } from '@/lib/appLaunches';
 import { areaAt, areaFor, primaryArea, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
@@ -174,9 +174,11 @@ export function useWindows(
 ) {
   const [windows, setWindows] = useState<WindowState[]>([]);
   // For actions that must look before they leap without re-binding on every
-  // commit (close, which asks native apps instead of deciding for them).
+  // commit (close, which asks native apps instead of deciding for them, and
+  // open, which reuses a single-instance app's window). A layout effect, so
+  // it is current before any input the commit could have prompted.
   const windowsRef = useRef(windows);
-  useEffect(() => {
+  useLayoutEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
 
@@ -222,7 +224,10 @@ export function useWindows(
     // and un-minimize it, merging in any new launch params, rather than
     // spawning a duplicate.
     if (app.singleInstance) {
-      const existing = windows.find((w) => w.appId === appId && !w.closing);
+      // Read through the ref, not `windows`: depending on the array would
+      // re-create open() - and with it every action consumers hold - on
+      // each focus, move and resize.
+      const existing = windowsRef.current.find((w) => w.appId === appId && !w.closing);
       if (existing) {
         setWindows((ws) =>
           raise(
@@ -293,7 +298,7 @@ export function useWindows(
       ];
     });
     return id;
-  }, [getApp, getAreas, getLaunchMonitor, windows]);
+  }, [getApp, getAreas, getLaunchMonitor]);
 
   /**
    * Begin closing a window: it stays mounted, marked `closing`, while the

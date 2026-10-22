@@ -1,7 +1,10 @@
-import { createRoot } from 'react-dom/client';
-
 // Import polyfills first
 import './lib/polyfills.ts';
+// Profiling builds only: probes wrapping WebSocket/timers/the React DevTools
+// hook, which must be in place before react-dom loads and any socket opens.
+import '@/lib/perfRuntimeInstall';
+
+import { createRoot } from 'react-dom/client';
 import { installWebNotification } from './lib/webNotification.ts';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';

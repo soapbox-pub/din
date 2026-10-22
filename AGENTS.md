@@ -11,7 +11,12 @@ npm test            # type-check + lint + tests + build — THE validation scrip
 npm run build       # build the web app into dist/
 npm run os:build    # build the installable DinOS disk image
 npm run os:run      # demo DinOS in a QEMU window
+npm run perf:profile # headless performance run of the desktop (see Profiling)
 ```
+
+## Profiling (never in a shipped build)
+
+Runtime instrumentation exists only in profiling builds, gated on the compile-time `VITE_PROFILE=1` (`src/lib/perfRuntime.ts`, installed by `src/lib/perfRuntimeInstall.ts`; `npm run build:profile` for a hand-driven build, whose console then has `__dinPerf.runtime()`). Keep new probes behind the same guard. `scripts/perf-profile.mjs` builds into `dist-perf/`, drives Din headless in Chromium over the DevTools protocol (boot, idle, launching apps, dragging and raising windows, the apps menu, an open/close leak tour) and writes `perf-reports/`; `--only <scenarios>`, `--skip-build`, `--cpu-profile`, `--offline` and `--no-blur` are documented at the top of the script. It never publishes: every outbound EVENT gets a local OK. Measure before and after a performance change, on the same machine — headless rendering is software (SwiftShader), so frame times there overstate compositing cost on a real GPU.
 
 ## Technology Stack
 

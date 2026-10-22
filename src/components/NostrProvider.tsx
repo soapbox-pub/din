@@ -8,6 +8,29 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { SEARCH_RELAYS } from '@/lib/searchRelays';
 import { NOSTRD_LOGIN, NostrdSigner } from '@/lib/nostrd';
 
+/** Signatures already checked, by `id:sig`, oldest first (a Set keeps insertion order). */
+const verifiedSignatures = new Set<string>();
+const VERIFIED_MAX = 10_000;
+
+/**
+ * verifyEvent, minus the Schnorr check for a signature already verified: every
+ * relay sends its own copy of an event, and the same profiles and listings
+ * arrive again on each query. The id is still recomputed from the content, so
+ * a copy only skips the check if it is byte-for-byte the event that passed it
+ * (the id commits to the pubkey and content, the signature to the id).
+ */
+function verifyEventOnce(event: NostrEvent): boolean {
+  if (getEventHash(event) !== event.id) return false;
+  const key = `${event.id}:${event.sig}`;
+  if (verifiedSignatures.has(key)) return true;
+  if (!verifyEvent(event)) return false;
+  verifiedSignatures.add(key);
+  if (verifiedSignatures.size > VERIFIED_MAX) {
+    verifiedSignatures.delete(verifiedSignatures.values().next().value!);
+  }
+  return true;
+}
+
 interface NostrProviderProps {
   children: React.ReactNode;
 }
@@ -46,7 +69,7 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
           if (event.kind === 1059 || event.kind === 21059) {
             return event.id === getEventHash(event);
           }
-          return verifyEvent(event);
+          return verifyEventOnce(event);
         },
 
         // NIP-42: Respond to relay AUTH challenges by signing a kind
