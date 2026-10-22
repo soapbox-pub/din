@@ -81,8 +81,10 @@ let
       # live in a node_modules directory beside it.
       mkdir -p $out/share/din/node_modules
       # The ad blocker's filter engine (electron/adblock.mts) and its
-      # page preload come along too.
-      for dep in electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip pbf \
+      # page preload come along too, and nostr-tools for Din's NIP-46
+      # remote signer (electron/bunker.mts).
+      for dep in nostr-tools @noble/ciphers @noble/curves @noble/hashes @scure/base \
+        electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip pbf \
         @ghostery/adblocker @ghostery/adblocker-content @ghostery/adblocker-extended-selectors \
         @ghostery/adblocker-electron-preload @ghostery/url-parser tldts-experimental tldts-core \
         @remusao/guess-url-type @remusao/small @remusao/smaz @remusao/smaz-compress \

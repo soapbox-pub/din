@@ -100,6 +100,7 @@ import {
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 import { AdblockButton } from '@/components/desktop/apps/AdblockButton';
 import { PopupBlockedButton } from '@/components/desktop/apps/PopupBlockedButton';
+import { SignerSiteButton } from '@/components/desktop/apps/SignerSiteButton';
 import { useUserscripts } from '@/hooks/useUserscripts';
 import {
   UserscriptInstallDialog,
@@ -1570,6 +1571,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             if (isAllowedTabUrl(url)) openTab(url, true, null, activeId);
           }}
         />
+
+        {/* Private tabs have no window.nostr. */}
+        {!isPrivate && <SignerSiteButton url={activeTab.url} />}
 
         {isPrivate && (
           <span

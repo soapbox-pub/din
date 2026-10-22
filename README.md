@@ -292,6 +292,15 @@ files — `git add` new source files before `npm run os:build`.
   Manifest V2 is allowed (Electron lacks `declarativeNetRequest`, so classic
   content blockers like uBlock Origin need it); `chrome.*` API coverage is
   broad but not complete.
+- Din's signer is the system's NIP-07 provider. Browser tabs (not private
+  ones) and installed web apps get a `window.nostr` (`electron/nostr-preload.cjs`)
+  whose calls Din answers: a site has to ask to connect before it learns who
+  you are, and Din asks before it signs, encrypts or decrypts anything unless
+  you told it to remember (per site, and per kind for signing). Apps on other
+  devices can use your account the same way over NIP-46, with a bunker:// link
+  Din makes or a nostrconnect:// link they make (`electron/bunker.mts`).
+  Settings → Connected apps lists all of them; the key button in the browser's
+  toolbar shows the current site's.
 - The Settings app manages WiFi through NetworkManager (`nmcli` behind an
   Electron IPC bridge). NetworkManager picks up physical adapters (wired and
   wireless) automatically. Note that QEMU has no wireless hardware, so the

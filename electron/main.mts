@@ -60,6 +60,7 @@ import { registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
+import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
 import { registerUpdaterHandlers } from './updater.mts';
@@ -2848,14 +2849,18 @@ const WEBAPP_PARTITION = 'persist:din-apps';
 // WEBBROWSER_PRIVATE_PARTITION in src/components/desktop/apps/BrowserView.tsx.
 const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
 
-/** Absolute path to the preload injected into installed web-app <webview>s. */
-const WEBAPP_PRELOAD = path.join(import.meta.dirname, 'webview-preload.cjs');
+/**
+ * Absolute path to the session preload that gives web pages a NIP-07
+ * window.nostr backed by Din's signer (see registerNostrBridge): browser tabs
+ * and installed web apps, never private tabs.
+ */
+const NOSTR_PRELOAD = path.join(import.meta.dirname, 'nostr-preload.cjs');
 
 /**
  * Absolute path to the preload injected into the ad-hoc Web Browser's tabs.
- * Adds the NIP-84 "Highlight" affordance (text selection -> kind 9802). Unlike
- * WEBAPP_PRELOAD it exposes no window.nostr / signer surface to the page - it
- * only relays an explicit highlight click to the shell (see din-highlight:*).
+ * Adds the NIP-84 "Highlight" affordance (text selection -> kind 9802). It
+ * only relays an explicit highlight click to the shell (see din-highlight:*);
+ * window.nostr comes from NOSTR_PRELOAD.
  */
 const HIGHLIGHT_PRELOAD = path.join(import.meta.dirname, 'browser-highlight-preload.cjs');
 
@@ -3026,52 +3031,115 @@ function originOf(url: string): string | null {
   }
 }
 
-// Nostr identity bridge (window.nostr in installed web apps - see
-// webview-preload.cjs). The signer lives in the shell renderer (the nsec /
-// extension / bunker the user logged in with), not here, so each NIP-07 call
-// is relayed to the shell and its answer routed back to the requesting guest.
+// Nostr identity bridge (window.nostr - see nostr-preload.cjs). Browser tabs
+// and installed web apps get a NIP-07 provider whose calls land here. The
+// signer, and every decision about whether a site may use it, live in the
+// shell renderer (NostrBridgeHost), so each call is relayed to the shell and
+// its answer routed back. This side only establishes who is asking: the origin
+// is read from the calling frame, never taken from the page.
 let nextNostrRequestId = 1;
 const pendingNostrRequests = new Map<number, {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
+  resolve: (reply: NostrReply) => void;
   timer: NodeJS.Timeout;
+  /** The guest that asked, so its requests die with its page. */
+  wcId: number | null;
 }>();
-const NOSTR_REQUEST_TIMEOUT_MS = 60_000;
 
-function registerNostrBridge(): void {
-  // A guest's window.nostr.* call: verify it's a trusted app guest, then relay
-  // to the shell renderer and resolve with whatever it signs/returns.
-  ipcMain.handle('nostr-bridge:call', (event, payload) => {
-    // Only the installed app's own top-level document may sign: the guest is
-    // bound to the origin it was installed for (appGuestOrigins), so a page it
+/** Long enough for a prompt to wait in a background tab or window. */
+const NOSTR_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
+/** The shell's answer to a relayed request (see NostrBridgeResponse). */
+interface NostrReply {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+  /** Bunker connections only: a decision the user asked Din to remember. */
+  remember?: unknown;
+}
+
+/** Everything the shell needs to decide on and fulfil one request. */
+interface NostrRelayRequest {
+  method: string;
+  params: unknown;
+  /** Who is asking: a web origin, or `nip46:<connection>` for a bunker client. */
+  origin: string;
+  source: 'tab' | 'app' | 'bunker';
+  wcId: number | null;
+  /** Whether the page was just clicked or typed in (the page's own report). */
+  userActivated: boolean;
+  /** Bunker connections: the account the connection signs for. */
+  account?: string;
+  /** Bunker connections: the client's name and what it has been allowed. */
+  client?: unknown;
+}
+
+/** Relay a request to the shell; settles with its answer, or an error on timeout. */
+function relayNostrRequest(request: NostrRelayRequest, timeoutMs = NOSTR_REQUEST_TIMEOUT_MS): Promise<NostrReply> {
+  if (!shellWindow || shellWindow.webContents.isDestroyed()) {
+    return Promise.resolve({ ok: false, error: 'Din is unavailable' });
+  }
+  return new Promise((resolve) => {
+    const requestId = nextNostrRequestId++;
+    const timer = setTimeout(() => {
+      pendingNostrRequests.delete(requestId);
+      sendToShell('nostr-bridge:cancel', requestId);
+      resolve({ ok: false, error: 'Timed out waiting for an answer' });
+    }, timeoutMs);
+    pendingNostrRequests.set(requestId, { resolve, timer, wcId: request.wcId });
+    sendToShell('nostr-bridge:request', { requestId, ...request });
+  });
+}
+
+/** Fail every request a guest is waiting on: its page has gone. */
+function cancelNostrRequestsFor(wcId: number, error: string): void {
+  for (const [requestId, pending] of pendingNostrRequests) {
+    if (pending.wcId !== wcId) continue;
+    clearTimeout(pending.timer);
+    pendingNostrRequests.delete(requestId);
+    sendToShell('nostr-bridge:cancel', requestId);
+    pending.resolve({ ok: false, error });
+  }
+  sendToShell('nostr-bridge:page-changed', wcId);
+}
+
+/** Pages that may use window.nostr: secure ones, and the machine's own. */
+function isNostrCapableOrigin(origin: string): boolean {
+  return /^(https|nsite):\/\//.test(origin) || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin);
+}
+
+/**
+ * Who a window.nostr call is from, or null if it may not make one: the top
+ * document of a (non-private) browser tab, or of an installed app on the
+ * origin it was installed for. A page's iframes never qualify.
+ */
+function nostrCaller(event: Electron.IpcMainInvokeEvent): { origin: string; source: 'tab' | 'app' } | null {
+  const frame = event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame) return null;
+  if (isAppGuest(event.sender)) {
+    // Bound to the origin it was installed for (appGuestOrigins), so a page it
     // navigates or is redirected to never inherits the user's identity.
     const origin = appGuestOrigins.get(event.sender.id);
-    if (
-      !isAppGuest(event.sender) ||
-      !origin ||
-      !event.senderFrame ||
-      event.senderFrame !== event.sender.mainFrame ||
-      event.senderFrame.origin !== origin
-    ) {
-      throw new Error('Nostr bridge is not available here');
-    }
-    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
-      throw new Error('Din shell is unavailable');
-    }
+    return origin && frame.origin === origin ? { origin, source: 'app' } : null;
+  }
+  if (browserTabFromId(event.sender.id) === event.sender) {
+    const origin = frame.origin;
+    return isNostrCapableOrigin(origin) ? { origin, source: 'tab' } : null;
+  }
+  return null;
+}
+
+function registerNostrBridge(): void {
+  ipcMain.handle('nostr-bridge:call', (event, payload): Promise<NostrReply> | NostrReply => {
+    const caller = nostrCaller(event);
+    if (!caller) return { ok: false, error: 'Nostr is not available here' };
     const method = payload && typeof payload.method === 'string' ? payload.method : '';
-    return new Promise((resolve, reject) => {
-      const requestId = nextNostrRequestId++;
-      const timer = setTimeout(() => {
-        pendingNostrRequests.delete(requestId);
-        reject(new Error('Signing request timed out'));
-      }, NOSTR_REQUEST_TIMEOUT_MS);
-      pendingNostrRequests.set(requestId, { resolve, reject, timer });
-      sendToShell('nostr-bridge:request', {
-        requestId,
-        method,
-        params: payload ? payload.params : undefined,
-        origin,
-      });
+    return relayNostrRequest({
+      method,
+      params: payload ? payload.params : undefined,
+      origin: caller.origin,
+      source: caller.source,
+      wcId: event.sender.id,
+      userActivated: Boolean(payload && payload.userActivated),
     });
   });
 
@@ -3083,9 +3151,24 @@ function registerNostrBridge(): void {
     if (!pending) return;
     clearTimeout(pending.timer);
     pendingNostrRequests.delete(response.requestId);
-    if (response.ok) pending.resolve(response.result);
-    else pending.reject(new Error(response.error || 'Signing failed'));
+    pending.resolve(
+      response.ok
+        ? { ok: true, result: response.result, remember: response.remember }
+        : { ok: false, error: typeof response.error === 'string' ? response.error : 'Request failed', remember: response.remember },
+    );
   });
+
+  // The shell switched accounts: every page with window.nostr hears about it.
+  ipcMain.on('nostr-bridge:account-changed', (event) => {
+    if (!isShellSender(event)) return;
+    for (const contents of webContents.getAllWebContents()) {
+      if (contents.isDestroyed() || contents.getType() !== 'webview') continue;
+      if (contents.session !== browserSession() && contents.session !== appSession()) continue;
+      contents.send('nostr-bridge:account-changed');
+    }
+  });
+
+  registerBunkerHandlers({ assertShellSender, sendToShell, relay: relayNostrRequest });
 }
 
 // NIP-84 highlight bridge (browser-highlight-preload.cjs). A browser tab's
@@ -3562,6 +3645,21 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
   const asking = new Map<string, Promise<boolean>>();
 
   s.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    // A nostrconnect:// link is an app asking to use the user's account
+    // through Din (electron/bunker.mts). The shell shows what it asks for and
+    // connects nothing until the user says so.
+    if (
+      permission === 'openExternal' &&
+      prompts &&
+      s !== privateBrowserSession() &&
+      'externalURL' in details &&
+      typeof details.externalURL === 'string' &&
+      /^nostrconnect:/i.test(details.externalURL)
+    ) {
+      sendToShell('bunker:link', details.externalURL);
+      callback(false);
+      return;
+    }
     if (ALWAYS_ALLOWED_PERMISSIONS.has(permission)) {
       callback(true);
       return;
@@ -4386,6 +4484,10 @@ app.whenReady().then(() => {
   for (const s of [browserSession(), privateBrowserSession(), appSession()]) {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
   }
+  // And a window.nostr backed by Din's signer; private tabs get none.
+  for (const s of [browserSession(), appSession()]) {
+    s.registerPreloadScript({ id: 'din-nostr', type: 'frame', filePath: NOSTR_PRELOAD });
+  }
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
@@ -4544,10 +4646,8 @@ app.whenReady().then(() => {
     return { action: 'deny' };
   });
 
-  // Attach the NIP-07 preload to installed web-app guests only (keyed on their
-  // session partition), so they inherit the user's Nostr identity. Browser
-  // tabs and devtools hosts attach in other partitions and get nothing. Keep
-  // every guest locked down (sandboxed, no Node) regardless.
+  // Keep every guest locked down (sandboxed, no Node), and give browser tabs
+  // their highlight preload.
   win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     // Every guest must live in one of Din's own partitions. A guest in the
     // default session would share the shell's app:// origin - and with it the
@@ -4570,9 +4670,7 @@ app.whenReady().then(() => {
     if (!attachingGuestSrc.startsWith('chrome-extension://')) {
       webPreferences.transparent = false;
     }
-    if (params.partition === WEBAPP_PARTITION) {
-      webPreferences.preload = WEBAPP_PRELOAD;
-    } else if (params.partition === WEBBROWSER_PARTITION) {
+    if (params.partition === WEBBROWSER_PARTITION) {
       // Load frame preloads into sub-frames, not just the top document, so the
       // chrome.* API preload (session-registered by electron-chrome-extensions
       // as type:'frame') reaches extension web_accessible_resource iframes -
@@ -4580,8 +4678,8 @@ app.whenReady().then(() => {
       // the content script embeds in the page. Without this the overlay's own
       // bundle has no chrome.runtime and the fill prompt never renders. The
       // guest stays sandboxed with no Node, so this only widens preload reach.
-      // Scoped to the browser session on purpose: the web-app partition's
-      // NIP-07 signer preload must never fan out into a page's iframes.
+      // The NIP-07 preload (NOSTR_PRELOAD) stays inert in iframes, and main
+      // refuses calls from anything but a top document either way.
       webPreferences.nodeIntegrationInSubFrames = true;
       if (!attachingGuestSrc.startsWith('chrome-extension://')) {
         // Ad-hoc browser tabs get the highlight preload (no signer surface,
@@ -4810,6 +4908,14 @@ app.on('web-contents-created', (_event, contents) => {
     !isExtensionPageGuest &&
     (isBrowserTabSession(contents.session) || contents.session === appSession());
   if (isWebPage) {
+    // A page's pending window.nostr requests die with it, and the prompts the
+    // user hasn't answered yet go away.
+    contents.on('did-start-navigation', (event) => {
+      if (event.isMainFrame && !event.isSameDocument) {
+        cancelNostrRequestsFor(contents.id, 'The page navigated away');
+      }
+    });
+    contents.once('destroyed', () => cancelNostrRequestsFor(contents.id, 'The page was closed'));
     attachFileChooserInterception(contents);
     // Pop-ups need a click (electron/popups.mts); a tab one opened is linked
     // to its opener.

@@ -48,8 +48,11 @@
 //   - window.adblock: the Web Browser's built-in ad blocker
 //   - window.popups: the pop-up blocker's blocked windows and allowed sites
 //   - window.devtools: docked devtools control for the Web Browser app
-//   - window.nostrHost: relays NIP-07 requests from installed web apps to the
-//     signed-in account's signer (see NostrBridgeHost / webview-preload.cjs)
+//   - window.nostrHost: relays NIP-07 requests from browser tabs and installed
+//     web apps to the signed-in account's signer (see NostrBridgeHost /
+//     nostr-preload.cjs)
+//   - window.bunkerHost: Din's NIP-46 remote-signer connections (see
+//     electron/bunker.mts)
 //   - window.highlightHost: relays NIP-84 highlight clicks from browser tabs to
 //     the signer (see HighlightBridgeHost / browser-highlight-preload.cjs)
 //   - window.filePickerHost: relays <input type=file> clicks from guests to the
@@ -1827,34 +1830,91 @@ contextBridge.exposeInMainWorld('guestInput', {
 });
 
 // Nostr identity bridge host (window.nostrHost), backed by the
-// nostr-bridge:* handlers in main.mts. Installed web apps get a NIP-07
-// window.nostr (see webview-preload.cjs) whose calls are relayed here, to the
-// shell renderer, where the signed-in account's signer runs. The renderer
-// subscribes via onRequest and answers each request with respond(). This is
-// the ONLY bridge that serves the user's signer, so it must never be attached
-// to a <webview> - only the shell (see the header note above).
+// nostr-bridge:* handlers in main.mts. Browser tabs and installed web apps get
+// a NIP-07 window.nostr (see nostr-preload.cjs), and apps connected over
+// NIP-46 (electron/bunker.mts) ask the same questions; their calls are relayed
+// here, to the shell renderer, which decides on them and signs with the
+// signed-in account's signer. This is the ONLY bridge that serves the user's
+// signer, so it must never be attached to a <webview> - only the shell (see
+// the header note above).
 contextBridge.exposeInMainWorld('nostrHost', {
   /**
-   * Subscribe to signing requests relayed from installed web-app guests.
-   * The callback receives { requestId, method, params, origin }. Returns an
-   * unsubscribe fn.
-   * @param {(request: { requestId: number, method: string, params?: unknown, origin: string }) => void} callback
+   * Subscribe to requests. Returns an unsubscribe fn.
+   * @param {(request: unknown) => void} callback
    */
   onRequest: (callback) => {
-    /**
-     * @param {Electron.IpcRendererEvent} _event
-     * @param {{ requestId: number, method: string, params?: unknown, origin: string }} request
-     */
+    /** @param {Electron.IpcRendererEvent} _event @param {unknown} request */
     const listener = (_event, request) => callback(request);
     ipcRenderer.on('nostr-bridge:request', listener);
     return () => ipcRenderer.removeListener('nostr-bridge:request', listener);
   },
 
   /**
-   * Answer a relayed request: { requestId, ok, result?, error? }.
-   * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string }} response
+   * Subscribe to requests main gave up on (timed out, or their page went away).
+   * @param {(requestId: number) => void} callback
+   */
+  onCancel: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {number} requestId */
+    const listener = (_event, requestId) => callback(requestId);
+    ipcRenderer.on('nostr-bridge:cancel', listener);
+    return () => ipcRenderer.removeListener('nostr-bridge:cancel', listener);
+  },
+
+  /**
+   * Subscribe to a guest's page going away (navigated or closed).
+   * @param {(wcId: number) => void} callback
+   */
+  onPageChanged: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {number} wcId */
+    const listener = (_event, wcId) => callback(wcId);
+    ipcRenderer.on('nostr-bridge:page-changed', listener);
+    return () => ipcRenderer.removeListener('nostr-bridge:page-changed', listener);
+  },
+
+  /**
+   * Answer a relayed request: { requestId, ok, result?, error?, remember? }.
+   * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string, remember?: unknown }} response
    */
   respond: (response) => ipcRenderer.send('nostr-bridge:response', response),
+
+  /** Tell every page with window.nostr that the account changed. */
+  accountChanged: () => ipcRenderer.send('nostr-bridge:account-changed'),
+});
+
+// Din as a remote signer (window.bunkerHost), backed by electron/bunker.mts:
+// the connections apps make to the user's account over NIP-46.
+contextBridge.exposeInMainWorld('bunkerHost', {
+  list: () => ipcRenderer.invoke('bunker:list'),
+  /** @param {{ account: string, relays: string[] }} options */
+  create: (options) => ipcRenderer.invoke('bunker:create', options),
+  /** @param {string} uri */
+  parse: (uri) => ipcRenderer.invoke('bunker:parse', uri),
+  /** @param {{ account: string, uri: string }} options */
+  accept: (options) => ipcRenderer.invoke('bunker:accept', options),
+  /** @param {string} id */
+  remove: (id) => ipcRenderer.invoke('bunker:remove', id),
+  /** @param {{ id: string, method: string, kind?: number }} options */
+  revoke: (options) => ipcRenderer.invoke('bunker:revoke', options),
+  /**
+   * Subscribe to the connection list changing. Returns an unsubscribe fn.
+   * @param {(connections: unknown) => void} callback
+   */
+  onChange: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {unknown} connections */
+    const listener = (_event, connections) => callback(connections);
+    ipcRenderer.on('bunker:changed', listener);
+    return () => ipcRenderer.removeListener('bunker:changed', listener);
+  },
+  /**
+   * Subscribe to nostrconnect:// links opened in a page. Returns an unsubscribe fn.
+   * @param {(uri: string) => void} callback
+   */
+  onLink: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {string} uri */
+    const listener = (_event, uri) => callback(uri);
+    ipcRenderer.on('bunker:link', listener);
+    return () => ipcRenderer.removeListener('bunker:link', listener);
+  },
 });
 
 // Highlight bridge host (window.highlightHost), backed by the din-highlight:*

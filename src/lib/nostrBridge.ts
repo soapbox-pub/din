@@ -1,21 +1,36 @@
 /**
  * Typed access to the Nostr identity bridge host exposed by the Electron
- * preload (`window.nostrHost`, see electron/preload.cjs + electron/main.cjs).
+ * preload (`window.nostrHost`, see electron/preload.cjs + electron/main.mts).
  *
- * Installed web apps run in a <webview> that gets a NIP-07 `window.nostr`
- * provider (electron/webview-preload.cjs). That provider holds no keys - it
- * relays every call to the main process, which forwards it here, to the shell
- * renderer, where the signed-in account's signer actually runs. The renderer
- * subscribes with `onRequest` and answers each request with `respond`.
+ * Browser tabs and installed web apps get a NIP-07 `window.nostr`
+ * (electron/nostr-preload.cjs), and apps connected to Din as a remote signer
+ * (NIP-46, electron/bunker.mts) ask the same things. None of them hold keys:
+ * main relays every call here, to the shell renderer, which decides whether
+ * to allow it and signs with the account's signer. The renderer subscribes
+ * with `onRequest` and answers each request with `respond`.
  *
- * In a plain browser (`make dev-browser`) the bridge is absent - there are no
- * <webview> guests to serve - so callers must feature-detect via
+ * In a plain browser (`npm run dev:browser`) the bridge is absent - there are
+ * no guests to serve - so callers must feature-detect via
  * `getNostrHostBridge()`.
  */
 
-/** A NIP-07 call relayed from an installed web-app guest. */
+import type { SiteGrant } from '@/lib/signerPermissions';
+
+/** Where a request came from. */
+export type NostrRequestSource = 'tab' | 'app' | 'bunker';
+
+/** A bunker client, as main describes it alongside its requests. */
+export interface BunkerClientInfo {
+  id: string;
+  name?: string;
+  url?: string;
+  image?: string;
+  grants: Pick<SiteGrant, 'methods' | 'kinds'>;
+}
+
+/** A NIP-07 call relayed from a guest or a bunker client. */
 export interface NostrBridgeRequest {
-  /** Correlates the eventual response back to the waiting guest call. */
+  /** Correlates the eventual response back to the waiting caller. */
   requestId: number;
   /**
    * The NIP-07 method: 'getPublicKey' | 'signEvent' | 'getRelays' |
@@ -24,8 +39,27 @@ export interface NostrBridgeRequest {
   method: string;
   /** Method arguments (shape depends on `method`). */
   params?: unknown;
-  /** The requesting app's origin (informational; e.g. for logging). */
+  /**
+   * Who is asking, as main established it: the calling frame's origin
+   * (`https://…`, `nsite://…`), or `nip46:<connection>` for a bunker client.
+   */
   origin: string;
+  source: NostrRequestSource;
+  /** The guest that asked (tabs and apps). */
+  wcId: number | null;
+  /** Whether the page had just been clicked or typed in (its own report). */
+  userActivated: boolean;
+  /** Bunker clients: the account the connection signs for. */
+  account?: string;
+  /** Bunker clients: who they are and what they're allowed. */
+  client?: BunkerClientInfo;
+}
+
+/** A decision a bunker client's request should leave behind (kept by main). */
+export interface RememberedDecision {
+  method: string;
+  kind?: number;
+  decision: 'allow' | 'deny';
 }
 
 /** The shell renderer's answer to a relayed request. */
@@ -36,13 +70,21 @@ export interface NostrBridgeResponse {
   result?: unknown;
   /** Present when not `ok` - a human-readable failure message. */
   error?: string;
+  /** Bunker clients only. */
+  remember?: RememberedDecision;
 }
 
 export interface NostrHostBridge {
-  /** Subscribe to relayed signing requests. Returns an unsubscribe fn. */
+  /** Subscribe to relayed requests. Returns an unsubscribe fn. */
   onRequest(callback: (request: NostrBridgeRequest) => void): () => void;
+  /** Subscribe to requests main gave up on. Returns an unsubscribe fn. */
+  onCancel(callback: (requestId: number) => void): () => void;
+  /** Subscribe to a guest's page going away. Returns an unsubscribe fn. */
+  onPageChanged(callback: (wcId: number) => void): () => void;
   /** Answer a relayed request. */
   respond(response: NostrBridgeResponse): void;
+  /** Tell every page with window.nostr that the account changed. */
+  accountChanged(): void;
 }
 
 declare global {

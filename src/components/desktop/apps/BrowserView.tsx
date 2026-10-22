@@ -29,7 +29,8 @@ export const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
 
 /**
  * The session partition for installed web apps (WebAppFrame). Guests here get
- * the NIP-07 identity bridge so they inherit Din's login; browser tabs do not.
+ * the NIP-07 identity bridge already connected, so they inherit Din's login;
+ * browser tabs get it too, but have to ask to connect.
  * Must match WEBAPP_PARTITION in electron/main.cjs.
  */
 export const APP_WEBVIEW_PARTITION = 'persist:din-apps';

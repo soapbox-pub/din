@@ -167,8 +167,9 @@ export function WebAppFrame({
       <BrowserView
         ref={viewRef}
         src={src}
-        // Installed apps run in their own session so they inherit the user's
-        // Nostr login (window.nostr) - the ad-hoc Web Browser does not.
+        // Installed apps run in their own session, pinned to their origin, and
+        // are connected to the user's Nostr account (window.nostr) by being
+        // installed; browser tabs have to ask to connect.
         partition={APP_WEBVIEW_PARTITION}
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => {
