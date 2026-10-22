@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm, type ILink } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { SquareTerminal } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
@@ -805,9 +806,14 @@ function paneSession(bridge: PtyBridge, paneId: string, initialCwd: string | und
       "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace",
     scrollback: 5000,
     theme: TERMINAL_THEME,
+    // The graphemes addon needs the proposed `unicode` API.
+    allowProposedApi: true,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  // Treat grapheme clusters (skin tones, ZWJ sequences, flags) as one
+  // double-width cell, so emoji like 👍🏽 and 🇺🇸 render whole.
+  term.loadAddon(new UnicodeGraphemesAddon());
 
   // Prefer the WebGL renderer: the default DOM renderer draws box-drawing
   // and block glyphs straight from the font, leaving gaps and misaligned

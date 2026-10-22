@@ -42,7 +42,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-W2/xr9qmsII6t/m6uNzg2sntGyuc9ylFROzz+As0GDw=";
+    npmDepsHash = "sha256-9F+vbSFjvGWdSBF6Hxbeq1e9SvbFkfxxtTGYmyV+ujM=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -731,6 +731,17 @@ in
     noto-fonts
     noto-fonts-color-emoji
   ];
+
+  # fontconfig always ships DejaVu Sans, and left as the default sans-serif
+  # it wins over the emoji font for the emoticons it has outlines for (😂
+  # and friends), which then render as monochrome text. Noto Sans has no
+  # emoji, so Chromium falls back to Noto Color Emoji for all of them.
+  fonts.fontconfig.defaultFonts = {
+    sansSerif = [ "Noto Sans" "Noto Color Emoji" ];
+    serif = [ "Noto Serif" "Noto Color Emoji" ];
+    monospace = [ "Noto Sans Mono" "Noto Color Emoji" ];
+    emoji = [ "Noto Color Emoji" ];
+  };
 
   # The disk image (`nix build ./os#image`) is written directly to a drive and
   # boots via UEFI. systemd-boot installs to the ESP's removable path
