@@ -190,6 +190,29 @@ export function areaAt(areas: WorkArea[], x: number, y: number): WorkArea | null
   return areas.find((a) => contains(a.bounds, x, y)) ?? null;
 }
 
+/**
+ * The work area whose monitor holds a point, else the one nearest it. A
+ * pointer the compositor keeps on a monitor can still land a hair outside the
+ * monitor's measured bounds (rounding, page zoom, the very top row).
+ */
+export function areaNear(areas: WorkArea[], x: number, y: number): WorkArea {
+  const hit = areaAt(areas, x, y);
+  if (hit) return hit;
+  let best = primaryArea(areas);
+  let bestDistance = Infinity;
+  for (const a of areas) {
+    const { bounds: b } = a;
+    const dx = Math.max(b.x - x, 0, x - (b.x + b.width - 1));
+    const dy = Math.max(b.y - y, 0, y - (b.y + b.height - 1));
+    const d = Math.hypot(dx, dy);
+    if (d < bestDistance) {
+      best = a;
+      bestDistance = d;
+    }
+  }
+  return best;
+}
+
 /** Height of a window's title bar, the part of it that must stay reachable. */
 const TITLE_BAR_PX = 36;
 

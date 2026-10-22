@@ -38,7 +38,7 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { MIN_HEIGHT, MIN_WIDTH, windowRect, type WindowState } from '@/hooks/useWindows';
-import { areaAt, areaFor, hasNeighbor, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
+import { areaFor, areaNear, hasNeighbor, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
 
 /**
  * Dragging with the pointer within this many pixels of a monitor's top edge
@@ -64,10 +64,20 @@ interface SnapTarget {
   area: WorkArea;
 }
 
+/** The monitor a pointer is on (or nearest), and the pointer clamped onto it. */
+function pointerOn(areas: WorkArea[], px: number, py: number): { area: WorkArea; x: number; y: number } {
+  const area = areaNear(areas, px, py);
+  const { bounds: b } = area;
+  return {
+    area,
+    x: Math.min(Math.max(px, b.x), b.x + b.width - 1),
+    y: Math.min(Math.max(py, b.y), b.y + b.height - 1),
+  };
+}
+
 /** The snap zone under a pointer (workspace coordinates), if any. */
-function snapTargetAt(areas: WorkArea[], x: number, y: number): SnapTarget | null {
-  const area = areaAt(areas, x, y);
-  if (!area) return null;
+function snapTargetAt(areas: WorkArea[], px: number, py: number): SnapTarget | null {
+  const { area, x, y } = pointerOn(areas, px, py);
   // Top wins its (thinner) corner overlap. On the primary monitor the
   // pointer can be above the work area, over the menu bar: that's the top.
   if (y - area.y <= SNAP_TOP_PX && !hasNeighbor(areas, area, 'top', x)) return { zone: 'top', area };
@@ -86,15 +96,19 @@ function snapTargetAt(areas: WorkArea[], x: number, y: number): SnapTarget | nul
 const SHARED_TOP_DWELL_MS = 350;
 
 /** The monitor whose shared top edge the pointer rides, if any. */
-function sharedTopAt(areas: WorkArea[], x: number, y: number): WorkArea | null {
-  const area = areaAt(areas, x, y);
-  if (!area || y - area.y > SNAP_TOP_PX || !hasNeighbor(areas, area, 'top', x)) return null;
+function sharedTopAt(areas: WorkArea[], px: number, py: number): WorkArea | null {
+  const { area, x, y } = pointerOn(areas, px, py);
+  if (y - area.y > SNAP_TOP_PX || !hasNeighbor(areas, area, 'top', x)) return null;
   return area;
 }
 
-/** The highest a window's top edge may go with the pointer (or window) at a spot. */
-function topLimit(areas: WorkArea[], x: number, y: number, rect: Rect): number {
-  return (areaAt(areas, x, y) ?? areaFor(areas, rect)).y;
+/**
+ * The highest a window's top edge may go with the pointer at a spot: the top
+ * of the monitor it's on, or nearest. Never the monitor the drag began on,
+ * which would yank the window back there while the pointer stays put.
+ */
+function topLimit(areas: WorkArea[], x: number, y: number): number {
+  return areaNear(areas, x, y).y;
 }
 
 /**
@@ -824,7 +838,7 @@ export const Window = memo(function Window({
         const x = Math.round(px - width * fraction);
         // Keep the grab point's offset within the title bar.
         const y = Math.max(
-          topLimit(areas, px, py, prevRect),
+          topLimit(areas, px, py),
           prevRect.y + (e.clientY - s.py),
         );
         s.tearAway = null;
@@ -882,7 +896,7 @@ export const Window = memo(function Window({
 
       s.x = s.wx + (e.clientX - s.px);
       s.y = Math.max(
-        topLimit(areas, px, py, { x: s.x, y: s.wy, width: win.width, height: win.height }),
+        topLimit(areas, px, py),
         s.wy + (e.clientY - s.py),
       );
 
@@ -926,7 +940,7 @@ export const Window = memo(function Window({
         el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
       }
     },
-    [beginGesture, unmaximize, win.id, win.width, win.height, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
+    [beginGesture, unmaximize, win.id, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
   );
 
   const endDrag = useCallback(
