@@ -15,6 +15,7 @@ import {
   EthernetPort,
   Gauge,
   Globe,
+  Info,
   KeyRound,
   Keyboard,
   Laptop,
@@ -182,8 +183,8 @@ type SectionId =
   | 'notifications'
   | 'nostr'
   | 'appearance'
-  | 'updates'
-  | 'developers';
+  | 'developers'
+  | 'about';
 
 const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
@@ -199,8 +200,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'notifications', name: 'Notifications', icon: Bell },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'appearance', name: 'Appearance', icon: Palette },
-  { id: 'updates', name: 'Updates', icon: CircleArrowUp },
   { id: 'developers', name: 'Developers', icon: Bug },
+  { id: 'about', name: 'About', icon: Info },
 ];
 
 /**
@@ -225,16 +226,18 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * sync, NIP-65 relay list, and Blossom server list. Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
- * Updates shows DinOS's version and the update it's staging through
- * `window.updater`, and offers the restart that finishes one.
  * Developers holds debug utilities such as intentionally crashing the shell
- * to test the error boundary.
+ * to test the error boundary. About shows Din's logo and DinOS's version, and
+ * the update it's staging through `window.updater`, and offers the restart
+ * that finishes one.
  */
 const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
 
 /** Extract a valid SectionId from launch params, if present. */
 function paramSection(params: AppComponentProps['params']): SectionId | undefined {
   const s = params?.section;
+  // Updates used to be a section of its own.
+  if (s === 'updates') return 'about';
   return typeof s === 'string' && SECTION_IDS.has(s) ? (s as SectionId) : undefined;
 }
 
@@ -309,10 +312,10 @@ export function Settings({ params }: AppComponentProps) {
           <NostrStorageSection />
         ) : section === 'appearance' ? (
           <AppearanceSection />
-        ) : section === 'updates' ? (
-          <UpdatesSection />
-        ) : (
+        ) : section === 'developers' ? (
           <DevelopersSection />
+        ) : (
+          <AboutSection />
         )}
       </div>
     </div>
@@ -3740,53 +3743,56 @@ function PasswordSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Updates
+// About
 // ---------------------------------------------------------------------------
 
 /**
- * DinOS's version, and its updates (window.updater). The system looks for
- * them by itself and stages what it finds for the next boot, so this mostly
- * reports, and offers the restart.
+ * Din's logo and DinOS's version, and its updates (window.updater). The
+ * system looks for them by itself and stages what it finds for the next boot,
+ * so this mostly reports, and offers the restart.
  */
-function UpdatesSection() {
+function AboutSection() {
   const bridge = getUpdaterBridge();
   const state = useUpdateState();
+  const dinos = !!bridge && state?.available !== false;
 
-  if (!bridge || (state && !state.available)) {
-    return (
-      <SectionShell title="Updates">
+  return (
+    <SectionShell title="About">
+      <div className="flex flex-col items-center gap-2 rounded-xl border border-border/60 bg-background/40 px-6 py-8 text-center">
+        <img src="/din-logo.svg" alt="Din" className="h-24 w-auto select-none" draggable={false} />
+        {dinos && !state ? (
+          <Skeleton className="h-4 w-24 bg-foreground/10" aria-hidden />
+        ) : (
+          <p className="text-sm font-medium text-foreground">
+            {dinos ? `DinOS ${state?.current ?? '(unknown version)'}` : 'Din'}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">A social computer.</p>
+      </div>
+
+      <SubHeading>Updates</SubHeading>
+      {!dinos ? (
         <FallbackCard icon={CircleArrowUp}>
           Updates are for DinOS. Elsewhere, Din is updated along with the system
           it runs on.
         </FallbackCard>
-      </SectionShell>
-    );
-  }
-
-  if (!state) {
-    return (
-      <SectionShell title="Updates">
+      ) : !state ? (
         <div className="space-y-2 rounded-xl border border-border/60 p-4" aria-hidden>
           <Skeleton className="h-4 w-32 bg-foreground/10" />
           <Skeleton className="h-3 w-56 bg-foreground/10" />
         </div>
-      </SectionShell>
-    );
-  }
-
-  return (
-    <SectionShell title="Updates">
-      <div className="flex flex-col gap-1 rounded-xl border border-border/60 bg-background/40 p-4">
-        <p className="text-sm font-medium text-foreground">
-          DinOS {state.current ?? '(unknown version)'}
+      ) : state.live ? (
+        <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+          Running from a USB stick. Install DinOS to get updates.
         </p>
-        <p className="text-xs text-muted-foreground">
-          {state.live
-            ? 'Running from a USB stick. Install DinOS to get updates.'
-            : 'Updates are downloaded by themselves and installed when you restart.'}
-        </p>
-      </div>
-      {!state.live && <UpdateStatus state={state} />}
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Updates are downloaded by themselves and installed when you restart.
+          </p>
+          <UpdateStatus state={state} />
+        </>
+      )}
     </SectionShell>
   );
 }

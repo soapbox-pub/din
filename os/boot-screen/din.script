@@ -1,7 +1,7 @@
 # Din's boot and unlock screen, for Plymouth (see os/boot-screen.nix).
 #
 # It looks like Din's old login screen: the wallpaper, dimmed, a large clock
-# and the date, a password field, and DIN at the foot. Until a password is
+# and the date, a password field, and Din's logo at the foot. Until a password is
 # asked for there's only the background and the footer. Once root is mounted
 # everything fades to black, which Din's own boot veil fades in from.
 #
@@ -104,8 +104,14 @@ field_image = Image("field.png");
 if (field_image)
   center(field.sprite, field_image.Scale(px(320), px(48)), field_y);
 
-center(footer.sprite, text("D I N", 0.4, "Medium", 11), screen.h - px(48));
-footer.target = 1;
+logo_image = Image("logo.png");
+if (logo_image)
+{
+  logo_h = px(28);
+  logo_w = Math.Int(logo_image.GetWidth() * logo_h / logo_image.GetHeight());
+  center(footer.sprite, logo_image.Scale(logo_w, logo_h), screen.h - px(40) - logo_h);
+}
+footer.target = 0.85;
 
 asked = 0;
 mounted = 0;

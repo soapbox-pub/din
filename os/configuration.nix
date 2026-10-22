@@ -245,10 +245,10 @@ let
   };
 
   # The boot and unlock screen: a Plymouth script theme (boot-screen/), with
-  # the two images it draws with made here. Its ImageDir is under /run, where
+  # the images it draws with made here. Its ImageDir is under /run, where
   # the initrd puts those and the user's wallpaper (dinos-boot-screen, below).
   boot-screen-theme = pkgs.runCommand "dinos-boot-screen" {
-    nativeBuildInputs = [ pkgs.imagemagick ];
+    nativeBuildInputs = [ pkgs.imagemagick pkgs.librsvg ];
   } ''
     dir=$out/share/plymouth/themes/din
     mkdir -p $dir
@@ -267,6 +267,7 @@ let
     magick -size 640x96 xc:none -fill 'rgba(255,255,255,0.14)' \
       -stroke 'rgba(255,255,255,0.32)' -strokewidth 2 \
       -draw 'roundrectangle 1,1 638,94 47,47' $dir/field.png
+    rsvg-convert -h 96 ${din-src}/public/din-logo.svg -o $dir/logo.png
   '';
 
   # Succeeds when the partition UUID given is the boot loader's ESP, from

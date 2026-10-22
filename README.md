@@ -1,4 +1,6 @@
-# Din
+<h1 align="center">
+  <img src="public/din-logo.svg" alt="Din" width="280">
+</h1>
 
 **Din is a social computer.** You sign in with your Nostr account, and Din
 bridges your identity into every application on the desktop — connecting you
@@ -138,7 +140,7 @@ for a newer release a minute after starting and every six hours. The check is
 `os/din-update.sh`, run as root like the Installer's helper. It verifies the
 release's signature and author, downloads the bundle and checks it against the
 asset's sha256, fetches the rest from cache.nixos.org, and stages the new
-system with `switch-to-configuration boot`. Settings → Updates shows its
+system with `switch-to-configuration boot`. Settings → About shows its
 progress and offers the restart. Older systems stay in the boot menu. Live
 sticks aren't updated.
 

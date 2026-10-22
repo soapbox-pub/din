@@ -21,7 +21,7 @@ export function UpdateNotifier() {
       title: `DinOS ${staged} is ready`,
       description: 'Restart to finish updating.',
       action: (
-        <ToastAction altText="Open Updates in Settings" onClick={() => open('settings', { section: 'updates' })}>
+        <ToastAction altText="Open About in Settings" onClick={() => open('settings', { section: 'about' })}>
           Details
         </ToastAction>
       ),
