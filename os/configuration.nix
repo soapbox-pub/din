@@ -451,6 +451,11 @@ in
       ErrorPolicy retry-job
     '';
   };
+  # CUPS ships a "Manage Printing" entry that opens its web admin page.
+  # Settings → Printers is how Din manages printers, so keep it out of Apps.
+  environment.extraSetup = ''
+    rm -f $out/share/applications/cups.desktop
+  '';
   services.ipp-usb.enable = true;
   services.avahi = {
     enable = true;
