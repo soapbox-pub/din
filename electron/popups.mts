@@ -19,7 +19,9 @@
 // popup-preload.cjs puts that link back. In the page it opens from,
 // window.open returns a stand-in for the new tab's window; in the tab,
 // window.opener is a stand-in for the page. Both carry postMessage, close,
-// focus, closed and location, relayed through here. This process stamps every
+// focus, closed and location, relayed through here - postMessage with the
+// MessagePorts it transfers, which Google's sign-in pop-up answers on. This
+// process stamps every
 // message with the origin of the frame that really sent it and delivers it
 // only to a frame whose origin matches the sender's targetOrigin, as
 // postMessage does.
@@ -291,23 +293,29 @@ function registerBridge(): void {
     event.returnValue = fromGuest(event) && !!linkOpenedBy(event, id);
   });
 
-  // postMessage. `id` names the window a page opened; null is the opener.
-  ipcMain.on('popup-bridge:post', (event, id: unknown, data: unknown, targetOrigin: unknown) => {
-    if (!fromGuest(event) || !event.senderFrame) return;
-    const source = event.senderFrame.origin;
-    if (id === null) {
-      const link = linkOfPopup(event);
-      const opener = link && frameOf(link.openerFrame);
-      if (link && opener && originMatches(opener, targetOrigin, source)) {
-        opener.send('popup-bridge:message', { id: link.id, data, origin: source });
+  // postMessage, with any MessagePorts it transfers. `id` names the window a
+  // page opened; null is the opener.
+  ipcMain.on('popup-bridge:post', (event, message: unknown) => {
+    const { id, data, targetOrigin } = (message ?? {}) as { id?: unknown; data?: unknown; targetOrigin?: unknown };
+    const source = event.senderFrame?.origin ?? '';
+    const deliver = (frame: Electron.WebFrameMain | null, to: string | null): boolean => {
+      if (!frame || !originMatches(frame, targetOrigin, source)) return false;
+      frame.postMessage('popup-bridge:message', { id: to, data, origin: source }, event.ports);
+      return true;
+    };
+    let delivered = false;
+    if (fromGuest(event)) {
+      if (id === null) {
+        const link = linkOfPopup(event);
+        delivered = !!link && deliver(frameOf(link.openerFrame), link.id);
+      } else {
+        const link = linkOpenedBy(event, id);
+        delivered = deliver(liveContents(link?.popupWcId ?? null)?.mainFrame ?? null, null);
       }
-      return;
     }
-    const link = linkOpenedBy(event, id);
-    const popup = link && liveContents(link.popupWcId);
-    if (popup && originMatches(popup.mainFrame, targetOrigin, source)) {
-      popup.mainFrame.send('popup-bridge:message', { id: null, data, origin: source });
-    }
+    // An undelivered message's ports go nowhere: close them, as the page's
+    // own end would see if the window were gone.
+    if (!delivered) for (const port of event.ports) port.close();
   });
 
   // close(): the opener closing its window, or a window closing itself.

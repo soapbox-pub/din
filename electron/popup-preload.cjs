@@ -12,6 +12,12 @@
 // Not a full window: a page can't reach into the other one's document, even
 // when they're the same origin, or open one it then writes into.
 //
+// MessagePorts in a postMessage's transfer list go along: Google's sign-in
+// pop-up gets the channel it answers on that way. contextBridge can't carry a
+// port between the page's world and this one, so the two worlds pass them -
+// and everything else the bridge delivers, to keep it in order - by posting
+// to their own window, tagged with a token only they know.
+//
 // Registered with session.registerPreloadScript in popups.mts. Runs in every
 // frame that gets frame preloads, since a sign-in button is often an iframe.
 //
@@ -23,6 +29,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 /**
  * Runs in the page's world: everything it needs comes in through `bridge`.
  * @param {{
+ *   token: string,
  *   isPopup: boolean,
  *   willOpen: () => string | null,
  *   didOpen: (id: string) => boolean,
@@ -30,11 +37,12 @@ const { contextBridge, ipcRenderer } = require('electron');
  *   close: (id: string | null) => void,
  *   focus: (id: string | null) => void,
  *   navigate: (id: string, url: string) => void,
- *   listen: (callback: (type: string, payload: { id: string | null, data?: unknown, origin?: string, href?: string | null }) => void) => void,
  * }} bridge
  */
 function installPopupBridge(bridge) {
   const nativeOpen = window.open;
+  const nativePostMessage = window.postMessage;
+  const token = bridge.token;
 
   /**
    * @typedef {{ closed: boolean, href: string | null, name: string, window: object }} Linked
@@ -61,6 +69,18 @@ function installPopupBridge(bridge) {
         'SyntaxError',
       );
     }
+  };
+
+  /**
+   * The MessagePorts in a postMessage's transfer list. Other transferables
+   * are copied rather than moved.
+   * @param {unknown} options
+   * @param {unknown} transfer
+   * @returns {MessagePort[]}
+   */
+  const portsOf = (options, transfer) => {
+    const list = options && typeof options === 'object' && 'transfer' in options ? options.transfer : transfer;
+    return Array.isArray(list) ? list.filter((item) => item instanceof MessagePort) : [];
   };
 
   const crossOrigin = () =>
@@ -104,9 +124,19 @@ function installPopupBridge(bridge) {
       /**
        * @param {unknown} message
        * @param {unknown} [options]
+       * @param {unknown} [transfer]
        */
-      postMessage(message, options) {
-        bridge.post(id, message, targetOriginOf(options));
+      postMessage(message, options, transfer) {
+        const targetOrigin = targetOriginOf(options);
+        const ports = portsOf(options, transfer);
+        if (ports.length === 0) {
+          bridge.post(id, message, targetOrigin);
+        } else {
+          nativePostMessage.call(window, { [token]: 'post', id, data: message, targetOrigin }, {
+            targetOrigin: '*',
+            transfer: ports,
+          });
+        }
       },
       close() {
         bridge.close(id);
@@ -131,20 +161,37 @@ function installPopupBridge(bridge) {
     return win;
   };
 
-  bridge.listen((type, payload) => {
-    const linked = payload.id === null ? opener : opened.get(payload.id);
-    if (!linked) return;
-    if (type === 'message') {
-      const event = new MessageEvent('message', { data: payload.data, origin: payload.origin });
-      // MessageEventInit only takes a real window as the source.
-      Object.defineProperty(event, 'source', { value: linked.window });
-      window.dispatchEvent(event);
-    } else if (type === 'closed') {
-      linked.closed = true;
-    } else if (type === 'location') {
-      linked.href = payload.href ?? null;
-    }
-  });
+  // What the bridge delivers arrives as a message to this window, ahead of
+  // the page's own listeners, which never see it.
+  window.addEventListener(
+    'message',
+    (event) => {
+      const tagged = event.data;
+      if (event.source !== window || !tagged || typeof tagged !== 'object') return;
+      const type = tagged[token];
+      if (type !== 'message' && type !== 'closed' && type !== 'location') return;
+      event.stopImmediatePropagation();
+      /** @type {{ id: string | null, data?: unknown, origin?: string, href?: string | null }} */
+      const payload = tagged.payload;
+      const linked = payload.id === null ? opener : opened.get(payload.id);
+      if (!linked) return;
+      if (type === 'message') {
+        const message = new MessageEvent('message', {
+          data: payload.data,
+          origin: payload.origin,
+          ports: [...event.ports],
+        });
+        // MessageEventInit only takes a real window as the source.
+        Object.defineProperty(message, 'source', { value: linked.window });
+        window.dispatchEvent(message);
+      } else if (type === 'closed') {
+        linked.closed = true;
+      } else {
+        linked.href = payload.href ?? null;
+      }
+    },
+    true,
+  );
 
   /**
    * @param {string | URL} [url]
@@ -214,16 +261,42 @@ function installPopupBridge(bridge) {
 }
 
 if (/^(https?|nsite):$/.test(location.protocol)) {
-  /** @type {((type: string, payload: { id: string | null }) => void) | null} */
-  let listener = null;
+  // Not randomUUID: that's only in secure contexts, and http pages get this too.
+  const token = `din-popup-bridge:${Array.from(crypto.getRandomValues(new Uint32Array(4)), (n) => n.toString(36)).join('')}`;
+
+  /**
+   * @param {string | null} id
+   * @param {unknown} data
+   * @param {string} targetOrigin
+   * @param {MessagePort[]} [ports]
+   */
+  const post = (id, data, targetOrigin, ports = []) =>
+    ipcRenderer.postMessage('popup-bridge:post', { id, data, targetOrigin }, ports);
+
+  // A postMessage from the page with ports in it. Registered before the
+  // page's world gets its listener, so this one runs first.
+  window.addEventListener(
+    'message',
+    (event) => {
+      const tagged = event.data;
+      if (event.source !== window || !tagged || typeof tagged !== 'object' || tagged[token] !== 'post') return;
+      event.stopImmediatePropagation();
+      post(tagged.id, tagged.data, tagged.targetOrigin, [...event.ports]);
+    },
+    true,
+  );
+
   for (const type of ['message', 'closed', 'location']) {
-    ipcRenderer.on(`popup-bridge:${type}`, (_event, payload) => listener?.(type, payload));
+    ipcRenderer.on(`popup-bridge:${type}`, (event, payload) => {
+      window.postMessage({ [token]: type, payload }, '*', event.ports);
+    });
   }
 
   contextBridge.executeInMainWorld({
     func: installPopupBridge,
     args: [
       {
+        token,
         isPopup: window.top === window.self && ipcRenderer.sendSync('popup-bridge:hello') === true,
         willOpen: () => ipcRenderer.sendSync('popup-bridge:will-open'),
         /** @param {string} id */
@@ -233,7 +306,7 @@ if (/^(https?|nsite):$/.test(location.protocol)) {
          * @param {unknown} data
          * @param {string} targetOrigin
          */
-        post: (id, data, targetOrigin) => ipcRenderer.send('popup-bridge:post', id, data, targetOrigin),
+        post: (id, data, targetOrigin) => post(id, data, targetOrigin),
         /** @param {string | null} id */
         close: (id) => ipcRenderer.send('popup-bridge:close', id),
         /** @param {string | null} id */
@@ -243,10 +316,6 @@ if (/^(https?|nsite):$/.test(location.protocol)) {
          * @param {string} url
          */
         navigate: (id, url) => ipcRenderer.send('popup-bridge:navigate', id, url),
-        /** @param {(type: string, payload: { id: string | null }) => void} callback */
-        listen: (callback) => {
-          listener = callback;
-        },
       },
     ],
   });
