@@ -11,7 +11,6 @@ import { NostrdSync } from '@/components/NostrdSync';
 import { AppDataSync } from '@/components/AppDataSync';
 import { ProfileThemeApplier } from '@/components/ProfileThemeApplier';
 import { CursorThemeApplier } from '@/components/CursorThemeApplier';
-import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NostrLoginProvider } from '@nostrify/react/login';
 import { AppProvider } from '@/components/AppProvider';
@@ -80,7 +79,6 @@ export function App() {
               <ProfileThemeApplier />
               <CursorThemeApplier />
               <TooltipProvider>
-                <Toaster />
                 <Suspense>
                   <AppRouter />
                 </Suspense>

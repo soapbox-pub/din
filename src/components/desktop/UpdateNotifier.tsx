@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { useUpdateState } from '@/hooks/useUpdater';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { ToastAction } from '@/components/ui/toast';
 
 /** The version already announced this boot, so a re-login doesn't repeat it. */
 const NOTIFIED_KEY = 'updater:notified';
@@ -20,11 +19,8 @@ export function UpdateNotifier() {
     toast({
       title: `DinOS ${staged} is ready`,
       description: 'Restart to finish updating.',
-      action: (
-        <ToastAction altText="Open About in Settings" onClick={() => open('settings', { section: 'about' })}>
-          Details
-        </ToastAction>
-      ),
+      actions: [{ id: 'details', label: 'Details' }],
+      onAction: () => open('settings', { section: 'about' }),
     });
   }, [staged, toast, open]);
 

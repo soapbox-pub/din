@@ -14,6 +14,7 @@ import { WindowAccentContext } from '@/contexts/WindowAccentContext';
 import { WindowTitleContext } from '@/contexts/WindowTitleContext';
 import { WindowIconContext } from '@/contexts/WindowIconContext';
 import { WindowFocusContext } from '@/contexts/WindowFocusContext';
+import { WindowAppContext } from '@/contexts/WindowAppContext';
 import {
   WindowChromeContext,
   type ChromePoint,
@@ -1359,11 +1360,13 @@ export const Window = memo(function Window({
                   <WindowAccentContext.Provider value={publishAccent}>
                     {/* Built-in apps are code-split (React.lazy); the fallback shows
                         while an app's chunk loads on its first launch. */}
-                    <Suspense
-                      fallback={<div className="size-full animate-pulse bg-muted/40" />}
-                    >
-                      <WindowContent component={app.component} windowId={win.id} params={win.params} />
-                    </Suspense>
+                    <WindowAppContext.Provider value={app.id}>
+                      <Suspense
+                        fallback={<div className="size-full animate-pulse bg-muted/40" />}
+                      >
+                        <WindowContent component={app.component} windowId={win.id} params={win.params} />
+                      </Suspense>
+                    </WindowAppContext.Provider>
                   </WindowAccentContext.Provider>
                 </WindowChromeContext.Provider>
               </WindowIconContext.Provider>
