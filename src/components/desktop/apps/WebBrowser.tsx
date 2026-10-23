@@ -417,6 +417,29 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     input.select();
   }, []);
 
+  // Set when the user switches tabs, so the newly shown tab takes keyboard
+  // focus once it is visible (see the effect below).
+  const focusOnActivate = useRef(false);
+
+  /** Switch to a tab the way the user does: its page gets keyboard focus. */
+  const selectTab = useCallback((id: string) => {
+    if (id === activeIdRef.current) return;
+    focusOnActivate.current = true;
+    setActiveId(id);
+  }, []);
+
+  // Focus the tab just switched to, after the commit that makes its surface
+  // visible (a hidden <webview> can't take focus). A blank tab focuses the
+  // address bar instead, ready to type.
+  useEffect(() => {
+    if (!focusOnActivate.current) return;
+    focusOnActivate.current = false;
+    const tab = tabsRef.current.find((t) => t.id === activeId);
+    if (!tab) return;
+    if (tab.url === '') focusAddress();
+    else if (tab.url !== PREFERENCES_URL) views.current.get(tab.id)?.focus();
+  }, [activeId, focusAddress]);
+
   /**
    * Open a fresh blank tab and drop the cursor in the empty address bar,
    * ready to type (the new-tab button and Ctrl+T). Focus waits a frame for
@@ -467,6 +490,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         return copy;
       });
       setTabs(next);
+      if (id === activeIdRef.current) focusOnActivate.current = true;
       setActiveId((current) =>
         current === id ? next[Math.max(0, index - 1)].id : current,
       );
@@ -532,7 +556,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       <TabStrip
         tabs={tabs}
         activeId={activeId}
-        onActivate={setActiveId}
+        onActivate={selectTab}
         onCloseTab={closeTab}
         onNewTab={openNewTab}
         onMoveTab={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
@@ -540,7 +564,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       />,
     );
     return () => setTitlebar(null);
-  }, [treeTabs, tabs, activeId, closeTab, openNewTab, transfer, setTitlebar]);
+  }, [treeTabs, tabs, activeId, selectTab, closeTab, openNewTab, transfer, setTitlebar]);
 
   /** Collapse/expand a subtree in the tree sidebar. */
   const toggleCollapsed = useCallback((id: string) => {
@@ -1341,15 +1365,15 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     if (ts.length < 2) return;
     const index = ts.findIndex((t) => t.id === activeIdRef.current);
     const next = (index + (backward ? -1 : 1) + ts.length) % ts.length;
-    setActiveId(ts[next].id);
-  }, []);
+    selectTab(ts[next].id);
+  }, [selectTab]);
 
   /** Activate a tab by 1-based position; 9 jumps to the last tab (Chrome). */
   const gotoTabDigit = useCallback((digit: number) => {
     const ts = tabsRef.current;
     const tab = digit === 9 ? ts[ts.length - 1] : ts[digit - 1];
-    if (tab) setActiveId(tab.id);
-  }, []);
+    if (tab) selectTab(tab.id);
+  }, [selectTab]);
 
   /** Step a tab's page zoom in (+1) or out (-1), or reset it (0). */
   const zoomTab = useCallback(
@@ -1761,7 +1785,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             tabs={tabs}
             activeId={activeId}
             collapsed={collapsed}
-            onActivate={setActiveId}
+            onActivate={selectTab}
             onCloseTab={closeTab}
             onNewTab={openNewTab}
             onToggleCollapsed={toggleCollapsed}

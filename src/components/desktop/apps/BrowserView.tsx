@@ -56,6 +56,8 @@ export interface BrowserViewHandle {
   goBack: () => void;
   /** Go forward in the surface's own history (webview only). */
   goForward: () => void;
+  /** Give the page keyboard focus. */
+  focus: () => void;
   /**
    * Harvest the page's icon hints (link rel=icon / apple-touch-icon /
    * mask-icon plus web-app-manifest icons) for choosing an install icon.
@@ -192,6 +194,7 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       },
       goBack: () => {},
       goForward: () => {},
+      focus: () => iframeRef.current?.focus(),
       // The iframe fallback can't reach into cross-origin guest DOM.
       collectIcons: () => Promise.resolve([]),
       getSelectionText: () => Promise.resolve(''),
@@ -298,6 +301,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       },
       goBack: () => webviewRef.current?.goBack(),
       goForward: () => webviewRef.current?.goForward(),
+      focus: () => webviewRef.current?.focus(),
       collectIcons: async () => {
         const el = webviewRef.current;
         if (!el) return [];
