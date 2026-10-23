@@ -112,8 +112,11 @@ def main():
     if os.geteuid() == 0:
         as_din()
 
-    # A cached disk passphrase can be several, NUL-separated; the first is it.
-    lines = sys.stdin.buffer.read().split(b"\0")[0].split(b"\n")
+    # The cached disk passphrase is every one typed at the boot screen, oldest
+    # first and NUL-separated; the disk opened on the last. Trying the typos
+    # too would be worse than useless: after a failed unlock, gnome-keyring
+    # re-keys the keyring with that password the next time it's unlocked.
+    lines = sys.stdin.buffer.read().rstrip(b"\0").split(b"\0")[-1].split(b"\n")
     try:
         start_daemon()
         if command == ["unlock"]:

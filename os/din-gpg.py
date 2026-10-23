@@ -111,8 +111,9 @@ def main():
     if not os.path.exists(socket):
         fail("gpg-agent isn't running.")
 
-    # A cached disk passphrase can be several, NUL-separated; the first is it.
-    lines = sys.stdin.read().split("\0")[0].split("\n")
+    # The cached disk passphrase is every one typed at the boot screen, oldest
+    # first and NUL-separated; the disk opened on the last.
+    lines = sys.stdin.read().rstrip("\0").split("\0")[-1].split("\n")
     if command == ["unlock"]:
         unlock(lines[0])
     else:

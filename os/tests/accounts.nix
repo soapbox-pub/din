@@ -74,7 +74,7 @@ pkgs.testers.runNixOSTest {
     def restart_keyring_with(passphrase):
         machine.succeed("pkill -u din -f gnome-keyring-daemon")
         machine.wait_until_fails("pgrep -u din -f gnome-keyring-daemon")
-        machine.succeed(f"keyctl add user cryptsetup {passphrase} @u")
+        machine.succeed(f"printf '{passphrase}' | keyctl padd user cryptsetup @u")
         machine.succeed("systemctl restart din-keyring-unlock")
         machine.succeed("keyctl unlink $(keyctl search @u user cryptsetup) @u")
 
@@ -94,6 +94,13 @@ pkgs.testers.runNixOSTest {
         as_din(session + "printf hunter22 | din-keyring unlock")
         assert as_din(lookup) == "s3cret"
 
+    with subtest("typos at the boot screen don't count, and don't re-key it"):
+        # systemd caches every passphrase typed, NUL-separated; the last opened the disk.
+        restart_keyring_with("hunter2\\0hunter222\\0hunter22")
+        assert as_din(lookup) == "s3cret"
+        restart_keyring_with("hunter22")
+        assert as_din(lookup) == "s3cret"
+
     def gpg_sign(key, passphrase=None):
         mode = f"--pinentry-mode loopback --passphrase {passphrase}" if passphrase else "--pinentry-mode error"
         return session + f"gpg --batch --no-autostart {mode} --local-user {key} --sign --output /dev/null --yes /dev/null"
@@ -101,7 +108,7 @@ pkgs.testers.runNixOSTest {
     with subtest("the disk passphrase unlocks GPG keys that have it, and no others"):
         as_din(session + "gpg --batch --pinentry-mode loopback --passphrase hunter22 --quick-gen-key mine@test ed25519 sign never")
         as_din(session + "gpg --batch --pinentry-mode loopback --passphrase other123 --quick-gen-key other@test ed25519 sign never")
-        machine.succeed("keyctl add user cryptsetup hunter22 @u")
+        machine.succeed("printf 'hunter2\\0hunter22' | keyctl padd user cryptsetup @u")
         machine.succeed("systemctl restart din-gpg-unlock")
         machine.succeed("keyctl unlink $(keyctl search @u user cryptsetup) @u")
         as_din(gpg_sign("mine@test"))
