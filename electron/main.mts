@@ -4682,7 +4682,7 @@ function isPrintInput(input: Electron.Input): boolean {
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
-  | { action: 'apps-menu' | 'assistant' | 'system-monitor' | 'screenshot' | 'screenshot-area' }
+  | { action: 'apps-menu' | 'assistant' | 'system-monitor' | 'security-options' | 'screenshot' | 'screenshot-area' }
   | { action: 'super-key'; down: boolean }
   | { action: 'alt-released' }
   | {
@@ -4737,6 +4737,10 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   // Ctrl+Shift+Escape: the System Monitor, as on Windows.
   if (input.control && input.shift && !input.alt && !input.meta && input.key === 'Escape') {
     return { action: 'system-monitor' };
+  }
+  // Ctrl+Alt+Delete: the security options screen, as on Windows.
+  if (input.control && input.alt && !input.meta && input.key === 'Delete') {
+    return { action: 'security-options' };
   }
   // Alt+Left/Right: history navigation (Chrome behavior).
   if (
@@ -5489,6 +5493,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
         shortcut?.action === 'system-monitor' ||
+        shortcut?.action === 'security-options' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {
@@ -5548,6 +5553,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
         shortcut?.action === 'system-monitor' ||
+        shortcut?.action === 'security-options' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {

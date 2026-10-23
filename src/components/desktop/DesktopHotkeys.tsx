@@ -4,6 +4,7 @@ import { toggleAppsMenu } from '@/lib/appsMenu';
 import { toggleAssistantPrompt } from '@/lib/assistantPrompt';
 import { publishBrowserHotkey, type BrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
+import { isSecurityOptionsActive, showSecurityOptions } from '@/lib/securityOptions';
 import { isScreenshotSessionActive, requestScreenshot } from '@/lib/screenshot';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { isWindowSwitcherActive } from '@/lib/windowSwitcherState';
@@ -31,6 +32,9 @@ const SYSTEM_MONITOR_APP_ID = 'system-monitor';
  * - Super+A opens the assistant's prompt (AssistantHost), or closes it.
  * - Ctrl+Shift+Escape opens the System Monitor, or brings it forward, as
  *   on Windows.
+ * - Ctrl+Alt+Delete opens the security options screen (SecurityOptions):
+ *   lock, switch account, sign out, change the password, System Monitor,
+ *   restart and shut down. Everything else stands down while it's up.
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
@@ -95,6 +99,17 @@ export function DesktopHotkeys() {
       // open (its own listener handles navigation/commit); stand down so we
       // don't, e.g., read its Alt+Arrow selection as browser history.
       if (isWindowSwitcherActive()) return;
+
+      // Ctrl+Alt+Delete: the security options screen, as on Windows. Checked
+      // before anything else, and swallowed so a native app doesn't get it.
+      if (e.key === 'Delete' && e.ctrlKey && e.altKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        showSecurityOptions();
+        return;
+      }
+      // The screen has the keyboard while it's up.
+      if (isSecurityOptionsActive()) return;
 
       // Print Screen: full-screen capture. Shift+Print Screen: select an
       // area (the same session the dedicated box-select key starts via the
@@ -257,6 +272,8 @@ export function DesktopHotkeys() {
         toggleAppsMenu();
       } else if (shortcut.action === 'assistant') {
         toggleAssistantPrompt();
+      } else if (shortcut.action === 'security-options') {
+        showSecurityOptions();
       } else if (shortcut.action === 'system-monitor') {
         actionsRef.current.open(SYSTEM_MONITOR_APP_ID);
       } else if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {

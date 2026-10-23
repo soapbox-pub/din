@@ -1069,6 +1069,15 @@ in
   '';
   systemd.sleep.settings.Sleep.HibernateDelaySec = "2h";
 
+  # Ctrl+Alt+Delete is Din's: in Din it opens the security options screen
+  # (src/components/desktop/SecurityOptions.tsx), as on Windows. On the lock
+  # screen's terminal, though, the kernel sees the keys itself and has
+  # systemd reboot, so anyone at a locked computer, or someone used to
+  # pressing it to sign in, would restart it and lose what was open. The
+  # target is masked, and pressing it seven times fast does nothing either.
+  systemd.ctrlAltDelUnit = "/dev/null";
+  systemd.settings.Manager.CtrlAltDelBurstAction = "none";
+
   # A crashing Electron writes out gigabytes of core, so one crashing in a loop
   # saturated the disk and stalled every app that writes to it. Bigger crashes
   # still get a journal entry, just no core file.

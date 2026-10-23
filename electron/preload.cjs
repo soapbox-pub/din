@@ -2160,6 +2160,7 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
    *   { action: 'apps-menu' }                 (Super+Space)
    *   { action: 'assistant' }                 (Super+A)
    *   { action: 'system-monitor' }            (Ctrl+Shift+Escape)
+   *   { action: 'security-options' }          (Ctrl+Alt+Delete)
    *   { action: 'super-key', down }           (Super pressed / released)
    *   { action: 'alt-released' }              (Alt released)
    *   { action: 'screenshot' }                (Print Screen)
