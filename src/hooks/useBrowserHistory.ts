@@ -12,6 +12,8 @@ export interface BrowserHistoryEntry {
   visitedAt: number;
   /** Total number of visits to this URL. */
   visits: number;
+  /** Last favicon URL the page reported (http(s) only), for top-site tiles. */
+  favicon?: string;
 }
 
 const browserHistorySchema: z.ZodType<BrowserHistoryEntry[]> = z.array(
@@ -20,6 +22,7 @@ const browserHistorySchema: z.ZodType<BrowserHistoryEntry[]> = z.array(
     title: z.string().nullable(),
     visitedAt: z.number(),
     visits: z.number(),
+    favicon: z.string().optional(),
   }),
 );
 
@@ -52,6 +55,97 @@ function trimHistory(entries: BrowserHistoryEntry[]): BrowserHistoryEntry[] {
     out = out.slice(0, Math.ceil(out.length * 0.9));
   }
   return out;
+}
+
+/** A site worth a tile on the new-tab page. */
+export interface TopSite {
+  label: string;
+  url: string;
+  /** Icon URL, or null for a monogram. */
+  icon: string | null;
+  /** Whether `icon` is a full app icon (drawn edge to edge) or a small favicon. */
+  appIcon: boolean;
+  /** Brand color backing the monogram when there is no icon. */
+  color?: string;
+}
+
+/** Visits lose half their weight every two weeks. */
+const FRECENCY_HALF_LIFE_DAYS = 14;
+/**
+ * The head start a default site gets, in recent visits: another site has to
+ * be visited more than this often lately to rank above the defaults.
+ */
+const DEFAULT_SITE_SCORE = 3;
+
+/** The host a URL counts toward on the new-tab page (`www.` folded in). */
+function siteKey(url: string): string | null {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol !== 'https:' && protocol !== 'nsite:') return null;
+    return hostname.replace(/^www\./i, '').toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Most-visited sites for the new-tab page, Chrome/Brave style: history is
+ * grouped by host and ranked by frecency (visit counts decaying with age),
+ * and `defaults` compete with a fixed head start, so they hold their tiles
+ * until the user's own habits outrank them.
+ */
+export function topSites(
+  history: BrowserHistoryEntry[],
+  defaults: TopSite[],
+  limit: number,
+  now = Date.now() / 1000,
+): TopSite[] {
+  const sites = new Map<
+    string,
+    { score: number; best: BrowserHistoryEntry; root: BrowserHistoryEntry | null; favicon: string | null }
+  >();
+  for (const entry of history) {
+    const key = siteKey(entry.url);
+    if (!key) continue;
+    const ageDays = Math.max(0, now - entry.visitedAt) / 86_400;
+    const score = entry.visits * 0.5 ** (ageDays / FRECENCY_HALF_LIFE_DAYS);
+    const isRoot = new URL(entry.url).pathname === '/';
+    const site = sites.get(key);
+    if (!site) {
+      sites.set(key, { score, best: entry, root: isRoot ? entry : null, favicon: entry.favicon ?? null });
+      continue;
+    }
+    site.score += score;
+    if (entry.visits > site.best.visits) site.best = entry;
+    if (isRoot && !site.root) site.root = entry;
+    // History is most-recent-first, so the first favicon seen is the newest.
+    site.favicon ??= entry.favicon ?? null;
+  }
+
+  const ranked: { site: TopSite; score: number }[] = defaults.map((site) => {
+    const key = siteKey(site.url);
+    const visited = key ? sites.get(key) : undefined;
+    if (key) sites.delete(key);
+    return { site, score: DEFAULT_SITE_SCORE + (visited?.score ?? 0) };
+  });
+
+  for (const [key, { score, best, root, favicon }] of sites) {
+    const isNsite = best.url.startsWith('nsite://');
+    ranked.push({
+      site: {
+        // An nsite's host is key-derived gibberish; its page title says more.
+        label: (isNsite && (root ?? best).title) || key,
+        url: (root ?? best).url.replace(/^((?:https|nsite):\/\/[^/]+).*$/i, '$1/'),
+        icon: favicon,
+        appIcon: false,
+      },
+      score,
+    });
+  }
+
+  // Stable sort: ties keep the defaults first, in their given order.
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked.slice(0, limit).map((r) => r.site);
 }
 
 /** Scheme and `www.` stripped, for user-friendly matching and display. */
@@ -180,6 +274,7 @@ export function useBrowserHistory() {
         const entry: BrowserHistoryEntry = {
           url,
           title: existing?.title ?? null,
+          favicon: existing?.favicon,
           visitedAt: Math.floor(Date.now() / 1000),
           visits: (existing?.visits ?? 0) + 1,
         };
@@ -204,9 +299,22 @@ export function useBrowserHistory() {
     [setHistory],
   );
 
+  const recordFavicon = useCallback(
+    (url: string, favicon: string | null) => {
+      // Only plain http(s) icons: data: URIs would eat the size budget.
+      if (!favicon || !/^https?:\/\//i.test(favicon) || favicon.length > MAX_URL_LENGTH) return;
+      const current = historyRef.current.find((e) => e.url === url);
+      if (!current || current.favicon === favicon) return;
+      setHistory((prev) =>
+        prev.map((e) => (e.url === url ? { ...e, favicon } : e)),
+      );
+    },
+    [setHistory],
+  );
+
   const clearHistory = useCallback(() => {
     setHistory(() => EMPTY_HISTORY);
   }, [setHistory]);
 
-  return { history, recordVisit, recordTitle, clearHistory };
+  return { history, recordVisit, recordTitle, recordFavicon, clearHistory };
 }

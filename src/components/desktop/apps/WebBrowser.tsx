@@ -91,7 +91,9 @@ import {
   bareUrl,
   inlineCompletion,
   matchHistory,
+  topSites,
   useBrowserHistory,
+  type TopSite,
   type BrowserHistoryEntry,
 } from '@/hooks/useBrowserHistory';
 import {
@@ -364,8 +366,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const { toast } = useToast();
   const webviewMode = isWebviewAvailable();
   // Persistent browsing history (feeds address-bar autocomplete).
-  const { history: browsingHistory, recordVisit, recordTitle, clearHistory } =
+  const { history: browsingHistory, recordVisit, recordTitle, recordFavicon, clearHistory } =
     useBrowserHistory();
+  const newTabSites = useMemo(
+    () => topSites(browsingHistory, NEW_TAB_LINKS, NEW_TAB_SITE_COUNT),
+    [browsingHistory],
+  );
   // One docked-pane size per browser window, shared across tabs (like desktop
   // browsers): height for bottom docking, width for right docking. Resized by
   // dragging the pane's separator.
@@ -836,9 +842,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           if (!isPrivate && tab?.url && event.value) recordTitle(tab.url, event.value);
           break;
         }
-        case 'favicon':
+        case 'favicon': {
           updateTab(id, { favicon: event.value });
+          const tab = tabsRef.current.find((t) => t.id === id);
+          if (!isPrivate && tab?.url) recordFavicon(tab.url, event.value);
           break;
+        }
         case 'themeColor':
           updateTab(id, { themeColor: event.value });
           break;
@@ -897,7 +906,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         }
       }
     },
-    [updateTab, crx, recordVisit, recordTitle, clearCertError, clearLoadError, resetFind, isPrivate],
+    [updateTab, crx, recordVisit, recordTitle, recordFavicon, clearCertError, clearLoadError, resetFind, isPrivate],
   );
 
   // Retry a failed load: re-request the failed URL through the tab's surface.
@@ -1813,6 +1822,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             // A blank tab (empty url) shows the custom new-tab page overlaid
             // on its (about:blank) surface until the user navigates.
             isNewTab={tab.url === ''}
+            // Only blank tabs get the live list, so a history write doesn't
+            // re-render every other (memoized) surface.
+            topSites={tab.url === '' ? newTabSites : NO_SITES}
             // Non-null only for the settings tab, where it both selects the
             // about:preferences overlay and supplies what it renders.
             preferences={tab.url === PREFERENCES_URL ? preferences : null}
@@ -3047,6 +3059,7 @@ const TabSurface = memo(function TabSurface({
   isPrivate,
   active,
   isNewTab,
+  topSites: sites,
   preferences,
   onNavigate: onNavigateToUrl,
   dock,
@@ -3079,6 +3092,8 @@ const TabSurface = memo(function TabSurface({
   active: boolean;
   /** Show the custom new-tab page over the surface (blank tab). */
   isNewTab: boolean;
+  /** Tiles for the new-tab page. */
+  topSites: TopSite[];
   /** Settings to render over the surface, or null for a non-settings tab. */
   preferences: PreferencesProps | null;
   /** Navigate this tab to a URL/search (from the new-tab page). */
@@ -3225,6 +3240,7 @@ const TabSurface = memo(function TabSurface({
       {isNewTab && (
         <NewTabPage
           isPrivate={isPrivate}
+          sites={sites}
           onNavigate={(raw) => onNavigateToUrl(id, raw)}
         />
       )}
@@ -3323,10 +3339,11 @@ const TabSurface = memo(function TabSurface({
   );
 });
 
-/** Quick links shown on the new-tab page. Icon URLs were resolved from each
- * site's web-app manifest (the best of manifest icons, apple-touch-icon, and
+/** Default sites on the new-tab page, until the user's most-visited sites
+ * outrank them (see `topSites`). Icon URLs were resolved from each site's
+ * web-app manifest (the best of manifest icons, apple-touch-icon, and
  * favicon); the brand color backs a monogram tile if an icon fails to load. */
-const NEW_TAB_LINKS: { label: string; url: string; icon: string; color: string }[] = [
+const NEW_TAB_LINKS: TopSite[] = [
   {
     label: 'Soapbox',
     url: 'https://soapbox.pub/',
@@ -3363,42 +3380,69 @@ const NEW_TAB_LINKS: { label: string; url: string; icon: string; color: string }
     icon: 'https://agora.spot/icon-512.png',
     color: '#ff6600',
   },
-];
+].map((link) => ({ ...link, appIcon: true }));
 
-/** One quick-link tile: the site's real app icon, degrading to a
- * brand-colored monogram if the image fails (offline, moved, blocked). */
+/** Two rows of tiles on the new-tab page (one while only defaults qualify). */
+const NEW_TAB_SITE_COUNT = 12;
+const NO_SITES: TopSite[] = [];
+
+/** A stable color for a site's monogram, hashed from its label. */
+function monogramColor(label: string): string {
+  let hash = 0;
+  for (const ch of label) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+  return `hsl(${Math.abs(hash) % 360} 55% 40%)`;
+}
+
+/** One site tile: a default site's app icon drawn edge to edge, or a visited
+ * site's favicon on a plain tile, degrading to a colored monogram if there's
+ * no image or it fails (offline, moved, blocked). */
 function NewTabTile({
   link,
   onNavigate,
 }: {
-  link: (typeof NEW_TAB_LINKS)[number];
+  link: TopSite;
   onNavigate: (url: string) => void;
 }) {
   const [failed, setFailed] = useState(false);
+  const icon = link.icon ? sanitizeImageUrl(link.icon) : null;
 
   return (
     <button
       type="button"
+      title={link.url}
       onClick={() => onNavigate(link.url)}
-      className="group flex flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group flex min-w-0 flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      {failed ? (
+      {failed || !icon ? (
         <span
           aria-hidden
-          className="grid size-12 place-items-center rounded-2xl text-lg font-semibold text-white shadow-sm transition-transform group-hover:scale-105"
-          style={{ backgroundColor: link.color }}
+          className="grid size-12 place-items-center rounded-2xl text-lg font-semibold uppercase text-white shadow-sm transition-transform group-hover:scale-105"
+          style={{ backgroundColor: link.color ?? monogramColor(link.label) }}
         >
           {link.label[0]}
         </span>
-      ) : (
+      ) : link.appIcon ? (
         <img
-          src={link.icon}
+          src={icon}
           alt=""
           aria-hidden
           draggable={false}
           onError={() => setFailed(true)}
           className="size-12 rounded-2xl object-cover shadow-sm transition-transform group-hover:scale-105"
         />
+      ) : (
+        <span
+          aria-hidden
+          className="grid size-12 place-items-center rounded-2xl bg-card shadow-sm ring-1 ring-border/60 transition-transform group-hover:scale-105"
+        >
+          <img
+            src={icon}
+            alt=""
+            draggable={false}
+            onError={() => setFailed(true)}
+            className="size-7 object-contain"
+          />
+        </span>
       )}
       <span className="w-full truncate text-center text-xs text-muted-foreground">
         {link.label}
@@ -3416,9 +3460,12 @@ function NewTabTile({
  */
 function NewTabPage({
   isPrivate,
+  sites,
   onNavigate,
 }: {
   isPrivate: boolean;
+  /** Most-visited sites, defaults included (see `topSites`). */
+  sites: TopSite[];
   onNavigate: (raw: string) => void;
 }) {
   const [query, setQuery] = useState('');
@@ -3480,11 +3527,11 @@ function NewTabPage({
           />
         </form>
 
-        {/* Quick links are omitted in private windows - a curated dashboard of
-            sites clashes with the point of an ephemeral window. */}
+        {/* Top sites are omitted in private windows - a dashboard of where
+            you've been clashes with the point of an ephemeral window. */}
         {!isPrivate && (
           <div className="mt-10 grid w-full grid-cols-3 gap-4 sm:grid-cols-6">
-            {NEW_TAB_LINKS.map((link) => (
+            {sites.map((link) => (
               <NewTabTile key={link.url} link={link} onNavigate={onNavigate} />
             ))}
           </div>
