@@ -49,7 +49,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-lVNiVrxG2c15SxVmUhMHnIvRx69lzUcuO70+HzBHW3M=";
+    npmDepsHash = "sha256-f+pPFDZ1Ty3yvtr96FgXFGsZk69riO5Sxg/t4x7e5ao=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -747,6 +747,14 @@ in
     enable = true;
     dockerCompat = true;
   };
+
+  # OpenCode, the agent behind Din's Assistant (electron/assistant.mts), is
+  # the user's own install in ~/.opencode, which updates itself; Din installs
+  # it there when the assistant is first turned on. On PATH, `opencode` in a
+  # Terminal attaches to the same background server Din started.
+  environment.extraInit = ''
+    export PATH="$HOME/.opencode/bin:$PATH"
+  '';
 
   # Flatpak for desktop apps from Flathub, per user and without root. It
   # requires the desktop portals, which the GTK backend provides, except for

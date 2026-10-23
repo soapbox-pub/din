@@ -32,6 +32,9 @@ const Screenshot = lazy(() =>
 const DevTools = lazy(() =>
   import('@/components/desktop/apps/DevTools').then((m) => ({ default: m.DevTools })),
 );
+const Assistant = lazy(() =>
+  import('@/components/desktop/apps/Assistant').then((m) => ({ default: m.Assistant })),
+);
 const AppStore = lazy(() =>
   import('@/components/desktop/apps/AppStore').then((m) => ({ default: m.AppStore })),
 );
@@ -128,6 +131,18 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/terminal.png',
     component: Terminal,
     defaultSize: { width: 760, height: 480 },
+  },
+  {
+    // Conversations with OpenCode, the coding agent. One window, which
+    // notifications and the menu bar's robot point at a conversation by
+    // its `sessionID` launch param.
+    id: 'assistant',
+    name: 'Assistant',
+    icon: '/icons/apps/assistant.png',
+    component: Assistant,
+    defaultSize: { width: 920, height: 640 },
+    keywords: ['AI', 'agent', 'OpenCode', 'chat', 'robot'],
+    singleInstance: true,
   },
   {
     id: 'settings',

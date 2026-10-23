@@ -1566,11 +1566,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     const bridge = getShellShortcuts();
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
-      // Window cycling, the apps menu, and screenshot keys are desktop-wide;
-      // DesktopHotkeys and the WindowSwitcher own them.
+      // Window cycling, the apps menu, the assistant, and screenshot keys are
+      // desktop-wide; DesktopHotkeys and the WindowSwitcher own them.
       if (
         shortcut.action === 'cycle-windows' ||
         shortcut.action === 'apps-menu' ||
+        shortcut.action === 'assistant' ||
         shortcut.action === 'super-key' ||
         shortcut.action === 'screenshot' ||
         shortcut.action === 'screenshot-area'

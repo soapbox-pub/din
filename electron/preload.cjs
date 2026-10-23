@@ -26,6 +26,8 @@
 //   - window.updater: DinOS system updates, for the Settings app
 //   - window.airplay: sharing the screen with AirPlay receivers, for the menu
 //     bar and Settings
+//   - window.assistant: OpenCode, the coding agent, through its background
+//     server, for the Assistant app, its menu-bar item and Settings
 //   - window.bluetooth: BlueZ adapter and devices (pairing, connecting), for
 //     the menu bar and Settings
 //   - window.bluetoothLogin: receive the account key from a phone over
@@ -1159,6 +1161,64 @@ contextBridge.exposeInMainWorld('airplay', {
   },
 });
 
+// Assistant bridge (window.assistant), backed by electron/assistant.mts:
+// OpenCode's background server, whose credentials stay in the main process.
+contextBridge.exposeInMainWorld('assistant', {
+  /** Whether it's installed, running and connected. */
+  status: () => ipcRenderer.invoke('assistant:status'),
+
+  /**
+   * Turn the assistant on (start the server and follow its events) or off.
+   * @param {boolean} enabled
+   */
+  setEnabled: (enabled) => ipcRenderer.invoke('assistant:setEnabled', enabled),
+
+  /** Run OpenCode's installer. */
+  install: () => ipcRenderer.invoke('assistant:install'),
+
+  /** Restart the server. */
+  restart: () => ipcRenderer.invoke('assistant:restart'),
+
+  /** The models OpenCode's own interface used last. */
+  recentModels: () => ipcRenderer.invoke('assistant:recentModels'),
+
+  /**
+   * One request to the server's API.
+   * @param {string} method
+   * @param {string} path Under /api/, with its query.
+   * @param {unknown} [body] Sent as JSON.
+   */
+  request: (method, path, body) => ipcRenderer.invoke('assistant:request', method, path, body),
+
+  /**
+   * Subscribe to status changes. Returns an unsubscribe fn.
+   * @param {(status: unknown) => void} callback
+   */
+  onStatus: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} status
+     */
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on('assistant:status', handler);
+    return () => ipcRenderer.removeListener('assistant:status', handler);
+  },
+
+  /**
+   * Subscribe to the server's events. Returns an unsubscribe fn.
+   * @param {(event: unknown) => void} callback
+   */
+  onEvent: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} data
+     */
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('assistant:event', handler);
+    return () => ipcRenderer.removeListener('assistant:event', handler);
+  },
+});
+
 // System change events (window.systemEvents): the main process watches
 // NetworkManager and PipeWire for changes (`nmcli monitor`, `pactl
 // subscribe`) and says which area changed, so the menu bar and Settings
@@ -1858,6 +1918,7 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
    * Subscribe to forwarded shortcuts. Returns an unsubscribe fn. Payloads:
    *   { action: 'cycle-windows', backward }   (Alt+Tab / Alt+Shift+Tab)
    *   { action: 'apps-menu' }                 (Super+Space)
+   *   { action: 'assistant' }                 (Super+A)
    *   { action: 'super-key', down }           (Super pressed / released)
    *   { action: 'screenshot' }                (Print Screen)
    *   { action: 'screenshot-area' }           (Shift+Print Screen or the box-select key)

@@ -63,6 +63,8 @@ const defaultConfig: AppConfig = {
   clockFormat: 'auto',
   clockShowDate: true,
   clockShowSeconds: false,
+  assistantEnabled: true,
+  assistantDirectory: '',
 };
 
 export function App() {

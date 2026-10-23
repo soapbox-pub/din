@@ -74,6 +74,7 @@ import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { airplayDisplays, registerAirPlayHandlers } from './airplay.mts';
+import { registerAssistantHandlers } from './assistant.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 
@@ -4653,7 +4654,7 @@ function isDevtoolsToggleInput(input: Electron.Input): boolean {
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
-  | { action: 'apps-menu' | 'screenshot' | 'screenshot-area' }
+  | { action: 'apps-menu' | 'assistant' | 'screenshot' | 'screenshot-area' }
   | { action: 'super-key'; down: boolean }
   | {
       action:
@@ -4696,6 +4697,10 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   }
   if (input.meta && !input.alt && !input.control && !input.shift && input.key === ' ') {
     return { action: 'apps-menu' };
+  }
+  // Super+A: the assistant's prompt.
+  if (input.meta && !input.alt && !input.control && !input.shift && input.key.toLowerCase() === 'a') {
+    return { action: 'assistant' };
   }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
@@ -4925,6 +4930,7 @@ app.whenReady().then(() => {
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerBluetoothHandlers({ assertShellSender, sendToShell });
   registerNostrdHandlers({ assertShellSender, sendToShell });
+  registerAssistantHandlers({ assertShellSender, sendToShell });
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
   registerUpdaterHandlers({ assertShellSender, sendToShell });
@@ -5404,6 +5410,7 @@ app.on('web-contents-created', (_event, contents) => {
       if (
         shortcut?.action === 'cycle-windows' ||
         shortcut?.action === 'apps-menu' ||
+        shortcut?.action === 'assistant' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {
@@ -5443,14 +5450,15 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   // Installed web-app guests aren't browser tabs, but focus still lands inside
-  // them, so the shell's window-cycling, apps-menu, and screenshot shortcuts
-  // must be forwarded too.
+  // them, so the shell's window-cycling, apps-menu, assistant, and screenshot
+  // shortcuts must be forwarded too.
   if (isAppGuest(contents)) {
     contents.on('before-input-event', (event, input) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
         shortcut?.action === 'apps-menu' ||
+        shortcut?.action === 'assistant' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {

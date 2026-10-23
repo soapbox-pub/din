@@ -268,6 +268,19 @@ user service (the flake's `deckmon` input) and Din talks to over its socket
 separate display is a spare DisplayPort connector forced on with an EDID,
 through a sudo rule for those writes. Elsewhere Din uses a `deckmon` on PATH.
 
+### Assistant
+
+The Assistant app, the menu bar's robot, and Super+A (a prompt from
+anywhere) talk to [OpenCode](https://opencode.ai) v2, the coding agent,
+through its per-user background server (`opencode serve --service`). Din
+starts it at login while Settings → Assistant has it on, and holds its
+password and event stream in the main process (`electron/assistant.mts`);
+the shell only gets what it asks for under `/api/`. Conversations are
+OpenCode's sessions, so `opencode` in a Terminal shares them. OpenCode is the
+user's own self-updating install in `~/.opencode/bin` (DinOS puts it on
+PATH), which Din runs the v2 installer for if it's missing; `$DIN_OPENCODE`
+names another binary.
+
 ### Updating npm dependencies
 
 The Nix build fetches npm deps from `package-lock.json` pinned by hash.

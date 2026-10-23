@@ -60,6 +60,8 @@ const AppConfigSchema = z.object({
   clockFormat: z.enum(['auto', '12', '24']),
   clockShowDate: z.boolean(),
   clockShowSeconds: z.boolean(),
+  assistantEnabled: z.boolean(),
+  assistantDirectory: z.string(),
 }) satisfies z.ZodType<AppConfig>;
 
 export function AppProvider(props: AppProviderProps) {

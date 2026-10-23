@@ -45,6 +45,8 @@ export function TestApp({ children }: TestAppProps) {
     clockFormat: 'auto',
     clockShowDate: true,
     clockShowSeconds: false,
+    assistantEnabled: true,
+    assistantDirectory: '',
   };
 
   return (

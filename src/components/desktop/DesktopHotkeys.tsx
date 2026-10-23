@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { toggleAppsMenu } from '@/lib/appsMenu';
+import { toggleAssistantPrompt } from '@/lib/assistantPrompt';
 import { publishBrowserHotkey, type BrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { isScreenshotSessionActive, requestScreenshot } from '@/lib/screenshot';
@@ -25,6 +26,7 @@ const WEB_BROWSER_APP_ID = 'web-browser';
  *   Both are ignored while a capture session is already running.
  * - Super+Space opens the menu bar's apps menu with its search focused (or
  *   closes it again).
+ * - Super+A opens the assistant's prompt (AssistantHost), or closes it.
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
@@ -107,6 +109,14 @@ export function DesktopHotkeys() {
         e.preventDefault();
         e.stopPropagation();
         toggleAppsMenu();
+        return;
+      }
+
+      // Super+A: the assistant's prompt.
+      if (e.key.toLowerCase() === 'a' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleAssistantPrompt();
         return;
       }
 
@@ -231,6 +241,8 @@ export function DesktopHotkeys() {
       // subscription; here we only service the apps menu and screenshots.
       if (shortcut.action === 'apps-menu') {
         toggleAppsMenu();
+      } else if (shortcut.action === 'assistant') {
+        toggleAssistantPrompt();
       } else if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {
         if (!isScreenshotSessionActive()) {
           requestScreenshot(shortcut.action === 'screenshot-area' ? 'area' : 'screen');

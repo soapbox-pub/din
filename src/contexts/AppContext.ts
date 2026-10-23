@@ -74,6 +74,14 @@ export interface AppConfig {
   clockShowDate: boolean;
   /** Whether the menu-bar clock shows seconds. */
   clockShowSeconds: boolean;
+  /**
+   * Whether the assistant is on: Din keeps OpenCode's server running and
+   * shows the assistant in the menu bar (see electron/assistant.mts). Kept on
+   * this device, like everything OpenCode itself keeps.
+   */
+  assistantEnabled: boolean;
+  /** The folder new assistant conversations work in; empty for the home folder. */
+  assistantDirectory: string;
 }
 
 export interface AppContextType {

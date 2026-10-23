@@ -6,6 +6,7 @@ import {
   BellOff,
   Bluetooth,
   Bomb,
+  Bot,
   Bug,
   Check,
   CircleArrowUp,
@@ -174,6 +175,7 @@ import type { UpdateState } from '@/lib/updater';
 import { cleanInstallerError } from '@/lib/installer';
 import { useUpdateState } from '@/hooks/useUpdater';
 import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSection';
+import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
 
 type SectionId =
   | 'wifi'
@@ -189,6 +191,7 @@ type SectionId =
   | 'notifications'
   | 'nostr'
   | 'connected'
+  | 'assistant'
   | 'appearance'
   | 'developers'
   | 'about';
@@ -207,6 +210,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'notifications', name: 'Notifications', icon: Bell },
   { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
   { id: 'connected', name: 'Connected apps', icon: Link2 },
+  { id: 'assistant', name: 'Assistant', icon: Bot },
   { id: 'appearance', name: 'Appearance', icon: Palette },
   { id: 'developers', name: 'Developers', icon: Bug },
   { id: 'about', name: 'About', icon: Info },
@@ -234,7 +238,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * (disk, lock screen, Nostr keys) through `window.lock`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Connected apps lists the
  * sites and apps that may use the account through Din's signer
- * (ConnectedAppsSection). Appearance switches the
+ * (ConnectedAppsSection). Assistant turns OpenCode, the AI agent, on or off
+ * and connects its providers (AssistantSettingsSection). Appearance switches the
  * shell theme (AppContext, persisted to localStorage and roamed via
  * encrypted sync) and toggles desktop effects like wobbly windows.
  * Developers holds debug utilities such as intentionally crashing the shell
@@ -326,6 +331,8 @@ export function Settings({ params }: AppComponentProps) {
             nostrconnect={typeof params?.nostrconnect === 'string' ? params.nostrconnect : undefined}
             nonce={params?.nonce}
           />
+        ) : section === 'assistant' ? (
+          <AssistantSettingsSection />
         ) : section === 'appearance' ? (
           <AppearanceSection />
         ) : section === 'developers' ? (
