@@ -2342,7 +2342,7 @@ function TabButton({
         )}
       >
         {icon ? (
-          <img src={icon} alt="" aria-hidden draggable={false} className="size-4 shrink-0 rounded-sm" />
+          <img src={icon} alt="" aria-hidden draggable={false} className="size-4 shrink-0" />
         ) : (
           <TabGlyph tab={tab} className="size-4 shrink-0 opacity-60" />
         )}
@@ -2675,7 +2675,7 @@ function TreeTabRow({
             alt=""
             aria-hidden
             draggable={false}
-            className="size-4 shrink-0 rounded-sm"
+            className="size-4 shrink-0"
           />
         ) : (
           <TabGlyph tab={tab} className="size-4 shrink-0 opacity-60" />
