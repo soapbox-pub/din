@@ -23,6 +23,8 @@
 // a receiver that's streaming reconnects it the other way (deckmon keeps the
 // pairing, so no PIN again), and is remembered for next time.
 //
+// The display-switch key does the same switch (switchAirPlayMode).
+//
 // Receivers are found over mDNS: a scan every half minute, and one whenever
 // the shell asks (the menu or Settings opening). deckmon's event stream
 // keeps the sessions current, including a receiver asking for the PIN it
@@ -222,6 +224,18 @@ export function airplayDisplays(): Map<string, string> {
   );
 }
 
+let switchMode: (() => void) | null = null;
+let switching: Promise<void> | null = null;
+
+/**
+ * The display-switch key (F7 on ThinkPads): switch the receiver being shared
+ * with between extending the desktop and mirroring it. Does nothing while
+ * nothing is shared.
+ */
+export function switchAirPlayMode(): void {
+  switchMode?.();
+}
+
 export function registerAirPlayHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;
@@ -399,16 +413,41 @@ export function registerAirPlayHandlers(options: {
     await start(target, readModes()[target] ?? 'extend');
   });
 
+  /** Remember MODE for a receiver, and switch it over if it's streaming. */
+  const setMode = async (target: string, mode: AirPlayMode) => {
+    saveMode(target, mode);
+    const session = sessions.get(target);
+    if (!session || session.state !== 'streaming' || session.extend === (mode === 'extend')) return;
+    await send({ cmd: 'disconnect', target }, 30_000);
+    await start(target, mode);
+  };
+
   ipcMain.handle('airplay:mode', async (event, rawTarget, rawMode) => {
     assertShellSender(event);
     const target = knownReceiver(rawTarget);
     if (rawMode !== 'mirror' && rawMode !== 'extend') throw new Error('Invalid mode');
-    saveMode(target, rawMode);
-    const session = sessions.get(target);
-    if (!session || session.state !== 'streaming' || session.extend === (rawMode === 'extend')) return;
-    await send({ cmd: 'disconnect', target }, 30_000);
-    await start(target, rawMode);
+    await setMode(target, rawMode);
   });
+
+  // The display-switch key flips the receiver being shared with: one that
+  // extends goes back to mirroring, else a mirrored one becomes a display of
+  // its own. Said on screen at once, as switching takes a few seconds.
+  switchMode = () => {
+    if (switching) return;
+    const streaming = [...sessions.values()].filter((s) => s.state === 'streaming');
+    const session = streaming.find((s) => s.extend) ?? streaming[0];
+    if (!session) return;
+    const mode: AirPlayMode = session.extend ? 'mirror' : 'extend';
+    sendToShell('airplay:osd', { name: session.name, mode });
+    switching = setMode(session.target, mode)
+      .catch((error: unknown) => {
+        state = { ...state, failure: { target: session.target, message: messageOf(error), at: Date.now() } };
+        publishSessions();
+      })
+      .finally(() => {
+        switching = null;
+      });
+  };
 
   ipcMain.handle('airplay:code', async (event, rawTarget, rawCode) => {
     assertShellSender(event);

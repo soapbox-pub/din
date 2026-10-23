@@ -75,7 +75,7 @@ import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
-import { airplayDisplays, registerAirPlayHandlers } from './airplay.mts';
+import { airplayDisplays, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
@@ -2762,9 +2762,12 @@ function registerScreenshotHandlers(): void {
 // - The mic-mute key (KEY_MICMUTE, keysym XF86AudioMicMute; on ThinkPads it
 //   comes from the "ThinkPad Extra Buttons" device). It toggles the default
 //   source's mute.
+// - The display-switch key (KEY_SWITCHVIDEOMODE, keysym XF86Display; F7 on
+//   ThinkPads, again from "ThinkPad Extra Buttons"). It switches an AirPlay
+//   receiver between extending the desktop and mirroring it.
 //
-// Chromium has no DOM key for either keysym, and its code for KEY_MICMUTE
-// has no name, so before-input-event reports both as key "Unidentified",
+// Chromium has no DOM key for these keysyms, and its code for KEY_MICMUTE
+// has no name, so before-input-event reports them as key "Unidentified",
 // code "" - indistinguishable from any other unmapped key. GNOME/KDE handle
 // these at the evdev level; do the same: read the keyboard event nodes
 // directly.
@@ -2776,6 +2779,7 @@ function registerScreenshotHandlers(): void {
 // ---------------------------------------------------------------------------
 
 const EV_KEY = 0x01;
+const KEY_SWITCHVIDEOMODE = 0xe3;
 const KEY_MICMUTE = 0xf8;
 const KEY_SELECTIVE_SCREENSHOT = 0x27a;
 /** struct input_event on 64-bit Linux: 16-byte timeval + type + code + value. */
@@ -2825,6 +2829,7 @@ function watchEvdevKeys(): void {
           const code = buf.readUInt16LE(off + 18);
           if (code === KEY_SELECTIVE_SCREENSHOT) sendToShell('shortcut', { action: 'screenshot-area' });
           else if (code === KEY_MICMUTE) pushInputOsd(audioToggleInputMute());
+          else if (code === KEY_SWITCHVIDEOMODE) switchAirPlayMode();
         }
         leftover = buf.subarray(full);
       });

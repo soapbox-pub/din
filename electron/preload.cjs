@@ -1236,6 +1236,21 @@ contextBridge.exposeInMainWorld('airplay', {
     ipcRenderer.on('airplay:changed', handler);
     return () => ipcRenderer.removeListener('airplay:changed', handler);
   },
+
+  /**
+   * Subscribe to the display-switch key switching a receiver, for the OSD.
+   * Returns an unsubscribe fn.
+   * @param {(change: unknown) => void} callback
+   */
+  onOsd: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} change
+     */
+    const handler = (_event, change) => callback(change);
+    ipcRenderer.on('airplay:osd', handler);
+    return () => ipcRenderer.removeListener('airplay:osd', handler);
+  },
 });
 
 // Assistant bridge (window.assistant), backed by electron/assistant.mts:

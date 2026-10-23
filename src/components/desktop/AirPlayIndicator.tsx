@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Airplay, Loader2, Settings2, Tv } from 'lucide-react';
+import { Airplay, Columns2, Copy, Loader2, Settings2, Tv } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -16,7 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useAirPlayActions, useAirPlayScan, useAirPlayState } from '@/hooks/useAirPlay';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { cleanAirPlayError, type AirPlayMode, type AirPlaySession } from '@/lib/airplay';
+import { cleanAirPlayError, getAirPlayBridge, type AirPlayMode, type AirPlaySession } from '@/lib/airplay';
 import { cn } from '@/lib/utils';
 
 /** What a session is doing, in a few words. */
@@ -195,6 +195,78 @@ export function AirPlayPopoverBody() {
           </Button>
         </PopoverClose>
       </footer>
+    </div>
+  );
+}
+
+/** How long the OSD stays on screen after the display-switch key. */
+const OSD_VISIBLE_MS = 2000;
+
+/**
+ * On-screen display for the display-switch key (F7 on ThinkPads), which
+ * switches the receiver being shared with between extending and mirroring.
+ * Both ways are shown, the new one highlighted, Win+P style.
+ */
+export function AirPlayOsd() {
+  const [change, setChange] = useState<{ name: string; mode: AirPlayMode } | null>(null);
+  const [visible, setVisible] = useState(false);
+  const hideTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    const airplay = getAirPlayBridge();
+    if (!airplay) return;
+    const unsubscribe = airplay.onOsd((next) => {
+      setChange(next);
+      setVisible(true);
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = window.setTimeout(() => setVisible(false), OSD_VISIBLE_MS);
+    });
+    return () => {
+      unsubscribe();
+      window.clearTimeout(hideTimer.current);
+    };
+  }, []);
+
+  if (!change) return null;
+
+  const options = [
+    { mode: 'extend', label: 'Extend', Icon: Columns2 },
+    { mode: 'mirror', label: 'Mirror', Icon: Copy },
+  ] as const;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        'pointer-events-none fixed inset-x-0 bottom-24 z-[9998] flex justify-center',
+        'transition-opacity duration-200 motion-reduce:transition-none',
+        visible ? 'opacity-100' : 'opacity-0',
+      )}
+    >
+      <div className="flex flex-col items-center gap-2 rounded-2xl border border-border/60 bg-background/80 px-4 py-3 shadow-lg backdrop-blur-md">
+        <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <Airplay className="size-4 text-muted-foreground" aria-hidden />
+          {change.name}
+        </p>
+        <div className="flex gap-2">
+          {options.map(({ mode, label, Icon }) => (
+            <span
+              key={mode}
+              className={cn(
+                'flex w-20 flex-col items-center gap-1 rounded-xl px-2 py-2 text-xs font-medium',
+                change.mode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground',
+              )}
+            >
+              <Icon className="size-5" aria-hidden />
+              {label}
+            </span>
+          ))}
+        </div>
+        <span className="sr-only">
+          {change.mode === 'extend' ? `Extending the desktop to ${change.name}` : `Mirroring the screen to ${change.name}`}
+        </span>
+      </div>
     </div>
   );
 }

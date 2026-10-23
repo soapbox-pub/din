@@ -29,7 +29,7 @@ import { SystemEventsHost } from './SystemEventsHost';
 import { NativeLinksHost } from './NativeLinksHost';
 import { InstallerAutoOpen } from './InstallerAutoOpen';
 import { UpdateNotifier } from './UpdateNotifier';
-import { AirPlayPromptHost } from './AirPlayIndicator';
+import { AirPlayOsd, AirPlayPromptHost } from './AirPlayIndicator';
 import { BluetoothPromptHost } from './BluetoothIndicator';
 import { VolumesHost } from './VolumesHost';
 import { PageFullscreenHost } from './PageFullscreenHost';
@@ -182,6 +182,7 @@ function DesktopSession() {
               <WindowSwitcher />
               <VolumeOsd />
               <BrightnessOsd />
+              <AirPlayOsd />
               <ScreenDimmer />
               <NostrNotifications />
               <NotificationPopups />

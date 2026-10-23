@@ -50,6 +50,8 @@ export interface AirPlayBridge {
   code(target: string, code: string): Promise<void>;
   disconnect(target: string): Promise<void>;
   onChanged(callback: (state: AirPlayState) => void): () => void;
+  /** The display-switch key switched a receiver to MODE. */
+  onOsd(callback: (change: { name: string; mode: AirPlayMode }) => void): () => void;
 }
 
 declare global {
