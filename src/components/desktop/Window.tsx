@@ -1244,10 +1244,13 @@ export const Window = memo(function Window({
         // keyframes take precedence over inline transforms for their
         // duration, so gestures in the first 200ms are visually deferred,
         // never broken. fill-mode-forwards holds the faded-out final frame
-        // until destroy() commits.
+        // until destroy() commits. animation-duration-*, not duration-*:
+        // the latter also sets transition-duration, which with the default
+        // `transition-property: all` holds a hidden window (minimize, the
+        // genie's snapshot hand-off) visible for the whole transition.
         win.closing
-          ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:duration-150 motion-safe:fill-mode-forwards'
-          : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200',
+          ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:animation-duration-150 motion-safe:fill-mode-forwards'
+          : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:animation-duration-200',
         flush || frameless
           ? 'rounded-none'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
