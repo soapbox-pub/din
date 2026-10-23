@@ -599,9 +599,10 @@ in
 
   # Power profiles for Settings → Power (net.hadess.PowerProfiles over D-Bus,
   # electron/main.mts): power-saver / balanced / performance set the CPU's
-  # energy preference, the firmware's platform profile (power limits and fans)
-  # and the AMD panel's backlight power saving. UPower tells it when the
-  # computer is on battery, so balanced leans toward saving power then.
+  # energy preference and the firmware's platform profile (power limits and
+  # fans). Its GPU actions (panel power savings, DPM) are off by default, so
+  # the GPU and panel are left alone. UPower tells it when the computer is on
+  # battery, so balanced leans toward saving power then.
   services.power-profiles-daemon.enable = true;
   services.upower.enable = true;
 
