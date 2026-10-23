@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import type { ComponentType } from 'react';
-import { Activity, type LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
 import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
 
@@ -160,7 +160,7 @@ export const APPS: readonly AppDefinition[] = [
     // Ctrl+Shift+Escape opens it from anywhere (DesktopHotkeys).
     id: 'system-monitor',
     name: 'System Monitor',
-    icon: Activity,
+    icon: '/icons/apps/system-monitor.png',
     component: SystemMonitor,
     defaultSize: { width: 760, height: 560 },
     keywords: ['task manager', 'activity monitor', 'processes', 'CPU', 'memory', 'force quit', 'kill'],
