@@ -493,6 +493,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [],
   );
 
+  // Set when a tab is brought to the front (switched to, or opened in the
+  // foreground), so it takes keyboard focus once it is visible (see the effect
+  // below). Otherwise focus stays in the hidden tab's page.
+  const focusOnActivate = useRef(false);
+
   const openTab = useCallback(
     (
       url: string,
@@ -502,7 +507,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     ) => {
       const tab = createTab(url, pendingRequestId, parentId);
       setTabs((ts) => [...ts, tab]);
-      if (activate) setActiveId(tab.id);
+      if (activate) {
+        focusOnActivate.current = true;
+        setActiveId(tab.id);
+      }
       return tab.id;
     },
     [],
@@ -530,10 +538,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     input.focus();
     input.select();
   }, []);
-
-  // Set when the user switches tabs, so the newly shown tab takes keyboard
-  // focus once it is visible (see the effect below).
-  const focusOnActivate = useRef(false);
 
   /** Switch to a tab the way the user does: its page gets keyboard focus. */
   const selectTab = useCallback((id: string) => {
@@ -1144,6 +1148,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           if (soloBlank) {
             const tab = createTab(command.url);
             setTabs([tab]);
+            focusOnActivate.current = true;
             setActiveId(tab.id);
           } else {
             openTab(command.url, !background, null, parentId);
@@ -1715,8 +1720,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       ) {
         return;
       }
-      const tab = tabsRef.current.find((t) => t.wcId === shortcut.wcId);
-      if (!tab) return;
+      const sender = tabsRef.current.find((t) => t.wcId === shortcut.wcId);
+      if (!sender) return;
+      // Keyboard focus can linger in a tab's page after another tab came to
+      // the front (a hidden <webview> doesn't give it up). The key still
+      // means the tab the user is looking at, never the hidden one.
+      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current) ?? sender;
       if (runWindowHotkey(shortcut.action)) return;
       switch (shortcut.action) {
         case 'new-tab':
