@@ -18,6 +18,9 @@ perf-reports
 *.local
 yarn.lock
 
+# The compiled Electron host (scripts/build-electron.mjs)
+electron/*.mjs
+
 # The ad blocker's bundled filter engine (scripts/build-adblock-engine.mjs)
 electron/adblock-extension/engine.js
 

@@ -29,8 +29,10 @@ let
         "electron"
       ]
       # The ad blocker's engine bundle is built from these two
-      # (electron/adblock.mts). `scripts` itself must pass for its files to.
+      # (electron/adblock.mts), and the Electron host is compiled by
+      # build-electron.mjs. `scripts` itself must pass for its files to.
       || rel == "scripts"
+      || rel == "scripts/build-electron.mjs"
       || rel == "scripts/build-adblock-engine.mjs"
       || rel == "scripts/adblock-engine-entry.js";
   };
@@ -58,6 +60,7 @@ let
     buildPhase = ''
       runHook preBuild
       npm exec -- vite build -l error
+      node scripts/build-electron.mjs
       node scripts/build-adblock-engine.mjs
       runHook postBuild
     '';
@@ -66,11 +69,11 @@ let
       runHook preInstall
       mkdir -p $out/share/din
       cp -r dist $out/share/din/dist
-      # The whole Electron host: main.mts and the .mts modules and workers it
-      # loads (run via Node's native type stripping - no build step), the
-      # .cjs preloads, and the pty helper. Copied wholesale so a new module
-      # can't be forgotten here.
-      install -m444 electron/*.mts electron/*.cjs $out/share/din/
+      # The whole Electron host: main.mjs and the modules and workers it
+      # loads (compiled from the .mts sources above, so no process pays for
+      # Node's TypeScript stripper), the .cjs preloads, and the pty helper.
+      # Copied wholesale so a new module can't be forgotten here.
+      install -m444 electron/*.mjs electron/*.cjs $out/share/din/
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
       # The ad blocker's extension, with its engine bundle built above.
       cp -r electron/adblock-extension $out/share/din/adblock-extension
@@ -346,7 +349,7 @@ let
     # setting for "none" (an empty one means its default).
     exec ${pkgs.util-linux}/bin/setpriv --inh-caps=-all --ambient-caps=-all \
       ${pkgs.electron}/bin/electron \
-      ${din-app}/share/din/main.mts \
+      ${din-app}/share/din/main.mjs \
       --ozone-platform=wayland ${extraFlags}
   '';
   din-launcher = makeDinLauncher "";

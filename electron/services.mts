@@ -16,7 +16,8 @@
 import path from 'node:path';
 import { app, MessageChannelMain, utilityProcess } from 'electron';
 
-const HOST = path.join(import.meta.dirname, 'services-host.mts');
+// .mts in development, the compiled .mjs in a build (scripts/build-electron.mjs).
+const HOST = path.join(import.meta.dirname, `services-host${path.extname(import.meta.filename)}`);
 
 export type ServiceName = 'system' | 'notifications' | 'file-chooser';
 

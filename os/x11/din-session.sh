@@ -11,7 +11,8 @@
 # printing) is still there underneath.
 #
 # Prerequisites:
-#   - `npm run build` has been run at least once (produces dist/).
+#   - `npm run build` has been run at least once (produces dist/ and the
+#     compiled electron/*.mjs).
 #   - Electron present (node_modules/.bin/electron, from `npm install`).
 #   - python3 on PATH (Terminal app's pty host) and nmcli (Settings Wifi).
 #     Both are standard on Fedora and most distros.
@@ -45,7 +46,9 @@ ROOT_DIR="${DIN_ROOT:-$(cd "$(dirname "${SELF}")/../.." && pwd)}"
 export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 ELECTRON="${ROOT_DIR}/node_modules/.bin/electron"
-MAIN="${ROOT_DIR}/electron/main.mts"
+# The compiled host (npm run build -> scripts/build-electron.mjs), not the
+# .mts sources: those load Node's TypeScript stripper into every process.
+MAIN="${ROOT_DIR}/electron/main.mjs"
 
 # main.mts serves the built app over app://; point it at this checkout's build
 # explicitly. (It also falls back to __dirname/../dist, but being explicit
@@ -56,7 +59,7 @@ if [ ! -x "${ELECTRON}" ]; then
   echo "din-session: Electron not found at ${ELECTRON}. Run 'npm install'." >&2
   exit 1
 fi
-if [ ! -f "${ROOT_DIR}/dist/index.html" ]; then
+if [ ! -f "${ROOT_DIR}/dist/index.html" ] || [ ! -f "${MAIN}" ]; then
   echo "din-session: no build at ${ROOT_DIR}/dist. Run 'npm run build'." >&2
   exit 1
 fi

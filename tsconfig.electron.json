@@ -3,8 +3,9 @@
 // not Vite's bundler resolution.
 //
 // The .mts files run directly in Electron 41+ via Node's native type
-// stripping - there is NO build step, so only erasable TypeScript syntax is
-// allowed (no enums, namespaces, parameter properties), enforced by
+// stripping in development; production runs them compiled to .mjs by
+// scripts/build-electron.mjs (stripping only, no type changes), so only
+// erasable TypeScript syntax is allowed (no enums, namespaces, parameter properties), enforced by
 // `erasableSyntaxOnly`. The preload scripts stay plain .cjs (Electron's
 // sandboxed-preload loader doesn't type-strip) and are checked via JSDoc
 // (`checkJs`).
@@ -34,5 +35,5 @@
   },
   "include": ["electron"],
   /* The ad blocker's extension runs in an extension page, not Node. */
-  "exclude": ["electron/adblock-extension"]
+  "exclude": ["electron/adblock-extension", "electron/*.mjs"]
 }

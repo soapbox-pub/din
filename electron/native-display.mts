@@ -39,7 +39,8 @@ import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electr
 import { connectGpuBuffers, dinFd } from './native-gpu.mts';
 import { keyboardKeymap, onKeymapChange } from './keyboard.mts';
 
-const WORKER = path.join(import.meta.dirname, 'native-display-worker.mts');
+// .mts in development, the compiled .mjs in a build (scripts/build-electron.mjs).
+const WORKER = path.join(import.meta.dirname, `native-display-worker${path.extname(import.meta.filename)}`);
 
 /** The embedded display's servers and how to reach them. */
 export interface EmbeddedDisplay {
