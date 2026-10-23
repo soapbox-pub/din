@@ -3,16 +3,13 @@ import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { toggleAppsMenu } from '@/lib/appsMenu';
 import { publishBrowserHotkey, type BrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
-import { isScreenshotSessionActive } from '@/lib/screenshot';
+import { isScreenshotSessionActive, requestScreenshot } from '@/lib/screenshot';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { isWindowSwitcherActive } from '@/lib/windowSwitcherState';
 import type { WindowState } from '@/hooks/useWindows';
 
 /** The built-in Web Browser's app id (see src/lib/apps.ts). */
 const WEB_BROWSER_APP_ID = 'web-browser';
-
-/** The built-in Screenshot tool's app id (see src/lib/apps.ts). */
-const SCREENSHOT_APP_ID = 'screenshot';
 
 /**
  * Desktop-wide keyboard shortcuts. Renders nothing.
@@ -21,12 +18,11 @@ const SCREENSHOT_APP_ID = 'screenshot';
  * WindowSwitcher, which owns the keyboard for the duration of the gesture;
  * this component stands down while it's active.)
  *
- * - Print Screen opens the Screenshot app for a full-screen capture, and
- *   Shift+Print Screen for an area grab (the laptop screenshot function
- *   keys; the dedicated box-select key on newer laptops reaches the shell
- *   as the 'screenshot-area' bridge shortcut instead - see electron/main.mts).
- *   Both are ignored while a capture session is already running, so they
- *   can't re-raise the deliberately hidden window mid-shot.
+ * - Print Screen takes a full-screen capture on the spot, and Shift+Print
+ *   Screen starts an area grab (the dedicated box-select key on newer
+ *   laptops reaches the shell as the 'screenshot-area' bridge shortcut
+ *   instead - see electron/main.mts). ScreenshotHost does the capturing.
+ *   Both are ignored while a capture session is already running.
  * - Super+Space opens the menu bar's apps menu with its search focused (or
  *   closes it again).
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
@@ -97,14 +93,11 @@ export function DesktopHotkeys() {
       // Print Screen: full-screen capture. Shift+Print Screen: select an
       // area (the same session the dedicated box-select key starts via the
       // Electron host's evdev watch). The session flag guards against a
-      // press mid-capture, when the app's window is deliberately minimized
-      // out of the shot.
+      // press mid-capture.
       if (e.key === 'PrintScreen' && !e.ctrlKey && !e.altKey && !e.metaKey) {
         if (!isScreenshotSessionActive()) {
           e.preventDefault();
-          actionsRef.current.open(SCREENSHOT_APP_ID, {
-            start: e.shiftKey ? 'area' : 'screen',
-          });
+          requestScreenshot(e.shiftKey ? 'area' : 'screen');
         }
         return;
       }
@@ -240,9 +233,7 @@ export function DesktopHotkeys() {
         toggleAppsMenu();
       } else if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {
         if (!isScreenshotSessionActive()) {
-          actionsRef.current.open(SCREENSHOT_APP_ID, {
-            start: shortcut.action === 'screenshot-area' ? 'area' : 'screen',
-          });
+          requestScreenshot(shortcut.action === 'screenshot-area' ? 'area' : 'screen');
         }
       }
     });

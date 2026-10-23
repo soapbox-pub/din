@@ -150,9 +150,7 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/screenshot.png',
     component: Screenshot,
     defaultSize: { width: 440, height: 400 },
-    // One shot at a time: the Print Screen / box-select hotkeys re-open
-    // with launch params, which merge into the existing window instead of
-    // stacking up.
+    // One shot at a time.
     singleInstance: true,
   },
   {

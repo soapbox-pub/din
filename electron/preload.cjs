@@ -1360,6 +1360,12 @@ contextBridge.exposeInMainWorld('screenshot', {
    * @param {{ x: number, y: number, width: number, height: number }} rect
    */
   captureRegion: (rect) => ipcRenderer.invoke('screenshot:captureRegion', rect),
+
+  /**
+   * Put a PNG capture on the system clipboard.
+   * @param {string} dataUrl a `data:image/png;base64,...` URL
+   */
+  copy: (dataUrl) => ipcRenderer.invoke('screenshot:copy', dataUrl),
 });
 
 /**

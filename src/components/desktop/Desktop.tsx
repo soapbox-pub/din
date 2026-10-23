@@ -3,6 +3,7 @@ import { Wallpaper } from './Wallpaper';
 import { BootScreenSync } from './BootScreenSync';
 import { Dock } from './Dock';
 import { DesktopHotkeys } from './DesktopHotkeys';
+import { ScreenshotHost } from './ScreenshotHost';
 import { MenuBar } from './MenuBar';
 import { VolumeOsd } from './VolumeOsd';
 import { BrightnessOsd } from './BrightnessOsd';
@@ -132,6 +133,7 @@ function DesktopSession() {
             <NsiteBridgeHost />
             <PromptHost />
             <DesktopHotkeys />
+            <ScreenshotHost />
             <SystemEventsHost />
             <SystemNotificationsHost />
             <GuestInputHost />

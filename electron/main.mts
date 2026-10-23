@@ -18,7 +18,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { app, BrowserWindow, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme, shell } from 'electron';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import {
   installChromeWebStore,
@@ -2731,6 +2731,20 @@ function registerScreenshotHandlers(): void {
       throw new Error('Captured an empty image');
     }
     return { dataUrl: image.toDataURL(), width: size.width, height: size.height };
+  });
+
+  // Put a capture on the clipboard. Done here rather than with
+  // navigator.clipboard in the renderer, which refuses unless the shell
+  // document has focus - and a Print Screen pressed inside a <webview> guest
+  // leaves the focus in the guest.
+  ipcMain.handle('screenshot:copy', (event, dataUrl) => {
+    assertShellSender(event);
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) {
+      throw new Error('Invalid image');
+    }
+    const image = nativeImage.createFromDataURL(dataUrl);
+    if (image.isEmpty()) throw new Error('Invalid image');
+    clipboard.writeImage(image);
   });
 }
 
