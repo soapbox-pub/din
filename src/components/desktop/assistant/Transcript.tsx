@@ -1,8 +1,8 @@
 import { createElement, memo, useState, type ReactNode } from 'react';
 import {
   Bot,
+  Braces,
   Brain,
-  Check,
   ChevronRight,
   CircleAlert,
   FilePen,
@@ -11,7 +11,9 @@ import {
   Globe,
   ListTodo,
   Loader2,
+  MessageCircleQuestion,
   Search,
+  Sparkles,
   SquareTerminal,
   Wrench,
   X,
@@ -128,8 +130,49 @@ function Working() {
   );
 }
 
+type ToolPart = Extract<AssistantContent, { type: 'tool' }>;
+type ReasoningPart = Extract<AssistantContent, { type: 'reasoning' }>;
+type Step = (ToolPart | ReasoningPart) & { key: string };
+
+/** A turn as it's shown: prose, and each unbroken run of tool calls and thinking folded into one line. */
+type Block =
+  | { kind: 'text'; key: string; text: string }
+  | { kind: 'steps'; key: string; steps: Step[] }
+  | { kind: 'error'; key: string; message: string };
+
+function blocks(messages: AssistantMessage[]): Block[] {
+  const out: Block[] = [];
+  for (const message of messages) {
+    message.content.forEach((part, index) => {
+      const key = part.type === 'tool' ? part.id : `${message.id}:${index}`;
+      if (part.type === 'text') {
+        if (part.text.trim()) out.push({ kind: 'text', key, text: part.text });
+        return;
+      }
+      if (part.type === 'reasoning' && !part.text.trim()) return;
+      const last = out[out.length - 1];
+      if (last?.kind === 'steps') last.steps.push({ ...part, key });
+      else out.push({ kind: 'steps', key, steps: [{ ...part, key }] });
+    });
+    if (message.error) {
+      out.push({ kind: 'error', key: `${message.id}:error`, message: message.error.message ?? message.error.type ?? 'Something went wrong' });
+    }
+  }
+  return out;
+}
+
+function toolRunning(step: Step): boolean {
+  return step.type === 'tool' && (step.state.status === 'streaming' || step.state.status === 'running');
+}
+
 function Turn({ messages, working }: { messages: AssistantMessage[]; working: boolean }) {
   const lastMessage = messages[messages.length - 1];
+  const list = blocks(messages);
+  const tail = list[list.length - 1];
+  const tailSteps = tail?.kind === 'steps' ? tail.steps : [];
+  const lastStep = tailSteps[tailSteps.length - 1];
+  // The trailing group narrates the work while a step in it is still going.
+  const live = working && (tailSteps.some(toolRunning) || (lastStep?.type === 'reasoning' && !lastStep.time?.completed));
   return (
     <div className="flex gap-3">
       <div
@@ -138,109 +181,136 @@ function Turn({ messages, working }: { messages: AssistantMessage[]; working: bo
       >
         <Bot className="size-4" />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {messages.map((message) => (
-          <div key={message.id} className="flex flex-col gap-2">
-            {message.content.map((part, index) => (
-              <Part key={part.type === 'tool' ? part.id : `${message.id}:${index}`} part={part} />
-            ))}
-            {message.retry && message === lastMessage && (
-              <p className="text-xs text-muted-foreground">
-                Retrying (attempt {message.retry.attempt})… {message.retry.error.message}
-              </p>
-            )}
-            {message.error && <ErrorBanner message={message.error.message ?? message.error.type ?? 'Something went wrong'} />}
-          </div>
-        ))}
-        {working && <Working />}
+      <div className="flex min-w-0 flex-1 flex-col gap-3 pt-1">
+        {list.map((block) => {
+          if (block.kind === 'text') return <Markdown key={block.key} text={block.text} />;
+          if (block.kind === 'error') return <ErrorBanner key={block.key} message={block.message} />;
+          return <Steps key={block.key} steps={block.steps} live={live && block === tail} />;
+        })}
+        {lastMessage?.retry && (
+          <p className="text-xs text-muted-foreground">
+            Retrying (attempt {lastMessage.retry.attempt})… {lastMessage.retry.error.message}
+          </p>
+        )}
+        {working && !live && <Working />}
       </div>
     </div>
   );
 }
 
-function Part({ part }: { part: AssistantContent }) {
-  if (part.type === 'text') return part.text.trim() ? <Markdown text={part.text} /> : null;
-  if (part.type === 'reasoning') return part.text.trim() ? <Reasoning text={part.text} /> : null;
-  return <ToolCard name={part.name} state={part.state} />;
-}
+const SHIMMER =
+  'bg-[linear-gradient(90deg,var(--color-muted-foreground)_40%,var(--color-foreground)_50%,var(--color-muted-foreground)_60%)] bg-[length:200%_100%] bg-clip-text text-transparent motion-safe:animate-shimmer';
 
-function Reasoning({ text }: { text: string }) {
+const TRIGGER =
+  'flex min-w-0 items-center gap-1.5 rounded-md text-left text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/** A run of steps as one line ("Read 3 files, ran a command") that opens into the list of them. */
+function Steps({ steps, live }: { steps: Step[]; live: boolean }) {
   const [open, setOpen] = useState(false);
+  if (steps.length === 1 && steps[0].type === 'reasoning') return <Reasoning step={steps[0]} live={live} />;
+  const failed = steps.filter((step) => step.type === 'tool' && step.state.status === 'error').length;
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex items-center gap-1.5 rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} aria-hidden />
-        <Brain className="size-3.5" aria-hidden />
-        Thinking
+      <CollapsibleTrigger className={cn(TRIGGER, 'max-w-full')}>
+        {live && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
+        <span className={cn('min-w-0 truncate', live && SHIMMER)} role={live ? 'status' : undefined}>
+          {live ? activeLabel(steps) : doneLabel(steps)}
+        </span>
+        {failed > 0 && <span className="shrink-0 text-destructive">· {failed} failed</span>}
+        <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <Markdown text={text} className="mt-1.5 border-l-2 border-border pl-3 text-sm text-muted-foreground" />
+        <ol className="ml-1.5 mt-2 flex flex-col gap-0.5 border-l border-border pl-2">
+          {steps.map((step) => (
+            <li key={step.key}>{step.type === 'tool' ? <ToolStep step={step} /> : <ThoughtStep step={step} />}</li>
+          ))}
+        </ol>
       </CollapsibleContent>
     </Collapsible>
   );
 }
 
-const TOOL_ICONS: [RegExp, LucideIcon][] = [
-  [/^(read|view|cat)$/, FileText],
-  [/^(write|edit|patch|multiedit|apply_patch)/, FilePen],
-  [/^(bash|shell|exec|command)/, SquareTerminal],
-  [/^(grep|search|websearch)/, Search],
-  [/^(glob|list|ls|find)/, FolderSearch],
-  [/^(webfetch|fetch|browse)/, Globe],
-  [/^(todo)/, ListTodo],
-  [/^(task|subagent|agent)/, Bot],
-];
-
-function ToolIcon({ name, className }: { name: string; className?: string }) {
-  const icon = TOOL_ICONS.find(([pattern]) => pattern.test(name.toLowerCase()))?.[1] ?? Wrench;
-  return createElement(icon, { className, 'aria-hidden': true });
+function thoughtLabel(step: ReasoningPart, live: boolean): string {
+  if (live) return 'Thinking…';
+  const seconds = step.time?.completed ? Math.round((step.time.completed - step.time.created) / 1000) : 0;
+  return seconds > 0 ? `Thought for ${seconds}s` : 'Thought';
 }
 
-/** The one-line gist of a tool call: the file, command, pattern or URL. */
-function toolSummary(state: ToolState): string {
-  if (state.status === 'streaming') return '';
-  const input = state.input;
-  for (const key of ['description', 'command', 'path', 'filePath', 'file_path', 'pattern', 'url', 'query', 'prompt']) {
-    const value = input[key];
-    if (typeof value === 'string' && value.trim()) return value.trim().split('\n')[0];
-  }
-  return '';
-}
-
-function toolOutput(state: ToolState): string {
-  if (state.status === 'completed' || state.status === 'error') {
-    return (state.content ?? [])
-      .map((c) => (c.type === 'text' ? (c.text ?? '') : `[${c.name ?? c.mime ?? 'file'}]`))
-      .join('\n');
-  }
-  return '';
-}
-
-function ToolCard({ name, state }: { name: string; state: ToolState }) {
+function Reasoning({ step, live }: { step: ReasoningPart; live: boolean }) {
   const [open, setOpen] = useState(false);
-  const summary = toolSummary(state);
-  const output = toolOutput(state);
-  const diff = 'metadata' in state ? state.metadata?.diff : undefined;
-  const input = state.status === 'streaming' ? state.input : JSON.stringify(state.input, null, 2);
-
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded-lg border border-border/70 bg-muted/30">
-      <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <ToolIcon name={name} className="size-4 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 font-medium">{name}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={summary}>
-          {summary}
-        </span>
-        <ToolStatus status={state.status} />
-        <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden />
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className={TRIGGER}>
+        <span className={cn(live && SHIMMER)}>{thoughtLabel(step, live)}</span>
+        <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="space-y-2 border-t border-border/60 p-2.5">
+        <Markdown text={step.text} className="mt-2 border-l border-border pl-3 text-sm text-muted-foreground" />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+const ROW =
+  'group flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+function RowChevron({ open }: { open: boolean }) {
+  return (
+    <ChevronRight
+      className={cn(
+        'size-3.5 shrink-0 transition-transform',
+        open ? 'rotate-90' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+      )}
+      aria-hidden
+    />
+  );
+}
+
+function ThoughtStep({ step }: { step: ReasoningPart }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className={ROW}>
+        <Brain className="size-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{thoughtLabel(step, false)}</span>
+        <RowChevron open={open} />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <Markdown text={step.text} className="mb-2 ml-7 mt-1 text-sm text-muted-foreground" />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ToolStep({ step }: { step: ToolPart }) {
+  const [open, setOpen] = useState(false);
+  const { state } = step;
+  const kind = toolKind(step.name);
+  const target = toolTarget(kind, state);
+  const output = toolOutput(state);
+  const diff = 'metadata' in state ? state.metadata?.diff : undefined;
+  const command = state.status !== 'streaming' && kind.command ? str(state.input.command, false) : undefined;
+  const input = state.status === 'streaming' ? state.input : (command ?? JSON.stringify(state.input, null, 2));
+  const done = state.status === 'completed' || state.status === 'error';
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className={ROW}>
+        {createElement(kind.icon, { className: 'size-3.5 shrink-0', 'aria-hidden': true })}
+        <span className="min-w-0 flex-1 truncate" title={target?.full}>
+          {done ? kind.past(step.name) : kind.active(step.name)}
+          {target && <code className="ml-1.5 font-mono text-xs text-foreground/80">{target.short}</code>}
+        </span>
+        <ToolStatus status={state.status} />
+        <RowChevron open={open} />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mb-2 ml-7 mt-1 space-y-2 rounded-lg border border-border/70 bg-muted/30 p-2.5">
           {state.status === 'error' && <ErrorBanner message={state.error.message ?? 'The tool failed'} />}
           {typeof diff === 'string' && diff ? (
             <Diff text={diff} />
           ) : (
-            <OutputBlock label="Input" text={input} />
+            input && <OutputBlock label={command ? 'Command' : 'Input'} text={input} />
           )}
           {output && <OutputBlock label="Output" text={output} />}
         </div>
@@ -250,9 +320,120 @@ function ToolCard({ name, state }: { name: string; state: ToolState }) {
 }
 
 function ToolStatus({ status }: { status: ToolState['status'] }) {
-  if (status === 'completed') return <Check className="size-3.5 shrink-0 text-primary" aria-label="Done" />;
+  if (status === 'completed') return null;
   if (status === 'error') return <X className="size-3.5 shrink-0 text-destructive" aria-label="Failed" />;
-  return <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Running" />;
+  return <Loader2 className="size-3.5 shrink-0 animate-spin" aria-label="Running" />;
+}
+
+interface ToolKind {
+  icon: LucideIcon;
+  /** "Reading", shown while the call runs. */
+  active: (name: string) => string;
+  /** "Read", once it's done. */
+  past: (name: string) => string;
+  /** "read 3 files", for a group's summary line. */
+  count: (n: number) => string;
+  /** What the call acts on, from its input. */
+  target?: (input: Record<string, unknown>) => string | undefined;
+  /** Count distinct targets rather than calls (the same file read twice is one file). */
+  distinct?: boolean;
+  /** Its input is a shell command: show that rather than the JSON. */
+  command?: boolean;
+}
+
+function str(value: unknown, firstLine = true): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return firstLine ? value.trim().split('\n')[0] : value.trim();
+}
+
+const filePath = (input: Record<string, unknown>) => str(input.filePath) ?? str(input.path) ?? str(input.file_path);
+
+const counted = (one: string, many: string) => (n: number) => (n === 1 ? one : many.replace('#', String(n)));
+const fixed = (text: string) => () => text;
+
+const TOOL_KINDS: [RegExp, ToolKind][] = [
+  [/^(read|view|cat)$/, { icon: FileText, active: fixed('Reading'), past: fixed('Read'), count: counted('read a file', 'read # files'), target: filePath, distinct: true }],
+  [/^(write|edit|patch|multiedit|apply_patch)/, { icon: FilePen, active: fixed('Editing'), past: fixed('Edited'), count: counted('edited a file', 'edited # files'), target: filePath, distinct: true }],
+  [/^(execute|code)/, { icon: Braces, active: fixed('Running code'), past: fixed('Ran code'), count: counted('ran code', 'ran code # times'), target: (input) => str(input.description) }],
+  [/^(bash|shell|exec|command)/, { icon: SquareTerminal, active: fixed('Running'), past: fixed('Ran'), count: counted('ran a command', 'ran # commands'), target: (input) => str(input.command), command: true }],
+  [/^websearch/, { icon: Globe, active: fixed('Searching the web for'), past: fixed('Searched the web for'), count: counted('searched the web', 'searched the web # times'), target: (input) => str(input.query) }],
+  [/^(webfetch|fetch|browse)/, { icon: Globe, active: fixed('Opening'), past: fixed('Opened'), count: counted('opened a page', 'opened # pages'), target: (input) => str(input.url), distinct: true }],
+  [/^(grep|search)/, { icon: Search, active: fixed('Searching for'), past: fixed('Searched for'), count: counted('searched the code', 'searched the code # times'), target: (input) => str(input.pattern) ?? str(input.query) }],
+  [/^(glob|list|ls|find)/, { icon: FolderSearch, active: fixed('Looking for'), past: fixed('Looked for'), count: counted('looked for files', 'looked for files # times'), target: (input) => str(input.pattern) ?? filePath(input) }],
+  [/^todo/, { icon: ListTodo, active: fixed('Updating the plan'), past: fixed('Updated the plan'), count: counted('updated the plan', 'updated the plan # times') }],
+  [/^(task|subagent|agent)/, { icon: Bot, active: fixed('Delegating'), past: fixed('Delegated'), count: counted('started a subagent', 'started # subagents'), target: (input) => str(input.description) }],
+  [/^skill/, { icon: Sparkles, active: fixed('Loading skill'), past: fixed('Loaded skill'), count: counted('loaded a skill', 'loaded # skills'), target: (input) => str(input.id) ?? str(input.name) }],
+  [/^question/, { icon: MessageCircleQuestion, active: fixed('Asking you'), past: fixed('Asked you'), count: counted('asked you a question', 'asked you # questions') }],
+];
+
+const OTHER_TOOL: ToolKind = {
+  icon: Wrench,
+  active: (name) => `Using ${name}`,
+  past: (name) => `Used ${name}`,
+  count: counted('used a tool', 'used # tools'),
+  target: (input) => {
+    for (const key of ['description', 'command', 'path', 'filePath', 'file_path', 'pattern', 'url', 'query', 'prompt']) {
+      const value = str(input[key]);
+      if (value) return value;
+    }
+  },
+};
+
+function toolKind(name: string): ToolKind {
+  return TOOL_KINDS.find(([pattern]) => pattern.test(name.toLowerCase()))?.[1] ?? OTHER_TOOL;
+}
+
+/** What a call acts on, short (a file's name, a URL without its scheme) and in full. */
+function toolTarget(kind: ToolKind, state: ToolState): { short: string; full: string } | undefined {
+  if (state.status === 'streaming') return undefined;
+  const full = kind.target?.(state.input);
+  if (!full) return undefined;
+  if (kind.target === filePath) return { short: full.replace(/\/+$/, '').split('/').pop() || full, full };
+  if (/^https?:\/\//.test(full)) return { short: full.replace(/^https?:\/\//, ''), full };
+  return { short: full, full };
+}
+
+function stepLabel(step: ToolPart, done: boolean): string {
+  const kind = toolKind(step.name);
+  const target = toolTarget(kind, step.state);
+  const verb = done ? kind.past(step.name) : kind.active(step.name);
+  return target ? `${verb} ${target.short}` : verb;
+}
+
+/** What the group is doing now: the newest step that's still going. */
+function activeLabel(steps: Step[]): string {
+  const last = steps[steps.length - 1];
+  if (last.type === 'reasoning') return 'Thinking…';
+  const running = steps.filter((step): step is Step & ToolPart => toolRunning(step));
+  return `${stepLabel(running[running.length - 1] ?? last, false)}…`;
+}
+
+/** What the group did: "Read 3 files, edited a file, ran 2 commands". */
+function doneLabel(steps: Step[]): string {
+  const tools = steps.filter((step): step is Step & ToolPart => step.type === 'tool');
+  if (tools.length === 0) return 'Thought';
+  if (tools.length === 1) return stepLabel(tools[0], true);
+  const tallies = new Map<ToolKind, { calls: number; targets: Set<string> }>();
+  for (const tool of tools) {
+    const kind = toolKind(tool.name);
+    const tally = tallies.get(kind) ?? { calls: 0, targets: new Set<string>() };
+    tally.calls++;
+    const target = toolTarget(kind, tool.state);
+    if (target) tally.targets.add(target.full);
+    tallies.set(kind, tally);
+  }
+  const phrases = [...tallies].map(([kind, { calls, targets }]) => kind.count(kind.distinct && targets.size ? targets.size : calls));
+  const text = phrases.join(', ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function toolOutput(state: ToolState): string {
+  if (state.status === 'completed' || state.status === 'error') {
+    return (state.content ?? [])
+      .map((c) => (c.type === 'text' ? (c.text ?? '') : `[${c.name ?? c.mime ?? 'file'}]`))
+      .join('\n');
+  }
+  return '';
 }
 
 function OutputBlock({ label, text }: { label: string; text: string }) {

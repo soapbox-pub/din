@@ -61,6 +61,17 @@
   --animate-accordion-up: accordion-up 0.2s ease-out;
   --animate-veil-out: veil-out 1.2s ease-out forwards;
   --animate-dock-bounce: dock-bounce 0.8s infinite;
+  --animate-shimmer: shimmer 2s linear infinite;
+
+  /* A highlight sweeping across text that's still in progress. */
+  @keyframes shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
 
   /* A launching app's Dock icon: thrown up, falling back under gravity, a
      beat on the ground between hops. */
