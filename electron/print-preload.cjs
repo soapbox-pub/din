@@ -10,6 +10,7 @@
 // hidden iframe and calling print() there, so the frame's document goes along
 // to be drawn again on its own. Preloads don't run in such about:blank
 // frames, so their windows get the same print() as the page reaches them.
+// The Print button of Chromium's PDF viewer goes to Din's dialog too.
 //
 // Registered with session.registerPreloadScript in main.mts, so it runs
 // alongside each guest's own preload, in every frame of web pages.
@@ -78,7 +79,34 @@ function installPrint(request) {
   }
 }
 
-if (/^(https?|nsite|file|about|blob|data):$/.test(location.protocol)) {
+/**
+ * Runs in the world of Chromium's PDF viewer, the frame a PDF opens in. Its
+ * Print button asks the PDF plugin itself to print, which would open the
+ * GTK dialog; the whole page (the PDF) goes to Din's dialog instead.
+ * @param {() => void} request
+ */
+function installPdfViewerPrint(request) {
+  window.addEventListener(
+    'click',
+    (event) => {
+      const print = event
+        .composedPath()
+        .some((node) => node instanceof Element && node.localName === 'cr-icon-button' && node.id === 'print');
+      if (!print) return;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      request();
+    },
+    true,
+  );
+}
+
+if (location.origin === 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai') {
+  contextBridge.executeInMainWorld({
+    func: installPdfViewerPrint,
+    args: [() => ipcRenderer.send('printing:request', null)],
+  });
+} else if (/^(https?|nsite|file|about|blob|data):$/.test(location.protocol)) {
   contextBridge.executeInMainWorld({
     func: installPrint,
     args: [
