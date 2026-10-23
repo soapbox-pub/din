@@ -20,16 +20,19 @@
  *   phase translates the whole shape into the icon, vertices piling up
  *   (clamping) at its far side until the window is fully swallowed.
  *
- * The DOM can't warp live content through a mesh (the windows host an
- * Electron <webview>, xterm, etc.), so — exactly like the wobbly-windows
- * port in src/lib/wobbly.ts — we evaluate the model only at the four corners
- * and fit the projective transform (CSS matrix3d) mapping the window onto
- * that quad. Corner trajectories match Compiz; edge curvature between
- * corners and the "wavy" sides of the default Magic Lamp variant are lost
- * (this matches Compiz's straight-sided "Vacuum" variant, i.e. magic lamp
- * with max_waves = 0). A short end-of-timeline fade covers the final pop
- * that Compiz hides behind the (opaque) icon — our dock tiles sit on a
- * transparent strip.
+ * `genieFrame` is the model: any point of the window at any progress. Inside
+ * the shell, minimize warps a bitmap snapshot of the window, which
+ * src/lib/genieMesh.ts draws through a real 2 × GRID_RES mesh in WebGL, so
+ * the sides follow the sigmoid curve as in Compiz. The DOM can't warp live
+ * content through a mesh (the windows host an Electron <webview>, xterm,
+ * etc.), so `animateGenie` - the fallback outside the shell or without WebGL
+ * - evaluates the model only at the four corners and fits the projective
+ * transform (CSS matrix3d) mapping the element onto that quad, like the
+ * wobbly-windows port in src/lib/wobbly.ts: straight sides, Compiz's
+ * "Vacuum" look. Neither has the "wavy" sides of the default Magic Lamp
+ * variant (max_waves = 0, as on macOS). A short end-of-timeline fade covers
+ * the final pop that Compiz hides behind the (opaque) icon — our dock tiles
+ * sit on a transparent strip.
  *
  * Restore plays the same timeline backwards, as Compiz does for unminimize.
  */
@@ -80,13 +83,24 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+/** The window's deformation at one point of the timeline. */
+export interface GenieFrame {
+  /**
+   * Where the window point at fractions (`gx`, `gy`) of its width and height
+   * is drawn, in workspace coordinates. Linear in `gx` along a row, so a mesh
+   * needs only two columns; values just outside [0, 1] extrapolate the edges.
+   */
+  point(gx: number, gy: number): QuadPoint;
+  /** The window's opacity, 1 until the end-of-timeline fade. */
+  opacity: number;
+}
+
 /**
- * Paint the deformation for progress `p` onto the element: 0 is the window
- * at rest in its own geometry, 1 is fully swallowed by the tile. A port of
- * Compiz `fxMagicLampModelStep` for the minimize-downward case, evaluated at
- * the four mesh corners.
+ * The deformation for progress `p`: 0 is the window at rest in its own
+ * geometry, 1 is fully swallowed by the tile. A port of Compiz
+ * `fxMagicLampModelStep` for the minimize-downward case.
  */
-function paintFrame(el: HTMLElement, win: GenieRect, target: GenieRect, p: number): void {
+export function genieFrame(win: GenieRect, target: GenieRect, p: number): GenieFrame {
   // Compiz's edge names, for a window above the icon: the "close" end is
   // the window's bottom edge, heading for the icon's mouth (top edge); the
   // "far" end is the window's top edge, last to be swallowed.
@@ -107,7 +121,7 @@ function paintFrame(el: HTMLElement, win: GenieRect, target: GenieRect, p: numbe
   const stretch = Math.min(1, p / stretchEnd);
   const post = p < stretchEnd ? 0 : (p - stretchEnd) / (1 - stretchEnd);
 
-  const corner = (gx: 0 | 1, gy: 0 | 1): QuadPoint => {
+  const point = (gx: number, gy: number): QuadPoint => {
     const origX = win.x + gx * win.width;
     const origY = win.y + gy * win.height;
     const iconX = target.x + gx * target.width;
@@ -130,10 +144,21 @@ function paintFrame(el: HTMLElement, win: GenieRect, target: GenieRect, p: numbe
     let x = fy * (origX - iconX) + iconX;
     if (preShape < 1) x = lerp(origX, x, preShape);
 
-    // Corner offsets are relative to the window's layout box.
-    return { x: x - win.x, y: y - win.y };
+    return { x, y };
   };
 
+  const opacity = p <= FADE_START ? 1 : Math.max(0, 1 - (p - FADE_START) / (1 - FADE_START));
+  return { point, opacity };
+}
+
+/** Paint frame `p` onto the element, as the projective fit of its corners. */
+function paintFrame(el: HTMLElement, win: GenieRect, target: GenieRect, p: number): void {
+  const frame = genieFrame(win, target, p);
+  // Corner offsets are relative to the window's layout box.
+  const corner = (gx: 0 | 1, gy: 0 | 1): QuadPoint => {
+    const pt = frame.point(gx, gy);
+    return { x: pt.x - win.x, y: pt.y - win.y };
+  };
   el.style.transform = quadTransform(
     win.width,
     win.height,
@@ -142,10 +167,7 @@ function paintFrame(el: HTMLElement, win: GenieRect, target: GenieRect, p: numbe
     corner(0, 1),
     corner(1, 1),
   );
-  el.style.opacity =
-    p <= FADE_START
-      ? ''
-      : String(Math.max(0, 1 - (p - FADE_START) / (1 - FADE_START)));
+  el.style.opacity = frame.opacity === 1 ? '' : String(frame.opacity);
 }
 
 /**

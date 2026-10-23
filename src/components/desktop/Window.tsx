@@ -7,6 +7,7 @@ import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
+import { animateGenieMesh } from '@/lib/genieMesh';
 import { getScreenshotBridge } from '@/lib/screenshot';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
@@ -276,10 +277,11 @@ export const Window = memo(function Window({
   const paintedRect = useRef<GenieRect | null>(null);
   // The window's own bitmap, captured on minimize and replayed (reversed) on
   // restore: a minimized window is off-screen, so it can't be re-captured for
-  // the restore warp. `null` until the first minimize, or whenever no shell
-  // capture bridge is available (a plain browser), in which case the genie
-  // falls back to warping the live element.
-  const snapshotRef = useRef<string | null>(null);
+  // the restore warp. Kept decoded, so restore's first frame paints at once.
+  // `null` until the first minimize, or whenever no shell capture bridge is
+  // available (a plain browser), in which case the genie falls back to
+  // warping the live element.
+  const snapshotRef = useRef<HTMLImageElement | null>(null);
 
   // Custom title-bar content published by the hosted app (e.g. the browser's
   // tab strip), rendered inline with the window controls. `null` shows the
@@ -464,8 +466,9 @@ export const Window = memo(function Window({
   // window, not the live element: the section wraps a <webview>/WebGL guest
   // surface, and a projective transform can't composite a guest cheaply - it
   // re-rasterizes the whole surface every frame, which is what made the genie
-  // crawl on full-screen windows. A raster <img> warps as a plain compositor
-  // layer, and (unlike the guest) actually follows the perspective mesh. The
+  // crawl on full-screen windows. A bitmap can also go through a real mesh:
+  // src/lib/genieMesh.ts draws it in WebGL with curved sides, and without
+  // WebGL a raster <img> warps with the four-corner CSS transform. The
   // minimize snapshot is cached so restore - whose window is off-screen and
   // can't be re-captured - can replay it reversed. Outside the shell (a plain
   // browser: no capture bridge) the genie falls back to warping the live
@@ -536,14 +539,34 @@ export const Window = memo(function Window({
       });
     };
 
-    // Warp a bitmap overlay <img>, hiding the live section behind it for the
-    // whole timeline. Returns a cleanup that removes the overlay and hands
-    // the section's styles back to React - shared by onDone and cancel
-    // (which onDone never covers).
-    const warpImage = (dataUrl: string) => {
+    // Warp the decoded snapshot - through the WebGL mesh, or failing that as
+    // an overlay <img> - hiding the live section for the whole timeline.
+    // `finish` hands the section's styles back to React; it's shared by
+    // onDone and cancel (which onDone never covers).
+    const warpImage = (snapshot: HTMLImageElement) => {
       if (!parent) return runLiveGenie();
+      const direction = minimizing ? 'minimize' : 'restore';
+      const showSection = () => {
+        el.style.pointerEvents = '';
+        el.style.visibility = minimizing ? 'hidden' : '';
+      };
+
+      const meshCancel = animateGenieMesh(parent, snapshot, winRect, target, direction, win.z, () => {
+        animCancel.current = null;
+        showSection();
+      });
+      if (meshCancel) {
+        el.style.visibility = 'hidden';
+        el.style.pointerEvents = 'none';
+        animCancel.current = () => {
+          meshCancel();
+          showSection();
+        };
+        return;
+      }
+
       const img = document.createElement('img');
-      img.src = dataUrl;
+      img.src = snapshot.src;
       img.draggable = false;
       img.decoding = 'sync';
       img.style.position = 'absolute';
@@ -562,10 +585,9 @@ export const Window = memo(function Window({
 
       const finish = () => {
         img.remove();
-        el.style.pointerEvents = '';
-        el.style.visibility = minimizing ? 'hidden' : '';
+        showSection();
       };
-      const cancel = animateGenie(img, winRect, target, minimizing ? 'minimize' : 'restore', () => {
+      const cancel = animateGenie(img, winRect, target, direction, () => {
         animCancel.current = null;
         finish();
       });
@@ -592,10 +614,13 @@ export const Window = memo(function Window({
         el.style.visibility = 'hidden';
       };
       captureRegion({ x: r.left, y: r.top, width: r.width, height: r.height })
-        .then((shot) => {
+        .then(async (shot) => {
+          const snapshot = new Image();
+          snapshot.src = shot.dataUrl;
+          await snapshot.decode();
           if (cancelled) return;
-          snapshotRef.current = shot.dataUrl;
-          warpImage(shot.dataUrl);
+          snapshotRef.current = snapshot;
+          warpImage(snapshot);
         })
         .catch(() => {
           if (!cancelled) runLiveGenie();
