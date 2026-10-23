@@ -37,6 +37,8 @@ import {
   useWatchDirectory,
 } from '@/hooks/useFileSystem';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { useAppContext } from '@/hooks/useAppContext';
+import { getAssistantBridge } from '@/lib/assistant';
 import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import {
   getFileClipboard,
@@ -901,6 +903,12 @@ function FileBrowserTab({
   }, [run]);
 
   const openInTerminal = useCallback((path: string) => open('terminal', { cwd: path }), [open]);
+  const { config } = useAppContext();
+  const hasAssistant = !!getAssistantBridge() && config.assistantEnabled;
+  const openInAssistant = useCallback(
+    (path: string) => open('assistant', { directory: path, nonce: Date.now() }),
+    [open],
+  );
 
   const copyPaths = useCallback((paths: string[]) => {
     void navigator.clipboard?.writeText(paths.join('\n'));
@@ -1466,6 +1474,9 @@ function FileBrowserTab({
               </DropdownMenuItem>
             )}
             {cwd && <DropdownMenuItem onSelect={() => openInTerminal(cwd)}>Open in Terminal</DropdownMenuItem>}
+            {cwd && hasAssistant && (
+              <DropdownMenuItem onSelect={() => openInAssistant(cwd)}>Open in Assistant</DropdownMenuItem>
+            )}
             {isTrash && (
               <DropdownMenuItem variant="destructive" onSelect={() => setDialog({ type: 'emptyTrash' })}>
                 Empty Trash…
@@ -1650,6 +1661,11 @@ function FileBrowserTab({
                         <ContextMenuItem onSelect={() => openInTerminal(singleFolderPath)}>
                           Open in Terminal
                         </ContextMenuItem>
+                        {hasAssistant && (
+                          <ContextMenuItem onSelect={() => openInAssistant(singleFolderPath)}>
+                            Open in Assistant
+                          </ContextMenuItem>
+                        )}
                       </>
                     )}
                     <ContextMenuItem onSelect={() => copyPaths(pathsOf(selectedNames))}>
@@ -1696,6 +1712,9 @@ function FileBrowserTab({
                     {viewMenuItems(contextParts)}
                     <ContextMenuSeparator />
                     <ContextMenuItem onSelect={() => cwd && openInTerminal(cwd)}>Open in Terminal</ContextMenuItem>
+                    {cwd && hasAssistant && (
+                      <ContextMenuItem onSelect={() => openInAssistant(cwd)}>Open in Assistant</ContextMenuItem>
+                    )}
                     {cwd && (
                       <ContextMenuItem onSelect={() => toggleBookmark(cwd)}>
                         {bookmarked.has(cwd) ? 'Remove from Favorites' : 'Add to Favorites'}

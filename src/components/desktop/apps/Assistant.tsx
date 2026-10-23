@@ -89,11 +89,13 @@ const SUGGESTIONS = [
  * the agent finishes or needs an answer (AssistantHost). The agent asks
  * before what its rules say to ask about; the request shows above the
  * composer. Opened with `sessionID` (and a fresh `nonce`) in its launch
- * params, it shows that conversation.
+ * params, it shows that conversation; with `directory` instead (Files' "Open
+ * in Assistant"), it starts a new one in that folder.
  */
 export function Assistant({ params }: AppComponentProps) {
   const ready = useAssistantReady();
   const requested = typeof params?.sessionID === 'string' ? params.sessionID : null;
+  const requestedDirectory = typeof params?.directory === 'string' ? params.directory : null;
   const [sessionID, setSessionID] = useState<string | null>(requested);
   const [listOpen, setListOpen] = useState(false);
 
@@ -141,7 +143,12 @@ export function Assistant({ params }: AppComponentProps) {
         {sessionID ? (
           <Conversation key={sessionID} sessionID={sessionID} onShowList={() => setListOpen(true)} onDeleted={() => choose(null)} />
         ) : (
-          <NewConversation onStarted={choose} onShowList={() => setListOpen(true)} />
+          <NewConversation
+            key={String(launch.nonce)}
+            initialDirectory={requestedDirectory}
+            onStarted={choose}
+            onShowList={() => setListOpen(true)}
+          />
         )}
       </main>
     </div>
@@ -536,10 +543,18 @@ function TranscriptSkeleton() {
 // Starting one
 // ---------------------------------------------------------------------------
 
-function NewConversation({ onStarted, onShowList }: { onStarted: (id: string) => void; onShowList: () => void }) {
+function NewConversation({
+  initialDirectory,
+  onStarted,
+  onShowList,
+}: {
+  initialDirectory: string | null;
+  onStarted: (id: string) => void;
+  onShowList: () => void;
+}) {
   const defaultDirectory = useAssistantDirectory();
   const home = useHomeDirectory();
-  const [directory, setDirectory] = useState<string | null>(null);
+  const [directory, setDirectory] = useState<string | null>(initialDirectory);
   const [agent, setAgent] = useState('build');
   const { model, setModel, models } = usePreferredModel();
   const { data: recent } = useRecentModelKeys();
