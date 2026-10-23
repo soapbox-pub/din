@@ -353,8 +353,23 @@ async function request(method: string, apiPath: string, body: string | undefined
 function slim(event: Record<string, unknown>): unknown {
   const type = typeof event.type === 'string' ? event.type : '';
   const data = typeof event.data === 'object' && event.data !== null ? (event.data as Record<string, unknown>) : {};
-  const sessionID = typeof data.sessionID === 'string' ? data.sessionID : undefined;
+  const sessionID = sessionOf(data);
   return DATA_EVENTS.test(type) ? { type, sessionID, data } : { type, sessionID };
+}
+
+/**
+ * The session an event is about. Most say so at the top; some carry the
+ * thing they announce whole and the session is in that (form.created has
+ * it in data.form).
+ */
+function sessionOf(data: Record<string, unknown>): string | undefined {
+  if (typeof data.sessionID === 'string') return data.sessionID;
+  for (const value of Object.values(data)) {
+    if (typeof value === 'object' && value !== null && typeof (value as { sessionID?: unknown }).sessionID === 'string') {
+      return (value as { sessionID: string }).sessionID;
+    }
+  }
+  return undefined;
 }
 
 /** Hold the event stream open while the assistant is on. */

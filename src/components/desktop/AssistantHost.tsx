@@ -131,7 +131,9 @@ function useAssistantNotifications() {
         notify({
           source: SOURCE,
           title: 'The assistant has a question',
-          body: form.title,
+          // The question tool titles every form "Questions"; the question
+          // itself is the first field's.
+          body: form.fields[0]?.description || form.fields[0]?.title || form.title,
           urgency: 'critical',
           replaceKey: `assistant:form:${form.id}`,
           onActivate: () => latest.current.show(form.sessionID),
