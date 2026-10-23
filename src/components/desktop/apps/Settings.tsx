@@ -1161,8 +1161,8 @@ function DisplaySection() {
 }
 
 /**
- * AirPlay receivers nearby: mirror the screen to one, or add it as a
- * separate display, which then appears in the arrangement above. Hidden
+ * AirPlay receivers nearby: connect one as a separate display, which then
+ * appears in the arrangement above, or switch it to mirroring. Hidden
  * where AirPlay isn't available.
  */
 function AirPlayDisplays() {

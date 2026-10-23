@@ -43,7 +43,10 @@ export interface AirPlayState {
 export interface AirPlayBridge {
   state(): Promise<AirPlayState>;
   scan(): Promise<void>;
-  connect(target: string, mode: AirPlayMode): Promise<void>;
+  /** Connect the way the receiver was last shared, extending by default. */
+  connect(target: string): Promise<void>;
+  /** Remember MODE for the receiver, and switch it over if it's streaming. */
+  mode(target: string, mode: AirPlayMode): Promise<void>;
   code(target: string, code: string): Promise<void>;
   disconnect(target: string): Promise<void>;
   onChanged(callback: (state: AirPlayState) => void): () => void;

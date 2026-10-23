@@ -351,8 +351,8 @@ function AppGrid({
 
 /**
  * AirPlay status item: shows once a receiver is nearby, and lights up while
- * the screen is shared; clicking lists the receivers to mirror or extend
- * the desktop to. Renders nothing outside the Electron shell or without
+ * the screen is shared; clicking lists the receivers to connect to, and
+ * switches a connected one between extending and mirroring. Renders nothing outside the Electron shell or without
  * deckmon, like the hardware indicators.
  */
 const AirPlayMenuItem = memo(function AirPlayMenuItem() {

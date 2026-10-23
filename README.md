@@ -259,9 +259,12 @@ and Gecko). Elsewhere Din uses the system's `wine`, or `$DIN_WINE`.
 ### AirPlay
 
 The menu bar's AirPlay item (once a receiver is nearby) and Settings →
-Display share the screen with Apple TVs, AirPlay TVs and Rokus: mirroring
-the primary display, or as a separate display that extends the desktop and
-is arranged in Settings like any other. Sound goes to the receiver too. The
+Display share the screen with Apple TVs, AirPlay TVs and Rokus. Like a
+monitor plugged in, a receiver connects the way it was last used, extending
+the desktop by default as a separate display arranged in Settings like any
+other; while connected it can be switched to mirroring the primary display
+and back, which is remembered (`airplay.json` in Din's config). Sound goes to
+the receiver too. The
 sending is [deckmon](https://git.shakespeare.diy)'s, a daemon DinOS runs as a
 user service (the flake's `deckmon` input) and Din talks to over its socket
 (`electron/airplay.mts`). It captures cage through wlroots screencopy, and a

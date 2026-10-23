@@ -33,53 +33,34 @@ function describeSession(session: AirPlaySession): string {
 
 /**
  * The receivers nearby, each with what it's showing, and a way to start or
- * stop sharing with it. Shared by the menu bar's AirPlay panel and Settings →
- * Display. Looks for receivers when it mounts.
+ * stop sharing with it. A receiver connects the way it was last shared
+ * (extending the desktop by default), like a monitor plugged back in; while
+ * it's connected, it can be switched between extending and mirroring. Shared
+ * by the menu bar's AirPlay panel and Settings → Display. Looks for
+ * receivers when it mounts.
  */
 export function AirPlayReceiverList({ className }: { className?: string }) {
   const { data } = useAirPlayState();
-  const { connect, disconnect } = useAirPlayActions();
-  const [mode, setMode] = useState<AirPlayMode>('mirror');
+  const { connect, disconnect, mode: switchMode } = useAirPlayActions();
   const [error, setError] = useState<string | null>(null);
   useAirPlayScan();
 
   const receivers = data?.receivers ?? [];
   const sessions = data?.sessions ?? [];
-  const extending = sessions.find((s) => s.extend);
   const failure = data?.failure;
+  const onError = (e: unknown) => setError(cleanAirPlayError(e));
 
   const start = (target: string) => {
     setError(null);
-    connect.mutate(
-      { target, mode },
-      { onError: (e) => setError(cleanAirPlayError(e)) },
-    );
+    connect.mutate(target, { onError });
+  };
+  const setMode = (target: string, mode: AirPlayMode) => {
+    setError(null);
+    switchMode.mutate({ target, mode }, { onError });
   };
 
   return (
     <div className={cn('flex flex-col gap-3', className)}>
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        size="sm"
-        value={mode}
-        onValueChange={(value) => value && setMode(value as AirPlayMode)}
-        aria-label="How to share the screen"
-        className="w-full"
-      >
-        <ToggleGroupItem value="mirror" className="flex-1">
-          Mirror
-        </ToggleGroupItem>
-        <ToggleGroupItem
-          value="extend"
-          className="flex-1"
-          disabled={!!extending}
-          title={extending ? `${extending.name} is already a separate display` : undefined}
-        >
-          Separate display
-        </ToggleGroupItem>
-      </ToggleGroup>
-
       {receivers.length === 0 ? (
         <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border/60 px-3 py-6 text-sm text-muted-foreground">
           {data?.scanning && <Loader2 className="size-4 animate-spin" aria-hidden />}
@@ -89,54 +70,91 @@ export function AirPlayReceiverList({ className }: { className?: string }) {
         <ul className="flex flex-col gap-1" aria-label="AirPlay receivers">
           {receivers.map((receiver) => {
             const session = sessions.find((s) => s.target === receiver.name);
+            const switching = switchMode.isPending && switchMode.variables?.target === receiver.name;
             const pending =
-              (connect.isPending && connect.variables?.target === receiver.name && !session) ||
-              (disconnect.isPending && disconnect.variables === receiver.name);
+              (connect.isPending && connect.variables === receiver.name && !session) ||
+              (disconnect.isPending && disconnect.variables === receiver.name) ||
+              switching;
             const active = session?.state === 'streaming';
+            // There's one spare connector for a display of its own.
+            const extendingElsewhere = sessions.find((s) => s.extend && s.target !== receiver.name);
+            const shownMode: AirPlayMode = switching
+              ? (switchMode.variables?.mode ?? 'extend')
+              : session?.extend ? 'extend' : 'mirror';
             return (
               <li
                 key={receiver.name}
                 className={cn(
-                  'flex items-center gap-3 rounded-lg px-2 py-1.5',
+                  'flex flex-col gap-2 rounded-lg px-2 py-1.5',
                   active && 'bg-primary/10',
                 )}
               >
-                <span
-                  className={cn(
-                    'grid size-8 shrink-0 place-items-center rounded-full',
-                    active ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-foreground/80',
-                  )}
-                >
-                  <Tv className="size-4" aria-hidden />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{receiver.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {session ? describeSession(session) : receiver.model || receiver.host}
-                  </p>
-                </div>
-                {session ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={pending}
-                    onClick={() => disconnect.mutate(receiver.name)}
-                    aria-label={`Stop sharing with ${receiver.name}`}
+                <div className="flex items-center gap-3">
+                  <span
+                    className={cn(
+                      'grid size-8 shrink-0 place-items-center rounded-full',
+                      active ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-foreground/80',
+                    )}
                   >
-                    {pending && <Loader2 className="size-4 animate-spin" aria-hidden />}
-                    Stop
-                  </Button>
-                ) : (
-                  <Button
+                    <Tv className="size-4" aria-hidden />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{receiver.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {switching
+                        ? 'Switching…'
+                        : session ? describeSession(session) : receiver.model || receiver.host}
+                    </p>
+                  </div>
+                  {session && !switching ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => disconnect.mutate(receiver.name)}
+                      aria-label={`Stop sharing with ${receiver.name}`}
+                    >
+                      {pending && <Loader2 className="size-4 animate-spin" aria-hidden />}
+                      Stop
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => start(receiver.name)}
+                      aria-label={`Share the screen with ${receiver.name}`}
+                    >
+                      {pending && <Loader2 className="size-4 animate-spin" aria-hidden />}
+                      Connect
+                    </Button>
+                  )}
+                </div>
+                {(active || switching) && (
+                  <ToggleGroup
+                    type="single"
                     variant="outline"
                     size="sm"
-                    disabled={pending || (mode === 'extend' && !!extending)}
-                    onClick={() => start(receiver.name)}
-                    aria-label={`${mode === 'extend' ? 'Extend the desktop to' : 'Mirror the screen to'} ${receiver.name}`}
+                    value={shownMode}
+                    disabled={switching}
+                    onValueChange={(value) => {
+                      if (value && value !== shownMode) setMode(receiver.name, value as AirPlayMode);
+                    }}
+                    aria-label={`How to share the screen with ${receiver.name}`}
+                    className="w-full pl-11"
                   >
-                    {pending && <Loader2 className="size-4 animate-spin" aria-hidden />}
-                    Share
-                  </Button>
+                    <ToggleGroupItem
+                      value="extend"
+                      className="flex-1"
+                      disabled={switching || !!extendingElsewhere}
+                      title={extendingElsewhere ? `${extendingElsewhere.name} is already a separate display` : undefined}
+                    >
+                      Extend
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="mirror" className="flex-1">
+                      Mirror
+                    </ToggleGroupItem>
+                  </ToggleGroup>
                 )}
               </li>
             );

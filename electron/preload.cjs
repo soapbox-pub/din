@@ -1142,11 +1142,19 @@ contextBridge.exposeInMainWorld('airplay', {
   scan: () => ipcRenderer.invoke('airplay:scan'),
 
   /**
-   * Start sharing with a receiver; resolves once it's streaming.
+   * Start sharing with a receiver the way it was last shared (extending by
+   * default); resolves once it's streaming.
+   * @param {string} target
+   */
+  connect: (target) => ipcRenderer.invoke('airplay:connect', target),
+
+  /**
+   * Mirror or extend to a receiver from now on, switching it over if it's
+   * streaming; resolves once it streams the new way.
    * @param {string} target
    * @param {'mirror' | 'extend'} mode
    */
-  connect: (target, mode) => ipcRenderer.invoke('airplay:connect', target, mode),
+  mode: (target, mode) => ipcRenderer.invoke('airplay:mode', target, mode),
 
   /**
    * Answer a receiver's request for the PIN it shows, or its password.

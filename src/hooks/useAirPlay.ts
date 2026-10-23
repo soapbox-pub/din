@@ -42,8 +42,11 @@ export function useAirPlayScan(enabled = true) {
 export function useAirPlayActions() {
   return {
     connect: useMutation({
+      mutationFn: (target: string) => requireBridge().connect(target),
+    }),
+    mode: useMutation({
       mutationFn: ({ target, mode }: { target: string; mode: AirPlayMode }) =>
-        requireBridge().connect(target, mode),
+        requireBridge().mode(target, mode),
     }),
     disconnect: useMutation({
       mutationFn: (target: string) => requireBridge().disconnect(target),

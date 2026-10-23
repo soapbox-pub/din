@@ -18,6 +18,11 @@
 // Either way the receiver also gets a sound output, made the default while
 // it lasts, so sound plays there and the volume keys reach it.
 //
+// Connecting to a receiver uses the way it was last shared, extending by
+// default, as a monitor keeps its place when it's plugged back in. Switching
+// a receiver that's streaming reconnects it the other way (deckmon keeps the
+// pairing, so no PIN again), and is remembered for next time.
+//
 // Receivers are found over mDNS: a scan every half minute, and one whenever
 // the shell asks (the menu or Settings opening). deckmon's event stream
 // keeps the sessions current, including a receiver asking for the PIN it
@@ -31,7 +36,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
 import { runCommand } from './system.mts';
 
 const SCAN_INTERVAL_MS = 30_000;
@@ -42,6 +47,8 @@ const SCAN_MISSES = 2;
 const CONNECT_TIMEOUT_MS = 6 * 60_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const WATCH_RETRY_MS = 10_000;
+
+export type AirPlayMode = 'mirror' | 'extend';
 
 export interface AirPlayReceiver {
   /** The receiver's name, which deckmon connects to it by. */
@@ -156,6 +163,33 @@ function noDaemon(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ECONNREFUSED';
 }
 
+/** How each receiver was last shared, by name, in the user's config. */
+function modesPath(): string {
+  return path.join(app.getPath('userData'), 'airplay.json');
+}
+
+function readModes(): Record<string, AirPlayMode> {
+  try {
+    const data: unknown = JSON.parse(fs.readFileSync(modesPath(), 'utf8'));
+    const modes = (data as { modes?: unknown } | null)?.modes;
+    if (!modes || typeof modes !== 'object') return {};
+    return Object.fromEntries(
+      Object.entries(modes).filter((e): e is [string, AirPlayMode] => e[1] === 'mirror' || e[1] === 'extend'),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveMode(target: string, mode: AirPlayMode): void {
+  const modes = { ...readModes(), [target]: mode };
+  try {
+    fs.writeFileSync(modesPath(), JSON.stringify({ modes }, null, 2));
+  } catch (error) {
+    console.warn('airplay: could not save how to share:', messageOf(error));
+  }
+}
+
 function toSession(raw: DeckmonSession): AirPlaySession | null {
   if (typeof raw.target !== 'string') return null;
   const state = raw.state;
@@ -208,7 +242,7 @@ export function registerAirPlayHandlers(options: {
   });
 
   if (!deckmon) {
-    for (const channel of ['airplay:scan', 'airplay:connect', 'airplay:code', 'airplay:disconnect']) {
+    for (const channel of ['airplay:scan', 'airplay:connect', 'airplay:mode', 'airplay:code', 'airplay:disconnect']) {
       ipcMain.handle(channel, (event) => {
         assertShellSender(event);
         throw new Error('AirPlay is not available here');
@@ -334,10 +368,14 @@ export function registerAirPlayHandlers(options: {
     await scan();
   });
 
-  ipcMain.handle('airplay:connect', async (event, rawTarget, rawMode) => {
-    assertShellSender(event);
-    const target = knownReceiver(rawTarget);
-    const extend = rawMode === 'extend';
+  /**
+   * Share with a receiver as MODE. There's one spare connector, so while
+   * another receiver is the external display this one mirrors. Extending
+   * leaves deckmon to mirror instead where it can't add a display.
+   */
+  const start = async (target: string, mode: AirPlayMode) => {
+    const extend =
+      mode === 'extend' && ![...sessions.values()].some((s) => s.extend && s.target !== target);
     const output = extend ? null : await primaryOutput().catch(() => null);
     const range = portRange();
     state = { ...state, failure: null };
@@ -349,10 +387,27 @@ export function registerAirPlayHandlers(options: {
           source: output ? { kind: 'monitor', name: output } : { kind: 'screen' },
           ...(range ? { port_range: range } : {}),
         },
-        extras: extend ? { display: true, extend: 'right-of' } : { display: false },
+        extras: extend ? { extend: 'right-of' } : { display: false },
       },
       CONNECT_TIMEOUT_MS,
     );
+  };
+
+  ipcMain.handle('airplay:connect', async (event, rawTarget) => {
+    assertShellSender(event);
+    const target = knownReceiver(rawTarget);
+    await start(target, readModes()[target] ?? 'extend');
+  });
+
+  ipcMain.handle('airplay:mode', async (event, rawTarget, rawMode) => {
+    assertShellSender(event);
+    const target = knownReceiver(rawTarget);
+    if (rawMode !== 'mirror' && rawMode !== 'extend') throw new Error('Invalid mode');
+    saveMode(target, rawMode);
+    const session = sessions.get(target);
+    if (!session || session.state !== 'streaming' || session.extend === (rawMode === 'extend')) return;
+    await send({ cmd: 'disconnect', target }, 30_000);
+    await start(target, rawMode);
   });
 
   ipcMain.handle('airplay:code', async (event, rawTarget, rawCode) => {
