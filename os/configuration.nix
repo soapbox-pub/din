@@ -301,11 +301,13 @@ let
   # their keyboard layout (electron/keyboard.mts), gsettings (glib) for the
   # pointer's theme and size (electron/cursor.mts), Wine for Windows
   # programs, bsdtar (libarchive) plus gzip/xz/bzip2/zstd for the Files
-  # app's archives (electron/files.mts), and sudo (from /run/wrappers) for
+  # app's archives (electron/files.mts), CUPS's tools and poppler's
+  # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
+  # and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, and the time
   # zone's helpers.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd ]}:/run/wrappers/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils ]}:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
@@ -429,6 +431,31 @@ in
       if (allowed.indexOf(action.id) >= 0) return polkit.Result.YES;
     });
   '';
+
+  # Printing that needs no setup (electron/printing.mts). Avahi finds
+  # printers on the network, ipp-usb puts USB printers that speak IPP (most
+  # made since about 2015) there too, and CUPS lists both and makes a
+  # driverless queue the first time one is used - so a printer shows up in
+  # Din's print dialog as soon as it's on. Older USB printers need a driver;
+  # Settings → Printers adds them with the best of gutenprint's and
+  # brlaser's. `din` administers printers without a password because it's in
+  # `wheel` (CUPS's SystemGroup). cups-browsed isn't needed for any of this
+  # and has had remote holes, so it's off; nothing is shared. A printer that
+  # can't be reached (asleep, off) keeps its job and tries again, rather than
+  # CUPS's default of stopping the printer until someone starts it.
+  services.printing = {
+    enable = true;
+    browsed.enable = false;
+    drivers = [ pkgs.gutenprint pkgs.brlaser ];
+    extraConf = ''
+      ErrorPolicy retry-job
+    '';
+  };
+  services.ipp-usb.enable = true;
+  services.avahi = {
+    enable = true;
+    nssmdns4 = true;
+  };
 
   # The user Din runs as. `networkmanager` group membership lets the
   # WiFi settings panel control connections without polkit prompts; `video`

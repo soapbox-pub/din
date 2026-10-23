@@ -70,6 +70,7 @@ import { isInstalling, registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerVolumesHandlers } from './volumes.mts';
+import { cleanUpPrinting, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
@@ -3069,6 +3070,13 @@ const HIGHLIGHT_PRELOAD = path.join(import.meta.dirname, 'browser-highlight-prel
  */
 const NOTIFICATION_PRELOAD = path.join(import.meta.dirname, 'notification-preload.cjs');
 
+/**
+ * Absolute path to the session preload that sends web pages' print() to
+ * Din's print dialog (see electron/printing.mts). Every page gets it, in
+ * every frame.
+ */
+const PRINT_PRELOAD = path.join(import.meta.dirname, 'print-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow: BrowserWindow | null = null;
 
@@ -4658,6 +4666,18 @@ function isDevtoolsToggleInput(input: Electron.Input): boolean {
   return Boolean(input.control && input.shift && input.key.toLowerCase() === 'i');
 }
 
+/** Whether a before-input-event input is Ctrl+P, which prints the page. */
+function isPrintInput(input: Electron.Input): boolean {
+  return (
+    input.type === 'keyDown' &&
+    input.control &&
+    !input.shift &&
+    !input.alt &&
+    !input.meta &&
+    input.key.toLowerCase() === 'p'
+  );
+}
+
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
@@ -4888,6 +4908,7 @@ app.whenReady().then(() => {
   // Web pages' notifications go to Din's notification center.
   for (const s of [browserSession(), privateBrowserSession(), appSession()]) {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
+    s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
   }
   // And a window.nostr backed by Din's signer; private tabs get none.
   for (const s of [browserSession(), appSession()]) {
@@ -4939,6 +4960,8 @@ app.whenReady().then(() => {
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerBluetoothHandlers({ assertShellSender, sendToShell });
   registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling });
+  registerPrintingHandlers({ assertShellSender, sendToShell, guestFromId: shellGuestFromId });
+  app.on('will-quit', cleanUpPrinting);
   registerNostrdHandlers({ assertShellSender, sendToShell });
   registerAssistantHandlers({ assertShellSender, sendToShell });
   registerBootScreenHandlers({ assertShellSender });
@@ -5084,6 +5107,13 @@ app.whenReady().then(() => {
     // The ad blocker's engine, before the tab's first request.
     if (params.partition === WEBBROWSER_PARTITION || params.partition === WEBBROWSER_PRIVATE_PARTITION) {
       ensureAdblockEngine();
+    }
+    // Every frame of a web page needs PRINT_PRELOAD: a frame from another
+    // origin calling its own print() would otherwise open Chromium's GTK
+    // print dialog, which takes over the whole screen under cage. The other
+    // session preloads guard themselves to the top document.
+    if (params.partition === WEBAPP_PARTITION || params.partition === WEBBROWSER_PRIVATE_PARTITION) {
+      webPreferences.nodeIntegrationInSubFrames = true;
     }
     if (params.partition === WEBBROWSER_PARTITION) {
       // Load frame preloads into sub-frames, not just the top document, so the
@@ -5461,6 +5491,11 @@ app.on('web-contents-created', (_event, contents) => {
         sendToShell('devtools:toggleRequested', { wcId: contents.id });
         return;
       }
+      if (isPrintInput(input)) {
+        event.preventDefault();
+        requestPagePrint(contents);
+        return;
+      }
       const shortcut = shellShortcutForInput(input);
       if (!shortcut) return;
       event.preventDefault();
@@ -5483,6 +5518,11 @@ app.on('web-contents-created', (_event, contents) => {
   // shortcuts must be forwarded too.
   if (isAppGuest(contents)) {
     contents.on('before-input-event', (event, input) => {
+      if (isPrintInput(input)) {
+        event.preventDefault();
+        requestPagePrint(contents);
+        return;
+      }
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
@@ -5584,6 +5624,12 @@ app.on('web-contents-created', (_event, contents) => {
         }),
       );
       menu = replaced;
+    }
+    // Chrome's "Print…" on the page itself, just above "Inspect".
+    if (params.mediaType === 'none' && !params.linkURL && !params.isEditable && !selection) {
+      const at = Math.max(0, menu.items.length - 1);
+      menu.insert(at, new MenuItem({ type: 'separator' }));
+      menu.insert(at, new MenuItem({ label: 'Print…', click: () => requestPagePrint(contents) }));
     }
     // Pop the menu up on the next tick, not synchronously inside the
     // context-menu handler: the right-button press that fired this event is

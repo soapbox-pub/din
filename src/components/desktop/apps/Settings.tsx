@@ -31,6 +31,7 @@ import {
   Moon,
   MousePointer2,
   Play,
+  Printer,
   Palette,
   Plug,
   Plus,
@@ -176,6 +177,7 @@ import { cleanInstallerError } from '@/lib/installer';
 import { useUpdateState } from '@/hooks/useUpdater';
 import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSection';
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
+import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
 
 type SectionId =
   | 'wifi'
@@ -186,6 +188,7 @@ type SectionId =
   | 'power'
   | 'sound'
   | 'keyboard'
+  | 'printers'
   | 'datetime'
   | 'password'
   | 'notifications'
@@ -205,6 +208,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'power', name: 'Power', icon: Gauge },
   { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'keyboard', name: 'Keyboard', icon: Keyboard },
+  { id: 'printers', name: 'Printers', icon: Printer },
   { id: 'datetime', name: 'Date & Time', icon: Clock },
   { id: 'password', name: 'Password', icon: KeyRound },
   { id: 'notifications', name: 'Notifications', icon: Bell },
@@ -233,7 +237,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * section drives the default sink's volume/mute through `window.audio`
  * (wpctl/PipeWire), including outputs on a sound card's inactive profile.
  * Keyboard picks the layout native Linux apps type with
- * through `window.keyboard`. Date & Time sets the time zone and clock
+ * through `window.keyboard`. Printers lists the printers CUPS can reach, sets
+ * the default, and shows the queue (PrintersSettingsSection). Date & Time sets the time zone and clock
  * through `window.datetime`, and how Din's clocks show the time. Password changes the computer's one password
  * (disk, lock screen, Nostr keys) through `window.lock`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Connected apps lists the
@@ -318,6 +323,8 @@ export function Settings({ params }: AppComponentProps) {
           <SoundSection />
         ) : section === 'keyboard' ? (
           <KeyboardSection />
+        ) : section === 'printers' ? (
+          <PrintersSettingsSection />
         ) : section === 'datetime' ? (
           <DateTimeSection />
         ) : section === 'password' ? (

@@ -13,6 +13,7 @@ import {
   History,
   MonitorDown,
   Plus,
+  Printer,
   RotateCw,
   Search,
   Settings,
@@ -128,6 +129,7 @@ import {
   type DockMode,
 } from '@/components/desktop/apps/InspectorToolbar';
 import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
+import { cleanPrintingError, printPage } from '@/lib/printing';
 
 const HOME_URL = 'https://en.wikipedia.org/wiki/Main_Page';
 
@@ -1475,6 +1477,18 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [webviewMode, openTab],
   );
 
+  /** Open Din's print dialog for a tab (Ctrl+P with focus in the toolbar). */
+  const printTab = useCallback(
+    (id: string) => {
+      const wcId = tabsRef.current.find((t) => t.id === id)?.wcId;
+      if (!webviewMode || wcId == null) return;
+      printPage(wcId).catch((error) =>
+        toast({ title: 'Couldn’t print', description: cleanPrintingError(error), variant: 'destructive' }),
+      );
+    },
+    [webviewMode, toast],
+  );
+
   /** Activate the next/previous tab (Ctrl+Tab / Ctrl+Shift+Tab), wrapping. */
   const cycleTab = useCallback((backward: boolean) => {
     const ts = tabsRef.current;
@@ -1630,6 +1644,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'view-source':
           viewSource(activeIdRef.current);
           break;
+        case 'print':
+          printTab(activeIdRef.current);
+          break;
         case 'reload':
           reloadTab(activeIdRef.current, false);
           break;
@@ -1668,6 +1685,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     focusAddress,
     openFind,
     viewSource,
+    printTab,
     reloadTab,
     cycleTab,
     gotoTabDigit,
@@ -1875,6 +1893,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onFind={openFind}
           viewSourceDisabled={viewSourceUrl(activeTab.url) === null}
           onViewSource={() => viewSource(activeId)}
+          printDisabled={activeTab.wcId === null}
+          onPrint={() => printTab(activeId)}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -3767,6 +3787,8 @@ function BrowserMenu({
   onFind,
   viewSourceDisabled,
   onViewSource,
+  printDisabled,
+  onPrint,
   hasDevtools,
   devtoolsActive,
   devtoolsDisabled,
@@ -3784,6 +3806,9 @@ function BrowserMenu({
   /** No source to show (a blank tab, internal page, or source view). */
   viewSourceDisabled: boolean;
   onViewSource: () => void;
+  /** No page to print (a blank or internal tab). */
+  printDisabled: boolean;
+  onPrint: () => void;
   /** Whether the docked-devtools control is available (webview mode). */
   hasDevtools: boolean;
   devtoolsActive: boolean;
@@ -3842,6 +3867,15 @@ function BrowserMenu({
               shortcut="Ctrl+F"
               disabled={findDisabled}
               onClick={() => run(onFind)}
+            />
+          )}
+          {showFind && (
+            <BrowserMenuItem
+              icon={Printer}
+              label="Print…"
+              shortcut="Ctrl+P"
+              disabled={printDisabled}
+              onClick={() => run(onPrint)}
             />
           )}
           {showFind && (

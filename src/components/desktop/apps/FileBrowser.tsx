@@ -40,6 +40,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useVolumes } from '@/hooks/useVolumes';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getAssistantBridge } from '@/lib/assistant';
+import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } from '@/lib/printing';
 import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import {
   getFileClipboard,
@@ -918,6 +919,11 @@ function FileBrowserTab({
   }, [run]);
 
   const openInTerminal = useCallback((path: string) => open('terminal', { cwd: path }), [open]);
+  const canPrint = !!getPrintingBridge();
+  const print = useCallback((path: string | undefined) => {
+    if (!path) return;
+    printFile(path).catch((error) => setStatus({ kind: 'error', text: cleanPrintingError(error) }));
+  }, []);
   const { config } = useAppContext();
   const hasAssistant = !!getAssistantBridge() && config.assistantEnabled;
   const openInAssistant = useCallback(
@@ -1631,6 +1637,9 @@ function FileBrowserTab({
                       <ContextMenuItem onSelect={() => setQuickLook(true)}>
                         Quick Look <ContextMenuShortcut>Space</ContextMenuShortcut>
                       </ContextMenuItem>
+                    )}
+                    {single?.kind === 'file' && !isTrash && canPrint && isPrintableFile(single.name) && (
+                      <ContextMenuItem onSelect={() => print(pathsOf([single.name])[0])}>Print…</ContextMenuItem>
                     )}
                     <ContextMenuSeparator />
                     {isTrash ? (

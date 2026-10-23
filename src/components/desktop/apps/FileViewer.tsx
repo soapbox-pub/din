@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, FolderOpen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FolderOpen, Printer } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
 import { isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
+import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } from '@/lib/printing';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -70,6 +71,14 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
     rootRef.current?.focus({ preventScroll: true });
   }, []);
   const [extractError, setExtractError] = useState<string | null>(null);
+  const [printError, setPrintError] = useState<string | null>(null);
+  // What's printed is what's saved: edits in progress aren't.
+  const printable = !!getPrintingBridge() && isPrintableFile(name);
+  const print = useCallback(() => {
+    if (!path || !printable) return;
+    setPrintError(null);
+    printFile(path).catch((error) => setPrintError(cleanPrintingError(error)));
+  }, [path, printable]);
   const extract = useCallback(async () => {
     if (!path || !dir) return;
     setExtractError(null);
@@ -109,6 +118,12 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
           close(windowId);
           return;
         }
+        if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && key === 'p' && printable) {
+          e.preventDefault();
+          e.stopPropagation();
+          print();
+          return;
+        }
         const target = e.target as HTMLElement;
         if (target.closest('textarea, input, video, audio')) return;
         if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -136,6 +151,11 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
           {siblings.length > 1 && index !== -1 && `${index + 1} of ${siblings.length} · `}
           {entry?.size != null && formatBytes(entry.size)}
         </span>
+        {printable && (
+          <BarButton label="Print…" onClick={print}>
+            <Printer className="size-4" />
+          </BarButton>
+        )}
         <BarButton
           label="Show in Files"
           onClick={() => dir && open('file-browser', { path: dir, select: name })}
@@ -156,6 +176,11 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
       {extractError !== null && (
         <p role="alert" className="shrink-0 border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
           Couldn’t extract: {extractError}
+        </p>
+      )}
+      {printError !== null && (
+        <p role="alert" className="shrink-0 border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
+          Couldn’t print: {printError}
         </p>
       )}
     </div>

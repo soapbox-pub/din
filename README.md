@@ -272,6 +272,23 @@ user service (the flake's `deckmon` input) and Din talks to over its socket
 separate display is a spare DisplayPort connector forced on with an EDID,
 through a sudo rule for those writes. Elsewhere Din uses a `deckmon` on PATH.
 
+### Printing
+
+Printers need no setup on DinOS. CUPS runs with Avahi and ipp-usb, so a
+printer on the network, or one plugged in that speaks IPP over USB, appears
+in the print dialog as soon as it's on, and printing makes its driverless
+queue on the spot. Settings → Printers shows them and their queues, sets the
+default, prints a test page, and adds older USB printers with the best
+driver installed (gutenprint, brlaser).
+
+The print dialog is Din's own (`src/components/desktop/PrintDialog.tsx`):
+Chromium's would open a GTK window, which under cage replaces the whole
+screen. `electron/print-preload.cjs` sends every page's `print()`, frames'
+included, there, and so do Ctrl+P, the browser's menu and right-click menu,
+and Print in Files and Preview. Whatever is printed goes to CUPS as a PDF
+laid out by Chromium, and the dialog previews that PDF's pages, drawn by
+poppler (`electron/printing.mts`). Save as PDF needs no printer at all.
+
 ### Assistant
 
 The Assistant app, the menu bar's robot, and Super+A (a prompt from

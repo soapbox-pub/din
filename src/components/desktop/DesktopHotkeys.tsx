@@ -221,6 +221,7 @@ export function DesktopHotkeys() {
         else if (key === 'l') publish({ action: 'focus-address' });
         else if (key === 'f') publish({ action: 'find' });
         else if (key === 'u') publish({ action: 'view-source' });
+        else if (key === 'p') publish({ action: 'print' });
         else if (key === 'r') publish({ action: 'reload' });
         else if (key === 'n') publish({ action: 'new-window' });
         else if (/^[1-9]$/.test(e.key)) {

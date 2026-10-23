@@ -30,6 +30,8 @@
 //     server, for the Assistant app, its menu-bar item and Settings
 //   - window.bluetooth: BlueZ adapter and devices (pairing, connecting), for
 //     the menu bar and Settings
+//   - window.printing: printers, the print dialog's previews and jobs, and
+//     the print queue, for the print dialog and Settings
 //   - window.volumes: USB sticks and SD cards, mounted as they're plugged in
 //     and ejected from the Files sidebar
 //   - window.bluetoothLogin: receive the account key from a phone over
@@ -1018,6 +1020,113 @@ contextBridge.exposeInMainWorld('bluetooth', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('bluetooth:changed', handler);
     return () => ipcRenderer.removeListener('bluetooth:changed', handler);
+  },
+});
+
+// Printing bridge (window.printing), backed by electron/printing.mts: the
+// printers CUPS knows, Din's print dialog, and the print queue.
+contextBridge.exposeInMainWorld('printing', {
+  /** Printers and waiting jobs. */
+  state: () => ipcRenderer.invoke('printing:state'),
+
+  /** @param {string} printer */
+  capabilities: (printer) => ipcRenderer.invoke('printing:capabilities', printer),
+
+  /**
+   * Start printing a page (a <webview> guest); resolves to the document.
+   * @param {number} wcId
+   */
+  openPage: (wcId) => ipcRenderer.invoke('printing:openPage', wcId),
+
+  /**
+   * Start printing a file; resolves to the document.
+   * @param {string} path
+   */
+  openFile: (path) => ipcRenderer.invoke('printing:openFile', path),
+
+  /**
+   * Lay a document out and draw its first pages.
+   * @param {string} id
+   * @param {unknown} layout
+   */
+  preview: (id, layout) => ipcRenderer.invoke('printing:preview', id, layout),
+
+  /**
+   * Send a document to a printer; resolves to the job id.
+   * @param {string} id
+   * @param {unknown} layout
+   * @param {unknown} job
+   */
+  print: (id, layout, job) => ipcRenderer.invoke('printing:print', id, layout, job),
+
+  /**
+   * Save a document as a PDF instead.
+   * @param {string} id
+   * @param {unknown} layout
+   * @param {string} path
+   */
+  savePdf: (id, layout, path) => ipcRenderer.invoke('printing:savePdf', id, layout, path),
+
+  /**
+   * The dialog closed without printing.
+   * @param {string} id
+   */
+  close: (id) => ipcRenderer.invoke('printing:close', id),
+
+  /** Forget every open document (the shell just started). */
+  reset: () => ipcRenderer.invoke('printing:reset'),
+
+  /** @param {string} job */
+  cancelJob: (job) => ipcRenderer.invoke('printing:cancelJob', job),
+
+  /** @param {string} printer */
+  setDefault: (printer) => ipcRenderer.invoke('printing:setDefault', printer),
+
+  /** @param {string} printer */
+  testPage: (printer) => ipcRenderer.invoke('printing:testPage', printer),
+
+  /** @param {string} printer */
+  resume: (printer) => ipcRenderer.invoke('printing:resume', printer),
+
+  /** @param {string} printer */
+  remove: (printer) => ipcRenderer.invoke('printing:remove', printer),
+
+  /** Look for printers that need setting up (slow: asks every backend). */
+  discover: () => ipcRenderer.invoke('printing:discover'),
+
+  /**
+   * Set up a printer `discover` found, with the best driver there is.
+   * @param {string} uri
+   */
+  add: (uri) => ipcRenderer.invoke('printing:add', uri),
+
+  /**
+   * Subscribe to pages asking to print. Returns an unsubscribe fn.
+   * @param {(document: unknown) => void} callback
+   */
+  onOpen: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} document
+     */
+    const handler = (_event, document) => callback(document);
+    ipcRenderer.on('printing:open', handler);
+    return () => ipcRenderer.removeListener('printing:open', handler);
+  },
+
+  /**
+   * Subscribe to printers stopping with a job waiting, and those jobs
+   * printing after all. Returns an unsubscribe fn.
+   * @param {(event: unknown) => void} callback
+   */
+  onEvent: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} payload
+     */
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('printing:event', handler);
+    return () => ipcRenderer.removeListener('printing:event', handler);
   },
 });
 

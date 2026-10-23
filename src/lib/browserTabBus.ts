@@ -120,6 +120,7 @@ export interface BrowserHotkey {
     | 'focus-address'
     | 'find'
     | 'view-source'
+    | 'print'
     | 'reload'
     | 'force-reload'
     | 'cycle-tab'
