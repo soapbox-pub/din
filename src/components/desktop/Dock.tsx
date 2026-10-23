@@ -855,6 +855,13 @@ const DockItem = memo(function DockItem({
   // One dot per window, the active one lit. Past MAX_DOTS the row stops
   // growing; the last dot stands in for the rest and lights if any of them
   // is active.
+  //
+  // The dots sit over whatever is behind the dock (wallpaper, or a window
+  // that fills the screen), so no fixed color reads everywhere. Each dot is
+  // painted from its own backdrop instead: blurred to one tone, thresholded
+  // on luminance to black or white, then inverted - black over light
+  // content, white over dark. It works over <webview> guests too, since the
+  // compositor applies the filter.
   const activeIndex = appWindows.findIndex((w) => w.id === activeWindowId);
   const dotCount = Math.min(appWindows.length, MAX_DOTS);
   const runningDots = dotCount > 0 && (
@@ -866,10 +873,8 @@ const DockItem = memo(function DockItem({
         <span
           key={i}
           className={cn(
-            'size-1.5 rounded-full',
-            isAppActive && Math.min(activeIndex, dotCount - 1) === i
-              ? 'bg-primary'
-              : 'bg-foreground/70',
+            'size-1.5 rounded-full [backdrop-filter:blur(4px)_grayscale(1)_contrast(100)_invert(1)]',
+            !(isAppActive && Math.min(activeIndex, dotCount - 1) === i) && 'opacity-50',
           )}
         />
       ))}
