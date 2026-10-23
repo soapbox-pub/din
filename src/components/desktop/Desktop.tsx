@@ -26,6 +26,7 @@ import { NsiteBridgeHost } from './NsiteBridgeHost';
 import { PromptHost } from './PromptHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
 import { SystemEventsHost } from './SystemEventsHost';
+import { NativeLinksHost } from './NativeLinksHost';
 import { InstallerAutoOpen } from './InstallerAutoOpen';
 import { UpdateNotifier } from './UpdateNotifier';
 import { AirPlayPromptHost } from './AirPlayIndicator';
@@ -137,6 +138,7 @@ function DesktopSession() {
             <AssistantHost />
             <ScreenshotHost />
             <SystemEventsHost />
+            <NativeLinksHost />
             <SystemNotificationsHost />
             <GuestInputHost />
             <InstallerAutoOpen />

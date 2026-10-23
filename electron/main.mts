@@ -63,6 +63,7 @@ import {
   type NightLightState,
 } from './night-light.mts';
 import { registerTrayHandlers } from './tray.mts';
+import { registerOpenUri } from './open-uri.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
@@ -4925,6 +4926,7 @@ app.whenReady().then(() => {
   registerDateTimeHandlers({ assertShellSender });
   registerCursorHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
+  registerOpenUri({ sendToShell });
   registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
   registerInstallerHandlers({ assertShellSender, sendToShell });
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });

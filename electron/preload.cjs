@@ -527,6 +527,21 @@ contextBridge.exposeInMainWorld('nativeApps', {
     ipcRenderer.on('native-apps:changed', handler);
     return () => ipcRenderer.removeListener('native-apps:changed', handler);
   },
+
+  /**
+   * Subscribe to links native apps open (electron/open-uri.mts). Returns an
+   * unsubscribe fn.
+   * @param {(url: string) => void} callback
+   */
+  onOpenUrl: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string} url
+     */
+    const handler = (_event, url) => callback(url);
+    ipcRenderer.on('open-uri:open', handler);
+    return () => ipcRenderer.removeListener('open-uri:open', handler);
+  },
 });
 
 // Embedded display (src/lib/nativeDisplay.ts): pixels and input travel on a

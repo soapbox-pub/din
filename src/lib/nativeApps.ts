@@ -67,6 +67,8 @@ export interface NativeAppsBridge {
   forceQuit(pid: number): Promise<void>;
   /** Subscribe to installed-app changes. Returns an unsubscribe fn. */
   onChanged(callback: () => void): () => void;
+  /** Subscribe to links native apps open. Returns an unsubscribe fn. */
+  onOpenUrl(callback: (url: string) => void): () => void;
 }
 
 /** File extensions opened as Windows programs (see electron/windows-apps.mts). */

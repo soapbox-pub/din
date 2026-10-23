@@ -742,7 +742,25 @@ in
     # AirPlay from the command line too (`deckmon discover`, `deckmon status`).
     ++ [ din-deckmon ]
     # Pointer themes: Adwaita (GTK's own default) and the others Settings offers.
-    ++ [ adwaita-icon-theme din-cursor-themes ];
+    ++ [ adwaita-icon-theme din-cursor-themes ]
+    # xdg-open, and Din as the handler for the links it opens (see
+    # xdg.mime.defaultApplications below).
+    ++ [
+      xdg-utils
+      (writeShellScriptBin "din-open" ''
+        [ "$#" -gt 0 ] || exit 0
+        exec ${systemd}/bin/busctl --user call pub.soapbox.Din /pub/soapbox/Din \
+          org.freedesktop.Application Open 'asa{sv}' "$#" "$@" 0
+      '')
+      (writeTextDir "share/applications/din-open.desktop" ''
+        [Desktop Entry]
+        Type=Application
+        Name=Din Web Browser
+        Exec=din-open %U
+        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;
+        NoDisplay=true
+      '')
+    ];
   virtualisation.podman = {
     enable = true;
     dockerCompat = true;
@@ -776,6 +794,17 @@ in
       "org.freedesktop.impl.portal.FileChooser" = "din";
     };
   };
+
+  # Links native apps open go to Din's Web Browser (electron/open-uri.mts).
+  # Electron and Chromium apps (Signal) run xdg-open, and Flatpaks ask the
+  # portal's OpenURI; both start the default handler, din-open, which hands
+  # the links to Din over the session bus.
+  xdg.mime.defaultApplications = {
+    "x-scheme-handler/http" = "din-open.desktop";
+    "x-scheme-handler/https" = "din-open.desktop";
+    "x-scheme-handler/nsite" = "din-open.desktop";
+  };
+
   systemd.services.flathub = {
     description = "Add the Flathub Flatpak remote";
     wantedBy = [ "multi-user.target" ];
