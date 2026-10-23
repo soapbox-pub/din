@@ -14,7 +14,7 @@ import { useDragReorder } from '@/hooks/useDragReorder';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
 import { registerDockTile } from '@/lib/dockTiles';
 import { cn } from '@/lib/utils';
-import { APPS } from '@/lib/apps';
+import { APPS, appsDockedAs } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -152,7 +152,9 @@ export function Dock({
       open: dinActions.open,
       focus: dinActions.focus,
       minimize: dinActions.minimize,
-      closeAll: (appId) => dinActions.closeApp(appId),
+      closeAll: (appId) => {
+        for (const id of [appId, ...appsDockedAs(appId)]) dinActions.closeApp(id);
+      },
     }),
     [dinActions],
   );
@@ -166,7 +168,9 @@ export function Dock({
   // else launch order. An app still launching counts as running, so it has a
   // tile to bounce on while its window is on the way.
   const launching = useLaunchingApps();
-  const running = [...new Set([...windows.map((w) => w.appId), ...launching])];
+  // The tile a window goes under: its app's, or the one its app docks as.
+  const tileOf = (appId: string) => getApp(appId)?.dockAs ?? appId;
+  const running = [...new Set([...windows.map((w) => tileOf(w.appId)), ...launching])];
   const pinnedIds = pinned.filter((id) => getApp(id));
   const rank = (id: string) => {
     const i = unpinnedOrder.indexOf(id);
@@ -588,7 +592,7 @@ export function Dock({
             // Launch order, so cycling visits windows in a fixed sequence.
             // Closing windows are on their way out and can't be focused.
             const appWindows = windows
-              .filter((w) => w.appId === appId && !w.closing)
+              .filter((w) => tileOf(w.appId) === appId && !w.closing)
               .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon }));
             return (
               <DockItem

@@ -508,7 +508,7 @@ export const Window = memo(function Window({
     const ws = parent?.getBoundingClientRect();
     const wsLeft = ws?.left ?? 0;
     const wsTop = ws?.top ?? 0;
-    const tile = getDockTileRect(win.appId);
+    const tile = getDockTileRect(app?.dockAs ?? win.appId);
     const target: GenieRect = tile
       ? { x: tile.x - wsLeft, y: tile.y - wsTop, width: tile.width, height: tile.height }
       : {
@@ -637,7 +637,7 @@ export const Window = memo(function Window({
     }
 
     runLiveGenie();
-  }, [win.minimized, win.appId, win.z, beginGesture, endGesture, stopWobble]);
+  }, [win.minimized, win.appId, app?.dockAs, win.z, beginGesture, endGesture, stopWobble]);
 
   // Maximize/restore/tile transitions FLIP from the previous committed rect
   // to the new one: React swaps the geometry instantly (CSS percentages or

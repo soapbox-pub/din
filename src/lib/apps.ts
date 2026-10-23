@@ -99,6 +99,11 @@ export interface AppDefinition {
    * of spawning a duplicate. E.g. Settings.
    */
   singleInstance?: boolean;
+  /**
+   * Another app whose Dock tile this app's windows go under, rather than a
+   * tile of their own. E.g. the browser's pop-up windows, under Web Browser.
+   */
+  dockAs?: string;
 }
 
 /** All apps installed on the desktop, in launcher order. */
@@ -171,6 +176,7 @@ export const APPS: readonly AppDefinition[] = [
     component: WebPopup,
     defaultSize: { width: 500, height: 640 },
     hidden: true,
+    dockAs: 'web-browser',
   },
   {
     // One file opened from Files (a picture, a video, some text). Hidden
@@ -205,6 +211,11 @@ export const APPS: readonly AppDefinition[] = [
     hidden: true,
   },
 ];
+
+/** The built-in apps whose windows go under this app's Dock tile. */
+export function appsDockedAs(id: string): string[] {
+  return APPS.filter((app) => app.dockAs === id).map((app) => app.id);
+}
 
 /** Look up an app definition by id. */
 export function getApp(id: string): AppDefinition | undefined {
