@@ -1,5 +1,13 @@
-import { useId, useState } from 'react';
-import { ExternalLink, Loader2, MessageCircleQuestion, ShieldQuestion } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  MessageCircleQuestion,
+  ShieldQuestion,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -104,13 +112,39 @@ function isEmpty(value: FormValue | undefined): boolean {
   return value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
 }
 
-/** A question the agent asked, as a form to fill in. */
+function isMissing(field: FormField, answers: Record<string, FormValue | undefined>): boolean {
+  return field.type !== 'external' && field.required === true && isEmpty(answers[field.key]);
+}
+
+/**
+ * A question the agent asked, as a form to fill in. Several questions are
+ * asked one at a time, with Back and Next, so a long form never outgrows the
+ * window it's shown in.
+ */
 export function FormCard({ form, className }: { form: FormInfo; className?: string }) {
   const reply = useReplyForm();
   const { toast } = useToast();
   const [answers, setAnswers] = useState(() => initialAnswers(form.fields));
+  const [step, setStep] = useState(0);
+  const stepRef = useRef<HTMLDivElement>(null);
+  const moved = useRef(false);
   const visible = form.fields.filter((field) => fieldVisible(field, answers));
-  const missing = visible.some((field) => field.type !== 'external' && field.required && isEmpty(answers[field.key]));
+  const missing = visible.some((field) => isMissing(field, answers));
+  const paged = visible.length > 1;
+  const index = Math.min(step, visible.length - 1);
+  const current = visible[index];
+  const last = index >= visible.length - 1;
+  const currentMissing = current !== undefined && isMissing(current, answers);
+
+  // The step's controls unmount when it changes, so keep focus in the card.
+  useEffect(() => {
+    if (moved.current) stepRef.current?.focus();
+  }, [index]);
+
+  const go = (to: number) => {
+    moved.current = true;
+    setStep(Math.max(0, Math.min(to, visible.length - 1)));
+  };
 
   const set = (key: string, value: FormValue | undefined) => setAnswers((current) => ({ ...current, [key]: value }));
 
@@ -137,26 +171,84 @@ export function FormCard({ form, className }: { form: FormInfo; className?: stri
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!missing) submit();
+          if (!last) {
+            if (!currentMissing) go(index + 1);
+          } else if (missing) {
+            go(visible.findIndex((field) => isMissing(field, answers)));
+          } else {
+            submit();
+          }
         }}
       >
         <div className="flex items-start gap-3">
           <MessageCircleQuestion className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
           <div className="min-w-0 flex-1 space-y-4">
-            <p className="font-medium text-foreground">{form.title}</p>
-            {visible.map((field) => (
-              <FormFieldInput key={field.key} field={field} value={answers[field.key]} onChange={(v) => set(field.key, v)} />
-            ))}
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="font-medium text-foreground">{form.title}</p>
+              {paged && (
+                <p className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                  {index + 1} of {visible.length}
+                </p>
+              )}
+            </div>
+            {paged && (
+              <nav aria-label="Questions" className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
+                {visible.map((field, i) => {
+                  const done = field.type !== 'external' && !isEmpty(answers[field.key]);
+                  return (
+                    <button
+                      key={field.key}
+                      type="button"
+                      aria-current={i === index ? 'step' : undefined}
+                      onClick={() => go(i)}
+                      className={cn(
+                        'flex max-w-40 shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        i === index
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground',
+                      )}
+                    >
+                      {done && <Check className="size-3 shrink-0" aria-label="Answered" />}
+                      <span className="truncate">{field.title || field.key}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+            )}
+            {current && (
+              <div ref={stepRef} tabIndex={-1} className="outline-none">
+                <FormFieldInput
+                  key={current.key}
+                  field={current}
+                  value={answers[current.key]}
+                  onChange={(v) => set(current.key, v)}
+                  onPick={paged && !last ? () => go(index + 1) : undefined}
+                />
+              </div>
+            )}
           </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" disabled={reply.isPending} onClick={() => send(null)}>
             Dismiss
           </Button>
-          <Button type="submit" size="sm" disabled={reply.isPending || missing}>
-            {reply.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
-            Answer
-          </Button>
+          {paged && index > 0 && (
+            <Button type="button" variant="outline" size="sm" disabled={reply.isPending} onClick={() => go(index - 1)}>
+              <ChevronLeft className="size-3.5" aria-hidden />
+              Back
+            </Button>
+          )}
+          {last ? (
+            <Button type="submit" size="sm" disabled={reply.isPending || (paged ? currentMissing : missing)}>
+              {reply.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+              Answer
+            </Button>
+          ) : (
+            <Button type="submit" size="sm" disabled={currentMissing}>
+              Next
+              <ChevronRight className="size-3.5" aria-hidden />
+            </Button>
+          )}
         </div>
       </form>
     </section>
@@ -167,13 +259,17 @@ function FormFieldInput({
   field,
   value,
   onChange,
+  onPick,
 }: {
   field: FormField;
   value: FormValue | undefined;
   onChange: (value: FormValue | undefined) => void;
+  /** Called after one of a single-choice field's own options is chosen. */
+  onPick?: () => void;
 }) {
   const id = useId();
   const openUrl = useOpenUrl();
+  const pointer = useRef(false);
   const label = field.title || field.key;
   const description = field.description && (
     <p id={`${id}-description`} className="text-xs text-muted-foreground">
@@ -240,7 +336,13 @@ function FormFieldInput({
         {description}
         <RadioGroup
           value={other ? '__other' : typeof value === 'string' ? value : ''}
-          onValueChange={(v) => onChange(v === '__other' ? '' : v)}
+          onValueChange={(v) => {
+            onChange(v === '__other' ? '' : v);
+            if (v !== '__other' && pointer.current) onPick?.();
+          }}
+          // Only a click moves on: arrow keys select each option they pass.
+          onPointerDown={() => (pointer.current = true)}
+          onKeyDown={() => (pointer.current = false)}
         >
           {field.options.map((option) => (
             <label key={option.value} className="flex cursor-pointer items-start gap-2 text-sm">
