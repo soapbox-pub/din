@@ -234,6 +234,14 @@
     height: 100%;
   }
 
+  /* ...and with several monitors <body> is only the primary one, holding
+     the layers that span the rest (MonitorsProvider.tsx), so its
+     `overflow: hidden` blanked every other monitor while a menu or dialog
+     was open. <html> already keeps the page from scrolling. */
+  html > body[data-scroll-locked] {
+    overflow: visible !important;
+  }
+
   *,
   ::after,
   ::before,
