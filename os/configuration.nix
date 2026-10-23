@@ -407,6 +407,28 @@ in
   # picked up by NetworkManager automatically.
   networking.networkmanager.enable = true;
 
+  # udisks backs the USB sticks and SD cards Din mounts as they're plugged in
+  # and ejects from Files (electron/volumes.mts), under /run/media/din. Din's
+  # session has no seat, so udisks would ask for an admin password even for
+  # removable media; this lets `din` mount, unmount and eject it without one.
+  # Internal disks still need the password (filesystem-mount-system).
+  services.udisks2.enable = true;
+  security.polkit.extraConfig = ''
+    polkit.addRule(function (action, subject) {
+      if (subject.user != "din") return;
+      var allowed = [
+        "org.freedesktop.udisks2.filesystem-mount",
+        "org.freedesktop.udisks2.filesystem-mount-other-seat",
+        "org.freedesktop.udisks2.filesystem-unmount-others",
+        "org.freedesktop.udisks2.eject-media",
+        "org.freedesktop.udisks2.eject-media-other-seat",
+        "org.freedesktop.udisks2.power-off-drive",
+        "org.freedesktop.udisks2.power-off-drive-other-seat",
+      ];
+      if (allowed.indexOf(action.id) >= 0) return polkit.Result.YES;
+    });
+  '';
+
   # The user Din runs as. `networkmanager` group membership lets the
   # WiFi settings panel control connections without polkit prompts; `video`
   # lets the brightness bridge write the backlight (via brightnessctl's udev

@@ -37,6 +37,7 @@ import {
   useWatchDirectory,
 } from '@/hooks/useFileSystem';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { useVolumes } from '@/hooks/useVolumes';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getAssistantBridge } from '@/lib/assistant';
 import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
@@ -515,6 +516,20 @@ function FileBrowserTab({
     },
     [historyIndex, cwd, focusView],
   );
+
+  // A disk ejected or pulled out takes its folders with it: go home rather
+  // than sit on an error, as Finder closes the disk's windows.
+  const volumes = useVolumes();
+  const mounted = useMemo(
+    () => (volumes.data?.volumes ?? []).flatMap((v) => (v.mountPoint ? [v.mountPoint] : [])),
+    [volumes.data],
+  );
+  const lastMounted = useRef(mounted);
+  useEffect(() => {
+    const gone = lastMounted.current.filter((p) => !mounted.includes(p));
+    lastMounted.current = mounted;
+    if (cwd && home.data && gone.some((p) => cwd === p || cwd.startsWith(`${p}/`))) navigate(home.data);
+  }, [mounted, cwd, home.data, navigate]);
 
   const go = useCallback(
     (delta: number) => {

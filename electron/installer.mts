@@ -21,6 +21,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { ipcMain } from 'electron';
 import { runCommand, CommandError } from './system.mts';
+import { releaseDisk } from './volumes.mts';
 
 const HELPER = process.env.DIN_INSTALLER;
 
@@ -142,7 +143,7 @@ export function registerInstallerHandlers(options: {
     });
   };
 
-  ipcMain.handle('installer:install', (event, disk, mode, newPassphrase) => {
+  ipcMain.handle('installer:install', async (event, disk, mode, newPassphrase) => {
     assertShellSender(event);
     if (!HELPER) throw new Error('Installing is not available here');
     if (state.phase === 'running') throw new Error('An install is already running');
@@ -153,16 +154,20 @@ export function registerInstallerHandlers(options: {
     if (newPassphrase !== null && !isValidPassphrase(newPassphrase)) {
       throw new Error('Not a usable passphrase');
     }
+    // A USB disk plugged in to install onto was mounted when it went in.
+    await releaseDisk(disk);
+    if (isInstalling()) throw new Error('An install is already running');
     passphrase = newPassphrase;
     start(HELPER, disk, mode as Mode);
   });
 
-  ipcMain.handle('installer:retry', (event) => {
+  ipcMain.handle('installer:retry', async (event) => {
     assertShellSender(event);
     if (!HELPER) throw new Error('Installing is not available here');
     if (state.phase !== 'failed' || !state.disk || !state.mode) {
       throw new Error('There is no failed install to retry');
     }
+    await releaseDisk(state.disk);
     start(HELPER, state.disk, state.mode);
   });
 

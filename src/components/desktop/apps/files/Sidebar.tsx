@@ -6,6 +6,8 @@ import {
   HardDrive,
   Home,
   Image,
+  LoaderCircle,
+  MemoryStick,
   Monitor,
   Music,
   Star,
@@ -16,8 +18,12 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { joinPath } from '@/lib/fs';
+import { notify } from '@/lib/notificationCenter';
+import { cleanVolumesError, getVolumesBridge, type Volume } from '@/lib/volumes';
 import { useDirectory } from '@/hooks/useFileSystem';
 import type { Bookmark } from '@/hooks/useFileSystem';
+import { useVolumeActions, useVolumes } from '@/hooks/useVolumes';
+import { EjectIcon } from '@/components/icons/EjectIcon';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -43,6 +49,8 @@ interface Place {
   icon: LucideIcon;
   bookmark?: boolean;
   trash?: boolean;
+  /** A removable disk; its path is empty until it's mounted. */
+  volume?: Volume;
 }
 
 export interface SidebarProps {
@@ -81,7 +89,12 @@ export function Sidebar({
 }: SidebarProps) {
   const homeListing = useDirectory(home ?? null);
   const user = home ? home.slice(home.lastIndexOf('/') + 1) : null;
-  const media = useDirectory(user ? `/run/media/${user}` : null);
+  // Where the volumes bridge is missing (Din on another distro), whatever
+  // the desktop there mounted under /run/media still shows.
+  const hasVolumes = getVolumesBridge() !== undefined;
+  const media = useDirectory(user && !hasVolumes ? `/run/media/${user}` : null);
+  const volumes = useVolumes();
+  const volumeActions = useVolumeActions();
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   // Whether a drag that could add a favorite is over the sidebar.
   const [offeringFavorite, setOfferingFavorite] = useState(false);
@@ -124,30 +137,60 @@ export function Sidebar({
 
   const devices: Place[] = [
     { path: '/', name: 'Computer', icon: HardDrive },
-    ...(media.data?.entries ?? [])
-      .filter((e) => e.kind === 'directory')
-      .map((e) => ({ path: joinPath(`/run/media/${user}`, e.name), name: e.name, icon: Usb })),
+    ...(hasVolumes
+      ? (volumes.data?.volumes ?? []).map((v) => ({
+          path: v.mountPoint ?? '',
+          name: v.name,
+          icon: v.bus === 'sdio' ? MemoryStick : Usb,
+          volume: v,
+        }))
+      : (media.data?.entries ?? [])
+          .filter((e) => e.kind === 'directory')
+          .map((e) => ({ path: joinPath(`/run/media/${user}`, e.name), name: e.name, icon: Usb }))),
   ];
+
+  const failed = (title: string, error: unknown) =>
+    notify({ source: { appId: 'file-browser', name: 'Files' }, title, body: cleanVolumesError(error) });
+
+  /** Open a place; a disk that isn't mounted is mounted first. */
+  const openPlace = (place: Place, open: (path: string) => void) => {
+    const volume = place.volume;
+    if (!volume || volume.mountPoint) {
+      open(place.path);
+      return;
+    }
+    if (volume.busy) return;
+    volumeActions.mount.mutate(volume.id, {
+      onSuccess: (mountPoint) => open(mountPoint),
+      onError: (error) => failed(`Can’t open “${volume.name}”`, error),
+    });
+  };
+
+  const eject = (volume: Volume) =>
+    volumeActions.eject.mutate(volume.id, {
+      onError: (error) => failed(`Can’t eject “${volume.name}”`, error),
+    });
 
   const bookmarked = new Set(bookmarks.map((b) => b.path));
 
   const renderPlace = (place: Place) => (
     <SidebarItem
-      key={`${place.bookmark ? 'b' : 'p'}:${place.path}`}
+      key={place.volume ? `v:${place.volume.id}` : `${place.bookmark ? 'b' : 'p'}:${place.path}`}
       place={place}
-      active={cwd === place.path}
+      active={!!place.path && cwd === place.path}
       dropping={dragTarget === place.path}
       bookmarked={bookmarked.has(place.path)}
-      onNavigate={onNavigate}
-      onOpenInNewTab={onOpenInNewTab}
-      onOpenInNewWindow={onOpenInNewWindow}
+      onNavigate={(p) => (p === place.path ? openPlace(place, onNavigate) : onNavigate(p))}
+      onOpenInNewTab={() => openPlace(place, onOpenInNewTab)}
+      onOpenInNewWindow={() => openPlace(place, onOpenInNewWindow)}
+      onEject={eject}
       onAddBookmark={onAddBookmark}
       onRemoveBookmark={onRemoveBookmark}
       onEmptyTrash={onEmptyTrash}
       onProperties={onProperties}
       onDragOver={(e) => {
         const drag = activeFileDrag(e);
-        if (!drag || drag.paths.some((p) => place.path === p || place.path.startsWith(`${p}/`))) return;
+        if (!drag || !place.path || drag.paths.some((p) => place.path === p || place.path.startsWith(`${p}/`))) return;
         e.preventDefault();
         e.stopPropagation();
         e.dataTransfer.dropEffect = dropCopies(e) && !place.trash ? 'copy' : 'move';
@@ -158,7 +201,7 @@ export function Sidebar({
         const drag = activeFileDrag(e);
         setDragTarget(null);
         setOfferingFavorite(false);
-        if (!drag) return;
+        if (!drag || !place.path) return;
         e.preventDefault();
         e.stopPropagation();
         onDrop(place.path, drag.paths, dropCopies(e) && !place.trash);
@@ -242,6 +285,7 @@ function SidebarItem({
   onNavigate,
   onOpenInNewTab,
   onOpenInNewWindow,
+  onEject,
   onAddBookmark,
   onRemoveBookmark,
   onEmptyTrash,
@@ -257,6 +301,7 @@ function SidebarItem({
   onNavigate: (path: string) => void;
   onOpenInNewTab: (path: string) => void;
   onOpenInNewWindow: (path: string) => void;
+  onEject: (volume: Volume) => void;
   onAddBookmark: (path: string) => void;
   onRemoveBookmark: (path: string) => void;
   onEmptyTrash: () => void;
@@ -265,40 +310,73 @@ function SidebarItem({
   onDragLeave: () => void;
   onDrop: (e: React.DragEvent) => void;
 }) {
+  const volume = place.volume;
+  const busy = volume?.busy ?? null;
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <button
-          type="button"
-          onClick={() => onNavigate(place.path)}
-          onAuxClick={(e) => {
-            if (e.button === 1) onOpenInNewTab(place.path);
-          }}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-          title={place.path}
-          aria-current={active ? 'location' : undefined}
+        <div
           className={cn(
-            'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'group flex items-center rounded-md',
             dropping
               ? 'bg-primary/20 text-foreground ring-2 ring-primary'
               : active
                 ? 'bg-primary/15 font-medium text-foreground'
                 : 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
           )}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
         >
-          <place.icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
-          <span className="truncate">{place.name}</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => onNavigate(place.path)}
+            onAuxClick={(e) => {
+              if (e.button === 1) onOpenInNewTab(place.path);
+            }}
+            title={place.path || volume?.device}
+            aria-current={active ? 'location' : undefined}
+            className={cn(
+              'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              volume && !volume.mountPoint && 'text-muted-foreground',
+            )}
+          >
+            <place.icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
+            <span className="truncate">{place.name}</span>
+          </button>
+          {volume && (busy ? (
+            <span className="flex size-6 shrink-0 items-center justify-center" role="status">
+              <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-hidden />
+              <span className="sr-only">{busy === 'ejecting' ? `Ejecting ${place.name}` : `Opening ${place.name}`}</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onEject(volume)}
+              title={`Eject “${place.name}”`}
+              aria-label={`Eject ${place.name}`}
+              className={cn(
+                'mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground',
+                'hover:bg-foreground/10 hover:text-foreground',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              )}
+            >
+              <EjectIcon className="size-3.5" />
+            </button>
+          ))}
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={() => onNavigate(place.path)}>Open</ContextMenuItem>
         <ContextMenuItem onSelect={() => onOpenInNewTab(place.path)}>Open in New Tab</ContextMenuItem>
         <ContextMenuItem onSelect={() => onOpenInNewWindow(place.path)}>Open in New Window</ContextMenuItem>
         <ContextMenuSeparator />
-        {place.trash ? (
+        {volume ? (
+          <ContextMenuItem disabled={busy !== null} onSelect={() => onEject(volume)}>
+            Eject “{place.name}”
+          </ContextMenuItem>
+        ) : place.trash ? (
           <ContextMenuItem variant="destructive" onSelect={onEmptyTrash}>
             Empty Trash…
           </ContextMenuItem>
@@ -307,7 +385,7 @@ function SidebarItem({
         ) : (
           <ContextMenuItem onSelect={() => onAddBookmark(place.path)}>Add to Favorites</ContextMenuItem>
         )}
-        <ContextMenuItem onSelect={() => onProperties(place.path)}>Properties</ContextMenuItem>
+        {place.path && <ContextMenuItem onSelect={() => onProperties(place.path)}>Properties</ContextMenuItem>}
       </ContextMenuContent>
     </ContextMenu>
   );

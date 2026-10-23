@@ -189,7 +189,7 @@ disk_json() {
           removable: ($d.rm == true or $d.rm == "1"),
           partitionTable: $d.pttype,
           largestFreeBytes: $free,
-          inUse: any($d | .. | objects | .mountpoints? // [] | .[]; . != null),
+          inUse: any($d | .. | objects | .mountpoints? // [] | .[]; . != null and (startswith("/run/media/") | not)),
           hasLinuxRoot: any($parts[]; (.parttype // "" | ascii_downcase) == $root),
           existingInstall: $existing,
           partitions: [$parts[] | {
@@ -332,7 +332,9 @@ install() {
   fi
 
   json=$(disk_json "$disk")
-  [[ $(jq '.inUse' <<<"$json") == false ]] || die "A partition on $disk is in use."
+  # Status lets a disk Din mounted on its own (under /run/media) through:
+  # Din unmounts it before it starts this. Nothing may be mounted by now.
+  [[ -z $(lsblk -nro MOUNTPOINTS "$disk" | tr -d '[:space:]') ]] || die "A partition on $disk is in use."
   required=$(required_bytes)
   ss=$(blockdev --getss "$disk")
 

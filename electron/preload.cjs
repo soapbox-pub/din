@@ -30,6 +30,8 @@
 //     server, for the Assistant app, its menu-bar item and Settings
 //   - window.bluetooth: BlueZ adapter and devices (pairing, connecting), for
 //     the menu bar and Settings
+//   - window.volumes: USB sticks and SD cards, mounted as they're plugged in
+//     and ejected from the Files sidebar
 //   - window.bluetoothLogin: receive the account key from a phone over
 //     Bluetooth LE, for the login screen
 //   - window.nostrd: the signer daemon that holds the account keys, for the
@@ -1016,6 +1018,54 @@ contextBridge.exposeInMainWorld('bluetooth', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('bluetooth:changed', handler);
     return () => ipcRenderer.removeListener('bluetooth:changed', handler);
+  },
+});
+
+// Volumes bridge (window.volumes), backed by electron/volumes.mts: removable
+// disks, mounted as they're plugged in, and ejecting them.
+contextBridge.exposeInMainWorld('volumes', {
+  /** The removable filesystems, mounted or not. */
+  state: () => ipcRenderer.invoke('volumes:state'),
+
+  /**
+   * Mount a volume; resolves to where.
+   * @param {string} id
+   */
+  mount: (id) => ipcRenderer.invoke('volumes:mount', id),
+
+  /**
+   * Unmount everything on a volume's disk and power it off.
+   * @param {string} id
+   */
+  eject: (id) => ipcRenderer.invoke('volumes:eject', id),
+
+  /**
+   * Subscribe to state changes. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('volumes:changed', handler);
+    return () => ipcRenderer.removeListener('volumes:changed', handler);
+  },
+
+  /**
+   * Subscribe to disks becoming ready, safe to remove, pulled out, or
+   * unreadable. Returns an unsubscribe fn.
+   * @param {(event: unknown) => void} callback
+   */
+  onEvent: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} payload
+     */
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('volumes:event', handler);
+    return () => ipcRenderer.removeListener('volumes:event', handler);
   },
 });
 

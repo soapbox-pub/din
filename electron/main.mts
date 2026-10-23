@@ -69,6 +69,7 @@ import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
+import { registerVolumesHandlers } from './volumes.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
@@ -4932,6 +4933,7 @@ app.whenReady().then(() => {
   registerInstallerHandlers({ assertShellSender, sendToShell });
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerBluetoothHandlers({ assertShellSender, sendToShell });
+  registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling });
   registerNostrdHandlers({ assertShellSender, sendToShell });
   registerAssistantHandlers({ assertShellSender, sendToShell });
   registerBootScreenHandlers({ assertShellSender });
