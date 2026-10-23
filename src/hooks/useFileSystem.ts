@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { getFsBridge, joinPath, parentPath } from '@/lib/fs';
-import type { FsDetails, FsDiskUsage, FsListing, FsReadResult } from '@/lib/fs';
+import type { FsDetails, FsDiskUsage, FsListing, FsReadResult, FsRecentFile } from '@/lib/fs';
+import { readPickedFiles } from '@/lib/pickedFiles';
 
 /**
  * TanStack Query hooks over the OS filesystem bridge (window.fs).
@@ -40,6 +41,18 @@ export function useDirectory(path: string | null) {
       return requireBridge().readdir(path);
     },
     enabled: fs !== undefined && path !== null,
+    staleTime: 5_000,
+    retry: false,
+  });
+}
+
+/** The file picker's Recent list: latest made, changed, or opened files. */
+export function useRecentFiles(enabled: boolean) {
+  const fs = getFsBridge();
+  return useQuery<FsRecentFile[]>({
+    queryKey: ['fs', 'recent'],
+    queryFn: () => requireBridge().recent(readPickedFiles()),
+    enabled: fs !== undefined && enabled,
     staleTime: 5_000,
     retry: false,
   });

@@ -463,6 +463,127 @@ async function listArchive(archive: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Recent files, for the file picker.
+// ---------------------------------------------------------------------------
+
+/** The user folders Recent looks through, under home. */
+const RECENT_DIRS = ['Desktop', 'Documents', 'Downloads', 'Music', 'Pictures', 'Videos'];
+/** How many folders deep below each of them. */
+const RECENT_DEPTH = 2;
+/** Entries looked at in each, at most, so a huge Pictures can't stall the picker. */
+const MAX_RECENT_SCAN = 5_000;
+/** Of GTK's recently used files, how many of the latest are checked. */
+const MAX_RECENT_XBEL = 300;
+const MAX_RECENT = 200;
+/** Downloads still in progress (Firefox, Chromium, Safari). */
+const UNFINISHED_DOWNLOAD = /\.(?:part|crdownload|download)$/i;
+
+interface RecentFile {
+  path: string;
+  name: string;
+  kind: 'file';
+  symlink: boolean;
+  size: number;
+  mtimeMs: number;
+  /** When it was last made, changed, moved here, or opened (ms). */
+  usedMs: number;
+}
+
+/** GTK's recently used files (recently-used.xbel), latest first, as [path, ms]. */
+async function xbelRecent(home: string): Promise<[string, number][]> {
+  let text: string;
+  try {
+    text = await fsp.readFile(path.join(home, '.local/share/recently-used.xbel'), 'utf8');
+  } catch {
+    return [];
+  }
+  const found: [string, number][] = [];
+  for (const match of text.matchAll(/<bookmark\s([^>]*)>/g)) {
+    const attrs = match[1];
+    const href = /\bhref="file:\/\/([^"]+)"/.exec(attrs)?.[1];
+    if (!href) continue;
+    let p: string;
+    try {
+      p = decodeURIComponent(href.replaceAll('&amp;', '&'));
+    } catch {
+      continue;
+    }
+    const times = [...attrs.matchAll(/\b(?:added|modified|visited)="([^"]+)"/g)]
+      .map((m) => Date.parse(m[1]))
+      .filter((t) => !Number.isNaN(t));
+    if (times.length > 0) found.push([p, Math.max(...times)]);
+  }
+  return found.sort((a, b) => b[1] - a[1]).slice(0, MAX_RECENT_XBEL);
+}
+
+/**
+ * The files the user most likely wants next: what's newest in their own
+ * folders (a screenshot, a download), what GTK apps opened, and `extra`,
+ * what the picker itself handed out. Latest first.
+ */
+async function recentFiles(extra: [string, number][]): Promise<RecentFile[]> {
+  const home = os.homedir();
+  const found = new Map<string, RecentFile>();
+  const add = (p: string, stats: fs.Stats, symlink: boolean, usedMs: number) => {
+    if (!stats.isFile() || UNFINISHED_DOWNLOAD.test(p)) return;
+    const known = found.get(p);
+    // A file moved or copied in keeps its old mtime; its ctime says when it arrived.
+    const used = Math.max(usedMs, stats.mtimeMs, stats.ctimeMs);
+    if (known && known.usedMs >= used) return;
+    found.set(p, { path: p, name: path.basename(p), kind: 'file', symlink, size: stats.size, mtimeMs: stats.mtimeMs, usedMs: used });
+  };
+
+  // Breadth first, so a folder too big to finish still gives its top levels.
+  const walk = async (root: string, maxDepth: number): Promise<void> => {
+    let budget = MAX_RECENT_SCAN;
+    let level = [root];
+    for (let depth = 0; depth <= maxDepth && level.length > 0 && budget > 0; depth++) {
+      const next: string[] = [];
+      for (const dir of level) {
+        if (budget <= 0) break;
+        let dirents: fs.Dirent[];
+        try {
+          dirents = await fsp.readdir(dir, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        await Promise.all(dirents.map(async (d) => {
+          if (budget <= 0 || d.name.startsWith('.')) return;
+          budget--;
+          const p = path.join(dir, d.name);
+          if (d.isDirectory()) {
+            if (d.name !== 'node_modules') next.push(p);
+          } else if (d.isFile() || d.isSymbolicLink()) {
+            try {
+              add(p, await fsp.stat(p), d.isSymbolicLink(), 0);
+            } catch {
+              // Gone, or a broken link.
+            }
+          }
+        }));
+      }
+      level = next;
+    }
+  };
+  await Promise.all([
+    walk(home, 0),
+    ...RECENT_DIRS.map((dir) => walk(path.join(home, dir), RECENT_DEPTH)),
+  ]);
+
+  const used = [...extra, ...(await xbelRecent(home))];
+  await Promise.all(used.map(async ([p, ms]) => {
+    try {
+      const link = await fsp.lstat(p);
+      add(p, link.isSymbolicLink() ? await fsp.stat(p) : link, link.isSymbolicLink(), ms);
+    } catch {
+      // No longer there.
+    }
+  }));
+
+  return [...found.values()].sort((a, b) => b.usedMs - a.usedMs).slice(0, MAX_RECENT);
+}
+
+// ---------------------------------------------------------------------------
 // Registration.
 // ---------------------------------------------------------------------------
 
@@ -578,6 +699,15 @@ export function registerFileOpsHandlers({ assertShellSender, sendToShell }: {
     return compress(absolute(dir), names.map(entryName), entryName(outName));
   });
   handle('fs:listArchive', async (archive) => listArchive(absolute(archive)));
+  handle('fs:recent', async (extra) => {
+    const used = Array.isArray(extra)
+      ? extra.slice(0, 100).flatMap((item): [string, number][] =>
+          Array.isArray(item) && typeof item[0] === 'string' && path.isAbsolute(item[0]) && typeof item[1] === 'number'
+            ? [[path.normalize(item[0]), item[1]]]
+            : [])
+      : [];
+    return recentFiles(used);
+  });
 }
 
 /** Content types for what the shell renders inline. */

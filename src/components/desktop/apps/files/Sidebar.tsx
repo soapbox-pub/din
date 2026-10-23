@@ -1,19 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Download,
-  FileText,
   Folder,
   HardDrive,
   Home,
-  Image,
   LoaderCircle,
   MemoryStick,
-  Monitor,
-  Music,
   Star,
   Trash2,
   Usb,
-  Video,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -32,16 +26,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { activeFileDrag, dropCopies } from './dnd';
-
-/** The XDG user folders, shown under Home when they exist. */
-const USER_DIRS: { name: string; icon: LucideIcon }[] = [
-  { name: 'Desktop', icon: Monitor },
-  { name: 'Documents', icon: FileText },
-  { name: 'Downloads', icon: Download },
-  { name: 'Music', icon: Music },
-  { name: 'Pictures', icon: Image },
-  { name: 'Videos', icon: Video },
-];
+import { USER_DIRS } from './layout';
 
 interface Place {
   path: string;

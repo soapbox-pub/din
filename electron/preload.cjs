@@ -256,6 +256,13 @@ contextBridge.exposeInMainWorld('fs', {
   listArchive: (archive) => ipcRenderer.invoke('fs:listArchive', archive),
 
   /**
+   * Recently made, changed, or opened files, latest first, for the file
+   * picker. `extra` adds [path, ms] pairs the shell remembers itself.
+   * @param {[string, number][]} extra
+   */
+  recent: (extra) => ipcRenderer.invoke('fs:recent', extra),
+
+  /**
    * Watch a folder for changes; resolves to a watch id (null if it can't be
    * watched). Changes arrive through onChange.
    * @param {string} path

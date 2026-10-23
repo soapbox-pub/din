@@ -40,6 +40,13 @@ export interface FsListing {
   truncated: boolean;
 }
 
+/** A file in the picker's Recent list. */
+export interface FsRecentFile extends FsEntry {
+  path: string;
+  /** When it was last made, changed, moved in, or opened (ms since epoch). */
+  usedMs: number;
+}
+
 export interface FsReadResult {
   data: Uint8Array;
   /** Full size of the file on disk (may exceed data.length). */
@@ -101,6 +108,12 @@ export interface FsBridge {
   compress(dir: string, names: string[], outName: string): Promise<string>;
   /** An archive's member names (capped; `total` counts them all). */
   listArchive(archive: string): Promise<{ entries: string[]; total: number }>;
+  /**
+   * The files most recently made, changed, or opened in the user's folders
+   * (and GTK's recently used list), latest first. `extra` adds `[path, ms]`
+   * pairs of the shell's own.
+   */
+  recent(extra: [string, number][]): Promise<FsRecentFile[]>;
   /** Watch a folder for changes; resolves to a watch id, or null if it can't be watched. */
   watch(path: string): Promise<number | null>;
   unwatch(id: number): Promise<void>;
@@ -227,21 +240,22 @@ export function sortEntries(entries: readonly FsEntry[]): FsEntry[] {
   });
 }
 
+export type EntrySortKey = 'name' | 'size' | 'type' | 'modified';
+
 /**
- * Sort by a column, folders always first. Ties fall back to name order, and
- * `type` compares by extension. Returns a new array.
+ * Order entries by a column, folders always first. Ties fall back to name
+ * order, and `type` compares by extension.
  */
-export function sortEntriesBy(
-  entries: readonly FsEntry[],
-  key: 'name' | 'size' | 'type' | 'modified',
+export function compareEntriesBy(
+  key: EntrySortKey,
   descending: boolean,
-): FsEntry[] {
+): (a: FsEntry, b: FsEntry) => number {
   const ext = (name: string) => {
     const idx = name.lastIndexOf('.');
     return idx > 0 ? name.slice(idx + 1).toLowerCase() : '';
   };
   const sign = descending ? -1 : 1;
-  return [...entries].sort((a, b) => {
+  return (a, b) => {
     if ((a.kind === 'directory') !== (b.kind === 'directory')) {
       return a.kind === 'directory' ? -1 : 1;
     }
@@ -251,7 +265,16 @@ export function sortEntriesBy(
     else if (key === 'type') order = NAME_COLLATOR.compare(ext(a.name), ext(b.name));
     if (order === 0) order = NAME_COLLATOR.compare(a.name, b.name);
     return order * sign;
-  });
+  };
+}
+
+/** Sort by a column (see {@link compareEntriesBy}). Returns a new array. */
+export function sortEntriesBy(
+  entries: readonly FsEntry[],
+  key: EntrySortKey,
+  descending: boolean,
+): FsEntry[] {
+  return [...entries].sort(compareEntriesBy(key, descending));
 }
 
 /** Human-readable byte size (e.g. "4.2 MB"). */

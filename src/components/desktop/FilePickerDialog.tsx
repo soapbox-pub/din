@@ -1,21 +1,38 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Download, Eye, EyeOff, Folder, HardDrive, Home, RotateCw } from 'lucide-react';
+import {
+  ArrowUp,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Eye,
+  EyeOff,
+  Folder,
+  HardDrive,
+  Home,
+  RotateCw,
+  Star,
+  Usb,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   cleanFsError,
+  compareEntriesBy,
   formatBytes,
   getFsBridge,
   joinPath,
   parentPath,
-  sortEntries,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
 import { extensionFilter, filterMatches } from '@/lib/fileFilters';
-import { useDirectory, useHomeDir } from '@/hooks/useFileSystem';
+import { recordPickedFiles } from '@/lib/pickedFiles';
+import { useBookmarks, useDirectory, useHomeDir, useRecentFiles } from '@/hooks/useFileSystem';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
+import { useVolumes } from '@/hooks/useVolumes';
 import type { FilePickerOptions, FilePickerResult } from '@/contexts/FilePickerContext';
 import { FileIcon } from '@/components/desktop/apps/files/FileIcon';
+import { USER_DIRS } from '@/components/desktop/apps/files/layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -33,6 +50,37 @@ interface FilePickerDialogProps {
   onCancel: () => void;
 }
 
+type SortKey = 'name' | 'size' | 'modified';
+interface SortOrder {
+  key: SortKey;
+  descending: boolean;
+}
+
+interface PickerPrefs {
+  /** How folders are sorted. */
+  sort: SortOrder;
+  /** How Recent is sorted (kept apart: it's nearly always wanted newest first). */
+  recentSort: SortOrder;
+  showHidden: boolean;
+}
+
+const DEFAULT_PREFS: PickerPrefs = {
+  sort: { key: 'modified', descending: true },
+  recentSort: { key: 'modified', descending: true },
+  showHidden: false,
+};
+
+/** The sidebar's Recent place; never a real path, which always starts with `/`. */
+const RECENT = 'recent:';
+
+/** A row: an entry and where it is (Recent's come from many folders). */
+interface PickerItem {
+  entry: FsEntry;
+  path: string;
+  /** The date shown: when it was modified, or in Recent, last used. */
+  when: number | null;
+}
+
 /**
  * In-Din modal file picker. Reuses the `window.fs` bridge (via the same
  * TanStack Query hooks as the Files app) to browse the real filesystem, but
@@ -40,6 +88,10 @@ interface FilePickerDialogProps {
  * several, chooses folders, or asks where to save a new file, as the
  * request says; Din's own features use it, and so do web pages' uploads
  * and native apps' file dialogs (through the desktop portal).
+ *
+ * Opening files starts in Recent (the newest screenshots, downloads, and
+ * files picked before) unless the asker names a folder. The sidebar has the
+ * Files app's places and Favorites, and the sort order is remembered.
  */
 export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDialogProps) {
   const bridge = getFsBridge();
@@ -47,6 +99,10 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
   const saving = options.mode === 'save';
   const directory = options.directory === true && !saving;
   const multiple = options.multiple === true && !saving;
+  const hasRecent = !saving && !directory;
+
+  const [storedPrefs, setPrefs] = useLocalStorage<PickerPrefs>('din:filepicker:prefs', DEFAULT_PREFS);
+  const prefs = useMemo(() => ({ ...DEFAULT_PREFS, ...storedPrefs }), [storedPrefs]);
 
   const filters = useMemo(
     () =>
@@ -62,28 +118,46 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
   );
   const filter = filters[filterIndex] ?? null;
 
-  const [cwd, setCwd] = useState<string | null>(options.initialPath ?? null);
-  /** Names selected in the current folder. */
+  /** A folder, `RECENT`, or null for home (once it resolves). */
+  const [cwd, setCwd] = useState<string | null>(options.initialPath ?? (hasRecent ? RECENT : null));
+  /** Paths selected. */
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   /** Where a Shift+click range starts. */
   const anchorRef = useRef<string | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
   const [name, setName] = useState(options.currentName ?? '');
   /** A save that would replace this path, waiting for the user to say so. */
   const [replacing, setReplacing] = useState<string | null>(null);
 
-  // Until the user navigates, browse the home directory (once it resolves).
-  const effectiveCwd = cwd ?? home.data ?? null;
-  const listing = useDirectory(effectiveCwd);
+  const location = cwd ?? home.data ?? null;
+  const inRecent = location === RECENT;
+  /** The folder shown, or null in Recent (and while home loads). */
+  const folder = inRecent ? null : location;
+  const listing = useDirectory(folder);
+  const recent = useRecentFiles(inRecent);
+  const bookmarks = useBookmarks(home.data);
+  const homeListing = useDirectory(home.data ?? null);
+  const volumes = useVolumes();
 
-  const entries = useMemo(
-    () =>
-      sortEntries(
-        (listing.data?.entries ?? []).filter((e) => showHidden || !e.name.startsWith('.')),
-      ),
-    [listing.data, showHidden],
-  );
-  const byName = useMemo(() => new Map(entries.map((e) => [e.name, e])), [entries]);
+  const sort = inRecent ? prefs.recentSort : prefs.sort;
+  const showHidden = prefs.showHidden;
+
+  const items = useMemo<PickerItem[]>(() => {
+    const compare = compareEntriesBy(sort.key, sort.descending);
+    if (inRecent) {
+      return (recent.data ?? [])
+        // Recent lists only what can be chosen; a folder dims the rest instead.
+        .filter((f) => filterMatches(filter, f.name))
+        .map((f) => ({ entry: f, path: f.path, when: f.usedMs }))
+        // Sorting by date means by when it was last used, which is what Recent shows.
+        .sort((a, b) => compare({ ...a.entry, mtimeMs: a.when }, { ...b.entry, mtimeMs: b.when }));
+    }
+    if (folder === null) return [];
+    return (listing.data?.entries ?? [])
+      .filter((e) => showHidden || !e.name.startsWith('.'))
+      .sort(compare)
+      .map((entry) => ({ entry, path: joinPath(folder, entry.name), when: entry.mtimeMs }));
+  }, [inRecent, recent.data, filter, folder, listing.data, showHidden, sort]);
+  const byPath = useMemo(() => new Map(items.map((item) => [item.path, item])), [items]);
 
   /** Whether an entry can be what the picker returns. */
   const choosable = useCallback(
@@ -92,69 +166,108 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     [directory, filter],
   );
 
-  const places = useMemo(() => {
-    const list: { name: string; path: string; icon: LucideIcon }[] = [];
+  const sections = useMemo(() => {
+    const places: Place[] = [];
+    if (hasRecent) places.push({ name: 'Recent', path: RECENT, icon: Clock });
     if (home.data) {
-      list.push({ name: 'Home', path: home.data, icon: Home });
-      list.push({ name: 'Downloads', path: joinPath(home.data, 'Downloads'), icon: Download });
-      list.push({ name: 'Desktop', path: joinPath(home.data, 'Desktop'), icon: Folder });
+      places.push({ name: 'Home', path: home.data, icon: Home });
+      const present = new Set(
+        (homeListing.data?.entries ?? []).filter((e) => e.kind === 'directory').map((e) => e.name),
+      );
+      for (const dir of USER_DIRS) {
+        if (present.has(dir.name)) places.push({ name: dir.name, path: joinPath(home.data, dir.name), icon: dir.icon });
+      }
     }
-    list.push({ name: 'System', path: '/', icon: HardDrive });
-    return list;
-  }, [home.data]);
+    const favorites = bookmarks.bookmarks.map<Place>((b) => ({
+      name: b.label ?? (b.path === '/' ? '/' : b.path.slice(b.path.lastIndexOf('/') + 1)),
+      path: b.path,
+      icon: Folder,
+    }));
+    const devices: Place[] = [
+      { name: 'Computer', path: '/', icon: HardDrive },
+      ...(volumes.data?.volumes ?? []).flatMap((v) =>
+        v.mountPoint ? [{ name: v.name, path: v.mountPoint, icon: Usb }] : [],
+      ),
+    ];
+    return [
+      { label: 'Places', places },
+      { label: 'Favorites', places: favorites },
+      { label: 'Devices', places: devices },
+    ];
+  }, [hasRecent, home.data, homeListing.data, bookmarks.bookmarks, volumes.data]);
 
   const navigate = useCallback((target: string) => {
     setSelected(new Set());
     anchorRef.current = null;
     setReplacing(null);
-    setCwd(target.length > 1 ? target.replace(/\/+$/, '') : '/');
+    setCwd(target === RECENT || target.length <= 1 ? target || '/' : target.replace(/\/+$/, ''));
   }, []);
 
+  const setSort = (key: SortKey) =>
+    setPrefs((stored) => {
+      const p = { ...DEFAULT_PREFS, ...stored };
+      const field = inRecent ? 'recentSort' : 'sort';
+      const current = p[field];
+      return {
+        ...p,
+        [field]: {
+          key,
+          descending: current.key === key ? !current.descending : key !== 'name',
+        },
+      };
+    });
+  const toggleHidden = () =>
+    setPrefs((stored) => ({ ...DEFAULT_PREFS, ...stored, showHidden: !(stored.showHidden ?? false) }));
+
   const finish = useCallback(
-    (paths: string[]) => onConfirm({ paths, filter: filter ? filterIndex : null }),
-    [onConfirm, filter, filterIndex],
+    (paths: string[]) => {
+      if (!directory) recordPickedFiles(paths);
+      onConfirm({ paths, filter: filter ? filterIndex : null });
+    },
+    [directory, onConfirm, filter, filterIndex],
   );
 
   /** Save under `fileName` in the current folder, asking before replacing a file. */
   const save = useCallback(
     (fileName: string) => {
       const clean = fileName.trim();
-      if (effectiveCwd === null || !clean || clean.includes('/') || clean === '.' || clean === '..') return;
-      const existing = byName.get(clean);
-      const target = joinPath(effectiveCwd, clean);
-      if (existing?.kind === 'directory') return navigate(target);
+      if (folder === null || !clean || clean.includes('/') || clean === '.' || clean === '..') return;
+      const target = joinPath(folder, clean);
+      const existing = byPath.get(target);
+      if (existing?.entry.kind === 'directory') return navigate(target);
       if (existing && replacing !== target) return setReplacing(target);
       finish([target]);
     },
-    [effectiveCwd, byName, replacing, navigate, finish],
+    [folder, byPath, replacing, navigate, finish],
   );
 
-  const selectedPaths = useMemo(() => {
-    if (effectiveCwd === null) return [];
-    return [...selected]
-      .map((n) => byName.get(n))
-      .filter((e): e is FsEntry => e !== undefined && choosable(e))
-      .map((e) => joinPath(effectiveCwd, e.name));
-  }, [selected, byName, choosable, effectiveCwd]);
+  const selectedPaths = useMemo(
+    () => [...selected].filter((p) => {
+      const item = byPath.get(p);
+      return item !== undefined && choosable(item.entry);
+    }),
+    [selected, byPath, choosable],
+  );
 
   const canConfirm = saving
-    ? name.trim() !== '' && !name.includes('/')
+    ? folder !== null && name.trim() !== '' && !name.includes('/')
     : directory
-      ? effectiveCwd !== null
+      ? folder !== null
       : selectedPaths.length > 0;
 
   const confirm = () => {
     if (saving) return save(name);
     if (directory) {
       if (selectedPaths.length > 0) finish(selectedPaths);
-      else if (effectiveCwd) finish([effectiveCwd]);
+      else if (folder) finish([folder]);
       return;
     }
     if (selectedPaths.length > 0) finish(selectedPaths);
   };
 
-  const clickEntry = useCallback(
-    (entry: FsEntry, event: React.MouseEvent) => {
+  const clickItem = useCallback(
+    (item: PickerItem, event: React.MouseEvent) => {
+      const { entry, path } = item;
       if (saving) {
         if (entry.kind === 'file') {
           setName(entry.name);
@@ -169,36 +282,35 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
       const toggle = multiple && (event.ctrlKey || event.metaKey);
       const range = multiple && event.shiftKey && anchorRef.current !== null;
       if (range) {
-        const names = entries.filter(choosable).map((e) => e.name);
-        const from = names.indexOf(anchorRef.current!);
-        const to = names.indexOf(entry.name);
+        const paths = items.filter((i) => choosable(i.entry)).map((i) => i.path);
+        const from = paths.indexOf(anchorRef.current!);
+        const to = paths.indexOf(path);
         if (from !== -1 && to !== -1) {
-          setSelected(new Set(names.slice(Math.min(from, to), Math.max(from, to) + 1)));
+          setSelected(new Set(paths.slice(Math.min(from, to), Math.max(from, to) + 1)));
           return;
         }
       }
-      anchorRef.current = entry.name;
+      anchorRef.current = path;
       setSelected((current) => {
-        if (!toggle) return new Set([entry.name]);
+        if (!toggle) return new Set([path]);
         const next = new Set(current);
-        if (!next.delete(entry.name)) next.add(entry.name);
+        if (!next.delete(path)) next.add(path);
         return next;
       });
     },
-    [saving, choosable, multiple, entries],
+    [saving, choosable, multiple, items],
   );
 
-  const openEntry = useCallback(
-    (entry: FsEntry) => {
-      if (effectiveCwd === null) return;
-      const target = joinPath(effectiveCwd, entry.name);
-      if (entry.kind === 'directory') navigate(target);
+  const openItem = useCallback(
+    (item: PickerItem) => {
+      const { entry, path } = item;
+      if (entry.kind === 'directory') navigate(path);
       else if (saving && entry.kind === 'file') {
         setName(entry.name);
         save(entry.name);
-      } else if (choosable(entry)) finish([target]);
+      } else if (choosable(entry)) finish([path]);
     },
-    [effectiveCwd, navigate, saving, save, choosable, finish],
+    [navigate, saving, save, choosable, finish],
   );
 
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -211,6 +323,8 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     const dot = input.value.lastIndexOf('.');
     input.setSelectionRange(0, dot > 0 ? dot : input.value.length);
   }, []);
+
+  const favorite = folder !== null && bookmarks.bookmarks.some((b) => b.path === folder);
 
   const title =
     options.title ??
@@ -238,6 +352,52 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     status = multiple ? 'Select files (Ctrl+click for more)' : 'Select a file';
   }
 
+  const query = inRecent ? recent : listing;
+  let body: React.ReactNode;
+  if (!bridge) {
+    body = (
+      <FallbackMessage>
+        The file picker needs the Din desktop shell and isn't available
+        in a plain browser.
+      </FallbackMessage>
+    );
+  } else if (query.isError) {
+    body = <FallbackMessage>{cleanFsError(query.error)}</FallbackMessage>;
+  } else if (location === null || query.isLoading) {
+    body = (
+      <div className="space-y-1 p-2">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className="h-8 w-full" />
+        ))}
+      </div>
+    );
+  } else {
+    body = (
+      // Keyed by place so scroll position resets on navigation.
+      <PickerList
+        key={location}
+        items={items}
+        home={home.data}
+        showLocation={inRecent}
+        sort={sort}
+        onSort={setSort}
+        empty={
+          inRecent
+            ? filter
+              ? `No recent ${filter.name || 'files'}.`
+              : 'No recent files.'
+            : 'This folder is empty.'
+        }
+        choosable={choosable}
+        dimmed={(entry) => entry.kind !== 'directory' && !(saving ? filterMatches(filter, entry.name) : choosable(entry))}
+        selected={selected}
+        multiple={multiple}
+        onClick={clickItem}
+        onOpen={openItem}
+      />
+    );
+  }
+
   return (
     <div
       className="fixed inset-0 z-[1000] grid place-items-center bg-black/50 p-6"
@@ -252,7 +412,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="flex h-[560px] max-h-full w-[820px] max-w-full flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-2xl outline-none"
+        className="flex h-[600px] max-h-full w-[900px] max-w-full flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-2xl outline-none"
         onKeyDown={(e) => {
           const typing = e.target instanceof HTMLInputElement;
           if (e.key === 'Escape') {
@@ -262,18 +422,18 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             e.preventDefault();
             if (canConfirm) confirm();
           } else if (
-            effectiveCwd &&
-            effectiveCwd !== '/' &&
+            folder &&
+            folder !== '/' &&
             ((e.altKey && e.key === 'ArrowUp') || (e.key === 'Backspace' && !typing))
           ) {
             e.preventDefault();
-            navigate(parentPath(effectiveCwd));
+            navigate(parentPath(folder));
           } else if (e.ctrlKey && e.key.toLowerCase() === 'h') {
             e.preventDefault();
-            setShowHidden((v) => !v);
+            toggleHidden();
           } else if (multiple && e.ctrlKey && e.key.toLowerCase() === 'a' && !typing) {
             e.preventDefault();
-            setSelected(new Set(entries.filter(choosable).map((entry) => entry.name)));
+            setSelected(new Set(items.filter((i) => choosable(i.entry)).map((i) => i.path)));
           }
         }}
       >
@@ -286,8 +446,8 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             size="icon"
             className="size-7"
             aria-label="Parent folder"
-            disabled={!effectiveCwd || effectiveCwd === '/'}
-            onClick={() => effectiveCwd && navigate(parentPath(effectiveCwd))}
+            disabled={!folder || folder === '/'}
+            onClick={() => folder && navigate(parentPath(folder))}
           >
             <ArrowUp className="size-4" aria-hidden />
           </Button>
@@ -297,13 +457,30 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             size="icon"
             className="size-7"
             aria-label="Refresh"
-            onClick={() => listing.refetch()}
+            onClick={() => query.refetch()}
           >
-            <RotateCw className={cn('size-4', listing.isFetching && 'animate-spin')} aria-hidden />
+            <RotateCw className={cn('size-4', query.isFetching && 'animate-spin')} aria-hidden />
           </Button>
           <div className="ml-1 min-w-0 flex-1 truncate rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-            {effectiveCwd ?? 'Loading…'}
+            {inRecent ? 'Recent' : (location ?? 'Loading…')}
           </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            aria-label={favorite ? 'Remove from Favorites' : 'Add to Favorites'}
+            aria-pressed={favorite}
+            title={favorite ? 'Remove from Favorites' : 'Add to Favorites'}
+            disabled={folder === null}
+            onClick={() => {
+              if (!folder) return;
+              if (favorite) bookmarks.remove(folder);
+              else bookmarks.add(folder);
+            }}
+          >
+            <Star className={cn('size-4', favorite && 'fill-current text-primary')} aria-hidden />
+          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -312,7 +489,8 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             aria-label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
             aria-pressed={showHidden}
             title="Show hidden files (Ctrl+H)"
-            onClick={() => setShowHidden((v) => !v)}
+            disabled={inRecent}
+            onClick={toggleHidden}
           >
             {showHidden ? <Eye className="size-4" aria-hidden /> : <EyeOff className="size-4" aria-hidden />}
           </Button>
@@ -320,57 +498,48 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
 
         <div className="flex min-h-0 flex-1">
           {/* Places sidebar */}
-          <nav className="hidden w-40 shrink-0 space-y-0.5 overflow-y-auto border-r border-border/60 bg-muted/20 p-2 sm:block">
-            {places.map((place) => (
-              <button
-                key={place.path}
-                type="button"
-                onClick={() => navigate(place.path)}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                  'text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  effectiveCwd === place.path && 'bg-primary/10 text-foreground',
-                )}
-              >
-                <place.icon className="size-4 shrink-0" aria-hidden />
-                <span className="truncate">{place.name}</span>
-              </button>
-            ))}
+          <nav
+            aria-label="Places"
+            className="hidden w-44 shrink-0 flex-col gap-3 overflow-y-auto border-r border-border/60 bg-muted/20 p-2 sm:flex"
+          >
+            {sections.map((section) =>
+              section.places.length === 0 ? null : (
+                <div key={section.label} className="flex flex-col gap-0.5">
+                  <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {section.label}
+                  </p>
+                  {section.places.map((place) => {
+                    const active = location === place.path;
+                    return (
+                      <button
+                        key={place.path}
+                        type="button"
+                        title={place.path === RECENT ? undefined : place.path}
+                        aria-current={active ? 'location' : undefined}
+                        onClick={() => navigate(place.path)}
+                        className={cn(
+                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                          active
+                            ? 'bg-primary/15 font-medium text-foreground'
+                            : 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
+                        )}
+                      >
+                        <place.icon
+                          className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')}
+                          aria-hidden
+                        />
+                        <span className="truncate">{place.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ),
+            )}
           </nav>
 
           {/* File list */}
-          <div className="min-w-0 flex-1 overflow-hidden">
-            {!bridge ? (
-              <FallbackMessage>
-                The file picker needs the Din desktop shell and isn't available
-                in a plain browser.
-              </FallbackMessage>
-            ) : listing.isError ? (
-              <FallbackMessage>{cleanFsError(listing.error)}</FallbackMessage>
-            ) : listing.isLoading || effectiveCwd === null ? (
-              <div className="space-y-1 p-2">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <Skeleton key={i} className="h-8 w-full" />
-                ))}
-              </div>
-            ) : entries.length === 0 ? (
-              <FallbackMessage>This folder is empty.</FallbackMessage>
-            ) : (
-              // Keyed by path so scroll position resets on navigation.
-              <PickerList
-                key={effectiveCwd}
-                cwd={effectiveCwd}
-                entries={entries}
-                choosable={choosable}
-                dimmed={(entry) => entry.kind !== 'directory' && !(saving ? filterMatches(filter, entry.name) : choosable(entry))}
-                selected={selected}
-                multiple={multiple}
-                onClick={clickEntry}
-                onOpen={openEntry}
-              />
-            )}
-          </div>
+          <div className="min-w-0 flex-1 overflow-hidden">{body}</div>
         </div>
 
         {/* Footer */}
@@ -437,20 +606,59 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
   );
 }
 
+interface Place {
+  name: string;
+  path: string;
+  icon: LucideIcon;
+}
+
 /** Fixed row height for the virtualized picker list (px). */
 const ROW_HEIGHT = 32;
 /** Extra rows rendered above/below the viewport to hide scroll pop-in. */
 const OVERSCAN = 10;
 
+const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
+
+/** "Today, 4:31 PM", "Yesterday, 9:02 AM", or "Oct 3, 2026". */
+function formatWhen(ms: number): string {
+  const day = new Date(ms);
+  day.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((today.getTime() - day.getTime()) / 86_400_000);
+  if (days === 0) return `Today, ${TIME_FORMAT.format(ms)}`;
+  if (days === 1) return `Yesterday, ${TIME_FORMAT.format(ms)}`;
+  return DATE_FORMAT.format(ms);
+}
+
+/** A folder for display, with home as `~`. */
+function displayFolder(path: string, home: string | undefined): string {
+  const dir = parentPath(path);
+  if (home && (dir === home || dir.startsWith(`${home}/`))) return `~${dir.slice(home.length)}`;
+  return dir;
+}
+
+const COLUMNS: { key: SortKey | 'location'; label: string; className: string; align?: 'right' }[] = [
+  { key: 'name', label: 'Name', className: 'min-w-0 flex-1' },
+  { key: 'location', label: 'Location', className: 'hidden w-40 shrink-0 @2xl:flex' },
+  { key: 'size', label: 'Size', className: 'w-20 shrink-0', align: 'right' },
+  { key: 'modified', label: 'Modified', className: 'hidden w-36 shrink-0 @md:flex' },
+];
+
 /**
- * Virtualized picker listing. Directory listings can reach thousands of
- * entries (the bridge caps at 5000); windowing keeps the mounted DOM at
- * ~viewport size, and memoized rows keep a selection change from re-rendering
- * every row.
+ * Virtualized picker listing under sortable column headers. Directory
+ * listings can reach thousands of entries (the bridge caps at 5000);
+ * windowing keeps the mounted DOM at ~viewport size, and memoized rows keep
+ * a selection change from re-rendering every row.
  */
 const PickerList = memo(function PickerList({
-  cwd,
-  entries,
+  items,
+  home,
+  showLocation,
+  sort,
+  onSort,
+  empty,
   choosable,
   dimmed,
   selected,
@@ -458,77 +666,130 @@ const PickerList = memo(function PickerList({
   onClick,
   onOpen,
 }: {
-  cwd: string;
-  entries: FsEntry[];
+  items: PickerItem[];
+  home: string | undefined;
+  showLocation: boolean;
+  sort: SortOrder;
+  onSort: (key: SortKey) => void;
+  empty: string;
   choosable: (entry: FsEntry) => boolean;
   dimmed: (entry: FsEntry) => boolean;
   selected: ReadonlySet<string>;
   multiple: boolean;
-  onClick: (entry: FsEntry, event: React.MouseEvent) => void;
-  onOpen: (entry: FsEntry) => void;
+  onClick: (item: PickerItem, event: React.MouseEvent) => void;
+  onOpen: (item: PickerItem) => void;
 }) {
   const { containerRef, onScroll, start, end, totalHeight } = useVirtualRows({
-    count: entries.length,
+    count: items.length,
     rowHeight: ROW_HEIGHT,
     overscan: OVERSCAN,
   });
+  const columns = COLUMNS.filter((col) => showLocation || col.key !== 'location');
 
   return (
-    <div
-      ref={containerRef}
-      onScroll={onScroll}
-      className="h-full overflow-y-auto p-1"
-    >
-      <ul
-        className="relative"
-        style={{ height: totalHeight }}
-        role="listbox"
-        aria-multiselectable={multiple || undefined}
+    <div ref={containerRef} onScroll={onScroll} className="@container flex h-full flex-col overflow-y-auto">
+      {/* In the scroll area, so its columns line up with the rows' beside the scrollbar. */}
+      <div
+        role="row"
+        className="sticky top-0 z-10 flex h-8 shrink-0 items-stretch gap-3 border-b border-border/60 bg-background px-4 text-xs text-muted-foreground"
       >
-        {entries.slice(start, end).map((entry, i) => (
-          <PickerRow
-            key={entry.name}
-            entry={entry}
-            path={joinPath(cwd, entry.name)}
-            top={(start + i) * ROW_HEIGHT}
-            dim={dimmed(entry)}
-            isSelected={selected.has(entry.name) && choosable(entry)}
-            onClick={onClick}
-            onOpen={onOpen}
-          />
-        ))}
-      </ul>
+        {columns.map((col) => {
+          const key = col.key;
+          if (key === 'location') {
+            return (
+              <span key={key} role="columnheader" className={cn(col.className, 'items-center font-medium')}>
+                {col.label}
+              </span>
+            );
+          }
+          const active = sort.key === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              role="columnheader"
+              aria-sort={active ? (sort.descending ? 'descending' : 'ascending') : 'none'}
+              onClick={() => onSort(key)}
+              className={cn(
+                col.className,
+                'flex items-center gap-1 rounded-sm font-medium hover:text-foreground',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                col.align === 'right' && 'justify-end',
+                active && 'text-foreground',
+              )}
+            >
+              {key === 'modified' && showLocation ? 'Date' : col.label}
+              {active &&
+                (sort.descending ? (
+                  <ChevronDown className="size-3.5" aria-hidden />
+                ) : (
+                  <ChevronUp className="size-3.5" aria-hidden />
+                ))}
+            </button>
+          );
+        })}
+      </div>
+      {items.length === 0 ? (
+        <div className="min-h-0 flex-1">
+          <FallbackMessage>{empty}</FallbackMessage>
+        </div>
+      ) : (
+        <div className="p-1">
+          <ul
+            className="relative"
+            style={{ height: totalHeight }}
+            role="listbox"
+            aria-multiselectable={multiple || undefined}
+          >
+            {items.slice(start, end).map((item, i) => (
+              <PickerRow
+                key={item.path}
+                item={item}
+                location={showLocation ? displayFolder(item.path, home) : null}
+                top={(start + i) * ROW_HEIGHT}
+                dim={dimmed(item.entry)}
+                isSelected={selected.has(item.path) && choosable(item.entry)}
+                onClick={onClick}
+                onOpen={onOpen}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 });
 
 /** One row in the picker list, absolutely positioned within the virtual list. */
 const PickerRow = memo(function PickerRow({
-  entry,
-  path,
+  item,
+  location,
   top,
   dim,
   isSelected,
   onClick,
   onOpen,
 }: {
-  entry: FsEntry;
-  path: string;
+  item: PickerItem;
+  /** The containing folder, shown in Recent. */
+  location: string | null;
   top: number;
   dim: boolean;
   isSelected: boolean;
-  onClick: (entry: FsEntry, event: React.MouseEvent) => void;
-  onOpen: (entry: FsEntry) => void;
+  onClick: (item: PickerItem, event: React.MouseEvent) => void;
+  onOpen: (item: PickerItem) => void;
 }) {
+  const { entry, path } = item;
   return (
     <li className="absolute inset-x-0" style={{ top, height: ROW_HEIGHT }} role="option" aria-selected={isSelected}>
       <button
         type="button"
         disabled={dim}
-        onClick={(e) => onClick(entry, e)}
-        onDoubleClick={() => onOpen(entry)}
+        title={location !== null ? path : undefined}
+        onClick={(e) => onClick(item, e)}
+        onDoubleClick={() => onOpen(item)}
         className={cn(
-          'flex h-full w-full items-center gap-2 rounded-md px-2 text-left text-sm',
+          'flex h-full w-full items-center gap-3 rounded-md px-3 text-left text-sm',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           isSelected
             ? 'bg-primary/15 text-foreground'
@@ -536,21 +797,29 @@ const PickerRow = memo(function PickerRow({
           dim && 'opacity-40',
         )}
       >
-        <FileIcon
-          path={path}
-          name={entry.name}
-          kind={entry.kind}
-          size={entry.size}
-          mtimeMs={entry.mtimeMs}
-          symlink={entry.symlink}
-          px={20}
-        />
-        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-        {entry.kind === 'file' && entry.size !== null && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatBytes(entry.size)}
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <FileIcon
+            path={path}
+            name={entry.name}
+            kind={entry.kind}
+            size={entry.size}
+            mtimeMs={entry.mtimeMs}
+            symlink={entry.symlink}
+            px={20}
+          />
+          <span className="truncate">{entry.name}</span>
+        </span>
+        {location !== null && (
+          <span className="hidden w-40 shrink-0 truncate text-xs text-muted-foreground @2xl:block">
+            {location}
           </span>
         )}
+        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+          {entry.kind === 'file' && entry.size !== null ? formatBytes(entry.size) : ''}
+        </span>
+        <span className="hidden w-36 shrink-0 truncate text-xs tabular-nums text-muted-foreground @md:block">
+          {item.when !== null ? formatWhen(item.when) : ''}
+        </span>
       </button>
     </li>
   );
