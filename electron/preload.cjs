@@ -87,10 +87,14 @@ const { contextBridge, ipcRenderer, sharedTexture, webFrame } = require('electro
 // Boot bridge (window.boot): the renderer reports that the app has mounted
 // beneath the black boot veil; main.mts keeps the shell window hidden until
 // this arrives so the window never maps onto an unpainted (white/garbage)
-// surface on bare X11.
+// surface.
 contextBridge.exposeInMainWorld('boot', {
-  /** Signal that the shell's first frame is ready to be shown. */
-  ready: () => ipcRenderer.send('shell:bootReady'),
+  /**
+   * Signal that the shell's first frame is ready to be shown. Resolves once
+   * the window is on screen.
+   * @returns {Promise<void>}
+   */
+  ready: () => ipcRenderer.invoke('shell:bootReady'),
 });
 
 // Session bridge (window.session): "Log out" quits the shell cleanly. Under

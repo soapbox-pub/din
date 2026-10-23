@@ -4,13 +4,13 @@
  *
  * The shell window starts hidden (see electron/main.mts) and is shown only
  * after the renderer reports its first frame is on the way, so the window
- * never maps onto an unpainted (white/garbage) buffer on bare X11. In a
+ * never maps onto an unpainted (white/garbage) buffer. In a
  * plain browser there is no host to signal and this is a no-op.
  */
 
 export interface BootBridge {
-  /** Signal that the shell's first frame is ready to be shown. */
-  ready(): void;
+  /** Signal that the shell's first frame is ready to be shown. Resolves once the window is on screen. */
+  ready(): Promise<void>;
 }
 
 declare global {

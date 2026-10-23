@@ -4994,10 +4994,13 @@ app.whenReady().then(() => {
   // Bare X11 fullscreens a window onto one display; across several, the
   // explicit bounds have to do.
   const spanX11 = DISPLAY_TOOL === 'xrandr' && screen.getAllDisplays().length > 1;
+  // Fullscreen and kiosk are applied when the window is revealed (below),
+  // not here: asking for them at construction maps the window at once on
+  // Wayland, show: false or not, and cage then presents Chromium's white
+  // surface before the page's first frame.
+  const fullscreen = production && !spanX11;
   const win = new BrowserWindow({
     // Dev: normal windowed shell. Production: fills the displays, frameless.
-    fullscreen: production && !spanX11,
-    kiosk: production && !spanX11,
     frame: !production,
     ...(production ? screenBounds() : { width: 1280, height: 800 }),
     autoHideMenuBar: true,
@@ -5132,15 +5135,25 @@ app.whenReady().then(() => {
   // black boot veil (electron/preload.cjs -> src/components/desktop/
   // BootVeil.tsx). ready-to-show fires on the first paint of ANYTHING -
   // including the white initial about:blank - and mapping the window that
-  // early presents an unpainted (white/pixelated) buffer on bare X11. The
-  // short warm-up lets the hidden window composite complete black frames
-  // before it maps; the veil then fades in from black. The fallback ensures
-  // a crashed renderer can never leave the kiosk on a permanent black screen.
+  // early presents an unpainted (white/pixelated) buffer. The short warm-up
+  // lets the hidden window composite complete black frames before it maps;
+  // the veil then fades in from black. The fallback ensures a crashed
+  // renderer can never leave the kiosk on a permanent black screen.
+  // The renderer's request resolves once the window is on screen, which is
+  // when the veil starts to fade: a hidden window's document still reports
+  // itself visible, so the renderer can't tell on its own.
   const reveal = () => {
-    if (!win.isDestroyed() && !win.isVisible()) win.show();
+    if (win.isDestroyed() || win.isVisible()) return;
+    if (fullscreen) {
+      win.setFullScreen(true);
+      win.setKiosk(true);
+    }
+    win.show();
   };
-  ipcMain.once('shell:bootReady', (event) => {
-    if (event.sender === win.webContents) setTimeout(reveal, 400);
+  ipcMain.handle('shell:bootReady', async (event) => {
+    if (event.sender !== win.webContents) return;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    reveal();
   });
   setTimeout(reveal, 10000);
 

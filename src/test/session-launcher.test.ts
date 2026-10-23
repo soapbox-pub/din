@@ -28,8 +28,8 @@ describe('standalone Din session launcher', () => {
     // the fullscreen kiosk off its absence, or the session opens windowed.
     expect(main).toMatch(/DEV_URL\s*=\s*process\.env\.DIN_DEV_URL/);
     expect(main).toMatch(/production\s*=\s*!DEV_URL/);
-    expect(main).toMatch(/fullscreen:\s*production/);
-    expect(main).toMatch(/kiosk:\s*production/);
+    expect(main).toMatch(/fullscreen\s*=\s*production/);
+    expect(main).toMatch(/if \(fullscreen\) \{\s*win\.setFullScreen\(true\);\s*win\.setKiosk\(true\);/);
   });
 
   it('execs paths that actually exist in the tree', () => {
