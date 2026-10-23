@@ -27,7 +27,8 @@ interface SwitchSession {
    *  - `held`: opened from a shell-DOM Alt+Tab, so we hold the overlay open
    *    while Alt is down and commit on its keyup.
    *  - `bridge`: opened from a guest-forwarded cycle (focus was inside a
-   *    <webview>), where no keyup is observable, so an idle timer commits.
+   *    <webview>), which commits on the forwarded `alt-released`, or on an
+   *    idle timer if that never comes.
    */
   mode: 'held' | 'bridge';
 }
@@ -47,8 +48,8 @@ interface SwitchSession {
  * Two input paths feed the same session, mirroring DesktopHotkeys: a
  * capture-phase keydown/keyup listener for keys pressed in the shell DOM, and
  * the shell-shortcut bridge for Alt+Tab pressed inside an Electron <webview>
- * guest (where keydown never reaches the shell). The guest path can't see Alt
- * release, so it auto-commits on an idle timer.
+ * guest (where keydown never reaches the shell), which forwards Alt's release
+ * as `alt-released`.
  */
 export function WindowSwitcher() {
   const { windows, actions } = useWindowManager();
@@ -197,7 +198,7 @@ export function WindowSwitcher() {
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
       if (shortcut.action === 'alt-released') {
-        if (sessionRef.current?.mode === 'bridge') commit();
+        if (sessionRef.current) commit();
         return;
       }
       if (shortcut.action !== 'cycle-windows') return;

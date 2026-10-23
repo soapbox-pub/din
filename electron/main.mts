@@ -4755,6 +4755,31 @@ function isPrintInput(input: Electron.Input): boolean {
   );
 }
 
+/**
+ * Keep a keydown from reaching the page, without losing the keyups after it.
+ * Chromium drops every keyup a page would get after a keydown the browser
+ * handled, until the next keydown. So the Alt of an Alt+Tab claimed here
+ * never came up: the guest's Alt release (and the shell's `alt-released`)
+ * only arrived after Alt was pressed again, and the switcher hung open until
+ * then. Replaying the held modifier as an autorepeat keydown ends the
+ * suppression at once; a held key repeating is something pages already see.
+ */
+function claimGuestKey(
+  contents: Electron.WebContents,
+  event: Electron.Event,
+  input: Electron.Input,
+): void {
+  event.preventDefault();
+  const keyCode = input.alt ? 'Alt' : input.meta ? 'Meta' : input.control ? 'Control' : input.shift ? 'Shift' : null;
+  if (!keyCode) return;
+  const modifiers: NonNullable<Electron.InputEvent['modifiers']> = ['isautorepeat'];
+  if (input.alt) modifiers.push('alt');
+  if (input.meta) modifiers.push('meta');
+  if (input.control) modifiers.push('control');
+  if (input.shift) modifiers.push('shift');
+  contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+}
+
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
@@ -5560,7 +5585,7 @@ app.on('web-contents-created', (_event, contents) => {
       if (isDevtoolsToggleInput(input)) {
         const targetId = devtoolsBridge.targetIdForHost(contents.id);
         if (targetId === undefined) return;
-        event.preventDefault();
+        claimGuestKey(contents, event, input);
         sendToShell('devtools:toggleRequested', { wcId: targetId });
         return;
       }
@@ -5574,7 +5599,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {
-        event.preventDefault();
+        claimGuestKey(contents, event, input);
         sendToShell('shortcut', shortcut);
       }
     });
@@ -5588,18 +5613,18 @@ app.on('web-contents-created', (_event, contents) => {
   if (isBrowserTab) {
     contents.on('before-input-event', (event, input) => {
       if (isDevtoolsToggleInput(input)) {
-        event.preventDefault();
+        claimGuestKey(contents, event, input);
         sendToShell('devtools:toggleRequested', { wcId: contents.id });
         return;
       }
       if (isPrintInput(input)) {
-        event.preventDefault();
+        claimGuestKey(contents, event, input);
         requestPagePrint(contents);
         return;
       }
       const shortcut = shellShortcutForInput(input);
       if (!shortcut) return;
-      event.preventDefault();
+      claimGuestKey(contents, event, input);
       sendToShell('shortcut', { ...shortcut, wcId: contents.id });
     });
 
@@ -5620,7 +5645,7 @@ app.on('web-contents-created', (_event, contents) => {
   if (isAppGuest(contents)) {
     contents.on('before-input-event', (event, input) => {
       if (isPrintInput(input)) {
-        event.preventDefault();
+        claimGuestKey(contents, event, input);
         requestPagePrint(contents);
         return;
       }
@@ -5634,7 +5659,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {
-        event.preventDefault();
+        claimGuestKey(contents, event, input);
         sendToShell('shortcut', shortcut);
       }
     });
