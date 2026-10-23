@@ -12,25 +12,35 @@ import {
 import type { TabTransfer } from '@/hooks/useTabTransfer';
 
 /**
- * A tab's right-click menu: move it to a new window or to another of the
- * app's windows (when the strip supports moving tabs), and close it.
- * `children` is the tab element itself.
+ * A tab's right-click menu: pin it (when the app has pinned tabs), move it to
+ * a new window or to another of the app's windows (when the strip supports
+ * moving tabs), and close it. `children` is the tab element itself.
  */
 export function TabContextMenu({
   tabId,
   transfer,
   onClose,
+  pinned,
+  onTogglePin,
   children,
 }: {
   tabId: string;
   transfer: TabTransfer;
   onClose: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
   children: ReactNode;
 }) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-52">
+        {onTogglePin && (
+          <>
+            <ContextMenuItem onSelect={onTogglePin}>{pinned ? 'Unpin tab' : 'Pin tab'}</ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {transfer.enabled && (
           <>
             <ContextMenuItem

@@ -85,6 +85,13 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { moveItem, useDragReorder } from '@/hooks/useDragReorder';
 import { useTabTransfer, type TabTransfer, type TabTransferOptions } from '@/hooks/useTabTransfer';
 import { parkedTab } from '@/lib/tabTransfer';
+import {
+  claimBrowserSession,
+  forgetBrowserWindow,
+  restoredWindowParam,
+  saveBrowserWindow,
+  type SavedWindow,
+} from '@/lib/browserSession';
 import { TabContextMenu } from '@/components/desktop/TabContextMenu';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
@@ -208,6 +215,14 @@ interface Tab {
   deviceId: string | null;
   /** Page zoom (Ctrl+= / Ctrl+- / Ctrl+0); 1 is 100%. */
   zoom: number;
+  /** Pinned tabs sit, icon-only, before all the others and have no close button. */
+  pinned: boolean;
+  /**
+   * A restored tab that hasn't been looked at yet: it has no surface, so
+   * reopening the browser doesn't load every page at once. Cleared when the
+   * tab is first selected.
+   */
+  dormant: boolean;
 }
 
 function createTab(
@@ -241,6 +256,47 @@ function createTab(
     undockedWindowId: null,
     deviceId: null,
     zoom: 1,
+    pinned: false,
+    dormant: false,
+  };
+}
+
+/** Pinned tabs first, otherwise in the same order. */
+function pinnedFirst(tabs: Tab[]): Tab[] {
+  const firstUnpinned = tabs.findIndex((t) => !t.pinned);
+  if (firstUnpinned === -1 || !tabs.slice(firstUnpinned).some((t) => t.pinned)) return tabs;
+  return [...tabs.filter((t) => t.pinned), ...tabs.filter((t) => !t.pinned)];
+}
+
+/** Rebuild a window's tabs from its saved session. Only the selected one loads. */
+function restoreTabs(saved: SavedWindow): { tabs: Tab[]; activeId: string } {
+  const created = saved.tabs.map((s, i) => ({
+    ...createTab(s.url || NEW_TAB_URL),
+    title: s.title,
+    favicon: s.favicon,
+    pinned: s.pinned,
+    dormant: i !== saved.active,
+  }));
+  const tabs = created.map((tab, i) => {
+    const parent = saved.tabs[i].parent;
+    return { ...tab, parentId: parent !== null ? created[parent]?.id ?? null : null };
+  });
+  return { tabs: pinnedFirst(tabs), activeId: (tabs[saved.active] ?? tabs[0]).id };
+}
+
+/** What a window's tabs look like on disk. Blank tabs aren't worth keeping. */
+function saveTabs(tabs: Tab[], activeId: string): SavedWindow {
+  const kept = tabs.filter((t) => t.url !== '');
+  const index = new Map(kept.map((t, i) => [t.id, i]));
+  return {
+    tabs: kept.map((t) => ({
+      url: t.url,
+      title: t.title,
+      favicon: t.favicon,
+      pinned: t.pinned,
+      parent: t.parentId !== null ? index.get(t.parentId) ?? null : null,
+    })),
+    active: Math.max(0, kept.findIndex((t) => t.id === activeId)),
   };
 }
 
@@ -315,12 +371,26 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const { close: closeWindow, open: openWindow, focus: focusWindow } =
     useWindowActions();
   const setTitlebar = useWindowTitlebar();
-  const [tabs, setTabs] = useState<Tab[]>(() => {
+  const [initial] = useState(() => {
     // A window opened for a tab dragged out of another one.
     const adopted = parkedTab(params);
-    return [isTabTransferPayload(adopted) ? adoptTab(adopted) : createTab(NEW_TAB_URL)];
+    if (isTabTransferPayload(adopted)) {
+      const tab = adoptTab(adopted);
+      return { tabs: [tab], activeId: tab.id, otherWindows: [] };
+    }
+    // Reopening the browser brings back the tabs it had (see browserSession).
+    const passed = restoredWindowParam(params);
+    const claim = isPrivate
+      ? null
+      : passed
+        ? { window: passed, others: [] }
+        : claimBrowserSession(windowId);
+    if (claim) return { ...restoreTabs(claim.window), otherWindows: claim.others };
+    const tab = createTab(NEW_TAB_URL);
+    return { tabs: [tab], activeId: tab.id, otherWindows: [] };
   });
-  const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
+  const [tabs, setTabs] = useState<Tab[]>(initial.tabs);
+  const [activeId, setActiveId] = useState<string>(initial.activeId);
   // Tab surfaces render in the order their tabs opened, not in tab order:
   // reordering the tabs would otherwise move their <webview>s around the
   // DOM, and a moved <webview> loses its guest page.
@@ -342,6 +412,27 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const activeIdRef = useRef(activeId);
   useEffect(() => {
     activeIdRef.current = activeId;
+  }, [activeId]);
+  // Keep this window's tabs on file so reopening the browser restores them.
+  useEffect(() => {
+    if (!isPrivate) saveBrowserWindow(windowId, saveTabs(tabs, activeId));
+  }, [isPrivate, windowId, tabs, activeId]);
+  useEffect(() => {
+    if (!isPrivate) return () => forgetBrowserWindow(windowId);
+  }, [isPrivate, windowId]);
+  // Din quit with more than one browser window open: the rest come back in
+  // windows of their own.
+  const restoredOthers = useRef(false);
+  useEffect(() => {
+    if (restoredOthers.current) return;
+    restoredOthers.current = true;
+    for (const saved of initial.otherWindows) openWindow('web-browser', { restoreSession: saved });
+  }, [initial, openWindow]);
+  // A restored tab loads its page the first time it's selected.
+  useEffect(() => {
+    if (tabsRef.current.some((t) => t.id === activeId && t.dormant)) {
+      setTabs((ts) => ts.map((t) => (t.id === activeId ? { ...t, dormant: false } : t)));
+    }
   }, [activeId]);
   // Tree-tabs mode: a vertical sidebar of tabs nested by opener, shared
   // across every browser window (a plain browser preference).
@@ -414,6 +505,21 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     },
     [],
   );
+
+  /**
+   * Pin or unpin a tab. Either way it lands where the pinned tabs meet the
+   * rest, like Chrome; a pinned tab leaves the tree it was in.
+   */
+  const togglePin = useCallback((id: string) => {
+    setTabs((ts) => {
+      const tab = ts.find((t) => t.id === id);
+      if (!tab) return ts;
+      const rest = ts.filter((t) => t.id !== id);
+      const at = rest.filter((t) => t.pinned).length;
+      const moved = { ...tab, pinned: !tab.pinned, parentId: tab.pinned ? tab.parentId : null };
+      return [...rest.slice(0, at), moved, ...rest.slice(at)];
+    });
+  }, []);
 
   /** Focus (and select) the address bar - Ctrl+L / clicking a blank tab. */
   const focusAddress = useCallback(() => {
@@ -524,7 +630,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const receiveTab = useCallback((payload: unknown, index: number) => {
     if (!isTabTransferPayload(payload)) return;
     const tab = adoptTab(payload);
-    setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
+    setTabs((ts) => pinnedFirst([...ts.slice(0, index), tab, ...ts.slice(index)]));
     setActiveId(tab.id);
   }, []);
 
@@ -543,10 +649,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [windowId, isPrivate, windowTitle, takeTab, receiveTab],
   );
 
-  // The browser opens on a blank tab; drop the cursor in the address bar so
+  // A browser that opens on a blank tab drops the cursor in the address bar so
   // the user can type a destination straight away. Runs once on mount.
   useEffect(() => {
-    focusAddress();
+    if (tabsRef.current.find((t) => t.id === activeIdRef.current)?.url === '') focusAddress();
   }, [focusAddress]);
 
   // Publish the tab strip into the window's title bar so tabs share a line
@@ -564,13 +670,14 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         activeId={activeId}
         onActivate={selectTab}
         onCloseTab={closeTab}
+        onTogglePin={togglePin}
         onNewTab={openNewTab}
-        onMoveTab={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+        onMoveTab={(id, to) => setTabs((ts) => pinnedFirst(moveItem(ts, id, to)))}
         transfer={transfer}
       />,
     );
     return () => setTitlebar(null);
-  }, [treeTabs, tabs, activeId, selectTab, closeTab, openNewTab, transfer, setTitlebar]);
+  }, [treeTabs, tabs, activeId, selectTab, closeTab, togglePin, openNewTab, transfer, setTitlebar]);
 
   /** Collapse/expand a subtree in the tree sidebar. */
   const toggleCollapsed = useCallback((id: string) => {
@@ -1798,6 +1905,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             collapsed={collapsed}
             onActivate={selectTab}
             onCloseTab={closeTab}
+            onTogglePin={togglePin}
             onNewTab={openNewTab}
             onToggleCollapsed={toggleCollapsed}
             onMoveTab={moveTab}
@@ -1810,7 +1918,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             only the active one is visible. (visibility, not display:none -
             Electron <webview>s misbehave when display is toggled.) */}
         <div className="relative min-w-0 flex-1 overflow-hidden bg-white">
-        {surfaceTabs.map((tab) => (
+        {surfaceTabs.filter((tab) => !tab.dormant || tab.id === activeId).map((tab) => (
           <TabSurface
             key={tab.id}
             id={tab.id}
@@ -2242,6 +2350,7 @@ function TabStrip({
   activeId,
   onActivate,
   onCloseTab,
+  onTogglePin,
   onNewTab,
   onMoveTab,
   transfer,
@@ -2250,6 +2359,7 @@ function TabStrip({
   activeId: string;
   onActivate: (id: string) => void;
   onCloseTab: (id: string) => void;
+  onTogglePin: (id: string) => void;
   onNewTab: () => void;
   /** Move a tab to a new index; tabs are dragged to reorder them. */
   onMoveTab: (id: string, toIndex: number) => void;
@@ -2283,6 +2393,7 @@ function TabStrip({
           onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onCloseTab(tab.id)}
+          onTogglePin={() => onTogglePin(tab.id)}
         />
       ))}
       <button
@@ -2312,21 +2423,29 @@ function TabButton({
   onPointerDown,
   onActivate,
   onClose,
+  onTogglePin,
 }: {
   tab: Tab;
   active: boolean;
   dragging: boolean;
   transfer: TabTransfer;
-  ref: React.Ref<HTMLDivElement>;
-  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
+  ref?: React.Ref<HTMLDivElement>;
+  onPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
   onActivate: () => void;
   onClose: () => void;
+  onTogglePin: () => void;
 }) {
   const label = tabLabel(tab);
   const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
 
   return (
-    <TabContextMenu tabId={tab.id} transfer={transfer} onClose={onClose}>
+    <TabContextMenu
+      tabId={tab.id}
+      transfer={transfer}
+      onClose={onClose}
+      pinned={tab.pinned}
+      onTogglePin={onTogglePin}
+    >
       <div
         ref={ref}
         onPointerDown={onPointerDown}
@@ -2342,12 +2461,14 @@ function TabButton({
           }
         }}
         onAuxClick={(e) => {
-          // Middle-click closes, like every browser.
-          if (e.button === 1) onClose();
+          // Middle-click closes, like every browser - except a pinned tab,
+          // which is pinned so it doesn't go away by accident.
+          if (e.button === 1 && !tab.pinned) onClose();
         }}
         title={label}
         className={cn(
-          'group relative flex h-7 w-44 min-w-0 shrink-0 cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
+          'group relative flex h-7 min-w-0 shrink-0 cursor-default select-none items-center rounded-md border text-xs',
+          tab.pinned ? 'w-9 justify-center' : 'w-44 gap-2 px-2.5',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           active
             ? 'border-border/60 bg-background text-foreground shadow-sm'
@@ -2360,23 +2481,27 @@ function TabButton({
         ) : (
           <TabGlyph tab={tab} className="size-4 shrink-0 opacity-60" />
         )}
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        <button
-          type="button"
-          aria-label={`Close ${label}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose();
-          }}
-          className={cn(
-            'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
-            'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-            active && 'opacity-100',
-            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
-        >
-          <X className="size-3" />
-        </button>
+        {!tab.pinned && (
+          <>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            <button
+              type="button"
+              aria-label={`Close ${label}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className={cn(
+                'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
+                'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
+                active && 'opacity-100',
+                'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              )}
+            >
+              <X className="size-3" />
+            </button>
+          </>
+        )}
       </div>
     </TabContextMenu>
   );
@@ -2433,6 +2558,7 @@ function TreeTabStrip({
   collapsed,
   onActivate,
   onCloseTab,
+  onTogglePin,
   onNewTab,
   onToggleCollapsed,
   onMoveTab,
@@ -2444,6 +2570,7 @@ function TreeTabStrip({
   collapsed: Set<string>;
   onActivate: (id: string) => void;
   onCloseTab: (id: string) => void;
+  onTogglePin: (id: string) => void;
   onNewTab: () => void;
   onToggleCollapsed: (id: string) => void;
   onMoveTab: (dragId: string, targetId: string, position: DropZone) => void;
@@ -2455,7 +2582,12 @@ function TreeTabStrip({
   transfer: TabTransferOptions;
 }) {
   const tabTransfer = useTabTransfer(transfer, tabs.length);
-  const rows = useMemo(() => flattenTabTree(tabs, collapsed), [tabs, collapsed]);
+  // Pinned tabs sit in a row of icons above the tree, outside it.
+  const pinned = useMemo(() => tabs.filter((t) => t.pinned), [tabs]);
+  const rows = useMemo(
+    () => flattenTabTree(tabs.filter((t) => !t.pinned), collapsed),
+    [tabs, collapsed],
+  );
   // The tab currently being dragged, or null. Shared across rows so a row can
   // tell whether it's a valid drop target (and skip itself).
   const [dragId, setDragId] = useState<string | null>(null);
@@ -2468,6 +2600,22 @@ function TreeTabStrip({
       aria-orientation="vertical"
       className="flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/60 bg-background/40 p-1.5"
     >
+      {pinned.length > 0 && (
+        <div className="flex shrink-0 flex-wrap gap-1 pb-1">
+          {pinned.map((tab) => (
+            <TabButton
+              key={tab.id}
+              tab={tab}
+              active={tab.id === activeId}
+              dragging={false}
+              transfer={tabTransfer}
+              onActivate={() => onActivate(tab.id)}
+              onClose={() => onCloseTab(tab.id)}
+              onTogglePin={() => onTogglePin(tab.id)}
+            />
+          ))}
+        </div>
+      )}
       {rows.map(({ tab, depth, hasChildren }) => (
         <TreeTabRow
           key={tab.id}
@@ -2481,6 +2629,7 @@ function TreeTabStrip({
           transfer={tabTransfer}
           onActivate={() => onActivate(tab.id)}
           onClose={() => onCloseTab(tab.id)}
+          onPin={() => onTogglePin(tab.id)}
           onToggleCollapsed={() => onToggleCollapsed(tab.id)}
           onDragStart={() => setDragId(tab.id)}
           onDragEnd={() => setDragId(null)}
@@ -2548,6 +2697,7 @@ function TreeTabRow({
   transfer,
   onActivate,
   onClose,
+  onPin,
   onToggleCollapsed,
   onDragStart,
   onDragEnd,
@@ -2565,6 +2715,7 @@ function TreeTabRow({
   transfer: TabTransfer;
   onActivate: () => void;
   onClose: () => void;
+  onPin: () => void;
   onToggleCollapsed: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -2605,7 +2756,13 @@ function TreeTabRow({
   };
 
   return (
-    <TabContextMenu tabId={tab.id} transfer={transfer} onClose={onClose}>
+    <TabContextMenu
+      tabId={tab.id}
+      transfer={transfer}
+      onClose={onClose}
+      pinned={false}
+      onTogglePin={onPin}
+    >
       <div
         role="tab"
         aria-selected={active}
