@@ -465,6 +465,17 @@ contextBridge.exposeInMainWorld('pageFullscreen', {
     ipcRenderer.invoke('pageFullscreen:fit', webContentsId, width, height),
 });
 
+// Guest visibility bridge (window.guestVisibility), backed by the
+// guestVisibility:* handler in main.mts: tells a <webview> page it's hidden
+// (a background tab, a minimized window) or visible again.
+contextBridge.exposeInMainWorld('guestVisibility', {
+  /**
+   * @param {number} webContentsId the <webview>'s guest
+   * @param {boolean} hidden
+   */
+  set: (webContentsId, hidden) => ipcRenderer.send('guestVisibility:set', webContentsId, hidden),
+});
+
 // Monitors bridge (window.monitors), backed by the monitors:* handler in
 // main.mts: each display's rectangle within the shell window (null when the
 // window covers just one), so the desktop can keep its menu bar and Dock on

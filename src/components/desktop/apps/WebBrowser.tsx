@@ -3414,6 +3414,7 @@ const TabSurface = memo(function TabSurface({
           src={initialSrc}
           partition={partition}
           pageZoom={zoom}
+          hidden={!active}
           onLoadStart={onLoadStart}
           onLoadEnd={onLoadEnd}
           onLoadError={onLoadError}
