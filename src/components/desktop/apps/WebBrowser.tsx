@@ -1573,6 +1573,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         shortcut.action === 'apps-menu' ||
         shortcut.action === 'assistant' ||
         shortcut.action === 'super-key' ||
+        shortcut.action === 'alt-released' ||
         shortcut.action === 'screenshot' ||
         shortcut.action === 'screenshot-area'
       ) {

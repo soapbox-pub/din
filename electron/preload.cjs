@@ -1947,6 +1947,7 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
    *   { action: 'apps-menu' }                 (Super+Space)
    *   { action: 'assistant' }                 (Super+A)
    *   { action: 'super-key', down }           (Super pressed / released)
+   *   { action: 'alt-released' }              (Alt released)
    *   { action: 'screenshot' }                (Print Screen)
    *   { action: 'screenshot-area' }           (Shift+Print Screen or the box-select key)
    *   { action: 'new-tab', wcId }             (Ctrl+T in a browser tab)

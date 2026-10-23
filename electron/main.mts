@@ -4657,6 +4657,7 @@ type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
   | { action: 'apps-menu' | 'assistant' | 'screenshot' | 'screenshot-area' }
   | { action: 'super-key'; down: boolean }
+  | { action: 'alt-released' }
   | {
       action:
         | 'new-tab'
@@ -5230,9 +5231,15 @@ app.on('web-contents-created', (_event, contents) => {
 
   // Holding Super lets the shell drag windows from anywhere, but it can't
   // see the key while focus is inside a guest, so forward its presses (not
-  // consumed: Super is still a modifier for the page).
+  // consumed: Super is still a modifier for the page). Alt's release is
+  // forwarded too, so an Alt+Tab started in a guest commits the moment Alt
+  // comes up.
   if (contents.getType() === 'webview') {
     contents.on('before-input-event', (_event, input) => {
+      if (input.key === 'Alt' && input.type === 'keyUp') {
+        sendToShell('shortcut', { action: 'alt-released' } satisfies ShellShortcut);
+        return;
+      }
       if (input.key !== 'Meta' || input.isAutoRepeat) return;
       if (input.type !== 'keyDown' && input.type !== 'keyUp') return;
       sendToShell('shortcut', { action: 'super-key', down: input.type === 'keyDown' } satisfies ShellShortcut);

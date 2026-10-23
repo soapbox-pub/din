@@ -11,6 +11,7 @@
  *   - Super+Space             -> { action: 'apps-menu' }
  *   - Super+A                 -> { action: 'assistant' }
  *   - Super down / up         -> { action: 'super-key', down }
+ *   - Alt up                  -> { action: 'alt-released' }
  *   - Print Screen            -> { action: 'screenshot' }
  *   - Shift+Print Screen, or the laptop box-select key
  *                             -> { action: 'screenshot-area' }
@@ -60,6 +61,10 @@ export type ShellShortcut =
       /** Super pressed or released inside a guest (Super+drag moves windows). */
       action: 'super-key';
       down: boolean;
+    }
+  | {
+      /** Alt released inside a guest: ends an Alt+Tab started there. */
+      action: 'alt-released';
     }
   | {
       /** Print Screen pressed inside a guest: full-screen capture. */

@@ -9,12 +9,12 @@ import type { WindowState } from '@/hooks/useWindows';
 
 /**
  * How long, after the last guest-forwarded cycle, to auto-commit the
- * selection when we can't observe the Alt key being released. Keyboard focus
- * inside an Electron <webview> reaches us only as discrete `cycle-windows`
- * bridge events (see shellShortcuts); there's no keyup to end the gesture, so
- * a short idle timeout stands in for releasing Alt.
+ * selection if Alt's release never arrives. Keyboard focus inside an Electron
+ * <webview> reaches us only as bridge events (see shellShortcuts); the main
+ * process forwards Alt's keyup as `alt-released`, which commits at once, and
+ * this timer only recovers a keyup that went missing.
  */
-const BRIDGE_COMMIT_DELAY = 1000;
+const BRIDGE_COMMIT_DELAY = 3000;
 
 /** An active Alt+Tab switching gesture. */
 interface SwitchSession {
@@ -190,12 +190,16 @@ export function WindowSwitcher() {
     };
   }, [step, commit, cancel]);
 
-  // Guest-forwarded Alt+Tab (focus inside a <webview>): advance, then arm the
-  // idle timer that stands in for the unobservable Alt release.
+  // Guest-forwarded Alt+Tab (focus inside a <webview>): advance, and commit
+  // when Alt comes up, with an idle timer as the backstop.
   useEffect(() => {
     const bridge = getShellShortcuts();
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
+      if (shortcut.action === 'alt-released') {
+        if (sessionRef.current?.mode === 'bridge') commit();
+        return;
+      }
       if (shortcut.action !== 'cycle-windows') return;
       step(shortcut.backward, 'bridge');
       window.clearTimeout(bridgeTimer.current);
