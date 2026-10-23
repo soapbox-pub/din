@@ -11,6 +11,8 @@ import type { WindowState } from '@/hooks/useWindows';
 
 /** The built-in Web Browser's app id (see src/lib/apps.ts). */
 const WEB_BROWSER_APP_ID = 'web-browser';
+/** The System Monitor's app id (see src/lib/apps.ts). */
+const SYSTEM_MONITOR_APP_ID = 'system-monitor';
 
 /**
  * Desktop-wide keyboard shortcuts. Renders nothing.
@@ -27,6 +29,8 @@ const WEB_BROWSER_APP_ID = 'web-browser';
  * - Super+Space opens the menu bar's apps menu with its search focused (or
  *   closes it again).
  * - Super+A opens the assistant's prompt (AssistantHost), or closes it.
+ * - Ctrl+Shift+Escape opens the System Monitor, or brings it forward, as
+ *   on Windows.
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
@@ -117,6 +121,15 @@ export function DesktopHotkeys() {
         e.preventDefault();
         e.stopPropagation();
         toggleAssistantPrompt();
+        return;
+      }
+
+      // Ctrl+Shift+Escape: the System Monitor (single-instance, so an open
+      // one just comes forward).
+      if (e.key === 'Escape' && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        actionsRef.current.open(SYSTEM_MONITOR_APP_ID);
         return;
       }
 
@@ -244,6 +257,8 @@ export function DesktopHotkeys() {
         toggleAppsMenu();
       } else if (shortcut.action === 'assistant') {
         toggleAssistantPrompt();
+      } else if (shortcut.action === 'system-monitor') {
+        actionsRef.current.open(SYSTEM_MONITOR_APP_ID);
       } else if (shortcut.action === 'screenshot' || shortcut.action === 'screenshot-area') {
         if (!isScreenshotSessionActive()) {
           requestScreenshot(shortcut.action === 'screenshot-area' ? 'area' : 'screen');

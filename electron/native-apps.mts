@@ -912,6 +912,11 @@ function watchUserApplications(onChange: () => void): void {
   if (fs.existsSync(nixProfiles)) watch(nixProfiles, false);
 }
 
+/** Every app Din has launched this session, by the pid it started as. */
+export function launchedApps(): ReadonlyMap<number, string> {
+  return launchedPids;
+}
+
 /** Walk a pid's ancestry, looking for a process Din launched. */
 export function appIdForPid(pid: number | null): string | null {
   let current = pid;

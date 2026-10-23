@@ -34,6 +34,8 @@
 //     the print queue, for the print dialog and Settings
 //   - window.volumes: USB sticks and SD cards, mounted as they're plugged in
 //     and ejected from the Files sidebar
+//   - window.systemMonitor: running processes, CPU and memory, and ending
+//     them, for the System Monitor app
 //   - window.bluetoothLogin: receive the account key from a phone over
 //     Bluetooth LE, for the login screen
 //   - window.nostrd: the signer daemon that holds the account keys, for the
@@ -1178,6 +1180,43 @@ contextBridge.exposeInMainWorld('volumes', {
   },
 });
 
+// System Monitor bridge (window.systemMonitor), backed by
+// electron/system-monitor.mts: snapshots of what's running, pushed every few
+// seconds while someone is subscribed, and SIGTERM/SIGKILL for Din's user's
+// own processes.
+contextBridge.exposeInMainWorld('systemMonitor', {
+  /**
+   * Receive a snapshot every few seconds; sampling runs only while someone
+   * is subscribed. Returns an unsubscribe fn.
+   * @param {(snapshot: unknown) => void} callback
+   */
+  subscribe: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} snapshot
+     */
+    const handler = (_event, snapshot) => callback(snapshot);
+    ipcRenderer.on('system-monitor:snapshot', handler);
+    void ipcRenderer.invoke('system-monitor:subscribe');
+    return () => {
+      ipcRenderer.removeListener('system-monitor:snapshot', handler);
+      void ipcRenderer.invoke('system-monitor:unsubscribe');
+    };
+  },
+
+  /**
+   * Ask a process to quit (SIGTERM).
+   * @param {number} pid
+   */
+  end: (pid) => ipcRenderer.invoke('system-monitor:end', pid),
+
+  /**
+   * Make a process quit now (SIGKILL).
+   * @param {number} pid
+   */
+  forceQuit: (pid) => ipcRenderer.invoke('system-monitor:force-quit', pid),
+});
+
 // Bluetooth login bridge (window.bluetoothLogin), backed by
 // electron/bluetooth-login.mts: advertises a GATT service a phone (Tenna)
 // sends the account key to, encrypted to the renderer's ephemeral key.
@@ -2120,6 +2159,7 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
    *   { action: 'cycle-windows', backward }   (Alt+Tab / Alt+Shift+Tab)
    *   { action: 'apps-menu' }                 (Super+Space)
    *   { action: 'assistant' }                 (Super+A)
+   *   { action: 'system-monitor' }            (Ctrl+Shift+Escape)
    *   { action: 'super-key', down }           (Super pressed / released)
    *   { action: 'alt-released' }              (Alt released)
    *   { action: 'screenshot' }                (Print Screen)

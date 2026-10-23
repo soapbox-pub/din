@@ -71,6 +71,7 @@ import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerVolumesHandlers } from './volumes.mts';
 import { cleanUpPrinting, registerPrintingHandlers, requestPagePrint } from './printing.mts';
+import { registerSystemMonitorHandlers } from './system-monitor.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
@@ -4681,7 +4682,7 @@ function isPrintInput(input: Electron.Input): boolean {
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
-  | { action: 'apps-menu' | 'assistant' | 'screenshot' | 'screenshot-area' }
+  | { action: 'apps-menu' | 'assistant' | 'system-monitor' | 'screenshot' | 'screenshot-area' }
   | { action: 'super-key'; down: boolean }
   | { action: 'alt-released' }
   | {
@@ -4732,6 +4733,10 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
+  }
+  // Ctrl+Shift+Escape: the System Monitor, as on Windows.
+  if (input.control && input.shift && !input.alt && !input.meta && input.key === 'Escape') {
+    return { action: 'system-monitor' };
   }
   // Alt+Left/Right: history navigation (Chrome behavior).
   if (
@@ -4962,6 +4967,19 @@ app.whenReady().then(() => {
   registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling });
   registerPrintingHandlers({ assertShellSender, sendToShell, guestFromId: shellGuestFromId });
   app.on('will-quit', cleanUpPrinting);
+  registerSystemMonitorHandlers({
+    assertShellSender,
+    sendToShell,
+    shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
+    pageKind: (contents) => {
+      if (contents.getType() !== 'webview') return 'page';
+      if (contents.session === browserSession()) return 'browser-tab';
+      if (contents.session === privateBrowserSession()) return 'private-tab';
+      if (contents.session === appSession()) return 'web-app';
+      if (contents.session === devtoolsSession()) return 'devtools';
+      return 'page';
+    },
+  });
   registerNostrdHandlers({ assertShellSender, sendToShell });
   registerAssistantHandlers({ assertShellSender, sendToShell });
   registerBootScreenHandlers({ assertShellSender });
@@ -5470,6 +5488,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'cycle-windows' ||
         shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
+        shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {
@@ -5514,8 +5533,8 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   // Installed web-app guests aren't browser tabs, but focus still lands inside
-  // them, so the shell's window-cycling, apps-menu, assistant, and screenshot
-  // shortcuts must be forwarded too.
+  // them, so the shell's window-cycling, apps-menu, assistant, System Monitor
+  // and screenshot shortcuts must be forwarded too.
   if (isAppGuest(contents)) {
     contents.on('before-input-event', (event, input) => {
       if (isPrintInput(input)) {
@@ -5528,6 +5547,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'cycle-windows' ||
         shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
+        shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area'
       ) {

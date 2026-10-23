@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import type { ComponentType } from 'react';
-import type { LucideIcon } from 'lucide-react';
+import { Activity, type LucideIcon } from 'lucide-react';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
 import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
 
@@ -37,6 +37,9 @@ const Assistant = lazy(() =>
 );
 const AppStore = lazy(() =>
   import('@/components/desktop/apps/AppStore').then((m) => ({ default: m.AppStore })),
+);
+const SystemMonitor = lazy(() =>
+  import('@/components/desktop/apps/SystemMonitor').then((m) => ({ default: m.SystemMonitor })),
 );
 const Installer = lazy(() =>
   import('@/components/desktop/apps/Installer').then((m) => ({ default: m.Installer })),
@@ -150,6 +153,17 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/settings.png',
     component: Settings,
     defaultSize: { width: 720, height: 520 },
+    singleInstance: true,
+  },
+  {
+    // What's running and what it costs, and ending what won't quit.
+    // Ctrl+Shift+Escape opens it from anywhere (DesktopHotkeys).
+    id: 'system-monitor',
+    name: 'System Monitor',
+    icon: Activity,
+    component: SystemMonitor,
+    defaultSize: { width: 760, height: 560 },
+    keywords: ['task manager', 'activity monitor', 'processes', 'CPU', 'memory', 'force quit', 'kill'],
     singleInstance: true,
   },
   {

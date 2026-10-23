@@ -10,6 +10,7 @@
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
  *   - Super+Space             -> { action: 'apps-menu' }
  *   - Super+A                 -> { action: 'assistant' }
+ *   - Ctrl+Shift+Escape       -> { action: 'system-monitor' }
  *   - Super down / up         -> { action: 'super-key', down }
  *   - Alt up                  -> { action: 'alt-released' }
  *   - Print Screen            -> { action: 'screenshot' }
@@ -56,6 +57,10 @@ export type ShellShortcut =
   | {
       /** Super+A pressed inside a guest: toggle the assistant's prompt. */
       action: 'assistant';
+    }
+  | {
+      /** Ctrl+Shift+Escape pressed inside a guest: open the System Monitor. */
+      action: 'system-monitor';
     }
   | {
       /** Super pressed or released inside a guest (Super+drag moves windows). */
