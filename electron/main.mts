@@ -1256,6 +1256,82 @@ function registerPageFullscreenHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Guest visibility bridge (window.guestVisibility). Electron overrides a
+// <webview> page's document.visibilityState with its embedder window's, so a
+// background tab or a minimized window's page is told it's visible and never
+// gets a visibilitychange: video players, canvas loops and polling that
+// pause themselves for hidden pages keep running, and burn the battery. The
+// shell reports which of its guests it is hiding, and this sets their state
+// through the same internal message Electron uses for the window's.
+// ---------------------------------------------------------------------------
+
+/** Electron's internal channel that sets a guest's document visibility. */
+const GUEST_VISIBILITY_CHANNEL = 'GUEST_INSTANCE_VISIBILITY_CHANGE';
+
+/** Electron internals this relies on (lib/browser/guest-view-manager.ts). */
+interface InternalWebContents {
+  _sendInternal(channel: string, ...args: unknown[]): void;
+}
+
+/**
+ * Guests the shell is hiding (a background tab, a minimized window), each
+ * with what undoes the listeners that keep it hidden.
+ */
+const hiddenGuests = new Map<number, () => void>();
+
+/** Shell webContents whose window-visibility changes are already watched. */
+const visibilityWatchedHosts = new WeakSet<Electron.WebContents>();
+
+function sendGuestVisibility(guest: Electron.WebContents, state: 'hidden' | 'visible'): void {
+  if (guest.isDestroyed()) return;
+  (guest as unknown as InternalWebContents)._sendInternal(GUEST_VISIBILITY_CHANNEL, state);
+}
+
+function registerGuestVisibilityHandlers(): void {
+  ipcMain.on('guestVisibility:set', (event, wcId, hidden) => {
+    if (!isShellSender(event)) return;
+    const guest = shellGuestFromId(wcId);
+    if (!guest || typeof hidden !== 'boolean') return;
+    const id = guest.id;
+    if (hidden === hiddenGuests.has(id)) return;
+    if (hidden) {
+      // Electron restates its own (the window's) visibility to the guest on
+      // every dom-ready, so each new document has to be told again, after it.
+      const reapply = () => {
+        if (hiddenGuests.has(id)) setImmediate(() => sendGuestVisibility(guest, 'hidden'));
+      };
+      const forget = () => hiddenGuests.delete(id);
+      guest.on('dom-ready', reapply);
+      guest.once('destroyed', forget);
+      hiddenGuests.set(id, () => {
+        guest.removeListener('dom-ready', reapply);
+        guest.removeListener('destroyed', forget);
+        forget();
+      });
+    } else {
+      hiddenGuests.get(id)?.();
+    }
+    sendGuestVisibility(guest, hidden ? 'hidden' : 'visible');
+
+    // And it restates the window's visibility to every guest whenever the
+    // window is shown again, which would un-hide the ones the shell hides.
+    const host = guest.hostWebContents;
+    if (host && !visibilityWatchedHosts.has(host)) {
+      visibilityWatchedHosts.add(host);
+      (host as unknown as NodeJS.EventEmitter).on('-window-visibility-change', (state: unknown) => {
+        if (state !== 'visible') return;
+        setImmediate(() => {
+          for (const hiddenId of hiddenGuests.keys()) {
+            const hiddenGuest = webContents.fromId(hiddenId);
+            if (hiddenGuest) sendGuestVisibility(hiddenGuest, 'hidden');
+          }
+        });
+      });
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Monitors bridge (window.monitors): where each display sits inside the shell
 // window, for the desktop's layout (src/lib/monitors.ts). The production
 // window spans every display - cage stretches it over all outputs, and on bare
@@ -4901,6 +4977,7 @@ app.whenReady().then(() => {
   registerVpnHandlers();
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
+  registerGuestVisibilityHandlers();
   registerMonitorsHandlers();
   registerPowerHandlers();
   registerAudioHandlers();

@@ -8,6 +8,7 @@ import {
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { useAppContext } from '@/hooks/useAppContext';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
+import { useWindowVisible } from '@/contexts/WindowVisibleContext';
 
 /**
  * The Electron session partition for the ad-hoc Web Browser app's tabs. The
@@ -126,6 +127,24 @@ export interface BrowserViewProps {
    * interface zoom. 1 is 100%. Only applied on the Electron <webview> surface.
    */
   pageZoom?: number;
+  /**
+   * Whether the caller is hiding the surface (a background tab). The page is
+   * told it's hidden - as it is, too, while the surface's window is
+   * minimized - so it can pause itself. Only applied on the Electron
+   * <webview> surface.
+   */
+  hidden?: boolean;
+}
+
+interface GuestVisibilityBridge {
+  set(webContentsId: number, hidden: boolean): void;
+}
+
+declare global {
+  interface Window {
+    /** Present only inside the Electron shell. */
+    guestVisibility?: GuestVisibilityBridge;
+  }
 }
 
 /**
@@ -239,9 +258,12 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       onNavigate,
       onWebContentsId,
       pageZoom = 1,
+      hidden = false,
     },
     ref,
   ) {
+    const windowVisible = useWindowVisible();
+    const pageHidden = hidden || !windowVisible;
     // The partition is fixed for the element's lifetime (like the initial src).
     const partitionRef = useRef(partition);
     // The <webview> is created imperatively (see the mount effect below), so
@@ -473,6 +495,32 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         el.removeEventListener('dom-ready', attached);
       };
     }, [onWebContentsId]);
+
+    // Tell the page whether it's showing. Electron hands a guest its window's
+    // visibility, so a background tab or a minimized window's page would
+    // otherwise think it's visible and keep its videos and loops running
+    // (see guestVisibility in electron/main.mts). Restated once the guest
+    // attaches, since there's no WebContents to address before then; the
+    // main process ignores repeats.
+    useEffect(() => {
+      const el = webviewRef.current;
+      const bridge = window.guestVisibility;
+      if (!el || !bridge) return;
+      const report = () => {
+        try {
+          bridge.set(el.getWebContentsId(), pageHidden);
+        } catch {
+          // Guest not attached yet; did-attach retries.
+        }
+      };
+      report();
+      el.addEventListener('did-attach', report);
+      el.addEventListener('dom-ready', report);
+      return () => {
+        el.removeEventListener('did-attach', report);
+        el.removeEventListener('dom-ready', report);
+      };
+    }, [pageHidden]);
 
     // Host for the guest built in the mount effect above. The <webview> itself
     // is not rendered by React so its attributes can be set before insertion.
