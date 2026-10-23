@@ -1,7 +1,8 @@
 import { createContext, useContext } from 'react';
 
 /**
- * Whether the window hosting this app content is showing (not minimized).
+ * Whether the window hosting this app content is showing (not minimized, nor
+ * hidden behind a window that covers it).
  * Provided by Window around its content; consumed by web surfaces, which tell
  * their pages they're hidden so those can pause themselves.
  */

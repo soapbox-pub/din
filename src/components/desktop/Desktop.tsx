@@ -37,7 +37,8 @@ import { BluetoothPromptHost } from './BluetoothIndicator';
 import { VolumesHost } from './VolumesHost';
 import { PrintHost } from './PrintHost';
 import { PageFullscreenHost } from './PageFullscreenHost';
-import { useWindows } from '@/hooks/useWindows';
+import { useWindows, windowRect, type WindowState } from '@/hooks/useWindows';
+import { useMovingWindows } from '@/lib/windowGestures';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
 import { useMonitors, WorkAreasContext } from '@/contexts/MonitorsContext';
@@ -45,6 +46,41 @@ import { contains, workAreas, type WorkArea } from '@/lib/monitors';
 
 /** How long after a click a window it opens still counts as opened by it. */
 const LAUNCH_POINTER_MS = 2000;
+
+/**
+ * The windows another one wholly covers: one above it, at rest, whose rect
+ * contains its own. Nothing of a covered window shows but a blur of it
+ * through the frosted chrome on top, so Window hides it, and its pages stop
+ * painting and animating for nobody (a maximized terminal over a stack of
+ * browser windows was the case that ran hot). Frameless windows don't
+ * cover: they draw what they like, transparency included. A window mid-
+ * gesture doesn't either, since its committed rect isn't where it's painted.
+ */
+function coveredWindows(
+  windows: WindowState[],
+  areas: WorkArea[],
+  moving: ReadonlySet<string>,
+): Set<string> {
+  const shown = windows.filter((w) => !w.minimized && !w.closing);
+  const covers = shown
+    .filter((w) => !w.frameless && !moving.has(w.id))
+    .map((w) => ({ z: w.z, rect: windowRect(w, areas) }));
+  const covered = new Set<string>();
+  for (const w of shown) {
+    if (moving.has(w.id)) continue;
+    const r = windowRect(w, areas);
+    const hidden = covers.some(
+      (c) =>
+        c.z > w.z &&
+        c.rect.x <= r.x &&
+        c.rect.y <= r.y &&
+        c.rect.x + c.rect.width >= r.x + r.width &&
+        c.rect.y + c.rect.height >= r.y + r.height,
+    );
+    if (hidden) covered.add(w.id);
+  }
+  return covered;
+}
 
 /** The desktop session: top menu bar, wallpaper workspace, bottom dock. */
 export function Desktop() {
@@ -126,6 +162,8 @@ function DesktopSession() {
     (max, w) => (w.minimized || w.closing ? max : Math.max(max, w.z)),
     0,
   );
+  const moving = useMovingWindows();
+  const covered = coveredWindows(manager.windows, areas, moving);
 
   return (
     <WindowManagerContext.Provider value={manager}>
@@ -181,6 +219,7 @@ function DesktopSession() {
                     key={win.id}
                     window={win}
                     isTop={!win.minimized && win.z === topZ}
+                    covered={covered.has(win.id)}
                   />
                 ))}
               </main>
