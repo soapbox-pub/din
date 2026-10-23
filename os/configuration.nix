@@ -1041,6 +1041,14 @@ in
   '';
   systemd.sleep.settings.Sleep.HibernateDelaySec = "2h";
 
+  # A crashing Electron writes out gigabytes of core, so one crashing in a loop
+  # saturated the disk and stalled every app that writes to it. Bigger crashes
+  # still get a journal entry, just no core file.
+  systemd.coredump.settings.Coredump = {
+    ProcessSizeMax = "2G";
+    ExternalSizeMax = "2G";
+  };
+
   # Hibernating takes swap as big as memory. On an encrypted root with room
   # to spare, this makes a swap file there and tells logind to hibernate
   # after sleeping; otherwise lids just suspend, as logind does by default.
