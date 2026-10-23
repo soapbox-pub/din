@@ -4617,9 +4617,13 @@ function registerFindHandlers(): void {
       options && typeof options === 'object'
         ? (options as { forward?: unknown; findNext?: unknown; matchCase?: unknown })
         : {};
+    // Electron's `findNext` is inverted from its name: `true` starts a new
+    // find session and `false` steps through the current one. Our bridge's
+    // `findNext` means "step to the next match", so every edit to the query
+    // must start a new session, or Chromium keeps highlighting the old text.
     tab.findInPage(text, {
       forward: opts.forward !== false,
-      findNext: opts.findNext === true,
+      findNext: opts.findNext !== true,
       matchCase: opts.matchCase === true,
     });
   });
