@@ -308,15 +308,17 @@ async function state(): Promise<PrintersState> {
   return { available: true, printers, jobs: parseJobs(queued, ranked) };
 }
 
-async function capabilities(printer: string): Promise<PrinterCapabilities> {
+type QueueOptions = Map<string, { values: string[]; default: string | null }>;
+
+/** A queue's driver options (`lpoptions -l`), or null when it has no queue yet. */
+async function queueOptions(printer: string): Promise<QueueOptions | null> {
   let text: string;
   try {
     text = (await cups('lpoptions', ['-p', printer, '-l'])).stdout;
   } catch {
-    // A printer that has no queue yet has nothing to read options from.
-    return { color: null, duplex: null, paperSizes: [...PAPER_SIZES], defaultPaper: null };
+    return null;
   }
-  const options = new Map<string, { values: string[]; default: string | null }>();
+  const options: QueueOptions = new Map();
   for (const line of text.split('\n')) {
     const match = /^([^/:]+)(?:\/[^:]*)?:\s*(.*)$/.exec(line);
     if (!match) continue;
@@ -324,6 +326,34 @@ async function capabilities(printer: string): Promise<PrinterCapabilities> {
     const chosen = values.find((v) => v.startsWith('*'))?.slice(1) ?? null;
     options.set(match[1], { values: values.map((v) => v.replace(/^\*/, '')), default: chosen });
   }
+  return options;
+}
+
+const GRAY_MODEL = /^(gray|grey|black|mono|monochrome|kgray|bi-level|devicegray)/i;
+
+/**
+ * The ColorModel value that prints in colour, or in grey.
+ *
+ * `print-color-mode` alone isn't enough: CUPS turns it into a ColorModel
+ * through the PPD's presets, and the driverless PPDs it makes for IPP
+ * printers often have only grey presets and a Gray default, so a colour job
+ * came out grey all the same.
+ */
+function colorModelFor(options: QueueOptions | null, color: boolean): string | null {
+  const model = options?.get('ColorModel');
+  if (!model) return null;
+  const preferred = color ? ['RGB', 'DeviceRGB', 'CMYK', 'Color'] : ['Gray', 'DeviceGray'];
+  return (
+    preferred.find((v) => model.values.includes(v)) ??
+    model.values.find((v) => GRAY_MODEL.test(v) !== color) ??
+    null
+  );
+}
+
+async function capabilities(printer: string): Promise<PrinterCapabilities> {
+  const options = await queueOptions(printer);
+  // A printer that has no queue yet has nothing to read options from.
+  if (!options) return { color: null, duplex: null, paperSizes: [...PAPER_SIZES], defaultPaper: null };
   const colorModel = options.get('ColorModel') ?? options.get('print-color-mode');
   const duplex = options.get('Duplex') ?? options.get('sides');
   const pageSize = options.get('PageSize') ?? options.get('media');
@@ -331,7 +361,7 @@ async function capabilities(printer: string): Promise<PrinterCapabilities> {
     PAPER_SIZES.find((size) => size.toLowerCase() === value?.toLowerCase()) ?? null;
   const paperSizes = pageSize ? PAPER_SIZES.filter((size) => pageSize.values.some((v) => known(v) === size)) : [];
   return {
-    color: colorModel ? colorModel.values.some((v) => !/^(gray|grey|black|mono|monochrome|kgray|bi-level)/i.test(v)) : null,
+    color: colorModel ? colorModel.values.some((v) => !GRAY_MODEL.test(v)) : null,
     duplex: duplex ? duplex.values.some((v) => /^duplex|^two-sided/i.test(v)) : false,
     paperSizes: paperSizes.length > 0 ? paperSizes : [...PAPER_SIZES],
     defaultPaper: known(pageSize?.default),
@@ -576,7 +606,11 @@ async function print(id: string, layout: PrintLayout, options: JobOptions): Prom
   if (options.pages) args.push('-P', options.pages);
   args.push('-o', `media=${options.paper}`);
   args.push('-o', `sides=${options.twoSided ? (layout.landscape ? 'two-sided-short-edge' : 'two-sided-long-edge') : 'one-sided'}`);
-  if (options.color !== null) args.push('-o', `print-color-mode=${options.color ? 'color' : 'monochrome'}`);
+  if (options.color !== null) {
+    args.push('-o', `print-color-mode=${options.color ? 'color' : 'monochrome'}`);
+    const model = colorModelFor(await queueOptions(options.printer), options.color);
+    if (model) args.push('-o', `ColorModel=${model}`);
+  }
   // The PDF is laid out for the paper already; don't let CUPS scale it again.
   if (document.source.kind !== 'file' || document.source.type !== 'pdf') args.push('-o', 'print-scaling=none');
   args.push('--', pdf);
