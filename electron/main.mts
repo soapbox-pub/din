@@ -30,7 +30,7 @@ import {
   attachUserscripts,
   isUserscriptInstallUrl,
 } from './userscripts.mts';
-import { attachAdblock, isAdblockExtension, setupAdblock } from './adblock.mts';
+import { attachAdblock, ensureAdblockEngine, isAdblockExtension, setupAdblock } from './adblock.mts';
 import {
   attachPopups,
   mayOpenWindow,
@@ -5061,6 +5061,10 @@ app.whenReady().then(() => {
     // Extension popups keep transparency for their own shapes.
     if (!attachingGuestSrc.startsWith('chrome-extension://')) {
       webPreferences.transparent = false;
+    }
+    // The ad blocker's engine, before the tab's first request.
+    if (params.partition === WEBBROWSER_PARTITION || params.partition === WEBBROWSER_PRIVATE_PARTITION) {
+      ensureAdblockEngine();
     }
     if (params.partition === WEBBROWSER_PARTITION) {
       // Load frame preloads into sub-frames, not just the top document, so the

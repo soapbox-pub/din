@@ -38,7 +38,8 @@ const require = createRequire(import.meta.url);
 export const ADBLOCK_EXTENSION_ID = 'gmmdegmbkcjkjfbacghangmkafhmkoeb';
 const EXTENSION_ORIGIN = `chrome-extension://${ADBLOCK_EXTENSION_ID}`;
 const EXTENSION_DIR = path.join(import.meta.dirname, 'adblock-extension');
-const WORKER = path.join(import.meta.dirname, 'adblock-worker.mts');
+// .mts in development, the compiled .mjs in a build (scripts/build-electron.mjs).
+const WORKER = path.join(import.meta.dirname, `adblock-worker${path.extname(import.meta.filename)}`);
 const PRELOAD = path.join(import.meta.dirname, 'adblock-preload.cjs');
 const SCRIPTLETS_PRELOAD = path.join(import.meta.dirname, 'adblock-scriptlets-preload.cjs');
 
@@ -64,6 +65,8 @@ interface Settings {
 let settings: Settings = { enabled: true, allowlist: [] };
 let allowlist = new Set<string>();
 let engine: FiltersEngine | null = null;
+/** A browser tab has been opened, so the engine is wanted in memory. */
+let engineWanted = false;
 let building = false;
 let retryMs = FIRST_RETRY_MS;
 
@@ -160,7 +163,7 @@ function buildEngine(): void {
   child.once('exit', (code) => {
     building = false;
     if (code === 0 || code === 2) retryMs = FIRST_RETRY_MS;
-    if (code === 0 && loadEngine()) {
+    if (code === 0 && (!engineWanted || loadEngine())) {
       for (const page of backgroundPages()) page.send('adblock-ext:engineChanged');
       sendToShell('adblock:settings', settings);
     } else if (code !== 2) {
@@ -346,6 +349,17 @@ export function attachAdblock(contents: Electron.WebContents): void {
   });
 }
 
+/**
+ * Load the filter engine (~7 MB in memory) if it isn't yet. Called as the
+ * first browser tab attaches, before it loads anything, so a session that
+ * never browses never holds it.
+ */
+export function ensureAdblockEngine(): void {
+  if (engineWanted) return;
+  engineWanted = true;
+  loadEngine();
+}
+
 /** Whether an installed extension is the ad blocker (hidden from the list). */
 export function isAdblockExtension(id: string): boolean {
   return id === ADBLOCK_EXTENSION_ID;
@@ -365,7 +379,7 @@ export function setupAdblock(options: {
   const { assertShellSender } = options;
 
   loadSettings();
-  loadEngine();
+  // The engine itself loads with the first browser tab (ensureAdblockEngine).
   scheduleUpdates();
 
   // The extension's line to this process (adblock-preload.cjs).

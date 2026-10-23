@@ -9,7 +9,7 @@ import htmlEslint from "@html-eslint/eslint-plugin";
 import customRules from "./eslint-rules/index.js";
 
 export default defineConfig(
-  globalIgnores(["dist", "dist-perf", "perf-reports", ".agents", "electron/adblock-extension/engine.js"]),
+  globalIgnores(["dist", "dist-perf", "perf-reports", ".agents", "electron/adblock-extension/engine.js", "electron/*.mjs"]),
   {
     name: "app/ts",
     files: ["**/*.{ts,tsx}"],
@@ -43,8 +43,8 @@ export default defineConfig(
     },
   },
   {
-    // The Electron host: .mts main-process files (run via Node's native type
-    // stripping) and the .cjs preloads (JSDoc-typed; sandboxed preloads
+    // The Electron host: .mts main-process files (type-stripped by Node in
+    // development, compiled to .mjs for production) and the .cjs preloads (JSDoc-typed; sandboxed preloads
     // can't be ESM or TypeScript, so require() stays).
     name: "app/electron",
     files: ["electron/**/*.{mts,cjs}"],
