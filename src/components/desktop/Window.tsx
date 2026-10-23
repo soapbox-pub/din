@@ -20,7 +20,7 @@ import {
   type ResizeDir,
   type WindowChrome,
 } from '@/contexts/WindowChromeContext';
-import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
+import { isDarkThemeColor, normalizeThemeColor, themeColorTokens } from '@/lib/themeColor';
 import { useSuperHeld } from '@/lib/superKey';
 import {
   createModel,
@@ -219,7 +219,7 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object or `isTop` changes.
-  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon } =
+  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon, setAccent } =
     useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
@@ -291,8 +291,12 @@ export const Window = memo(function Window({
 
   // Chrome accent color published by the hosted app (e.g. the loaded page's
   // theme-color), tinting the title bar Safari-style. The raw value comes
-  // from an untrusted page, so it's strictly normalized before styling.
-  const [accentRaw, setAccent] = useState<string | null>(null);
+  // from an untrusted page, so it's strictly normalized before it's stored
+  // in the window manager, where the menu bar also reads it.
+  const publishAccent = useCallback(
+    (color: string | null) => setAccent(win.id, normalizeThemeColor(color)),
+    [setAccent, win.id],
+  );
 
   // What the hosted app says the window is showing; kept in the window
   // manager, where the Dock and the switcher read it.
@@ -1202,7 +1206,7 @@ export const Window = memo(function Window({
   // Sanitized chrome accent. Theme tokens can't guarantee contrast against
   // an arbitrary page color, so tinted chrome flips its foregrounds to plain
   // black/white based on the accent's luminance.
-  const accent = normalizeThemeColor(accentRaw);
+  const accent = win.accent;
   const accentDark = accent !== null && isDarkThemeColor(accent);
   const chromeText = accent
     ? accentDark ? 'text-white/90' : 'text-black/80'
@@ -1216,17 +1220,8 @@ export const Window = memo(function Window({
       : 'hover:bg-black/10 hover:text-black'
     : 'hover:bg-foreground/10 hover:text-foreground';
   // App-published title-bar content (the browser's tabs) is styled with theme
-  // tokens, so re-point them at the accent the same way. The `background`
-  // the active tab sits on pushes further from the text color — darker under
-  // white text, lighter under black — so it only ever gains contrast.
-  const titlebarTint = accent
-    ? ({
-        '--foreground': accentDark ? '#ffffff' : '#000000',
-        '--muted-foreground': accentDark ? 'rgb(255 255 255 / 0.8)' : 'rgb(0 0 0 / 0.7)',
-        '--border': accentDark ? 'rgb(255 255 255 / 0.2)' : 'rgb(0 0 0 / 0.15)',
-        '--background': accentDark ? 'rgb(0 0 0 / 0.25)' : 'rgb(255 255 255 / 0.5)',
-      } as CSSProperties)
-    : undefined;
+  // tokens, so re-point them at the accent the same way.
+  const titlebarTint = accent ? (themeColorTokens(accent) as CSSProperties) : undefined;
 
   return (
     <section
@@ -1361,7 +1356,7 @@ export const Window = memo(function Window({
             <WindowTitleContext.Provider value={publishTitle}>
               <WindowIconContext.Provider value={publishIcon}>
                 <WindowChromeContext.Provider value={chrome}>
-                  <WindowAccentContext.Provider value={setAccent}>
+                  <WindowAccentContext.Provider value={publishAccent}>
                     {/* Built-in apps are code-split (React.lazy); the fallback shows
                         while an app's chunk loads on its first launch. */}
                     <Suspense

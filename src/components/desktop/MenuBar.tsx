@@ -66,6 +66,7 @@ import { getAudioBridge } from '@/lib/audio';
 import { getBrightnessBridge } from '@/lib/brightness';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
+import { themeColorTokens } from '@/lib/themeColor';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
@@ -84,20 +85,29 @@ import type { WebApp } from '@/lib/webApps';
  *
  * The bar itself is borderless and transparent, fading from a soft scrim
  * into the wallpaper so it reads as part of the desktop rather than a
- * separate chrome strip. When a window is fullscreened it turns solid —
- * white in light mode, black in dark mode — so it reads as system chrome
- * above the fullscreen window.
+ * separate chrome strip. When a window is fullscreened it takes on that
+ * window's title bar - its app's accent, or the default translucent chrome -
+ * so the two read as one seamless strip. A frameless window draws its own
+ * title bar, whose color isn't known, so above one the bar turns solid:
+ * white in light mode, black in dark mode.
  */
 export function MenuBar() {
   // Subscribes to window state (needed for the fullscreen scrim), so this
   // re-renders on every window commit - all children are memoized so the
   // re-render stops at this component's own <header> element.
   const { windows } = useWindowManager();
-  // Only a window maximized beneath it - on the primary monitor - counts.
+  // Only a window maximized beneath it - on the primary monitor - counts,
+  // and of several, the one on top.
   const primaryId = primaryArea(useWorkAreas()).id;
-  const fullscreen = windows.some(
-    (w) => w.maximized && !w.minimized && (w.monitor === null || w.monitor === primaryId),
+  const fullscreen = windows.reduce<(typeof windows)[number] | null>(
+    (top, w) =>
+      w.maximized && !w.minimized && !w.closing && (w.monitor === null || w.monitor === primaryId) &&
+      (!top || w.z > top.z)
+        ? w
+        : top,
+    null,
   );
+  const accent = fullscreen && !fullscreen.frameless ? fullscreen.accent : null;
   // The focused window is the highest visible one, as for its focus ring.
   const focused = windows.reduce<(typeof windows)[number] | null>(
     (top, w) => (w.minimized || w.closing || (top && top.z > w.z) ? top : w),
@@ -106,15 +116,23 @@ export function MenuBar() {
 
   return (
     <header
+      // The accent is sanitized by the window; its tokens keep the bar's
+      // contents legible on it, as on the title bar.
+      style={accent ? { backgroundColor: accent, ...themeColorTokens(accent) } : undefined}
       className={cn(
         // Equal side columns keep the clock centered on the screen however
         // much each side holds.
         // tracking-tight approximates SF Pro's optical spacing at menu-bar sizes.
         // Chrome, not content: no text cursor or selection anywhere in it.
         'relative z-20 grid h-9 cursor-default select-none grid-cols-[1fr_auto_1fr] items-center gap-2 px-2 tracking-tight transition-colors',
-        fullscreen
-          ? 'bg-white dark:bg-black'
-          : 'bg-gradient-to-b from-background/60 via-background/25 to-transparent',
+        !fullscreen
+          ? 'bg-gradient-to-b from-background/60 via-background/25 to-transparent'
+          : fullscreen.frameless
+            ? 'bg-white dark:bg-black'
+            : !accent &&
+              // The window's default chrome, layer for layer: its frosted
+              // card body under the title bar's background wash.
+              'bg-card/90 backdrop-blur-xl before:absolute before:inset-0 before:-z-10 before:bg-background/60',
       )}
     >
       <div className="flex min-w-0 items-center gap-1.5">

@@ -120,6 +120,12 @@ export interface WindowState {
    * picture, video or file), or null to go by the app's icon.
    */
   icon: string | null;
+  /**
+   * The title bar's tint as published by its app (a page's theme-color),
+   * already sanitized, or null for the default chrome. The menu bar matches
+   * it while the window is maximized beneath it.
+   */
+  accent: string | null;
 }
 
 /**
@@ -294,6 +300,7 @@ export function useWindows(
           frameless,
           title: null,
           icon: null,
+          accent: null,
         },
       ];
     });
@@ -411,6 +418,15 @@ export function useWindows(
     setWindows((ws) =>
       ws.some((w) => w.id === id && w.icon !== icon)
         ? ws.map((w) => (w.id === id ? { ...w, icon } : w))
+        : ws,
+    );
+  }, []);
+
+  /** Set (or clear, with null) a window's sanitized title-bar accent. */
+  const setAccent = useCallback((id: string, accent: string | null) => {
+    setWindows((ws) =>
+      ws.some((w) => w.id === id && w.accent !== accent)
+        ? ws.map((w) => (w.id === id ? { ...w, accent } : w))
         : ws,
     );
   }, []);
@@ -613,9 +629,10 @@ export function useWindows(
       setFrameless,
       setTitle,
       setIcon,
+      setAccent,
       fitToAreas,
     }),
-    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, fitToAreas],
+    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

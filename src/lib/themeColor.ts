@@ -63,3 +63,21 @@ export function themeColorLuminance(color: string): number {
 export function isDarkThemeColor(color: string): boolean {
   return 1.05 / (themeColorLuminance(color) + 0.05) >= 3;
 }
+
+/**
+ * Theme tokens re-pointed for content sitting on tinted chrome (a window's
+ * title bar, or the menu bar matching it), which is styled with theme
+ * tokens that can't guarantee contrast against an arbitrary color. The
+ * `background` an active tab sits on pushes further from the text color —
+ * darker under white text, lighter under black — so it only ever gains
+ * contrast.
+ */
+export function themeColorTokens(color: string): Record<string, string> {
+  const dark = isDarkThemeColor(color);
+  return {
+    '--foreground': dark ? '#ffffff' : '#000000',
+    '--muted-foreground': dark ? 'rgb(255 255 255 / 0.8)' : 'rgb(0 0 0 / 0.7)',
+    '--border': dark ? 'rgb(255 255 255 / 0.2)' : 'rgb(0 0 0 / 0.15)',
+    '--background': dark ? 'rgb(0 0 0 / 0.25)' : 'rgb(255 255 255 / 0.5)',
+  };
+}
