@@ -68,6 +68,12 @@ pkgs.testers.runNixOSTest {
         machine.succeed("systemctl restart nostrd-unlock")
         as_din("nostrd call status | grep -q '\"locked\": true'")
 
+    with subtest("typos at the boot screen don't keep it locked"):
+        # systemd caches every passphrase typed, NUL-separated; the last opened the disk.
+        machine.succeed("printf 'hunter2\\0hunter22' | keyctl padd user cryptsetup @u")
+        machine.succeed("systemctl restart nostrd-unlock")
+        as_din("nostrd call status | grep -q '\"locked\": false'")
+
     session = "export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus; "
     lookup = session + "timeout 10 secret-tool lookup test 1"
 
