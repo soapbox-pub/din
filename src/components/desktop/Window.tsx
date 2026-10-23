@@ -1306,7 +1306,9 @@ export const Window = memo(function Window({
           // The app owns the flexible region (drag still works on its empty
           // space; interactive controls inside handle their own events).
           <div className="flex min-w-0 flex-1 items-center self-stretch" style={titlebarTint}>
-            {titlebar}
+            {/* Rendered here rather than under the app, so it needs its own
+                chrome: a window's only tab drags the window. */}
+            <WindowChromeContext.Provider value={chrome}>{titlebar}</WindowChromeContext.Provider>
           </div>
         ) : (
           <>

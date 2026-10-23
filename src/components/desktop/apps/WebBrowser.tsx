@@ -78,6 +78,7 @@ import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerCont
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
+import { useWindowChrome } from '@/contexts/WindowChromeContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
@@ -2218,7 +2219,14 @@ function TabStrip({
   transfer: TabTransferOptions;
 }) {
   const tabTransfer = useTabTransfer(transfer, tabs.length);
-  const reorder = useDragReorder({ ids: tabs.map((t) => t.id), onMove: onMoveTab, tearOff: tabTransfer.tearOff });
+  const chrome = useWindowChrome();
+  const reorder = useDragReorder({
+    ids: tabs.map((t) => t.id),
+    onMove: onMoveTab,
+    tearOff: tabTransfer.tearOff,
+    // A window's only tab moves the window, like Chrome's.
+    moveWindow: tabs.length === 1 ? chrome : undefined,
+  });
   return (
     <div
       ref={(el) => tabTransfer.setList(el)}

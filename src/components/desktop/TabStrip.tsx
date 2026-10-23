@@ -3,6 +3,7 @@ import { Plus, X } from 'lucide-react';
 import { useDragReorder } from '@/hooks/useDragReorder';
 import { useTabTransfer, type TabTransfer, type TabTransferOptions } from '@/hooks/useTabTransfer';
 import { TabContextMenu } from '@/components/desktop/TabContextMenu';
+import { useWindowChrome } from '@/contexts/WindowChromeContext';
 import { cn } from '@/lib/utils';
 
 /**
@@ -23,7 +24,7 @@ export interface TabDescriptor {
  * the window controls (Chrome-style). The surrounding <header> is the window
  * drag handle; tab buttons and the new-tab button handle their own clicks, so
  * dragging empty space still moves the window, while dragging a tab moves the
- * tab along the strip. With `transfer`, a tab dragged off the strip moves to
+ * tab along the strip (or, for a window's only tab, the window). With `transfer`, a tab dragged off the strip moves to
  * another window of the app (see useTabTransfer), and its context menu
  * offers the same.
  *
@@ -56,7 +57,14 @@ export function TabStrip({
   transfer?: TabTransferOptions;
 }) {
   const tabTransfer = useTabTransfer(transfer, tabs.length);
-  const reorder = useDragReorder({ ids: tabs.map((t) => t.id), onMove, tearOff: tabTransfer.tearOff });
+  const chrome = useWindowChrome();
+  const reorder = useDragReorder({
+    ids: tabs.map((t) => t.id),
+    onMove,
+    tearOff: tabTransfer.tearOff,
+    // A window's only tab moves the window, like Chrome's.
+    moveWindow: tabs.length === 1 ? chrome : undefined,
+  });
   return (
     <div
       ref={(el) => tabTransfer.setList(el)}

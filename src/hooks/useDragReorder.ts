@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import type { WindowChrome } from '@/contexts/WindowChromeContext';
 
 /** Pointer travel before a press turns into a drag, in CSS pixels. */
 const DRAG_THRESHOLD = 5;
@@ -55,6 +56,8 @@ interface Drag {
   lastX: number;
   lastY: number;
   active: boolean;
+  /** The drag is moving the window through its chrome (see `moveWindow`). */
+  window: WindowChrome | null;
   /** A copy of the item following the pointer while it's torn off the row. */
   ghost: HTMLElement | null;
   /**
@@ -122,23 +125,14 @@ function createGhost(el: HTMLElement, d: Drag): HTMLElement {
  * the row still count, and the click that ends a drag is swallowed so it
  * doesn't also activate or launch the item.
  *
- * Positions are written straight onto the elements' transforms rather than
- * through React state, so a drag only re-renders when the order changes.
- */
-/**
- * Drag-to-reorder for a horizontal row of items (tab strips, dock tiles).
- *
- * The dragged item follows the pointer, and as its center crosses a
- * neighbor's, `onMove(id, toIndex)` reorders the list right away (Chrome's
- * tab strip behaves the same way); neighbors slide into their new slots. The
- * pointer is captured for the whole gesture, so moves over a <webview> below
- * the row still count, and the click that ends a drag is swallowed so it
- * doesn't also activate or launch the item.
- *
  * With `tearOff`, dragging an item well above or below the row tears it off:
  * it stays in its slot, dimmed, while a copy follows the pointer, and
  * releasing it there hands it to `tearOff.onDrop`. Bringing it back onto the
  * row resumes reordering.
+ *
+ * With `moveWindow`, a drag moves the window instead (a window's only tab,
+ * Chrome-style): past the threshold, the gesture goes to the window's chrome
+ * and the item stays put.
  *
  * Positions are written straight onto the elements' transforms rather than
  * through React state, so a drag only re-renders when the order changes.
@@ -149,6 +143,7 @@ export function useDragReorder({
   constrain,
   relayout,
   tearOff,
+  moveWindow,
 }: {
   /** The reorderable items' ids, in display order. */
   ids: string[];
@@ -162,6 +157,8 @@ export function useDragReorder({
    */
   relayout?: () => void;
   tearOff?: TearOff;
+  /** Drags move this window instead of the item. */
+  moveWindow?: WindowChrome;
 }) {
   const elements = useRef(new Map<string, HTMLElement>());
   const drag = useRef<Drag | null>(null);
@@ -169,9 +166,9 @@ export function useDragReorder({
   // Sibling positions just before a reorder, to slide them from (FLIP).
   const before = useRef<Map<string, number> | null>(null);
 
-  const latest = useRef({ ids, onMove, constrain, relayout, tearOff });
+  const latest = useRef({ ids, onMove, constrain, relayout, tearOff, moveWindow });
   useLayoutEffect(() => {
-    latest.current = { ids, onMove, constrain, relayout, tearOff };
+    latest.current = { ids, onMove, constrain, relayout, tearOff, moveWindow };
   });
 
   /** Put the dragged element under the pointer, and reorder if it crossed a neighbor. */
@@ -249,19 +246,23 @@ export function useDragReorder({
     const d = drag.current;
     drag.current = null;
     if (!d?.active) return;
-    setDraggingId(null);
-    const el = elements.current.get(d.id);
-    if (el) {
-      delete el.dataset.reorderDragging;
-      el.style.zIndex = '';
-      el.style.opacity = '';
-      settle(el, el.getBoundingClientRect().left - naturalLeft(el));
-    }
-    if (d.ghost) {
-      d.ghost.remove();
-      const tearOff = latest.current.tearOff;
-      tearOff?.onHover?.(d.id, null);
-      if (!cancelled) tearOff?.onDrop(d.id, { x: d.lastX, y: d.lastY });
+    if (d.window) {
+      d.window.gestureEnd();
+    } else {
+      setDraggingId(null);
+      const el = elements.current.get(d.id);
+      if (el) {
+        delete el.dataset.reorderDragging;
+        el.style.zIndex = '';
+        el.style.opacity = '';
+        settle(el, el.getBoundingClientRect().left - naturalLeft(el));
+      }
+      if (d.ghost) {
+        d.ghost.remove();
+        const tearOff = latest.current.tearOff;
+        tearOff?.onHover?.(d.id, null);
+        if (!cancelled) tearOff?.onDrop(d.id, { x: d.lastX, y: d.lastY });
+      }
     }
     if (cancelled) return;
     // The click that ends the drag isn't a click on the item.
@@ -290,6 +291,7 @@ export function useDragReorder({
       lastX: e.clientX,
       lastY: e.clientY,
       active: false,
+      window: null,
       ghost: null,
       ghostOrigin: { x: 0, y: 0 },
     };
@@ -305,17 +307,27 @@ export function useDragReorder({
       d.lastX = ev.clientX;
       d.lastY = ev.clientY;
       if (!d.active) {
-        // An item that can be torn off starts dragging in any direction.
-        const travel = latest.current.tearOff?.enabled
+        const { tearOff, moveWindow } = latest.current;
+        // An item that can be torn off, or that moves its window, starts
+        // dragging in any direction.
+        const travel = tearOff?.enabled || moveWindow
           ? Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY)
           : Math.abs(ev.clientX - d.startX);
         if (travel < DRAG_THRESHOLD) return;
         d.active = true;
         target.setPointerCapture(d.pointerId);
-        el.dataset.reorderDragging = '';
-        el.style.transition = 'none';
-        el.style.zIndex = '10';
-        setDraggingId(d.id);
+        if (moveWindow?.beginMove({ clientX: d.startX, clientY: d.startY })) {
+          d.window = moveWindow;
+        } else {
+          el.dataset.reorderDragging = '';
+          el.style.transition = 'none';
+          el.style.zIndex = '10';
+          setDraggingId(d.id);
+        }
+      }
+      if (d.window) {
+        d.window.gestureMove(ev);
+        return;
       }
       tear();
       follow();
