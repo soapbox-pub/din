@@ -4,7 +4,10 @@ import {
   useImperativeHandle,
   useLayoutEffect,
   useRef,
+  useState,
 } from 'react';
+import { RotateCw, Unplug } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { useAppContext } from '@/hooks/useAppContext';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
@@ -454,6 +457,26 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       return () => el.removeEventListener('dom-ready', apply);
     }, [zoomFactor]);
 
+    // The page's renderer went away: it crashed, ran out of memory, or was
+    // ended from the System Monitor. Chromium leaves the guest blank, so say
+    // what happened and offer a reload (which starts a fresh renderer).
+    const [gone, setGone] = useState(false);
+    useEffect(() => {
+      const el = webviewRef.current;
+      if (!el) return;
+      const crashed = () => {
+        setGone(true);
+        onLoadEnd?.();
+      };
+      const loading = () => setGone(false);
+      el.addEventListener('render-process-gone', crashed);
+      el.addEventListener('did-start-loading', loading);
+      return () => {
+        el.removeEventListener('render-process-gone', crashed);
+        el.removeEventListener('did-start-loading', loading);
+      };
+    }, [onLoadEnd]);
+
     // Report the guest's WebContents id once it attaches (used to register
     // the tab with the Chrome extension system).
     useEffect(() => {
@@ -476,9 +499,37 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
     // Host for the guest built in the mount effect above. The <webview> itself
     // is not rendered by React so its attributes can be set before insertion.
-    return <div ref={containerRef} className="h-full w-full" style={{ display: 'flex' }} />;
+    return (
+      <div className="relative h-full w-full" style={{ display: 'flex' }}>
+        <div ref={containerRef} className="h-full w-full" style={{ display: 'flex' }} />
+        {gone && <PageGone onReload={() => webviewRef.current?.reload()} />}
+      </div>
+    );
   },
 );
+
+/** Shown over a page whose renderer is gone, with a way to start it again. */
+function PageGone({ onReload }: { onReload: () => void }) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-background p-6">
+      <div className="w-full max-w-md space-y-5 text-center">
+        <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Unplug className="size-7" aria-hidden />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl font-semibold leading-tight">This page stopped</h2>
+          <p className="text-sm text-muted-foreground">
+            It crashed, ran out of memory, or was ended from System Monitor.
+          </p>
+        </div>
+        <Button onClick={onReload} className="min-w-32">
+          <RotateCw className="mr-2 size-4" aria-hidden />
+          Reload
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /** Minimal typing for the Electron <webview> element methods we use. */
 interface ElectronWebviewElement extends HTMLElement {
