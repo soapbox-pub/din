@@ -106,13 +106,14 @@ function subscribe(listener: () => void): () => void {
 export function notify(input: NotifyInput): string {
   const id = input.id ?? `n${nextId++}`;
   const notification: DesktopNotification = {
-    body: '',
-    actions: [],
     urgency: 'normal',
     timeout: input.urgency === 'critical' ? 0 : DEFAULT_POPUP_MS,
     history: true,
     resident: false,
     ...input,
+    // Callers (toast()) pass these through as undefined when unset.
+    body: input.body ?? '',
+    actions: input.actions ?? [],
     id,
     createdAt: Date.now(),
     read: false,
