@@ -18,6 +18,9 @@ import type { CrxTabCommand } from '@/lib/crx';
  * persistent, authenticated session (and vice versa). Commands with no such
  * reference (chrome.tabs.create, desktop link clicks) go to the most recently
  * mounted window (consumers form a stack).
+ *
+ * Pop-up windows (WebPopup) consume too, but only the commands bound to their
+ * one page; they are never a browser window that unbound commands fall to.
  */
 
 interface Consumer {
@@ -25,6 +28,8 @@ interface Consumer {
   handle: (command: CrxTabCommand) => void;
   /** Whether this window hosts the tab with the given WebContents id. */
   ownsTab: (wcId: number) => boolean;
+  /** A pop-up window: takes bound commands only. */
+  popup: boolean;
 }
 
 const consumers: Consumer[] = [];
@@ -47,12 +52,17 @@ function boundWcId(command: CrxTabCommand): number | undefined {
   }
 }
 
+/** The newest browser window (not a pop-up), if any. */
+function topBrowser(): Consumer | undefined {
+  return consumers.findLast((c) => !c.popup);
+}
+
 /** The consumer that should handle a command: its tab owner, else top-of-stack. */
 function targetFor(command: CrxTabCommand): Consumer | undefined {
   const wcId = boundWcId(command);
   const owner =
     wcId !== undefined ? consumers.find((c) => c.ownsTab(wcId)) : undefined;
-  return owner ?? consumers[consumers.length - 1];
+  return owner ?? topBrowser();
 }
 
 /** Deliver a tab command to the owning (or active) consumer, or queue it. */
@@ -67,22 +77,24 @@ export function publishTabCommand(command: CrxTabCommand): void {
 
 /** Whether a Web Browser instance is currently consuming commands. */
 export function hasTabConsumer(): boolean {
-  return consumers.length > 0;
+  return topBrowser() !== undefined;
 }
 
 /**
  * Register a mounted Web Browser as a consumer of tab commands. `ownsTab`
  * reports whether this window hosts a given tab, so commands route to the
  * right window. Any queued commands (issued while no browser was open, hence
- * ownerless) are delivered immediately. Returns an unsubscribe fn.
+ * ownerless) are delivered immediately. A pop-up window passes `popup` and
+ * gets only the commands bound to its page. Returns an unsubscribe fn.
  */
 export function consumeTabCommands(
   handle: Consumer['handle'],
   ownsTab: Consumer['ownsTab'],
+  popup = false,
 ): () => void {
-  const consumer: Consumer = { handle, ownsTab };
+  const consumer: Consumer = { handle, ownsTab, popup };
   consumers.push(consumer);
-  if (consumers[consumers.length - 1] === consumer) {
+  if (!popup) {
     while (queue.length > 0) {
       consumer.handle(queue.shift() as CrxTabCommand);
     }

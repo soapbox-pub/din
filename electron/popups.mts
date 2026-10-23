@@ -11,20 +11,25 @@
 //
 // Openers. Din's tabs are <webview> guests, and a guest can't adopt a window
 // Chromium creates for it, so every window.open is denied and the URL opens
-// as a tab instead (see setWindowOpenHandler in main.mts). That cuts the two
-// pages apart: window.open returns null and the tab's window.opener is null,
-// which breaks pop-up sign-in (Google, Apple, Firebase, MSAL...). They post
-// their result to window.opener and watch the pop-up's `closed`.
+// in a guest of the shell's instead (see setWindowOpenHandler in main.mts): a
+// tab, or a small pop-up window when the page asked for one with a size, as
+// Chrome does. That cuts the two pages apart: window.open returns null and
+// the new page's window.opener is null, which breaks pop-up sign-in (Google,
+// Apple, Firebase, MSAL...). They post their result to window.opener and
+// watch the pop-up's `closed`.
 //
 // popup-preload.cjs puts that link back. In the page it opens from,
-// window.open returns a stand-in for the new tab's window; in the tab,
-// window.opener is a stand-in for the page. Both carry postMessage, close,
+// window.open returns a stand-in for the new page's window; in that page,
+// window.opener is a stand-in for its opener. Both carry postMessage, close,
 // focus, closed and location, relayed through here - postMessage with the
 // MessagePorts it transfers, which Google's sign-in pop-up answers on. This
-// process stamps every
-// message with the origin of the frame that really sent it and delivers it
-// only to a frame whose origin matches the sender's targetOrigin, as
-// postMessage does.
+// process stamps every message with the origin of the frame that really sent
+// it and delivers it only to a frame whose origin matches the sender's
+// targetOrigin, as postMessage does.
+//
+// A Cross-Origin-Opener-Policy cuts the link where Chromium would put the two
+// pages in separate browsing context groups: the pop-up's window.opener goes
+// null and the opener sees the window closed.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -53,15 +58,41 @@ interface FrameRef {
   routingId: number;
 }
 
+/** What the shell opens a window in: a pop-up window of this size, or a tab. */
+export interface PopupFeatures {
+  width: number;
+  height: number;
+  /** Opened from a private window: the pop-up is private too. */
+  private: boolean;
+}
+
+/** The values of Cross-Origin-Opener-Policy that matter here. */
+type Coop = 'unsafe-none' | 'same-origin' | 'same-origin-allow-popups' | 'noopener-allow-popups';
+
+/** A top-level document, as far as COOP goes. */
+interface Doc {
+  origin: string;
+  coop: Coop;
+}
+
 /** A window a page opened, and the frame that opened it. */
 interface PopupLink {
   id: string;
   openerWcId: number;
   openerFrame: FrameRef;
-  /** The tab's guest, once the shell has made it. */
+  /** The guest it opened in, once the shell has made it. */
   popupWcId: number | null;
-  /** The URL the tab is opening, until it attaches. Null: not opened yet. */
+  /** The URL the guest is opening, until it attaches. Null: not opened yet. */
   pendingUrl: string | null;
+  /** How the shell is to open an about:blank window once it goes somewhere. */
+  popup: PopupFeatures | null;
+  /**
+   * The pop-up's initial empty document, which takes its opener's top-level
+   * COOP when the opener frame is the same origin as its top-level page.
+   */
+  initialDoc: Doc;
+  /** Whether the pop-up has had a response of its own yet. */
+  loaded: boolean;
 }
 
 let allowlist = new Set<string>();
@@ -75,6 +106,8 @@ const blocked = new Map<number, string[]>();
 /** A window.open the preload announced, waiting for the open handler. */
 const announced = new Map<number, { id: string; frame: FrameRef }>();
 const links = new Map<string, PopupLink>();
+/** Each web guest's top-level document, from its last main-frame response. */
+const docs = new Map<number, Doc>();
 /** The link whose tab is attaching (will-attach-webview -> web-contents-created). */
 let attachingLink: PopupLink | null = null;
 
@@ -162,20 +195,49 @@ export function mayOpenWindow(contents: Electron.WebContents, url: string): bool
 // --- Openers -----------------------------------------------------------------
 
 /**
- * The open handler let a window open (its tab is on the way, or for
+ * Whether a window.open asked for a pop-up window rather than a tab, and how
+ * big. Chromium has already decided (its disposition is 'new-window' for a
+ * pop-up, from features like width=, height= or popup); Shift+click on a link
+ * says so too but has no features, and opens a tab here.
+ */
+export function popupFeatures(
+  disposition: string,
+  features: string,
+  isPrivate: boolean,
+): PopupFeatures | null {
+  if (disposition !== 'new-window' || features.trim() === '') return null;
+  const size = (key: string, fallback: number): number => {
+    const match = new RegExp(`(?:^|[\\s,])${key}\\s*=\\s*(\\d+)`, 'i').exec(features);
+    const value = match ? Number(match[1]) : fallback;
+    return Math.min(Math.max(value, 100), 4096);
+  };
+  return { width: size('width', 500), height: size('height', 600), private: isPrivate };
+}
+
+/**
+ * The open handler let a window open (its guest is on the way, or for
  * about:blank, not yet: `url` is null). Link it to its opener if the page's
  * window.open asked for one.
  */
-export function windowOpened(contents: Electron.WebContents, url: string | null): void {
+export function windowOpened(
+  contents: Electron.WebContents,
+  url: string | null,
+  popup: PopupFeatures | null,
+): void {
   const announcement = announced.get(contents.id);
   if (!announcement) return;
   announced.delete(contents.id);
+  const openerOrigin = frameOf(announcement.frame)?.origin ?? '';
+  const top = docs.get(contents.id);
   const link: PopupLink = {
     id: announcement.id,
     openerWcId: contents.id,
     openerFrame: announcement.frame,
     popupWcId: null,
     pendingUrl: url,
+    popup,
+    initialDoc: top && top.origin === openerOrigin ? top : { origin: openerOrigin, coop: 'unsafe-none' },
+    loaded: false,
   };
   links.set(link.id, link);
   if (url) expireUnattached(link);
@@ -230,6 +292,77 @@ function reportLocation(link: PopupLink): void {
 function closeLink(link: PopupLink): void {
   links.delete(link.id);
   frameOf(link.openerFrame)?.send('popup-bridge:closed', { id: link.id });
+}
+
+/**
+ * COOP put the two pages in separate browsing context groups: the opener
+ * sees its window closed, and the window's opener is null.
+ */
+function severLink(link: PopupLink): void {
+  closeLink(link);
+  liveContents(link.popupWcId)?.mainFrame.send('popup-bridge:closed', { id: null, severed: true });
+}
+
+// --- Cross-Origin-Opener-Policy ----------------------------------------------
+
+/** A response's COOP. Only secure pages have one; report-only is ignored. */
+function coopOf(url: string, headers: Record<string, string[]> | undefined): Coop {
+  if (!url.startsWith('https:') || !headers) return 'unsafe-none';
+  const name = Object.keys(headers).find((key) => key.toLowerCase() === 'cross-origin-opener-policy');
+  const value = name ? headers[name]?.[0]?.split(';')[0].trim().toLowerCase() : undefined;
+  return value === 'same-origin' || value === 'same-origin-allow-popups' || value === 'noopener-allow-popups'
+    ? value
+    : 'unsafe-none';
+}
+
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Whether going from one top-level document to the next takes the page to a
+ * new browsing context group, which severs it from its opener and the
+ * windows it opened (the HTML spec's "check if COOP values require a
+ * browsing context group switch"). `initial`: leaving the pop-up's first,
+ * empty document, which an opener's "-allow-popups" lets go anywhere that
+ * sets no policy.
+ */
+function requiresSwitch(from: Doc, to: Doc, initial: boolean): boolean {
+  if (from.coop === 'unsafe-none' && to.coop === 'unsafe-none') return false;
+  if (
+    initial &&
+    (from.coop === 'same-origin-allow-popups' || from.coop === 'noopener-allow-popups') &&
+    to.coop === 'unsafe-none'
+  ) {
+    return false;
+  }
+  if (to.coop === 'noopener-allow-popups' || from.coop === 'noopener-allow-popups') return true;
+  return from.coop !== to.coop || from.origin !== to.origin;
+}
+
+/**
+ * A web guest got a top-level response: sever the links COOP says it can't
+ * keep, as the response comes in, so the new page never sees them.
+ */
+function documentArriving(wcId: number, url: string, headers: Record<string, string[]> | undefined): void {
+  const next: Doc = { origin: originOf(url), coop: coopOf(url, headers) };
+  const previous = docs.get(wcId);
+  docs.set(wcId, next);
+  for (const link of [...links.values()]) {
+    if (link.popupWcId === wcId) {
+      const initial = !link.loaded;
+      link.loaded = true;
+      if (requiresSwitch(initial ? link.initialDoc : (previous ?? link.initialDoc), next, initial)) {
+        severLink(link);
+      }
+    } else if (link.openerWcId === wcId && previous && requiresSwitch(previous, next, false)) {
+      severLink(link);
+    }
+  }
 }
 
 /** The link whose window sent this, if it came from a linked tab's top frame. */
@@ -348,10 +481,10 @@ function registerBridge(): void {
     if (popup) {
       popup.loadURL(url).catch(() => {});
     } else if (!link.pendingUrl) {
-      // Opened as about:blank: the tab opens now, where it's going.
+      // Opened as about:blank: the window opens now, where it's going.
       link.pendingUrl = url;
       expireUnattached(link);
-      sendToShell('crx:openTab', { url, openerWcId: link.openerWcId });
+      sendToShell('crx:openTab', { url, openerWcId: link.openerWcId, popup: link.popup ?? undefined });
     }
   });
 }
@@ -380,6 +513,7 @@ export function attachPopups(contents: Electron.WebContents): void {
     activations.delete(contents.id);
     blocked.delete(contents.id);
     announced.delete(contents.id);
+    docs.delete(contents.id);
     for (const link of [...links.values()]) {
       if (link.openerWcId !== contents.id) continue;
       links.delete(link.id);
@@ -403,6 +537,13 @@ export function setupPopups(options: {
   loadSettings();
   for (const s of options.sessions) {
     s.registerPreloadScript({ id: 'din-popups', type: 'frame', filePath: PRELOAD });
+    // Every top-level response, for its COOP. The only onResponseStarted
+    // listener on these sessions (each event takes one).
+    s.webRequest.onResponseStarted({ urls: ['https://*/*', 'http://*/*'] }, (details) => {
+      if (details.resourceType !== 'mainFrame' || details.webContentsId === undefined) return;
+      const contents = liveContents(details.webContentsId);
+      if (contents && isWebGuest(contents)) documentArriving(contents.id, details.url, details.responseHeaders);
+    });
   }
   registerBridge();
 

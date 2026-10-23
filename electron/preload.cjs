@@ -1504,10 +1504,15 @@ contextBridge.exposeInMainWorld('browser', {
  * An extension-initiated tab command surfaced to the browser app.
  * @typedef {(
  *   { type: 'create', requestId: number, url?: string, active: boolean } |
- *   { type: 'open', url: string, openerWcId?: number, background?: boolean } |
+ *   { type: 'open', url: string, openerWcId?: number, background?: boolean, popup?: CrxPopupFeatures } |
  *   { type: 'select', wcId: number } |
  *   { type: 'close', wcId: number }
  * )} CrxTabCommand
+ */
+
+/**
+ * A window.open that asked for a pop-up window, not a tab.
+ * @typedef {{ width: number, height: number, private: boolean }} CrxPopupFeatures
  */
 
 // Chrome extension bridge (window.crx), backed by the crx:* handlers in
@@ -1547,7 +1552,7 @@ contextBridge.exposeInMainWorld('crx', {
       callback({ type: 'create', requestId: d.requestId, url: d.url, active: d.active });
     /**
      * @param {Electron.IpcRendererEvent} _event
-     * @param {{ url: string, openerWcId?: number, background?: boolean }} d
+     * @param {{ url: string, openerWcId?: number, background?: boolean, popup?: CrxPopupFeatures }} d
      */
     const open = (_event, d) =>
       callback({
@@ -1555,6 +1560,7 @@ contextBridge.exposeInMainWorld('crx', {
         url: d.url,
         openerWcId: d.openerWcId,
         background: d.background,
+        popup: d.popup,
       });
     /**
      * @param {Electron.IpcRendererEvent} _event

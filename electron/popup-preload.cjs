@@ -171,10 +171,14 @@ function installPopupBridge(bridge) {
       const type = tagged[token];
       if (type !== 'message' && type !== 'closed' && type !== 'location') return;
       event.stopImmediatePropagation();
-      /** @type {{ id: string | null, data?: unknown, origin?: string, href?: string | null }} */
+      /** @type {{ id: string | null, data?: unknown, origin?: string, href?: string | null, severed?: boolean }} */
       const payload = tagged.payload;
       const linked = payload.id === null ? opener : opened.get(payload.id);
       if (!linked) return;
+      // Cut off by Cross-Origin-Opener-Policy: no opener at all, as in Chrome.
+      if (type === 'closed' && payload.severed && linked === opener && window.opener === linked.window) {
+        window.opener = null;
+      }
       if (type === 'message') {
         const message = new MessageEvent('message', {
           data: payload.data,

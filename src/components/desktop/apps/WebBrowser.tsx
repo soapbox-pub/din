@@ -2841,7 +2841,7 @@ function describeLoadError(info: LoadErrorInfo): {
  * Chromium would otherwise show its own generic error page; this branded one
  * offers a Retry that re-requests the failed URL.
  */
-function LoadErrorPage({
+export function LoadErrorPage({
   info,
   onRetry,
 }: {

@@ -2,6 +2,7 @@ import { lazy } from 'react';
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
+import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
 
 // Built-in apps are code-split: each is its own chunk, loaded the first time
 // it's launched (windows render app content inside <Suspense>). Statically
@@ -9,6 +10,9 @@ import { NATIVE_APP_ICON } from '@/lib/appIcons';
 // in the main bundle, which slowed boot and first paint of the desktop.
 const WebBrowser = lazy(() =>
   import('@/components/desktop/apps/WebBrowser').then((m) => ({ default: m.WebBrowser })),
+);
+const WebPopup = lazy(() =>
+  import('@/components/desktop/apps/WebPopup').then((m) => ({ default: m.WebPopup })),
 );
 const FileBrowser = lazy(() =>
   import('@/components/desktop/apps/FileBrowser').then((m) => ({ default: m.FileBrowser })),
@@ -155,6 +159,17 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/devtools.png',
     component: DevTools,
     defaultSize: { width: 720, height: 560 },
+    hidden: true,
+  },
+  {
+    // A pop-up window a page opened (window.open with a size, like a sign-in
+    // window). Hidden from the launcher; BrowserExtensionHost opens it with
+    // the page's URL and opener in its launch params, at the size it asked.
+    id: WEB_POPUP_APP_ID,
+    name: 'Web Browser',
+    icon: '/icons/apps/web-browser.png',
+    component: WebPopup,
+    defaultSize: { width: 500, height: 640 },
     hidden: true,
   },
   {

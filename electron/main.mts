@@ -31,7 +31,15 @@ import {
   isUserscriptInstallUrl,
 } from './userscripts.mts';
 import { attachAdblock, isAdblockExtension, setupAdblock } from './adblock.mts';
-import { attachPopups, mayOpenWindow, popupAttached, popupAttaching, setupPopups, windowOpened } from './popups.mts';
+import {
+  attachPopups,
+  mayOpenWindow,
+  popupAttached,
+  popupAttaching,
+  popupFeatures,
+  setupPopups,
+  windowOpened,
+} from './popups.mts';
 import {
   NSITE_SCHEME,
   registerNsiteProtocol,
@@ -5324,7 +5332,12 @@ app.on('web-contents-created', (_event, contents) => {
     });
   }
 
-  contents.setWindowOpenHandler(({ url, disposition }) => {
+  contents.setWindowOpenHandler(({ url, disposition, features }) => {
+    // A window.open that asked for a pop-up gets a small window of its own.
+    // A web page's only: extension pages open theirs as tabs, as before.
+    const popup = isWebPage
+      ? popupFeatures(disposition, features, contents.session === privateBrowserSession())
+      : null;
     if (isBrowserTab && isUserscriptInstallUrl(url)) {
       sendToShell('userscripts:installRequested', { url, wcId: contents.id });
     } else if (
@@ -5345,12 +5358,13 @@ app.on('web-contents-created', (_event, contents) => {
         url,
         openerWcId: contents.id,
         background: disposition === 'background-tab',
+        popup: popup ?? undefined,
       });
-      if (isWebPage) windowOpened(contents, url);
+      if (isWebPage) windowOpened(contents, url, popup);
     } else if (isWebPage && url === 'about:blank' && mayOpenWindow(contents, url)) {
       // An empty window the page means to send somewhere: no tab until it
       // does (popup-preload.cjs gives the page its location).
-      windowOpened(contents, null);
+      windowOpened(contents, null, popup);
     }
     return { action: 'deny' };
   });

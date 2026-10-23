@@ -22,6 +22,15 @@ export interface CrxExtension {
   description: string;
 }
 
+/** The pop-up window a page's window.open asked for. */
+export interface CrxPopupFeatures {
+  /** Size of the page in the window, in CSS px. */
+  width: number;
+  height: number;
+  /** Opened from a private window, so private too. */
+  private: boolean;
+}
+
 /** A tab command initiated by the extension system (or a page's window.open). */
 export type CrxTabCommand =
   | {
@@ -50,6 +59,11 @@ export type CrxTabCommand =
        * plain target=_blank, window.open, and desktop-initiated opens.
        */
       background?: boolean;
+      /**
+       * The page asked for a pop-up window (window.open with a size), not a
+       * tab: it opens in a small window of its own, as in Chrome.
+       */
+      popup?: CrxPopupFeatures;
     }
   | {
       /** chrome.tabs.update({ active: true }): activate the matching tab. */
