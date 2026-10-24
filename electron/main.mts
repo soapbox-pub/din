@@ -38,6 +38,7 @@ import {
   popupAttaching,
   popupFeatures,
   setupPopups,
+  topLevelResponse,
   windowOpened,
 } from './popups.mts';
 import {
@@ -5184,12 +5185,14 @@ app.whenReady().then(() => {
     isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents,
     assertShellSender,
     sendToShell,
+    onTopLevelResponse: (url, coop) => topLevelResponse(browserSession(), url, coop),
   });
 
   // The pop-up blocker, and window.opener for windows pages open
   // (electron/popups.mts). Also before the first <webview>, for its preload.
   setupPopups({
     sessions: [browserSession(), privateBrowserSession(), appSession()],
+    extensionSessions: [browserSession()],
     isWebGuest: (contents) =>
       contents.getType() === 'webview' &&
       (isBrowserTabSession(contents.session) || contents.session === appSession()),

@@ -108,6 +108,8 @@ const announced = new Map<number, { id: string; frame: FrameRef }>();
 const links = new Map<string, PopupLink>();
 /** Each web guest's top-level document, from its last main-frame response. */
 const docs = new Map<number, Doc>();
+/** Where each web guest's top frame is navigating, until its response comes. */
+const navigating = new Map<number, string>();
 /** The link whose tab is attaching (will-attach-webview -> web-contents-created). */
 let attachingLink: PopupLink | null = null;
 
@@ -349,6 +351,7 @@ function requiresSwitch(from: Doc, to: Doc, initial: boolean): boolean {
  * keep, as the response comes in, so the new page never sees them.
  */
 function documentArriving(wcId: number, url: string, headers: Record<string, string[]> | undefined): void {
+  navigating.delete(wcId);
   const next: Doc = { origin: originOf(url), coop: coopOf(url, headers) };
   const previous = docs.get(wcId);
   docs.set(wcId, next);
@@ -503,8 +506,12 @@ export function attachPopups(contents: Electron.WebContents): void {
   contents.on('input-event', (_event, input) => {
     if (input.type === 'touchEnd' || input.type === 'gestureTap') pressed();
   });
+  contents.on('did-redirect-navigation', (event) => {
+    if (event.isMainFrame) navigating.set(contents.id, event.url);
+  });
   contents.on('did-start-navigation', (event) => {
     if (!event.isMainFrame || event.isSameDocument) return;
+    navigating.set(contents.id, event.url);
     if (!blocked.has(contents.id)) return;
     blocked.delete(contents.id);
     sendToShell('popups:blocked', { wcId: contents.id, urls: [] });
@@ -514,6 +521,7 @@ export function attachPopups(contents: Electron.WebContents): void {
     blocked.delete(contents.id);
     announced.delete(contents.id);
     docs.delete(contents.id);
+    navigating.delete(contents.id);
     for (const link of [...links.values()]) {
       if (link.openerWcId !== contents.id) continue;
       links.delete(link.id);
@@ -522,9 +530,28 @@ export function attachPopups(contents: Electron.WebContents): void {
   });
 }
 
+/**
+ * A top-level response in a session that runs extensions, where this module
+ * can't listen itself (see `extensionSessions`). The built-in ad blocker's
+ * extension reports them; the guest is the one navigating to that URL.
+ */
+export function topLevelResponse(s: Electron.Session, url: string, coop: string | null): void {
+  for (const [wcId, pending] of [...navigating]) {
+    const contents = liveContents(wcId);
+    if (contents?.session !== s || !sameUrl(pending, url)) continue;
+    documentArriving(wcId, url, coop === null ? undefined : { 'Cross-Origin-Opener-Policy': [coop] });
+  }
+}
+
 export function setupPopups(options: {
   /** Sessions whose pages get window.opener and the window.open stand-in. */
   sessions: Electron.Session[];
+  /**
+   * Those of them that run extensions. A session.webRequest listener there
+   * would switch chrome.webRequest off for every extension, the ad blocker
+   * included, so their responses come in through topLevelResponse instead.
+   */
+  extensionSessions: Electron.Session[];
   /** Web content guests: browser tabs and installed apps. */
   isWebGuest: (contents: Electron.WebContents) => boolean;
   assertShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => void;
@@ -537,6 +564,7 @@ export function setupPopups(options: {
   loadSettings();
   for (const s of options.sessions) {
     s.registerPreloadScript({ id: 'din-popups', type: 'frame', filePath: PRELOAD });
+    if (options.extensionSessions.includes(s)) continue;
     // Every top-level response, for its COOP. The only onResponseStarted
     // listener on these sessions (each event takes one).
     s.webRequest.onResponseStarted({ urls: ['https://*/*', 'http://*/*'] }, (details) => {

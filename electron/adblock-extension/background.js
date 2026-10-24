@@ -124,9 +124,16 @@ chrome.webRequest.onBeforeRequest.addListener(
   ['blocking'],
 );
 
-// Filters can add a Content-Security-Policy to documents (`$csp`).
+// Filters can add a Content-Security-Policy to documents (`$csp`). Every
+// top-level response's COOP also goes to the pop-up blocker (popups.mts),
+// blocking on or off: a session.webRequest listener there would switch this
+// one off.
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
+    if (details.type === 'main_frame' && (details.statusCode < 300 || details.statusCode >= 400)) {
+      const coop = details.responseHeaders?.find((h) => h.name.toLowerCase() === 'cross-origin-opener-policy');
+      dinAdblock.reportDocument(details.url, coop?.value ?? null);
+    }
     if (!enabled || !engine || allowlist.has(pageOf(details).site)) return {};
     const policy = engine.getCSPDirectives(requestOf(details));
     if (!policy) return {};

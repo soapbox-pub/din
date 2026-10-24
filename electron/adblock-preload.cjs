@@ -26,6 +26,12 @@ if (location.origin === EXTENSION_ORIGIN) {
     /** @param {[string, string[]][]} reports newly blocked URLs, by site */
     reportBlocked: (reports) => ipcRenderer.send('adblock-ext:blocked', reports),
 
+    /**
+     * @param {string} url a top-level response's URL
+     * @param {string | null} coop its Cross-Origin-Opener-Policy header
+     */
+    reportDocument: (url, coop) => ipcRenderer.send('adblock-ext:document', url, coop),
+
     /** @param {(settings: { enabled: boolean, allowlist: string[] }) => void} callback */
     onSettings: (callback) => {
       ipcRenderer.on('adblock-ext:settings', (_event, settings) => callback(settings));
