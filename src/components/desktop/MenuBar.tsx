@@ -45,6 +45,7 @@ import { useNotificationsBadge } from '@/hooks/useNotificationsBadge';
 import { Calendar } from '@/components/ui/calendar';
 import { TrayItems } from '@/components/desktop/TrayMenu';
 import { AssistantMenuItem } from '@/components/desktop/AssistantIndicator';
+import { ScreenShareMenuItem } from '@/components/desktop/ScreenShareHost';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { useClock } from '@/hooks/useClock';
@@ -141,6 +142,7 @@ export function MenuBar() {
       </div>
       <ClockMenuItem />
       <div className="flex min-w-0 items-center justify-end gap-1.5">
+        <ScreenShareMenuItem />
         <TrayItems />
         <AssistantMenuItem />
         <AirPlayMenuItem />

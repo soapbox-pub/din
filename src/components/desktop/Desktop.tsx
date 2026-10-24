@@ -26,6 +26,7 @@ import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { NsiteBridgeHost } from './NsiteBridgeHost';
 import { PromptHost } from './PromptHost';
+import { ScreenSharePicker } from './ScreenShareHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
 import { SystemEventsHost } from './SystemEventsHost';
 import { NativeLinksHost } from './NativeLinksHost';
@@ -138,6 +139,7 @@ function DesktopSession() {
             <HighlightBridgeHost />
             <NsiteBridgeHost />
             <PromptHost />
+            <ScreenSharePicker />
             <DesktopHotkeys />
             <AssistantHost />
             <SecurityOptions />

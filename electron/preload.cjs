@@ -73,6 +73,8 @@
 //     Nostr client (see NsiteBridgeHost / electron/nsite.mts)
 //   - window.promptHost: yes/no questions for the user - site permissions and
 //     extension installs (see PromptHost)
+//   - window.screenShare: pages asking to share the screen, and the shares
+//     running (see ScreenShareHost.tsx / electron/screen-share.mts)
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -2534,4 +2536,58 @@ contextBridge.exposeInMainWorld('promptHost', {
    * @param {{ requestId: number, allow: boolean, dismissed?: boolean }} response
    */
   respond: (response) => ipcRenderer.send('prompt:response', response),
+});
+
+// Screen sharing (window.screenShare), backed by electron/screen-share.mts.
+// A page's getDisplayMedia() arrives as a pick for ScreenSharePicker, and the
+// shares running are listed for the menu bar, which can stop them.
+contextBridge.exposeInMainWorld('screenShare', {
+  /**
+   * Subscribe to picks. Returns an unsubscribe fn.
+   * @param {(request: unknown) => void} callback
+   */
+  onPick: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, request: unknown) => void} */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('screen-share:pick', listener);
+    return () => ipcRenderer.removeListener('screen-share:pick', listener);
+  },
+
+  /**
+   * Subscribe to picks main has given up on (timed out). Returns an
+   * unsubscribe fn.
+   * @param {(requestId: number) => void} callback
+   */
+  onCancel: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, d: { requestId: number }) => void} */
+    const listener = (_event, d) => callback(d.requestId);
+    ipcRenderer.on('screen-share:cancel', listener);
+    return () => ipcRenderer.removeListener('screen-share:cancel', listener);
+  },
+
+  /**
+   * Answer a pick: a source id, or null to refuse.
+   * @param {{ requestId: number, sourceId: string | null, audio: boolean }} response
+   */
+  choose: (response) => ipcRenderer.send('screen-share:choice', response),
+
+  /** The shares running now. */
+  list: () => ipcRenderer.invoke('screen-share:list'),
+
+  /**
+   * Subscribe to the shares running. Returns an unsubscribe fn.
+   * @param {(shares: unknown[]) => void} callback
+   */
+  onActive: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, shares: unknown[]) => void} */
+    const listener = (_event, shares) => callback(shares);
+    ipcRenderer.on('screen-share:active', listener);
+    return () => ipcRenderer.removeListener('screen-share:active', listener);
+  },
+
+  /**
+   * Stop a share.
+   * @param {string} id
+   */
+  stop: (id) => ipcRenderer.invoke('screen-share:stop', id),
 });

@@ -81,6 +81,7 @@ import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
 import { airplayDisplays, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
+import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 
@@ -3157,6 +3158,13 @@ const NOTIFICATION_PRELOAD = path.join(import.meta.dirname, 'notification-preloa
  */
 const PRINT_PRELOAD = path.join(import.meta.dirname, 'print-preload.cjs');
 
+/**
+ * Absolute path to the session preload that tells Din when a web page is
+ * sharing the screen, so the menu bar can show it and stop it (see
+ * electron/screen-share.mts). Every page gets it, in every frame.
+ */
+const SCREEN_SHARE_PRELOAD = path.join(import.meta.dirname, 'screen-share-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow: BrowserWindow | null = null;
 
@@ -4067,6 +4075,17 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     }
     if (ALWAYS_ALLOWED_PERMISSIONS.has(permission)) {
       callback(true);
+      return;
+    }
+    // Screen sharing asks the user in its own picker, every time
+    // (electron/screen-share.mts); the permission itself is no gate.
+    // getDisplayMedia arrives as 'media' naming neither camera nor
+    // microphone (Electron 41 lists only device capture in mediaTypes).
+    if (
+      permission === 'display-capture' ||
+      (permission === 'media' && 'mediaTypes' in details && (details.mediaTypes ?? []).length === 0)
+    ) {
+      callback(prompts);
       return;
     }
     const capabilities = prompts ? requestedCapabilities(permission, details) : null;
@@ -5045,7 +5064,20 @@ app.whenReady().then(() => {
   for (const s of [browserSession(), privateBrowserSession(), appSession()]) {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
+    s.registerPreloadScript({ id: 'din-screen-share', type: 'frame', filePath: SCREEN_SHARE_PRELOAD });
+    allowScreenSharing(s);
   }
+  registerScreenShareHandlers({
+    assertShellSender,
+    isShellSender,
+    sendToShell,
+    shellContents: () => (shellWindow && !shellWindow.webContents.isDestroyed() ? shellWindow.webContents : null),
+    isShareableGuest: (contents) =>
+      shellGuestFromId(contents.id) !== null &&
+      (isBrowserTabSession(contents.session) || contents.session === appSession()),
+    isPrivate: (s) => s === privateBrowserSession(),
+    undim: undimCapture,
+  });
   // And a window.nostr backed by Din's signer; private tabs get none.
   for (const s of [browserSession(), appSession()]) {
     s.registerPreloadScript({ id: 'din-nostr', type: 'frame', filePath: NOSTR_PRELOAD });
