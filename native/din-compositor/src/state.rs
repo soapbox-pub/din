@@ -13,8 +13,8 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         renderer::{ImportDma, pixman::PixmanRenderer, utils::on_commit_buffer_handler},
     },
-    delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_dmabuf,
-    delegate_output, delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_compositor, delegate_cursor_shape, delegate_data_control, delegate_data_device, delegate_dmabuf,
+    delegate_ext_data_control, delegate_output, delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
     delegate_xwayland_shell,
     desktop::{PopupKind, PopupManager, Window, utils::bbox_from_surface_tree},
     input::{
@@ -54,6 +54,10 @@ use smithay::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
                 request_data_device_client_selection, set_data_device_focus,
             },
+            ext_data_control::{
+                DataControlHandler as ExtDataControlHandler, DataControlState as ExtDataControlState,
+            },
+            wlr_data_control::{DataControlHandler, DataControlState},
         },
         shell::xdg::{
             PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -260,6 +264,9 @@ pub struct State {
     pub shm_state: ShmState,
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
+    /// Copying and pasting without a window (wl-copy, wl-paste).
+    pub data_control_state: DataControlState,
+    pub ext_data_control_state: ExtDataControlState,
     // Held only so their globals stay advertised.
     _output_manager_state: OutputManagerState,
     _decoration_state: XdgDecorationState,
@@ -330,6 +337,8 @@ impl State {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let mut seat_state = SeatState::new();
         let data_device_state = DataDeviceState::new::<Self>(dh);
+        let data_control_state = DataControlState::new::<Self, _>(dh, None, |_| true);
+        let ext_data_control_state = ExtDataControlState::new::<Self, _>(dh, None, |_| true);
         let decoration_state = XdgDecorationState::new::<Self>(dh);
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
@@ -373,6 +382,8 @@ impl State {
             shm_state,
             seat_state,
             data_device_state,
+            data_control_state,
+            ext_data_control_state,
             _output_manager_state: output_manager_state,
             _decoration_state: decoration_state,
             _cursor_shape_state: cursor_shape_state,
@@ -803,6 +814,18 @@ impl DataDeviceHandler for State {
     }
 }
 
+impl DataControlHandler for State {
+    fn data_control_state(&self) -> &DataControlState {
+        &self.data_control_state
+    }
+}
+
+impl ExtDataControlHandler for State {
+    fn data_control_state(&self) -> &ExtDataControlState {
+        &self.ext_data_control_state
+    }
+}
+
 impl ClientDndGrabHandler for State {}
 
 /// A drag from the shell (Files) into an app.
@@ -836,6 +859,8 @@ delegate_xdg_shell!(State);
 delegate_xdg_decoration!(State);
 delegate_seat!(State);
 delegate_data_device!(State);
+delegate_data_control!(State);
+delegate_ext_data_control!(State);
 delegate_output!(State);
 delegate_cursor_shape!(State);
 delegate_dmabuf!(State);

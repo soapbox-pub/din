@@ -799,6 +799,9 @@ in
     # Screenshots of the whole screen. Cage's socket is renamed to din-shell
     # (see the launcher above), so: WAYLAND_DISPLAY=din-shell grim x.png
     ++ [ grim slurp ]
+    # The clipboard from the command line (wl-copy, wl-paste, xclip). Native
+    # apps' clipboard is Din's, so these reach the whole desktop.
+    ++ [ wl-clipboard xclip ]
     # notify-send, for scripts and long builds: Din is the notification server.
     ++ [ libnotify ]
     # AirPlay from the command line too (`deckmon discover`, `deckmon status`).
