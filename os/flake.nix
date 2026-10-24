@@ -97,6 +97,7 @@
         {
           accounts = test ./tests/accounts.nix;
           boot-screen = test ./tests/boot-screen.nix;
+          firmware = test ./tests/firmware.nix;
           lock = test ./tests/lock.nix;
         };
     };

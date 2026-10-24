@@ -325,6 +325,7 @@ let
     export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
     export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
     export DIN_TIME=${din-time}/bin/din-time
+    export DIN_FWUPDMGR=${config.services.fwupd.package}/bin/fwupdmgr
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
@@ -441,7 +442,31 @@ in
       ];
       if (allowed.indexOf(action.id) >= 0) return polkit.Result.YES;
     });
+
+    // fwupd, below.
+    polkit.addRule(function (action, subject) {
+      if (subject.user != "din") return;
+      var allowed = [
+        "org.freedesktop.fwupd.get-remotes",
+        "org.freedesktop.fwupd.refresh-remote",
+        "org.freedesktop.fwupd.update-internal-trusted",
+        "org.freedesktop.fwupd.update-hotplug-trusted",
+        "org.freedesktop.fwupd.clear-results",
+      ];
+      if (allowed.indexOf(action.id) >= 0) return polkit.Result.YES;
+    });
   '';
+
+  # Firmware updates from LVFS, for Settings → About (electron/firmware.mts):
+  # the computer's own firmware (UEFI capsules, staged on /boot and applied
+  # by the next restart) and its devices'. fwupd-refresh's timer keeps the
+  # list of releases current. As with udisks, the seatless session would be
+  # asked for an admin password; the polkit rule above lets `din` install
+  # firmware that LVFS signed, and nothing else: local or unsigned files,
+  # downgrades and fwupd's settings still need one. Secure Boot is off
+  # wherever DinOS boots (its systemd-boot is unsigned), so fwupd's unsigned
+  # EFI updater boots too.
+  services.fwupd.enable = true;
 
   # Printing that needs no setup (electron/printing.mts). Avahi finds
   # printers on the network, ipp-usb puts USB printers that speak IPP (most

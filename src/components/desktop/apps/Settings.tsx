@@ -12,6 +12,7 @@ import {
   CircleArrowUp,
   Clock,
   Cloud,
+  Cpu,
   Link2,
   CloudOff,
   EthernetPort,
@@ -175,6 +176,9 @@ import { getUpdaterBridge, UPDATE_STEP_LABELS } from '@/lib/updater';
 import type { UpdateState } from '@/lib/updater';
 import { cleanInstallerError } from '@/lib/installer';
 import { useUpdateState } from '@/hooks/useUpdater';
+import { getFirmwareBridge } from '@/lib/firmware';
+import type { FirmwareState, FirmwareUpdate } from '@/lib/firmware';
+import { useFirmwareState } from '@/hooks/useFirmware';
 import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSection';
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
@@ -250,7 +254,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * Developers holds debug utilities such as intentionally crashing the shell
  * to test the error boundary. About shows Din's logo and DinOS's version, and
  * the update it's staging through `window.updater`, and offers the restart
- * that finishes one.
+ * that finishes one, and firmware updates through `window.firmware`.
  */
 const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
 
@@ -3964,7 +3968,160 @@ function AboutSection() {
           <UpdateStatus state={state} />
         </>
       )}
+
+      <FirmwareSection />
     </SectionShell>
+  );
+}
+
+/**
+ * Firmware updates for the computer and its devices (window.firmware). Unlike
+ * DinOS's, they're never installed by themselves: each waits for its Update
+ * button.
+ */
+function FirmwareSection() {
+  const bridge = getFirmwareBridge();
+  const state = useFirmwareState();
+  if (!bridge || state?.available === false) return null;
+
+  return (
+    <>
+      <SubHeading>Firmware</SubHeading>
+      {!state ? (
+        <div className="space-y-2 rounded-xl border border-border/60 p-4" aria-hidden>
+          <Skeleton className="h-4 w-32 bg-foreground/10" />
+          <Skeleton className="h-3 w-56 bg-foreground/10" />
+        </div>
+      ) : (
+        <FirmwareStatus state={state} />
+      )}
+    </>
+  );
+}
+
+function FirmwareStatus({ state }: { state: FirmwareState }) {
+  const [error, setError] = useState<string | null>(null);
+  const [rebooting, setRebooting] = useState(false);
+  const busy = state.phase === 'checking' || state.phase === 'installing';
+
+  const check = () => {
+    setError(null);
+    getFirmwareBridge()?.check().catch((e: unknown) => setError(cleanInstallerError(e)));
+  };
+
+  const install = (deviceId: string) => {
+    setError(null);
+    getFirmwareBridge()?.install(deviceId).catch((e: unknown) => setError(cleanInstallerError(e)));
+  };
+
+  const reboot = () => {
+    setRebooting(true);
+    setError(null);
+    getFirmwareBridge()
+      ?.reboot()
+      .catch((e: unknown) => {
+        setRebooting(false);
+        setError(cleanInstallerError(e));
+      });
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">
+        Firmware runs the computer's hardware. Updates come from its makers through LVFS, and are
+        installed only when you choose. Keep the charger plugged in while one installs.
+      </p>
+
+      {state.pendingRestart.length > 0 && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              New firmware for {state.pendingRestart.join(', ')} is ready
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Restart to install it. The screen may stay dark for a few minutes; don't turn the
+              computer off.
+            </p>
+          </div>
+          <Button size="sm" disabled={rebooting || busy} onClick={reboot}>
+            {rebooting && <Loader2 className="size-4 motion-safe:animate-spin" />}
+            Restart now
+          </Button>
+        </div>
+      )}
+
+      {state.updates.map((update) => (
+        <FirmwareUpdateCard
+          key={update.deviceId}
+          update={update}
+          installing={state.installing === update.deviceId}
+          disabled={busy}
+          onInstall={() => install(update.deviceId)}
+        />
+      ))}
+
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <p className="min-w-0 text-xs text-muted-foreground">
+          {state.phase === 'checking'
+            ? 'Looking for firmware updates…'
+            : state.phase === 'installing'
+              ? 'Updating firmware. Don’t turn the computer off.'
+              : state.phase === 'failed'
+                ? state.error ?? 'The last check didn’t finish.'
+                : state.checkedAt
+                  ? `${state.updates.length > 0 ? 'Checked' : 'Up to date. Checked'} ${new Date(state.checkedAt).toLocaleString()}.`
+                  : 'Not checked yet.'}
+        </p>
+        <Button variant="outline" size="sm" disabled={busy} onClick={check}>
+          <RotateCw className={cn('size-4', state.phase === 'checking' && 'motion-safe:animate-spin')} aria-hidden />
+          Check now
+        </Button>
+      </div>
+
+      {error && error !== state.error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+function FirmwareUpdateCard({
+  update,
+  installing,
+  disabled,
+  onInstall,
+}: {
+  update: FirmwareUpdate;
+  installing: boolean;
+  disabled: boolean;
+  onInstall: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-border/60 p-4">
+      <div className="flex items-start gap-3">
+        <Cpu className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">{update.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {[update.vendor, `${update.current ?? 'Unknown'} → ${update.version}`].filter(Boolean).join(' · ')}
+          </p>
+        </div>
+        <Button size="sm" disabled={disabled} onClick={onInstall}>
+          {installing && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
+          {installing ? 'Updating…' : 'Update'}
+        </Button>
+      </div>
+      {update.summary && <p className="text-xs text-foreground">{update.summary}</p>}
+      {update.needsRestart && (
+        <p className="text-xs text-muted-foreground">Installed when the computer restarts.</p>
+      )}
+      {update.description && (
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer rounded-sm select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            What's new
+          </summary>
+          <p className="mt-2 whitespace-pre-line">{update.description}</p>
+        </details>
+      )}
+    </div>
   );
 }
 

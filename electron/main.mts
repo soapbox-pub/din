@@ -77,6 +77,7 @@ import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
+import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
 import { airplayDisplays, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
@@ -1707,6 +1708,7 @@ async function logindAllows(method: string): Promise<boolean> {
 function assertSafeToPowerOff(): void {
   if (isUpdating()) throw new Error('An update is being installed. Try again when it finishes.');
   if (isInstalling()) throw new Error('DinOS is being installed. Try again when it finishes.');
+  if (isFlashing()) throw new Error('Firmware is being updated. Try again when it finishes.');
 }
 
 function registerPowerHandlers(): void {
@@ -5110,7 +5112,8 @@ app.whenReady().then(() => {
   registerDictationHandlers({ assertShellSender, guestFromId: shellGuestFromId });
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
-  registerUpdaterHandlers({ assertShellSender, sendToShell });
+  registerUpdaterHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
+  registerFirmwareHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
   registerAirPlayHandlers({
     assertShellSender,
     sendToShell,

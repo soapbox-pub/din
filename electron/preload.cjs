@@ -24,6 +24,7 @@
 //   - window.installer: put DinOS on this computer's disk, for the
 //     Installer app (live USB boots only)
 //   - window.updater: DinOS system updates, for the Settings app
+//   - window.firmware: firmware updates through fwupd, for the Settings app
 //   - window.airplay: sharing the screen with AirPlay receivers, for the menu
 //     bar and Settings
 //   - window.assistant: OpenCode, the coding agent, through its background
@@ -1351,6 +1352,40 @@ contextBridge.exposeInMainWorld('updater', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('updater:progress', handler);
     return () => ipcRenderer.removeListener('updater:progress', handler);
+  },
+});
+
+// Firmware bridge (window.firmware), backed by electron/firmware.mts:
+// updates for the computer's firmware and its devices', through fwupd.
+contextBridge.exposeInMainWorld('firmware', {
+  /** The updates found, and the check or install in progress (or the failed one). */
+  state: () => ipcRenderer.invoke('firmware:state'),
+
+  /** Get LVFS's newest releases and look for updates. */
+  check: () => ipcRenderer.invoke('firmware:check'),
+
+  /**
+   * Install the newest firmware for a device. Resolves when it's done (or
+   * staged for the next restart).
+   * @param {string} deviceId
+   */
+  install: (deviceId) => ipcRenderer.invoke('firmware:install', deviceId),
+
+  /** Restart the computer, which applies staged firmware. */
+  reboot: () => ipcRenderer.invoke('firmware:reboot'),
+
+  /**
+   * Subscribe to state changes. Returns an unsubscribe fn.
+   * @param {(state: unknown) => void} callback
+   */
+  onProgress: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('firmware:progress', handler);
+    return () => ipcRenderer.removeListener('firmware:progress', handler);
   },
 });
 

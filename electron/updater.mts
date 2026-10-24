@@ -73,8 +73,10 @@ export function isUpdating(): boolean {
 export function registerUpdaterHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;
+  /** Throws while something a restart would cut short is running. */
+  assertSafeToPowerOff: () => void;
 }): void {
-  const { assertShellSender, sendToShell } = options;
+  const { assertShellSender, sendToShell, assertSafeToPowerOff } = options;
 
   const update = (next: Partial<UpdateState>) => {
     state = { ...state, ...next };
@@ -147,6 +149,7 @@ export function registerUpdaterHandlers(options: {
   ipcMain.handle('updater:reboot', async (event) => {
     assertShellSender(event);
     if (state.phase === 'updating') throw new Error('An update is being installed');
+    assertSafeToPowerOff();
     await runCommand('systemctl', ['reboot'], { timeout: 15_000 });
   });
 
