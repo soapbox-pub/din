@@ -119,6 +119,9 @@ pkgs.testers.runNixOSTest {
         machine.succeed("keyctl unlink $(keyctl search @u user cryptsetup) @u")
         as_din(gpg_sign("mine@test"))
         machine.fail("su - din -c " + shlex.quote(gpg_sign("other@test")))
+        # Past gpg-agent's default max-cache-ttl, two hours, it's unlocked still.
+        machine.succeed("date -s '+3 hours'")
+        as_din(gpg_sign("mine@test"))
 
     password = machine.succeed("grep -o '/nix/store/[^ ,]*-din-password/bin/din-password' /etc/sudoers | head -1").strip()
     script = machine.succeed(f"grep -o '/nix/store/[^ ]*din-password.py' {password}").strip()

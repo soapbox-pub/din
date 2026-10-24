@@ -609,6 +609,11 @@ in
     enable = true;
     pinentryPackage = pkgs.pinentry-qt;
     settings.allow-preset-passphrase = "";
+    # gpg-agent forgets every passphrase this long after it's cached, preset
+    # ones too: by default two hours, after which signing asked again. 400
+    # days, so the boot's unlock lasts. One typed in the prompt still goes
+    # after 10 minutes unused (default-cache-ttl).
+    settings.max-cache-ttl = 34560000;
   };
   systemd.services.din-gpg-unlock = {
     description = "Unlock GPG keys with the disk passphrase";
