@@ -682,6 +682,25 @@ export function releaseNativeKeys(): void {
   heldKeys.clear();
 }
 
+/**
+ * Type text into the focused app (dictation). The display has no way to
+ * send text as such, only keys in the app's layout, so it's pasted: the
+ * apps' clipboard holds the text for a Ctrl+V. Din's own clipboard is left
+ * alone and offered back to the apps at the next focus or paste.
+ */
+export function typeNativeText(text: string): void {
+  const ctrl = KEYCODES.ControlLeft;
+  const v = KEYCODES.KeyV;
+  keyQueue = keyQueue.then(() => {
+    send({ type: 'clipboard', text });
+    lastClipboard = null;
+    send({ type: 'key', keycode: ctrl, down: true });
+    send({ type: 'key', keycode: v, down: true });
+    send({ type: 'key', keycode: v, down: false });
+    send({ type: 'key', keycode: ctrl, down: false });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Clipboard
 // ---------------------------------------------------------------------------

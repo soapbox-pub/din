@@ -26,9 +26,11 @@ import {
   setNativeGeometry,
   setNativeMaximized,
   subscribeNativeDisplay,
+  typeNativeText,
   windowChrome,
   type NativeSurface,
 } from '@/lib/nativeDisplay';
+import { registerDictationTarget } from '@/lib/dictation';
 
 /**
  * How often the canvas's screen position is re-reported. Pointer and focus
@@ -109,6 +111,13 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       height: host.clientHeight,
     });
   }, [xid]);
+
+  // Dictation while this window has the keyboard types into the app.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    return registerDictationTarget(host, typeNativeText);
+  }, []);
 
   // Adopt the surface's canvas, and keep geometry in sync with the box.
   useLayoutEffect(() => {

@@ -1712,6 +1712,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         shortcut.action === 'cycle-windows' ||
         shortcut.action === 'apps-menu' ||
         shortcut.action === 'assistant' ||
+        shortcut.action === 'assistant-released' ||
+        shortcut.action === 'dictation' ||
         shortcut.action === 'system-monitor' ||
         shortcut.action === 'security-options' ||
         shortcut.action === 'super-key' ||

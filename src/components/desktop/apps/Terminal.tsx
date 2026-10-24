@@ -22,6 +22,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
+import { registerDictationTarget } from '@/lib/dictation';
 import '@xterm/xterm/css/xterm.css';
 
 /**
@@ -1137,6 +1138,8 @@ function paneSession(
         fit.fit();
       } else {
         term.open(container);
+        // Dictated text goes in as a paste, so a shell doesn't run it.
+        if (term.element) registerDictationTarget(term.element, (text) => term.paste(text));
         loadWebgl();
         fit.fit();
         spawn();

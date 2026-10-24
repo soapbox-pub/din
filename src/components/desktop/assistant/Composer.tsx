@@ -1,8 +1,10 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, FileText, ImageIcon, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, FileText, ImageIcon, Mic, Paperclip, Square, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useFilePicker } from '@/contexts/FilePickerContext';
+import { useIsDictatingInto } from '@/hooks/useDictation';
 import type { PromptAttachment } from '@/lib/assistant';
+import { elementTarget, finishDictation, hasDictationBridge, startDictation } from '@/lib/dictation';
 import { cn } from '@/lib/utils';
 
 /** Pasted pictures past this size are left out; the request would be too big. */
@@ -26,7 +28,8 @@ function readAsDataUrl(file: File): Promise<string> {
  * Where the user writes to the agent. Enter sends and Shift+Enter starts a
  * new line. Files come from Din's file picker or are pasted in (pictures),
  * and go along with the message. While the agent works, a message sent
- * steers it, and Stop interrupts it.
+ * steers it, and Stop interrupts it. The mic button dictates into it, the
+ * same as Super+H does anywhere.
  */
 export function Composer({
   onSubmit,
@@ -59,6 +62,7 @@ export function Composer({
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const ref = textareaRef ?? ownRef;
   const { pickFiles } = useFilePicker();
+  const dictating = useIsDictatingInto(ref);
 
   const canSend = !disabled && !busy && text.trim().length > 0;
 
@@ -86,6 +90,17 @@ export function Composer({
         .map((path) => ({ uri: fileUri(path), name: path.split('/').pop() || path })),
     ]);
     ref.current?.focus();
+  };
+
+  const dictate = () => {
+    const textarea = ref.current;
+    if (!textarea) return;
+    if (dictating) {
+      void finishDictation();
+      return;
+    }
+    textarea.focus();
+    void startDictation(elementTarget(textarea));
   };
 
   const onPaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -166,6 +181,26 @@ export function Composer({
           <Paperclip className="size-4" aria-hidden />
         </Button>
         <div className="flex min-w-0 flex-1 items-center gap-1">{toolbar}</div>
+        {hasDictationBridge() && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            // Keeps focus in the message, where the text goes.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={dictate}
+            disabled={disabled}
+            aria-label={dictating ? 'Stop dictating' : 'Dictate'}
+            aria-pressed={dictating}
+            title={dictating ? 'Stop dictating' : 'Dictate (Super+H)'}
+            className={cn(
+              'size-8 rounded-full text-muted-foreground hover:text-foreground',
+              dictating && 'bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary',
+            )}
+          >
+            <Mic className={cn('size-4', dictating && 'motion-safe:animate-pulse')} aria-hidden />
+          </Button>
+        )}
         {running && onStop && (
           <Button
             type="button"

@@ -28,6 +28,8 @@
 //     bar and Settings
 //   - window.assistant: OpenCode, the coding agent, through its background
 //     server, for the Assistant app, its menu-bar item and Settings
+//   - window.dictation: speech to text with whisper.cpp, for Super+H, the
+//     assistant's mic button and holding Super+A
 //   - window.bluetooth: BlueZ adapter and devices (pairing, connecting), for
 //     the menu bar and Settings
 //   - window.printing: printers, the print dialog's previews and jobs, and
@@ -1417,6 +1419,29 @@ contextBridge.exposeInMainWorld('airplay', {
     ipcRenderer.on('airplay:osd', handler);
     return () => ipcRenderer.removeListener('airplay:osd', handler);
   },
+});
+
+// Dictation bridge (window.dictation), backed by electron/dictation.mts:
+// whisper.cpp's server, which turns the shell's recordings into text.
+contextBridge.exposeInMainWorld('dictation', {
+  /** Whether a speech recognizer and its model are installed. */
+  available: () => ipcRenderer.invoke('dictation:available'),
+
+  /** Start the recognizer (load the model) ahead of the first transcription. */
+  prepare: () => ipcRenderer.invoke('dictation:prepare'),
+
+  /**
+   * The text spoken in a recording.
+   * @param {Uint8Array} pcm 16 kHz mono 16-bit samples, little-endian.
+   */
+  transcribe: (pcm) => ipcRenderer.invoke('dictation:transcribe', pcm),
+
+  /**
+   * Type text into a web page (a browser tab or web app), where its focus is.
+   * @param {number} wcId The page's WebContents id.
+   * @param {string} text
+   */
+  insertIntoGuest: (wcId, text) => ipcRenderer.invoke('dictation:insert-guest', wcId, text),
 });
 
 // Assistant bridge (window.assistant), backed by electron/assistant.mts:

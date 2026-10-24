@@ -8,6 +8,7 @@ import { SecurityOptions } from './SecurityOptions';
 import { ScreenshotHost } from './ScreenshotHost';
 import { MenuBar } from './MenuBar';
 import { VolumeOsd } from './VolumeOsd';
+import { DictationOverlay } from './DictationOverlay';
 import { BrightnessOsd } from './BrightnessOsd';
 import { ScreenDimmer } from './ScreenDimmer';
 import { NostrNotifications } from './NostrNotifications';
@@ -187,6 +188,7 @@ function DesktopSession() {
               <VolumeOsd />
               <BrightnessOsd />
               <AirPlayOsd />
+              <DictationOverlay />
               <ScreenDimmer />
               <NostrNotifications />
               <NotificationPopups />

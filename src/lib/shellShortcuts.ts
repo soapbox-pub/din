@@ -9,7 +9,9 @@
  *
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
  *   - Super+Space             -> { action: 'apps-menu' }
- *   - Super+A                 -> { action: 'assistant' }
+ *   - Super+A                 -> { action: 'assistant' }, and when the A
+ *                                comes up -> { action: 'assistant-released' }
+ *   - Super+H                 -> { action: 'dictation' }
  *   - Ctrl+Shift+Escape       -> { action: 'system-monitor' }
  *   - Ctrl+Alt+Delete         -> { action: 'security-options' }
  *   - Super down / up         -> { action: 'super-key', down }
@@ -56,8 +58,19 @@ export type ShellShortcut =
       action: 'apps-menu';
     }
   | {
-      /** Super+A pressed inside a guest: toggle the assistant's prompt. */
+      /**
+       * Super+A pressed inside a guest: a tap toggles the assistant's prompt,
+       * and holding it dictates into the prompt.
+       */
       action: 'assistant';
+    }
+  | {
+      /** The A of a Super+A pressed inside a guest came up. */
+      action: 'assistant-released';
+    }
+  | {
+      /** Super+H pressed inside a guest: start or stop dictating into it. */
+      action: 'dictation';
     }
   | {
       /** Ctrl+Shift+Escape pressed inside a guest: open the System Monitor. */

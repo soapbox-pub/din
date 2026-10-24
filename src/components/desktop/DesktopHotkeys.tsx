@@ -1,7 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { toggleAppsMenu } from '@/lib/appsMenu';
-import { toggleAssistantPrompt } from '@/lib/assistantPrompt';
+import {
+  holdAssistantPromptDictation,
+  releaseAssistantPromptDictation,
+  toggleAssistantPrompt,
+} from '@/lib/assistantPrompt';
+import { cancelDictation, finishDictation, getDictationState, isDictating, toggleDictation } from '@/lib/dictation';
 import { publishBrowserHotkey, type BrowserHotkey } from '@/lib/browserTabBus';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { isSecurityOptionsActive, showSecurityOptions } from '@/lib/securityOptions';
@@ -14,6 +19,38 @@ import type { WindowState } from '@/hooks/useWindows';
 const WEB_BROWSER_APP_ID = 'web-browser';
 /** The System Monitor's app id (see src/lib/apps.ts). */
 const SYSTEM_MONITOR_APP_ID = 'system-monitor';
+/** Super+A held this long dictates into the prompt instead of toggling it. */
+const ASSISTANT_HOLD_MS = 300;
+
+let assistantHoldTimer: ReturnType<typeof setTimeout> | null = null;
+let assistantHeld = false;
+
+/** Super+A went down: a tap or a hold, depending on when it comes up. */
+function assistantKeyDown(): void {
+  if (assistantHoldTimer !== null || assistantHeld) return;
+  assistantHoldTimer = setTimeout(() => {
+    assistantHoldTimer = null;
+    assistantHeld = true;
+    holdAssistantPromptDictation();
+  }, ASSISTANT_HOLD_MS);
+}
+
+/** Super+A came up (its A, or Super): toggle the prompt, or finish dictating. */
+function assistantKeyUp(): void {
+  if (assistantHoldTimer !== null) {
+    clearTimeout(assistantHoldTimer);
+    assistantHoldTimer = null;
+    toggleAssistantPrompt();
+  } else if (assistantHeld) {
+    assistantHeld = false;
+    releaseAssistantPromptDictation();
+    if (getDictationState().held) void finishDictation();
+  }
+}
+
+function isAssistantKeyPressed(): boolean {
+  return assistantHoldTimer !== null || assistantHeld;
+}
 
 /**
  * Desktop-wide keyboard shortcuts. Renders nothing.
@@ -30,6 +67,10 @@ const SYSTEM_MONITOR_APP_ID = 'system-monitor';
  * - Super+Space opens the menu bar's apps menu with its search focused (or
  *   closes it again).
  * - Super+A opens the assistant's prompt (AssistantHost), or closes it.
+ *   Held, it opens the prompt listening, and what was said is typed into it
+ *   (unsent) when the key comes up.
+ * - Super+H dictates into whatever has focus (src/lib/dictation.ts), or
+ *   finishes; Esc cancels.
  * - Ctrl+Shift+Escape opens the System Monitor, or brings it forward, as
  *   on Windows.
  * - Ctrl+Alt+Delete opens the security options screen (SecurityOptions):
@@ -131,11 +172,34 @@ export function DesktopHotkeys() {
         return;
       }
 
-      // Super+A: the assistant's prompt.
-      if (e.key.toLowerCase() === 'a' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      // Super+A: the assistant's prompt, on the way up (holding it dictates).
+      // While it's down, its A doesn't type (if Super comes up first).
+      if (
+        e.key.toLowerCase() === 'a' &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.metaKey || isAssistantKeyPressed())
+      ) {
         e.preventDefault();
         e.stopPropagation();
-        toggleAssistantPrompt();
+        if (!e.repeat) assistantKeyDown();
+        return;
+      }
+
+      // Super+H: dictation.
+      if (e.key.toLowerCase() === 'h' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) toggleDictation();
+        return;
+      }
+
+      // Esc: stop dictating, throwing it away.
+      if (e.key === 'Escape' && isDictating() && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelDictation();
         return;
       }
 
@@ -258,8 +322,17 @@ export function DesktopHotkeys() {
       }
     };
 
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!isAssistantKeyPressed()) return;
+      if (e.key.toLowerCase() === 'a' || e.key === 'Meta') assistantKeyUp();
+    };
+
     window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
   }, []);
 
   useEffect(() => {
@@ -271,7 +344,13 @@ export function DesktopHotkeys() {
       if (shortcut.action === 'apps-menu') {
         toggleAppsMenu();
       } else if (shortcut.action === 'assistant') {
-        toggleAssistantPrompt();
+        assistantKeyDown();
+      } else if (shortcut.action === 'assistant-released') {
+        assistantKeyUp();
+      } else if (shortcut.action === 'super-key' && !shortcut.down) {
+        if (isAssistantKeyPressed()) assistantKeyUp();
+      } else if (shortcut.action === 'dictation') {
+        toggleDictation();
       } else if (shortcut.action === 'security-options') {
         showSecurityOptions();
       } else if (shortcut.action === 'system-monitor') {

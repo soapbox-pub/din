@@ -152,6 +152,15 @@ let
     '';
   };
 
+  # Dictation's speech recognizer (electron/dictation.mts): whisper.cpp's
+  # server, on the GPU through Vulkan, and Whisper large-v3-turbo quantized to
+  # about 550 MB. The server is only started when someone dictates.
+  whisper = pkgs.whisper-cpp-vulkan.override { withSDL = false; };
+  whisper-model = pkgs.fetchurl {
+    url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin";
+    hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
+  };
+
   # The local UDP ports AirPlay receivers send timing and sound control to,
   # three per session; the firewall lets them in (below).
   airplayPorts = { from = 7010; to = 7039; };
@@ -319,6 +328,8 @@ let
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
+    export DIN_WHISPER_SERVER=${whisper}/bin/whisper-server
+    export DIN_WHISPER_MODEL=${whisper-model}
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Din is the whole desktop: the session's services (the desktop portal's

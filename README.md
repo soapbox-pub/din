@@ -302,6 +302,18 @@ user's own self-updating install in `~/.opencode/bin` (DinOS puts it on
 PATH), which Din runs the v2 installer for if it's missing; `$DIN_OPENCODE`
 names another binary.
 
+### Dictation
+
+Super+H types what you say into whatever has the keyboard: a text field, a
+web page, the Terminal, or a native app (pasted, since the display only sends
+keys). Holding Super+A opens the assistant's prompt listening, and the
+prompt's mic button dictates into it. The shell records the microphone
+(`src/lib/dictation.ts`) and whisper.cpp's server turns it into text on the
+GPU (`electron/dictation.mts`), started on first use and stopped after a few
+idle minutes. DinOS ships the server and Whisper large-v3-turbo (about
+550 MB) and names them in `$DIN_WHISPER_SERVER` and `$DIN_WHISPER_MODEL`;
+elsewhere, set both to dictate.
+
 ### Updating npm dependencies
 
 The Nix build fetches npm deps from `package-lock.json` pinned by hash.

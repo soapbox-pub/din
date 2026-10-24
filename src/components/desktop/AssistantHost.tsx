@@ -29,7 +29,12 @@ import {
   sessionTitle,
   type PermissionRequest,
 } from '@/lib/assistant';
-import { onToggleAssistantPrompt } from '@/lib/assistantPrompt';
+import {
+  isAssistantPromptDictationHeld,
+  onHoldAssistantPromptDictation,
+  onToggleAssistantPrompt,
+} from '@/lib/assistantPrompt';
+import { cancelDictation, elementTarget, getDictationState, startDictation } from '@/lib/dictation';
 import { closeNotification, notify } from '@/lib/notificationCenter';
 import type { WindowState } from '@/hooks/useWindows';
 
@@ -205,6 +210,46 @@ const QuickPrompt = memo(function QuickPrompt() {
 
   useEffect(() => onToggleAssistantPrompt(() => setOpen((current) => !current)), []);
 
+  // Holding Super+A opens the prompt listening; the text lands in it when the
+  // key comes up, unsent.
+  const dictatePending = useRef(false);
+  const dictatedInto = useRef<HTMLTextAreaElement | null>(null);
+  const [holdNonce, setHoldNonce] = useState(0);
+  useEffect(
+    () =>
+      onHoldAssistantPromptDictation(() => {
+        dictatePending.current = true;
+        setOpen(true);
+        setHoldNonce((n) => n + 1);
+      }),
+    [],
+  );
+  useEffect(() => {
+    if (!open) {
+      dictatePending.current = false;
+      if (dictatedInto.current && getDictationState().owner === dictatedInto.current) cancelDictation();
+      dictatedInto.current = null;
+      return;
+    }
+    // The dialog's content mounts a frame or so after it opens.
+    let frame = 0;
+    let tries = 0;
+    const start = () => {
+      if (!dictatePending.current) return;
+      const textarea = textareaRef.current;
+      if (!textarea) {
+        if (++tries < 30) frame = requestAnimationFrame(start);
+        return;
+      }
+      dictatePending.current = false;
+      if (!isAssistantPromptDictationHeld()) return;
+      dictatedInto.current = textarea;
+      void startDictation(elementTarget(textarea), { held: true });
+    };
+    start();
+    return () => cancelAnimationFrame(frame);
+  }, [open, holdNonce, ready]);
+
   const submit = (text: string, files: Parameters<typeof start.mutateAsync>[0]['files']) =>
     start.mutateAsync(
       { text, files, model, directory },
@@ -247,7 +292,7 @@ const QuickPrompt = memo(function QuickPrompt() {
                   toolbar={<ModelPicker models={models} value={model} onChange={setModel} />}
                 />
                 <p className="flex items-center justify-end gap-1.5 px-3 pb-1 pt-1 text-xs text-muted-foreground">
-                  <CornerDownLeft className="size-3" aria-hidden /> to send · Esc to close · Super+A anytime
+                  <CornerDownLeft className="size-3" aria-hidden /> to send · Esc to close · Super+A anytime, hold it to speak
                 </p>
               </>
             ) : (

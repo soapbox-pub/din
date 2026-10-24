@@ -79,6 +79,7 @@ import { registerLockHandlers } from './lock.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { airplayDisplays, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
 import { registerAssistantHandlers } from './assistant.mts';
+import { registerDictationHandlers } from './dictation.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 
@@ -4787,7 +4788,17 @@ function claimGuestKey(
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
-  | { action: 'apps-menu' | 'assistant' | 'system-monitor' | 'security-options' | 'screenshot' | 'screenshot-area' }
+  | {
+      action:
+        | 'apps-menu'
+        | 'assistant'
+        | 'assistant-released'
+        | 'dictation'
+        | 'system-monitor'
+        | 'security-options'
+        | 'screenshot'
+        | 'screenshot-area';
+    }
   | { action: 'super-key'; down: boolean }
   | { action: 'alt-released' }
   | {
@@ -4835,6 +4846,10 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   // Super+A: the assistant's prompt.
   if (input.meta && !input.alt && !input.control && !input.shift && input.key.toLowerCase() === 'a') {
     return { action: 'assistant' };
+  }
+  // Super+H: dictation, as Win+H on Windows.
+  if (input.meta && !input.alt && !input.control && !input.shift && input.key.toLowerCase() === 'h') {
+    return input.isAutoRepeat ? null : { action: 'dictation' };
   }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
@@ -5092,6 +5107,7 @@ app.whenReady().then(() => {
   });
   registerNostrdHandlers({ assertShellSender, sendToShell });
   registerAssistantHandlers({ assertShellSender, sendToShell });
+  registerDictationHandlers({ assertShellSender, guestFromId: shellGuestFromId });
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
   registerUpdaterHandlers({ assertShellSender, sendToShell });
@@ -5399,10 +5415,22 @@ app.on('web-contents-created', (_event, contents) => {
   // consumed: Super is still a modifier for the page). Alt's release is
   // forwarded too, so an Alt+Tab started in a guest commits the moment Alt
   // comes up.
+  // Super+A's release is forwarded too, when it was pressed here: holding it
+  // dictates into the assistant's prompt until it comes up.
   if (contents.getType() === 'webview') {
+    let assistantKeyDown = false;
     contents.on('before-input-event', (_event, input) => {
       if (input.key === 'Alt' && input.type === 'keyUp') {
         sendToShell('shortcut', { action: 'alt-released' } satisfies ShellShortcut);
+        return;
+      }
+      if (input.key.toLowerCase() === 'a') {
+        if (input.type === 'keyDown' && input.meta && !input.alt && !input.control && !input.shift) {
+          assistantKeyDown = true;
+        } else if (input.type === 'keyUp' && assistantKeyDown) {
+          assistantKeyDown = false;
+          sendToShell('shortcut', { action: 'assistant-released' } satisfies ShellShortcut);
+        }
         return;
       }
       if (input.key !== 'Meta' || input.isAutoRepeat) return;
@@ -5598,6 +5626,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'cycle-windows' ||
         shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
+        shortcut?.action === 'dictation' ||
         shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'security-options' ||
         shortcut?.action === 'screenshot' ||
@@ -5658,6 +5687,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'cycle-windows' ||
         shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
+        shortcut?.action === 'dictation' ||
         shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'security-options' ||
         shortcut?.action === 'screenshot' ||
