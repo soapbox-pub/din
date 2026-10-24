@@ -52,7 +52,7 @@ const PinnedAppsSchema = z.array(z.string());
 /** Width of one dock slot at rest, in px (icon plus breathing room). */
 const BASE_WIDTH = 80;
 /** How large a slot grows directly under the cursor (macOS magnification). */
-const MAX_SCALE = 2;
+const MAX_SCALE = 1.5;
 /** Distance, in slots, over which magnification falls off to nothing. */
 const FALLOFF = 2.5;
 
