@@ -80,7 +80,7 @@
 // but is deliberately NOT Node's fs module:
 //   - promise-only, no sync or callback variants
 //   - readdir returns rich entries (kind/size/mtime) in one batched call
-//   - readFile is size-capped (previews, not bulk transfer)
+//   - readFile is size-capped: 16 MB unless the caller asks for more, 1 GB at most
 //
 // Runs sandboxed with context isolation; only the operations below are
 // reachable from the page, and the main process re-validates every request

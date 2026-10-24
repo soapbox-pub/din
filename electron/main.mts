@@ -224,13 +224,15 @@ const SHELL_ORIGIN = DEV_URL ? new URL(DEV_URL).origin : 'app://din';
 //
 // Performance notes: everything is async (libuv threadpool), directory
 // listings stat all entries in parallel and are capped at MAX_DIR_ENTRIES,
-// and file reads are capped at MAX_READ_BYTES so a stray click on a huge
-// file can't balloon the renderer.
+// and file reads are capped at MAX_READ_BYTES unless the caller asks for more
+// (an editor opening a document), so a stray click on a huge file can't
+// balloon the renderer. Nothing reads more than MAX_READ_LIMIT.
 // ---------------------------------------------------------------------------
 
 const fsp = fs.promises;
 const MAX_DIR_ENTRIES = 5000;
 const MAX_READ_BYTES = 16 * 1024 * 1024;
+const MAX_READ_LIMIT = 1024 * 1024 * 1024;
 
 // webContents.id of the shell window; set once the window is created. Used to
 // reject IPC from any other web contents (e.g. <webview> guests).
@@ -337,7 +339,7 @@ function registerFsHandlers(): void {
     const file = normalizeAbsolute(filePath);
     const cap = Math.min(
       Number.isFinite(maxBytes) && maxBytes > 0 ? Math.floor(maxBytes) : MAX_READ_BYTES,
-      MAX_READ_BYTES,
+      MAX_READ_LIMIT,
     );
 
     const handle = await fsp.open(file, 'r');

@@ -4,7 +4,7 @@ import type { AdjustmentLayer, LayerEffectsInfo } from 'ag-psd';
 import { FilePlus, FolderOpen } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
-import { cleanFsError, getFsBridge, parentPath } from '@/lib/fs';
+import { cleanFsError, formatBytes, getFsBridge, parentPath } from '@/lib/fs';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { invalidateListings } from '@/hooks/useFileSystem';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -572,7 +572,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
       (async () => {
         try {
           const r = await fs.readFile(p, MAX_BYTES);
-          if (r.truncated) throw new Error('It’s too big to open (over 1 GB).');
+          if (r.truncated) throw new Error(`It’s too big to open (${formatBytes(r.size ?? r.data.length)}; up to 1 GB).`);
           const d = await readDoc(r.data, p);
           if (seq !== loadSeq.current) return;
           startDoc(d, basename(p), p);
