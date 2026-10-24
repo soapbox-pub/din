@@ -97,7 +97,7 @@ export function makeCanvas(w: number, h: number): HTMLCanvasElement {
 }
 
 export function ctx2d(c: HTMLCanvasElement): CanvasRenderingContext2D {
-  return c.getContext('2d', { willReadFrequently: false })!;
+  return c.getContext('2d')!;
 }
 
 export function cloneCanvas(src: HTMLCanvasElement): HTMLCanvasElement {

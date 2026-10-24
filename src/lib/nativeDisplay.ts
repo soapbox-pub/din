@@ -17,6 +17,7 @@
  * its canvas's viewport position, reported with `setGeometry`.
  */
 
+import { keepAccelerated } from '@/lib/cpuCanvas';
 import { getFileClipboard, setFileClipboard } from '@/lib/fileClipboard';
 
 /** One X window as the shell knows it. */
@@ -221,6 +222,8 @@ function ackOnNextFrame(source: string | undefined): void {
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
+  // GPU-rendered windows are drawn from shared textures every frame.
+  keepAccelerated(canvas);
   canvas.width = Math.max(1, width);
   canvas.height = Math.max(1, height);
   canvas.style.display = 'block';
@@ -236,6 +239,7 @@ function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: number):
   height = Math.max(1, height);
   if (canvas.width === width && canvas.height === height) return;
   const copy = document.createElement('canvas');
+  keepAccelerated(copy);
   copy.width = canvas.width;
   copy.height = canvas.height;
   copy.getContext('2d')?.drawImage(canvas, 0, 0);

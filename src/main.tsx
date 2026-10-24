@@ -1,5 +1,8 @@
 // Import polyfills first
 import './lib/polyfills.ts';
+// Before anything opens a 2D canvas: keep them all off the GPU (see the module).
+import { installCpuCanvas } from './lib/cpuCanvas.ts';
+installCpuCanvas();
 // Profiling builds only: probes wrapping WebSocket/timers/the React DevTools
 // hook, which must be in place before react-dom loads and any socket opens.
 import '@/lib/perfRuntimeInstall';
