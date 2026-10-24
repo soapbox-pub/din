@@ -64,6 +64,12 @@ export function fileCategory(name: string, kind: FsEntryKind): FileCategory {
   return 'other';
 }
 
+/** Text and code, which open in the Text Editor. */
+export function isTextFile(name: string): boolean {
+  const category = fileCategory(name, 'file');
+  return category === 'text' || category === 'code';
+}
+
 /** Whether Din can draw a picture of this file for its icon. */
 export function hasThumbnail(name: string): boolean {
   const ext = extensionOf(name);

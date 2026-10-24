@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AppDefinition } from '@/lib/apps';
 import { endLaunching } from '@/lib/appLaunches';
+import { closeIntercepted } from '@/lib/closeGuards';
 import { areaAt, areaFor, primaryArea, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
 import { launchNativeApp } from '@/lib/nativeApps';
 import { closeNativeWindow, isNativeWindowOpen } from '@/lib/nativeDisplay';
@@ -313,6 +314,7 @@ export function useWindows(
    *
    * A native window is the app's to close: it's asked to (and may prompt to
    * save, or refuse), and its Din window closes when the X window goes away.
+   * A built-in app with unsaved work may likewise ask first (closeGuards).
    */
   const close = useCallback((id: string) => {
     const xid = liveNativeWindow(windowsRef.current.find((w) => w.id === id));
@@ -320,6 +322,7 @@ export function useWindows(
       closeNativeWindow(xid);
       return;
     }
+    if (closeIntercepted(id)) return;
     setWindows((ws) =>
       ws.some((w) => w.id === id && !w.closing)
         ? ws.map((w) => (w.id === id ? { ...w, closing: true } : w))
@@ -328,15 +331,18 @@ export function useWindows(
   }, []);
 
   const closeApp = useCallback((appId: string) => {
+    const kept = new Set<string>();
     for (const w of windowsRef.current) {
-      const xid = w.appId === appId ? liveNativeWindow(w) : null;
+      if (w.appId !== appId) continue;
+      const xid = liveNativeWindow(w);
       if (xid !== null) closeNativeWindow(xid);
+      else if (!w.closing && closeIntercepted(w.id)) kept.add(w.id);
     }
+    const closes = (w: WindowState) =>
+      w.appId === appId && !kept.has(w.id) && liveNativeWindow(w) === null;
     setWindows((ws) =>
-      ws.some((w) => w.appId === appId && !w.closing && liveNativeWindow(w) === null)
-        ? ws.map((w) =>
-            w.appId === appId && liveNativeWindow(w) === null ? { ...w, closing: true } : w,
-          )
+      ws.some((w) => closes(w) && !w.closing)
+        ? ws.map((w) => (closes(w) ? { ...w, closing: true } : w))
         : ws,
     );
   }, []);

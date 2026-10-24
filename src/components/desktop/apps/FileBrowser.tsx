@@ -26,7 +26,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { isExtractable } from '@/lib/fileTypes';
+import { isExtractable, isTextFile } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -629,7 +629,7 @@ function FileBrowserTab({
               setTimeout(() => startingRef.current.delete(target), 3_000);
             });
         } else {
-          open('preview', { path: target });
+          open(isTextFile(file.name) ? 'text-editor' : 'preview', { path: target });
         }
       }
     },
@@ -1636,6 +1636,11 @@ function FileBrowserTab({
                     {single?.kind === 'file' && (
                       <ContextMenuItem onSelect={() => setQuickLook(true)}>
                         Quick Look <ContextMenuShortcut>Space</ContextMenuShortcut>
+                      </ContextMenuItem>
+                    )}
+                    {single?.kind === 'file' && !isTrash && !isTextFile(single.name) && (
+                      <ContextMenuItem onSelect={() => open('text-editor', { path: pathsOf([single.name])[0] })}>
+                        Open in Text Editor
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && canPrint && isPrintableFile(single.name) && (

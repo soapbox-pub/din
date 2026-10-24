@@ -14,7 +14,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'long', time
  * A dialog over the Files tab (not the whole desktop): Escape closes,
  * clicking the backdrop closes, focus starts inside.
  */
-function Overlay({
+export function Overlay({
   label,
   onClose,
   children,
@@ -61,7 +61,7 @@ function Overlay({
   );
 }
 
-function DialogButton({
+export function DialogButton({
   variant = 'secondary',
   className,
   ...props

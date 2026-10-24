@@ -20,6 +20,9 @@ const FileBrowser = lazy(() =>
 const FileViewer = lazy(() =>
   import('@/components/desktop/apps/FileViewer').then((m) => ({ default: m.FileViewer })),
 );
+const TextEditor = lazy(() =>
+  import('@/components/desktop/apps/TextEditor').then((m) => ({ default: m.TextEditor })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -134,6 +137,16 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/terminal.png',
     component: Terminal,
     defaultSize: { width: 760, height: 480 },
+  },
+  {
+    // Plain text and code. Files opens text files here; launch params
+    // `{ path }` open one, none starts an empty document.
+    id: 'text-editor',
+    name: 'Text Editor',
+    icon: '/icons/apps/text-editor.png',
+    component: TextEditor,
+    defaultSize: { width: 800, height: 600 },
+    keywords: ['notepad', 'gedit', 'editor', 'text', 'code', 'notes', 'write'],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which
