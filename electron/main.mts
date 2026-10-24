@@ -4770,6 +4770,9 @@ function isPrintInput(input: Electron.Input): boolean {
  * only arrived after Alt was pressed again, and the switcher hung open until
  * then. Replaying the held modifier as an autorepeat keydown ends the
  * suppression at once; a held key repeating is something pages already see.
+ * The replay waits a task: sent from inside this handler, it ended the
+ * suppression before the claimed key's own char event, so Super+H typed an
+ * "h" into the page.
  */
 function claimGuestKey(
   contents: Electron.WebContents,
@@ -4784,7 +4787,9 @@ function claimGuestKey(
   if (input.meta) modifiers.push('meta');
   if (input.control) modifiers.push('control');
   if (input.shift) modifiers.push('shift');
-  contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+  setTimeout(() => {
+    if (!contents.isDestroyed()) contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+  }, 0);
 }
 
 /** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
@@ -5422,7 +5427,21 @@ app.on('web-contents-created', (_event, contents) => {
   // dictates into the assistant's prompt until it comes up.
   if (contents.getType() === 'webview') {
     let assistantKeyDown = false;
-    contents.on('before-input-event', (_event, input) => {
+    contents.on('before-input-event', (event, input) => {
+      // Super+H held: only the first press toggles dictation (see
+      // shellShortcutForInput), but the repeats mustn't type either.
+      if (
+        input.type === 'keyDown' &&
+        input.isAutoRepeat &&
+        input.meta &&
+        !input.alt &&
+        !input.control &&
+        !input.shift &&
+        input.key.toLowerCase() === 'h'
+      ) {
+        claimGuestKey(contents, event, input);
+        return;
+      }
       if (input.key === 'Alt' && input.type === 'keyUp') {
         sendToShell('shortcut', { action: 'alt-released' } satisfies ShellShortcut);
         return;

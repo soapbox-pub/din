@@ -219,10 +219,14 @@ interface Session {
   previewedSamples: number;
   previewing: Promise<void> | null;
   ended: boolean;
+  /** The microphone was muted, and was unmuted for this session. */
+  remute: boolean;
 }
 
 let session: Session | null = null;
 let errorTimer: ReturnType<typeof setTimeout> | null = null;
+/** A finished session muting the microphone again. */
+let remuting: Promise<unknown> = Promise.resolve();
 
 function fail(message: string): void {
   stopRecording();
@@ -240,6 +244,10 @@ function stopRecording(): void {
   void session.context?.close().catch(() => {});
   session.stream = null;
   session.context = null;
+  if (session.remute) {
+    session.remute = false;
+    remuting = getAudioBridge()?.setInputMuted(true).catch(() => {}) ?? Promise.resolve();
+  }
 }
 
 function recording(current: Session): Uint8Array {
@@ -294,13 +302,24 @@ function makeResampler(rate: number) {
   };
 }
 
-async function micMuted(): Promise<boolean> {
+/**
+ * Unmute the microphone for `current`, if it's muted; stopRecording mutes it
+ * again. Waits for the last session's re-mute first, or that would land
+ * after this one read the microphone as unmuted.
+ */
+async function unmuteFor(current: Session): Promise<void> {
+  const audio = getAudioBridge();
+  if (!audio) return;
+  await remuting;
   try {
-    const status = await getAudioBridge()?.inputStatus();
-    return Boolean(status?.available && status.muted);
+    const status = await audio.inputStatus();
+    if (!status.available || !status.muted) return;
+    await audio.setInputMuted(false);
   } catch {
-    return false;
+    return;
   }
+  if (session === current && !current.ended) current.remute = true;
+  else remuting = audio.setInputMuted(true).catch(() => {});
 }
 
 /**
@@ -330,6 +349,7 @@ export async function startDictation(target: DictationTarget, options: { held?: 
     previewedSamples: 0,
     previewing: null,
     ended: false,
+    remute: false,
   };
   session = current;
   setState({ ...IDLE, status: 'listening', held: current.held, owner: target.owner ?? null });
@@ -340,10 +360,8 @@ export async function startDictation(target: DictationTarget, options: { held?: 
     fail('Dictation isn’t available here');
     return;
   }
-  if (await micMuted()) {
-    if (session === current) fail('Your microphone is muted');
-    return;
-  }
+  await unmuteFor(current);
+  if (session !== current) return;
   // Loads the model while the microphone opens.
   api.prepare().catch((error: unknown) => {
     if (session === current) fail(cleanError(error));
