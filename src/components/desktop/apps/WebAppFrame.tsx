@@ -195,7 +195,8 @@ export function WebAppFrame({
         <AppIcon
           icon={icon}
           className={cn(
-            'size-14 animate-pulse',
+            'size-14',
+            !ready && 'animate-pulse',
             splashColor
               ? splashDark
                 ? 'text-white/90'

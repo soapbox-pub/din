@@ -24,6 +24,7 @@ import {
 } from '@/contexts/WindowChromeContext';
 import { isDarkThemeColor, normalizeThemeColor, themeColorTokens } from '@/lib/themeColor';
 import { useSuperHeld } from '@/lib/superKey';
+import { beginWindowGesture, endWindowGesture } from '@/lib/windowGestures';
 import {
   createModel,
   grabModel,
@@ -58,6 +59,13 @@ const SNAP_TOP_PX = 6;
  * continues past don't snap - the window is on its way over there.
  */
 const SNAP_EDGE_PX = 24;
+
+/**
+ * How long a window must stay covered before it's hidden: long enough for
+ * the window over it to finish popping in (its open animation scales it up
+ * from 95%) and for a burst of raises to settle.
+ */
+const COVERED_HIDE_MS = 1000;
 
 /** Which edge a title-bar drag is currently snapping to, or null. */
 type SnapZone = 'top' | 'left' | 'right' | null;
@@ -209,24 +217,43 @@ interface WobblyDrag {
  * manager position is committed on pointer-up as usual, then again with the
  * model's resting position once the jelly settles (Compiz moves the window to
  * the model's top-left bound when the wobble ends).
+ *
+ * Covered windows: a window wholly behind another one (a maximized window
+ * over everything else) is hidden like a minimized one, so its pages stop
+ * painting and running their animation loops where nobody can see them.
  */
 export const Window = memo(function Window({
   window: win,
   isTop,
+  covered,
 }: {
   window: WindowState;
   isTop: boolean;
+  /** Whether a window above this one, at rest, covers all of it. */
+  covered: boolean;
 }) {
   // Actions only (stable identity): subscribing to the full manager would
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
-  // solely when its own `window` object or `isTop` changes.
+  // solely when its own `window` object, `isTop` or `covered` changes.
   const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon, setAccent } =
     useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
   const areas = useWorkAreas();
+  // A covered window hides once it has stayed covered a moment, and shows
+  // again in the same render that it stops being covered.
+  const [coverSettled, setCoverSettled] = useState(false);
+  useEffect(() => {
+    if (!covered) return;
+    const timer = setTimeout(() => setCoverSettled(true), COVERED_HIDE_MS);
+    return () => {
+      clearTimeout(timer);
+      setCoverSettled(false);
+    };
+  }, [covered]);
+  const hiddenBehind = covered && coverSettled;
   // For gesture handlers, which shouldn't re-bind whenever monitors change.
   const areasRef = useRef(areas);
   useLayoutEffect(() => {
@@ -363,18 +390,23 @@ export const Window = memo(function Window({
    * the blur mid-gesture is nearly invisible.
    */
   const beginGesture = useCallback(() => {
+    beginWindowGesture(win.id);
     const el = sectionRef.current;
     if (!el) return;
     el.style.willChange = 'transform';
     el.style.backdropFilter = 'none';
-  }, []);
+  }, [win.id]);
 
   const endGesture = useCallback(() => {
+    endWindowGesture(win.id);
     const el = sectionRef.current;
     if (!el) return;
     el.style.willChange = '';
     el.style.backdropFilter = '';
-  }, []);
+  }, [win.id]);
+
+  // A window closed mid-gesture never ends it.
+  useEffect(() => () => endWindowGesture(win.id), [win.id]);
 
   /** Paint the current spring-model deformation onto the DOM node. */
   const renderWobble = useCallback(() => {
@@ -1196,7 +1228,10 @@ export const Window = memo(function Window({
   // sessions, browser pages, navigation history) survives restore.
   // `visibility: hidden` (not display:none / unmount) keeps layout intact,
   // which the Electron <webview> and xterm's fit logic both depend on.
-  if (win.minimized) geometry.visibility = 'hidden';
+  // A covered window is hidden the same way: unlike a page's own
+  // visibilityState, that is what stops Chromium painting it and running its
+  // requestAnimationFrame loops.
+  if (win.minimized || hiddenBehind) geometry.visibility = 'hidden';
 
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
@@ -1362,7 +1397,7 @@ export const Window = memo(function Window({
                     {/* Built-in apps are code-split (React.lazy); the fallback shows
                         while an app's chunk loads on its first launch. */}
                     <WindowAppContext.Provider value={app.id}>
-                      <WindowVisibleContext.Provider value={!win.minimized}>
+                      <WindowVisibleContext.Provider value={!win.minimized && !hiddenBehind}>
                         <Suspense
                           fallback={<div className="size-full animate-pulse bg-muted/40" />}
                         >
