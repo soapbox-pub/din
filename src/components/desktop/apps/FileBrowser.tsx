@@ -26,7 +26,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { isExtractable, isTextFile } from '@/lib/fileTypes';
+import { isExtractable, isTextFile, isViewableImage } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -1641,6 +1641,11 @@ function FileBrowserTab({
                     {single?.kind === 'file' && !isTrash && !isTextFile(single.name) && (
                       <ContextMenuItem onSelect={() => open('text-editor', { path: pathsOf([single.name])[0] })}>
                         Open in Text Editor
+                      </ContextMenuItem>
+                    )}
+                    {single?.kind === 'file' && !isTrash && isViewableImage(single.name) && (
+                      <ContextMenuItem onSelect={() => open('paint', { path: pathsOf([single.name])[0] })}>
+                        Edit in Paint
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && canPrint && isPrintableFile(single.name) && (

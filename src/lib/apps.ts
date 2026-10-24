@@ -23,6 +23,9 @@ const FileViewer = lazy(() =>
 const TextEditor = lazy(() =>
   import('@/components/desktop/apps/TextEditor').then((m) => ({ default: m.TextEditor })),
 );
+const Paint = lazy(() =>
+  import('@/components/desktop/apps/Paint').then((m) => ({ default: m.Paint })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -147,6 +150,17 @@ export const APPS: readonly AppDefinition[] = [
     component: TextEditor,
     defaultSize: { width: 800, height: 600 },
     keywords: ['notepad', 'gedit', 'editor', 'text', 'code', 'notes', 'write'],
+  },
+  {
+    // Pictures and pixel art, MS Paint style with Kid Pix's toys. Launch
+    // params `{ path }` open a picture; `{ width, height, transparent, zoom }`
+    // start a new one.
+    id: 'paint',
+    name: 'Paint',
+    icon: '/icons/apps/paint.png',
+    component: Paint,
+    defaultSize: { width: 960, height: 700 },
+    keywords: ['mspaint', 'kid pix', 'draw', 'drawing', 'pixel art', 'sprite', 'image', 'picture', 'art'],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, FolderOpen, Printer } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FolderOpen, Paintbrush, Printer } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
@@ -151,6 +151,11 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
           {siblings.length > 1 && index !== -1 && `${index + 1} of ${siblings.length} · `}
           {entry?.size != null && formatBytes(entry.size)}
         </span>
+        {path && isViewableImage(name) && (
+          <BarButton label="Edit in Paint" onClick={() => open('paint', { path })}>
+            <Paintbrush className="size-4" />
+          </BarButton>
+        )}
         {printable && (
           <BarButton label="Print…" onClick={print}>
             <Printer className="size-4" />
