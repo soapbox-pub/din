@@ -26,6 +26,9 @@ const TextEditor = lazy(() =>
 const Paint = lazy(() =>
   import('@/components/desktop/apps/Paint').then((m) => ({ default: m.Paint })),
 );
+const PhotoEditor = lazy(() =>
+  import('@/components/desktop/apps/PhotoEditor').then((m) => ({ default: m.PhotoEditor })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -161,6 +164,17 @@ export const APPS: readonly AppDefinition[] = [
     component: Paint,
     defaultSize: { width: 960, height: 700 },
     keywords: ['mspaint', 'kid pix', 'draw', 'drawing', 'pixel art', 'sprite', 'image', 'picture', 'art'],
+  },
+  {
+    // Layered pictures, Photoshop style: opens and saves PSDs. Files opens
+    // .psd files here. Launch params `{ path }` open one; `{ width, height,
+    // background, name }` start a new document (File > New from another window).
+    id: 'photo-editor',
+    name: 'Photo Editor',
+    icon: '/icons/apps/photo-editor.png',
+    component: PhotoEditor,
+    defaultSize: { width: 1280, height: 800 },
+    keywords: ['photoshop', 'psd', 'gimp', 'photopea', 'layers', 'photo', 'retouch', 'image', 'picture', 'editor'],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which

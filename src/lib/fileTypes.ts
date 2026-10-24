@@ -20,7 +20,7 @@ export type FileCategory =
   | 'disk'
   | 'other';
 
-const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'heic', 'jxl', 'tif', 'tiff']);
+const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'heic', 'jxl', 'tif', 'tiff', 'psd']);
 /** Images Chromium can decode (and so thumbnail and show). */
 const VIEWABLE_IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg']);
 const VIDEO = new Set(['mp4', 'm4v', 'webm', 'mkv', 'mov', 'ogv', 'avi']);
@@ -78,6 +78,16 @@ export function hasThumbnail(name: string): boolean {
 
 export function isViewableImage(name: string): boolean {
   return VIEWABLE_IMAGE.has(extensionOf(name));
+}
+
+/** Photoshop documents, which open in Photo Editor. */
+export function isPhotoshopFile(name: string): boolean {
+  return extensionOf(name) === 'psd';
+}
+
+/** Pictures Photo Editor opens: Photoshop documents and whatever Chromium can decode. */
+export function isPhotoEditable(name: string): boolean {
+  return isPhotoshopFile(name) || isViewableImage(name);
 }
 
 export function isPlayableVideo(name: string): boolean {

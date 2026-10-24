@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, FolderOpen, Paintbrush, Printer } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
-import { isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
+import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } from '@/lib/printing';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
@@ -154,6 +154,11 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
         {path && isViewableImage(name) && (
           <BarButton label="Edit in Paint" onClick={() => open('paint', { path })}>
             <Paintbrush className="size-4" />
+          </BarButton>
+        )}
+        {path && isPhotoEditable(name) && (
+          <BarButton label="Edit in Photo Editor" onClick={() => open('photo-editor', { path })}>
+            <Layers className="size-4" />
           </BarButton>
         )}
         {printable && (

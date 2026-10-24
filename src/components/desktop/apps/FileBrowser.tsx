@@ -26,7 +26,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { isExtractable, isTextFile, isViewableImage } from '@/lib/fileTypes';
+import { isExtractable, isPhotoEditable, isPhotoshopFile, isTextFile, isViewableImage } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -629,7 +629,7 @@ function FileBrowserTab({
               setTimeout(() => startingRef.current.delete(target), 3_000);
             });
         } else {
-          open(isTextFile(file.name) ? 'text-editor' : 'preview', { path: target });
+          open(isTextFile(file.name) ? 'text-editor' : isPhotoshopFile(file.name) ? 'photo-editor' : 'preview', { path: target });
         }
       }
     },
@@ -1646,6 +1646,11 @@ function FileBrowserTab({
                     {single?.kind === 'file' && !isTrash && isViewableImage(single.name) && (
                       <ContextMenuItem onSelect={() => open('paint', { path: pathsOf([single.name])[0] })}>
                         Edit in Paint
+                      </ContextMenuItem>
+                    )}
+                    {single?.kind === 'file' && !isTrash && isPhotoEditable(single.name) && !isPhotoshopFile(single.name) && (
+                      <ContextMenuItem onSelect={() => open('photo-editor', { path: pathsOf([single.name])[0] })}>
+                        Edit in Photo Editor
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && canPrint && isPrintableFile(single.name) && (
