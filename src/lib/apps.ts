@@ -29,6 +29,15 @@ const Paint = lazy(() =>
 const PhotoEditor = lazy(() =>
   import('@/components/desktop/apps/PhotoEditor').then((m) => ({ default: m.PhotoEditor })),
 );
+const WordProcessor = lazy(() =>
+  import('@/components/desktop/apps/WordProcessor').then((m) => ({ default: m.WordProcessor })),
+);
+const Spreadsheet = lazy(() =>
+  import('@/components/desktop/apps/Spreadsheet').then((m) => ({ default: m.Spreadsheet })),
+);
+const Slides = lazy(() =>
+  import('@/components/desktop/apps/Slides').then((m) => ({ default: m.Slides })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -175,6 +184,37 @@ export const APPS: readonly AppDefinition[] = [
     component: PhotoEditor,
     defaultSize: { width: 1280, height: 800 },
     keywords: ['photoshop', 'psd', 'gimp', 'photopea', 'layers', 'photo', 'retouch', 'image', 'picture', 'editor'],
+  },
+  {
+    // Documents, Microsoft Word style: opens and saves .docx. Files opens
+    // Word documents here. Launch params `{ path }` open one.
+    id: 'word-processor',
+    name: 'Word Processor',
+    icon: '/icons/apps/word-processor.png',
+    component: WordProcessor,
+    defaultSize: { width: 1200, height: 840 },
+    keywords: ['word', 'microsoft word', 'office', 'docx', 'doc', 'writer', 'libreoffice', 'document', 'letter', 'write'],
+  },
+  {
+    // Workbooks, Microsoft Excel style: opens and saves .xlsx (and CSV).
+    // Files opens Excel workbooks here. Launch params `{ path }` open one.
+    id: 'spreadsheet',
+    name: 'Spreadsheet',
+    icon: '/icons/apps/spreadsheet.png',
+    component: Spreadsheet,
+    defaultSize: { width: 1200, height: 800 },
+    keywords: ['excel', 'microsoft excel', 'office', 'xlsx', 'xls', 'csv', 'calc', 'sheets', 'workbook', 'formulas', 'budget'],
+  },
+  {
+    // Presentations, Microsoft PowerPoint style: opens and saves .pptx and
+    // plays slide shows. Files opens PowerPoint decks here. Launch params
+    // `{ path }` open one.
+    id: 'slides',
+    name: 'Slides',
+    icon: '/icons/apps/slides.png',
+    component: Slides,
+    defaultSize: { width: 1280, height: 800 },
+    keywords: ['powerpoint', 'microsoft powerpoint', 'office', 'pptx', 'ppt', 'keynote', 'impress', 'presentation', 'slideshow', 'deck'],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which

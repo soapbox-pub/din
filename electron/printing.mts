@@ -41,6 +41,8 @@ const JOB_POLL_MS = 3000;
 const PREVIEW_PAGES = 30;
 const PREVIEW_PIXELS = 480;
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
+/** Documents apps draw to print (pictures and fonts inlined) can't be bigger than this. */
+const MAX_HTML_CHARS = 256 * 1024 * 1024;
 const MAX_FRAME_HTML = 16 * 1024 * 1024;
 
 export const PAPER_SIZES = ['Letter', 'Legal', 'Tabloid', 'A3', 'A4', 'A5'] as const;
@@ -816,6 +818,12 @@ export function registerPrintingHandlers(options: {
     const document = addDocument(guest.getTitle() || 'Untitled', { kind: 'page', contents: guest });
     guest.once('destroyed', () => discard(document.id));
     return document;
+  });
+
+  ipcMain.handle('printing:openHtml', (event, title: unknown, html: unknown) => {
+    assertShellSender(event);
+    if (typeof html !== 'string' || html.length > MAX_HTML_CHARS) throw new Error('This document is too big to print.');
+    return addDocument(typeof title === 'string' && title ? title.slice(0, 200) : 'Untitled', { kind: 'html', html });
   });
 
   ipcMain.handle('printing:openFile', (event, file: unknown) => {

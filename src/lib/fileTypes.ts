@@ -38,7 +38,7 @@ const ARCHIVE = new Set([
   'cpio', 'cab', 'deb', 'rpm', 'apk',
 ]);
 const DISK = new Set(['iso', 'img', 'qcow2', 'vmdk', 'vdi', 'dmg']);
-const DOCUMENT = new Set(['doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'ods', 'ppt', 'pptx', 'odp', 'epub']);
+const DOCUMENT = new Set(['doc', 'docx', 'docm', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'epub']);
 /** Names that are text whatever their extension. */
 const TEXT_NAMES = new Set(['readme', 'license', 'copying', 'makefile', 'dockerfile', 'changelog', 'authors', '.gitignore', '.bashrc', '.zshrc', '.profile']);
 
@@ -83,6 +83,25 @@ export function isViewableImage(name: string): boolean {
 /** Photoshop documents, which open in Photo Editor. */
 export function isPhotoshopFile(name: string): boolean {
   return extensionOf(name) === 'psd';
+}
+
+const WORD = new Set(['docx', 'docm', 'dotx', 'doc']);
+const EXCEL = new Set(['xlsx', 'xlsm', 'xltx', 'xls']);
+const POWERPOINT = new Set(['pptx', 'pptm', 'potx', 'ppsx', 'ppt']);
+
+/** The built-in Office app for a Word, Excel or PowerPoint file, if it is one. */
+export function officeAppFor(name: string): 'word-processor' | 'spreadsheet' | 'slides' | null {
+  const ext = extensionOf(name);
+  if (WORD.has(ext)) return 'word-processor';
+  if (EXCEL.has(ext)) return 'spreadsheet';
+  if (POWERPOINT.has(ext)) return 'slides';
+  return null;
+}
+
+/** Tables in text that Spreadsheet opens too. */
+export function isDelimitedText(name: string): boolean {
+  const ext = extensionOf(name);
+  return ext === 'csv' || ext === 'tsv';
 }
 
 /** Pictures Photo Editor opens: Photoshop documents and whatever Chromium can decode. */

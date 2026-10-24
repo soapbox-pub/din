@@ -26,7 +26,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { isExtractable, isPhotoEditable, isPhotoshopFile, isTextFile, isViewableImage } from '@/lib/fileTypes';
+import { isDelimitedText, isExtractable, isPhotoEditable, isPhotoshopFile, isTextFile, isViewableImage, officeAppFor } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -629,7 +629,7 @@ function FileBrowserTab({
               setTimeout(() => startingRef.current.delete(target), 3_000);
             });
         } else {
-          open(isTextFile(file.name) ? 'text-editor' : isPhotoshopFile(file.name) ? 'photo-editor' : 'preview', { path: target });
+          open(isTextFile(file.name) ? 'text-editor' : isPhotoshopFile(file.name) ? 'photo-editor' : (officeAppFor(file.name) ?? 'preview'), { path: target });
         }
       }
     },
@@ -1641,6 +1641,11 @@ function FileBrowserTab({
                     {single?.kind === 'file' && !isTrash && !isTextFile(single.name) && (
                       <ContextMenuItem onSelect={() => open('text-editor', { path: pathsOf([single.name])[0] })}>
                         Open in Text Editor
+                      </ContextMenuItem>
+                    )}
+                    {single?.kind === 'file' && !isTrash && isDelimitedText(single.name) && (
+                      <ContextMenuItem onSelect={() => open('spreadsheet', { path: pathsOf([single.name])[0] })}>
+                        Open in Spreadsheet
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isViewableImage(single.name) && (

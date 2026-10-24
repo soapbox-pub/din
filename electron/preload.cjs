@@ -1070,6 +1070,14 @@ contextBridge.exposeInMainWorld('printing', {
   openFile: (path) => ipcRenderer.invoke('printing:openFile', path),
 
   /**
+   * Start printing a document Din drew itself as HTML (rendered with
+   * scripts off); resolves to the document.
+   * @param {string} title
+   * @param {string} html
+   */
+  openHtml: (title, html) => ipcRenderer.invoke('printing:openHtml', title, html),
+
+  /**
    * Lay a document out and draw its first pages.
    * @param {string} id
    * @param {unknown} layout
