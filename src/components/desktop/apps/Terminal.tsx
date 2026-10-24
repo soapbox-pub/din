@@ -70,6 +70,9 @@ const newSplitId = () => `split-${nextSplitId++}`;
  */
 const TERMINAL_URL_REGEX = /https?:\/\/[^\s"'`<>()[\]{}]+/g;
 
+/** The largest OSC 52 copy accepted, in base64 characters (about 1 MB of text). */
+const MAX_OSC52_BYTES = 1_400_000;
+
 /**
  * Terminal font size ("zoom"), shared across every pane and tab and persisted
  * so it survives restarts. Tilix-style Ctrl/Cmd+scroll and Ctrl/Cmd +/-/0
@@ -917,6 +920,23 @@ function paneSession(
     return true;
   });
 
+  // OSC 52 ("Pc;base64") is how programs without a clipboard tool of their
+  // own copy: tmux, vim, TUIs like opencode, and anything over SSH. Writes
+  // go on Din's clipboard; reads ("?") are ignored, since answering them
+  // would hand the clipboard to whatever is running in the terminal.
+  const clipboardHandler = term.parser.registerOscHandler(52, (data) => {
+    const payload = data.slice(data.indexOf(';') + 1);
+    if (payload === '?' || payload.length > MAX_OSC52_BYTES) return true;
+    try {
+      const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+      const text = new TextDecoder().decode(bytes);
+      if (text) navigator.clipboard.writeText(text).catch(() => {});
+    } catch {
+      // ignore malformed OSC 52 payloads
+    }
+    return true;
+  });
+
   // Linkify http/https URLs in the output. xterm has no link detection of
   // its own; this provider scans each line for URLs and, on Ctrl/Cmd+click
   // (Tilix/VS Code convention — a plain click still selects text), routes
@@ -1098,6 +1118,7 @@ function paneSession(
     offCommandDone();
     finished?.close();
     oscHandler.dispose();
+    clipboardHandler.dispose();
     linkProvider.dispose();
     if (sessionId !== null) bridge.kill(sessionId);
     term.dispose();
