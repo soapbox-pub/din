@@ -527,8 +527,16 @@ impl State {
             return;
         }
         let toplevel = t.window.toplevel().expect("wayland window");
+        let known_size = t.known_size;
         toplevel.with_pending_state(|state| {
             if maximized {
+                // A window still at the size it picked itself has no size in
+                // its configures yet, and maximized at 0x0 is a size Chromium
+                // dies on (a CHECK). It keeps its size until the shell's new
+                // geometry comes.
+                if state.size.is_none() {
+                    state.size = known_size;
+                }
                 state.states.set(xdg_toplevel::State::Maximized);
             } else {
                 state.states.unset(xdg_toplevel::State::Maximized);
