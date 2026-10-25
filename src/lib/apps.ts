@@ -47,6 +47,9 @@ const VectorEditor = lazy(() =>
 const PageLayout = lazy(() =>
   import('@/components/desktop/apps/PageLayout').then((m) => ({ default: m.PageLayout })),
 );
+const CAD = lazy(() =>
+  import('@/components/desktop/apps/CAD').then((m) => ({ default: m.CAD })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -257,6 +260,17 @@ export const APPS: readonly AppDefinition[] = [
     component: PageLayout,
     defaultSize: { width: 1280, height: 840 },
     keywords: ['indesign', 'adobe indesign', 'indd', 'idml', 'scribus', 'publisher', 'desktop publishing', 'layout', 'magazine', 'brochure', 'flyer'],
+  },
+  {
+    // 2D drafting, AutoCAD style: opens DWGs (R14 to 2018) and saves
+    // AutoCAD 2000 DWGs. Files opens .dwg files here. Launch params
+    // `{ path }` open one; `{ new: 'imperial' | 'metric' }` start one.
+    id: 'cad',
+    name: 'CAD',
+    icon: '/icons/apps/cad.png',
+    component: CAD,
+    defaultSize: { width: 1360, height: 860 },
+    keywords: ['autocad', 'dwg', 'drafting', 'drawing', 'cad', 'draftsight', 'librecad', 'blueprint', 'floor plan', 'technical drawing'],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which

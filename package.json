@@ -28,6 +28,7 @@
     "@fontsource/tinos": "^5.3.0",
     "@ghostery/adblocker": "^2.20.1",
     "@ghostery/adblocker-electron-preload": "^2.20.1",
+    "@mlightcad/libredwg-web": "0.7.17",
     "@nostrify/nostrify": "^0.55.1",
     "@nostrify/react": "^0.6.8",
     "@radix-ui/react-toast": "^1.2.1",
