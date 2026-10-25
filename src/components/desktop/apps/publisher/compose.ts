@@ -555,15 +555,16 @@ export function compose(story: Element, styles: Styles, frames: FrameSpec[], pre
       let left = r.x + pl.leftIndent + (firstLine ? pl.firstIndent : 0);
       const right = r.x + r.w - pl.rightIndent;
       if (drop && lineInPara < drop.lines) left = Math.max(left, r.x + pl.leftIndent + drop.width);
-      const slots = wrapSlots(frame.wraps, left, right, y - estLead * 0.8, y + estDesc);
+      // A line's band reaches up to its leading, but not above the top of its column.
+      const slots = wrapSlots(frame.wraps, left, right, Math.max(r.y, y - estLead * 0.8), y + estDesc);
       if (slots === 'jump') {
-        baseline = Math.max(y, baseline + 1);
+        baseline = first ? y : Math.max(y, baseline + 1);
         first = false;
         continue;
       }
       if (!slots.length) {
         // Nothing fits on this band; try further down.
-        baseline = Math.max(y, baseline + 1);
+        baseline = first ? y : Math.max(y, baseline + 1);
         first = false;
         if (y > r.y + r.h) {
           if (!nextColumn()) {
@@ -582,6 +583,15 @@ export function compose(story: Element, styles: Styles, frames: FrameSpec[], pre
       const made: Line[] = [];
       for (const slot of slots) {
         if (ai >= atoms.length) break;
+        // Beside a wrapped object, a sliver too narrow for the next word stays empty.
+        if (slots.length > 1) {
+          let word = 0;
+          for (let k = ai; k < atoms.length && k < ai + 64; k++) {
+            word += atoms[k].w;
+            if (atoms[k].breakAfter || atoms[k].kind === 'end' || atoms[k].kind === 'forced') break;
+          }
+          if (word > slot.width) continue;
+        }
         const res = fillLine(atoms, ai, slot, r.x, pl);
         const line: Line = {
           frame: col.frame,
@@ -607,6 +617,16 @@ export function compose(story: Element, styles: Styles, frames: FrameSpec[], pre
           break;
         }
         if (res.forced) break;
+      }
+      if (!made.length) {
+        baseline = first ? y : Math.max(y, baseline + 1);
+        first = false;
+        if (y > r.y + r.h && !nextColumn()) {
+          overset = true;
+          setEnd = atoms[ai].start;
+          break outer;
+        }
+        continue;
       }
       // Leading is set by the tallest thing on the line; recheck the fit with it.
       if (!first && lineLead > estLead + 0.01) {
