@@ -3329,6 +3329,20 @@ function originOf(url: string): string | null {
   }
 }
 
+/**
+ * Whether a URL is on the shell's own origin. Not originOf(): Node's URL
+ * doesn't know app: is a standard scheme and gives app://din/ an opaque
+ * origin, so the shell's own reload looked like leaving home and was blocked.
+ */
+function isShellUrl(url: string): boolean {
+  try {
+    const { protocol, host } = new URL(url);
+    return `${protocol}//${host}` === SHELL_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
 // Nostr identity bridge (window.nostr - see nostr-preload.cjs). Browser tabs
 // and installed web apps get a NIP-07 provider whose calls land here. The
 // signer, and every decision about whether a site may use it, live in the
@@ -5255,7 +5269,7 @@ app.whenReady().then(() => {
   // (nostrconnect: for remote signers) are the one exception - they never
   // replace the document. Web links go to the Web Browser instead.
   const keepShellHome = (event: Electron.Event, url: string) => {
-    if (originOf(url) === SHELL_ORIGIN) return;
+    if (isShellUrl(url)) return;
     event.preventDefault();
     if (/^(https?|nsite):\/\//i.test(url)) sendToShell('crx:openTab', { url });
   };
