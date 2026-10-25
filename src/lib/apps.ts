@@ -38,6 +38,9 @@ const Spreadsheet = lazy(() =>
 const Slides = lazy(() =>
   import('@/components/desktop/apps/Slides').then((m) => ({ default: m.Slides })),
 );
+const Calculator = lazy(() =>
+  import('@/components/desktop/apps/Calculator').then((m) => ({ default: m.Calculator })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -215,6 +218,16 @@ export const APPS: readonly AppDefinition[] = [
     component: Slides,
     defaultSize: { width: 1280, height: 800 },
     keywords: ['powerpoint', 'microsoft powerpoint', 'office', 'pptx', 'ppt', 'keynote', 'impress', 'presentation', 'slideshow', 'deck'],
+  },
+  {
+    // A graphing calculator with computer algebra, in place of a TI-89:
+    // exact answers, solve, d, ∫, limits, matrices, graphs and tables.
+    id: 'calculator',
+    name: 'Calculator',
+    icon: '/icons/apps/calculator.png',
+    component: Calculator,
+    defaultSize: { width: 1040, height: 720 },
+    keywords: ['TI-89', 'TI-84', 'graphing calculator', 'CAS', 'algebra', 'calculus', 'derivative', 'integral', 'solve', 'math', 'graph', 'homework'],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which

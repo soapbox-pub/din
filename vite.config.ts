@@ -33,8 +33,19 @@ export default defineConfig(() => ({
     react(),
     tailwindcss(),
   ],
+  // The Calculator's giac worker imports its WebAssembly relative to
+  // itself, which pre-bundling would break.
+  optimizeDeps: {
+    exclude: ["@basthon/xcas-wasm"],
+  },
+  worker: {
+    format: "es" as const,
+  },
   build: {
     sourcemap: PROFILE_BUILD,
+    // The shell's CSP has no data: in font-src, so small fonts (KaTeX's)
+    // stay files instead of being inlined.
+    assetsInlineLimit: (file: string) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined),
     rollupOptions: {
       output: PROFILE_BUILD ? { keepNames: true } : {},
     },
