@@ -35,6 +35,7 @@
 //     the menu bar and Settings
 //   - window.printing: printers, the print dialog's previews and jobs, and
 //     the print queue, for the print dialog and Settings
+//   - window.indd: InDesign documents read into IDML, for Page Layout
 //   - window.volumes: USB sticks and SD cards, mounted as they're plugged in
 //     and ejected from the Files sidebar
 //   - window.systemMonitor: running processes, CPU and memory, and ending
@@ -746,6 +747,19 @@ contextBridge.exposeInMainWorld('cursor', {
    * @param {{ theme: string, size: number }} choice
    */
   set: (choice) => ipcRenderer.invoke('cursor:set', choice),
+});
+
+// InDesign bridge (window.indd), backed by the indd:* handler in
+// electron/indd.mts: reads an InDesign document into the IDML package Page
+// Layout edits.
+contextBridge.exposeInMainWorld('indd', {
+  /**
+   * { idml, previews: { graphics, data }[], warnings }; rejects with a
+   * sentence when it can't be read.
+   * @param {Uint8Array} bytes
+   * @param {string} name
+   */
+  convert: (bytes, name) => ipcRenderer.invoke('indd:convert', bytes, name),
 });
 
 // Tray bridge (window.tray), backed by the tray:* handlers in

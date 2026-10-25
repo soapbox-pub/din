@@ -41,6 +41,12 @@ const Slides = lazy(() =>
 const Calculator = lazy(() =>
   import('@/components/desktop/apps/Calculator').then((m) => ({ default: m.Calculator })),
 );
+const VectorEditor = lazy(() =>
+  import('@/components/desktop/apps/VectorEditor').then((m) => ({ default: m.VectorEditor })),
+);
+const PageLayout = lazy(() =>
+  import('@/components/desktop/apps/PageLayout').then((m) => ({ default: m.PageLayout })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -228,6 +234,29 @@ export const APPS: readonly AppDefinition[] = [
     component: Calculator,
     defaultSize: { width: 1040, height: 720 },
     keywords: ['TI-89', 'TI-84', 'graphing calculator', 'CAS', 'algebra', 'calculus', 'derivative', 'integral', 'solve', 'math', 'graph', 'homework'],
+  },
+  {
+    // Vector art, Illustrator style: opens and saves .ai files (and PDF and
+    // SVG). Files opens Illustrator files here. Launch params `{ path }` open
+    // one; `{ width, height, units, mode, artboards, name }` start a new
+    // document (File > New from another window).
+    id: 'vector-editor',
+    name: 'Vector Editor',
+    icon: '/icons/apps/vector-editor.png',
+    component: VectorEditor,
+    defaultSize: { width: 1280, height: 820 },
+    keywords: ['illustrator', 'adobe illustrator', 'ai', 'inkscape', 'vector', 'svg', 'logo', 'illustration', 'drawing', 'pen tool', 'bezier'],
+  },
+  {
+    // Page layout, InDesign style: opens InDesign documents (.indd, .indt)
+    // and IDML, and saves IDML. Files opens them here. Launch params
+    // `{ path }` open one.
+    id: 'page-layout',
+    name: 'Page Layout',
+    icon: '/icons/apps/page-layout.png',
+    component: PageLayout,
+    defaultSize: { width: 1280, height: 840 },
+    keywords: ['indesign', 'adobe indesign', 'indd', 'idml', 'scribus', 'publisher', 'desktop publishing', 'layout', 'magazine', 'brochure', 'flyer'],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which

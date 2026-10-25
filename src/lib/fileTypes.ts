@@ -38,7 +38,7 @@ const ARCHIVE = new Set([
   'cpio', 'cab', 'deb', 'rpm', 'apk',
 ]);
 const DISK = new Set(['iso', 'img', 'qcow2', 'vmdk', 'vdi', 'dmg']);
-const DOCUMENT = new Set(['doc', 'docx', 'docm', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'epub']);
+const DOCUMENT = new Set(['ai', 'ait', 'indd', 'indt', 'idml', 'doc', 'docx', 'docm', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'epub']);
 /** Names that are text whatever their extension. */
 const TEXT_NAMES = new Set(['readme', 'license', 'copying', 'makefile', 'dockerfile', 'changelog', 'authors', '.gitignore', '.bashrc', '.zshrc', '.profile']);
 
@@ -102,6 +102,20 @@ export function officeAppFor(name: string): 'word-processor' | 'spreadsheet' | '
 export function isDelimitedText(name: string): boolean {
   const ext = extensionOf(name);
   return ext === 'csv' || ext === 'tsv';
+}
+
+/** The built-in Adobe-style app for an Illustrator or InDesign file, if it is one. */
+export function adobeAppFor(name: string): 'vector-editor' | 'page-layout' | null {
+  const ext = extensionOf(name);
+  if (ext === 'ai' || ext === 'ait') return 'vector-editor';
+  if (ext === 'indd' || ext === 'indt' || ext === 'idml') return 'page-layout';
+  return null;
+}
+
+/** Files Vector Editor opens besides its own: PDF, SVG and EPS. */
+export function isVectorEditable(name: string): boolean {
+  const ext = extensionOf(name);
+  return ext === 'pdf' || ext === 'svg' || ext === 'eps';
 }
 
 /** Pictures Photo Editor opens: Photoshop documents and whatever Chromium can decode. */

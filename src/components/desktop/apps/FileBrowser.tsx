@@ -26,7 +26,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { isDelimitedText, isExtractable, isPhotoEditable, isPhotoshopFile, isTextFile, isViewableImage, officeAppFor } from '@/lib/fileTypes';
+import { adobeAppFor, isDelimitedText, isExtractable, isPhotoEditable, isPhotoshopFile, isTextFile, isVectorEditable, isViewableImage, officeAppFor } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -629,7 +629,7 @@ function FileBrowserTab({
               setTimeout(() => startingRef.current.delete(target), 3_000);
             });
         } else {
-          open(isTextFile(file.name) ? 'text-editor' : isPhotoshopFile(file.name) ? 'photo-editor' : (officeAppFor(file.name) ?? 'preview'), { path: target });
+          open(isTextFile(file.name) ? 'text-editor' : isPhotoshopFile(file.name) ? 'photo-editor' : (officeAppFor(file.name) ?? adobeAppFor(file.name) ?? 'preview'), { path: target });
         }
       }
     },
@@ -1656,6 +1656,11 @@ function FileBrowserTab({
                     {single?.kind === 'file' && !isTrash && isPhotoEditable(single.name) && !isPhotoshopFile(single.name) && (
                       <ContextMenuItem onSelect={() => open('photo-editor', { path: pathsOf([single.name])[0] })}>
                         Edit in Photo Editor
+                      </ContextMenuItem>
+                    )}
+                    {single?.kind === 'file' && !isTrash && isVectorEditable(single.name) && (
+                      <ContextMenuItem onSelect={() => open('vector-editor', { path: pathsOf([single.name])[0] })}>
+                        Edit in Vector Editor
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && canPrint && isPrintableFile(single.name) && (

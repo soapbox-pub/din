@@ -75,6 +75,8 @@ let
       # Copied wholesale so a new module can't be forgotten here.
       install -m444 electron/*.mjs electron/*.cjs $out/share/din/
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
+      # Page Layout's INDD reader (electron/indd.mts), committed prebuilt.
+      install -m444 electron/indd.wasm $out/share/din/indd.wasm
       # The ad blocker's extension, with its engine bundle built above.
       cp -r electron/adblock-extension $out/share/din/adblock-extension
 

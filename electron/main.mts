@@ -53,6 +53,7 @@ import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { registerCursorHandlers } from './cursor.mts';
+import { registerInddHandlers } from './indd.mts';
 import {
   ensureNightLightTool,
   nightLightStatus,
@@ -5125,6 +5126,7 @@ app.whenReady().then(() => {
   registerKeyboardHandlers({ assertShellSender });
   registerDateTimeHandlers({ assertShellSender });
   registerCursorHandlers({ assertShellSender });
+  registerInddHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerOpenUri({ sendToShell });
   registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
