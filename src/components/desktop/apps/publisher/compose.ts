@@ -3,7 +3,7 @@ import { charLook, cssFont, formatNumber, paraLook, textChain, webFont, type Cha
 import { flatten, INDENT_HERE, NEXT_PAGE_NUMBER, OBJECT, PAGE_NUMBER, RIGHT_INDENT_TAB, type Flat } from './text';
 
 /**
- * Page Layout's composer: sets a story's paragraphs into the columns of its
+ * Publisher's composer: sets a story's paragraphs into the columns of its
  * threaded frames, one line at a time (a greedy single-line composer, where
  * InDesign uses its paragraph composer, so a line here and there may break
  * differently). Handles styles and local formatting, indents, space

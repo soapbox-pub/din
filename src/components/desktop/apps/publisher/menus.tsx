@@ -13,7 +13,7 @@ import {
 import type { Arrange, Fitting } from './ops';
 import { PANEL_NAMES, type PanelId } from './state';
 
-/** Page Layout's menu bar, laid out as InDesign's is, with its shortcuts. */
+/** Publisher's menu bar, laid out as InDesign's is, with its shortcuts. */
 
 export interface Commands {
   newDoc(): void;
@@ -97,7 +97,7 @@ export interface MenuState {
   pageCount: number;
 }
 
-export function LayoutMenus({ cmd, st }: { cmd: Commands; st: MenuState }) {
+export function PublisherMenus({ cmd, st }: { cmd: Commands; st: MenuState }) {
   const d = !st.hasDoc;
   const sel = !st.hasSelection;
   return (
@@ -447,7 +447,7 @@ export function LayoutMenus({ cmd, st }: { cmd: Commands; st: MenuState }) {
         <MenubarTrigger>Help</MenubarTrigger>
         <MenubarContent>
           <MenubarItem onSelect={cmd.shortcuts}>Keyboard Shortcuts…</MenubarItem>
-          <MenubarItem onSelect={cmd.about}>About Page Layout…</MenubarItem>
+          <MenubarItem onSelect={cmd.about}>About Publisher…</MenubarItem>
         </MenubarContent>
       </MenubarMenu>
     </Menubar>

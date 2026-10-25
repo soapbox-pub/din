@@ -1,4 +1,4 @@
-// InDesign documents, for Page Layout: indd.wasm (indd-utils, built by
+// InDesign documents, for Publisher: indd.wasm (indd-utils, built by
 // scripts/build-indd-wasm.sh) turns an INDD file into the IDML package the
 // app edits. It runs here rather than in the page because the shell's CSP
 // has no 'wasm-unsafe-eval', and shouldn't get one for this.

@@ -2,7 +2,7 @@ import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 
 /**
  * IDML packages: a zip of XML parts (designmap.xml, Spreads/, MasterSpreads/,
- * Stories/, Resources/...). Page Layout keeps every part as the DOM it was
+ * Stories/, Resources/...). Publisher keeps every part as the DOM it was
  * read into and edits those in place, so whatever it doesn't understand is
  * written back as it came. A package never changes: an edit makes a new one
  * that shares every part it didn't touch, which is what makes undo cheap.

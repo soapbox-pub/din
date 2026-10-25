@@ -110,10 +110,10 @@ export function isDelimitedText(name: string): boolean {
 }
 
 /** The built-in Adobe-style app for an Illustrator or InDesign file, if it is one. */
-export function adobeAppFor(name: string): 'vector-editor' | 'page-layout' | null {
+export function adobeAppFor(name: string): 'vector-editor' | 'publisher' | null {
   const ext = extensionOf(name);
   if (ext === 'ai' || ext === 'ait') return 'vector-editor';
-  if (ext === 'indd' || ext === 'indt' || ext === 'idml') return 'page-layout';
+  if (ext === 'indd' || ext === 'indt' || ext === 'idml') return 'publisher';
   return null;
 }
 

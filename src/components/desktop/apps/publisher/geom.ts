@@ -1,5 +1,5 @@
 /**
- * Page Layout's geometry: IDML's affine transforms ("a b c d tx ty", the
+ * Publisher's geometry: IDML's affine transforms ("a b c d tx ty", the
  * same order as a canvas matrix), points, rectangles and the paths frames
  * are made of (anchors with their two direction handles, as InDesign keeps
  * them).

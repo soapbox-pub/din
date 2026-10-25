@@ -5,7 +5,7 @@ import { childChain, cleanName, lookup, objectChain, readStyles, type Styles } f
 import { unitFromIdml, type Unit } from './units';
 
 /**
- * What Page Layout draws and edits, read out of an IDML package: spreads and
+ * What Publisher draws and edits, read out of an IDML package: spreads and
  * master spreads with their pages, the page items on them (frames, shapes,
  * lines, groups and the graphics placed in frames) with their transforms
  * worked out to spread coordinates, layers, swatches, styles and stories.

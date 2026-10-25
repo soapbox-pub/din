@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds electron/indd.wasm, Page Layout's reader for InDesign documents:
+# Builds electron/indd.wasm, Publisher's reader for InDesign documents:
 # indd-utils (MIT OR Apache-2.0) behind the plain interface in
 # native/indd-wasm. The result is committed, so neither `npm run build` nor
 # the DinOS build needs a Rust WebAssembly toolchain; run this after

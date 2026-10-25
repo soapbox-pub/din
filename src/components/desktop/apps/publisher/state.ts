@@ -2,7 +2,7 @@ import { boundsOf, decompose, rectCorners, apply, type Pt, type Rect } from './g
 import type { Item, Model, Spread } from './model';
 import type { ToolId } from './tools';
 
-/** Page Layout's saved settings and the selection helpers the editor shares with its panels. */
+/** Publisher's saved settings and the selection helpers the editor shares with its panels. */
 
 export type PanelId =
   | 'pages'
@@ -78,7 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   polygonSides: 6,
 };
 
-const KEY = 'din:page-layout:settings';
+const KEY = 'din:publisher:settings';
 
 export function readSettings(): Settings {
   try {

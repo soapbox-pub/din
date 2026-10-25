@@ -15,9 +15,9 @@ import '@/components/desktop/apps/office/fonts';
 import { Button, Dialog } from './photo/chrome';
 import { Panel } from './photo/panels';
 import { FOCUS, INPUT } from './photo/styles';
-import { rgbToCmyk, type Swatch } from './layout/colors';
-import { caretX, lineAt, posAt, resetMeasures, type Composition } from './layout/compose';
-import { ControlPanel, type Geometry, type ObjectInfo, type TypeInfo } from './layout/control';
+import { rgbToCmyk, type Swatch } from './publisher/colors';
+import { caretX, lineAt, posAt, resetMeasures, type Composition } from './publisher/compose';
+import { ControlPanel, type Geometry, type ObjectInfo, type TypeInfo } from './publisher/control';
 import {
   AboutDialog,
   CornerDialog,
@@ -29,24 +29,24 @@ import {
   ShortcutsDialog,
   SwatchDialog,
   TextFrameOptionsDialog,
-} from './layout/dialogs';
-import { about, apply, boundsOf, dist, invert, mul, rectCorners, rotate, scale, translate, type Mat, type Pt, type Rect } from './layout/geom';
-import { hitTest, marqueeHits } from './layout/hit';
-import { Draft, findSelf, looksLikeIdml, partRoot, readPackage, writePackage, type Pkg } from './layout/idml';
-import { ImageStore, linkPath } from './layout/images';
-import { LayoutMenus, type Commands, type MenuState } from './layout/menus';
-import { buildModel, itemBounds, pageAt, spreadAtY, walkItems, type Item, type Model, type Page, type Spread } from './layout/model';
-import { newDocument, type NewDocSettings } from './layout/newdoc';
-import * as ops from './layout/ops';
-import { CharacterPanel, ColorPanel, LayersPanel, LinksPanel, PagesPanel, ParagraphPanel, StrokePanel, StylesPanel, SwatchesPanel, WrapPanel, type LinkRow } from './layout/panels';
-import { drawOverlay, drawScene, HANDLES, handlePoints, portPoints, spreadToScreen, type Overlay, type SceneOptions, type View } from './layout/render';
-import { DEFAULT_SETTINGS, PANEL_NAMES, type PanelId, geometryOf, readSettings, refPointOf, rulerOrigin, same, snap1, snapLines, unionBounds, unionCorners, writeSettings, type Settings } from './layout/state';
-import { Stories } from './layout/stories';
-import { charLook, paraLook, textChain } from './layout/styles';
-import * as text from './layout/text';
-import { Toolbar } from './layout/toolbar';
-import { TOOL_GROUPS, toolByCode, type ToolId } from './layout/tools';
-import { fmtLength, nudgeStep, rulerSteps, unitLabel } from './layout/units';
+} from './publisher/dialogs';
+import { about, apply, boundsOf, dist, invert, mul, rectCorners, rotate, scale, translate, type Mat, type Pt, type Rect } from './publisher/geom';
+import { hitTest, marqueeHits } from './publisher/hit';
+import { Draft, findSelf, looksLikeIdml, partRoot, readPackage, writePackage, type Pkg } from './publisher/idml';
+import { ImageStore, linkPath } from './publisher/images';
+import { PublisherMenus, type Commands, type MenuState } from './publisher/menus';
+import { buildModel, itemBounds, pageAt, spreadAtY, walkItems, type Item, type Model, type Page, type Spread } from './publisher/model';
+import { newDocument, type NewDocSettings } from './publisher/newdoc';
+import * as ops from './publisher/ops';
+import { CharacterPanel, ColorPanel, LayersPanel, LinksPanel, PagesPanel, ParagraphPanel, StrokePanel, StylesPanel, SwatchesPanel, WrapPanel, type LinkRow } from './publisher/panels';
+import { drawOverlay, drawScene, HANDLES, handlePoints, portPoints, spreadToScreen, type Overlay, type SceneOptions, type View } from './publisher/render';
+import { DEFAULT_SETTINGS, PANEL_NAMES, type PanelId, geometryOf, readSettings, refPointOf, rulerOrigin, same, snap1, snapLines, unionBounds, unionCorners, writeSettings, type Settings } from './publisher/state';
+import { Stories } from './publisher/stories';
+import { charLook, paraLook, textChain } from './publisher/styles';
+import * as text from './publisher/text';
+import { Toolbar } from './publisher/toolbar';
+import { TOOL_GROUPS, toolByCode, type ToolId } from './publisher/tools';
+import { fmtLength, nudgeStep, rulerSteps, unitLabel } from './publisher/units';
 
 /** Bigger files than this aren't read. */
 const MAX_BYTES = 1024 * 1024 * 1024;
@@ -114,7 +114,7 @@ const ZOOMS = [0.05, 0.0833, 0.125, 0.25, 0.33, 0.5, 0.66, 0.75, 1, 1.25, 1.5, 2
 const zoomStep = (z: number, dir: 1 | -1) => (dir > 0 ? (ZOOMS.find((s) => s > z * 1.01) ?? 40) : ([...ZOOMS].reverse().find((s) => s < z * 0.99) ?? 0.05));
 
 /**
- * Page Layout - documents laid out in pages, InDesign style: opens InDesign
+ * Publisher - documents laid out in pages, InDesign style: opens InDesign
  * documents (.indd and .indt, read with indd-utils) and IDML, with InDesign's
  * tools, Control panel, panels, menus and shortcuts; frames, shapes, threaded
  * text with paragraph and character styles, placed images, master pages and
@@ -122,7 +122,7 @@ const zoomStep = (z: number, dir: 1 | -1) => (dir > 0 ? (ZOOMS.find((s) => s > z
  *
  * Launch params: `{ path?: string }` (absolute).
  */
-export function PageLayout({ windowId, params }: AppComponentProps) {
+export function Publisher({ windowId, params }: AppComponentProps) {
   const initial = typeof params?.path === 'string' ? params.path : null;
   const fs = getFsBridge();
   const { open, close, focus } = useWindowActions();
@@ -230,7 +230,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
   useEffect(() => writeSettings({ ...settings, tool }), [settings, tool]);
   const setSetting = useCallback(<K extends keyof Settings>(k: K, v: Settings[K]) => setSettings((s) => ({ ...s, [k]: v })), []);
 
-  const title = model ? `${dirty ? '• ' : ''}${docName} @ ${fmtZoom(zoomShown)}${preview ? ' [Preview]' : ''}` : 'Page Layout';
+  const title = model ? `${dirty ? '• ' : ''}${docName} @ ${fmtZoom(zoomShown)}${preview ? ' [Preview]' : ''}` : 'Publisher';
   useWindowTitle(title);
 
   // ---- Text -------------------------------------------------------------------------------------
@@ -832,7 +832,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
     const t = await pickFile({ title: 'Open', extensions: OPEN_EXTENSIONS, initialPath: path ? parentPath(path) : undefined });
     if (!t) return;
     if (modelRef.current) {
-      open('page-layout', { path: t });
+      open('publisher', { path: t });
       return;
     }
     setLoading(true);
@@ -1523,7 +1523,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
     if (!t) return;
     try {
       const r = await fs.readFile(t, 256 * 1024 * 1024);
-      const { decodeBytes } = await import('./layout/images');
+      const { decodeBytes } = await import('./publisher/images');
       const bmp = await decodeBytes(r.data);
       const gun: PlaceGun = { path: t, w: bmp.width, h: bmp.height, size: r.size || r.data.length };
       bmp.close();
@@ -2870,7 +2870,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
   // ---- Rendering ---------------------------------------------------------------------------------------
 
   if (!fs) {
-    return <p className="grid h-full place-items-center bg-[#323232] p-6 text-sm text-[#cfcfcf]">Page Layout needs the Electron shell to read and save files.</p>;
+    return <p className="grid h-full place-items-center bg-[#323232] p-6 text-sm text-[#cfcfcf]">Publisher needs the Electron shell to read and save files.</p>;
   }
 
   const cursor = (() => {
@@ -3087,7 +3087,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
     >
-      <LayoutMenus cmd={cmd} st={menuState} />
+      <PublisherMenus cmd={cmd} st={menuState} />
       {settings.control && (
         <ControlPanel
           mode={typing || (tool === 'type' && typeInfo) ? 'type' : objInfo ? 'object' : 'none'}
@@ -3203,7 +3203,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
               <div className="absolute inset-0 grid place-items-center p-6">
                 <div className="w-full max-w-md space-y-6 text-center">
                   <div className="space-y-2">
-                    <h1 className="text-[40px] leading-tight font-semibold tracking-tight text-[#f0f0f0]">Page Layout</h1>
+                    <h1 className="text-[40px] leading-tight font-semibold tracking-tight text-[#f0f0f0]">Publisher</h1>
                     <p className="text-lg text-[#b5b5b5]">Pages, frames, threaded text and styles. Opens InDesign documents and IDML, and saves IDML.</p>
                   </div>
                   {error && (
@@ -3246,7 +3246,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
                   aria-label="Zoom level"
                   key={zoomShown}
                   defaultValue={fmtZoom(zoomShown)}
-                  list="page-layout-zooms"
+                  list="publisher-zooms"
                   onKeyDown={(e) => {
                     e.stopPropagation();
                     if (e.key === 'Enter') {
@@ -3261,7 +3261,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
                   }}
                   className={cn(INPUT, 'h-5 w-[62px] text-[11px]')}
                 />
-                <datalist id="page-layout-zooms">
+                <datalist id="publisher-zooms">
                   {[5, 12.5, 25, 50, 75, 100, 125, 150, 200, 400, 800].map((z) => (
                     <option key={z} value={`${z}%`} />
                   ))}
@@ -3324,7 +3324,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
             const pk = newDocument(s);
             if (modelRef.current) {
               // A document of its own window, as InDesign opens another tab.
-              open('page-layout', { newDoc: { ...s, margins: { ...s.margins }, bleed: { ...s.bleed } } });
+              open('publisher', { newDoc: { ...s, margins: { ...s.margins }, bleed: { ...s.bleed } } });
               return;
             }
             startDoc(pk, 'Untitled-1', null, false, new Map());
@@ -3435,7 +3435,7 @@ export function PageLayout({ windowId, params }: AppComponentProps) {
       )}
       {dialog?.kind === 'unsaved' && (
         <Dialog
-          title="Page Layout"
+          title="Publisher"
           onCancel={() => setDialog(null)}
           onOk={() => {
             setDialog(null);

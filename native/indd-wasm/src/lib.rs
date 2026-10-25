@@ -1,4 +1,4 @@
-//! InDesign documents to IDML, for Page Layout: `indd::convert` behind a
+//! InDesign documents to IDML, for Publisher: `indd::convert` behind a
 //! plain WebAssembly interface that needs nothing from its host.
 //!
 //! The host asks `alloc` for room, copies the INDD bytes and the document

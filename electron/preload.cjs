@@ -35,7 +35,7 @@
 //     the menu bar and Settings
 //   - window.printing: printers, the print dialog's previews and jobs, and
 //     the print queue, for the print dialog and Settings
-//   - window.indd: InDesign documents read into IDML, for Page Layout
+//   - window.indd: InDesign documents read into IDML, for Publisher
 //   - window.volumes: USB sticks and SD cards, mounted as they're plugged in
 //     and ejected from the Files sidebar
 //   - window.systemMonitor: running processes, CPU and memory, and ending

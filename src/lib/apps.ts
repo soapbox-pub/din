@@ -44,8 +44,8 @@ const Calculator = lazy(() =>
 const VectorEditor = lazy(() =>
   import('@/components/desktop/apps/VectorEditor').then((m) => ({ default: m.VectorEditor })),
 );
-const PageLayout = lazy(() =>
-  import('@/components/desktop/apps/PageLayout').then((m) => ({ default: m.PageLayout })),
+const Publisher = lazy(() =>
+  import('@/components/desktop/apps/Publisher').then((m) => ({ default: m.Publisher })),
 );
 const CAD = lazy(() =>
   import('@/components/desktop/apps/CAD').then((m) => ({ default: m.CAD })),
@@ -256,10 +256,10 @@ export const APPS: readonly AppDefinition[] = [
     // Page layout, InDesign style: opens InDesign documents (.indd, .indt)
     // and IDML, and saves IDML. Files opens them here. Launch params
     // `{ path }` open one.
-    id: 'page-layout',
-    name: 'Page Layout',
-    icon: '/icons/apps/page-layout.png',
-    component: PageLayout,
+    id: 'publisher',
+    name: 'Publisher',
+    icon: '/icons/apps/publisher.png',
+    component: Publisher,
     defaultSize: { width: 1280, height: 840 },
     keywords: ['indesign', 'adobe indesign', 'indd', 'idml', 'scribus', 'publisher', 'desktop publishing', 'layout', 'magazine', 'brochure', 'flyer'],
   },
