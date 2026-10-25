@@ -1,4 +1,4 @@
-import { cloneElement, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { cloneElement, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DropdownMenu as Menu, Popover } from 'radix-ui';
 import {
   ArrowLeft,
@@ -20,8 +20,11 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
+import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
+import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
+import { AERO_CSS } from './aero';
 import { ACCENTS, AppContext, FIELD, FOCUS, keepFocus, refocusFrame, useOfficeApp, type OfficeApp } from './accent';
 import { FONT_CHOICES, fontStack } from './fonts';
 import { PICKER_NAMES, PICKER_THEME_ORDER, pickerVariants, STANDARD_COLORS, tintColor, type Theme, type ThemeColorName } from './theme';
@@ -31,8 +34,14 @@ import { PICKER_NAMES, PICKER_THEME_ORDER, pickerVariants, STANDARD_COLORS, tint
  * Quick Access Toolbar, ribbon tabs over a ribbon of labelled groups, the
  * File tab's full-window Backstage, and a status bar with view buttons and
  * the zoom slider. People who know Office find things where their hands
- * expect them, so this follows Microsoft 365's layout and wording closely.
+ * expect them, so this follows Microsoft 365's layout and wording closely,
+ * dressed the way Office 2010 looked on Windows 7 (see aero.ts).
  */
+
+function accentVars(app: OfficeApp): React.CSSProperties {
+  const a = ACCENTS[app];
+  return { '--office-accent': a.accent, '--office-accent-dark': a.dark, '--office-accent-light': a.light } as React.CSSProperties;
+}
 
 export function OfficeFrame({
   app,
@@ -40,23 +49,15 @@ export function OfficeFrame({
   className,
   ...props
 }: { app: OfficeApp } & React.ComponentProps<'div'>) {
-  const a = ACCENTS[app];
   return (
     <AppContext.Provider value={app}>
       <div
         tabIndex={-1}
         {...props}
-        className={cn('office-frame relative flex h-full w-full flex-col overflow-hidden outline-none bg-[#f3f3f3] text-[12px] text-[#242424] select-none', className)}
-        style={
-          {
-            '--office-accent': a.accent,
-            '--office-accent-dark': a.dark,
-            '--office-accent-light': a.light,
-            fontFamily: "'Inter Variable', 'Segoe UI', system-ui, sans-serif",
-            colorScheme: 'light',
-          } as React.CSSProperties
-        }
+        className={cn('office-frame relative flex h-full w-full flex-col overflow-hidden outline-none bg-[#dfe7f2] text-[12px] text-[#242424] select-none', className)}
+        style={{ ...accentVars(app), fontFamily: "'Inter Variable', 'Segoe UI', system-ui, sans-serif", colorScheme: 'light' }}
       >
+        <style>{AERO_CSS}</style>
         {children}
       </div>
     </AppContext.Provider>
@@ -65,16 +66,7 @@ export function OfficeFrame({
 
 // ---- Title bar -------------------------------------------------------------------
 
-export function TitleBar({
-  title,
-  status,
-  onSave,
-  onUndo,
-  onRedo,
-  canUndo,
-  canRedo,
-  search,
-}: {
+interface TitleBarProps {
   title: string;
   status?: string;
   onSave: () => void;
@@ -83,42 +75,107 @@ export function TitleBar({
   canUndo: boolean;
   canRedo: boolean;
   search?: { placeholder?: string; onSearch: (text: string) => void };
+}
+
+/**
+ * The Quick Access Toolbar, the document's name and Search. Inside a Din
+ * window they go into the window's own title bar, tinted the app's color, so
+ * there is one bar on top rather than two; on their own they draw one here.
+ */
+export function TitleBar(props: TitleBarProps) {
+  const app = useOfficeApp();
+  const setTitlebar = useContext(WindowTitlebarContext);
+  const setAccent = useWindowAccent();
+  const latest = useRef(props);
+  useLayoutEffect(() => {
+    latest.current = props;
+  });
+  const { title, status, canUndo, canRedo } = props;
+  const placeholder = props.search ? (props.search.placeholder ?? 'Search') : null;
+  const content = useMemo(
+    () => <TitleBarContent app={app} title={title} status={status} canUndo={canUndo} canRedo={canRedo} placeholder={placeholder} latest={latest} inWindow={!!setTitlebar} />,
+    [app, title, status, canUndo, canRedo, placeholder, setTitlebar],
+  );
+  useEffect(() => {
+    setAccent(ACCENTS[app].accent);
+    return () => setAccent(null);
+  }, [app, setAccent]);
+  useEffect(() => setTitlebar?.(content), [setTitlebar, content]);
+  useEffect(() => () => setTitlebar?.(null), [setTitlebar]);
+  if (setTitlebar) return null;
+  return <div className="flex h-9 shrink-0 bg-[var(--office-accent)] px-2">{content}</div>;
+}
+
+function TitleBarContent({
+  app,
+  title,
+  status,
+  canUndo,
+  canRedo,
+  placeholder,
+  latest,
+  inWindow,
+}: {
+  app: OfficeApp;
+  title: string;
+  status?: string;
+  canUndo: boolean;
+  canRedo: boolean;
+  placeholder: string | null;
+  latest: React.RefObject<TitleBarProps>;
+  inWindow: boolean;
 }) {
   const [query, setQuery] = useState('');
   return (
-    <div className="flex h-10 shrink-0 items-center gap-1 bg-[var(--office-accent)] px-2 text-white" onMouseDown={keepFocus}>
-      <QatButton label="Save (Ctrl+S)" onClick={onSave}>
-        <Save className="size-4" />
-      </QatButton>
-      <QatButton label="Undo (Ctrl+Z)" onClick={onUndo} disabled={!canUndo}>
-        <Undo2 className="size-4" />
-      </QatButton>
-      <QatButton label="Redo (Ctrl+Y)" onClick={onRedo} disabled={!canRedo}>
-        <Redo2 className="size-4" />
-      </QatButton>
-      <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-2">
-        <span className="truncate text-[12.5px] font-normal">{title}</span>
+    <div
+      className={cn(
+        'grid h-full min-w-0 flex-1 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-3 text-white',
+        // Reach in under the window's controls (the ones after this, so they
+        // stay on top) to center the title on the window rather than beside them.
+        inWindow && '-mr-[100px]',
+      )}
+      style={{ ...accentVars(app), fontFamily: "'Inter Variable', 'Segoe UI', system-ui, sans-serif" }}
+      onMouseDown={keepFocus}
+    >
+      <div className="flex items-center gap-px">
+        <img src={ACCENTS[app].icon} alt="" draggable={false} className="mr-1.5 size-4 shrink-0" />
+        <QatButton label="Save (Ctrl+S)" onClick={() => latest.current.onSave()}>
+          <Save className="size-4" />
+        </QatButton>
+        <QatButton label="Undo (Ctrl+Z)" onClick={() => latest.current.onUndo()} disabled={!canUndo}>
+          <Undo2 className="size-4" />
+        </QatButton>
+        <QatButton label="Redo (Ctrl+Y)" onClick={() => latest.current.onRedo()} disabled={!canRedo}>
+          <Redo2 className="size-4" />
+        </QatButton>
+        <span className="mx-1.5 h-4 w-px bg-white/30 shadow-[1px_0_0_rgba(0,0,0,0.15)]" />
+      </div>
+      <div className="flex min-w-0 items-center justify-center gap-2 [text-shadow:0_1px_2px_rgba(0,0,0,0.35)]">
+        <span className="truncate text-[12.5px]">{title}</span>
         {status && <span className="hidden shrink-0 text-[12px] text-white/75 sm:inline">• {status}</span>}
       </div>
-      {search && (
-        <form
-          className="hidden w-[min(320px,30%)] items-center gap-2 rounded-md bg-white/15 px-2.5 transition-colors focus-within:bg-white md:flex"
-          onSubmit={(e) => {
-            e.preventDefault();
-            search.onSearch(query);
-          }}
-        >
-          <Search className="size-3.5 shrink-0 opacity-80 [form:focus-within_&]:text-[#424242]" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-            placeholder={search.placeholder ?? 'Search'}
-            aria-label="Search"
-            className="h-7 min-w-0 flex-1 bg-transparent text-[12.5px] text-white outline-none placeholder:text-white/80 focus:text-[#242424] focus:placeholder:text-[#707070]"
-          />
-        </form>
-      )}
+      <div className={cn('flex min-w-0 justify-end', inWindow && 'pr-[100px]')}>
+        {placeholder !== null && (
+          <form
+            data-window-no-drag
+            className="hidden h-6 w-[min(260px,100%)] min-w-0 items-center gap-1.5 rounded-[2px] border border-black/25 bg-white/90 pr-1.5 pl-2 shadow-[inset_0_1px_2px_rgba(0,0,0,0.18)] transition-colors focus-within:bg-white md:flex"
+            onSubmit={(e) => {
+              e.preventDefault();
+              latest.current.search?.onSearch(query);
+            }}
+          >
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder={placeholder}
+              aria-label="Search"
+              className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-[#1b1b1b] outline-none placeholder:text-[#6d6d6d] placeholder:italic"
+            />
+            <Search className="size-3.5 shrink-0 text-[#4a5d78]" />
+          </form>
+        )}
+      </div>
     </div>
   );
 }
@@ -131,7 +188,7 @@ function QatButton({ label, onClick, disabled, children }: { label: string; onCl
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="grid size-8 place-items-center rounded-md hover:bg-white/15 active:bg-white/25 disabled:opacity-45 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+      className="office-glass grid size-7 place-items-center rounded-[3px] [filter:drop-shadow(0_1px_1px_rgba(0,0,0,0.3))] disabled:opacity-45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white"
     >
       {children}
     </button>
@@ -163,11 +220,11 @@ export function RibbonTabs({
   onToggleCollapsed: () => void;
 }) {
   return (
-    <div role="tablist" aria-label="Ribbon tabs" className="flex h-9 shrink-0 items-end gap-0.5 overflow-x-auto px-2 [scrollbar-width:none]" onMouseDown={keepFocus}>
+    <div role="tablist" aria-label="Ribbon tabs" className="office-tabs flex h-[30px] shrink-0 items-end gap-px overflow-x-auto px-1.5 [scrollbar-width:none]" onMouseDown={keepFocus}>
       <button
         type="button"
         onClick={onFile}
-        className={cn('mb-1 h-7 shrink-0 rounded-md px-3 text-[13px] text-[#242424] hover:bg-black/5', FOCUS)}
+        className={cn('office-gloss mr-1 mb-px h-6 shrink-0 rounded-t-[3px] px-4 text-[13px]', FOCUS)}
       >
         File
       </button>
@@ -182,17 +239,16 @@ export function RibbonTabs({
             onClick={() => (collapsed ? (onSelect(t.id), onToggleCollapsed()) : onSelect(t.id))}
             onDoubleClick={onToggleCollapsed}
             className={cn(
-              'relative mb-1 h-7 shrink-0 rounded-md px-3 text-[13px] whitespace-nowrap hover:bg-black/5',
-              t.contextual ? 'font-semibold text-[var(--office-accent)]' : 'text-[#242424]',
-              selected && 'font-semibold text-[var(--office-accent)]',
+              'relative h-[25px] shrink-0 rounded-t-[3px] border border-b-0 px-3 text-[13px] whitespace-nowrap',
+              selected
+                ? 'border-[#b6c4d6] bg-white'
+                : 'mb-px h-6 border-transparent hover:border-[#c3cfdf] hover:bg-[linear-gradient(rgba(255,255,255,0.9),rgba(255,255,255,0.4))]',
+              t.contextual ? 'text-[var(--office-accent)]' : 'text-[#1e395b]',
+              t.contextual && !selected && 'bg-[linear-gradient(transparent,var(--office-accent-light))]',
               FOCUS,
             )}
           >
-            {/* Bold without shifting the tabs after it: the bold width is reserved by an invisible copy. */}
-            <span data-text={t.label} className="inline-flex flex-col after:invisible after:h-0 after:overflow-hidden after:font-semibold after:content-[attr(data-text)]">
-              {t.label}
-            </span>
-            {selected && <span className="absolute inset-x-3 -bottom-0.5 h-[3px] rounded-full bg-[var(--office-accent)]" />}
+            {t.label}
           </button>
         );
       })}
@@ -202,7 +258,7 @@ export function RibbonTabs({
         onClick={onToggleCollapsed}
         title={collapsed ? 'Pin the ribbon (Ctrl+F1)' : 'Collapse the ribbon (Ctrl+F1)'}
         aria-label={collapsed ? 'Pin the ribbon' : 'Collapse the ribbon'}
-        className={cn('mb-1 grid size-7 shrink-0 place-items-center rounded-md text-[#424242] hover:bg-black/5', FOCUS)}
+        className={cn('office-hover mb-0.5 grid size-6 shrink-0 place-items-center rounded-[3px] text-[#1e395b]', FOCUS)}
       >
         {collapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
       </button>
@@ -215,7 +271,7 @@ export function Ribbon({ children, collapsed }: { children: React.ReactNode; col
   return (
     <div
       role="toolbar"
-      className="mx-1.5 mb-1.5 flex h-[100px] shrink-0 items-stretch overflow-x-auto overflow-y-hidden rounded-lg border border-[#e0e0e0] bg-white px-1 shadow-[0_1px_2px_rgba(0,0,0,0.06)] [scrollbar-width:thin]"
+      className="office-ribbon flex h-[100px] shrink-0 items-stretch overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:thin]"
       onMouseDown={keepFocus}
     >
       {children}
@@ -225,9 +281,13 @@ export function Ribbon({ children, collapsed }: { children: React.ReactNode; col
 
 export function RibbonGroup({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
-    <div role="group" aria-label={label} className="relative flex shrink-0 flex-col py-1 after:absolute after:top-2 after:right-0 after:bottom-2 after:w-px after:bg-[#e1e1e1] last:after:hidden">
+    <div
+      role="group"
+      aria-label={label}
+      className="relative flex shrink-0 flex-col py-1 after:absolute after:top-1 after:right-0 after:bottom-1 after:w-px after:bg-[linear-gradient(transparent,#c5d2e3_12%,#c5d2e3_88%,transparent)] after:shadow-[1px_0_0_rgba(255,255,255,0.9)] last:after:hidden"
+    >
       <div className={cn('flex min-h-0 flex-1 items-start gap-0.5 px-1.5', className)}>{children}</div>
-      <div className="h-4 shrink-0 px-2 text-center text-[11px] leading-4 whitespace-nowrap text-[#616161]">{label}</div>
+      <div className="h-4 shrink-0 px-2 text-center text-[11px] leading-4 whitespace-nowrap text-[#4c607a]">{label}</div>
     </div>
   );
 }
@@ -245,8 +305,8 @@ export function RowSep() {
   return <span className="mx-0.5 h-5 w-px shrink-0 bg-[#e1e1e1]" />;
 }
 
-const BTN = 'rounded-[4px] text-[#242424] hover:bg-[#f0f0f0] active:bg-[#e0e0e0] disabled:text-[#bdbdbd] disabled:hover:bg-transparent';
-const PRESSED = 'bg-[#e0e0e0] hover:bg-[#d6d6d6]';
+const BTN = 'office-hover rounded-[3px] text-[#242424] disabled:text-[#a0a0a0]';
+const PRESSED = 'office-on';
 
 interface ButtonProps {
   icon?: React.ReactNode;
@@ -278,7 +338,7 @@ export function BigButton({ icon, label, tip, onClick, pressed, disabled, menu, 
   const base = cn('flex min-w-11 flex-col items-center gap-1 px-1.5 pt-1.5 pb-1', FOCUS);
   if (menu && split) {
     return (
-      <div className={cn('flex h-[76px] flex-col overflow-hidden rounded-[4px] hover:ring-1 hover:ring-[#e0e0e0]', className)}>
+      <div className={cn('flex h-[76px] flex-col overflow-hidden rounded-[3px] hover:ring-1 hover:ring-[#f0c75c]', className)}>
         <button type="button" title={tip ?? label} onClick={onClick} disabled={disabled} aria-pressed={pressed} className={cn(BTN, base, 'flex-1 rounded-b-none pb-0', pressed && PRESSED)}>
           <span className="grid h-8 place-items-center [&>svg]:size-7">{icon}</span>
         </button>
@@ -307,7 +367,7 @@ export function SmallButton({ icon, label, text, tip, onClick, pressed, disabled
   const base = cn('flex h-6 items-center gap-1 px-1 [&>svg]:size-4 [&>span>svg]:size-4', FOCUS);
   if (menu && split) {
     return (
-      <div className={cn('flex h-6 items-stretch rounded-[4px] hover:ring-1 hover:ring-[#e0e0e0]', className)}>
+      <div className={cn('flex h-6 items-stretch rounded-[3px] hover:ring-1 hover:ring-[#f0c75c]', className)}>
         <button type="button" aria-label={label} title={tip ?? label} onClick={onClick} disabled={disabled} aria-pressed={pressed} className={cn(BTN, base, 'rounded-r-none', pressed && PRESSED)}>
           {icon}
           {text && <span className="text-[12px] whitespace-nowrap">{text}</span>}
@@ -381,7 +441,7 @@ function DropButton({
 // ---- Menus -----------------------------------------------------------------------
 
 
-const MENU = 'z-[60] min-w-44 rounded-md border border-[#d1d1d1] bg-white p-1 text-[12.5px] text-[#242424] shadow-[0_8px_24px_rgba(0,0,0,0.16)] outline-none';
+const MENU = 'z-[60] min-w-44 rounded-[3px] border border-[#a7abb0] bg-[#fcfcfc] p-[3px] text-[12.5px] text-[#1b1b1b] shadow-[2px_3px_6px_rgba(0,0,0,0.25)] outline-none';
 
 export function MenuContent({ className, children, ...props }: React.ComponentProps<typeof Menu.Content>) {
   const app = useOfficeApp();
@@ -404,8 +464,8 @@ export function MenuContent({ className, children, ...props }: React.ComponentPr
 }
 
 const ITEM = cn(
-  'relative flex min-h-8 cursor-default items-center gap-2.5 rounded-[4px] py-1 pr-3 pl-2 outline-none select-none',
-  'data-[highlighted]:bg-[#f0f0f0] data-[disabled]:text-[#bdbdbd]',
+  'office-hover relative flex min-h-8 cursor-default items-center gap-2.5 rounded-[3px] py-1 pr-3 pl-2 outline-none select-none',
+  'data-[disabled]:text-[#a0a0a0]',
 );
 
 export function MenuItem({
@@ -426,7 +486,7 @@ export function MenuItem({
 }
 
 export function MenuSeparator() {
-  return <Menu.Separator className="mx-1 my-1 h-px bg-[#e0e0e0]" />;
+  return <Menu.Separator className="mx-1 my-1 h-px bg-[#e2e3e3] shadow-[0_1px_0_#fff]" />;
 }
 
 export function MenuLabel({ children }: { children: React.ReactNode }) {
@@ -437,7 +497,7 @@ export function SubMenu({ label, icon, children }: { label: string; icon?: React
   const app = useOfficeApp();
   return (
     <Menu.Sub>
-      <Menu.SubTrigger className={cn(ITEM, 'data-[state=open]:bg-[#f0f0f0]')}>
+      <Menu.SubTrigger className={ITEM}>
         <span className="grid w-5 shrink-0 place-items-center text-[#424242] [&>svg]:size-4">{icon}</span>
         <span className="flex-1">{label}</span>
         <ChevronRight className="size-3.5 text-[#616161]" />
@@ -502,7 +562,7 @@ export function ComboBox({
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Anchor asChild>
         <div
-          className="flex h-6 items-stretch rounded-[4px] border border-[#c8c8c8] bg-white hover:border-[#9e9e9e] focus-within:border-[var(--office-accent)]"
+          className="flex h-6 items-stretch rounded-[2px] border border-[#abadb3] border-t-[#8e8f8f] bg-white hover:border-[#7eb4ea] focus-within:border-[#3d7bad]"
           style={{ width }}
         >
           <input
@@ -532,7 +592,7 @@ export function ComboBox({
             className="min-w-0 flex-1 bg-transparent pl-1.5 text-[12px] text-[#242424] outline-none select-text"
           />
           <Popover.Trigger asChild>
-            <button type="button" tabIndex={-1} aria-label={`${label} list`} onMouseDown={keepFocus} className="grid w-4 place-items-center border-l border-transparent text-[#616161] hover:bg-[#f0f0f0]">
+            <button type="button" tabIndex={-1} aria-label={`${label} list`} onMouseDown={keepFocus} className="office-hover grid w-4 place-items-center text-[#4c607a]">
               <ChevronDown className="size-3" />
             </button>
           </Popover.Trigger>
@@ -561,7 +621,7 @@ export function ComboBox({
                     data-current={o.value === value ? '' : undefined}
                     onMouseDown={keepFocus}
                     onClick={() => commit(o.value)}
-                    className={cn('flex w-full items-center rounded-[4px] px-2 py-1 text-left hover:bg-[#f0f0f0]', o.value === value && 'bg-[#e8e8e8]')}
+                    className={cn('flex w-full items-center rounded-[3px] px-2 py-1 text-left', o.value === value ? 'office-on' : 'office-hover')}
                   >
                     {renderOption ? renderOption(o) : (o.label ?? o.value)}
                   </button>
@@ -660,7 +720,7 @@ export function ColorPalette({
   return (
     <div className="w-[234px] p-1">
       {(automatic || none) && (
-        <MenuTile onSelect={() => onPick(null)} className="mb-1 flex h-7 cursor-pointer items-center gap-2 rounded-[4px] px-2 outline-none data-[highlighted]:bg-[#f0f0f0]">
+        <MenuTile onSelect={() => onPick(null)} className="office-hover mb-1 flex h-7 cursor-pointer items-center gap-2 rounded-[3px] px-2 outline-none">
           <span className={cn('size-4 border border-[#9e9e9e]', automatic ? 'bg-black' : 'bg-[linear-gradient(to_top_right,transparent_45%,#d13438_45%,#d13438_55%,transparent_55%)] bg-white')} />
           {automatic ?? none}
         </MenuTile>
@@ -681,7 +741,7 @@ export function ColorPalette({
       <div className="px-1 pt-2 pb-1 text-[11.5px] font-semibold text-[#424242]">Standard Colors</div>
       <div className="grid grid-cols-10 gap-x-1 px-1">{STANDARD_COLORS.map(([hex, name]) => swatch(hex, name, { hex }))}</div>
       <MenuSeparator />
-      <MenuTile onSelect={onMore} className="flex h-7 cursor-pointer items-center gap-2 rounded-[4px] px-2 outline-none data-[highlighted]:bg-[#f0f0f0]">
+      <MenuTile onSelect={onMore} className="office-hover flex h-7 cursor-pointer items-center gap-2 rounded-[3px] px-2 outline-none">
         <span className="size-4 rounded-full bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)]" />
         More Colors…
       </MenuTile>
@@ -755,7 +815,7 @@ export function FontColorGlyph() {
 
 export function StatusBar({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-6 shrink-0 items-center gap-1 bg-[#f3f3f3] px-2 text-[11.5px] text-[#424242]" onMouseDown={keepFocus}>
+    <div className="office-status flex h-6 shrink-0 items-center gap-1 px-2 text-[11.5px] text-[#1e395b]" onMouseDown={keepFocus}>
       {children}
     </div>
   );
@@ -764,7 +824,7 @@ export function StatusBar({ children }: { children: React.ReactNode }) {
 export function StatusText({ children, className, onClick, title }: { children: React.ReactNode; className?: string; onClick?: () => void; title?: string }) {
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} title={title} className={cn('h-5 rounded-[3px] px-1.5 whitespace-nowrap hover:bg-black/5', FOCUS, className)}>
+      <button type="button" onClick={onClick} title={title} className={cn('office-hover h-5 rounded-[3px] px-1.5 whitespace-nowrap', FOCUS, className)}>
         {children}
       </button>
     );
@@ -780,7 +840,7 @@ export function ViewButton({ label, active, onClick, children }: { label: string
       aria-label={label}
       aria-pressed={active}
       onClick={onClick}
-      className={cn('grid h-5 w-6 place-items-center rounded-[3px] text-[#424242] hover:bg-black/5 [&>svg]:size-3.5', active && 'bg-black/10', FOCUS)}
+      className={cn('grid h-5 w-6 place-items-center rounded-[3px] text-[#1e395b] [&>svg]:size-3.5', active ? 'office-on' : 'office-hover', FOCUS)}
     >
       {children}
     </button>
@@ -798,7 +858,7 @@ export function ZoomSlider({ zoom, onZoom, onDialog, min = 10, max = 500 }: { zo
   const step = (dir: 1 | -1) => onZoom(clamp(dir > 0 ? Math.floor(zoom / 10) * 10 + 10 : Math.ceil(zoom / 10) * 10 - 10));
   return (
     <div className="flex items-center gap-1">
-      <button type="button" aria-label="Zoom Out" title="Zoom Out" onClick={() => step(-1)} className={cn('grid size-5 place-items-center rounded-[3px] hover:bg-black/5', FOCUS)}>
+      <button type="button" aria-label="Zoom Out" title="Zoom Out" onClick={() => step(-1)} className={cn('office-hover grid size-5 place-items-center rounded-[3px]', FOCUS)}>
         <Minus className="size-3" />
       </button>
       <div className="relative hidden h-5 w-24 items-center sm:flex">
@@ -820,10 +880,10 @@ export function ZoomSlider({ zoom, onZoom, onDialog, min = 10, max = 500 }: { zo
           className="office-zoom relative w-full cursor-pointer appearance-none bg-transparent [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-1.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-[2px] [&::-webkit-slider-thumb]:bg-[#424242]"
         />
       </div>
-      <button type="button" aria-label="Zoom In" title="Zoom In" onClick={() => step(1)} className={cn('grid size-5 place-items-center rounded-[3px] hover:bg-black/5', FOCUS)}>
+      <button type="button" aria-label="Zoom In" title="Zoom In" onClick={() => step(1)} className={cn('office-hover grid size-5 place-items-center rounded-[3px]', FOCUS)}>
         <Plus className="size-3" />
       </button>
-      <button type="button" title="Zoom level" onClick={onDialog} className={cn('h-5 w-11 rounded-[3px] text-right tabular-nums hover:bg-black/5', FOCUS)}>
+      <button type="button" title="Zoom level" onClick={onDialog} className={cn('office-hover h-5 w-11 rounded-[3px] pr-1 text-right tabular-nums', FOCUS)}>
         {Math.round(zoom)}%
       </button>
     </div>
@@ -836,14 +896,7 @@ export function OfficeButton({ primary, className, ...props }: React.ComponentPr
   return (
     <button
       type="button"
-      className={cn(
-        'h-8 min-w-20 rounded-[4px] px-3 text-[13px] font-semibold transition-colors motion-reduce:transition-none disabled:opacity-40',
-        primary
-          ? 'bg-[var(--office-accent)] text-white hover:bg-[var(--office-accent-dark)]'
-          : 'border border-[#d1d1d1] bg-white text-[#242424] hover:bg-[#f5f5f5] active:bg-[#e0e0e0]',
-        FOCUS,
-        className,
-      )}
+      className={cn('office-button h-7 min-w-[75px] px-3 text-[13px] disabled:opacity-50', primary && 'office-default', FOCUS, className)}
       {...props}
     />
   );
@@ -900,17 +953,27 @@ export function OfficeDialog({
             requestAnimationFrame(() => okRef.current?.());
           }
         }}
-        className="flex max-h-full max-w-full flex-col overflow-hidden rounded-lg border border-[#d1d1d1] bg-white text-[13px] text-[#242424] shadow-[0_16px_48px_rgba(0,0,0,0.22)] outline-none select-text"
+        className="flex max-h-full max-w-full flex-col overflow-hidden rounded-[6px] border border-black/50 bg-[linear-gradient(#cddff3,#b4cbe8_28px,#c3d6ee)] px-[6px] pb-[6px] text-[13px] text-[#1b1b1b] shadow-[0_8px_28px_rgba(0,0,0,0.4),inset_0_0_0_1px_rgba(255,255,255,0.55)] outline-none select-text"
         style={{ width }}
       >
-        <div className="flex shrink-0 items-center justify-between pt-4 pr-3 pl-5">
-          <h2 className="text-[15px] font-semibold">{title}</h2>
-          <button type="button" aria-label="Close" onClick={onCancel} className={cn('grid size-7 place-items-center rounded-[4px] text-[#424242] hover:bg-[#f0f0f0]', FOCUS)}>
-            <X className="size-4" />
+        <div className="flex h-[30px] shrink-0 items-start justify-between">
+          <h2 className="self-center pl-1 text-[13px] [text-shadow:0_0_8px_#fff,0_0_3px_#fff]">{title}</h2>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onCancel}
+            className={cn(
+              'grid h-[19px] w-[43px] place-items-center rounded-b-[4px] border border-t-0 border-black/45 bg-[linear-gradient(rgba(255,255,255,0.55),rgba(255,255,255,0.2)_48%,rgba(255,255,255,0.05)_52%,rgba(255,255,255,0.3))] text-[#3c4b5e] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)]',
+              'hover:bg-[linear-gradient(#f0b5a6,#d9715b_48%,#c4401f_52%,#e0846b)] hover:text-white active:bg-[linear-gradient(#d3876f,#b8452c_48%,#a12b0e_52%,#c66449)] active:text-white',
+              FOCUS,
+            )}
+          >
+            <X className="size-3.5 [stroke-width:3]" />
           </button>
         </div>
-        <div className="min-h-0 overflow-y-auto px-5 py-3">{children}</div>
-        <div className="flex shrink-0 justify-end gap-2 px-5 pt-2 pb-4">
+        <div className="flex min-h-0 flex-col overflow-hidden border border-[#8ea4c1] bg-white">
+          <div className="min-h-0 overflow-y-auto px-4 py-3">{children}</div>
+          <div className="flex shrink-0 justify-end gap-2 border-t border-[#dfdfdf] bg-[#f0f0f0] px-3 py-2.5">
           {footer ?? (
             <>
               {onOk && (
@@ -921,6 +984,7 @@ export function OfficeDialog({
               <OfficeButton onClick={onCancel}>{cancelLabel}</OfficeButton>
             </>
           )}
+          </div>
         </div>
       </div>
     </div>
@@ -991,10 +1055,10 @@ export function Spinner({
         className={cn(FIELD, 'w-full pr-5')}
       />
       <span className="absolute inset-y-px right-px flex w-4 flex-col">
-        <button type="button" tabIndex={-1} aria-label="Up" onMouseDown={keepFocus} onClick={() => bump(1)} className="grid flex-1 place-items-center rounded-tr-[3px] text-[#616161] hover:bg-[#f0f0f0]">
+        <button type="button" tabIndex={-1} aria-label="Up" onMouseDown={keepFocus} onClick={() => bump(1)} className="office-hover grid flex-1 place-items-center rounded-tr-[2px] text-[#4c607a]">
           <ChevronUp className="size-2.5" />
         </button>
-        <button type="button" tabIndex={-1} aria-label="Down" onMouseDown={keepFocus} onClick={() => bump(-1)} className="grid flex-1 place-items-center rounded-br-[3px] text-[#616161] hover:bg-[#f0f0f0]">
+        <button type="button" tabIndex={-1} aria-label="Down" onMouseDown={keepFocus} onClick={() => bump(-1)} className="office-hover grid flex-1 place-items-center rounded-br-[2px] text-[#4c607a]">
           <ChevronDown className="size-2.5" />
         </button>
       </span>
@@ -1019,13 +1083,13 @@ export function MessageBar({ children, onDismiss, tone = 'info' }: { children: R
     <div
       role="status"
       className={cn(
-        'mx-1.5 mb-1.5 flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 text-[12px]',
+        'flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-[12px]',
         tone === 'warning' ? 'border-[#f2d18d] bg-[#fff4ce] text-[#5c4400]' : 'border-[#c7dbf3] bg-[#ebf3fc] text-[#1d3a5f]',
       )}
     >
       <Info className="size-4 shrink-0" />
       <span className="min-w-0 flex-1">{children}</span>
-      <button type="button" aria-label="Dismiss" onClick={onDismiss} className={cn('grid size-6 place-items-center rounded-[4px] hover:bg-black/5', FOCUS)}>
+      <button type="button" aria-label="Dismiss" onClick={onDismiss} className={cn('office-hover grid size-6 place-items-center rounded-[3px]', FOCUS)}>
         <X className="size-3.5" />
       </button>
     </div>
@@ -1048,6 +1112,8 @@ export interface RecentFile {
   path: string;
   time: number;
 }
+
+const H1 = 'mb-6 border-b border-[#d5dfec] pb-2 text-[24px] font-normal text-[#1e395b]';
 
 export function Backstage({
   page,
@@ -1103,7 +1169,7 @@ export function Backstage({
     <div
       ref={ref}
       tabIndex={-1}
-      className="absolute inset-0 z-40 flex bg-white outline-none motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-4"
+      className="absolute inset-0 z-40 flex bg-[linear-gradient(#ffffff,#ffffff_70%,#eef3fa)] outline-none motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-4"
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
@@ -1111,9 +1177,9 @@ export function Backstage({
         }
       }}
     >
-      <nav className="flex w-[176px] shrink-0 flex-col bg-[var(--office-accent)] py-2 text-white" aria-label="File">
-        <button type="button" onClick={onClose} aria-label="Back" title="Back" className="mx-2 mb-3 grid size-9 place-items-center rounded-full hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
-          <ArrowLeft className="size-5" />
+      <nav className="office-backstage-nav flex w-[176px] shrink-0 flex-col py-2 pl-1.5 text-[#1e395b]" aria-label="File">
+        <button type="button" onClick={onClose} aria-label="Back" title="Back" className={cn('office-orb mx-1.5 mb-3 grid size-8 place-items-center', FOCUS)}>
+          <ArrowLeft className="size-[18px] [filter:drop-shadow(0_1px_1px_rgba(0,0,0,0.4))] [stroke-width:3]" />
         </button>
         {nav.map((item, i) =>
           item ? (
@@ -1127,66 +1193,66 @@ export function Backstage({
                 else onPage(item.id);
               }}
               className={cn(
-                'flex h-10 items-center gap-3 px-5 text-left text-[13.5px] hover:bg-white/15 focus-visible:bg-white/15 focus-visible:outline-none',
-                item.id === page && 'bg-[var(--office-accent-dark)] hover:bg-[var(--office-accent-dark)]',
+                'mb-px flex h-9 items-center gap-3 rounded-[3px] px-4 text-left text-[13.5px] focus-visible:outline-none',
+                item.id === page ? 'office-gloss relative -mr-px rounded-r-none' : 'office-hover mr-1.5 focus-visible:ring-1 focus-visible:ring-[#f0c75c]',
               )}
             >
-              {item.icon}
+              <span className={item.id === page ? undefined : 'text-[var(--office-accent)]'}>{item.icon}</span>
               {item.label}
             </button>
           ) : (
-            <span key={`sep${i}`} className="mx-5 my-2 h-px bg-white/25" />
+            <span key={`sep${i}`} className="my-2 mr-3 ml-2 h-px bg-[#c5d2e3] shadow-[0_1px_0_#fff]" />
           ),
         )}
       </nav>
       <div className="min-w-0 flex-1 overflow-y-auto px-10 py-8 select-text">
         {page === 'home' && (
           <>
-            <h1 className="mb-6 text-[28px] font-light">{greeting}</h1>
+            <h1 className={H1}>{greeting}</h1>
             <TemplateRow templates={templates} />
             <RecentList recent={recent} onOpen={onOpenRecent} />
           </>
         )}
         {page === 'new' && (
           <>
-            <h1 className="mb-6 text-[28px] font-light">New</h1>
+            <h1 className={H1}>New</h1>
             <TemplateRow templates={templates} />
           </>
         )}
         {page === 'open' && (
           <>
-            <h1 className="mb-6 text-[28px] font-light">Open</h1>
+            <h1 className={H1}>Open</h1>
             <div className="mb-6 flex gap-2">
-              <BackstageTile icon={<FolderOpen className="size-8 text-[#c19c00]" />} label="Browse" onClick={onBrowse} />
+              <BackstageTile icon={<FolderOpen className="size-8 fill-[#f8d775] text-[#c19c00]" />} label="Browse" onClick={onBrowse} />
             </div>
             <RecentList recent={recent} onOpen={onOpenRecent} />
           </>
         )}
         {page === 'info' && (
           <>
-            <h1 className="mb-6 text-[28px] font-light">Info</h1>
+            <h1 className={H1}>Info</h1>
             {info}
           </>
         )}
         {page === 'saveAs' && (
           <>
-            <h1 className="mb-6 text-[28px] font-light">Save As</h1>
+            <h1 className={H1}>Save As</h1>
             <p className="mb-4 max-w-lg text-[13px] text-[#616161]">
               {path ? `This file is in ${path.slice(0, path.lastIndexOf('/')) || '/'}.` : 'This file hasn’t been saved yet.'} Choose a folder and a name.
             </p>
-            <BackstageTile icon={<FolderOpen className="size-8 text-[#c19c00]" />} label="Browse" onClick={onSaveAs} />
+            <BackstageTile icon={<FolderOpen className="size-8 fill-[#f8d775] text-[#c19c00]" />} label="Browse" onClick={onSaveAs} />
           </>
         )}
         {page === 'export' && (
           <>
-            <h1 className="mb-6 text-[28px] font-light">Export</h1>
+            <h1 className={H1}>Export</h1>
             <div className="max-w-xl space-y-1">
               {exports.map((x) => (
-                <button key={x.label} type="button" onClick={x.onClick} className={cn('flex w-full items-start gap-4 rounded-md p-3 text-left hover:bg-[#f0f0f0]', FOCUS)}>
+                <button key={x.label} type="button" onClick={x.onClick} className={cn('office-select flex w-full items-start gap-4 rounded-[3px] p-3 text-left', FOCUS)}>
                   <span className="mt-0.5 text-[var(--office-accent)] [&>svg]:size-8">{x.icon}</span>
                   <span>
                     <span className="block text-[14px] font-semibold">{x.label}</span>
-                    <span className="block text-[12.5px] text-[#616161]">{x.description}</span>
+                    <span className="block text-[12.5px] text-[#5a6779]">{x.description}</span>
                   </span>
                 </button>
               ))}
@@ -1209,7 +1275,7 @@ function HomeIcon() {
 
 function BackstageTile({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={cn('flex w-28 flex-col items-center gap-2 rounded-md border border-[#e0e0e0] p-4 hover:border-[#c8c8c8] hover:bg-[#f5f5f5]', FOCUS)}>
+    <button type="button" onClick={onClick} className={cn('office-select flex w-28 flex-col items-center gap-2 rounded-[3px] p-4', FOCUS)}>
       {icon}
       <span className="text-[13px]">{label}</span>
     </button>
@@ -1221,7 +1287,7 @@ function TemplateRow({ templates }: { templates: Template[] }) {
     <div className="mb-8 flex flex-wrap gap-4">
       {templates.map((t) => (
         <button key={t.id} type="button" onClick={t.create} className={cn('group flex w-[150px] flex-col gap-2 rounded-md text-left', FOCUS)}>
-          <span className="block overflow-hidden rounded-[3px] border border-[#d1d1d1] bg-white shadow-sm transition-shadow group-hover:border-[var(--office-accent)] group-hover:shadow-md motion-reduce:transition-none">
+          <span className="block overflow-hidden border border-[#c5d2e3] bg-white shadow-[1px_2px_4px_rgba(0,0,0,0.15)] transition-shadow group-hover:border-[#f0c75c] group-hover:shadow-[0_0_0_2px_#ffe38f,1px_2px_4px_rgba(0,0,0,0.15)] motion-reduce:transition-none">
             {t.preview}
           </span>
           <span className="truncate text-[12.5px]">{t.name}</span>
@@ -1234,7 +1300,7 @@ function TemplateRow({ templates }: { templates: Template[] }) {
 function RecentList({ recent, onOpen }: { recent: RecentFile[]; onOpen: (path: string) => void }) {
   return (
     <section>
-      <h2 className="mb-2 flex items-center gap-2 border-b border-[#e0e0e0] pb-2 text-[14px] font-semibold">
+      <h2 className="mb-2 flex items-center gap-2 border-b border-[#d5dfec] pb-2 text-[14px] font-semibold text-[#1e395b]">
         <Clock className="size-4" /> Recent
       </h2>
       {recent.length === 0 ? (
@@ -1252,7 +1318,7 @@ function RecentList({ recent, onOpen }: { recent: RecentFile[]; onOpen: (path: s
             {recent.map((r) => {
               const slash = r.path.lastIndexOf('/');
               return (
-                <tr key={r.path} className="cursor-pointer hover:bg-[#f0f0f0]" onClick={() => onOpen(r.path)}>
+                <tr key={r.path} className="cursor-pointer hover:bg-[#e5f1fc]" onClick={() => onOpen(r.path)}>
                   <td className="rounded-l-md py-2 pl-1">
                     <button type="button" className={cn('flex items-center gap-2 text-left', FOCUS)} onClick={() => onOpen(r.path)}>
                       <FileText className="size-4 shrink-0 text-[var(--office-accent)]" />

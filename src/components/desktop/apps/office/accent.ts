@@ -9,12 +9,13 @@ interface Accent {
   light: string;
   /** What the app is called in its title bar, like "Word" in "Document1 - Word". */
   name: string;
+  icon: string;
 }
 
 export const ACCENTS: Record<OfficeApp, Accent> = {
-  word: { accent: '#185abd', dark: '#123f87', light: '#d5e1f5', name: 'Word Processor' },
-  excel: { accent: '#107c41', dark: '#0a5a2e', light: '#d3eadb', name: 'Spreadsheet' },
-  powerpoint: { accent: '#c43e1c', dark: '#9c2f13', light: '#f8dcd3', name: 'Slides' },
+  word: { accent: '#185abd', dark: '#123f87', light: '#d5e1f5', name: 'Word Processor', icon: '/icons/apps/word-processor.png' },
+  excel: { accent: '#107c41', dark: '#0a5a2e', light: '#d3eadb', name: 'Spreadsheet', icon: '/icons/apps/spreadsheet.png' },
+  powerpoint: { accent: '#c43e1c', dark: '#9c2f13', light: '#f8dcd3', name: 'Slides', icon: '/icons/apps/slides.png' },
 };
 
 export const AppContext = createContext<OfficeApp>('word');
@@ -28,7 +29,7 @@ export const keepFocus = (e: React.MouseEvent) => {
 };
 
 export const FIELD = cn(
-  'h-7 rounded-[4px] border border-[#c8c8c8] bg-white px-2 text-[13px] text-[#242424] outline-none select-text hover:border-[#9e9e9e] focus:border-[var(--office-accent)] focus:ring-1 focus:ring-[var(--office-accent)]',
+  'h-7 rounded-[2px] border border-[#abadb3] border-t-[#8e8f8f] bg-white px-2 text-[13px] text-[#242424] outline-none select-text hover:border-[#7eb4ea] focus:border-[#3d7bad]',
 );
 
 /**
