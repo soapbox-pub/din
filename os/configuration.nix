@@ -366,6 +366,17 @@ let
     if [ -e /run/din/live ]; then
       export LD_PRELOAD=${pkgs.libeatmydata}/lib/libeatmydata.so''${LD_PRELOAD:+:$LD_PRELOAD}
     fi
+    # On AMD GPUs, ANGLE draws through Vulkan (RADV) instead of its default
+    # OpenGL backend on radeonsi, whose shaders page-fault and hang the GPU
+    # ring every so often (Strix Point/gfx11.5, Mesa 26.1). Only ANGLE moves:
+    # Chromium's own Vulkan compositor (the `Vulkan` feature) doesn't support
+    # Wayland. On Electron 43 the DefaultANGLEVulkan/VulkanFromANGLE features
+    # leave the GPU process with no GL implementation at all, so it's only
+    # --use-angle. DIN_ANGLE_GL=1 keeps the OpenGL backend.
+    gpuFlags=()
+    if [ "''${DIN_ANGLE_GL:-0}" != 1 ] && ${pkgs.gnugrep}/bin/grep -qx 0x1002 /sys/class/drm/card*/device/vendor 2>/dev/null; then
+      gpuFlags=(--use-angle=vulkan)
+    fi
     # pam_systemd gives the session's processes CAP_WAKE_ALARM as an ambient
     # capability (its default for a seat), which everything Din and its
     # Terminal start would inherit. Programs that drop all their capabilities
@@ -376,7 +387,7 @@ let
     exec ${pkgs.util-linux}/bin/setpriv --inh-caps=-all --ambient-caps=-all \
       ${electron}/bin/electron \
       ${din-app}/share/din/main.mjs \
-      --ozone-platform=wayland ${extraFlags}
+      --ozone-platform=wayland "''${gpuFlags[@]}" ${extraFlags}
   '';
   din-launcher = makeDinLauncher "";
 
