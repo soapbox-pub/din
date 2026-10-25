@@ -86,6 +86,9 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { moveItem, useDragReorder } from '@/hooks/useDragReorder';
 import { useTabTransfer, type TabTransfer, type TabTransferOptions } from '@/hooks/useTabTransfer';
 import { parkedTab } from '@/lib/tabTransfer';
+import { parentPath } from '@/lib/fs';
+import { appForFile } from '@/lib/fileTypes';
+import { isWindowsProgram } from '@/lib/nativeApps';
 import {
   claimBrowserSession,
   forgetBrowserWindow,
@@ -3176,8 +3179,15 @@ function DownloadChip({
   bridge: BrowserBridge | undefined;
   onDismiss: () => void;
 }) {
+  const { open } = useWindowActions();
   const { state, filename, receivedBytes, totalBytes, savePath } = download;
   const done = state === 'completed';
+  // Open and show-in-folder use Din's own apps, as Files does; only Windows
+  // programs go to the main process, which runs them.
+  const openFile = () => {
+    if (isWindowsProgram(filename)) bridge?.openDownload(savePath).catch(() => {});
+    else open(appForFile(filename), { path: savePath });
+  };
   const failed = state === 'cancelled' || state === 'interrupted';
   const pct =
     totalBytes > 0 ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100)) : null;
@@ -3205,7 +3215,7 @@ function DownloadChip({
         className="min-w-0 flex-1 text-left disabled:cursor-default"
         disabled={!done}
         onClick={() => {
-          if (done) bridge?.openDownload(savePath).catch(() => {});
+          if (done) openFile();
         }}
         title={done ? `Open ${filename}` : filename}
       >
@@ -3225,7 +3235,7 @@ function DownloadChip({
           type="button"
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           title="Show in folder"
-          onClick={() => bridge?.showDownload(savePath).catch(() => {})}
+          onClick={() => open('file-browser', { path: parentPath(savePath), select: filename })}
         >
           <FolderOpen className="size-3.5" />
         </button>

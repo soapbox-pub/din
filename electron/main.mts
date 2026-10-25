@@ -18,7 +18,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme } from 'electron';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import {
   installChromeWebStore,
@@ -4570,20 +4570,15 @@ function registerBrowserDownloadHandlers(): void {
   browserSession().on('will-download', onWillDownload);
   privateBrowserSession().on('will-download', onWillDownload);
 
-  // Open a completed download with the OS default handler, or reveal it in the
-  // file manager. Both are restricted to files under ~/Downloads so the shell
-  // can't be coaxed into opening an arbitrary path.
+  // Run a downloaded setup.exe, the way it would on Windows. Everything else
+  // opens in Din's own apps from the renderer; the OS default handler isn't
+  // Din's (it picked whatever desktop app was installed, VSCodium for
+  // folders). Restricted to files under ~/Downloads so the shell can't be
+  // coaxed into running an arbitrary path.
   ipcMain.handle('browser:openDownload', async (event, filePath) => {
     assertShellSender(event);
     if (!isDownloadsPath(filePath) || !fs.existsSync(filePath)) return;
-    // A downloaded setup.exe runs, the way it would on Windows.
     if (isWindowsProgram(filePath)) return runWindowsProgram(filePath);
-    await shell.openPath(filePath);
-  });
-  ipcMain.handle('browser:showDownload', (event, filePath) => {
-    assertShellSender(event);
-    if (!isDownloadsPath(filePath) || !fs.existsSync(filePath)) return;
-    shell.showItemInFolder(filePath);
   });
 }
 

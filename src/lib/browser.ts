@@ -122,10 +122,8 @@ export interface BrowserBridge {
    * initiating tab's `wcId`. Returns an unsubscribe fn.
    */
   onDownload(callback: (info: DownloadInfo) => void): () => void;
-  /** Open a completed download with the OS default handler. */
+  /** Run a completed download that is a Windows program. */
   openDownload(savePath: string): Promise<void>;
-  /** Reveal a completed download in the file manager. */
-  showDownload(savePath: string): Promise<void>;
   /**
    * What a site (`origin`, e.g. `https://meet.example`) has been allowed or
    * blocked. `isPrivate` reads the private window's answers instead.

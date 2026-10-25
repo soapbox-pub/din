@@ -1873,18 +1873,11 @@ contextBridge.exposeInMainWorld('browser', {
   },
 
   /**
-   * Open a completed download with the OS default handler. Restricted to
-   * files under ~/Downloads in the main process.
+   * Run a downloaded Windows program. Restricted to files under ~/Downloads
+   * in the main process.
    * @param {string} savePath
    */
   openDownload: (savePath) => ipcRenderer.invoke('browser:openDownload', savePath),
-
-  /**
-   * Reveal a completed download in the file manager. Restricted to files
-   * under ~/Downloads in the main process.
-   * @param {string} savePath
-   */
-  showDownload: (savePath) => ipcRenderer.invoke('browser:showDownload', savePath),
 
   /**
    * What a site (`origin`) has been allowed or blocked, and whether the user

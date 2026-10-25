@@ -117,6 +117,14 @@ export function designAppFor(name: string): 'vector-editor' | 'publisher' | null
   return null;
 }
 
+/** The built-in app that opening a file starts, as Files does on double-click. */
+export function appForFile(name: string): string {
+  if (isTextFile(name)) return 'text-editor';
+  if (isPhotoshopFile(name)) return 'photo-editor';
+  if (isDwgFile(name)) return 'cad';
+  return officeAppFor(name) ?? designAppFor(name) ?? 'preview';
+}
+
 /** Files Vector Editor opens besides its own: PDF, SVG and EPS. */
 export function isVectorEditable(name: string): boolean {
   const ext = extensionOf(name);
