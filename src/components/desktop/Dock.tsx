@@ -14,7 +14,7 @@ import { useDragReorder } from '@/hooks/useDragReorder';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
 import { registerDockTile } from '@/lib/dockTiles';
 import { cn } from '@/lib/utils';
-import { APPS, appsDockedAs } from '@/lib/apps';
+import { appsDockedAs } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -45,7 +45,7 @@ interface DockControls {
 }
 
 /** Apps kept in the Dock out of the box. */
-const DEFAULT_PINNED = APPS.filter((app) => !app.hidden).map((app) => app.id);
+const DEFAULT_PINNED = ['file-browser', 'settings', 'web-browser', 'app-store'];
 
 const PinnedAppsSchema = z.array(z.string());
 
