@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils';
 import { parse } from './expr';
 import { formatNumberText, toLatex, type NumberFormat } from './latex';
 import { MODELS, oneVar, regress, type Model } from './stats';
+import { runTest, TESTS, type Alternative, type TestId } from './tests';
+import { evaluateNumber } from './compile';
 import { TeX } from './TeX';
 import { LIST_NAMES, listItems, listValues, type ScatterSettings } from './lists';
 
@@ -51,12 +53,12 @@ export function Data({
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
       <div ref={grid} className="min-h-0 min-w-0 flex-1 overflow-auto">
-        <table className="border-separate border-spacing-0 font-mono text-sm">
+        <table className="w-full max-w-5xl border-separate border-spacing-0 font-mono text-sm">
           <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur">
             <tr>
               <th className="w-10 border-b border-r border-border/60 px-2 py-1.5 text-xs font-normal text-muted-foreground" />
               {LIST_NAMES.map((name) => (
-                <th key={name} scope="col" className="w-28 border-b border-r border-border/60 px-2 py-1.5 text-left font-semibold">
+                <th key={name} scope="col" className="min-w-28 border-b border-r border-border/60 px-2 py-1.5 text-left font-semibold">
                   {name}
                 </th>
               ))}
@@ -125,7 +127,7 @@ function Cell({
           setText(value);
         }
       }}
-      className="h-7 w-28 bg-transparent px-2 text-right outline-none focus:bg-primary/10 focus:ring-2 focus:ring-inset focus:ring-ring"
+      className="h-7 w-full min-w-28 bg-transparent px-2 text-right outline-none focus:bg-primary/10 focus:ring-2 focus:ring-inset focus:ring-ring"
     />
   );
 }
@@ -156,7 +158,7 @@ function StatsPanel({
   onScatter: (scatter: ScatterSettings) => void;
   onGraphEquation: (equation: string) => void;
 }) {
-  const [kind, setKind] = useState<'one' | 'two'>('one');
+  const [kind, setKind] = useState<'one' | 'two' | 'tests'>('one');
   const [list, setList] = useState('L1');
   const [model, setModel] = useState<Model>('linear');
   const fmt = (v: number) => formatNumberText(v, format);
@@ -190,8 +192,9 @@ function StatsPanel({
       <div className="flex rounded-lg bg-muted p-0.5" role="radiogroup" aria-label="Statistics">
         {(
           [
-            ['one', '1-Var Stats'],
+            ['one', '1-Var'],
             ['two', 'Regression'],
+            ['tests', 'Tests'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -210,7 +213,9 @@ function StatsPanel({
         ))}
       </div>
 
-      {kind === 'one' ? (
+      {kind === 'tests' ? (
+        <TestsPanel vars={vars} format={format} />
+      ) : kind === 'one' ? (
         <>
           <ListSelect label="List" value={list} onChange={setList} />
           {typeof one === 'string' ? (
@@ -295,5 +300,114 @@ function StatsPanel({
         The lists are variables too: try <span className="font-mono">mean(L1)</span> or <span className="font-mono">{'{1,2,3}→L1'}</span> on the home screen.
       </p>
     </div>
+  );
+}
+
+function TestsPanel({ vars, format }: { vars: Record<string, string>; format: NumberFormat }) {
+  const [test, setTest] = useState<TestId>('ttest');
+  const [input, setInput] = useState<'stats' | 'data'>('stats');
+  const [lists, setLists] = useState<[string, string]>(['L1', 'L2']);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [alt, setAlt] = useState<Alternative>('≠');
+  const [level, setLevel] = useState('0.95');
+  const spec = TESTS.find((t) => t.id === test)!;
+  const usesData = spec.fields.some((f) => f.data);
+  const fromData = usesData && input === 'data';
+  const fmt = (v: number) => formatNumberText(v, format);
+
+  const result = useMemo(() => {
+    const v: Record<string, number> = {};
+    for (const f of spec.fields) v[f.key] = evaluateNumber(values[f.key] ?? '') ?? NaN;
+    if (fromData) {
+      // x̄, Sx and n from the lists, like the TI-89's Data input.
+      const groups = test === 'tsamp2' ? [[lists[0], '1'], [lists[1], '2']] : [[lists[0], '']];
+      for (const [name, suffix] of groups) {
+        const data = listValues(vars[name]);
+        if (data.length === 0 || data.some(Number.isNaN)) return `${name} needs numbers in it.`;
+        const stats = oneVar(data);
+        v[`mean${suffix}`] = stats.mean;
+        v[`sx${suffix}`] = stats.sx;
+        v[`n${suffix}`] = stats.n;
+      }
+    }
+    const confidence = evaluateNumber(level) ?? NaN;
+    if (!(confidence > 0 && confidence < 1)) return 'The confidence level is between 0 and 1, like 0.95.';
+    return runTest(test, v, alt, confidence);
+  }, [spec, values, fromData, test, lists, vars, alt, level]);
+
+  const parameter = test === 'prop1' ? 'p' : test === 'prop2' ? 'p1' : test === 'tsamp2' ? 'μ1' : 'μ';
+  const against = test === 'prop1' ? 'p₀' : test === 'prop2' ? 'p2' : test === 'tsamp2' ? 'μ2' : 'μ₀';
+  const field = 'h-8 w-24 rounded-md border border-input bg-background px-2 text-right font-mono text-sm outline-none focus:border-ring';
+
+  return (
+    <>
+      <select value={test} onChange={(e) => setTest(e.target.value as TestId)} aria-label="Test" className="h-8 rounded-md border border-input bg-background px-2 text-sm">
+        {TESTS.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.label}
+          </option>
+        ))}
+      </select>
+      {usesData && (
+        <div className="flex rounded-lg bg-muted p-0.5 text-xs" role="radiogroup" aria-label="Input">
+          {([['stats', 'Summary stats'], ['data', 'From lists']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={input === id}
+              onClick={() => setInput(id)}
+              className={cn('flex-1 rounded-md px-2 py-1 font-medium', input === id ? 'bg-background shadow-xs' : 'text-muted-foreground hover:text-foreground')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {fromData && (
+        <>
+          <ListSelect label={test === 'tsamp2' ? 'List 1' : 'List'} value={lists[0]} onChange={(l) => setLists([l, lists[1]])} />
+          {test === 'tsamp2' && <ListSelect label="List 2" value={lists[1]} onChange={(l) => setLists([lists[0], l])} />}
+        </>
+      )}
+      {spec.fields
+        .filter((f) => !(fromData && f.data))
+        .map((f) => (
+          <label key={f.key} className="flex items-center justify-between gap-2 text-sm">
+            {f.label}
+            <input value={values[f.key] ?? ''} onChange={(e) => setValues({ ...values, [f.key]: e.target.value })} spellCheck={false} className={field} />
+          </label>
+        ))}
+      <label className="flex items-center justify-between gap-2 text-sm">
+        Alternative
+        <select value={alt} onChange={(e) => setAlt(e.target.value as Alternative)} className="h-8 w-24 rounded-md border border-input bg-background px-2 font-mono text-sm">
+          {(['≠', '<', '>'] as const).map((a) => (
+            <option key={a} value={a}>
+              {parameter} {a} {against}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center justify-between gap-2 text-sm">
+        C-Level
+        <input value={level} onChange={(e) => setLevel(e.target.value)} spellCheck={false} className={field} />
+      </label>
+      {typeof result === 'string' ? (
+        <p className="text-sm text-muted-foreground">{result}</p>
+      ) : (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg border border-border/60 bg-background p-3 font-mono text-sm tabular-nums">
+          {result.rows.map(([name, value]) => (
+            <div key={name} className="contents">
+              <dt className="text-muted-foreground">{name}</dt>
+              <dd className="text-right">{fmt(value)}</dd>
+            </div>
+          ))}
+          <dt className="text-muted-foreground">Interval</dt>
+          <dd className="text-right">
+            ({fmt(result.interval[0])}, {fmt(result.interval[1])})
+          </dd>
+        </dl>
+      )}
+    </>
   );
 }

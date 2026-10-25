@@ -1,4 +1,4 @@
-import { parse, unparen, type Node } from './expr';
+import { identifiers, parse, unparen, type Node } from './expr';
 import { texText, toLatex, type NumberFormat } from './latex';
 
 /** Functions whose results a TI-89 shows as {lists}. */
@@ -147,6 +147,25 @@ export function tidy(node: Node): Node {
         if (reduced) return reduced;
       }
       if (node.op === '*' && a.t === 'num' && a.v === '1') return b;
+      // x^2*3*y^2 as 3x²y²: a product's numbers lead.
+      if (node.op === '*' && b.t === 'num' && a.t !== 'num' && !/^-/.test(b.v)) {
+        const factors: Node[] = [];
+        const collect = (n: Node): void => {
+          if (n.t === 'bin' && n.op === '*') {
+            collect(n.a);
+            collect(n.b);
+          } else {
+            factors.push(n);
+          }
+        };
+        collect(a);
+        factors.push(b);
+        const numbers = factors.filter((f) => f.t === 'num');
+        const rest = factors.filter((f) => f.t !== 'num');
+        if (rest.some((f) => identifiers(f).size > 0) && !rest.some((f) => f.t === 'unit')) {
+          return [...numbers, ...rest].reduce((acc, f): Node => ({ t: 'bin', op: '*', a: acc, b: f }));
+        }
+      }
       const flipped = FLIPPED[node.op];
       if (flipped && a.t === 'num' && b.t !== 'num') return { t: 'bin', op: flipped, a: b, b: a };
       // Keep a lambda's parameter list: (x)->…

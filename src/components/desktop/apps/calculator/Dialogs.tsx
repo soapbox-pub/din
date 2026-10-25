@@ -292,7 +292,10 @@ export function VarsDialog({
 function VarValue({ text, format }: { text: string; format: NumberFormat }) {
   const tex = useMemo(() => {
     try {
-      return toLatex(tidy(parse(text, { giac: true })), { format });
+      const node = tidy(parse(text, { giac: true }));
+      // A list of numbers is a TI list: {1,2,3}.
+      const shown = node.t === 'list' && node.kind === 'bracket' && !node.items.some((i) => i.t === 'list') ? { ...node, kind: 'brace' as const } : node;
+      return toLatex(shown, { format });
     } catch {
       return null;
     }

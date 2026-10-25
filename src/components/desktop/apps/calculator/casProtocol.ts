@@ -13,7 +13,7 @@ export interface EvalResult {
 }
 
 export type WorkerRequest =
-  | { id: number; type: 'eval'; code: string; store: string; approx: boolean }
+  | { id: number; type: 'eval'; code: string; store: string; approx: boolean; simplify: boolean }
   | { id: number; type: 'run'; codes: string[] }
   | { id: number; type: 'sample'; expr: string; variable: string; xs: number[] };
 

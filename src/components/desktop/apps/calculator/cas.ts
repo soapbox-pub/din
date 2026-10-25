@@ -108,9 +108,9 @@ export class Cas {
     });
   }
 
-  /** Evaluate giac code, keeping the result in `store`. */
-  async evaluate(code: string, store: string, approx: boolean): Promise<EvalResult> {
-    const response = await this.send({ type: 'eval', code, store, approx });
+  /** Evaluate giac code, keeping the result in `store`; `simplify` tidies constant answers. */
+  async evaluate(code: string, store: string, approx: boolean, simplify = true): Promise<EvalResult> {
+    const response = await this.send({ type: 'eval', code, store, approx, simplify });
     if (response.type !== 'eval') throw new Error('Unexpected response');
     return response.result;
   }

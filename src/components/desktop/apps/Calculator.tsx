@@ -59,6 +59,12 @@ function sessionSetup(): string[] {
   ];
 }
 
+/** Functions whose answer is a particular form, which simplifying would undo. */
+const FORM_FUNCTIONS = new Set([
+  'factor', 'ifactor', 'expand', 'propfrac', 'comdenom', 'partfrac', 'texpand', 'tcollect', 'cfactor', 'collect',
+  'lnexpand', 'lncollect', 'taylor', 'series', 'exact', 'getnum', 'getdenom', 'string',
+]);
+
 /** Functions whose second argument (and deSolve's third) is a variable to work in. */
 const VARIABLE_FUNCTIONS = new Set([
   'solve', 'csolve', 'zeros', 'czeros', 'nsolve', 'fsolve', 'd', 'diff', '∫', 'integrate', 'int',
@@ -277,7 +283,7 @@ export function Calculator(_props: AppComponentProps) {
 
       let result;
       try {
-        result = await cas.evaluate(code, `dinA${id}`, useApprox);
+        result = await cas.evaluate(code, `dinA${id}`, useApprox, !FORM_FUNCTIONS.has(topFunction(ast) ?? ''));
       } catch (error) {
         fail(error instanceof BreakError ? 'Break' : error instanceof Error ? error.message : 'Error');
         if (error instanceof BreakError) setRevision((r) => r + 1);

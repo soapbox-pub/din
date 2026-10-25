@@ -189,11 +189,12 @@ export const CATALOG: CatalogEntry[] = [
   { name: 'subst', args: ['expression', 'variable=value'], desc: 'Substitutes a value.', example: 'subst(x^2+1, x=3)', category: 'Other' },
 ];
 
-const byName = new Map(CATALOG.map((entry) => [entry.name.toLowerCase(), entry]));
+const byName = new Map(CATALOG.map((entry) => [entry.name, entry]));
+const byLowerName = new Map(CATALOG.map((entry) => [entry.name.toLowerCase(), entry]));
 
-/** The catalog entry for a function name as typed (any case). */
+/** The catalog entry for a function name as typed: exactly (Π is not π), else in any case. */
 export function catalogEntry(name: string): CatalogEntry | undefined {
-  return byName.get(name.toLowerCase());
+  return byName.get(name) ?? byLowerName.get(name.toLowerCase());
 }
 
 /** What the catalog inserts for an entry. */

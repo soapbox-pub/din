@@ -76,12 +76,23 @@ function run(caseval: (input: string) => string, code: string): { out: string; e
   return { out };
 }
 
-function evaluate(caseval: (input: string) => string, code: string, store: string, approx: boolean): EvalResult {
+function evaluate(caseval: (input: string) => string, code: string, store: string, approx: boolean, simplify: boolean): EvalResult {
   const assigned = run(caseval, `${store}:=(${code})`);
   if (assigned.error) return { error: assigned.error, messages: [...giacMessages] };
   const messages = giacMessages.filter((m) => /warning|no checks|could not|assum/i.test(m) && !/declared as global/i.test(m));
   if (approx) run(caseval, `${store}:=evalf(${store})`);
-  const exact = unquote(run(caseval, `string(${store})`).out);
+  let exact = unquote(run(caseval, `string(${store})`).out);
+  // A TI-89 simplifies every answer; giac leaves 5√2+3√2 and 4π/8 alone. Only
+  // for constants, and only when it comes out shorter (or complex: a+bi), so
+  // simplify() doesn't rewrite trig into half-angle tangents or undo forms.
+  if (simplify && !approx && exact.length < 2000 && run(caseval, `lname(${store})`).out.trim() === '[]') {
+    const simpler = run(caseval, `string(simplify(${store}))`);
+    const text = unquote(simpler.out);
+    if (!simpler.error && text && text !== exact && (text.length <= exact.length || /\bi\b/.test(exact))) {
+      run(caseval, `${store}:=simplify(${store})`);
+      exact = text;
+    }
+  }
   let decimal: string | undefined;
   const type = run(caseval, `type(${store})`).out.trim();
   // Exact numbers get their decimal value too, like a TI-89's ≈ key.
@@ -113,7 +124,7 @@ scope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   let response: WorkerResponse;
   switch (request.type) {
     case 'eval':
-      response = { id: request.id, type: 'eval', result: evaluate(caseval, request.code, request.store, request.approx) };
+      response = { id: request.id, type: 'eval', result: evaluate(caseval, request.code, request.store, request.approx, request.simplify) };
       break;
     case 'run': {
       const results = request.codes.map((code) => {

@@ -376,8 +376,9 @@ function EmptyHome({ onTry }: { onTry: (example: string) => void }) {
 /** Whether giac's decimal adds anything to the exact answer. */
 function showsDecimal(entry: HistoryEntry): boolean {
   if (!entry.decimal || !entry.result) return false;
-  if (/^-?\d+$/.test(entry.result) && entry.result.length <= 12) return false;
-  return true;
+  // 2^3·3^2·5 is 360: whole numbers need no decimal, unless they're too long to read.
+  const value = Number(entry.decimal);
+  return !(Number.isInteger(value) && Math.abs(value) < 1e12);
 }
 
 const HistoryRow = memo(function HistoryRow({
