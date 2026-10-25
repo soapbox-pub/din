@@ -712,6 +712,9 @@ export function Spreadsheet({ windowId, params }: AppComponentProps) {
   }, [file.loading]);
 
   // Menus give focus back to nobody when they close; give it back to the sheet.
+  // Not when focus went to nobody because of a press somewhere else (another
+  // window's title bar, the desktop): taking it back would raise this window
+  // over the one that was clicked.
   const frameRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let ours = false;
@@ -721,6 +724,10 @@ export function Spreadsheet({ windowId, params }: AppComponentProps) {
       if (t?.closest?.('[role=menu],[data-radix-popper-content-wrapper]')) ours = ours || !!(from && frameRef.current?.contains(from));
       else ours = !!(t && frameRef.current?.contains(t));
     };
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (!t?.closest?.('[role=menu],[data-radix-popper-content-wrapper]') && !frameRef.current?.contains(t)) ours = false;
+    };
     const onOut = (e: FocusEvent) => {
       if (!ours || e.relatedTarget) return;
       setTimeout(() => {
@@ -729,9 +736,11 @@ export function Spreadsheet({ windowId, params }: AppComponentProps) {
     };
     document.addEventListener('focusin', onIn);
     document.addEventListener('focusout', onOut);
+    document.addEventListener('pointerdown', onDown, true);
     return () => {
       document.removeEventListener('focusin', onIn);
       document.removeEventListener('focusout', onOut);
+      document.removeEventListener('pointerdown', onDown, true);
     };
   }, []);
 

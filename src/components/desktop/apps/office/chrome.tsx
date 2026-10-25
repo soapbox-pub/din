@@ -351,6 +351,9 @@ function DropButton({
   children: React.ReactNode;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // Closed by a press outside the app (another window, the desktop): focus
+  // belongs there now, and taking it back would raise this window over it.
+  const leftApp = useRef(false);
   return (
     <Menu.Root modal={false}>
       <Menu.Trigger asChild disabled={disabled}>
@@ -360,9 +363,13 @@ function DropButton({
       </Menu.Trigger>
       <MenuContent
         className={menuClassName}
+        onPointerDownOutside={(e) => {
+          leftApp.current = !triggerRef.current?.closest('.office-frame')?.contains(e.target as Node);
+        }}
         onCloseAutoFocus={(e) => {
           e.preventDefault();
-          refocusFrame(triggerRef.current);
+          if (!leftApp.current) refocusFrame(triggerRef.current);
+          leftApp.current = false;
         }}
       >
         {menu}
