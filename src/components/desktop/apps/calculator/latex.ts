@@ -356,8 +356,12 @@ function binLatex(node: Extract<Node, { t: 'bin' }>, opts: LatexOptions): string
       return `${wrap(a, 1)}\\rightarrow ${wrap(b, 1)}`;
     case ':=':
       return `${wrap(a, 1)}:=${wrap(b, 0)}`;
-    case '▶':
-      return `${wrap(a, 1)}\\blacktriangleright ${wrap(b, 1)}`;
+    case '▶': {
+      // ▶Dec, ▶Polar: a conversion's name, not a variable.
+      const target = unparen(b);
+      const right = target.t === 'id' ? `\\mathrm{${texText(target.name)}}` : wrap(b, 1);
+      return `${wrap(a, 1)}\\blacktriangleright ${right}`;
+    }
     case '->':
       return `${tex(unparen(a))}\\mapsto ${wrap(b, 0)}`;
   }

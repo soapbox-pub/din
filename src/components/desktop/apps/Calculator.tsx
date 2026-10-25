@@ -16,6 +16,7 @@ import { CatalogDialog, MatrixDialog, ModeDialog, VarsDialog } from './calculato
 import { identifiers, parse, ParseError, unparen, type Node } from './calculator/expr';
 import { Data } from './calculator/Data';
 import { Graph } from './calculator/Graph';
+import { Surface } from './calculator/Surface';
 import { listValues } from './calculator/lists';
 import { dataWindow } from './calculator/numeric';
 import { Home, type EntryApi } from './calculator/Home';
@@ -35,7 +36,8 @@ const RESTORED_ANSWERS = 30;
 /** Solvers that are meant to give complex answers in REAL mode. */
 const COMPLEX_FUNCTIONS = new Set(['csolve', 'czeros', 'cfactor', 'real', 'imag', 'conj', 'angle', 're', 'im', 'arg', 'abs']);
 
-const GRAPH_LABELS: Record<GraphKind, string> = { function: 'FUNC', parametric: 'PAR', polar: 'POL' };
+const GRAPH_LABELS: Record<GraphKind, string> = { function: 'FUNC', parametric: 'PAR', polar: 'POL', de: 'DE', surface: '3D' };
+const GRAPH_ORDER: GraphKind[] = ['function', 'parametric', 'polar', 'de', 'surface'];
 
 /** Whether an entry stores, defines or deletes something. */
 function changesVariables(node: Node): boolean {
@@ -55,6 +57,29 @@ function sessionSetup(): string[] {
     ...Object.entries(s.vars).map(([name, value]) => `${name}:=(${value})`),
     ...answers.map((h) => `dinA${h.id}:=(${h.result})`),
   ];
+}
+
+/** Functions whose second argument (and deSolve's third) is a variable to work in. */
+const VARIABLE_FUNCTIONS = new Set([
+  'solve', 'csolve', 'zeros', 'czeros', 'nsolve', 'fsolve', 'd', 'diff', '∫', 'integrate', 'int',
+  'limit', 'σ', 'sum', 'π', 'product', 'taylor', 'fmin', 'fmax', 'arclen', 'desolve', 'series',
+  'nint', 'nderiv', 'avgrc', 'tangentline', 'factor', 'expand',
+]);
+
+/**
+ * The classic TI-89 trap: solve(x^2=4,x) after 3→x. Names the stored
+ * variable an entry wants to work in, so the error can say what to do.
+ */
+function storedVariable(node: Node, vars: Record<string, string>): string | undefined {
+  const n = unparen(node);
+  if (n.t !== 'call' || !VARIABLE_FUNCTIONS.has(n.f.toLowerCase())) return undefined;
+  const candidates = n.f.toLowerCase() === 'desolve' ? n.args.slice(1, 3) : n.args.slice(1, 2);
+  for (const arg of candidates) {
+    const a = unparen(arg);
+    const names = a.t === 'list' ? a.items.map(unparen) : [a.t === 'bin' && a.op === '=' ? unparen(a.a) : a];
+    for (const name of names) if (name.t === 'id' && vars[name.name] !== undefined) return name.name;
+  }
+  return undefined;
 }
 
 /** Whether an entry has a decimal number in it (2.5, 1ᴇ3). */
@@ -131,7 +156,7 @@ export function Calculator(_props: AppComponentProps) {
   const userFunctions = useMemo(() => {
     const names = new Set<string>();
     for (const [name, value] of Object.entries(state.vars)) if (value.includes('->')) names.add(name);
-    for (const kind of ['function', 'parametric', 'polar'] as GraphKind[]) {
+    for (const kind of GRAPH_ORDER) {
       state.plots[kind].forEach((_, i) => plotNames(kind, i).forEach((n) => names.add(n)));
     }
     return names;
@@ -229,6 +254,12 @@ export function Calculator(_props: AppComponentProps) {
         if (letters.length) await cas.run([`purge(${letters.join(',')})`]).catch(() => {});
         await refreshVariables();
         addEntry({ id, input, approx, done: true });
+        return;
+      }
+
+      const stored = storedVariable(ast, s.vars);
+      if (stored) {
+        fail(`${stored} has a value stored in it (${s.vars[stored]}). Clear it with DelVar ${stored}, or NewProb to clear a–z.`);
         return;
       }
 
@@ -482,20 +513,24 @@ export function Calculator(_props: AppComponentProps) {
                   }}
                 />
               </div>
-              <Graph
-                kind={kind}
-                compiled={compiled}
-                enabledIds={enabledIds}
-                window={state.window}
-                grid={state.grid}
-                degrees={mode.angle === 'deg'}
-                format={mode.digits}
-                cas={cas}
-                ctx={ctx}
-                points={scatterPoints}
-                onWindow={(window) => update({ window })}
-                onGrid={(grid) => update({ grid })}
-              />
+              {kind === 'surface' ? (
+                <Surface compiled={compiled} enabledIds={enabledIds} window={state.window} format={mode.digits} onWindow={(window) => update({ window })} />
+              ) : (
+                <Graph
+                  kind={kind}
+                  compiled={compiled}
+                  enabledIds={enabledIds}
+                  window={state.window}
+                  grid={state.grid}
+                  degrees={mode.angle === 'deg'}
+                  format={mode.digits}
+                  cas={cas}
+                  ctx={ctx}
+                  points={scatterPoints}
+                  onWindow={(window) => update({ window })}
+                  onGrid={(grid) => update({ grid })}
+                />
+              )}
             </>
           )}
           {screen === 'data' && (
@@ -585,7 +620,7 @@ export function Calculator(_props: AppComponentProps) {
         <StatusToggle
           label={GRAPH_LABELS[mode.graph]}
           title="Graph type"
-          onClick={() => setMode({ ...mode, graph: mode.graph === 'function' ? 'parametric' : mode.graph === 'parametric' ? 'polar' : 'function' })}
+          onClick={() => setMode({ ...mode, graph: GRAPH_ORDER[(GRAPH_ORDER.indexOf(mode.graph) + 1) % GRAPH_ORDER.length] })}
         />
         <StatusToggle label={mode.complex === 'real' ? 'REAL' : 'a+bi'} title="Complex format" onClick={() => setMode({ ...mode, complex: mode.complex === 'real' ? 'rectangular' : 'real' })} />
         <StatusToggle label={`${mode.digits.mode.toUpperCase()} ${mode.digits.digits}`} title="Display digits" onClick={() => setDialog('mode')} />

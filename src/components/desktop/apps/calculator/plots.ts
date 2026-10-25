@@ -1,25 +1,31 @@
 import { useEffect, useState } from 'react';
 import { parse, ParseError, type Node } from './expr';
-import { compile, CompileError } from './compile';
+import { compile, CompileError, evaluateNumber } from './compile';
 import { toGiac, TranslateError, type GiacContext } from './toGiac';
 import type { Cas } from './cas';
 import type { Plot } from './state';
 
-export type GraphKind = 'function' | 'parametric' | 'polar';
+export type GraphKind = 'function' | 'parametric' | 'polar' | 'de' | 'surface';
 
 /** The independent variable of each graph type, as on a TI-89. */
-export const GRAPH_VARIABLE: Record<GraphKind, string> = { function: 'x', parametric: 't', polar: 'θ' };
+export const GRAPH_VARIABLE: Record<GraphKind, string> = { function: 'x', parametric: 't', polar: 'θ', de: 'x', surface: 'x' };
+
+/** Graph types whose expressions are in x and y. */
+const TWO_VARIABLES = new Set<GraphKind>(['de', 'surface']);
 
 /** What each plot's expressions are called: y1, xt1 and yt1, r1. */
 export function plotNames(kind: GraphKind, index: number): string[] {
   const n = index + 1;
   if (kind === 'parametric') return [`xt${n}`, `yt${n}`];
   if (kind === 'polar') return [`r${n}`];
+  if (kind === 'de') return [`y${n}'`];
+  if (kind === 'surface') return [`z${n}`];
   return [`y${n}`];
 }
 
-/** The graph variable, renamed so a value stored in x doesn't leak in. */
+/** The graph variables, renamed so values stored in x or y don't leak in. */
 const FREE = 'dinvx';
+const FREE_Y = 'dinvy';
 
 export interface CompiledPlot {
   id: number;
@@ -29,6 +35,10 @@ export interface CompiledPlot {
   fns: (((v: number) => number) | null)[];
   /** giac code for each expression, in terms of `dinvx`, for sampling and exact answers. */
   giac: string[];
+  /** For y'=f(x,y) and z=f(x,y): f. */
+  fn2?: ((x: number, y: number) => number) | null;
+  /** A differential equation's initial condition (x₀, y₀). */
+  initial?: [number, number];
   error?: string;
 }
 
@@ -87,7 +97,7 @@ export function usePlotFunctions({
     let cancelled = false;
     const allNames = new Set([...userFunctions, ...plots.flatMap((_, i) => plotNames(kind, i))]);
 
-    type Work = { plot: Plot; index: number; codes: string[]; error?: string };
+    type Work = { plot: Plot; index: number; codes: string[]; error?: string; initial?: [number, number] };
     const work: Work[] = [];
     const defs: string[] = [];
     plots.forEach((plot, index) => {
@@ -97,6 +107,20 @@ export function usePlotFunctions({
         return;
       }
       try {
+        if (TWO_VARIABLES.has(kind)) {
+          if (!plot.exprs[0].trim()) return;
+          const ast = parse(plot.exprs[0], { userFunctions: allNames });
+          if (kind === 'surface') defs.push(`${names[0]}(x,y):=(${toGiac(ast, ctx)})`);
+          let initial: [number, number] | undefined;
+          const ic = plot.exprs[1]?.trim();
+          if (kind === 'de' && ic) {
+            const [x0, y0] = ic.replace(/^[({[]|[)}\]]$/g, '').split(',').map((s) => evaluateNumber(s));
+            if (x0 === undefined || y0 === undefined) throw new TranslateError('Initial condition: x₀, y₀ (like 0, 1)');
+            initial = [x0, y0];
+          }
+          work.push({ plot, index, codes: [toGiac(rename(rename(ast, variable, FREE), 'y', FREE_Y), ctx)], initial });
+          return;
+        }
         const codes = plot.exprs.map((expr, i) => {
           if (!expr.trim()) throw new TranslateError(`${names[i]} is empty`);
           const ast = parse(expr, { userFunctions: allNames });
@@ -121,6 +145,7 @@ export function usePlotFunctions({
           const fns: CompiledPlot['fns'] = [];
           const giac: string[] = [];
           let error: string | undefined;
+          let fn2: CompiledPlot['fn2'] = null;
           for (const code of w.codes) {
             const result = results[r++];
             if ('error' in result) {
@@ -131,14 +156,24 @@ export function usePlotFunctions({
             }
             giac.push(result.out);
             try {
-              const fn = compile(parse(result.out, { giac: true }), { variables: [FREE], degrees });
-              fns.push((v) => fn({ [FREE]: v }));
+              const fn = compile(parse(result.out, { giac: true }), { variables: [FREE, FREE_Y], degrees });
+              if (TWO_VARIABLES.has(kind)) {
+                const scope = { [FREE]: 0, [FREE_Y]: 0 };
+                fn2 = (x, y) => {
+                  scope[FREE] = x;
+                  scope[FREE_Y] = y;
+                  return fn(scope);
+                };
+              } else {
+                fns.push((v) => fn({ [FREE]: v }));
+              }
             } catch (e) {
               if (!(e instanceof CompileError) && !(e instanceof ParseError)) throw e;
-              fns.push(null);
+              if (TWO_VARIABLES.has(kind)) error = 'This can’t be graphed';
+              else fns.push(null);
             }
           }
-          return { id: w.plot.id, index: w.index, color: w.plot.color, fns, giac, error };
+          return { id: w.plot.id, index: w.index, color: w.plot.color, fns, giac, error, fn2, initial: w.initial };
         });
         setCompiled(out);
       })

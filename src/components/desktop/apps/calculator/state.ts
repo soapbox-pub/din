@@ -10,7 +10,7 @@ const ModeSchema = z.object({
   exact: z.enum(['auto', 'exact', 'approx']),
   digits: z.object({ mode: z.enum(['float', 'fix']), digits: z.number().int().min(0).max(12) }),
   complex: z.enum(['real', 'rectangular']),
-  graph: z.enum(['function', 'parametric', 'polar']),
+  graph: z.enum(['function', 'parametric', 'polar', 'de', 'surface']),
 });
 export type Mode = z.infer<typeof ModeSchema>;
 
@@ -29,7 +29,7 @@ export type HistoryEntry = z.infer<typeof HistoryEntrySchema>;
 
 const PlotSchema = z.object({
   id: z.number(),
-  /** One expression, or x and y for parametric. */
+  /** One expression; x and y for parametric; y' and its initial condition for differential equations. */
   exprs: z.array(z.string()),
   enabled: z.boolean(),
   color: z.string(),
@@ -62,6 +62,8 @@ const StateSchema = z.object({
     function: z.array(PlotSchema),
     parametric: z.array(PlotSchema),
     polar: z.array(PlotSchema),
+    de: z.array(PlotSchema),
+    surface: z.array(PlotSchema),
   }),
   window: WindowSchema,
   grid: z.boolean(),
@@ -102,6 +104,8 @@ export const DEFAULT_STATE: CalculatorState = {
     function: emptyPlots(8, 1),
     parametric: emptyPlots(4, 101).map((p) => ({ ...p, exprs: ['', ''] })),
     polar: emptyPlots(4, 201),
+    de: emptyPlots(4, 301).map((p) => ({ ...p, exprs: ['', ''] })),
+    surface: emptyPlots(2, 401),
   },
   window: STANDARD_WINDOW,
   grid: false,
@@ -117,7 +121,10 @@ export function loadState(): CalculatorState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
-    const parsed = StateSchema.safeParse({ ...DEFAULT_STATE, ...(JSON.parse(raw) as object) });
+    const saved = JSON.parse(raw) as Partial<CalculatorState>;
+    // Graph types added later start empty rather than discarding the rest.
+    const plots = { ...DEFAULT_STATE.plots, ...saved.plots };
+    const parsed = StateSchema.safeParse({ ...DEFAULT_STATE, ...saved, plots });
     return parsed.success ? parsed.data : DEFAULT_STATE;
   } catch {
     return DEFAULT_STATE;

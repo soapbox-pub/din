@@ -57,7 +57,11 @@ export function Table({
         </div>
       </div>
       {columns.length === 0 ? (
-        <p className="p-6 text-center text-sm text-muted-foreground">Enter a function in the Graph tab to see its table.</p>
+        <p className="p-6 text-center text-sm text-muted-foreground">
+          {kind === 'de' || kind === 'surface'
+            ? 'Tables are for function, parametric and polar graphs.'
+            : 'Enter a function in the Graph tab to see its table.'}
+        </p>
       ) : (
         <div
           className="min-h-0 flex-1 overflow-auto"

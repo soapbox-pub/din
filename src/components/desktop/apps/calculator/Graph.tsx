@@ -123,6 +123,15 @@ export function Graph({
   const toolInputRef = useRef<HTMLInputElement>(null);
 
   const curves = useMemo(() => curvesOf(kind, compiled, enabledIds), [kind, compiled, enabledIds]);
+  /** Differential equations y'=f(x,y), with the solutions through points clicked on the field. */
+  const fields = useMemo(() => (kind === 'de' ? compiled.filter((c) => enabledIds.has(c.id) && c.fn2) : []), [kind, compiled, enabledIds]);
+  const [clicked, setClicked] = useState<[number, number][]>([]);
+  const fieldsKey = fields.map((f) => f.giac[0]).join(';');
+  const [clickedFor, setClickedFor] = useState(fieldsKey);
+  if (clickedFor !== fieldsKey) {
+    setClickedFor(fieldsKey);
+    setClicked([]);
+  }
 
   // Each step of a Math tool takes typing as well as a click.
   const toolStep = tool ? `${tool.id}:${tool.picks.length}` : null;
@@ -244,6 +253,22 @@ export function Graph({
         }
       }
 
+      if (kind === 'de') {
+        const first = fields[0]?.fn2;
+        if (first) drawSlopeField(g, first, { view, size, fg, toPx, toPy });
+        for (const field of fields) {
+          const f = field.fn2;
+          if (!f) continue;
+          const starts = [...(field.initial ? [field.initial] : []), ...(field === fields[0] ? clicked : [])];
+          for (const [x0, y0] of starts) {
+            g.strokeStyle = field.color;
+            g.lineWidth = 2.25;
+            drawSolution(g, f, x0, y0, { view, size, toPx, toPy });
+            drawPoint(g, toPx(x0), toPy(y0), field.color, fg);
+          }
+        }
+      }
+
       for (const p of points) {
         const px = toPx(p.x);
         const py = toPy(p.y);
@@ -307,7 +332,7 @@ export function Graph({
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [size, view, grid, curves, points, kind, degrees, trace, tool, result, box, evaluator, toPx, toPy, fromPx]);
+  }, [size, view, grid, curves, fields, clicked, points, kind, degrees, trace, tool, result, box, evaluator, toPx, toPy, fromPx]);
 
   const zoom = useCallback(
     (factor: number, cx?: number, cy?: number) => {
@@ -449,8 +474,14 @@ export function Graph({
     onWindow({ ...d.start, xmin: d.start.xmin - dx, xmax: d.start.xmax - dx, ymin: d.start.ymin + dy, ymax: d.start.ymax + dy });
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const d = drag.current;
     drag.current = null;
+    // A click on a slope field draws the solution through that point.
+    if (kind === 'de' && d && !d.moved && fields.length) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setClicked((c) => [...c.slice(-11), [fromPx(e.clientX - rect.left), fromPy(e.clientY - rect.top)]]);
+    }
     if (box) {
       const w = Math.abs(box.x1 - box.x0);
       const h = Math.abs(box.y1 - box.y0);
@@ -701,6 +732,7 @@ export function Graph({
         <button
           type="button"
           aria-pressed={mode === 'trace'}
+          disabled={kind === 'de'}
           onClick={() => {
             const next = mode === 'trace' ? 'pan' : 'trace';
             setMode(next);
@@ -765,9 +797,9 @@ export function Graph({
           onWheel={onWheel}
           onKeyDown={onKeyDown}
         />
-        {curves.length === 0 && (
+        {curves.length === 0 && fields.length === 0 && (
           <div className="pointer-events-none absolute inset-x-0 top-6 text-center text-sm text-muted-foreground">
-            Enter a function on the left to graph it.
+            {kind === 'de' ? 'Enter y′ in terms of x and y on the left to draw its slope field.' : 'Enter a function on the left to graph it.'}
           </div>
         )}
       </div>
@@ -831,6 +863,8 @@ export function Graph({
           </>
         ) : mode === 'box' ? (
           <span className="text-muted-foreground">Drag a box to zoom into.</span>
+        ) : kind === 'de' ? (
+          <span className="text-xs text-muted-foreground">Click the slope field to draw the solution through that point · give y(x₀) on the left for an exact start</span>
         ) : (
           <span className="text-xs text-muted-foreground">Drag to move · scroll to zoom · Math finds zeros, extrema, intersections, slopes and areas</span>
         )}
@@ -948,6 +982,73 @@ function tracePoint(kind: GraphKind, curve: Curve, v: number, f: Fn | null, degr
   }
   const p = pathPoint(kind, curve.plot, v, degrees);
   return p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : undefined;
+}
+
+function drawSlopeField(
+  g: CanvasRenderingContext2D,
+  f: (x: number, y: number) => number,
+  { view, size, fg, toPx, toPy }: { view: GraphWindow; size: Size; fg: string; toPx: (x: number) => number; toPy: (y: number) => number },
+) {
+  const spacing = 26;
+  const cols = Math.max(2, Math.floor(size.w / spacing));
+  const rows = Math.max(2, Math.floor(size.h / spacing));
+  const sx = size.w / (view.xmax - view.xmin);
+  const sy = size.h / (view.ymax - view.ymin);
+  const half = spacing * 0.36;
+  g.strokeStyle = fg;
+  g.globalAlpha = 0.45;
+  g.lineWidth = 1.25;
+  g.beginPath();
+  for (let i = 0; i < cols; i++) {
+    for (let j = 0; j < rows; j++) {
+      const x = view.xmin + ((i + 0.5) / cols) * (view.xmax - view.xmin);
+      const y = view.ymin + ((j + 0.5) / rows) * (view.ymax - view.ymin);
+      const slope = f(x, y);
+      if (!Number.isFinite(slope)) continue;
+      // The segment's direction on screen, where the axes may be scaled differently.
+      const dx = sx;
+      const dy = slope * sy;
+      const len = Math.hypot(dx, dy);
+      const ux = (dx / len) * half;
+      const uy = (dy / len) * half;
+      const px = toPx(x);
+      const py = toPy(y);
+      g.moveTo(px - ux, py + uy);
+      g.lineTo(px + ux, py - uy);
+    }
+  }
+  g.stroke();
+  g.globalAlpha = 1;
+}
+
+/** The solution of y'=f(x,y) through (x0,y0), across the window both ways (RK4). */
+function drawSolution(
+  g: CanvasRenderingContext2D,
+  f: (x: number, y: number) => number,
+  x0: number,
+  y0: number,
+  { view, size, toPx, toPy }: { view: GraphWindow; size: Size; toPx: (x: number) => number; toPy: (y: number) => number },
+) {
+  const span = view.ymax - view.ymin;
+  for (const direction of [1, -1]) {
+    const h = (direction * (view.xmax - view.xmin)) / Math.max(size.w, 200) / 2;
+    let x = x0;
+    let y = y0;
+    g.beginPath();
+    g.moveTo(toPx(x), toPy(y));
+    for (let i = 0; i < 8000; i++) {
+      const k1 = f(x, y);
+      const k2 = f(x + h / 2, y + (h / 2) * k1);
+      const k3 = f(x + h / 2, y + (h / 2) * k2);
+      const k4 = f(x + h, y + h * k3);
+      y += (h / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+      x += h;
+      if (!Number.isFinite(y) || y > view.ymax + span * 4 || y < view.ymin - span * 4) break;
+      if (x > view.xmax || x < view.xmin) break;
+      g.lineTo(toPx(x), clampPy(toPy(y), size.h));
+    }
+    g.stroke();
+  }
 }
 
 function drawPoint(g: CanvasRenderingContext2D, px: number, py: number, color: string, ring: string) {

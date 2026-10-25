@@ -8,7 +8,21 @@ import { plotNames, type CompiledPlot, type GraphKind } from './plots';
 import { PLOT_COLORS, type GraphWindow, type Plot } from './state';
 import { formatNumberText, toLatex } from './latex';
 
-const KIND_LABELS: Record<GraphKind, string> = { function: 'Function', parametric: 'Parametric', polar: 'Polar' };
+const KIND_LABELS: Record<GraphKind, [string, string]> = {
+  function: ['y(x)', 'Functions'],
+  parametric: ['Param', 'Parametric'],
+  polar: ['Polar', 'Polar'],
+  de: ['y′', 'Differential equations (slope fields)'],
+  surface: ['3D', '3D surfaces'],
+};
+
+const PLACEHOLDERS: Record<GraphKind, string> = {
+  function: 'in terms of x',
+  parametric: 'in terms of t',
+  polar: 'in terms of θ',
+  de: 'in terms of x and y',
+  surface: 'in terms of x and y',
+};
 
 /** The Y= editor and the Window settings, beside the graph. */
 export function YEditor({
@@ -42,7 +56,7 @@ export function YEditor({
   const add = () => {
     const id = Math.max(0, ...plots.map((p) => p.id)) + 1;
     const color = PLOT_COLORS[plots.length % PLOT_COLORS.length];
-    onPlots([...plots, { id, exprs: kind === 'parametric' ? ['', ''] : [''], enabled: true, color }]);
+    onPlots([...plots, { id, exprs: kind === 'parametric' || kind === 'de' ? ['', ''] : [''], enabled: true, color }]);
   };
 
   return (
@@ -54,13 +68,15 @@ export function YEditor({
             type="button"
             role="radio"
             aria-checked={k === kind}
+            title={KIND_LABELS[k][1]}
+            aria-label={KIND_LABELS[k][1]}
             onClick={() => onKind(k)}
             className={cn(
               'flex-1 rounded-md px-2 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               k === kind ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
             )}
           >
-            {KIND_LABELS[k]}
+            {KIND_LABELS[k][0]}
           </button>
         ))}
       </div>
@@ -74,8 +90,9 @@ export function YEditor({
               {plot.exprs.map((expr, i) => (
                 <PlotField
                   key={i}
-                  name={names[i]}
-                  variable={kind === 'function' ? 'x' : kind === 'parametric' ? 't' : 'θ'}
+                  fieldId={names[i] ?? `${names[0]}-ic`}
+                  name={kind === 'de' && i === 1 ? 'y(x₀)' : names[i]}
+                  placeholder={kind === 'de' && i === 1 ? 'x₀, y₀ (optional)' : PLACEHOLDERS[kind]}
                   value={expr}
                   color={plot.color}
                   enabled={plot.enabled}
@@ -130,8 +147,9 @@ export function YEditor({
 }
 
 function PlotField({
+  fieldId,
   name,
-  variable,
+  placeholder,
   value,
   color,
   enabled,
@@ -141,8 +159,9 @@ function PlotField({
   onChange,
   onFocusField,
 }: {
+  fieldId: string;
   name: string;
-  variable: string;
+  placeholder: string;
   value: string;
   color: string;
   enabled: boolean;
@@ -181,12 +200,12 @@ function PlotField({
       ) : (
         <span className="size-5 shrink-0" />
       )}
-      <label className="w-9 shrink-0 font-mono text-xs text-muted-foreground" htmlFor={`plot-${name}`}>
+      <label className="w-10 shrink-0 font-mono text-xs text-muted-foreground" htmlFor={`plot-${fieldId}`}>
         {name}=
       </label>
       <div className="relative min-w-0 flex-1">
         <input
-          id={`plot-${name}`}
+          id={`plot-${fieldId}`}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onFocus={(e) => {
@@ -206,7 +225,7 @@ function PlotField({
           onBlur={() => setFocused(false)}
           spellCheck={false}
           autoComplete="off"
-          placeholder={`in terms of ${variable}`}
+          placeholder={placeholder}
           className={cn(
             'h-8 w-full rounded-md border border-transparent bg-transparent px-1.5 font-mono text-sm outline-none placeholder:text-muted-foreground/50 hover:border-border focus:border-ring focus:bg-background',
             tex && 'text-transparent caret-foreground',
