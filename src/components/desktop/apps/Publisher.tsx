@@ -5,6 +5,9 @@ import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, getFsBridge, parentPath } from '@/lib/fs';
 import { getInddBridge } from '@/lib/indd';
+import { looksLikePub, readPub } from './publisher/pub';
+import { rasterizeMetafile } from './publisher/pub/raster';
+import { pubToIdml } from './publisher/pub/toIdml';
 import { printHtml } from '@/lib/printing';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { invalidateListings } from '@/hooks/useFileSystem';
@@ -51,7 +54,7 @@ import { fmtLength, nudgeStep, rulerSteps, unitLabel } from './publisher/units';
 /** Bigger files than this aren't read. */
 const MAX_BYTES = 1024 * 1024 * 1024;
 const MAX_HISTORY = 200;
-const OPEN_EXTENSIONS = ['.indd', '.indt', '.idml'];
+const OPEN_EXTENSIONS = ['.indd', '.indt', '.idml', '.pub'];
 const IDML_FILTER = { name: 'InDesign Markup (IDML)', patterns: ['*.idml'], mimeTypes: ['application/vnd.adobe.indesign-idml-package'] };
 const PLACE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.svg'];
 const RULER = 16;
@@ -107,6 +110,10 @@ type DialogState =
 
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const isIndd = (p: string) => /\.(indd|indt)$/i.test(p);
+const isPub = (p: string) => /\.pub$/i.test(p);
+
+/** Formats opened by converting to IDML, which saving can't write back. */
+type Converted = 'indd' | 'pub' | null;
 const fmtZoom = (z: number) => `${z >= 1 ? Math.round(z * 100) : Math.round(z * 1000) / 10}%`;
 const editable = (t: EventTarget | null) =>
   t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
@@ -114,7 +121,8 @@ const ZOOMS = [0.05, 0.0833, 0.125, 0.25, 0.33, 0.5, 0.66, 0.75, 1, 1.25, 1.5, 2
 const zoomStep = (z: number, dir: 1 | -1) => (dir > 0 ? (ZOOMS.find((s) => s > z * 1.01) ?? 40) : ([...ZOOMS].reverse().find((s) => s < z * 0.99) ?? 0.05));
 
 /**
- * Publisher - documents laid out in pages, InDesign style: opens InDesign
+ * Publisher - documents laid out in pages, InDesign style: opens Microsoft
+ * Publisher documents (.pub, converted by ./publisher/pub), InDesign
  * documents (.indd and .indt, read with indd-utils) and IDML, with InDesign's
  * tools, Control panel, panels, menus and shortcuts; frames, shapes, threaded
  * text with paragraph and character styles, placed images, master pages and
@@ -143,7 +151,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   const [savedEntry, setSavedEntry] = useState<Entry | null>(boot);
   const [path, setPath] = useState<string | null>(null);
   const [docName, setDocName] = useState('Untitled-1');
-  const [fromIndd, setFromIndd] = useState(false);
+  const [converted, setConverted] = useState<Converted>(null);
   const [loading, setLoading] = useState(initial !== null && fs !== undefined);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -688,7 +696,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   );
 
   const startDoc = useCallback(
-    (p: Pkg, name: string, file: string | null, indd: boolean, previews: Map<string, Uint8Array>) => {
+    (p: Pkg, name: string, file: string | null, from: Converted, previews: Map<string, Uint8Array>) => {
       const m0 = buildModel(p);
       const entry: Entry = { label: file ? 'Open' : 'New', pkg: p, sel: [], direct: null };
       previewsRef.current = previews;
@@ -707,7 +715,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
       setSavedEntry(entry);
       setPath(file);
       setDocName(name);
-      setFromIndd(indd);
+      setConverted(from);
       setTyping(null);
       setMasterView(false);
       setError(null);
@@ -739,7 +747,14 @@ export function Publisher({ windowId, params }: AppComponentProps) {
           let pk: Pkg;
           const previews = new Map<string, Uint8Array>();
           let warn: string[] = [];
-          if (isIndd(p) || !looksLikeIdml(r.data)) {
+          let from: Converted = null;
+          if (isPub(p) || looksLikePub(r.data)) {
+            from = 'pub';
+            const doc = readPub(r.data);
+            pk = await pubToIdml(doc, rasterizeMetafile);
+            warn = [...doc.warnings];
+          } else if (isIndd(p) || !looksLikeIdml(r.data)) {
+            from = 'indd';
             const bridge = getInddBridge();
             if (!bridge) throw new Error('Reading InDesign documents needs the Din shell.');
             const conv = await bridge.convert(r.data, basename(p));
@@ -748,9 +763,10 @@ export function Publisher({ windowId, params }: AppComponentProps) {
             pk = readPackage(conv.idml);
           } else pk = readPackage(r.data);
           if (seq !== loadSeq.current) return;
-          startDoc(pk, basename(p), p, isIndd(p) || !looksLikeIdml(r.data), previews);
+          startDoc(pk, basename(p), p, from, previews);
           setWarnings(warn);
-          if (warn.length) setStatus(`Opened with ${warn.length} ${warn.length === 1 ? 'thing' : 'things'} InDesign keeps that couldn’t be read.`);
+          if (warn.length && from === 'pub') setStatus(warn.length === 1 ? warn[0] : `Opened with ${warn.length} things that look different from Publisher.`);
+          else if (warn.length) setStatus(`Opened with ${warn.length} ${warn.length === 1 ? 'thing' : 'things'} InDesign keeps that couldn’t be read.`);
         } catch (err) {
           if (seq !== loadSeq.current) return;
           setError(`Couldn’t open ${basename(p)}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
@@ -794,7 +810,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
         setSavedEntry(entry);
         setPath(p);
         setDocName(basename(p));
-        setFromIndd(false);
+        setConverted(null);
         setStatus(`Saved ${basename(p)}`);
         void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', p] });
         void invalidateListings(queryClient, p);
@@ -820,13 +836,13 @@ export function Publisher({ windowId, params }: AppComponentProps) {
 
   const save = useCallback((): Promise<boolean> => {
     if (!hist) return Promise.resolve(false);
-    if (path && !fromIndd && /\.idml$/i.test(path)) return writeTo(path);
-    if (fromIndd) {
+    if (path && !converted && /\.idml$/i.test(path)) return writeTo(path);
+    if (converted) {
       setDialog({ kind: 'saveNote' });
       return Promise.resolve(false);
     }
     return saveAs();
-  }, [hist, path, fromIndd, writeTo, saveAs]);
+  }, [hist, path, converted, writeTo, saveAs]);
 
   const openFile = useCallback(async () => {
     const t = await pickFile({ title: 'Open', extensions: OPEN_EXTENSIONS, initialPath: path ? parentPath(path) : undefined });
@@ -3204,7 +3220,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
                 <div className="w-full max-w-md space-y-6 text-center">
                   <div className="space-y-2">
                     <h1 className="text-[40px] leading-tight font-semibold tracking-tight text-[#f0f0f0]">Publisher</h1>
-                    <p className="text-lg text-[#b5b5b5]">Pages, frames, threaded text and styles. Opens InDesign documents and IDML, and saves IDML.</p>
+                    <p className="text-lg text-[#b5b5b5]">Pages, frames, threaded text and styles. Opens Microsoft Publisher and InDesign documents and IDML, and saves IDML.</p>
                   </div>
                   {error && (
                     <p role="alert" className="rounded-md border border-[#7a2b2b] bg-[#3a2323] px-3 py-2 text-sm text-[#ffb4b4]">
@@ -3229,7 +3245,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
                       Open…
                     </button>
                   </div>
-                  <p className="text-sm text-[#8a8a8a]">Ctrl+N new · Ctrl+O open · .indd, .indt and .idml</p>
+                  <p className="text-sm text-[#8a8a8a]">Ctrl+N new · Ctrl+O open · .pub, .indd, .indt and .idml</p>
                 </div>
               </div>
             )}
@@ -3327,7 +3343,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
               open('publisher', { newDoc: { ...s, margins: { ...s.margins }, bleed: { ...s.bleed } } });
               return;
             }
-            startDoc(pk, 'Untitled-1', null, false, new Map());
+            startDoc(pk, 'Untitled-1', null, null, new Map());
           }}
         />
       )}
@@ -3426,6 +3442,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
       {dialog?.kind === 'saveNote' && (
         <SaveNoteDialog
           name={docName}
+          from={converted ?? 'indd'}
           onCancel={() => setDialog(null)}
           onOk={() => {
             setDialog(null);
@@ -3439,7 +3456,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
           onCancel={() => setDialog(null)}
           onOk={() => {
             setDialog(null);
-            void (fromIndd ? saveAs() : save()).then((ok) => ok && closeNow());
+            void (converted ? saveAs() : save()).then((ok) => ok && closeNow());
           }}
           okLabel={busy ? 'Saving…' : 'Save'}
           extra={
@@ -3449,7 +3466,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
           }
         >
           <p className="text-sm text-[#e6e6e6]">Save changes to “{docName}” before closing?</p>
-          <p className="mt-1 text-xs text-[#a0a0a0]">{fromIndd ? 'It will be saved as InDesign Markup (.idml), which InDesign opens.' : 'If you don’t, your changes will be lost.'}</p>
+          <p className="mt-1 text-xs text-[#a0a0a0]">{converted ? 'It will be saved as InDesign Markup (.idml), which InDesign opens.' : 'If you don’t, your changes will be lost.'}</p>
         </Dialog>
       )}
     </div>

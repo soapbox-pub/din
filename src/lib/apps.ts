@@ -253,15 +253,15 @@ export const APPS: readonly AppDefinition[] = [
     keywords: ['illustrator', 'adobe illustrator', 'ai', 'inkscape', 'vector', 'svg', 'logo', 'illustration', 'drawing', 'pen tool', 'bezier'],
   },
   {
-    // Page layout, InDesign style: opens InDesign documents (.indd, .indt)
-    // and IDML, and saves IDML. Files opens them here. Launch params
-    // `{ path }` open one.
+    // Desktop publishing, InDesign style: opens Microsoft Publisher
+    // documents (.pub), InDesign documents (.indd, .indt) and IDML, and saves
+    // IDML. Files opens them here. Launch params `{ path }` open one.
     id: 'publisher',
     name: 'Publisher',
     icon: '/icons/apps/publisher.png',
     component: Publisher,
     defaultSize: { width: 1280, height: 840 },
-    keywords: ['indesign', 'adobe indesign', 'indd', 'idml', 'scribus', 'publisher', 'desktop publishing', 'layout', 'magazine', 'brochure', 'flyer'],
+    keywords: ['indesign', 'adobe indesign', 'indd', 'idml', 'microsoft publisher', 'pub', 'scribus', 'publisher', 'desktop publishing', 'layout', 'magazine', 'brochure', 'flyer'],
   },
   {
     // 2D drafting, AutoCAD style: opens DWGs (R14 to 2018) and saves

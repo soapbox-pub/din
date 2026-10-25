@@ -26,7 +26,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { adobeAppFor, isDelimitedText, isDwgFile, isExtractable, isPhotoEditable, isPhotoshopFile, isTextFile, isVectorEditable, isViewableImage, officeAppFor } from '@/lib/fileTypes';
+import { designAppFor, isDelimitedText, isDwgFile, isExtractable, isPhotoEditable, isPhotoshopFile, isTextFile, isVectorEditable, isViewableImage, officeAppFor } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -629,7 +629,7 @@ function FileBrowserTab({
               setTimeout(() => startingRef.current.delete(target), 3_000);
             });
         } else {
-          open(isTextFile(file.name) ? 'text-editor' : isPhotoshopFile(file.name) ? 'photo-editor' : isDwgFile(file.name) ? 'cad' : (officeAppFor(file.name) ?? adobeAppFor(file.name) ?? 'preview'), { path: target });
+          open(isTextFile(file.name) ? 'text-editor' : isPhotoshopFile(file.name) ? 'photo-editor' : isDwgFile(file.name) ? 'cad' : (officeAppFor(file.name) ?? designAppFor(file.name) ?? 'preview'), { path: target });
         }
       }
     },

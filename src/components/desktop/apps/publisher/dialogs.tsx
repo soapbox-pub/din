@@ -448,18 +448,22 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="About Publisher" onCancel={onClose}>
       <div className="space-y-2 text-sm text-[#e0e0e0]">
-        <p>Publisher opens InDesign documents (.indd, .indt) and InDesign Markup (.idml), and saves IDML, which InDesign opens.</p>
+        <p>Publisher opens Microsoft Publisher documents (.pub, from Publisher 98 on), InDesign documents (.indd, .indt) and InDesign Markup (.idml), and saves IDML, which InDesign opens.</p>
         <p className="text-xs text-[#a0a0a0]">INDD files are read with indd-utils. Fonts that aren’t on this computer are shown with similar free fonts; the document keeps its own font names.</p>
       </div>
     </Dialog>
   );
 }
 
-export function SaveNoteDialog({ name, onCancel, onOk }: { name: string; onCancel: () => void; onOk: () => void }) {
+export function SaveNoteDialog({ name, from, onCancel, onOk }: { name: string; from: 'indd' | 'pub'; onCancel: () => void; onOk: () => void }) {
   return (
     <Dialog title="Save As IDML" onCancel={onCancel} onOk={onOk} okLabel="Save As…">
-      <p className="text-sm text-[#e6e6e6]">“{name}” is an InDesign document. Publisher can’t write that format, so it saves InDesign Markup (.idml) instead.</p>
-      <p className="mt-1 text-xs text-[#a0a0a0]">InDesign opens IDML files, and saving one from there makes an .indd again. The original file isn’t changed.</p>
+      <p className="text-sm text-[#e6e6e6]">
+        “{name}” is {from === 'pub' ? 'a Microsoft Publisher' : 'an InDesign'} document. Publisher can’t write that format, so it saves InDesign Markup (.idml) instead.
+      </p>
+      <p className="mt-1 text-xs text-[#a0a0a0]">
+        {from === 'pub' ? 'File > Export can also make a PDF or PNG of it. ' : 'InDesign opens IDML files, and saving one from there makes an .indd again. '}The original file isn’t changed.
+      </p>
     </Dialog>
   );
 }

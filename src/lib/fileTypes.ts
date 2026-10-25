@@ -38,7 +38,7 @@ const ARCHIVE = new Set([
   'cpio', 'cab', 'deb', 'rpm', 'apk',
 ]);
 const DISK = new Set(['iso', 'img', 'qcow2', 'vmdk', 'vdi', 'dmg']);
-const DOCUMENT = new Set(['dwg', 'ai', 'ait', 'indd', 'indt', 'idml', 'doc', 'docx', 'docm', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'epub']);
+const DOCUMENT = new Set(['dwg', 'ai', 'ait', 'indd', 'indt', 'idml', 'pub', 'doc', 'docx', 'docm', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'epub']);
 /** Names that are text whatever their extension. */
 const TEXT_NAMES = new Set(['readme', 'license', 'copying', 'makefile', 'dockerfile', 'changelog', 'authors', '.gitignore', '.bashrc', '.zshrc', '.profile']);
 
@@ -109,11 +109,11 @@ export function isDelimitedText(name: string): boolean {
   return ext === 'csv' || ext === 'tsv';
 }
 
-/** The built-in Adobe-style app for an Illustrator or InDesign file, if it is one. */
-export function adobeAppFor(name: string): 'vector-editor' | 'publisher' | null {
+/** The built-in app for an Illustrator, InDesign or Microsoft Publisher file, if it is one. */
+export function designAppFor(name: string): 'vector-editor' | 'publisher' | null {
   const ext = extensionOf(name);
   if (ext === 'ai' || ext === 'ait') return 'vector-editor';
-  if (ext === 'indd' || ext === 'indt' || ext === 'idml') return 'publisher';
+  if (ext === 'indd' || ext === 'indt' || ext === 'idml' || ext === 'pub') return 'publisher';
   return null;
 }
 
