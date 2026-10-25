@@ -229,14 +229,16 @@ export const APPS: readonly AppDefinition[] = [
     keywords: ['powerpoint', 'microsoft powerpoint', 'office', 'pptx', 'ppt', 'keynote', 'impress', 'presentation', 'slideshow', 'deck'],
   },
   {
-    // A graphing calculator with computer algebra, in place of a TI-89:
-    // exact answers, solve, d, ∫, limits, matrices, graphs and tables.
+    // A basic calculator, and behind its Advanced switch a graphing
+    // calculator with computer algebra, in place of a TI-89: exact answers,
+    // solve, d, ∫, limits, matrices, graphs and tables. The window resizes
+    // itself to whichever is showing.
     id: 'calculator',
     name: 'Calculator',
     icon: '/icons/apps/calculator.png',
     component: Calculator,
-    defaultSize: { width: 1040, height: 720 },
-    keywords: ['TI-89', 'TI-84', 'graphing calculator', 'CAS', 'algebra', 'calculus', 'derivative', 'integral', 'solve', 'math', 'graph', 'homework'],
+    defaultSize: { width: 380, height: 620 },
+    keywords: ['arithmetic', 'TI-89', 'TI-84', 'graphing calculator', 'CAS', 'algebra', 'calculus', 'derivative', 'integral', 'solve', 'math', 'graph', 'homework'],
   },
   {
     // Vector art, Illustrator style: opens and saves .ai files (and PDF and

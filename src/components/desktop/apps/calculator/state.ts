@@ -138,3 +138,41 @@ export function saveState(state: CalculatorState) {
     console.warn('Failed to save the calculator:', error);
   }
 }
+
+/**
+ * The basic calculator, kept apart from the advanced one's state: only one of
+ * them is mounted at a time, and each saves its own.
+ */
+export const BASIC_STORAGE_KEY = 'din:calculator:basic';
+
+const BasicStateSchema = z.object({
+  /** Which calculator the window shows. Basic until the user asks for more. */
+  view: z.enum(['basic', 'advanced']),
+  /** Past calculations, oldest first. */
+  tape: z.array(z.object({ expr: z.string(), result: z.string() })),
+});
+export type BasicState = z.infer<typeof BasicStateSchema>;
+export type CalculatorView = BasicState['view'];
+
+export const TAPE_LIMIT = 100;
+
+const DEFAULT_BASIC_STATE: BasicState = { view: 'basic', tape: [] };
+
+export function loadBasicState(): BasicState {
+  try {
+    const raw = localStorage.getItem(BASIC_STORAGE_KEY);
+    if (!raw) return DEFAULT_BASIC_STATE;
+    const parsed = BasicStateSchema.safeParse({ ...DEFAULT_BASIC_STATE, ...(JSON.parse(raw) as Partial<BasicState>) });
+    return parsed.success ? parsed.data : DEFAULT_BASIC_STATE;
+  } catch {
+    return DEFAULT_BASIC_STATE;
+  }
+}
+
+export function saveBasicState(state: BasicState) {
+  try {
+    localStorage.setItem(BASIC_STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn('Failed to save the calculator:', error);
+  }
+}

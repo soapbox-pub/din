@@ -8,9 +8,13 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWorkAreas } from '@/contexts/MonitorsContext';
 import type { AppComponentProps } from '@/lib/apps';
+import { areaFor } from '@/lib/monitors';
 import { cn } from '@/lib/utils';
 import { BreakError, Cas } from './calculator/cas';
+import { Basic, ViewSwitch } from './calculator/Basic';
 import { catalogEntry, HOME_MENUS, insertText } from './calculator/catalog';
 import { CatalogDialog, MatrixDialog, ModeDialog, VarsDialog } from './calculator/Dialogs';
 import { identifiers, parse, ParseError, unparen, type Node } from './calculator/expr';
@@ -23,7 +27,18 @@ import { Home, type EntryApi } from './calculator/Home';
 import { Keypad } from './calculator/Keypad';
 import { usePlotFunctions, plotNames, type GraphKind } from './calculator/plots';
 import { definesFunction, tidy } from './calculator/present';
-import { HISTORY_LIMIT, loadState, PLOT_COLORS, saveState, type CalculatorState, type HistoryEntry, type Mode } from './calculator/state';
+import {
+  HISTORY_LIMIT,
+  loadBasicState,
+  loadState,
+  PLOT_COLORS,
+  saveBasicState,
+  saveState,
+  type CalculatorState,
+  type CalculatorView,
+  type HistoryEntry,
+  type Mode,
+} from './calculator/state';
 import { Table } from './calculator/Table';
 import { toGiac, TranslateError, type GiacContext } from './calculator/toGiac';
 import { YEditor } from './calculator/YEditor';
@@ -116,14 +131,76 @@ function topFunction(node: Node): string | undefined {
   return undefined;
 }
 
+/** The window size each calculator opens at. */
+const VIEW_SIZES: Record<CalculatorView, { width: number; height: number }> = {
+  basic: { width: 380, height: 620 },
+  advanced: { width: 1160, height: 720 },
+};
+
 /**
- * Calculator - a graphing calculator with a computer algebra system, built
- * to stand in for a TI-89: the home screen's exact answers (solve, factor,
- * d, ∫, limit, Σ, deSolve, matrices, units), the Y= editor and graph with
- * its Zoom, Trace and Math tools, and the table. Giac does the algebra, in
- * a worker (see calculator/cas.ts); the entry line speaks TI-89.
+ * Calculator - a basic calculator by default (calculator/Basic.tsx), and, a
+ * click away, the advanced one: a graphing calculator with a computer
+ * algebra system, built to stand in for a TI-89.
  */
-export function Calculator(_props: AppComponentProps) {
+export function Calculator({ windowId }: AppComponentProps) {
+  const [basic, setBasic] = useState(loadBasicState);
+  useEffect(() => saveBasicState(basic), [basic]);
+  const setView = (view: CalculatorView) => setBasic((b) => ({ ...b, view }));
+
+  return (
+    <>
+      <FitWindow windowId={windowId} view={basic.view} />
+      {basic.view === 'basic' ? (
+        <Basic tape={basic.tape} onTape={(tape) => setBasic((b) => ({ ...b, tape }))} onView={setView} />
+      ) : (
+        <Advanced onView={setView} />
+      )}
+    </>
+  );
+}
+
+/**
+ * Sizes the window for the calculator it shows, keeping it on its monitor.
+ * A component of its own: it follows every window change, and re-rendering
+ * the calculator for each would be wasteful.
+ */
+function FitWindow({ windowId, view }: { windowId: string; view: CalculatorView }) {
+  const { windows } = useWindowManager();
+  const { resize } = useWindowActions();
+  const areas = useWorkAreas();
+  const current = useRef({ windows, areas });
+  useEffect(() => {
+    current.current = { windows, areas };
+  }, [windows, areas]);
+
+  useEffect(() => {
+    const { windows, areas } = current.current;
+    const win = windows.find((w) => w.id === windowId);
+    if (!win || win.maximized || win.snapped) return;
+    let { width, height } = VIEW_SIZES[view];
+    if (win.width === width && win.height === height) return;
+    let { x, y } = win;
+    if (areas.length > 0) {
+      const area = areaFor(areas, win);
+      width = Math.min(width, area.width);
+      height = Math.min(height, area.height);
+      x = Math.max(area.x, Math.min(x, area.x + area.width - width));
+      y = Math.max(area.y, Math.min(y, area.y + area.height - height));
+    }
+    resize(windowId, { x, y, width, height });
+  }, [windowId, view, resize]);
+
+  return null;
+}
+
+/**
+ * The advanced calculator: a graphing calculator with a computer algebra
+ * system, built to stand in for a TI-89: the home screen's exact answers
+ * (solve, factor, d, ∫, limit, Σ, deSolve, matrices, units), the Y= editor
+ * and graph with its Zoom, Trace and Math tools, and the table. Giac does the
+ * algebra, in a worker (see calculator/cas.ts); the entry line speaks TI-89.
+ */
+function Advanced({ onView }: { onView: (view: CalculatorView) => void }) {
   const [state, setState] = useState<CalculatorState>(loadState);
   const stateRef = useRef(state);
   useEffect(() => {
@@ -398,6 +475,8 @@ export function Calculator(_props: AppComponentProps) {
   return (
     <div className="@container flex size-full min-h-0 flex-col bg-background text-foreground" onKeyDown={onKeyDown}>
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/60 bg-muted/40 px-2 py-1.5">
+        <ViewSwitch view="advanced" onChange={onView} />
+        <div className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
         <div className="flex shrink-0 rounded-lg bg-muted p-0.5" role="tablist" aria-label="Screen">
           {(
             [
