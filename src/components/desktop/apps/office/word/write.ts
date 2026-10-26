@@ -403,7 +403,7 @@ function partXml(root: 'w:hdr' | 'w:ftr', content: JSONContent[], ctx: PartCtx):
 
 // ---- Package ---------------------------------------------------------------------
 
-function newPackage(): OpcPackage {
+function newPackage(stylesXml = defaultStylesXml()): OpcPackage {
   const pkg = emptyPackage();
   pkg.ensureOverride('word/document.xml', MAIN_CT);
   pkg.setRels('', [{ id: 'rId1', type: REL.officeDocument, target: 'word/document.xml', external: false }]);
@@ -414,7 +414,7 @@ function newPackage(): OpcPackage {
     { id: 'rId2', type: REL.coreProps, target: 'docProps/core.xml', external: false },
     { id: 'rId3', type: REL.extProps, target: 'docProps/app.xml', external: false },
   ]);
-  pkg.setText('word/styles.xml', defaultStylesXml());
+  pkg.setText('word/styles.xml', stylesXml);
   pkg.ensureOverride('word/styles.xml', STYLES_CT);
   pkg.setText(
     'word/settings.xml',
@@ -453,7 +453,7 @@ export interface WriteInput {
 const MACRO_CT = 'application/vnd.ms-word.document.macroEnabled.main+xml';
 
 export function writeDocx({ doc, content, ext = 'docx' }: WriteInput): Uint8Array {
-  const pkg = doc.pkg ? copyPackage(doc.pkg) : newPackage();
+  const pkg = doc.pkg ? copyPackage(doc.pkg) : newPackage(doc.stylesXml);
   const docPart = doc.pkg ? doc.docPart : 'word/document.xml';
   const textWidth = doc.section.pageW - doc.section.mLeft - doc.section.mRight;
   const shared = { drawingId: 1 };

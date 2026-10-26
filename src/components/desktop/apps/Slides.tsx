@@ -33,7 +33,7 @@ import { useOfficeFile } from './office/useOfficeFile';
 import { Canvas, type Editing, type InsertTool } from './office/slides/Canvas';
 import { readChart } from './office/slides/chartData';
 import { FitIcon, NormalViewIcon, NotesIcon, PlayIcon, SorterIcon } from './office/slides/icons';
-import { copyMedia, loadPresentation, mediaUrl, newPresentation, OPEN_EXTENSIONS, SAVE_TYPES, savePresentation } from './office/slides/io';
+import { copyMedia, loadPresentation, mediaUrl, newPresentation, OPEN_EXTENSIONS, SAVE_ODP, SAVE_PPSX, SAVE_TYPES, savePresentation } from './office/slides/io';
 import {
   EMU_PER_INCH,
   hasText,
@@ -157,7 +157,8 @@ const caseFns: Record<CaseKind, (s: string) => string> = {
  * Normal view (thumbnails, the slide, notes), Slide Sorter, the slide show,
  * and its ribbon. The deck is immutable data in a snapshot history; the
  * package it came from rides along so saving keeps everything Slides
- * doesn't edit (see office/slides/write.ts).
+ * doesn't edit (see office/slides/write.ts). LibreOffice's .odp opens onto
+ * a new package and saves from the deck (see office/slides/odp.ts).
  */
 export function Slides({ windowId, params }: AppComponentProps) {
   const initialPath = typeof params?.path === 'string' ? params.path : null;
@@ -209,14 +210,15 @@ export function Slides({ windowId, params }: AppComponentProps) {
     initialPath,
     openExtensions: OPEN_EXTENSIONS,
     saveTypes: SAVE_TYPES,
-    onLoad: (bytes) => {
-      const loaded = loadPresentation(bytes);
+    onLoad: (bytes, path) => {
+      const loaded = loadPresentation(bytes, path);
       setPkg(loaded.pkg);
       setHist({ entries: [{ deck: loaded.deck, label: 'Open', at: 0 }], index: 0 });
       setCur(0);
       setSel([]);
       setEditing(null);
       setSlideSel(new Set(loaded.deck.slides[0] ? [loaded.deck.slides[0].uid] : []));
+      setMessage(loaded.lost?.length ? `Some things in this presentation can’t be shown here and won’t be kept when you save: ${loaded.lost.join(', ')}.` : null);
     },
     onSave: (path) => savePresentation(pkg, deckRef.current, path),
   });
@@ -1783,7 +1785,8 @@ export function Slides({ windowId, params }: AppComponentProps) {
             </div>
           }
           exports={[
-            { label: 'Save as PowerPoint Show', description: 'A .ppsx file opens straight into the slide show.', icon: <FilePlus />, onClick: () => void file.exportCopy(1) },
+            { label: 'Save as PowerPoint Show', description: 'A .ppsx file opens straight into the slide show.', icon: <FilePlus />, onClick: () => void file.exportCopy(SAVE_PPSX) },
+            { label: 'Save as OpenDocument Presentation', description: 'An .odp copy for LibreOffice Impress and other OpenDocument apps.', icon: <FilePlus />, onClick: () => void file.exportCopy(SAVE_ODP) },
             { label: 'Save a copy', description: 'Save the presentation under another name, keeping this one open.', icon: <FolderOpen />, onClick: () => void file.exportCopy(0) },
           ]}
           path={file.path}

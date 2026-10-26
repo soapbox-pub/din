@@ -38,7 +38,7 @@ const ARCHIVE = new Set([
   'cpio', 'cab', 'deb', 'rpm', 'apk',
 ]);
 const DISK = new Set(['iso', 'img', 'qcow2', 'vmdk', 'vdi', 'dmg']);
-const DOCUMENT = new Set(['dwg', 'dxf', 'ai', 'ait', 'indd', 'indt', 'idml', 'pub', 'doc', 'docx', 'docm', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'epub']);
+const DOCUMENT = new Set(['dwg', 'dxf', 'ai', 'ait', 'indd', 'indt', 'idml', 'pub', 'doc', 'docx', 'docm', 'dotx', 'odt', 'ott', 'fodt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ots', 'fods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'otp', 'fodp', 'epub']);
 /** Names that are text whatever their extension. */
 const TEXT_NAMES = new Set(['readme', 'license', 'copying', 'makefile', 'dockerfile', 'changelog', 'authors', '.gitignore', '.bashrc', '.zshrc', '.profile']);
 
@@ -86,11 +86,11 @@ export function isLayeredImage(name: string): boolean {
   return ext === 'psd' || ext === 'ora';
 }
 
-const WORD = new Set(['docx', 'docm', 'dotx', 'doc']);
-const EXCEL = new Set(['xlsx', 'xlsm', 'xltx', 'xls']);
-const POWERPOINT = new Set(['pptx', 'pptm', 'potx', 'ppsx', 'ppt']);
+const WORD = new Set(['docx', 'docm', 'dotx', 'doc', 'odt', 'ott', 'fodt']);
+const EXCEL = new Set(['xlsx', 'xlsm', 'xltx', 'xls', 'ods', 'ots', 'fods']);
+const POWERPOINT = new Set(['pptx', 'pptm', 'potx', 'ppsx', 'ppt', 'odp', 'otp', 'fodp']);
 
-/** The built-in Office app for a Word, Excel or PowerPoint file, if it is one. */
+/** The built-in Office app for a Word, Excel or PowerPoint file (or its OpenDocument counterpart), if it is one. */
 export function officeAppFor(name: string): 'word-processor' | 'spreadsheet' | 'slides' | null {
   const ext = extensionOf(name);
   if (WORD.has(ext)) return 'word-processor';

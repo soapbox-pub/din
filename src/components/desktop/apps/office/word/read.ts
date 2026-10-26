@@ -48,6 +48,8 @@ export interface WordDoc {
   theme: Theme;
   /** What couldn't be shown, for the message bar. */
   warnings: string[];
+  /** styles.xml for a new package, when the styles came from somewhere other than Word's defaults (an .odt). */
+  stylesXml?: string;
 }
 
 export interface StoredImage {

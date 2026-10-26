@@ -200,10 +200,7 @@ function nextId(used: Iterable<number>): number {
 
 /** Start a new list (a new definition and instance) and return its numId. */
 export function newList(n: Numbering, kind: { bullet: BulletKind } | { number: NumberKind }): number {
-  const abstractId = nextId(n.abstracts.keys());
-  const numId = nextId(n.nums.keys());
   const levels: Level[] = [];
-  const xmlLevels: string[] = [];
   for (let i = 0; i < 9; i++) {
     const left = 720 * (i + 1);
     let fmt: string;
@@ -219,15 +216,22 @@ export function newList(n: Numbering, kind: { bullet: BulletKind } | { number: N
       [fmt, text] = cycle[i % 3];
       text = text.replace('%1', `%${i + 1}`).replace('%L', `%${i + 1}`);
     }
-    const hanging = 360;
-    levels.push({ start: 1, fmt, text, indLeft: twipToPx(left), hanging: twipToPx(hanging), font });
-    const xmlText = text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    xmlLevels.push(
-      `<w:lvl w:ilvl="${i}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/><w:lvlText w:val="${xmlText}"/><w:lvlJc w:val="${fmt === 'lowerRoman' ? 'right' : 'left'}"/><w:pPr><w:ind w:left="${left}" w:hanging="${hanging}"/></w:pPr>${
-        font ? `<w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:hint="default"/></w:rPr>` : ''
-      }</w:lvl>`,
-    );
+    levels.push({ start: 1, fmt, text, indLeft: twipToPx(left), hanging: twipToPx(360), font });
   }
+  return addList(n, levels);
+}
+
+/** A list with levels of its own (from another format), as a new definition and instance; returns its numId. */
+export function addList(n: Numbering, levels: Level[]): number {
+  const abstractId = nextId(n.abstracts.keys());
+  const numId = nextId(n.nums.keys());
+  const attrText = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const xmlLevels = levels.map(
+    (l, i) =>
+      `<w:lvl w:ilvl="${i}"><w:start w:val="${l.start}"/><w:numFmt w:val="${l.fmt}"/><w:lvlText w:val="${attrText(l.text)}"/><w:lvlJc w:val="${l.fmt === 'lowerRoman' ? 'right' : 'left'}"/><w:pPr><w:ind w:left="${Math.round(l.indLeft * 15)}" w:hanging="${Math.round(l.hanging * 15)}"/></w:pPr>${
+        l.font ? `<w:rPr><w:rFonts w:ascii="${attrText(l.font)}" w:hAnsi="${attrText(l.font)}" w:hint="default"/></w:rPr>` : ''
+      }</w:lvl>`,
+  );
   n.abstracts.set(abstractId, levels);
   n.nums.set(numId, { abstractId, starts: new Map(), levels: new Map() });
   n.addedAbstracts.push(`<w:abstractNum w:abstractNumId="${abstractId}"><w:multiLevelType w:val="hybridMultilevel"/>${xmlLevels.join('')}</w:abstractNum>`);

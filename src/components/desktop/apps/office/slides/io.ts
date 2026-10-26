@@ -3,23 +3,33 @@ import { blobUrl, extOfPath, isOle, isZip, mimeOf, OpcPackage } from '../ooxml';
 import { officeThemeXml } from '../theme';
 import type { Deck } from './model';
 import { DESIGNS, newPackage, type DesignTheme } from './newDeck';
+import { readOdp, writeOdp } from './odp';
 import { slideFromLayout } from './ops';
 import { readDeck } from './read';
 import { writeDeck } from './write';
 
-export const OPEN_EXTENSIONS = ['pptx', 'ppsx', 'potx', 'pptm', 'ppt'];
+export const OPEN_EXTENSIONS = ['pptx', 'ppsx', 'potx', 'pptm', 'odp', 'otp', 'fodp', 'ppt'];
 
 export const SAVE_TYPES: FileFilter[] = [
   { name: 'PowerPoint Presentation', patterns: ['*.pptx'], mimeTypes: ['application/vnd.openxmlformats-officedocument.presentationml.presentation'] },
   { name: 'PowerPoint Show', patterns: ['*.ppsx'], mimeTypes: ['application/vnd.openxmlformats-officedocument.presentationml.slideshow'] },
+  { name: 'OpenDocument Presentation', patterns: ['*.odp'], mimeTypes: ['application/vnd.oasis.opendocument.presentation'] },
 ];
+
+export const SAVE_PPSX = 1;
+export const SAVE_ODP = 2;
+
+const ODF_EXTENSIONS = new Set(['odp', 'otp', 'fodp']);
 
 export interface Loaded {
   pkg: OpcPackage;
   deck: Deck;
+  /** Things in the file that didn't come across (from an .odp). */
+  lost?: string[];
 }
 
-export function loadPresentation(bytes: Uint8Array): Loaded {
+export function loadPresentation(bytes: Uint8Array, path = ''): Loaded {
+  if (ODF_EXTENSIONS.has(extOfPath(path))) return readOdp(bytes);
   if (isOle(bytes)) {
     throw new Error('It’s a PowerPoint 97–2003 presentation (.ppt), which Slides can’t open. Save it as a PowerPoint Presentation (.pptx) in PowerPoint or LibreOffice, then open that.');
   }
@@ -38,6 +48,8 @@ export function newPresentation(design: DesignTheme = DESIGNS[0]): Loaded {
 }
 
 export function savePresentation(pkg: OpcPackage, deck: Deck, path: string): Uint8Array {
+  const ext = extOfPath(path);
+  if (ODF_EXTENSIONS.has(ext)) return writeOdp(pkg, deck, ext);
   const out = writeDeck(pkg, deck, officeThemeXml);
   if (extOfPath(path) !== 'ppsx') return out;
   // A show is the same package with the main part typed as one.

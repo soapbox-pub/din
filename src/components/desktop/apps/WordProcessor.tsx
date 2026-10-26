@@ -67,12 +67,17 @@ import { defaultStylesXml, effectivePara, ensureBuiltin, galleryStyles, parseSty
 import { printHtml } from './office/word/print';
 import { newWordDoc, TEMPLATES } from './office/word/templates';
 import { writeDocx, writeText } from './office/word/write';
+import { readOdt, writeOdt } from './office/word/odt';
 
 const SAVE_TYPES = [
   { name: 'Word Document', patterns: ['*.docx'], mimeTypes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'] },
+  { name: 'OpenDocument Text', patterns: ['*.odt'], mimeTypes: ['application/vnd.oasis.opendocument.text'] },
   { name: 'Plain Text', patterns: ['*.txt'], mimeTypes: ['text/plain'] },
 ];
-const OPEN_EXTENSIONS = ['.docx', '.docm', '.dotx', '.txt', '.doc'];
+const SAVE_ODT = 1;
+const SAVE_TEXT = 2;
+const OPEN_EXTENSIONS = ['.docx', '.docm', '.dotx', '.odt', '.ott', '.fodt', '.txt', '.doc'];
+const ODF_EXTENSIONS = new Set(['odt', 'ott', 'fodt']);
 const GAP = 20;
 const SETTINGS_KEY = 'din:word:settings';
 
@@ -152,7 +157,8 @@ function hfFor(doc: WordDoc, kind: 'header' | 'footer', page: number): { type: H
 /**
  * Word Processor - a Microsoft Word workalike: Print Layout pages, the
  * ribbon, styles, lists, tables, pictures, headers and footers, and .docx
- * files read and written so they come back from Word looking the same.
+ * files read and written so they come back from Word looking the same;
+ * LibreOffice's .odt opens and saves too (see office/word/odt.ts).
  *
  * Launch params: `{ path?: string }` (absolute); none starts a blank document.
  */
@@ -206,7 +212,8 @@ export function WordProcessor({ windowId, params }: AppComponentProps) {
     openExtensions: OPEN_EXTENSIONS,
     saveTypes: SAVE_TYPES,
     onLoad: (bytes, path) => {
-      const d = extOf(path) === 'txt' ? { ...newWordDoc(), content: readText(bytes) } : readDocx(bytes);
+      const ext = extOf(path);
+      const d = ext === 'txt' ? { ...newWordDoc(), content: readText(bytes) } : ODF_EXTENSIONS.has(ext) ? readOdt(bytes) : readDocx(bytes);
       setDoc(d);
       setWarningsShown(true);
       setHfEdit(null);
@@ -214,7 +221,10 @@ export function WordProcessor({ windowId, params }: AppComponentProps) {
     },
     onSave: (path) => {
       const content = editorRef.current?.getJSON() ?? docRef.current.content;
-      return extOf(path) === 'txt' ? writeText(content) : writeDocx({ doc: docRef.current, content, ext: extOf(path) });
+      const ext = extOf(path);
+      if (ext === 'txt') return writeText(content);
+      if (ODF_EXTENSIONS.has(ext)) return writeOdt(docRef.current, content, ext);
+      return writeDocx({ doc: docRef.current, content, ext });
     },
   });
   const { setDirty } = file;
@@ -1460,12 +1470,21 @@ export function WordProcessor({ windowId, params }: AppComponentProps) {
           }
           exports={[
             {
+              label: 'OpenDocument Text',
+              description: 'Save a copy as an .odt file for LibreOffice Writer and other OpenDocument apps.',
+              icon: <FileText />,
+              onClick: () => {
+                setBackstage(null);
+                void file.exportCopy(SAVE_ODT);
+              },
+            },
+            {
               label: 'Plain Text',
               description: 'Save just the words, without formatting, as a .txt file.',
               icon: <FileText />,
               onClick: () => {
                 setBackstage(null);
-                void file.exportCopy(1);
+                void file.exportCopy(SAVE_TEXT);
               },
             },
           ]}

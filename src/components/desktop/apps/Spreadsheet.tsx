@@ -96,14 +96,21 @@ import { SheetTabs } from './office/sheet/SheetTabs';
 import { budgetTemplate, invoiceTemplate, todoTemplate } from './office/sheet/templates';
 import { readXlsx } from './office/sheet/xlsxRead';
 import { writeXlsx } from './office/sheet/xlsxWrite';
+import { readOds, writeOds } from './office/sheet/ods';
 import { isErr, numberToText, type Scalar } from './office/sheet/values';
 
 const SAVE_TYPES: FileFilter[] = [
   { name: 'Excel Workbook', patterns: ['*.xlsx'], mimeTypes: [] },
+  { name: 'OpenDocument Spreadsheet', patterns: ['*.ods'], mimeTypes: ['application/vnd.oasis.opendocument.spreadsheet'] },
   { name: 'CSV (Comma delimited)', patterns: ['*.csv'], mimeTypes: [] },
   { name: 'Text (Tab delimited)', patterns: ['*.tsv', '*.txt'], mimeTypes: [] },
 ];
-const OPEN_EXTENSIONS = ['xlsx', 'xlsm', 'csv', 'tsv', 'txt', 'xls'];
+const SAVE_XLSX = 0;
+const SAVE_ODS = 1;
+const SAVE_CSV = 2;
+const SAVE_TSV = 3;
+const OPEN_EXTENSIONS = ['xlsx', 'xlsm', 'ods', 'ots', 'fods', 'csv', 'tsv', 'txt', 'xls'];
+const ODF_EXTENSIONS = new Set(['ods', 'ots', 'fods']);
 const MAX_HISTORY = 100;
 
 interface Entry {
@@ -166,7 +173,7 @@ const selOf = (r: number, c: number): Selection => ({ active: { r, c }, ranges: 
 /**
  * Spreadsheet - an Excel workalike: workbooks of sheets with formulas,
  * number formats and cell formatting, opened from and saved to .xlsx (and
- * CSV), with Excel 365's ribbon, grid, keyboard and mouse.
+ * LibreOffice's .ods, and CSV), with Excel 365's ribbon, grid, keyboard and mouse.
  *
  * Launch params: `{ path?: string }` (absolute).
  */
@@ -261,7 +268,7 @@ export function Spreadsheet({ windowId, params }: AppComponentProps) {
         setLost([]);
         return;
       }
-      const loaded = readXlsx(bytes);
+      const loaded = ODF_EXTENSIONS.has(ext) ? readOds(bytes) : readXlsx(bytes);
       resetTo(fitRowsOnLoad(loaded.wb));
       setLost(loaded.lost);
       setKeptDismissed(!loaded.wb.sheets.some((sh) => sh.kept?.dv));
@@ -275,6 +282,10 @@ export function Spreadsheet({ windowId, params }: AppComponentProps) {
       }
       const out = finalWorkbook();
       const c = new Calc(out).all();
+      if (ODF_EXTENSIONS.has(ext)) {
+        if (out.sheets.some((sh) => sh.kept?.cf.length || sh.kept?.dv)) setMessage('Conditional formatting and data validation aren’t kept in OpenDocument format.');
+        return writeOds(out, (s, r, col) => c.value(s, r, col), ext);
+      }
       return writeXlsx(out, (s, r, col) => c.value(s, r, col), { macroEnabled: ext === 'xlsm' });
     },
   });
@@ -2462,9 +2473,10 @@ export function Spreadsheet({ windowId, params }: AppComponentProps) {
             </div>
           }
           exports={[
-            { label: 'Save a copy as CSV', description: 'Comma-separated values of the active sheet, as they’re displayed.', icon: <FileText />, onClick: () => (setBackstage(null), void file.exportCopy(1)) },
-            { label: 'Save a copy as Text (Tab delimited)', description: 'Tab-separated values of the active sheet.', icon: <FileText />, onClick: () => (setBackstage(null), void file.exportCopy(2)) },
-            { label: 'Save a copy as Excel Workbook', description: 'An .xlsx copy, leaving this window on the current file.', icon: <FileSpreadsheet />, onClick: () => (setBackstage(null), void file.exportCopy(0)) },
+            { label: 'Save a copy as CSV', description: 'Comma-separated values of the active sheet, as they’re displayed.', icon: <FileText />, onClick: () => (setBackstage(null), void file.exportCopy(SAVE_CSV)) },
+            { label: 'Save a copy as Text (Tab delimited)', description: 'Tab-separated values of the active sheet.', icon: <FileText />, onClick: () => (setBackstage(null), void file.exportCopy(SAVE_TSV)) },
+            { label: 'Save a copy as Excel Workbook', description: 'An .xlsx copy, leaving this window on the current file.', icon: <FileSpreadsheet />, onClick: () => (setBackstage(null), void file.exportCopy(SAVE_XLSX)) },
+            { label: 'Save a copy as OpenDocument Spreadsheet', description: 'An .ods copy for LibreOffice Calc and other OpenDocument apps.', icon: <FileSpreadsheet />, onClick: () => (setBackstage(null), void file.exportCopy(SAVE_ODS)) },
           ]}
           path={file.path}
         />

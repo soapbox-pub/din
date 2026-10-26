@@ -29,6 +29,8 @@ const SUBTYPE_EXTENSIONS: Record<string, string[]> = {
   'x-wav': ['wav'],
   'x-flac': ['flac'],
   'vnd.oasis.opendocument.text': ['odt'],
+  'vnd.oasis.opendocument.spreadsheet': ['ods'],
+  'vnd.oasis.opendocument.presentation': ['odp'],
   'vnd.openxmlformats-officedocument.wordprocessingml.document': ['docx'],
   msword: ['doc'],
   gzip: ['gz', 'tgz'],
