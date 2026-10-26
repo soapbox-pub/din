@@ -145,7 +145,7 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 
 const B36 = '0123456789abcdefghijklmnopqrstuvwxyz';
 const B36_PUBKEY_LENGTH = 50;
-const DTAG_RE = /^[a-z0-9-]{1,13}$/;
+const DTAG_RE = /^[a-z0-9-]{1,63}$/;
 
 function isValidDtag(dtag: string): boolean {
   return DTAG_RE.test(dtag) && !dtag.endsWith('-');

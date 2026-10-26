@@ -2509,7 +2509,7 @@ contextBridge.exposeInMainWorld('highlightHost', {
 
 // nsite resolution host (window.nsiteHost), backed by the nsite:* handlers in
 // main.mts. The nsite:// protocol handler needs Nostr lookups - NIP-19
-// decoding, a NIP-05 fetch, and a relay query for the NIP-5A manifest - and
+// decoding and a relay query for the NIP-5A manifest - and
 // the main process has no Nostr client, so each lookup is relayed here, to the
 // shell renderer, where Nostrify and the user's relay list live (see
 // NsiteBridgeHost). This carries no signing surface: it only turns a URL into

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { AppWindow, Lock, RotateCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
-import { nsiteDisplayUrl } from '@/lib/nsite';
 import { getPopupsBridge } from '@/lib/popups';
 import type { SiteCapability } from '@/lib/promptBridge';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
@@ -21,10 +20,9 @@ function siteOriginOf(url: string): string | null {
   }
 }
 
-/** The name a site goes by in the address bar: its host, or an nsite's pretty name. */
+/** The name a site goes by in the address bar: its host. */
 function siteName(url: string): string {
-  const display = nsiteDisplayUrl(url);
-  return display.replace(/^[a-z]+:\/\//i, '').split('/')[0] || display;
+  return url.replace(/^[a-z]+:\/\//i, '').split('/')[0] || url;
 }
 
 type Security = 'secure' | 'verified' | 'exception' | 'insecure';

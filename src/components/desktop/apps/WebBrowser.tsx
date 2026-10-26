@@ -34,7 +34,6 @@ import {
   sanitizeUrl,
   viewSourceUrl,
 } from '@/lib/sanitizeUrl';
-import { nsiteDisplayUrl, nsiteResolvedName } from '@/lib/nsite';
 import { canonicalHostOfUrl, nsiteAppId, nsiteAppUrl } from '@/lib/nsiteApps';
 import { getNsiteStore } from '@/lib/nsiteStore';
 import { ensureNsiteAppInfo } from '@/lib/nsiteAppInfo';
@@ -104,7 +103,6 @@ import { TabContextMenu } from '@/components/desktop/TabContextMenu';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
   historyDisplayUrl,
-  historyEntryHref,
   inlineCompletion,
   matchHistory,
   topSites,
@@ -983,11 +981,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             }
             return {
               url: event.url === NEW_TAB_URL ? '' : event.url,
-              // An nsite's committed URL is its canonical, key-derived host; the
-              // address bar shows the name it was reached through when Din
-              // resolved one (and the canonical host when it didn't).
-              address:
-                event.url === NEW_TAB_URL ? '' : nsiteDisplayUrl(event.url),
+              address: event.url === NEW_TAB_URL ? '' : event.url,
               canBack: event.canBack,
               canForward: event.canForward,
             };
@@ -1006,9 +1000,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // redirects, back/forward); recordVisit ignores non-https URLs
           // (about:blank, chrome-extension://). The iframe fallback never
           // fires this event - it records in navigateTab / go instead.
-          // Private windows keep no history. An nsite is recorded under its
-          // canonical URL, with the name it was reached through, if any.
-          if (!isPrivate) recordVisit(event.url, nsiteResolvedName(event.url));
+          // Private windows keep no history.
+          if (!isPrivate) recordVisit(event.url);
           break;
         case 'loadError':
           // Ignore the error for a URL the tab has already navigated past
@@ -1396,9 +1389,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       updateTab(id, (tab) => {
         const trimmed = tab.history.slice(0, tab.cursor + 1);
         return {
-          // `resolved` is the wire spelling; show the pretty one while the
-          // load is in flight so a typed nsite name doesn't flicker.
-          address: nsiteDisplayUrl(resolved),
+          address: resolved,
           url: resolved,
           title: null,
           favicon: null,
@@ -2172,7 +2163,7 @@ function AddressBar({
       if (next < -1) next = count - 1;
       else if (next >= count) next = -1;
       setHighlighted(next);
-      onChangeValue(next === -1 ? typed : historyEntryHref(suggestions[next]));
+      onChangeValue(next === -1 ? typed : suggestions[next].url);
     } else if (e.key === 'Escape' && show) {
       e.preventDefault();
       dismiss();
@@ -2250,7 +2241,7 @@ function AddressBar({
               aria-selected={i === highlighted}
               onClick={() => {
                 dismiss();
-                onNavigate(historyEntryHref(entry));
+                onNavigate(entry.url);
               }}
               className={cn(
                 'flex cursor-default items-center gap-2.5 px-3 py-1.5 text-sm',
@@ -2261,7 +2252,7 @@ function AddressBar({
             >
               <History className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 max-w-[50%] truncate">
-                {entry.title ?? entry.name ?? hostnameOf(entry.url) ?? entry.url}
+                {entry.title ?? hostnameOf(entry.url) ?? entry.url}
               </span>
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                 {historyDisplayUrl(entry)}
@@ -4169,8 +4160,7 @@ function InstallSiteButton({
     if (nsiteHost) {
       return {
         url: nsiteAppUrl(nsiteHost),
-        // The name Din resolved it through, when there was one.
-        hostname: nsiteDisplayUrl(nsiteAppUrl(nsiteHost)).replace(/^nsite:\/\/|\/$/g, ''),
+        hostname: nsiteHost,
         icon: '',
       };
     }
@@ -4338,7 +4328,7 @@ function InstallSiteButton({
               </div>
             </div>
             <p className="truncate text-xs text-muted-foreground" title={site.url}>
-              {nsiteHost ? nsiteDisplayUrl(site.url) : site.url}
+              {site.url}
             </p>
             <Button type="submit" className="w-full">
               Install

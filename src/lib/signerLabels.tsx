@@ -2,7 +2,6 @@ import { KeyRound, Link2, Lock, Pen, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { getKindLabel } from '@/lib/kindLabels';
-import { nsiteDisplayUrl } from '@/lib/nsite';
 import type { SignerMethod } from '@/lib/signerPermissions';
 import { middleEllipsis } from '@/lib/utils';
 
@@ -73,13 +72,11 @@ export function ruleLabel(method: SignerMethod, kind?: number): string {
 
 /**
  * How to name an origin to the user: the host for a web site, and for an
- * nsite the NIP-05 name it was reached through when Din resolved one (never a
- * name Din didn't verify - see nsiteDisplayUrl), otherwise its key, shortened.
+ * nsite its key, shortened.
  */
 export function originLabel(origin: string): string {
   if (origin.startsWith('nsite://')) {
-    const shown = nsiteDisplayUrl(`${origin}/`).replace(/^nsite:\/\//, '').replace(/\/$/, '');
-    return middleEllipsis(shown, 40);
+    return middleEllipsis(origin.replace(/^nsite:\/\//, ''), 40);
   }
   try {
     return new URL(origin).host || origin;

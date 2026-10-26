@@ -9,8 +9,8 @@ import { NSITE_PROTOCOL, parseCanonicalNsiteHost } from '@/lib/nsite';
  */
 export interface NsiteAppEntry {
   /**
-   * Canonical, key-derived host (`npub1…` or `<pubkeyB36><dtag>`). Never a
-   * NIP-05 name, so a name changing hands can't redirect an installed app.
+   * Canonical, key-derived host (`npub1…` or `<pubkeyB36><dtag>`), the
+   * origin the app's storage and Nostr connection belong to.
    */
   host: string;
   /** Unix seconds. */
@@ -42,7 +42,7 @@ export function nsiteAppUrl(host: string): string {
   return `${NSITE_PROTOCOL}//${host}/`;
 }
 
-/** The canonical host of an nsite URL, or null for anything else (aliases included). */
+/** The canonical host of an nsite URL, or null for anything else (an `naddr` included). */
 export function canonicalHostOfUrl(url: string): string | null {
   try {
     const parsed = new URL(url);

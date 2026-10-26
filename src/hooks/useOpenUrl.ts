@@ -30,8 +30,8 @@ export function useOpenUrl(): (url: string) => void {
       if (!url) return;
 
       // Route into an installed app that owns this URL. An nsite link only
-      // matches on its canonical host: a name (nsite://soapbox.pub/) opens in
-      // the Web Browser, which resolves it.
+      // matches on its canonical host: an `nsite://naddr1…/` opens in the Web
+      // Browser, which redirects it.
       const appId = findAppIdForUrl(url);
       if (appId) {
         open(appId, { url });

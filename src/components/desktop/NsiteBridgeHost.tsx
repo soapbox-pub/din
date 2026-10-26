@@ -9,78 +9,21 @@ import {
   NSITE_NAMED_KIND,
   NSITE_ROOT_KIND,
   parseCanonicalNsiteHost,
-  parseNsiteAlias,
-  rememberNsiteAlias,
-  type NsiteAliasAuthority,
+  parseNsiteNaddrUrl,
 } from '@/lib/nsite';
 import {
   getNsiteHostBridge,
   type NsiteResolution,
 } from '@/lib/nsiteBridge';
 
-/** How long a NIP-05 name -> pubkey mapping is reused. */
-const NIP05_TTL_MS = 10 * 60_000;
-
-/** Budget for a NIP-05 fetch or a relay query. */
+/** Budget for a relay query. */
 const LOOKUP_TIMEOUT_MS = 10_000;
 
-interface Nip05Result {
-  pubkey: string;
-  relays: string[];
-}
-
-const nip05Cache = new Map<string, { result: Nip05Result; fetchedAt: number }>();
-
 /**
- * Relay hints picked up while resolving an alias (an `naddr`'s hints, or the
- * `relays` map in a NIP-05 document), remembered per canonical host so the
+ * Relay hints carried by an `naddr`, remembered per canonical host so the
  * canonical request that follows the redirect can use them.
  */
 const relayHints = new Map<string, string[]>();
-
-/** Resolve `name@domain` to a pubkey via NIP-05, with a short-lived cache. */
-async function lookupNip05(
-  domain: string,
-  name: string,
-  signal: AbortSignal,
-): Promise<Nip05Result | null> {
-  const key = `${name}@${domain}`;
-  const cached = nip05Cache.get(key);
-  if (cached && Date.now() - cached.fetchedAt < NIP05_TTL_MS) return cached.result;
-
-  const url = `https://${domain}/.well-known/nostr.json?name=${encodeURIComponent(name)}`;
-  try {
-    const response = await fetch(url, { signal, redirect: 'follow' });
-    if (!response.ok) return null;
-    const body = (await response.json()) as {
-      names?: Record<string, string>;
-      relays?: Record<string, string[]>;
-    };
-    const pubkey = body.names?.[name];
-    if (typeof pubkey !== 'string' || !/^[0-9a-f]{64}$/.test(pubkey)) return null;
-    const result: Nip05Result = {
-      pubkey,
-      relays: (body.relays?.[pubkey] ?? []).filter(
-        (relay) => typeof relay === 'string' && relay.startsWith('wss://'),
-      ),
-    };
-    nip05Cache.set(key, { result, fetchedAt: Date.now() });
-    return result;
-  } catch {
-    return null;
-  }
-}
-
-/** Turn an alias authority into a pubkey plus any relay hints it carried. */
-async function resolveAuthority(
-  authority: NsiteAliasAuthority,
-  signal: AbortSignal,
-): Promise<Nip05Result | null> {
-  if (authority.type === 'naddr') {
-    return { pubkey: authority.pubkey, relays: authority.relays };
-  }
-  return lookupNip05(authority.domain, authority.name, signal);
-}
 
 /**
  * Whether an event really is the manifest we asked for. Relays can return
@@ -181,7 +124,7 @@ export function NsiteBridgeHost() {
       }
 
       // Canonical host: serve it directly, using any hints stashed by the
-      // alias that redirected here.
+      // naddr that redirected here.
       const canonical = parseCanonicalNsiteHost(url.hostname);
       if (canonical) {
         return loadSite(
@@ -192,49 +135,30 @@ export function NsiteBridgeHost() {
         );
       }
 
-      const alias = parseNsiteAlias(rawUrl);
-      if (!alias) {
+      const naddr = parseNsiteNaddrUrl(rawUrl);
+      if (!naddr) {
         return {
           kind: 'error',
           code: 'bad-url',
-          message:
-            'Expected nsite://<domain>/ for a root site, nsite://<domain>+<site>/ ' +
-            'for a named one, or a name in front: nsite://mk@<domain>+<site>/.',
+          message: 'Expected nsite://npub1…/ for a root site, or nsite://naddr1…/ for any site.',
         };
       }
 
-      const resolved = await resolveAuthority(alias.authority, signal);
-      if (!resolved) {
-        return {
-          kind: 'error',
-          code: 'no-nip05',
-          message:
-            alias.authority.type === 'nip05'
-              ? `${alias.authority.name}@${alias.authority.domain} does not resolve to a Nostr key.`
-              : 'That identifier does not name a site.',
-        };
-      }
-
-      // A d tag outside NIP-5A's charset has no canonical host, so the site is
-      // reachable by naddr only.
+      // A d tag outside NIP-5A's charset has no canonical host.
       let host: string;
       try {
-        host = canonicalNsiteHost(resolved.pubkey, alias.dtag);
+        host = canonicalNsiteHost(naddr.pubkey, naddr.dtag);
       } catch {
         return {
           kind: 'error',
           code: 'bad-url',
-          message: `"${alias.dtag}" cannot be addressed by name (NIP-5A allows 1-13 characters of a-z, 0-9 and -).`,
+          message: `"${naddr.dtag}" cannot be addressed as a site (1-63 characters of a-z, 0-9 and -).`,
         };
       }
 
-      if (resolved.relays.length > 0) relayHints.set(host, resolved.relays);
+      if (naddr.relays.length > 0) relayHints.set(host, naddr.relays);
 
-      const canonicalUrl = canonicalNsiteUrl(resolved.pubkey, alias.dtag, alias.path);
-      // Remember the name so the address bar can show `nsite://soapbox.pub/armada/`
-      // instead of the 56-character canonical host it redirects to.
-      rememberNsiteAlias(rawUrl, canonicalUrl);
-
+      const canonicalUrl = canonicalNsiteUrl(naddr.pubkey, naddr.dtag, naddr.path);
       return { kind: 'redirect', url: canonicalUrl };
     }
 

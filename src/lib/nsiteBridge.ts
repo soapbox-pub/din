@@ -3,8 +3,8 @@
  * (`window.nsiteHost`, see electron/preload.cjs).
  *
  * The nsite:// protocol handler runs in the main process (electron/nsite.mts),
- * which has no Nostr client. Turning a URL into a site means NIP-19 decoding,
- * a NIP-05 lookup, and a relay query for the NIP-5A manifest — all of which
+ * which has no Nostr client. Turning a URL into a site means NIP-19 decoding
+ * and a relay query for the NIP-5A manifest, both of which
  * belong in the renderer, where Nostrify, the user's relay list, and the query
  * cache already live. Main relays each lookup here; `NsiteBridgeHost`
  * subscribes with `onRequest` and answers with `respond`.
@@ -40,7 +40,7 @@ export interface NsiteSiteEvents {
 }
 
 /** Why a lookup failed, in terms the error page can speak. */
-export type NsiteErrorCode = 'bad-url' | 'no-nip05' | 'no-manifest' | 'timeout';
+export type NsiteErrorCode = 'bad-url' | 'no-manifest' | 'timeout';
 
 /** The renderer's answer to a relayed lookup. */
 export type NsiteResolution =

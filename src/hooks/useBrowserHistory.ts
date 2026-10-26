@@ -9,12 +9,6 @@ export interface BrowserHistoryEntry {
    * through a name and through the npub land on the same entry.
    */
   url: string;
-  /**
-   * For an nsite reached through a NIP-05 name, that name as the address bar
-   * spells it (`soapbox.pub`, `mk@ditto.pub+polaroids`). Only ever a name Din
-   * really resolved to this host; following it resolves it again.
-   */
-  name?: string;
   /** Last page title seen for this URL, when one arrived. */
   title: string | null;
   /** Unix seconds of the most recent visit. */
@@ -32,7 +26,6 @@ const browserHistorySchema: z.ZodType<BrowserHistoryEntry[]> = z.array(
     visitedAt: z.number(),
     visits: z.number(),
     favicon: z.string().optional(),
-    name: z.string().max(200).optional(),
   }),
 );
 
@@ -119,7 +112,6 @@ export function topSites(
       best: BrowserHistoryEntry;
       root: BrowserHistoryEntry | null;
       favicon: string | null;
-      name: string | null;
     }
   >();
   for (const entry of history) {
@@ -135,17 +127,14 @@ export function topSites(
         best: entry,
         root: isRoot ? entry : null,
         favicon: entry.favicon ?? null,
-        name: entry.name ?? null,
       });
       continue;
     }
     site.score += score;
     if (entry.visits > site.best.visits) site.best = entry;
     if (isRoot && !site.root) site.root = entry;
-    // History is most-recent-first, so the first favicon and name seen are
-    // the newest.
+    // History is most-recent-first, so the first favicon seen is the newest.
     site.favicon ??= entry.favicon ?? null;
-    site.name ??= entry.name ?? null;
   }
 
   const ranked: { site: TopSite; score: number }[] = defaults.map((site) => {
@@ -155,16 +144,15 @@ export function topSites(
     return { site, score: DEFAULT_SITE_SCORE + (visited?.score ?? 0) };
   });
 
-  for (const [key, { score, best, root, favicon, name }] of sites) {
+  for (const [key, { score, best, root, favicon }] of sites) {
     const isNsite = best.url.startsWith('nsite://');
     ranked.push({
       site: isNsite
         ? {
-            // An nsite's host is key-derived gibberish; the name it was
-            // reached through, or its page title, says more. The tile follows
-            // the name when there is one, as typing it would.
-            label: name ?? ((root ?? best).title || key),
-            url: name ? `nsite://${name}/` : `nsite://${key}/`,
+            // An nsite's host is key-derived gibberish; its page title says
+            // more.
+            label: (root ?? best).title || key,
+            url: `nsite://${key}/`,
             icon: null,
             appIcon: true,
             nsiteHost: key,
@@ -189,38 +177,18 @@ export function bareUrl(url: string): string {
   return url.replace(/^(https|nsite):\/\/(www\.)?/i, '');
 }
 
-/** The path, query and fragment of a URL, verbatim (`/` when it has none). */
-function pathOf(url: string): string {
-  const rest = url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, '');
-  return rest || '/';
-}
-
-/**
- * Where a history entry takes you: an nsite reached through a name goes
- * through the name again (re-resolved, never trusted from history); anything
- * else goes to its URL.
- */
-export function historyEntryHref(entry: BrowserHistoryEntry): string {
-  return entry.name ? `nsite://${entry.name}${pathOf(entry.url)}` : entry.url;
-}
-
-/** An nsite entry's address by name, scheme-less (`soapbox.pub/about`). */
-function namedUrl(entry: BrowserHistoryEntry): string {
-  return entry.name ? `${entry.name}${pathOf(entry.url)}` : '';
-}
-
 /**
  * How a history entry's address is shown: scheme-less, except that an nsite
- * shown by name keeps `nsite://`, or it would read as the https site.
+ * keeps `nsite://`, so its key-derived host doesn't read as a web address.
  */
 export function historyDisplayUrl(entry: BrowserHistoryEntry): string {
-  return entry.name ? `nsite://${namedUrl(entry)}` : bareUrl(entry.url);
+  return entry.url.startsWith('nsite://') ? entry.url : bareUrl(entry.url);
 }
 
 /**
  * Rank history entries against address-bar input. Matches on the URL (scheme
- * ignored), an nsite's name, and the page title; URL- or name-prefix matches
- * rank highest, then any URL or name substring, then title substrings.
+ * ignored) and the page title; URL-prefix matches rank highest, then any URL
+ * substring, then title substrings.
  * Frequent and recent visits break ties.
  */
 export function matchHistory(
@@ -234,11 +202,10 @@ export function matchHistory(
   const scored: { entry: BrowserHistoryEntry; score: number }[] = [];
   for (const entry of history) {
     const url = bareUrl(entry.url).toLowerCase();
-    const named = namedUrl(entry).toLowerCase();
     const title = entry.title?.toLowerCase() ?? '';
     let score = 0;
-    if (url.startsWith(q) || (named && named.startsWith(q))) score = 3;
-    else if (url.includes(q) || named.includes(q)) score = 2;
+    if (url.startsWith(q)) score = 3;
+    else if (url.includes(q)) score = 2;
     else if (title.includes(q)) score = 1;
     if (score > 0) scored.push({ entry, score });
   }
@@ -256,16 +223,12 @@ export function matchHistory(
 /**
  * The forms of a history URL that address-bar typing may complete to, shortest
  * first: `www.` and a bare trailing slash are noise, so "https://www.reddit.com/"
- * offers "reddit.com" and "www.reddit.com". An nsite reached through a name
- * also offers the name, but only after a typed `nsite://`: without it,
- * "soapbox.pub" means the https site.
+ * offers "reddit.com" and "www.reddit.com".
  */
-function completionTargets(entry: BrowserHistoryEntry, nsiteScheme: boolean): string[] {
+function completionTargets(entry: BrowserHistoryEntry): string[] {
   const noScheme = entry.url.replace(/^(?:https?|nsite):\/\//i, '').replace(/\/$/, '');
   const bare = noScheme.replace(/^www\./i, '');
-  const targets = bare === noScheme ? [bare] : [bare, noScheme];
-  if (entry.name && nsiteScheme) targets.unshift(namedUrl(entry).replace(/\/$/, ''));
-  return targets;
+  return bare === noScheme ? [bare] : [bare, noScheme];
 }
 
 /**
@@ -295,7 +258,7 @@ export function inlineCompletion(
   for (const entry of history) {
     if (scheme && !entry.url.toLowerCase().startsWith(scheme.toLowerCase())) continue;
 
-    const targets = completionTargets(entry, scheme.toLowerCase() === 'nsite://');
+    const targets = completionTargets(entry);
     if (targets.some((t) => t.toLowerCase() === q)) return null;
 
     const target = targets.find(
@@ -336,36 +299,19 @@ export function useBrowserHistory() {
     historyRef.current = history;
   }, [history]);
 
-  /**
-   * Record a visit. For an nsite, `name` is the NIP-05 name Din resolved the
-   * canonical URL through, if any; a visit without one keeps the name the
-   * entry already has.
-   */
   const recordVisit = useCallback(
-    (url: string, name?: string | null) => {
+    (url: string) => {
       if (!isRecordable(url)) return;
       setHistory((prev) => {
         const existing = prev.find((e) => e.url === url);
-        const entryName = name || existing?.name;
         const entry: BrowserHistoryEntry = {
           url,
           title: existing?.title ?? null,
           favicon: existing?.favicon,
-          ...(entryName ? { name: entryName } : {}),
           visitedAt: Math.floor(Date.now() / 1000),
           visits: (existing?.visits ?? 0) + 1,
         };
-        const host = name ? siteKey(url) : null;
-        const rest = prev
-          .filter((e) => e.url !== url)
-          // A name now resolving to this site no longer names any other: the
-          // old key's entries stop answering to it.
-          .map((e) => {
-            if (!name || e.name !== name || siteKey(e.url) === host) return e;
-            const { name: _stale, ...unnamed } = e;
-            return unnamed;
-          });
-        return trimHistory([entry, ...rest]);
+        return trimHistory([entry, ...prev.filter((e) => e.url !== url)]);
       });
     },
     [setHistory],

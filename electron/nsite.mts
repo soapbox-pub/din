@@ -5,10 +5,9 @@
 //
 //   canonical  nsite://<npub1…>/<path>            root site   (kind 15128)
 //              nsite://<pubkeyB36><dtag>/<path>   named site  (kind 35128)
-//   alias      nsite://<domain>/[@<name>/]<site>/<path>
-//              nsite://<naddr1…>/<path>
+//   naddr      nsite://<naddr1…>/<path>
 //
-// Aliases never serve bytes: they resolve to a canonical URL and 302, so the
+// An naddr never serves bytes: it resolves to a canonical URL and 302s, so the
 // document a page runs in is always key-derived. That is what gives each site
 // its own Chromium origin (storage, cookies, service worker) and stops an SPA
 // from pushState-ing out of its own site.
@@ -167,8 +166,8 @@ const pendingResolutions = new Map<number, {
 const inFlight = new Map<string, Promise<Resolved>>();
 
 /**
- * Ask the shell renderer to resolve a URL: NIP-19 decoding, the NIP-05 lookup,
- * and the relay query all live there, where Nostrify, the user's relay list,
+ * Ask the shell renderer to resolve a URL: NIP-19 decoding and
+ * the relay query both live there, where Nostrify, the user's relay list,
  * and the query cache already are. This process deliberately has no Nostr
  * client of its own.
  */
@@ -338,7 +337,6 @@ function errorPage(status: number, title: string, detail: string, url: string): 
 function resolutionErrorPage(code: string, message: string, url: string): Response {
   const titles: Record<string, string> = {
     'bad-url': 'That nsite address is malformed',
-    'no-nip05': "That domain doesn't point to a Nostr key",
     'no-manifest': "This site isn't published yet",
     timeout: 'Relays took too long to answer',
     'bad-manifest': "This site's manifest isn't validly signed",
@@ -347,7 +345,7 @@ function resolutionErrorPage(code: string, message: string, url: string): Respon
   return errorPage(status, titles[code] ?? 'This nsite could not be loaded', message, url);
 }
 
-/** A no-store redirect. Aliases must never be cached into a stale pubkey. */
+/** A no-store redirect, so a redirect is never served from a cache. */
 function redirectTo(url: string): Response {
   return new Response(null, {
     status: 302,
@@ -478,7 +476,7 @@ async function handleRequest(request: Request, persist: boolean): Promise<Respon
   }
   const head = request.method === 'HEAD';
 
-  // Resolve the host to a manifest, or bounce an alias to its canonical URL.
+  // Resolve the host to a manifest, or bounce an naddr to its canonical URL.
   // A stored site is served straight away and checked in the background.
   await nsiteStoreReady();
   const canonical = isCanonical(host);

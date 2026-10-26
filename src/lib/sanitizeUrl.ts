@@ -31,9 +31,9 @@ export function sanitizeUrl(input: string): string | null {
 
 /**
  * Sanitize an installed app's URL: https, or an nsite on its canonical,
- * key-derived host. An nsite alias (`nsite://soapbox.pub/`) never qualifies:
- * the name could be repointed at another key, and the app's storage and
- * Nostr connection belong to the key it was installed from.
+ * key-derived host. An `naddr` never qualifies: it is only ever redirected to
+ * the canonical host, and the app's storage and Nostr connection belong to
+ * that origin.
  */
 export function sanitizeAppUrl(input: string): string | null {
   const https = sanitizeUrl(input);
@@ -180,10 +180,8 @@ export function resolveNavigation(input: string): string | null {
     return inner ? viewSourceUrl(inner) : null;
   }
 
-  // nsite addresses first, so `nsite://soapbox.pub/armada` isn't mistaken for
-  // a search term. This also accepts the `name@domain` spelling and rewrites
-  // it into the path form the protocol handler can actually see — Chromium
-  // strips URL credentials before a request ever reaches it.
+  // nsite addresses first, so a bare `npub1…` or `naddr1…` isn't mistaken for
+  // a search term.
   const nsite = normalizeNsiteInput(trimmed);
   if (nsite) return nsite;
 
