@@ -19,6 +19,8 @@ export interface ImageEntry {
   height: number;
   /** The file it was read from, for linked graphics. */
   path: string | null;
+  /** The picture's bytes when it's a JPEG, for a PDF to embed as it is. */
+  jpeg: Uint8Array | null;
 }
 
 /** A link's URI as a path on this computer. */
@@ -70,6 +72,7 @@ export async function decodeBytes(b: Uint8Array): Promise<ImageBitmap> {
 
 export class ImageStore {
   private entries = new Map<string, ImageEntry>();
+  private loading = new Set<Promise<void>>();
   constructor(
     private onChange: () => void,
     /** InDesign's previews by graphic Self, from an INDD. */
@@ -82,10 +85,16 @@ export class ImageStore {
     const key = `${self}\u0000${link ?? ''}`;
     const hit = this.entries.get(key);
     if (hit) return hit;
-    const entry: ImageEntry = { state: 'loading', source: 'missing', image: null, width: 0, height: 0, path: null };
+    const entry: ImageEntry = { state: 'loading', source: 'missing', image: null, width: 0, height: 0, path: null, jpeg: null };
     this.entries.set(key, entry);
-    void this.load(entry, self, el, link);
+    const p = this.load(entry, self, el, link).finally(() => this.loading.delete(p));
+    this.loading.add(p);
     return entry;
+  }
+
+  /** Resolves once every picture asked for so far has loaded (or failed to). */
+  async settled() {
+    while (this.loading.size) await Promise.all([...this.loading]);
   }
 
   peek(self: string, link: string | null): ImageEntry | undefined {
@@ -93,8 +102,9 @@ export class ImageStore {
   }
 
   private async load(entry: ImageEntry, self: string, el: Element | null, link: string | null) {
-    const done = (bmp: ImageBitmap | null, source: ImageSource, path: string | null = null) => {
+    const done = (bmp: ImageBitmap | null, source: ImageSource, path: string | null = null, bytes?: Uint8Array) => {
       entry.image = bmp;
+      entry.jpeg = bytes && sniff(bytes) === 'jpeg' ? bytes : null;
       entry.width = bmp?.width ?? 0;
       entry.height = bmp?.height ?? 0;
       entry.source = source;
@@ -106,7 +116,8 @@ export class ImageStore {
     const contents = el ? propEl(el, 'Contents') : null;
     if (contents?.textContent) {
       try {
-        done(await decodeBytes(fromBase64(contents.textContent)), 'embedded');
+        const bytes = fromBase64(contents.textContent);
+        done(await decodeBytes(bytes), 'embedded', null, bytes);
         return;
       } catch {
         // Fall through to the preview.
@@ -122,7 +133,7 @@ export class ImageStore {
         try {
           const r = await fs.readFile(t, 256 * 1024 * 1024);
           if (r.truncated) continue;
-          done(await decodeBytes(r.data), 'linked', t);
+          done(await decodeBytes(r.data), 'linked', t, r.data);
           return;
         } catch {
           // Try the next place.
@@ -132,7 +143,7 @@ export class ImageStore {
     const prev = this.previews.get(self);
     if (prev) {
       try {
-        done(await decodeBytes(prev), 'preview');
+        done(await decodeBytes(prev), 'preview', null, prev);
         return;
       } catch {
         // No picture then.

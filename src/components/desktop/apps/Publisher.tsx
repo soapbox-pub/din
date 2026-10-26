@@ -40,6 +40,7 @@ import { ImageStore, linkPath } from './publisher/images';
 import { PublisherMenus, type Commands, type MenuState } from './publisher/menus';
 import { buildModel, itemBounds, pageAt, spreadAtY, walkItems, type Item, type Model, type Page, type Spread } from './publisher/model';
 import { newDocument, type NewDocSettings } from './publisher/newdoc';
+import { writePublisherPdf } from './publisher/pdf';
 import * as ops from './publisher/ops';
 import { CharacterPanel, ColorPanel, LayersPanel, LinksPanel, PagesPanel, ParagraphPanel, StrokePanel, StylesPanel, SwatchesPanel, WrapPanel, type LinkRow } from './publisher/panels';
 import { drawOverlay, drawScene, HANDLES, handlePoints, portPoints, spreadToScreen, type Overlay, type SceneOptions, type View } from './publisher/render';
@@ -56,6 +57,7 @@ const MAX_BYTES = 1024 * 1024 * 1024;
 const MAX_HISTORY = 200;
 const OPEN_EXTENSIONS = ['.indd', '.indt', '.idml', '.pub'];
 const IDML_FILTER = { name: 'InDesign Markup (IDML)', patterns: ['*.idml'], mimeTypes: ['application/vnd.adobe.indesign-idml-package'] };
+const PDF_FILTER = { name: 'PDF', patterns: ['*.pdf'], mimeTypes: ['application/pdf'] };
 const PLACE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.svg'];
 const RULER = 16;
 
@@ -943,6 +945,51 @@ export function Publisher({ windowId, params }: AppComponentProps) {
       if (!blob) throw new Error('The page couldn’t be drawn.');
       await fs.writeFile(out, new Uint8Array(await blob.arrayBuffer()));
       setStatus(`Exported page ${t.page.name} to ${basename(out)}`);
+      void invalidateListings(queryClient, out);
+    } catch (err) {
+      setStatus(`Couldn’t export: ${err instanceof Error ? err.message : cleanFsError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    const m = modelRef.current;
+    const images = imagesRef.current;
+    if (!m || !fs || !images) return;
+    const stem = docName.replace(/\.[^.]*$/, '');
+    const result = await pickFiles({ mode: 'save', title: 'Export', currentName: `${stem}.pdf`, initialPath: path ? parentPath(path) : undefined, filters: [PDF_FILTER] });
+    if (!result) return;
+    let out = result.paths[0];
+    if (!/\.pdf$/i.test(out)) out += '.pdf';
+    setBusy(true);
+    setStatus('Exporting…');
+    try {
+      // Every story's fonts loaded (for the characters it has) before anything is measured for the PDF.
+      const wanted = new Map<string, Set<string>>();
+      for (const story of m.threads.keys()) {
+        const comp = storiesRef.current.comp(m, story, null);
+        if (!comp) continue;
+        const gather = (c: Composition) => {
+          for (const l of c.lines) {
+            for (const p of l.pieces) {
+              if (p.table) for (const cell of p.table.cells) gather(cell.comp);
+              else if (p.text) {
+                const set = wanted.get(p.look.font) ?? new Set<string>();
+                for (const ch of p.text) set.add(ch);
+                wanted.set(p.look.font, set);
+              }
+            }
+          }
+        };
+        gather(comp);
+      }
+      await Promise.all([...wanted].map(([f, chars]) => document.fonts.load(f.replace(' 100px ', ' 16px '), [...chars].join('') || ' ').catch(() => [])));
+      resetMeasures();
+      storiesRef.current.clear();
+      const { bytes, notes } = await writePublisherPdf({ model: m, images, text: textSource, title: stem });
+      await fs.writeFile(out, bytes);
+      setStatus(`Exported ${basename(out)}${notes.length ? ` (${notes.join(' ')})` : ''}`);
       void invalidateListings(queryClient, out);
     } catch (err) {
       setStatus(`Couldn’t export: ${err instanceof Error ? err.message : cleanFsError(err)}`);
@@ -2520,7 +2567,8 @@ export function Publisher({ windowId, params }: AppComponentProps) {
     save: () => void save(),
     saveAs: () => void saveAs(),
     exportPng: () => void exportPng(),
-    exportPdf: () => void printPdf(),
+    exportPdf: () => void exportPdf(),
+    print: () => void printPdf(),
     documentSetup: () => setDialog({ kind: 'setup' }),
     undo: () => hist && hist.index > 0 && jump(hist.index - 1),
     redo: () => hist && hist.index < hist.entries.length - 1 && jump(hist.index + 1),
@@ -2766,7 +2814,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
         '3': alt ? cmd.showAll : cmd.hide,
         b: cmd.textFrameOptions,
         t: alt ? () => cmd.togglePanel('paragraph') : () => cmd.togglePanel('character'),
-        p: shift ? cmd.addPage : alt ? cmd.documentSetup : cmd.exportPdf,
+        p: shift ? cmd.addPage : alt ? cmd.documentSetup : cmd.print,
         h: cmd.toggleFrameEdges,
         r: cmd.toggleRulers,
         i: alt ? cmd.toggleHidden : undefined,

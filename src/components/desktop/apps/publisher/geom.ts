@@ -190,7 +190,10 @@ export function pathBounds(paths: SubPath[]): Rect {
 }
 
 /** Adds the paths to a canvas path (already transformed by the context). */
-export function tracePath(c: CanvasRenderingContext2D | Path2D, paths: SubPath[]) {
+/** What paths are traced into: a Path2D or a canvas, or anything else that takes the same calls. */
+export type PathSink = Pick<Path2D, 'moveTo' | 'lineTo' | 'bezierCurveTo' | 'closePath' | 'arc' | 'roundRect'>;
+
+export function tracePath(c: PathSink, paths: SubPath[]) {
   for (const sp of paths) {
     const pts = sp.points;
     if (!pts.length) continue;

@@ -1,6 +1,6 @@
 import { css, resolveColor, type RGB, type Swatches } from './colors';
 import { caretX as caretXOf, lineAt, selectionRects, type Composition, type Line, type Look, type TableLayout } from './compose';
-import { apply, mul, rectCorners, tracePath, type Mat, type Pt, type Rect } from './geom';
+import { apply, mul, rectCorners, tracePath, type Mat, type PathSink, type Pt, type Rect } from './geom';
 import type { ImageStore } from './images';
 import { masterPageFor, masterToPage, type Item, type LayerInfo, type Model, type Page, type Spread } from './model';
 
@@ -52,7 +52,7 @@ export interface SceneOptions {
   partEls: (part: string) => XMLDocument | undefined;
 }
 
-const BLENDS: Record<string, GlobalCompositeOperation> = {
+export const BLENDS: Record<string, GlobalCompositeOperation> = {
   Multiply: 'multiply',
   Screen: 'screen',
   Overlay: 'overlay',
@@ -139,7 +139,7 @@ function drawSpread(c: CanvasRenderingContext2D, o: SceneOptions, s: Spread, bas
   if (!o.preview) drawGuides(c, o, s, base);
 }
 
-function pageOfItem(s: Spread, it: Item): Page | null {
+export function pageOfItem(s: Spread, it: Item): Page | null {
   if (s.pages.length === 1) return s.pages[0];
   const p = apply(it.m, { x: it.box.x + it.box.w / 2, y: it.box.y + it.box.h / 2 });
   let best: Page | null = null;
@@ -214,53 +214,76 @@ function paint(sw: Swatches, ref: string | null, tint: number): string | null {
   return rgb ? css(rgb) : null;
 }
 
-function gradientFor(c: CanvasRenderingContext2D, sw: Swatches, it: Item, ref: string | null): CanvasGradient | null {
+/** A gradient swatch's ramp as an item paints it, in the item's coordinates. */
+export interface GradientSpec {
+  type: 'Linear' | 'Radial';
+  /** Linear: from (x0, y0) to (x1, y1). Radial: centered on (x0, y0), radius r. */
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  r: number;
+  /** Offsets 0-1, midpoints included as stops of their own. */
+  stops: { at: number; rgb: RGB }[];
+}
+
+/** The gradient an item paints with a swatch; null when the swatch isn't a gradient. */
+export function gradientSpec(sw: Swatches, it: Item, ref: string | null): GradientSpec | null {
   const s = ref ? sw.bySelf.get(ref) : null;
   if (!s || s.kind !== 'gradient' || !s.gradient) return null;
   const b = it.box;
-  let g: CanvasGradient;
+  let x0: number;
+  let y0: number;
+  let x1 = 0;
+  let y1 = 0;
+  let r = 0;
   if (s.gradient.type === 'Radial') {
-    const cx = it.gradFill ? it.gradFill.start.x : b.x + b.w / 2;
-    const cy = it.gradFill ? it.gradFill.start.y : b.y + b.h / 2;
-    const r = it.gradFill ? it.gradFill.length : Math.hypot(b.w, b.h) / 2;
-    g = c.createRadialGradient(cx, cy, 0, cx, cy, Math.max(0.1, r));
+    x0 = it.gradFill ? it.gradFill.start.x : b.x + b.w / 2;
+    y0 = it.gradFill ? it.gradFill.start.y : b.y + b.h / 2;
+    r = Math.max(0.1, it.gradFill ? it.gradFill.length : Math.hypot(b.w, b.h) / 2);
+  } else if (it.gradFill) {
+    const a = (-it.gradFill.angle * Math.PI) / 180;
+    x0 = it.gradFill.start.x;
+    y0 = it.gradFill.start.y;
+    x1 = x0 + Math.cos(a) * it.gradFill.length;
+    y1 = y0 + Math.sin(a) * it.gradFill.length;
   } else {
-    let x0: number;
-    let y0: number;
-    let x1: number;
-    let y1: number;
-    if (it.gradFill) {
-      const a = (-it.gradFill.angle * Math.PI) / 180;
-      x0 = it.gradFill.start.x;
-      y0 = it.gradFill.start.y;
-      x1 = x0 + Math.cos(a) * it.gradFill.length;
-      y1 = y0 + Math.sin(a) * it.gradFill.length;
-    } else {
-      x0 = b.x;
-      y0 = b.y + b.h / 2;
-      x1 = b.x + b.w;
-      y1 = y0;
-    }
-    g = c.createLinearGradient(x0, y0, x1, y1);
+    x0 = b.x;
+    y0 = b.y + b.h / 2;
+    x1 = b.x + b.w;
+    y1 = y0;
   }
-  const stops = s.gradient.stops;
-  for (let i = 0; i < stops.length; i++) {
-    const st = stops[i];
-    g.addColorStop(Math.min(1, Math.max(0, st.location / 100)), css(st.rgb));
-    const next = stops[i + 1];
+  const stops: GradientSpec['stops'] = [];
+  const src = s.gradient.stops;
+  for (let i = 0; i < src.length; i++) {
+    const st = src[i];
+    stops.push({ at: Math.min(1, Math.max(0, st.location / 100)), rgb: st.rgb });
+    const next = src[i + 1];
     if (next && Math.abs(st.midpoint - 50) > 1) {
       // The midpoint: where the two colors are half and half.
       const at = st.location + ((next.location - st.location) * st.midpoint) / 100;
       const mix: RGB = [0, 1, 2].map((k) => Math.round((st.rgb[k] + next.rgb[k]) / 2)) as RGB;
-      g.addColorStop(Math.min(1, Math.max(0, at / 100)), css(mix));
+      stops.push({ at: Math.min(1, Math.max(0, at / 100)), rgb: mix });
     }
   }
+  return { type: s.gradient.type, x0, y0, x1, y1, r, stops };
+}
+
+function gradientFor(c: CanvasRenderingContext2D, sw: Swatches, it: Item, ref: string | null): CanvasGradient | null {
+  const spec = gradientSpec(sw, it, ref);
+  if (!spec) return null;
+  const g = spec.type === 'Radial' ? c.createRadialGradient(spec.x0, spec.y0, 0, spec.x0, spec.y0, spec.r) : c.createLinearGradient(spec.x0, spec.y0, spec.x1, spec.y1);
+  for (const st of spec.stops) g.addColorStop(st.at, css(st.rgb));
   return g;
 }
 
 /** The outline, with InDesign's corner options where the frame is a plain rectangle. */
 export function outlinePath(it: Item): Path2D {
-  const p = new Path2D();
+  return traceOutline(new Path2D(), it);
+}
+
+/** Traces an item's outline into a path (a Path2D, or anything that takes the same calls). */
+export function traceOutline<P extends PathSink>(p: P, it: Item): P {
   const r = it.cornerRadius;
   const opt = it.cornerOption;
   const rectish = it.paths.length === 1 && it.paths[0].points.length === 4 && !it.paths[0].open && opt !== 'None' && r > 0 && it.kind !== 'line';
@@ -310,7 +333,7 @@ export function outlinePath(it: Item): Path2D {
   return p;
 }
 
-function dashFor(type: string, w: number): number[] {
+export function dashFor(type: string, w: number): number[] {
   const t = type.replace(/^StrokeStyle\/(\$ID\/)?/, '');
   if (/dotted|dots/i.test(t)) return [0.001, Math.max(w * 2, 0.5)];
   if (/3x2/.test(t)) return [w * 3, w * 2];
@@ -465,7 +488,7 @@ function drawGraphic(c: CanvasRenderingContext2D, o: SceneOptions, it: Item, m: 
 }
 
 const elCache = new WeakMap<XMLDocument, Map<string, Element>>();
-function findEl(doc: XMLDocument, self: string): Element | null {
+export function findEl(doc: XMLDocument, self: string): Element | null {
   let m = elCache.get(doc);
   if (!m) {
     m = new Map();

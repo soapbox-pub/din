@@ -58,7 +58,7 @@ class Reader {
 
 // ---- TrueType / OpenType -------------------------------------------------------------------
 
-function sfntTables(b: Uint8Array): Map<string, Uint8Array> {
+export function sfntTables(b: Uint8Array): Map<string, Uint8Array> {
   const r = new Reader(b);
   const tables = new Map<string, Uint8Array>();
   let base = 0;
@@ -80,7 +80,7 @@ function sfntTables(b: Uint8Array): Map<string, Uint8Array> {
   return tables;
 }
 
-function readCmaps(t: Uint8Array | undefined): Map<string, Map<number, number>> {
+export function readCmaps(t: Uint8Array | undefined): Map<string, Map<number, number>> {
   const out = new Map<string, Map<number, number>>();
   if (!t) return out;
   const r = new Reader(t);

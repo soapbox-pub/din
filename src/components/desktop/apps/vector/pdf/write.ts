@@ -1,4 +1,3 @@
-import { zlibSync } from 'fflate';
 import { visualBounds } from '../geom';
 import {
   intersects,
@@ -11,7 +10,6 @@ import {
   type ImageItem,
   type Item,
   type Layer,
-  type Mat,
   type Paint,
   type PathItem,
   type Stroke,
@@ -22,7 +20,8 @@ import {
 import { cssAdvanceOf, embeddedFor, layoutText, type LaidGlyph } from '../text';
 import { toRgb, type Color } from './color';
 import { winAnsiCode } from './encodings';
-import { PdfDoc, PdfName, PdfRef, PdfStream, type PdfDict, type PdfValue } from './objects';
+import { PdfRef, type PdfDict, type PdfValue } from './objects';
+import { fmt, hexString, imageXObject, matOps, N, PdfContent, pdfDate, pdfText, PdfWriter, splitRgba } from './writer';
 
 /**
  * Write a document as a PDF — which is also what a PDF-compatible
@@ -33,155 +32,6 @@ import { PdfDoc, PdfName, PdfRef, PdfStream, type PdfDict, type PdfValue } from 
  * as layers here and show as layers in Acrobat.
  */
 
-class Obj {
-  constructor(public value: PdfValue | (() => PdfValue)) {}
-}
-
-const fmt = (n: number) => {
-  if (!Number.isFinite(n)) return '0';
-  const r = Math.round(n * 10000) / 10000;
-  return Object.is(r, -0) ? '0' : String(r);
-};
-
-const NAME_SAFE = /^[A-Za-z0-9_.+\-:*]$/;
-function nameStr(n: string): string {
-  let s = '/';
-  for (const ch of new TextEncoder().encode(n)) {
-    const c = String.fromCharCode(ch);
-    s += ch > 32 && ch < 127 && NAME_SAFE.test(c) ? c : `#${ch.toString(16).padStart(2, '0')}`;
-  }
-  return s;
-}
-
-function strBytes(b: Uint8Array): string {
-  let s = '<';
-  for (const x of b) s += x.toString(16).padStart(2, '0');
-  return s + '>';
-}
-
-/** A text string, UTF-16 when it isn't plain ASCII. */
-export function pdfText(s: string): Uint8Array {
-  if (/^[\x20-\x7e]*$/.test(s)) return new TextEncoder().encode(s);
-  const out = new Uint8Array(2 + s.length * 2);
-  out[0] = 0xfe;
-  out[1] = 0xff;
-  for (let i = 0; i < s.length; i++) {
-    out[2 + i * 2] = s.charCodeAt(i) >> 8;
-    out[3 + i * 2] = s.charCodeAt(i) & 255;
-  }
-  return out;
-}
-
-class Writer {
-  objs: Obj[] = [];
-  private imported = new Map<PdfDoc, Map<string, PdfRef>>();
-
-  add(v: PdfValue | (() => PdfValue)): PdfRef {
-    this.objs.push(new Obj(v));
-    return new PdfRef(this.objs.length, 0);
-  }
-
-  set(ref: PdfRef, v: PdfValue) {
-    this.objs[ref.num - 1].value = v;
-  }
-
-  stream(dict: PdfDict, data: Uint8Array, compress = true): PdfRef {
-    if (compress && data.length > 64) {
-      const z = zlibSync(data, { level: 6 });
-      const d = new Map(dict);
-      d.set('Filter', new PdfName('FlateDecode'));
-      return this.add(new PdfStream(d, z));
-    }
-    return this.add(new PdfStream(dict, data));
-  }
-
-  /** Copy an object (and everything it refers to) from another PDF. */
-  import(src: PdfDoc, v: PdfValue): PdfValue {
-    let map = this.imported.get(src);
-    if (!map) this.imported.set(src, (map = new Map()));
-    const walk = (x: PdfValue): PdfValue => {
-      if (x instanceof PdfRef) {
-        const hit = map!.get(x.key);
-        if (hit) return hit;
-        const ref = this.add(null);
-        map!.set(x.key, ref);
-        this.set(ref, walk(src.get(x.num)));
-        return ref;
-      }
-      if (Array.isArray(x)) return x.map(walk);
-      if (x instanceof PdfStream) {
-        const d: PdfDict = new Map();
-        for (const [k, val] of x.dict) if (k !== 'Length') d.set(k, walk(val));
-        return new PdfStream(d, x.raw);
-      }
-      if (x instanceof Map) {
-        const d: PdfDict = new Map();
-        for (const [k, val] of x) d.set(k, walk(val));
-        return d;
-      }
-      return x;
-    };
-    return walk(v);
-  }
-
-  serialize(v: PdfValue): string | Uint8Array[] {
-    if (v === null) return 'null';
-    if (typeof v === 'boolean') return v ? 'true' : 'false';
-    if (typeof v === 'number') return fmt(v);
-    if (typeof v === 'string') return strBytes(new TextEncoder().encode(v));
-    if (v instanceof Uint8Array) return strBytes(v);
-    if (v instanceof PdfName) return nameStr(v.name);
-    if (v instanceof PdfRef) return `${v.num} 0 R`;
-    if (Array.isArray(v)) return `[${v.map((x) => this.serialize(x)).join(' ')}]`;
-    if (v instanceof Map) return `<<${[...v].map(([k, x]) => `${nameStr(k)} ${this.serialize(x)}`).join(' ')}>>`;
-    return 'null';
-  }
-
-  bytes(trailer: PdfDict): Uint8Array {
-    const enc = new TextEncoder();
-    const chunks: Uint8Array[] = [];
-    let len = 0;
-    const push = (b: Uint8Array | string) => {
-      const u = typeof b === 'string' ? enc.encode(b) : b;
-      chunks.push(u);
-      len += u.length;
-    };
-    push('%PDF-1.7\n');
-    push(new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));
-    const offsets: number[] = [];
-    this.objs.forEach((o, i) => {
-      offsets.push(len);
-      let v = o.value;
-      if (typeof v === 'function') v = v();
-      push(`${i + 1} 0 obj\n`);
-      if (v instanceof PdfStream) {
-        const d = new Map(v.dict);
-        d.set('Length', v.raw.length);
-        push(this.serialize(d) as string);
-        push('\nstream\n');
-        push(v.raw);
-        push('\nendstream');
-      } else push(this.serialize(v as PdfValue) as string);
-      push('\nendobj\n');
-    });
-    const xref = len;
-    let x = `xref\n0 ${this.objs.length + 1}\n0000000000 65535 f \n`;
-    for (const off of offsets) x += `${String(off).padStart(10, '0')} 00000 n \n`;
-    push(x);
-    const t = new Map(trailer);
-    t.set('Size', this.objs.length + 1);
-    push(`trailer\n${this.serialize(t)}\nstartxref\n${xref}\n%%EOF\n`);
-    const out = new Uint8Array(len);
-    let o = 0;
-    for (const c of chunks) {
-      out.set(c, o);
-      o += c.length;
-    }
-    return out;
-  }
-}
-
-const N = (n: string) => new PdfName(n);
 
 // ---- Fonts for type the file's fonts can't set -----------------------------------------------
 
@@ -202,47 +52,17 @@ interface WriteFont {
 
 // ---- Page content -----------------------------------------------------------------------------
 
-class Page {
-  ops: string[] = [];
-  res = {
-    ExtGState: new Map<string, PdfValue>(),
-    Shading: new Map<string, PdfValue>(),
-    XObject: new Map<string, PdfValue>(),
-    Font: new Map<string, PdfValue>(),
-    ColorSpace: new Map<string, PdfValue>(),
-    Properties: new Map<string, PdfValue>(),
-  };
-  private gsKeys = new Map<string, string>();
+class Page extends PdfContent {
   constructor(
-    readonly w: Writer,
+    w: PdfWriter,
     readonly ctx: WriteContext,
-  ) {}
-
-  op(s: string) {
-    this.ops.push(s);
+  ) {
+    super(w);
   }
 
-  gstate(fill: number, stroke: number, blend: string): string {
-    const key = `${fill}/${stroke}/${blend}`;
-    let n = this.gsKeys.get(key);
-    if (!n) {
-      n = `GS${this.gsKeys.size}`;
-      this.gsKeys.set(key, n);
-      const d: PdfDict = new Map<string, PdfValue>([
-        ['Type', N('ExtGState')],
-        ['CA', stroke],
-        ['ca', fill],
-        ['BM', N(BLEND_NAMES[blend] ?? 'Normal')],
-      ]);
-      this.res.ExtGState.set(n, this.w.add(d));
-    }
-    return n;
-  }
-
-  resourceDict(): PdfDict {
-    const d: PdfDict = new Map();
-    for (const [k, m] of Object.entries(this.res)) if (m.size) d.set(k, new Map(m));
-    return d;
+  /** A graphics state for an item's opacity and (CSS) blend mode. */
+  blendState(opacity: number, blend: string): string {
+    return this.gstate(opacity, opacity, BLEND_NAMES[blend] ?? 'Normal');
   }
 }
 
@@ -254,38 +74,14 @@ const BLEND_NAMES: Record<string, string> = {
 
 interface WriteContext {
   doc: Doc;
-  w: Writer;
+  w: PdfWriter;
   images: Map<string, PdfRef>;
   fonts: Map<string, WriteFont>;
-  spots: Map<string, PdfRef>;
   notes: Set<string>;
 }
 
 function colorOps(page: Page, c: Color, stroke: boolean): string {
-  if (c.spot && c.tint !== undefined && c.spotFull) {
-    const key = `${c.spot}/${c.space}/${c.spotFull.join(',')}`;
-    let ref = page.ctx.spots.get(key);
-    if (!ref) {
-      const alt = c.space === 'cmyk' ? 'DeviceCMYK' : c.space === 'gray' ? 'DeviceGray' : 'DeviceRGB';
-      const zeros = c.space === 'gray' ? [1] : c.space === 'rgb' ? [1, 1, 1] : [0, 0, 0, 0];
-      const fn: PdfDict = new Map<string, PdfValue>([
-        ['FunctionType', 2],
-        ['Domain', [0, 1]],
-        ['C0', zeros],
-        ['C1', c.spotFull],
-        ['N', 1],
-      ]);
-      ref = page.w.add([N('Separation'), N(c.spot), N(alt), fn]);
-      page.ctx.spots.set(key, ref);
-    }
-    const name = `CS${[...page.ctx.spots.keys()].indexOf(key)}`;
-    page.res.ColorSpace.set(name, ref);
-    return `/${name} ${stroke ? 'CS' : 'cs'} ${fmt(c.tint)} ${stroke ? 'SCN' : 'scn'}`;
-  }
-  const v = c.c.map(fmt).join(' ');
-  if (c.space === 'gray') return `${v} ${stroke ? 'G' : 'g'}`;
-  if (c.space === 'cmyk') return `${v} ${stroke ? 'K' : 'k'}`;
-  return `${v} ${stroke ? 'RG' : 'rg'}`;
+  return page.color(c, stroke);
 }
 
 function pathOps(paths: SubPath[]): string {
@@ -361,8 +157,6 @@ function shading(page: Page, g: Gradient): string {
   return name;
 }
 
-const matOps = (m: Mat) => `${m.map(fmt).join(' ')} cm`;
-
 function paintOps(page: Page, paint: Paint, stroke: boolean): string | null {
   if (paint.type === 'color') return colorOps(page, paint.color, stroke);
   if (paint.type === 'gradient') {
@@ -383,7 +177,7 @@ function writePath(page: Page, it: PathItem) {
   const stroke = it.stroke.paint.type !== 'none' && it.stroke.width > 0;
   if (!fill && !stroke) return;
   page.op('q');
-  if (it.opacity < 1 || it.blend !== 'normal') page.op(`/${page.gstate(it.opacity, it.opacity, it.blend)} gs`);
+  if (it.opacity < 1 || it.blend !== 'normal') page.op(`/${page.blendState(it.opacity, it.blend)} gs`);
   const geometry = pathOps(it.paths);
   if (it.fill.type === 'gradient') {
     const sh = shading(page, it.fill.gradient);
@@ -402,74 +196,27 @@ function writePath(page: Page, it: PathItem) {
 
 function writeImage(page: Page, it: ImageItem) {
   const ctx = page.ctx;
-  let ref = ctx.images.get(it.image);
+  let ref: PdfRef | null | undefined = ctx.images.get(it.image);
   const img = ctx.doc.res.images.get(it.image);
   if (!img) return;
   if (!ref) {
-    const d: PdfDict = new Map<string, PdfValue>([
-      ['Type', N('XObject')],
-      ['Subtype', N('Image')],
-      ['Width', img.width],
-      ['Height', img.height],
-      ['BitsPerComponent', 8],
-    ]);
-    if (img.alpha) {
-      const sm: PdfDict = new Map<string, PdfValue>([
-        ['Type', N('XObject')],
-        ['Subtype', N('Image')],
-        ['Width', img.width],
-        ['Height', img.height],
-        ['BitsPerComponent', 8],
-        ['ColorSpace', N('DeviceGray')],
-      ]);
-      d.set('SMask', page.w.stream(sm, img.alpha));
-    }
-    if (img.jpeg) {
-      const comps = img.jpegComponents ?? 3;
-      d.set('ColorSpace', N(comps === 4 ? 'DeviceCMYK' : comps === 1 ? 'DeviceGray' : 'DeviceRGB'));
-      d.set('Filter', N('DCTDecode'));
-      if (img.jpegDecode) d.set('Decode', img.jpegDecode);
-      ref = page.w.add(new PdfStream(d, img.jpeg));
-    } else if (img.rgb) {
-      d.set('ColorSpace', N(img.gray ? 'DeviceGray' : 'DeviceRGB'));
-      ref = page.w.stream(d, img.rgb);
-    } else if (img.bitmap) {
+    if (img.jpeg || img.rgb) ref = imageXObject(page.w, img);
+    else if (img.bitmap) {
       const c = document.createElement('canvas');
       c.width = img.width;
       c.height = img.height;
       const cx = c.getContext('2d')!;
       cx.drawImage(img.bitmap, 0, 0);
-      const px = cx.getImageData(0, 0, img.width, img.height).data;
-      const rgb = new Uint8Array(img.width * img.height * 3);
-      const a = new Uint8Array(img.width * img.height);
-      let anyAlpha = false;
-      for (let i = 0; i < img.width * img.height; i++) {
-        rgb[i * 3] = px[i * 4];
-        rgb[i * 3 + 1] = px[i * 4 + 1];
-        rgb[i * 3 + 2] = px[i * 4 + 2];
-        a[i] = px[i * 4 + 3];
-        if (a[i] < 255) anyAlpha = true;
-      }
-      d.set('ColorSpace', N('DeviceRGB'));
-      if (anyAlpha && !img.alpha) {
-        const sm: PdfDict = new Map<string, PdfValue>([
-          ['Type', N('XObject')],
-          ['Subtype', N('Image')],
-          ['Width', img.width],
-          ['Height', img.height],
-          ['BitsPerComponent', 8],
-          ['ColorSpace', N('DeviceGray')],
-        ]);
-        d.set('SMask', page.w.stream(sm, a));
-      }
-      ref = page.w.stream(d, rgb);
-    } else return;
+      const px = splitRgba(cx.getImageData(0, 0, img.width, img.height).data, img.width * img.height);
+      ref = imageXObject(page.w, { width: img.width, height: img.height, rgb: px.rgb, alpha: img.alpha ?? px.alpha });
+    } else ref = imageXObject(page.w, img);
+    if (!ref) return;
     ctx.images.set(it.image, ref);
   }
   const name = `Im${[...ctx.images.keys()].indexOf(it.image)}`;
   page.res.XObject.set(name, ref);
   page.op('q');
-  if (it.opacity < 1 || it.blend !== 'normal') page.op(`/${page.gstate(it.opacity, it.opacity, it.blend)} gs`);
+  if (it.opacity < 1 || it.blend !== 'normal') page.op(`/${page.blendState(it.opacity, it.blend)} gs`);
   page.op(matOps(mul([1, 0, 0, -1, 0, 1], it.matrix)));
   page.op(`/${name} Do\nQ`);
 }
@@ -559,7 +306,7 @@ function writeText(page: Page, it: TextItem) {
   const layout = layoutText(it, res);
   const placedFont = it.placed && it.placed.text === it.runs.map((r) => r.text).join('') ? res.fonts.get(it.placed.font) : null;
   page.op('q');
-  if (it.opacity < 1 || it.blend !== 'normal') page.op(`/${page.gstate(it.opacity, it.opacity, it.blend)} gs`);
+  if (it.opacity < 1 || it.blend !== 'normal') page.op(`/${page.blendState(it.opacity, it.blend)} gs`);
   for (const line of layout.lines) {
     // Runs of glyphs set in one font and style.
     let seg: { font: WriteFont; run: TextRun; hs: number; glyphs: { g: LaidGlyph; code: number; bytes: number }[] } | null = null;
@@ -583,14 +330,14 @@ function writeText(page: Page, it: TextItem) {
       for (const { g, code, bytes: nb } of glyphs) {
         const adj = ((g.x - x) * 1000) / (run.size * hs);
         if (Math.abs(adj) > 0.5) {
-          if (bytes.length) parts.push(strBytes(Uint8Array.from(bytes)));
+          if (bytes.length) parts.push(hexString(Uint8Array.from(bytes)));
           bytes = [];
           parts.push(fmt(-adj));
         }
         bytes.push(...codeBytes(code, nb));
         x = g.x + (font.width(code) / 1000) * run.size * hs;
       }
-      if (bytes.length) parts.push(strBytes(Uint8Array.from(bytes)));
+      if (bytes.length) parts.push(hexString(Uint8Array.from(bytes)));
       page.op(`[${parts.join(' ')}] TJ\nET`);
       seg = null;
     };
@@ -653,7 +400,7 @@ function writeGroup(page: Page, it: GroupItem) {
     const ref = page.w.stream(form, new TextEncoder().encode(sub.ops.join('\n')));
     const name = `Fm${page.res.XObject.size}`;
     page.res.XObject.set(name, ref);
-    page.op(`/${page.gstate(it.opacity, it.opacity, it.blend)} gs\n/${name} Do`);
+    page.op(`/${page.blendState(it.opacity, it.blend)} gs\n/${name} Do`);
   } else for (const k of kids) writeItem(page, k);
   page.op('Q');
 }
@@ -674,8 +421,8 @@ export interface WriteOptions {
 
 /** The document as PDF bytes, with notes on what didn't carry over exactly. */
 export function writePdf(doc: Doc, opts: WriteOptions): { bytes: Uint8Array; notes: string[] } {
-  const w = new Writer();
-  const ctx: WriteContext = { doc, w, images: new Map(), fonts: new Map(), spots: new Map(), notes: new Set() };
+  const w = new PdfWriter();
+  const ctx: WriteContext = { doc, w, images: new Map(), fonts: new Map(), notes: new Set() };
   const catalog = w.add(null);
   const pagesRef = w.add(null);
   const ocgs = new Map<Layer, PdfRef>();
@@ -771,9 +518,7 @@ export function writePdf(doc: Doc, opts: WriteOptions): { bytes: Uint8Array; not
       ],
     ]),
   );
-  const now = new Date();
-  const p2 = (n: number) => String(n).padStart(2, '0');
-  const date = `D:${now.getUTCFullYear()}${p2(now.getUTCMonth() + 1)}${p2(now.getUTCDate())}${p2(now.getUTCHours())}${p2(now.getUTCMinutes())}${p2(now.getUTCSeconds())}Z`;
+  const date = pdfDate();
   const info = w.add(
     new Map<string, PdfValue>([
       ['Title', pdfText(opts.title)],

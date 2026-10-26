@@ -24,6 +24,7 @@ export interface Commands {
   saveAs(): void;
   exportPng(): void;
   exportPdf(): void;
+  print(): void;
   documentSetup(): void;
   undo(): void;
   redo(): void;
@@ -144,7 +145,7 @@ export function PublisherMenus({ cmd, st }: { cmd: Commands; st: MenuState }) {
             Document Setup…
           </MenubarItem>
           <MenubarSeparator />
-          <MenubarItem shortcut="Ctrl+P" disabled={d} onSelect={cmd.exportPdf}>
+          <MenubarItem shortcut="Ctrl+P" disabled={d} onSelect={cmd.print}>
             Print…
           </MenubarItem>
         </MenubarContent>
