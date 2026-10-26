@@ -12,7 +12,8 @@
 //
 // OpenCode itself is the user's install in ~/.opencode, which updates
 // itself, rather than a copy pinned into DinOS: it moves faster than DinOS
-// releases. Where it's missing, turning the assistant on runs OpenCode's v2
+// releases. Where it's missing, Din copies in the one DinOS ships
+// (DIN_OPENCODE_SEED), else turning the assistant on runs OpenCode's v2
 // installer. DIN_OPENCODE names another binary.
 //
 // The server's API is HTTP with Basic auth, and that password is as good as
@@ -184,7 +185,31 @@ function isSupported(version: string | null): boolean {
   return version !== null && Number(version.split('.')[0]) >= 2;
 }
 
+/**
+ * Copy the OpenCode DinOS ships (DIN_OPENCODE_SEED) into ~/.opencode/bin, so
+ * it's there from the first boot and updates itself like an installed one.
+ * It's the AVX2 build; older CPUs get the installer's baseline one instead.
+ */
+async function seed(): Promise<void> {
+  const from = process.env.DIN_OPENCODE_SEED;
+  if (!from || !isExecutable(from)) return;
+  const cpuinfo = await fs.promises.readFile('/proc/cpuinfo', 'utf8').catch(() => '');
+  if (!/\bavx2\b/.test(cpuinfo)) return;
+  const to = path.join(INSTALL_DIR, 'opencode');
+  const partial = `${to}.din-seed`;
+  try {
+    await fs.promises.mkdir(INSTALL_DIR, { recursive: true });
+    await fs.promises.copyFile(from, partial);
+    await fs.promises.chmod(partial, 0o755);
+    await fs.promises.rename(partial, to);
+  } catch (error) {
+    await fs.promises.rm(partial, { force: true });
+    console.warn('[assistant] Couldn’t copy the shipped OpenCode:', messageOf(error));
+  }
+}
+
 async function locate(): Promise<string | null> {
+  if (!findBinary() && !process.env.DIN_OPENCODE) await seed();
   const binary = findBinary();
   const version = binary ? await readVersion(binary) : null;
   update({ binary: binary && isSupported(version) ? binary : null, version });

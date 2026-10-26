@@ -163,6 +163,20 @@ let
     hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
   };
 
+  # OpenCode, the agent behind the Assistant, as its v2 installer would fetch
+  # it (the npm package's prebuilt binary, run through nix-ld). Din copies it
+  # into ~/.opencode/bin where that's empty (electron/assistant.mts), so a new
+  # computer has it without a download and it updates itself from there.
+  opencode-seed = pkgs.runCommand "opencode-seed-2.1.4" {
+    src = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.1.4.tgz";
+      hash = "sha256-zgWr4tzhBBORyOyM242gZvZA/UcecqyEbcsInEQeEeE=";
+    };
+  } ''
+    tar -xzf $src package/bin/opencode
+    install -Dm755 package/bin/opencode $out/bin/opencode
+  '';
+
   # The local UDP ports AirPlay receivers send timing and sound control to,
   # three per session; the firewall lets them in (below).
   airplayPorts = { from = 7010; to = 7039; };
@@ -333,6 +347,7 @@ let
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
     export DIN_WHISPER_SERVER=${whisper}/bin/whisper-server
     export DIN_WHISPER_MODEL=${whisper-model}
+    export DIN_OPENCODE_SEED=${opencode-seed}/bin/opencode
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Din is the whole desktop: the session's services (the desktop portal's
@@ -877,9 +892,10 @@ in
   };
 
   # OpenCode, the agent behind Din's Assistant (electron/assistant.mts), is
-  # the user's own install in ~/.opencode, which updates itself; Din installs
-  # it there when the assistant is first turned on. On PATH, `opencode` in a
-  # Terminal attaches to the same background server Din started.
+  # the user's own install in ~/.opencode, which updates itself; Din puts the
+  # copy DinOS ships (opencode-seed) there when it's missing. On PATH,
+  # `opencode` in a Terminal attaches to the same background server Din
+  # started.
   environment.extraInit = ''
     export PATH="$HOME/.opencode/bin:$PATH"
   '';

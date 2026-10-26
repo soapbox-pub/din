@@ -299,8 +299,10 @@ password and event stream in the main process (`electron/assistant.mts`);
 the shell only gets what it asks for under `/api/`. Conversations are
 OpenCode's sessions, so `opencode` in a Terminal shares them. OpenCode is the
 user's own self-updating install in `~/.opencode/bin` (DinOS puts it on
-PATH), which Din runs the v2 installer for if it's missing; `$DIN_OPENCODE`
-names another binary.
+PATH). Where it's missing, Din copies in the version DinOS ships
+(`$DIN_OPENCODE_SEED`, `opencode-seed` in `os/configuration.nix`; bump its
+version and hash now and then), or runs the v2 installer where there's none
+or the CPU lacks AVX2; `$DIN_OPENCODE` names another binary.
 
 ### Dictation
 
