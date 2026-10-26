@@ -123,15 +123,15 @@ export function designAppFor(name: string): 'vector-editor' | 'publisher' | null
   return null;
 }
 
-/** Songs, playlists and player skins, which open in Music Player. */
-export function isMusicPlayerFile(name: string): boolean {
+/** Songs, playlists and player skins, which open in Media Player. */
+export function isMediaPlayerFile(name: string): boolean {
   const ext = extensionOf(name);
   return AUDIO.has(ext) || PLAYLIST.has(ext) || MEDIA_SKIN.has(ext);
 }
 
 /** The built-in app that opening a file starts, as Files does on double-click. */
 export function appForFile(name: string): string {
-  if (isMusicPlayerFile(name)) return 'music-player';
+  if (isMediaPlayerFile(name)) return 'media-player';
   if (isTextFile(name)) return 'text-editor';
   if (isLayeredImage(name)) return 'photo-editor';
   if (isCadFile(name)) return 'cad';

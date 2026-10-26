@@ -59,7 +59,7 @@ function snapshot(): PlayerSnapshot {
   };
 }
 
-const prefsKey = (pkg: WmzPackage) => `din:music-player:wmp-prefs:${pkg.name}`;
+const prefsKey = (pkg: WmzPackage) => `din:media-player:wmp-prefs:${pkg.name}`;
 
 function loadSkinPrefs(pkg: WmzPackage): Record<string, string> {
   try {

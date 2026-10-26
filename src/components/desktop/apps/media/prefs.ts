@@ -50,7 +50,7 @@ export interface MusicPrefs {
   stations: { name: string; url: string; genre?: string }[];
 }
 
-const KEY = 'din:music-player:prefs';
+const KEY = 'din:media-player:prefs';
 
 const DEFAULTS: MusicPrefs = {
   skin: { kind: 'din' },

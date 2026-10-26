@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 
-/** Renders the open question, if any. One per Music Player window. */
+/** Renders the open question, if any. One per Media Player window. */
 export function TextPromptHost() {
   const ask = useSyncExternalStore(subscribeAsk, currentAsk);
   return <Prompt key={ask ? `${ask.title}:${ask.initial}` : 'none'} ask={ask} />;

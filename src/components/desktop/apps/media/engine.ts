@@ -3,7 +3,7 @@ import { EQ_BANDS, EQ_MAX_DB } from './eq';
 import { baseTitle, coverFor, isUrl, isVideoLocation, mediaUrl, trackInfo } from './metadata';
 
 /**
- * The Music Player's engine: the Now Playing list and the sound itself.
+ * The Media Player's engine: the Now Playing list and the sound itself.
  * Every skin - Din's own, Winamp's and Windows Media Player's - drives this
  * one object, so switching skins never interrupts the music.
  *
@@ -88,7 +88,7 @@ export interface PlaybackTime {
   duration: number;
 }
 
-const STORAGE_KEY = 'din:music-player:state';
+const STORAGE_KEY = 'din:media-player:state';
 
 const DEFAULT_SETTINGS: PlayerSettings = {
   volume: 0.8,
@@ -1093,7 +1093,7 @@ class MusicEngine {
   }
 }
 
-/** The one engine every Music Player window and skin drives. */
+/** The one engine every Media Player window and skin drives. */
 export const player = new MusicEngine();
 export type { MusicEngine };
 

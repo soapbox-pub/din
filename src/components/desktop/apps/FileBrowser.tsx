@@ -27,7 +27,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { appForFile, isDelimitedText, isExtractable, isLayeredImage, isMusicPlayerFile, isPhotoEditable, isPlayableAudio, isPlayableVideo, isTextFile, isVectorEditable, isViewableImage } from '@/lib/fileTypes';
+import { appForFile, isDelimitedText, isExtractable, isLayeredImage, isMediaPlayerFile, isPhotoEditable, isPlayableAudio, isPlayableVideo, isTextFile, isVectorEditable, isViewableImage } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -614,11 +614,11 @@ function FileBrowserTab({
         if (how === 'window') onNewWindow(path);
         else onNewTab(path);
       }
-      // Songs and playlists go to Music Player together, as one list.
-      const music = files.filter((f) => isMusicPlayerFile(f.name));
-      if (music.length > 0) open('music-player', { paths: music.map((f) => joinPath(cwd, f.name)), at: Date.now() });
+      // Songs and playlists go to Media Player together, as one list.
+      const music = files.filter((f) => isMediaPlayerFile(f.name));
+      if (music.length > 0) open('media-player', { paths: music.map((f) => joinPath(cwd, f.name)), at: Date.now() });
       const nativeApps = getNativeAppsBridge();
-      for (const file of files.filter((f) => !isMusicPlayerFile(f.name))) {
+      for (const file of files.filter((f) => !isMediaPlayerFile(f.name))) {
         const target = joinPath(cwd, file.name);
         if (nativeApps && isWindowsProgram(file.name)) {
           // Windows programs run, as they would from Explorer. The first one
@@ -1680,13 +1680,13 @@ function FileBrowserTab({
                       </ContextMenuItem>
                     )}
                     {!isTrash && selectedNames.some((n) => isPlayableAudio(n) || isPlayableVideo(n)) && (
-                      <ContextMenuItem onSelect={() => open('music-player', { paths: pathsOf(selectedNames), how: 'enqueue', at: Date.now() })}>
-                        Add to Music Player List
+                      <ContextMenuItem onSelect={() => open('media-player', { paths: pathsOf(selectedNames), how: 'enqueue', at: Date.now() })}>
+                        Add to Media Player List
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isPlayableVideo(single.name) && (
-                      <ContextMenuItem onSelect={() => open('music-player', { paths: pathsOf([single.name]), at: Date.now() })}>
-                        Play in Music Player
+                      <ContextMenuItem onSelect={() => open('media-player', { paths: pathsOf([single.name]), at: Date.now() })}>
+                        Play in Media Player
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isViewableImage(single.name) && (

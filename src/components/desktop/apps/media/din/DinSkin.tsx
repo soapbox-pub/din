@@ -18,8 +18,8 @@ import { useTintVars } from './useThemeTint';
 function TitlebarTabs({ tab, showList, style }: { tab: DinTab; showList: boolean; style: CSSProperties }) {
   return (
     <div className="mp-theme flex min-w-0 flex-1 items-center gap-1 self-stretch" style={style}>
-      <AppIcon icon="/icons/apps/music-player.png" className="mx-1 size-4 shrink-0" />
-      <div role="tablist" aria-label="Music Player" className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
+      <AppIcon icon="/icons/apps/media-player.png" className="mx-1 size-4 shrink-0" />
+      <div role="tablist" aria-label="Media Player" className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t.id}

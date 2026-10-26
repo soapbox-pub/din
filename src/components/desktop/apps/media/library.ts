@@ -8,7 +8,7 @@ import { player } from './engine';
  * The Media Library: every song and video in the watched folders (Music and
  * Videos by default, as Windows Media Player watches My Music), with its
  * tags, star rating and play count. The index lives in
- * ~/.local/share/din/music-library.json so a scan only reads what changed.
+ * ~/.local/share/din/media-library.json so a scan only reads what changed.
  */
 
 export interface LibraryItem {
@@ -90,7 +90,7 @@ class Library {
     const fs = getFsBridge();
     if (!fs) return null;
     this.home ??= await fs.homedir();
-    return joinPath(this.home, '.local/share/din/music-library.json');
+    return joinPath(this.home, '.local/share/din/media-library.json');
   }
 
   /** Load the saved index, then bring it up to date in the background. */

@@ -13,7 +13,7 @@ const PANES = ['Graphic Equalizer', 'Play Speed', 'Crossfading', 'Quiet Mode', '
 type Pane = (typeof PANES)[number];
 
 const bandLabel = (hz: number) => (hz >= 1000 ? `${hz / 1000}K` : String(hz));
-const CUSTOM_KEY = 'din:music-player:eq-presets';
+const CUSTOM_KEY = 'din:media-player:eq-presets';
 
 function loadCustom(): EqPreset[] {
   try {

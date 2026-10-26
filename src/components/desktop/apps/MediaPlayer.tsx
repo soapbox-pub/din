@@ -7,19 +7,19 @@ import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { areaFor } from '@/lib/monitors';
 import { MIN_HEIGHT, MIN_WIDTH } from '@/hooks/useWindows';
 import { FILES_MIME } from './files/dnd';
-import { openPaths } from './music/actions';
-import { player, usePlayer } from './music/engine';
-import { getPrefs, setPrefs, setWinampPrefs, usePrefs, type SkinChoice } from './music/prefs';
-import { useCommands, type Commands } from './music/useCommands';
-import { AppMenus } from './music/din/AppMenus';
-import { DinSkin } from './music/din/DinSkin';
-import { TextPromptHost } from './music/din/TextPrompt';
-import { loadWinampSkin, type WinampSkin } from './music/winamp/skin';
-import { WinampPlayer } from './music/winamp/WinampPlayer';
-import { winampLayout } from './music/winamp/layout';
-import { WmpPlayer } from './music/wmp/WmpPlayer';
-import { openWmz, type WmzPackage } from './music/wmp/wms';
-import './music/din/player.css';
+import { openPaths } from './media/actions';
+import { player, usePlayer } from './media/engine';
+import { getPrefs, setPrefs, setWinampPrefs, usePrefs, type SkinChoice } from './media/prefs';
+import { useCommands, type Commands } from './media/useCommands';
+import { AppMenus } from './media/din/AppMenus';
+import { DinSkin } from './media/din/DinSkin';
+import { TextPromptHost } from './media/din/TextPrompt';
+import { loadWinampSkin, type WinampSkin } from './media/winamp/skin';
+import { WinampPlayer } from './media/winamp/WinampPlayer';
+import { winampLayout } from './media/winamp/layout';
+import { WmpPlayer } from './media/wmp/WmpPlayer';
+import { openWmz, type WmzPackage } from './media/wmp/wms';
+import './media/din/player.css';
 
 /** The Din skin's window size in full mode, and the Mini Player's. */
 const FULL_SIZE = { width: 1040, height: 680 };
@@ -217,7 +217,7 @@ function useShortcuts(commands: Commands, winamp: boolean) {
 }
 
 /**
- * Music Player: Windows Media Player's look and library with Winamp's
+ * Media Player: Windows Media Player's look and library with Winamp's
  * soul. Plays music and video, internet radio and playlists, and wears
  * Winamp (.wsz) and Windows Media Player (.wmz) skins.
  *
@@ -225,7 +225,7 @@ function useShortcuts(commands: Commands, winamp: boolean) {
  * playlists, folders or skin files) with `how: 'play' | 'enqueue'`, and
  * `at` to repeat an identical request.
  */
-export function MusicPlayer({ windowId, params }: AppComponentProps) {
+export function MediaPlayer({ windowId, params }: AppComponentProps) {
   const commands = useCommands(windowId);
   const choice = usePrefs((p) => p.skin);
   const mini = usePrefs((p) => p.mini);

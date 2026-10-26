@@ -50,8 +50,8 @@ const Publisher = lazy(() =>
 const CAD = lazy(() =>
   import('@/components/desktop/apps/CAD').then((m) => ({ default: m.CAD })),
 );
-const MusicPlayer = lazy(() =>
-  import('@/components/desktop/apps/MusicPlayer').then((m) => ({ default: m.MusicPlayer })),
+const MediaPlayer = lazy(() =>
+  import('@/components/desktop/apps/MediaPlayer').then((m) => ({ default: m.MediaPlayer })),
 );
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
@@ -295,12 +295,12 @@ export const APPS: readonly AppDefinition[] = [
     // radio, the equalizer and visualizations, and Winamp (.wsz) and Windows
     // Media Player (.wmz) skins. Files opens songs, playlists and skins here.
     // Launch params `{ paths, how: 'play' | 'enqueue' }` (or `{ path }`).
-    id: 'music-player',
-    name: 'Music Player',
-    icon: '/icons/apps/music-player.png',
-    component: MusicPlayer,
+    id: 'media-player',
+    name: 'Media Player',
+    icon: '/icons/apps/media-player.png',
+    component: MediaPlayer,
     defaultSize: { width: 1040, height: 680 },
-    keywords: ['windows media player', 'wmp', 'winamp', 'itunes', 'music', 'mp3', 'audio', 'songs', 'playlist', 'radio', 'equalizer', 'visualization', 'skins', 'video', 'media'],
+    keywords: ['music player', 'video player', 'windows media player', 'wmp', 'winamp', 'itunes', 'vlc', 'music', 'mp3', 'audio', 'songs', 'playlist', 'radio', 'equalizer', 'visualization', 'skins', 'video', 'movies', 'media'],
     singleInstance: true,
     actions: [
       { label: 'Library', params: { show: 'library' } },

@@ -1,5 +1,5 @@
 /**
- * Messages between the Music Player (the host) and a WMP skin view's
+ * Messages between the Media Player (the host) and a WMP skin view's
  * sandboxed script runtime (the VM, see vm.ts).
  */
 

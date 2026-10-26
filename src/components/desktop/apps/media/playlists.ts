@@ -199,7 +199,7 @@ export function writePlaylist(path: string, name: string, entries: PlaylistEntry
         '<?wpl version="1.0"?>',
         '<smil>',
         '  <head>',
-        '    <meta name="Generator" content="Din Music Player"/>',
+        '    <meta name="Generator" content="Din Media Player"/>',
         `    <title>${escapeXml(name)}</title>`,
         '  </head>',
         '  <body>',

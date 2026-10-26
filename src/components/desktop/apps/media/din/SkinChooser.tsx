@@ -51,7 +51,7 @@ function Preview({ entry }: { entry: SkinEntry }) {
   const query = useQuery({
     queryKey: ['music', 'skin-preview', entry.id],
     queryFn: async () => {
-      if (entry.choice.kind === 'din') return '/icons/apps/music-player.png';
+      if (entry.choice.kind === 'din') return '/icons/apps/media-player.png';
       if (!entry.choice.path) return winampPreview(null);
       const { data } = await getFsBridge()!.readFile(entry.choice.path, 32 * 1024 * 1024);
       return entry.kind === 'winamp' ? winampPreview(data) : wmpPreview(data);
@@ -162,7 +162,7 @@ export function SkinChooser({ commands }: { commands: Commands }) {
             </button>
             {(error ?? commands.message) && <p role="alert" className="text-sm text-amber-700 dark:text-amber-200">{error ?? commands.message}</p>}
             <p className="max-w-md text-center text-xs text-[var(--mp-ink-faint)]">
-              Open a .wsz or .wmz file from Files to add it here. Whatever the skin, View › Skin in the menu bar, Ctrl+1, or right-clicking Music Player in the Dock brings back Din’s own.
+              Open a .wsz or .wmz file from Files to add it here. Whatever the skin, View › Skin in the menu bar, Ctrl+1, or right-clicking Media Player in the Dock brings back Din’s own.
             </p>
           </>
         )}
