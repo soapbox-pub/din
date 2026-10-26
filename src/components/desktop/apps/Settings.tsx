@@ -2645,6 +2645,19 @@ function SoundSection() {
   );
 }
 
+/**
+ * Scrolls a list so that one of its rows is in view. Unlike scrollIntoView,
+ * it leaves the settings page itself where it is.
+ */
+function revealInList(row: HTMLElement | null) {
+  const list = row?.parentElement;
+  if (!row || !list) return;
+  const outer = list.getBoundingClientRect();
+  const inner = row.getBoundingClientRect();
+  if (inner.top < outer.top) list.scrollTop += inner.top - outer.top;
+  else if (inner.bottom > outer.bottom) list.scrollTop += inner.bottom - outer.bottom;
+}
+
 // ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
@@ -2680,7 +2693,7 @@ function KeyboardSection() {
   // Bring the system's layout into view when the list first appears.
   const showList = status.data?.canChange === true && Boolean(layouts.data);
   useEffect(() => {
-    if (showList) selectedRef.current?.scrollIntoView({ block: 'nearest' });
+    if (showList) revealInList(selectedRef.current);
   }, [showList]);
 
   if (!bridge) {
@@ -3046,7 +3059,7 @@ function TimeZonePicker({ current, canChange }: { current: string; canChange: bo
   // Bring the system's zone into view when the list first appears.
   const showList = canChange && entries.length > 0;
   useEffect(() => {
-    if (showList) selectedRef.current?.scrollIntoView({ block: 'nearest' });
+    if (showList) revealInList(selectedRef.current);
   }, [showList]);
 
   return (
