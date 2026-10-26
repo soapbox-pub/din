@@ -24,6 +24,7 @@ import {
   findLayer,
   julian,
   newDrawing,
+  type Dimension,
   type Drawing,
   type Entity,
   type Layer,
@@ -56,6 +57,7 @@ import { dimGeometry } from './cad/dim';
 import { writeDwg } from './cad/dwg/write';
 import { convertDwg, dwgVersion, readDwgBytes, versionName, type ReadResult } from './cad/dwg/read';
 import { isDxf, readDxf } from './cad/dxf/read';
+import { writeDxf } from './cad/dxf/write';
 import { CAP, ensureFonts, fontFamily } from './cad/text';
 import { findTextStyle } from './cad/model';
 import { Ribbon, type RibbonTabId } from './cad/ui/ribbon';
@@ -70,6 +72,23 @@ const SETTINGS_KEY = 'din:cad:settings';
 const RECENT_KEY = 'din:cad:recent';
 const CLIP_MARK = 'din-cad-clipboard:';
 const MAX_BYTES = 512 * 1024 * 1024;
+
+/** What CAD saves: DWG, or DXF for programs that take nothing else. */
+type Format = 'dwg' | 'dxf';
+const FORMATS: Format[] = ['dwg', 'dxf'];
+const SAVE_FILTERS = [
+  { name: 'AutoCAD 2000 Drawing (*.dwg)', patterns: ['*.dwg'], mimeTypes: ['image/vnd.dwg'] },
+  { name: 'AutoCAD 2004 DXF (*.dxf)', patterns: ['*.dxf'], mimeTypes: ['image/vnd.dxf'] },
+];
+/** The version each format is saved as, as `versionRef` holds it. */
+const SAVED_AS: Record<Format, { version: string; name: string }> = {
+  dwg: { version: 'AC1015', name: 'an AutoCAD 2000 drawing' },
+  dxf: { version: 'DXF AC1018', name: 'an AutoCAD 2004 DXF' },
+};
+const formatOf = (p: string): Format | null => {
+  const m = /\.(dwg|dxf)$/i.exec(p);
+  return m ? (m[1].toLowerCase() as Format) : null;
+};
 const MAX_UNDO = 200;
 /** Room the floating command line takes at the bottom of the drawing area. */
 const CMDLINE_SPACE = 100;
@@ -171,7 +190,7 @@ let textEditSeq = 0;
  * CAD - 2D drafting for people who know AutoCAD: the ribbon, command line,
  * aliases, object snaps, grips and dialogs where AutoCAD keeps them. Opens
  * DWG files from R13 to AutoCAD 2018 and DXF files of any version, and saves
- * AutoCAD 2000 DWGs.
+ * AutoCAD 2000 DWGs or AutoCAD 2004 DXFs.
  *
  * Launch params: `{ path?: string }` opens a drawing; `{ new?: 'imperial' |
  * 'metric' }` starts one.
@@ -650,7 +669,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
           } else {
             res = readDxf(r.data);
           }
-          versionRef.current = dxf ? 'DXF' : res.version;
+          versionRef.current = dxf ? `DXF ${res.version}` : res.version;
           dropped.current = res.dropped;
           startDoc(res.drawing, basename(p), p);
           setRecent(addRecent(p));
@@ -694,12 +713,13 @@ export function CAD({ windowId, params }: AppComponentProps) {
   }, [initialPath, load]);
 
   const encode = useCallback(
-    (d: Drawing): Uint8Array => {
+    (d: Drawing, format: Format): Uint8Array => {
       const ext = extents(d);
       const v = viewRef.current;
       const s = sizeRef.current;
       const withView: Drawing = s.h ? { ...d, view: { center: { x: v.cx, y: v.cy }, height: s.h / v.scale } } : d;
-      return writeDwg(withView, { extents: ext, dimBlock: (dim) => dimGeometry(dim, d), now: julian(Date.now()) });
+      const opts = { extents: ext, dimBlock: (dim: Dimension) => dimGeometry(dim, d), now: julian(Date.now()) };
+      return format === 'dxf' ? writeDxf(withView, opts) : writeDwg(withView, opts);
     },
     [extents],
   );
@@ -713,15 +733,17 @@ export function CAD({ windowId, params }: AppComponentProps) {
       setStatus('Saving…');
       try {
         await new Promise((r) => setTimeout(r, 16));
-        const bytes = encode(d);
+        const format = formatOf(p) ?? 'dwg';
+        const bytes = encode(d, format);
         await fs.writeFile(p, bytes);
         setSavedEntry(h.entries[h.index]);
         setPath(p);
         setDocName(basename(p));
         setRecent(addRecent(p));
         const was = versionRef.current;
-        setStatus(was && was !== 'AC1015' ? `Saved as an AutoCAD 2000 drawing` : `Saved ${basename(p)}`);
-        versionRef.current = 'AC1015';
+        const now = SAVED_AS[format];
+        setStatus(was && was !== now.version ? `Saved as ${now.name}` : `Saved ${basename(p)}`);
+        versionRef.current = now.version;
         void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', p] });
         void invalidateListings(queryClient, p);
         return true;
@@ -735,23 +757,27 @@ export function CAD({ windowId, params }: AppComponentProps) {
     [fs, encode, queryClient],
   );
 
-  const saveAs = useCallback(async (): Promise<boolean> => {
-    if (!docRef.current) return false;
-    const r = await pickFiles({
-      mode: 'save',
-      title: 'Save Drawing As',
-      currentName: docName.replace(/\.[^.]*$/, '') + '.dwg',
-      initialPath: path ? parentPath(path) : undefined,
-      filters: [{ name: 'AutoCAD 2000 Drawing (*.dwg)', patterns: ['*.dwg'], mimeTypes: ['image/vnd.dwg'] }],
-    });
-    if (!r) return false;
-    let t = r.paths[0];
-    if (!/\.dwg$/i.test(t)) t += '.dwg';
-    return writeTo(t);
-  }, [pickFiles, docName, path, writeTo]);
+  const saveAs = useCallback(
+    async (format?: Format): Promise<boolean> => {
+      if (!docRef.current) return false;
+      const start: Format = format ?? (path ? formatOf(path) : null) ?? 'dwg';
+      const r = await pickFiles({
+        mode: 'save',
+        title: format === 'dxf' ? 'Export DXF' : 'Save Drawing As',
+        currentName: `${docName.replace(/\.[^.]*$/, '')}.${start}`,
+        initialPath: path ? parentPath(path) : undefined,
+        filters: SAVE_FILTERS,
+        currentFilter: FORMATS.indexOf(start),
+      });
+      if (!r) return false;
+      let t = r.paths[0];
+      if (!formatOf(t)) t += `.${FORMATS[r.filter ?? FORMATS.indexOf(start)] ?? start}`;
+      return writeTo(t);
+    },
+    [pickFiles, docName, path, writeTo],
+  );
 
-  // Saving writes DWG, so a drawing opened from anything else is saved under a new name.
-  const save = useCallback((): Promise<boolean> => (path && /\.dwg$/i.test(path) ? writeTo(path) : saveAs()), [path, writeTo, saveAs]);
+  const save = useCallback((): Promise<boolean> => (path && formatOf(path) ? writeTo(path) : saveAs()), [path, writeTo, saveAs]);
 
   const openFile = useCallback(async () => {
     const t = await pickFile({ title: 'Select File', extensions: ['.dwg', '.dxf'], initialPath: path ? parentPath(path) : undefined });
@@ -1072,7 +1098,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
         else if (op === 'close') {
           if (dirty) setDialog({ kind: 'unsaved', then: closeNow });
           else closeNow();
-        } else say('DXF export isn’t available; save as DWG instead.');
+        } else void saveAs('dxf');
       },
       clipboard: {
         copy: (list, base) => {
@@ -2026,7 +2052,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
             <img src="/icons/apps/cad.png" alt="" className="size-16" />
             <div className="space-y-2 text-[12.5px] text-[#c4ccd7]">
               <p className="text-[15px] font-semibold text-white">CAD</p>
-              <p>2D drafting that opens DWG drawings from AutoCAD R13 through AutoCAD 2018 and later and DXF files of any version, and saves AutoCAD 2000 DWG files every AutoCAD and DWG viewer reads.</p>
+              <p>2D drafting that opens DWG drawings from AutoCAD R13 through AutoCAD 2018 and later and DXF files of any version, and saves AutoCAD 2000 DWG files every AutoCAD and DWG viewer reads, or AutoCAD 2004 DXF for programs that only take DXF.</p>
               <p className="text-[11.5px] text-[#8e98a6]">DWG reading by LibreDWG (GPL-3.0). AutoCAD is a trademark of Autodesk, Inc.; CAD isn’t affiliated with Autodesk.</p>
             </div>
           </div>
