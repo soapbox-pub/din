@@ -59,7 +59,7 @@ function usesPageNumbers(story: Element): boolean {
   const hit = MARKERS.get(story);
   if (hit && hit.version === v) return hit.uses;
   let uses = false;
-  const walker = story.ownerDocument.createTreeWalker(story, 0x80 /* NodeFilter.SHOW_PROCESSING_INSTRUCTION */);
+  const walker = story.ownerDocument.createTreeWalker(story, 0x40 /* NodeFilter.SHOW_PROCESSING_INSTRUCTION */);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const d = (n as ProcessingInstruction).data.trim();
     if ((n as ProcessingInstruction).target === 'ACE' && (d === '18' || d === '19')) {
