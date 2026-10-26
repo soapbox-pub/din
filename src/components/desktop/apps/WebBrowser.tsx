@@ -2410,12 +2410,36 @@ function TabStrip({
     // A window's only tab moves the window, like Chrome's.
     moveWindow: tabs.length === 1 ? chrome : undefined,
   });
+  // Tabs shrink to fit the strip, like Chrome's. Closing one with the mouse
+  // holds the others at their current width until the pointer leaves the
+  // strip, so the next tab's close button slides under the cursor.
+  const [lockedWidth, setLockedWidth] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  // Past the minimum tab width the strip scrolls; keep the active tab in view.
+  // (By hand: scrollIntoView would also scroll the desktop's clipped ancestors.)
+  useEffect(() => {
+    const list = listRef.current;
+    const tab = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!list || !tab) return;
+    const start = tab.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft;
+    const end = start + tab.offsetWidth;
+    if (start < list.scrollLeft) list.scrollLeft = start;
+    else if (end > list.scrollLeft + list.clientWidth) list.scrollLeft = end - list.clientWidth;
+  }, [activeId, tabs.length]);
   return (
     <div
-      ref={(el) => tabTransfer.setList(el)}
+      ref={(el) => {
+        listRef.current = el;
+        tabTransfer.setList(el);
+      }}
       role="tablist"
       aria-label="Browser tabs"
-      className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+      onPointerLeave={() => setLockedWidth(null)}
+      onWheel={(e) => {
+        // There's no scrollbar, so the wheel scrolls the tabs sideways.
+        if (e.deltaY !== 0 && e.deltaX === 0) e.currentTarget.scrollLeft += e.deltaY;
+      }}
+      className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
     >
       {tabs.map((tab) => (
         <TabButton
@@ -2424,10 +2448,14 @@ function TabStrip({
           active={tab.id === activeId}
           dragging={reorder.draggingId === tab.id}
           transfer={tabTransfer}
+          lockedWidth={lockedWidth}
           ref={(el) => reorder.register(tab.id, el)}
           onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
           onActivate={() => onActivate(tab.id)}
-          onClose={() => onCloseTab(tab.id)}
+          onClose={(width) => {
+            if (width !== undefined) setLockedWidth(width);
+            onCloseTab(tab.id);
+          }}
           onTogglePin={() => onTogglePin(tab.id)}
         />
       ))}
@@ -2448,12 +2476,19 @@ function TabStrip({
   );
 }
 
+/** The icon's classes for when an unpinned tab gets too narrow for its title. */
+function narrowIcon(pinned: boolean, active: boolean) {
+  if (pinned) return undefined;
+  return active ? '@max-[3.25rem]:hidden' : '@max-[3.25rem]:mx-auto';
+}
+
 /** A single tab in the tab strip. */
 function TabButton({
   tab,
   active,
   dragging,
   transfer,
+  lockedWidth = null,
   ref,
   onPointerDown,
   onActivate,
@@ -2464,20 +2499,24 @@ function TabButton({
   active: boolean;
   dragging: boolean;
   transfer: TabTransfer;
+  /** Hold an unpinned tab at this width instead of fitting it to the strip. */
+  lockedWidth?: number | null;
   ref?: React.Ref<HTMLDivElement>;
   onPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
   onActivate: () => void;
-  onClose: () => void;
+  /** Close the tab; given the tab's width when the mouse closed it. */
+  onClose: (width?: number) => void;
   onTogglePin: () => void;
 }) {
   const label = tabLabel(tab);
   const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
+  const widthOf = (el: Element) => el.closest('[role="tab"]')?.getBoundingClientRect().width;
 
   return (
     <TabContextMenu
       tabId={tab.id}
       transfer={transfer}
-      onClose={onClose}
+      onClose={() => onClose()}
       pinned={tab.pinned}
       onTogglePin={onTogglePin}
     >
@@ -2498,12 +2537,17 @@ function TabButton({
         onAuxClick={(e) => {
           // Middle-click closes, like every browser - except a pinned tab,
           // which is pinned so it doesn't go away by accident.
-          if (e.button === 1 && !tab.pinned) onClose();
+          if (e.button === 1 && !tab.pinned) onClose(widthOf(e.currentTarget));
         }}
         title={label}
+        style={!tab.pinned && lockedWidth !== null ? { flex: `0 0 ${lockedWidth}px` } : undefined}
         className={cn(
-          'group relative flex h-7 min-w-0 shrink-0 cursor-default select-none items-center rounded-md border text-xs',
-          tab.pinned ? 'w-9 justify-center' : 'w-44 gap-2 px-2.5',
+          'group relative flex h-7 cursor-default select-none items-center rounded-md border text-xs',
+          // Unpinned tabs shrink from 11rem as the strip fills, and are
+          // containers so their contents can collapse once they get narrow.
+          tab.pinned
+            ? 'w-9 shrink-0 justify-center'
+            : cn('@container basis-44 shrink gap-2 px-2.5', active ? 'min-w-10' : 'min-w-9'),
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           active
             ? 'border-border/60 bg-background text-foreground shadow-sm'
@@ -2511,25 +2555,36 @@ function TabButton({
           dragging && 'border-border/60 bg-background shadow-md',
         )}
       >
+        {/* Too narrow for everything, a tab shows just its icon - or, if
+            it's the active one, just its close button - like Chrome's. */}
         {icon ? (
-          <img src={icon} alt="" aria-hidden draggable={false} className="size-4 shrink-0" />
+          <img
+            src={icon}
+            alt=""
+            aria-hidden
+            draggable={false}
+            className={cn('size-4 shrink-0', narrowIcon(tab.pinned, active))}
+          />
         ) : (
-          <TabGlyph tab={tab} className="size-4 shrink-0 opacity-60" />
+          <TabGlyph
+            tab={tab}
+            className={cn('size-4 shrink-0 opacity-60', narrowIcon(tab.pinned, active))}
+          />
         )}
         {!tab.pinned && (
           <>
-            <span className="min-w-0 flex-1 truncate">{label}</span>
+            <span className="min-w-0 flex-1 truncate @max-[3.25rem]:hidden">{label}</span>
             <button
               type="button"
               aria-label={`Close ${label}`}
               onClick={(e) => {
                 e.stopPropagation();
-                onClose();
+                onClose(e.detail > 0 ? widthOf(e.currentTarget) : undefined);
               }}
               className={cn(
                 'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
                 'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-                active && 'opacity-100',
+                active ? 'opacity-100 @max-[3.25rem]:mx-auto' : '@max-[3.25rem]:hidden',
                 'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               )}
             >
