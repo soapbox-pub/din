@@ -484,7 +484,9 @@ in
   # printers on the network, ipp-usb puts USB printers that speak IPP (most
   # made since about 2015) there too, and CUPS lists both and makes a
   # driverless queue the first time one is used - so a printer shows up in
-  # Din's print dialog as soon as it's on. Older USB printers need a driver;
+  # Din's print dialog as soon as it's on. Din then keeps that queue
+  # (/var/lib/cups/printers.conf), so it's there after a restart. Older USB
+  # printers need a driver;
   # Settings → Printers adds them with the best of gutenprint's and
   # brlaser's. `din` administers printers without a password because it's in
   # `wheel` (CUPS's SystemGroup). cups-browsed isn't needed for any of this

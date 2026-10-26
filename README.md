@@ -277,8 +277,11 @@ through a sudo rule for those writes. Elsewhere Din uses a `deckmon` on PATH.
 
 Printers need no setup on DinOS. CUPS runs with Avahi and ipp-usb, so a
 printer on the network, or one plugged in that speaks IPP over USB, appears
-in the print dialog as soon as it's on, and printing makes its driverless
-queue on the spot. Settings → Printers shows them and their queues, sets the
+in the print dialog as soon as it's on. The first time Din prints to one (or
+makes it the default) it gives it a driverless queue of its own, so it's
+still there after a restart. Din reads the printer list in the background
+once it starts, so the print dialog doesn't wait on the network. Settings →
+Printers shows them and their queues, sets the
 default, prints a test page, and adds older USB printers with the best
 driver installed (gutenprint, brlaser).
 

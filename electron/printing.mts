@@ -5,9 +5,17 @@
 // (os/configuration.nix), so a printer on the network, or one plugged in
 // that speaks IPP over USB (most made since about 2015), shows up in
 // `lpstat -e` as soon as it's on, and printing to it makes the queue on the
-// spot (a CUPS temporary queue, driverless). Older USB printers need a
-// driver: Settings finds them with `lpinfo` and adds them with the best one
+// spot (a CUPS temporary queue, driverless). A temporary queue is gone
+// again after a restart, so the first time Din uses one of these printers
+// (prints to it, or makes it the default) it gives it a queue of its own
+// (`keep`): from then on it's listed as soon as CUPS starts, and its options
+// are known before anything is printed. Older USB printers need a driver:
+// Settings finds them with `lpinfo` and adds them with the best one
 // installed (`addPrinter`).
+//
+// Reading the list asks the network (`lpstat -e` browses DNS-SD for a
+// second), so Din reads it in the background once it starts and answers
+// from the last reading, reading again behind it (`knownState`).
 //
 // Everything printed goes to CUPS as a PDF. A page (a browser tab, a web
 // app) is laid out by Chromium with printToPDF; a frame that called print()
@@ -37,6 +45,10 @@ const TIMEOUT_MS = 20_000;
 const DISCOVER_TIMEOUT_MS = 60_000;
 const RENDER_TIMEOUT_MS = 60_000;
 const JOB_POLL_MS = 3000;
+/** The printer list is read again behind any answer older than this. */
+const STATE_FRESH_MS = 2000;
+/** How long after Din starts it first reads the printer list, out of the way of starting up. */
+const WARM_UP_MS = 5000;
 /** The dialog shows this many pages; the rest are counted. */
 const PREVIEW_PAGES = 30;
 const PREVIEW_PIXELS = 480;
@@ -150,6 +162,8 @@ let nextDocument = 1;
 const documents = new Map<string, Document>();
 /** Devices from the last `discover`, the only ones `addPrinter` takes. */
 let found: (FoundDevice & { makeModel: string })[] = [];
+/** Device URIs of the destinations CUPS found on the network, by name. */
+const networkUris = new Map<string, string>();
 
 /** What printing can do with a file, by its name; null for nothing. */
 export function printableKind(file: string): 'pdf' | 'image' | 'text' | null {
@@ -275,10 +289,28 @@ function parseJobs(lpstat: string, lpq: string): PrintJob[] {
   return jobs;
 }
 
+/** The name a printer gives itself on the network, from its DNS-SD URI. */
+function serviceName(uri: string): string | null {
+  const match = /^\w+:\/\/([^/]+?)\._ipps?\._tcp\./.exec(uri);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
 async function state(): Promise<PrintersState> {
   let names: string[];
   try {
-    names = (await cups('lpstat', ['-e'])).stdout.split('\n').map((n) => n.trim()).filter(Boolean);
+    // `-l`: "name type printer-uri device-uri" (URIs are percent-encoded).
+    const lines = (await cups('lpstat', ['-l', '-e'])).stdout.split('\n').map((l) => l.trim().split(/\s+/));
+    names = [];
+    for (const [name, , , uri] of lines) {
+      if (!name) continue;
+      names.push(name);
+      if (uri) networkUris.set(name, uri);
+    }
   } catch (error) {
     // No printers at all is an error to lpstat; no CUPS is ENOENT or a
     // refused connection.
@@ -296,9 +328,10 @@ async function state(): Promise<PrintersState> {
   const defaultName = /destination: (\S+)/.exec(defaults)?.[1] ?? null;
   const printers: Printer[] = [...new Set([...names, ...queues.keys()])].map((name) => {
     const queue = queues.get(name);
+    const uri = networkUris.get(name);
     return {
       name,
-      displayName: queue?.displayName ?? displayName(name),
+      displayName: queue?.displayName ?? displayName(name, (uri && serviceName(uri)) || undefined),
       location: queue?.location ?? '',
       state: queue?.state ?? 'idle',
       problem: queue?.problem ?? null,
@@ -308,6 +341,54 @@ async function state(): Promise<PrintersState> {
   });
   printers.sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.displayName.localeCompare(b.displayName));
   return { available: true, printers, jobs: parseJobs(queued, ranked) };
+}
+
+let lastState: { value: PrintersState; at: number } | null = null;
+let reading: Promise<PrintersState> | null = null;
+/** Bumped by every change, so a reading that started before one isn't kept. */
+let generation = 0;
+
+function readState(): Promise<PrintersState> {
+  if (reading) return reading;
+  const started = generation;
+  const read = state().then((value) => {
+    if (started === generation) lastState = { value, at: Date.now() };
+    return value;
+  });
+  reading = read;
+  void read.finally(() => {
+    if (reading === read) reading = null;
+  }).catch(() => {});
+  return read;
+}
+
+/** The printer list from the last reading, read again behind it when it's old. */
+function knownState(): Promise<PrintersState> {
+  if (!lastState) return readState();
+  if (Date.now() - lastState.at > STATE_FRESH_MS) readState().catch(() => {});
+  return Promise.resolve(lastState.value);
+}
+
+/** Something changed: the next answer is a new reading. */
+function changed(): void {
+  generation++;
+  lastState = null;
+  reading = null;
+}
+
+/**
+ * Give a printer CUPS found on the network a queue of its own, so it stays
+ * after a restart. A no-op for one that has a queue already.
+ */
+async function keep(name: string): Promise<void> {
+  if (await cups('lpstat', ['-v', name]).then(() => true, () => false)) return;
+  if (!networkUris.has(name)) await state();
+  const uri = networkUris.get(name);
+  if (!uri || !/^(ipp|ipps|dnssd):/.test(uri)) return;
+  const description = serviceName(uri) ?? displayName(name);
+  // `everywhere` asks the printer what it can do, the way a temporary queue would.
+  await cups('lpadmin', ['-p', name, '-E', '-v', uri, '-m', 'everywhere', '-D', description, '-o', 'printer-is-shared=false']);
+  changed();
 }
 
 type QueueOptions = Map<string, { values: string[]; default: string | null }>;
@@ -603,6 +684,8 @@ async function print(id: string, layout: PrintLayout, options: JobOptions): Prom
   const document = documents.get(id);
   if (!document) throw new Error('Nothing to print.');
   const pdf = await pdfFor(id, document, layout);
+  // If it can't be kept now (asleep, say), CUPS still prints to it the way it always has.
+  await keep(options.printer).catch(() => {});
   const args = ['-d', options.printer, '-n', String(options.copies), '-t', document.title || 'Untitled'];
   if (options.copies > 1) args.push('-o', 'collate=true');
   if (options.pages) args.push('-P', options.pages);
@@ -618,6 +701,7 @@ async function print(id: string, layout: PrintLayout, options: JobOptions): Prom
   args.push('--', pdf);
   try {
     const { stdout } = await cups('lp', args);
+    changed();
     const job = /request id is (\S+)/.exec(stdout)?.[1] ?? null;
     if (job) follow(job, options.printer, document.title);
     return job ?? '';
@@ -712,6 +796,7 @@ async function addPrinter(uri: string): Promise<string> {
     throw explain(error);
   }
   if (!current.printers.some((p) => p.isDefault)) await cups('lpoptions', ['-d', name]).catch(() => {});
+  changed();
   found = found.filter((d) => d.uri !== uri);
   return name;
 }
@@ -803,8 +888,12 @@ export function registerPrintingHandlers(options: {
 
   ipcMain.handle('printing:state', async (event) => {
     assertShellSender(event);
-    return state();
+    return knownState();
   });
+
+  // Read the list before anyone asks, so the first print dialog or Settings
+  // has it at once (and CUPS, started on demand, is up by then).
+  setTimeout(() => readState().catch(() => {}), WARM_UP_MS);
 
   ipcMain.handle('printing:capabilities', async (event, printer: unknown) => {
     assertShellSender(event);
@@ -870,19 +959,25 @@ export function registerPrintingHandlers(options: {
     await cups('cancel', [requireString(job, 'job')]).catch((error) => {
       throw explain(error);
     });
+    changed();
     tracked.delete(job as string);
   });
 
   ipcMain.handle('printing:setDefault', async (event, printer: unknown) => {
     assertShellSender(event);
-    await cups('lpoptions', ['-d', requireString(printer, 'printer')]).catch((error) => {
+    const name = requireString(printer, 'printer');
+    await keep(name).catch(() => {});
+    await cups('lpoptions', ['-d', name]).catch((error) => {
       throw explain(error);
     });
+    changed();
   });
 
   ipcMain.handle('printing:testPage', async (event, printer: unknown) => {
     assertShellSender(event);
     const name = requireString(printer, 'printer');
+    // Kept first, so the test page goes on the paper the printer says it has.
+    await keep(name).catch(() => {});
     const current = await state();
     const shown = current.printers.find((p) => p.name === name)?.displayName ?? name;
     const document = addDocument('Test page', { kind: 'html', html: testPageHtml(shown) });
@@ -912,6 +1007,7 @@ export function registerPrintingHandlers(options: {
     } catch (error) {
       throw explain(error);
     }
+    changed();
   });
 
   ipcMain.handle('printing:remove', async (event, printer: unknown) => {
@@ -919,6 +1015,7 @@ export function registerPrintingHandlers(options: {
     await cups('lpadmin', ['-x', requireString(printer, 'printer')]).catch((error) => {
       throw explain(error);
     });
+    changed();
   });
 
   ipcMain.handle('printing:discover', async (event) => {
