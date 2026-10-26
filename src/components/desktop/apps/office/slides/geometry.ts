@@ -554,65 +554,121 @@ function mirrorPath(d: string, w: number): string {
   });
 }
 
-const custCache = new Map<string, Element>();
+/** A custom geometry read out of its XML once: guides, then paths of commands. */
+interface CustGeom {
+  guides: [name: string, fmla: string][];
+  paths: { w: number; h: number; fill: SubPath['fill']; stroke: boolean; cmds: { op: string; args: string[] }[] }[];
+}
 
-function custPath(xml: string, w: number, h: number): ShapePath {
-  let el = custCache.get(xml);
-  if (!el) {
-    el = parseXml(xml).documentElement;
-    custCache.set(xml, el);
-  }
+function compileCust(el: Element): CustGeom {
+  const guides = [...kids(kid(el, 'avLst'), 'gd'), ...kids(kid(el, 'gdLst'), 'gd')].map((g): [string, string] => [attr(g, 'name') ?? '', attr(g, 'fmla') ?? '']);
+  const paths = kids(kid(el, 'pathLst'), 'path').map((p) => {
+    const fillAttr = attr(p, 'fill');
+    const cmds = kids(p).map((c) => ({
+      op: c.localName,
+      args:
+        c.localName === 'arcTo'
+          ? [attr(c, 'wR') ?? '0', attr(c, 'hR') ?? '0', attr(c, 'stAng') ?? '0', attr(c, 'swAng') ?? '0']
+          : kids(c, 'pt').flatMap((pt) => [attr(pt, 'x') ?? '0', attr(pt, 'y') ?? '0']),
+    }));
+    return {
+      w: Number(attr(p, 'w') ?? 0),
+      h: Number(attr(p, 'h') ?? 0),
+      fill: (fillAttr === null ? 'norm' : fillAttr) as SubPath['fill'],
+      stroke: attr(p, 'stroke') !== '0' && attr(p, 'stroke') !== 'false',
+      cmds,
+    };
+  });
+  return { guides, paths };
+}
+
+function custPath(geom: CustGeom, w: number, h: number): ShapePath {
   const paths: SubPath[] = [];
-  for (const p of kids(kid(el, 'pathLst'), 'path')) {
-    const pw = Number(attr(p, 'w') ?? 0);
-    const ph = Number(attr(p, 'h') ?? 0);
-    // Guides use the path's own space, which is the shape's size when it was drawn.
-    const vars = builtins(pw || w, ph || h);
-    for (const a of kids(kid(el, 'avLst'), 'gd')) vars.set(attr(a, 'name') ?? '', evalFormula(attr(a, 'fmla') ?? '', vars));
-    for (const g of kids(kid(el, 'gdLst'), 'gd')) vars.set(attr(g, 'name') ?? '', evalFormula(attr(g, 'fmla') ?? '', vars));
-    const sx = pw ? w / pw : 1;
-    const sy = ph ? h / ph : 1;
+  // Paths drawn in the same space share their guides' values.
+  const spaces = new Map<string, Vars>();
+  for (const p of geom.paths) {
+    const space = `${p.w}x${p.h}`;
+    let vars = spaces.get(space);
+    if (!vars) {
+      // Guides use the path's own space, which is the shape's size when it was drawn.
+      const v = builtins(p.w || w, p.h || h);
+      for (const [name, fmla] of geom.guides) v.set(name, evalFormula(fmla, v));
+      spaces.set(space, (vars = v));
+    }
+    const sx = p.w ? w / p.w : 1;
+    const sy = p.h ? h / p.h : 1;
     const pb = new PathBuilder();
-    const pt = (e: Element | null): [number, number] => [val(vars, attr(e, 'x') ?? '0') * sx, val(vars, attr(e, 'y') ?? '0') * sy];
-    for (const c of kids(p)) {
-      const pts = kids(c, 'pt').map(pt);
-      switch (c.localName) {
-        case 'moveTo': pb.moveTo(...pts[0]); break;
-        case 'lnTo': pb.lineTo(...pts[0]); break;
-        case 'cubicBezTo': if (pts.length === 3) pb.cubic(...pts[0], ...pts[1], ...pts[2]); break;
-        case 'quadBezTo': if (pts.length === 2) pb.quad(...pts[0], ...pts[1]); break;
-        case 'arcTo':
-          pb.arcTo(val(vars, attr(c, 'wR') ?? '0') * sx, val(vars, attr(c, 'hR') ?? '0') * sy, val(vars, attr(c, 'stAng') ?? '0'), val(vars, attr(c, 'swAng') ?? '0'));
-          break;
+    for (const { op, args } of p.cmds) {
+      const n = args.map((a, i) => val(vars, a) * (op === 'arcTo' ? (i === 0 ? sx : i === 1 ? sy : 1) : i % 2 ? sy : sx));
+      switch (op) {
+        case 'moveTo': if (n.length >= 2) pb.moveTo(n[0], n[1]); break;
+        case 'lnTo': if (n.length >= 2) pb.lineTo(n[0], n[1]); break;
+        case 'cubicBezTo': if (n.length === 6) pb.cubic(n[0], n[1], n[2], n[3], n[4], n[5]); break;
+        case 'quadBezTo': if (n.length === 4) pb.quad(n[0], n[1], n[2], n[3]); break;
+        case 'arcTo': pb.arcTo(n[0], n[1], n[2], n[3]); break;
         case 'close': pb.close(); break;
       }
     }
-    const fillAttr = attr(p, 'fill');
-    paths.push({
-      d: pb.d.join(' '),
-      fill: (fillAttr === null ? 'norm' : fillAttr) as SubPath['fill'],
-      stroke: attr(p, 'stroke') !== '0' && attr(p, 'stroke') !== 'false',
-    });
+    paths.push({ d: pb.d.join(' '), fill: p.fill, stroke: p.stroke });
   }
   return { paths, text: { l: 0, t: 0, r: w, b: h } };
 }
 
+// Big enough to hold every shape of a drawing exported to slides (a floor
+// plan from CAD is thousands of custom shapes a slide), so moving between
+// slides doesn't recompute them all.
+const CACHE_LIMIT = 50000;
 const cache = new Map<string, ShapePath>();
+/** Custom geometries by their XML, read once, with their paths by size. */
+const custCache = new Map<string, { geom: CustGeom; sizes: Map<string, ShapePath> }>();
 
-/** The outline of a shape of this geometry and size (px). */
-export function shapePath(geom: Geometry | undefined, w: number, h: number): ShapePath {
-  const key = `${geom?.prst ?? ''}|${geom?.cust ?? ''}|${JSON.stringify(geom?.adj ?? {})}|${w.toFixed(2)}|${h.toFixed(2)}`;
-  const hit = cache.get(key);
+function cached<K>(map: Map<K, ShapePath>, key: K, w: number, h: number, make: () => ShapePath): ShapePath {
+  const hit = map.get(key);
   if (hit) return hit;
   let out: ShapePath;
   try {
-    out = geom?.cust ? custPath(geom.cust, w, h) : presetPath(geom?.prst ?? 'rect', w, h, geom?.adj ?? {});
+    out = make();
   } catch {
     out = presetPath('rect', w, h, {});
   }
-  if (cache.size > 4000) cache.clear();
-  cache.set(key, out);
+  map.set(key, out);
   return out;
+}
+
+function remember(xml: string, el: Element) {
+  if (custCache.size >= CACHE_LIMIT) custCache.clear();
+  const entry = { geom: compileCust(el), sizes: new Map<string, ShapePath>() };
+  custCache.set(xml, entry);
+  return entry;
+}
+
+/**
+ * Hands over an a:custGeom already parsed (with `xml` its serialization),
+ * so drawing it doesn't parse it again; a slide can have thousands.
+ */
+export function rememberCustGeom(xml: string, el: Element): void {
+  if (!custCache.has(xml)) remember(xml, el);
+}
+
+/** The outline of a shape of this geometry and size (px). */
+export function shapePath(geom: Geometry | undefined, w: number, h: number): ShapePath {
+  const size = `${w.toFixed(2)}|${h.toFixed(2)}`;
+  // A custom geometry's XML can be long; it's looked up by itself rather
+  // than as part of a key string, which would be built and hashed each time.
+  if (geom?.cust) {
+    let entry = custCache.get(geom.cust);
+    if (!entry) {
+      try {
+        entry = remember(geom.cust, parseXml(geom.cust).documentElement);
+      } catch {
+        return presetPath('rect', w, h, {});
+      }
+    }
+    const { geom: cust } = entry;
+    return cached(entry.sizes, size, w, h, () => custPath(cust, w, h));
+  }
+  if (cache.size >= CACHE_LIMIT) cache.clear();
+  return cached(cache, `${geom?.prst ?? ''}|${JSON.stringify(geom?.adj ?? {})}|${size}`, w, h, () => presetPath(geom?.prst ?? 'rect', w, h, geom?.adj ?? {}));
 }
 
 /** Whether a geometry is a line (drawn with no fill, stretched to its two ends). */

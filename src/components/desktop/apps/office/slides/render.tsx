@@ -1,5 +1,5 @@
 import { memo, useId, type CSSProperties, type ReactNode } from 'react';
-import { isLineGeom, shapePath } from './geometry';
+import { isLineGeom, shapePath, type SubPath } from './geometry';
 import { ChartView } from './chart';
 import { cellLook } from './table';
 import {
@@ -361,6 +361,28 @@ function boxStyle(x: Xfrm): CSSProperties {
 const flipTransform = (x: Xfrm, w: number, h: number) =>
   x.flipH || x.flipV ? `translate(${x.flipH ? w : 0} ${x.flipV ? h : 0}) scale(${x.flipH ? -1 : 1} ${x.flipV ? -1 : 1})` : undefined;
 
+const joined = new WeakMap<SubPath[], SubPath[]>();
+
+/**
+ * Neighboring unfilled subpaths as one SVG path: they stroke the same either
+ * way, and a drawing exported from CAD can have tens of thousands a slide.
+ * Not for outlines with arrowheads (they'd lose their inner ends) or dashes
+ * (the pattern would run on from one subpath to the next).
+ */
+function joinOutlines(paths: SubPath[]): SubPath[] {
+  if (paths.length < 2) return paths;
+  let out = joined.get(paths);
+  if (out) return out;
+  out = [];
+  for (const p of paths) {
+    const prev = out[out.length - 1];
+    if (prev && prev.fill === 'none' && p.fill === 'none' && prev.stroke === p.stroke) out[out.length - 1] = { ...prev, d: `${prev.d} ${p.d}` };
+    else out.push(p);
+  }
+  joined.set(paths, out);
+  return out;
+}
+
 function SpView({ shape, ctx, opts, chain, box, grpFill, top }: ShapeProps & { shape: SpShape }) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const x = box ?? effectiveXfrm(shape, chain);
@@ -398,7 +420,7 @@ function SpView({ shape, ctx, opts, chain, box, grpFill, top }: ShapeProps & { s
           {stroke?.tail && marker(tailId, stroke.tail, stroke.color, false)}
         </defs>
         <g transform={flipTransform(x, w, h)}>
-          {path.paths.map((p, i) => (
+          {(stroke?.head || stroke?.tail || stroke?.dash ? path.paths : joinOutlines(path.paths)).map((p, i) => (
             <path
               key={i}
               d={p.d}

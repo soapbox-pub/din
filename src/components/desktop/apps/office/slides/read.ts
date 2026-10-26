@@ -1,5 +1,6 @@
 import { at, attr, kid, kids, NS, numAttr, OpcPackage, parseXml, REL, serialize, type Rel } from '../ooxml';
 import { OFFICE_THEME, parseTheme, resolveColor } from '../theme';
+import { rememberCustGeom } from './geometry';
 import {
   DEFAULT_CLR_MAP,
   newUid,
@@ -217,7 +218,11 @@ function parseGeom(spPr: Element | null): Geometry | undefined {
     return { prst: attr(prst, 'prst') ?? 'rect', ...(Object.keys(adj).length ? { adj } : {}) };
   }
   const cust = kid(spPr, 'custGeom');
-  if (cust) return { cust: serialize(cust) };
+  if (cust) {
+    const xml = serialize(cust);
+    rememberCustGeom(xml, cust);
+    return { cust: xml };
+  }
   return undefined;
 }
 
