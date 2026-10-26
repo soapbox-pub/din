@@ -356,6 +356,13 @@ let
     # Electron's wrapper doesn't put it on the library path, so without this
     # every video is decoded on the CPU.
     export LD_LIBRARY_PATH=${pkgs.libva-minimal.out}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+    # Running from a USB stick (dinos-live, below), every fsync Chromium does
+    # for its cookies and databases can hold it up for seconds, and the
+    # desktop with it. There they're skipped: the writes still reach the
+    # stick, a few seconds later.
+    if [ -e /run/din/live ]; then
+      export LD_PRELOAD=${pkgs.libeatmydata}/lib/libeatmydata.so''${LD_PRELOAD:+:$LD_PRELOAD}
+    fi
     # pam_systemd gives the session's processes CAP_WAKE_ALARM as an ambient
     # capability (its default for a seat), which everything Din and its
     # Terminal start would inherit. Programs that drop all their capabilities
@@ -1302,7 +1309,6 @@ in
   fileSystems."/" = {
     device = "/dev/gpt-auto-root";
     fsType = "ext4";
-    autoResize = true;
     options = [ "x-systemd.device-timeout=0" ];
   };
   fileSystems."/boot" = {
@@ -1312,19 +1318,94 @@ in
   };
 
   # The image is built at a minimal size; on first boot the root partition and
-  # filesystem grow to fill whatever disk it was written to. growpart is
-  # pointed at the mounted root, read from sysfs: this early in stage 2
-  # neither the gpt-auto-root link nor udev's database (lsblk) is back yet.
-  # An installed root is a volume, not a partition (the Installer already made
-  # its partition fill the space), so there's nothing to grow.
-  boot.growPartition = true;
-  systemd.services.growpart.script = lib.mkForce ''
-    root=$(${pkgs.util-linux}/bin/findmnt -nvo SOURCE /)
-    part=/sys/class/block/''${root#/dev/}
-    [ -e "$part/partition" ] || exit 0
-    disk=$(basename "$(readlink -f "$part/..")")
-    "${pkgs.cloud-utils.guest}/bin/growpart" "/dev/$disk" "$(cat "$part/partition")"
-  '';
+  # filesystem grow to fill whatever disk it was written to. ext4 grows while
+  # mounted, so it happens once the desktop is up, at idle priority: on a
+  # USB stick it takes a minute, which the first boot used to wait out. If
+  # it's cut short, the next boot finishes it. The mounted root is found
+  # through sysfs, where it's always the real device. An installed root is a
+  # volume, not a partition (the Installer already made its partition fill
+  # the space), so there's nothing to grow.
+  systemd.services.dinos-grow-root = {
+    description = "Grow the root partition to fill its disk";
+    wantedBy = [ "graphical.target" ];
+    after = [ "graphical.target" ];
+    path = [ pkgs.util-linux pkgs.e2fsprogs ];
+    serviceConfig = {
+      Type = "oneshot";
+      Nice = 19;
+      IOSchedulingClass = "idle";
+    };
+    script = ''
+      root=$(findmnt -nvo SOURCE /)
+      part=/sys/class/block/''${root#/dev/}
+      [ -e "$part/partition" ] || exit 0
+      disk=$(basename "$(readlink -f "$part/..")")
+      # 1: there was no room to grow it into.
+      "${pkgs.cloud-utils.guest}/bin/growpart" "/dev/$disk" "$(cat "$part/partition")" || [ $? -eq 1 ]
+      resize2fs "$root"
+    '';
+  };
+
+  # Booted from a USB stick (as the Installer and updater tell, by the root
+  # disk being removable or on USB), DinOS keeps what it can off the stick.
+  # A cheap one manages about 4 small flushed writes a second, some taking
+  # five seconds, and Din froze along with them. So the log stays in memory,
+  # reading a file doesn't write its access time, and the filesystem commits
+  # once a minute; Din skips Chromium's flushes (the launcher, above) and its
+  # caches go in memory too (dinos-live-caches). /run/din/live marks such a
+  # boot. What a session keeps - the sign-in, saved WiFi, nostrd's keys -
+  # still goes on the stick, for the next boot and for the Installer to copy.
+  systemd.services.dinos-live = {
+    description = "Spare the USB stick DinOS is running from";
+    wantedBy = [ "sysinit.target" ];
+    before = [ "sysinit.target" ];
+    after = [ "local-fs.target" "systemd-journal-flush.service" ];
+    unitConfig.DefaultDependencies = false;
+    path = [ pkgs.util-linux pkgs.coreutils config.systemd.package ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      root=$(findmnt -nvo SOURCE /)
+      part=/sys/class/block/''${root#/dev/}
+      [ -e "$part/partition" ] || exit 0
+      disk=$(readlink -f "$part/..")
+      if [ "$(cat "$disk/removable")" != 1 ] && [[ $disk != */usb* ]]; then
+        exit 0
+      fi
+      mkdir -p /run/din /run/systemd/journald.conf.d
+      touch /run/din/live
+      mount -o remount,noatime,lazytime,commit=60 /
+      printf '[Journal]\nStorage=volatile\n' > /run/systemd/journald.conf.d/dinos-live.conf
+      journalctl --relinquish-var
+    '';
+  };
+  # Chromium's caches under Din's profile (Electron's default name, as Din's
+  # host has no package.json of its own) and ~/.cache, as tmpfs.
+  systemd.services.dinos-live-caches = {
+    description = "Keep Din's caches in memory on a USB stick";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "systemd-user-sessions.service" "cage-tty1.service" ];
+    after = [ "dinos-live.service" "local-fs.target" ];
+    unitConfig.ConditionPathExists = "/run/din/live";
+    path = [ pkgs.util-linux pkgs.coreutils ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      home=/home/din
+      profile=$home/.config/Electron
+      [ -d "$home" ] || exit 0
+      for dir in "$home/.cache" "$profile/Cache" "$profile/Code Cache" "$profile/GPUCache" \
+        "$profile/DawnGraphiteCache" "$profile/DawnWebGPUCache"; do
+        mountpoint -q "$dir" && continue
+        runuser -u din -- mkdir -p "$dir"
+        mount -t tmpfs -o mode=0700,uid=${toString config.users.users.din.uid},gid=${toString config.ids.gids.users},size=25%,nosuid,nodev tmpfs "$dir"
+      done
+    '';
+  };
 
   # Storage controllers commonly found in real machines, so the initrd can
   # mount the root filesystem wherever the image lands (NVMe, SATA, USB, SD).
@@ -1416,10 +1497,6 @@ in
     # Serial console so `npm run os:run` shows boot logs in the terminal too.
     # Plymouth would draw on the serial console instead of the window.
     boot.kernelParams = [ "console=ttyS0" "plymouth.ignore-serial-consoles" ];
-
-    # The demo boots its kernel directly from an unpartitioned disk: there's
-    # no partition to grow.
-    boot.growPartition = lib.mkForce false;
 
     virtualisation = {
       memorySize = 4096;
