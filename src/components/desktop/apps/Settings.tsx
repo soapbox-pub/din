@@ -46,6 +46,8 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { findMatches, matchesAll, parseQuery } from '@/lib/settingsSearch';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { AppComponentProps } from '@/lib/apps';
 import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
 import {
@@ -190,24 +192,115 @@ type SectionId =
   | 'developers'
   | 'about';
 
-const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
-  { id: 'wifi', name: 'Wi-Fi', icon: Wifi },
-  { id: 'bluetooth', name: 'Bluetooth', icon: Bluetooth },
-  { id: 'display', name: 'Display', icon: Monitor },
-  { id: 'brightness', name: 'Brightness', icon: Sun },
-  { id: 'power', name: 'Battery & Power', icon: BatteryFull },
-  { id: 'sound', name: 'Sound', icon: Volume2 },
-  { id: 'keyboard', name: 'Keyboard', icon: Keyboard },
-  { id: 'printers', name: 'Printers', icon: Printer },
-  { id: 'datetime', name: 'Date & Time', icon: Clock },
-  { id: 'password', name: 'Password', icon: KeyRound },
-  { id: 'notifications', name: 'Notifications', icon: Bell },
-  { id: 'nostr', name: 'Nostr & Storage', icon: Cloud },
-  { id: 'connected', name: 'Connected apps', icon: Link2 },
-  { id: 'assistant', name: 'Assistant', icon: Bot },
-  { id: 'appearance', name: 'Appearance', icon: Palette },
-  { id: 'developers', name: 'Developers', icon: Bug },
-  { id: 'about', name: 'About', icon: Info },
+/**
+ * The sections, in sidebar order. `search` is what Settings search matches
+ * besides the name: the section's headings and setting labels, then words
+ * people might search for that aren't on screen. Keep it in step with the
+ * section when adding or renaming a setting.
+ */
+const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; search: string[] }[] = [
+  {
+    id: 'wifi',
+    name: 'Wi-Fi',
+    icon: Wifi,
+    search: ['Add network', 'Saved networks', 'Network details', 'network', 'internet', 'wireless', 'WLAN', 'SSID', 'hotspot', 'connection'],
+  },
+  {
+    id: 'bluetooth',
+    name: 'Bluetooth',
+    icon: Bluetooth,
+    search: ['My devices', 'Devices nearby', 'pair', 'headphones', 'speaker', 'mouse', 'keyboard', 'wireless', 'device'],
+  },
+  {
+    id: 'display',
+    name: 'Display',
+    icon: Monitor,
+    search: ['Zoom', 'Scale everything on the desktop up or down.', 'AirPlay', 'monitor', 'screen', 'resolution', 'refresh rate', 'arrange', 'mirror', 'scaling', 'external display', 'projector', 'TV'],
+  },
+  {
+    id: 'brightness',
+    name: 'Brightness',
+    icon: Sun,
+    search: ['Night Light', "Warm the display's colors to reduce blue light.", 'Color temperature', 'Schedule', 'screen', 'dim', 'backlight', 'blue light'],
+  },
+  {
+    id: 'power',
+    name: 'Battery & Power',
+    icon: BatteryFull,
+    search: ['Battery', 'Power mode', 'Power profile', 'power saver', 'balanced', 'performance', 'charging', 'energy'],
+  },
+  {
+    id: 'sound',
+    name: 'Sound',
+    icon: Volume2,
+    search: ['Output volume', 'Mute', 'Silence all output without losing your volume level.', 'Output device', 'Input device', 'Input volume', 'Play a test tone', 'volume', 'audio', 'speaker', 'headphones', 'microphone', 'mic'],
+  },
+  {
+    id: 'keyboard',
+    name: 'Keyboard',
+    icon: Keyboard,
+    search: ['Keyboard layout', 'The layout everything on this computer types with.', 'language', 'input', 'typing', 'QWERTY', 'Dvorak'],
+  },
+  {
+    id: 'printers',
+    name: 'Printers',
+    icon: Printer,
+    search: ['Add printer', 'Use as default', 'Print a test page', 'printing', 'print queue', 'scanner', 'CUPS'],
+  },
+  {
+    id: 'datetime',
+    name: 'Date & Time',
+    icon: Clock,
+    search: ['Time', 'Set time automatically', 'Time zone', 'Clock', 'Clock format', 'Show the date in the menu bar', 'The weekday and date, beside the time.', 'Show seconds in the menu bar', 'The clock ticks every second.', '24-hour', '12-hour', 'calendar', 'timezone'],
+  },
+  {
+    id: 'password',
+    name: 'Password',
+    icon: KeyRound,
+    search: ['Current password', 'New password', 'Changing it here changes it everywhere.', 'lock screen', 'login', 'security', 'disk encryption', 'passphrase'],
+  },
+  {
+    id: 'notifications',
+    name: 'Notifications',
+    icon: Bell,
+    search: ['Do Not Disturb', 'Keep notifications in the list without popping them up. Urgent ones still show.', 'On-screen alerts', 'Pop up new mentions, reactions, reposts, comments and zaps in the corner.', 'Only from people you follow', "Ignore interactions from accounts you don't follow.", 'Notify me about', 'alerts', 'quiet', 'silence'],
+  },
+  {
+    id: 'nostr',
+    name: 'Nostr & Storage',
+    icon: Cloud,
+    search: ['Encrypted sync', 'Relays', 'Blossom servers', 'sync', 'backup', 'cloud', 'media', 'uploads', 'NIP-65'],
+  },
+  {
+    id: 'connected',
+    name: 'Connected apps',
+    icon: Link2,
+    search: ['Connect an app', 'Sites and installed apps', 'Apps connected with a link', 'signer', 'bunker', 'Nostr Connect', 'remote signer', 'permissions', 'NIP-46'],
+  },
+  {
+    id: 'assistant',
+    name: 'Assistant',
+    icon: Bot,
+    search: ['AI providers', 'OpenCode', 'AI', 'agent', 'chat', 'model', 'API key'],
+  },
+  {
+    id: 'appearance',
+    name: 'Appearance',
+    icon: Palette,
+    search: ['Sync with your profile theme', 'Effects', 'Wobbly windows', 'Cursor', 'Cursor style', 'Cursor size', 'theme', 'dark mode', 'light mode', 'colors', 'fonts', 'background', 'wallpaper', 'desktop picture', 'mouse pointer'],
+  },
+  {
+    id: 'developers',
+    name: 'Developers',
+    icon: Bug,
+    search: ['Trigger an error', 'Crash', 'debug', 'error boundary'],
+  },
+  {
+    id: 'about',
+    name: 'About',
+    icon: Info,
+    search: ['Updates', 'Firmware', 'version', 'update', 'upgrade', 'restart', 'DinOS', 'system information'],
+  },
 ];
 
 /**
@@ -259,6 +352,11 @@ export function Settings({ params }: AppComponentProps) {
   const [section, setSection] = useState<SectionId>(
     () => paramSection(params) ?? 'wifi',
   );
+  // Search: once the query has two letters or digits, the pane shows every
+  // matching section, one after the other, with the matches highlighted.
+  // Only matching sections mount, since opening one can start work (a
+  // Bluetooth scan, say).
+  const [query, setQuery] = useState('');
 
   // The window is reused for this single-instance app, so a re-launch (e.g.
   // from a different tray indicator) updates params without remounting.
@@ -269,80 +367,193 @@ export function Settings({ params }: AppComponentProps) {
     if (requested && requested !== lastRequested.current) {
       lastRequested.current = requested;
       setSection(requested);
+      setQuery('');
     }
   }, [requested]);
 
-  return (
-    <div className="flex h-full w-full">
-      {/* Section sidebar */}
-      <nav
-        aria-label="Settings sections"
-        className="flex w-44 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/60 bg-background/30 p-2"
-      >
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => setSection(s.id)}
-            aria-current={section === s.id ? 'page' : undefined}
-            className={cn(
-              'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              section === s.id
-                ? 'bg-foreground/15 text-foreground'
-                : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
-            )}
-          >
-            <s.icon className="size-4 shrink-0" aria-hidden />
-            <span className="truncate">{s.name}</span>
-          </button>
-        ))}
-      </nav>
+  const debouncedQuery = useDebouncedValue(query, 150);
+  const terms = useMemo(() => parseQuery(query ? debouncedQuery : ''), [query, debouncedQuery]);
+  const searching = terms.join('').length >= 2;
+  const results = useMemo(
+    () => (searching ? SECTIONS.filter((s) => matchesAll([s.name, ...s.search], terms)) : []),
+    [searching, terms],
+  );
+  const searchRef = useRef<HTMLInputElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
+  useSearchHighlight(paneRef, searching ? terms : NO_TERMS);
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        {section === 'wifi' ? (
-          <WifiSettingsSection
-            join={typeof params?.join === 'string' ? { ssid: params.join, nonce: params.nonce } : undefined}
+  const onKeyDownCapture = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    }
+  };
+
+  const renderSection = (id: SectionId) =>
+    id === 'wifi' ? (
+      <WifiSettingsSection
+        join={typeof params?.join === 'string' ? { ssid: params.join, nonce: params.nonce } : undefined}
+      />
+    ) : id === 'bluetooth' ? (
+      <BluetoothSection />
+    ) : id === 'display' ? (
+      <DisplaySection />
+    ) : id === 'brightness' ? (
+      <BrightnessSection />
+    ) : id === 'power' ? (
+      <PowerSection />
+    ) : id === 'sound' ? (
+      <SoundSection />
+    ) : id === 'keyboard' ? (
+      <KeyboardSection />
+    ) : id === 'printers' ? (
+      <PrintersSettingsSection />
+    ) : id === 'datetime' ? (
+      <DateTimeSection />
+    ) : id === 'password' ? (
+      <PasswordSection />
+    ) : id === 'notifications' ? (
+      <NotificationsSection />
+    ) : id === 'nostr' ? (
+      <NostrStorageSection />
+    ) : id === 'connected' ? (
+      <ConnectedAppsSection
+        nostrconnect={typeof params?.nostrconnect === 'string' ? params.nostrconnect : undefined}
+        nonce={params?.nonce}
+      />
+    ) : id === 'assistant' ? (
+      <AssistantSettingsSection />
+    ) : id === 'appearance' ? (
+      <AppearanceSection />
+    ) : id === 'developers' ? (
+      <DevelopersSection />
+    ) : (
+      <AboutSection />
+    );
+
+  return (
+    <div className="flex h-full w-full" onKeyDownCapture={onKeyDownCapture}>
+      {/* Section sidebar */}
+      <div className="flex w-44 shrink-0 flex-col gap-2 border-r border-border/60 bg-background/30 p-2">
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
           />
-        ) : section === 'bluetooth' ? (
-          <BluetoothSection />
-        ) : section === 'display' ? (
-          <DisplaySection />
-        ) : section === 'brightness' ? (
-          <BrightnessSection />
-        ) : section === 'power' ? (
-          <PowerSection />
-        ) : section === 'sound' ? (
-          <SoundSection />
-        ) : section === 'keyboard' ? (
-          <KeyboardSection />
-        ) : section === 'printers' ? (
-          <PrintersSettingsSection />
-        ) : section === 'datetime' ? (
-          <DateTimeSection />
-        ) : section === 'password' ? (
-          <PasswordSection />
-        ) : section === 'notifications' ? (
-          <NotificationsSection />
-        ) : section === 'nostr' ? (
-          <NostrStorageSection />
-        ) : section === 'connected' ? (
-          <ConnectedAppsSection
-            nostrconnect={typeof params?.nostrconnect === 'string' ? params.nostrconnect : undefined}
-            nonce={params?.nonce}
+          <Input
+            ref={searchRef}
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && query) {
+                e.stopPropagation();
+                setQuery('');
+              }
+            }}
+            placeholder="Search settings"
+            aria-label="Search settings"
+            className="h-8 pl-8 text-sm"
           />
-        ) : section === 'assistant' ? (
-          <AssistantSettingsSection />
-        ) : section === 'appearance' ? (
-          <AppearanceSection />
-        ) : section === 'developers' ? (
-          <DevelopersSection />
+        </div>
+        <nav aria-label="Settings sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
+          {SECTIONS.map((s) => {
+            const current = searching ? results.includes(s) : section === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => {
+                  setSection(s.id);
+                  setQuery('');
+                }}
+                aria-current={!searching && section === s.id ? 'page' : undefined}
+                className={cn(
+                  'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  current
+                    ? 'bg-foreground/15 text-foreground'
+                    : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+                  searching && !current && 'opacity-50',
+                )}
+              >
+                <s.icon className="size-4 shrink-0" aria-hidden />
+                <span className="truncate">{s.name}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      <div ref={paneRef} className="min-w-0 flex-1 overflow-y-auto">
+        {!searching ? (
+          renderSection(section)
+        ) : results.length > 0 ? (
+          results.map((s) => (
+            <div key={s.id} className="border-b border-border/40 last:border-b-0">
+              {renderSection(s.id)}
+            </div>
+          ))
         ) : (
-          <AboutSection />
+          <div className="mx-auto max-w-2xl p-4">
+            <FallbackCard icon={Search}>No settings match “{query.trim()}”.</FallbackCard>
+          </div>
         )}
       </div>
     </div>
   );
+}
+
+const NO_TERMS: string[] = [];
+const SEARCH_HIGHLIGHT = 'settings-search';
+
+/**
+ * Highlights where `terms` occur in the text under `paneRef`, with the CSS
+ * Custom Highlight API so the sections' DOM stays untouched, and keeps the
+ * highlights current as sections load their content. Scrolls the first match
+ * into view once per search.
+ */
+function useSearchHighlight(paneRef: React.RefObject<HTMLElement | null>, terms: string[]) {
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!pane || terms.length === 0 || typeof Highlight === 'undefined' || !CSS.highlights) return;
+    pane.scrollTop = 0;
+    let scrolled = false;
+    let frame = 0;
+    const paint = () => {
+      frame = 0;
+      const ranges: Range[] = [];
+      const walker = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.nodeValue;
+        if (!text?.trim() || node.parentElement?.closest('style, script')) continue;
+        for (const [start, end] of findMatches(text, terms)) {
+          const range = new Range();
+          range.setStart(node, start);
+          range.setEnd(node, end);
+          ranges.push(range);
+        }
+      }
+      CSS.highlights.set(SEARCH_HIGHLIGHT, new Highlight(...ranges));
+      if (!scrolled && ranges.length > 0) {
+        scrolled = true;
+        const top = ranges[0].getBoundingClientRect().top - pane.getBoundingClientRect().top;
+        if (top > pane.clientHeight - 32) pane.scrollTop += top - 48;
+      }
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(paint);
+    };
+    schedule();
+    const observer = new MutationObserver(schedule);
+    observer.observe(pane, { childList: true, subtree: true, characterData: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      CSS.highlights.delete(SEARCH_HIGHLIGHT);
+    };
+  }, [paneRef, terms]);
 }
 
 // ---------------------------------------------------------------------------
@@ -3875,7 +4086,10 @@ function SectionShell({
   );
 }
 
-/** A labelled toggle row matching the rest of Settings' switch controls. */
+/**
+ * A labelled toggle row matching the rest of Settings' switch controls. Add a
+ * new row's label to its section's `search` in SECTIONS so search finds it.
+ */
 function SettingSwitchRow({
   id,
   icon: Icon,

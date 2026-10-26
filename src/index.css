@@ -296,6 +296,12 @@
    when those are set, Chromium ignores ::-webkit-scrollbar styling and
    reverts to native (cursor-breaking) scrollbars. */
 
+/* Matches of Settings search (useSearchHighlight in Settings.tsx). */
+::highlight(settings-search) {
+  background-color: rgb(250 204 21 / 0.45);
+  color: inherit;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
