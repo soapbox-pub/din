@@ -39,8 +39,6 @@ export interface AssistantBridge {
   status(): Promise<AssistantStatus>;
   setEnabled(enabled: boolean): Promise<AssistantStatus>;
   install(): Promise<void>;
-  /** Start the server, if it's on and not running. */
-  start(): Promise<void>;
   restart(): Promise<void>;
   recentModels(): Promise<{ providerID: string; modelID: string }[]>;
   request(method: string, path: string, body?: unknown): Promise<Reply>;

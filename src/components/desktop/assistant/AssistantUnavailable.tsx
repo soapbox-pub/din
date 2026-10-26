@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { CircleAlert, Loader2, Power } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -15,13 +14,6 @@ export function AssistantUnavailable({ className, compact = false }: { className
   const setEnabled = useSetAssistantEnabled();
   const { open } = useWindowActions();
   const openSettings = () => open('settings', { section: 'assistant' });
-
-  // The server starts the first time the assistant is wanted, which is when
-  // this is on screen.
-  const waiting = !!status?.enabled && !status.running && !status.installing && !status.error;
-  useEffect(() => {
-    if (waiting) void getAssistantBridge()?.start().catch(() => {});
-  }, [waiting]);
 
   if (!getAssistantBridge()) {
     return (

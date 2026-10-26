@@ -295,8 +295,7 @@ poppler (`electron/printing.mts`). Save as PDF needs no printer at all.
 The Assistant app, the menu bar's robot, and Super+A (a prompt from
 anywhere) talk to [OpenCode](https://opencode.ai) v2, the coding agent,
 through its per-user background server (`opencode serve --service`). Din
-starts it the first time the assistant is wanted while Settings → Assistant
-has it on, and holds its
+starts it at login while Settings → Assistant has it on, and holds its
 password and event stream in the main process (`electron/assistant.mts`);
 the shell only gets what it asks for under `/api/`. Conversations are
 OpenCode's sessions, so `opencode` in a Terminal shares them. OpenCode is the

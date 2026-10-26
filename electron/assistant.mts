@@ -5,12 +5,10 @@
 // OpenCode v2 keeps one server per user (`opencode serve --service`) that
 // every client shares: the TUI in a Terminal, `opencode run`, and Din. The
 // first client to need it starts it, and it writes where it listens and a
-// generated password to ~/.local/state/opencode/service.json. While the
-// assistant is on (the shell says so, from its config), Din starts it the
-// first time the assistant is wanted rather than at login: it's a big
-// program, and from a USB stick loading it held up the desktop. One already
-// running is picked up at login, and a Terminal's `opencode` attaches to
-// Din's.
+// generated password to ~/.local/state/opencode/service.json. Din starts it
+// at login while the assistant is on (the shell says so, from its config),
+// so the agent is there to be asked from anywhere; a Terminal's `opencode`
+// then finds it running and attaches.
 //
 // OpenCode itself is the user's install in ~/.opencode, which updates
 // itself, rather than a copy pinned into DinOS: it moves faster than DinOS
@@ -332,7 +330,6 @@ async function send(s: Service, method: string, apiPath: string, body: string | 
 }
 
 async function request(method: string, apiPath: string, body: string | undefined): Promise<Reply> {
-  startWatching();
   let s: Service;
   try {
     s = service ?? (await ensureService());
@@ -426,24 +423,11 @@ async function watch(controller: AbortController): Promise<void> {
   }
 }
 
-/** Open the event stream (which starts the server) while it's on. */
-function startWatching(): void {
-  if (!status.enabled || stream) return;
-  stream = new AbortController();
-  void watch(stream);
-}
-
 function setEnabled(enabled: boolean): void {
   update({ enabled });
   if (enabled && !stream) {
-    // Only a server that's running already; otherwise the first time the
-    // assistant is wanted starts one.
-    const known = readService();
-    if (known) {
-      void answers(known).then((up) => {
-        if (up) startWatching();
-      });
-    }
+    stream = new AbortController();
+    void watch(stream);
   } else if (!enabled && stream) {
     stream.abort();
     stream = null;
@@ -486,11 +470,6 @@ export function registerAssistantHandlers(options: {
     assertShellSender(event);
     setEnabled(enabled === true);
     return status;
-  });
-
-  ipcMain.handle('assistant:start', (event) => {
-    assertShellSender(event);
-    startWatching();
   });
 
   ipcMain.handle('assistant:install', async (event) => {
