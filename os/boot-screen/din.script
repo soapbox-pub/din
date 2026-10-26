@@ -1,9 +1,11 @@
 # Din's boot and unlock screen, for Plymouth (see os/boot-screen.nix).
 #
 # It looks like Din's old login screen: the wallpaper, dimmed, a large clock
-# and the date, a password field, and Din's logo at the foot. Until a password is
-# asked for there's only the background and the footer. Once root is mounted
-# everything fades to black, which Din's own boot veil fades in from.
+# and the date, a password field, and Din's logo at the foot. Otherwise
+# there's only the background, the footer, and a progress bar above it. Once
+# root is mounted the lock screen fades away and the logo and bar stay,
+# until Din's own boot veil, which draws them in the same place
+# (src/components/desktop/BootVeil.tsx), takes over.
 #
 # What it can't know by itself arrives through files and messages from the
 # initrd (os/boot-screen.nix): the wallpaper is a file in ImageDir that may
@@ -104,20 +106,45 @@ field_image = Image("field.png");
 if (field_image)
   center(field.sprite, field_image.Scale(px(320), px(48)), field_y);
 
+logo_h = px(28);
 logo_image = Image("logo.png");
 if (logo_image)
 {
-  logo_h = px(28);
   logo_w = Math.Int(logo_image.GetWidth() * logo_h / logo_image.GetHeight());
   center(footer.sprite, logo_image.Scale(logo_w, logo_h), screen.h - px(40) - logo_h);
 }
 footer.target = 0.85;
 
+# The bar: Plymouth's estimate of how far booting has got, from how long the
+# last boots took. It fills to BAR_SHARE by the time Din starts, and Din's
+# veil goes on from there.
+BAR_SHARE = 0.7;
+bar_w = px(160);
+bar_h = Math.Max(px(4), 2);
+bar_y = screen.h - px(40) - logo_h - px(24) - bar_h;
+bar_x = Math.Int((screen.w - bar_w) / 2);
+track = fader(Sprite(Image("bar-track.png").Scale(bar_w, bar_h)), 10);
+track.sprite.SetPosition(screen.x + bar_x, screen.y + bar_y, 10);
+fill = fader(Sprite(), 11);
+fill.sprite.SetPosition(screen.x + bar_x, screen.y + bar_y, 11);
+fill_image = Image("bar-fill.png");
+shown = 0;
+progress = 0;
+
+fun boot_progress(duration, value)
+{
+  value = value * BAR_SHARE;
+  if (value > global.progress)
+    global.progress = value;
+}
+
 asked = 0;
 mounted = 0;
+locked = 0;
 
 fun show_lock()
 {
+  global.locked = 1;
   clock.target = 1;
   date.target = 1;
   field.target = 1;
@@ -185,15 +212,19 @@ fun display_message(message)
   center(date.sprite, text(rest.SubString(bar + 1, rest.Length()), 0.7, "Regular", 16), date_y);
 }
 
-#------------------------------------ Fade out --------------------------------
-
-veil = fader(Sprite(black.Scale(screen.w, screen.h)), 1000);
-veil.sprite.SetPosition(screen.x, screen.y, 1000);
+#------------------------------------ Unlocked --------------------------------
 
 fun root_mounted()
 {
   global.mounted = 1;
-  veil.target = 1;
+  global.locked = 0;
+  clock.target = 0;
+  date.target = 0;
+  field.target = 0;
+  entry.target = 0;
+  caption.target = 0;
+  dim.target = 0;
+  wallpaper.target = 0;
 }
 
 #------------------------------------ Every frame -----------------------------
@@ -210,8 +241,25 @@ fun refresh()
       wallpaper.loaded = load_wallpaper();
     wallpaper_tries++;
   }
-  if (wallpaper.loaded && asked > 0)
+  if (wallpaper.loaded && locked)
     wallpaper.target = 1;
+
+  # The bar has nothing to say while the password is asked for.
+  if (locked)
+  {
+    track.target = 0;
+    fill.target = 0;
+  }
+  else
+  {
+    track.target = 0.85;
+    fill.target = 0.85;
+  }
+  # Eased toward the estimate, so it moves smoothly and never goes back.
+  global.shown += (progress - shown) * 0.08;
+  width = Math.Int(bar_w * shown);
+  if (width >= 1)
+    fill.sprite.SetImage(fill_image.Scale(width, bar_h));
 
   if (asked > 0 && !entered && Plymouth.GetCapslockState() != capslock)
   {
@@ -230,7 +278,8 @@ fun refresh()
   global.entry = ease(entry);
   global.caption = ease(caption);
   global.footer = ease(footer);
-  global.veil = ease(veil);
+  global.track = ease(track);
+  global.fill = ease(fill);
 }
 
 Plymouth.SetRefreshFunction(refresh);
@@ -238,3 +287,4 @@ Plymouth.SetDisplayPasswordFunction(display_password);
 Plymouth.SetDisplayNormalFunction(display_normal);
 Plymouth.SetDisplayMessageFunction(display_message);
 Plymouth.SetRootMountedFunction(root_mounted);
+Plymouth.SetBootProgressFunction(boot_progress);

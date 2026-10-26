@@ -4,8 +4,12 @@ import { cn } from '@/lib/utils';
 import { ScreenLayer } from './MonitorsProvider';
 
 /**
- * Boot veil: a black overlay covering the shell's first frame, fading out
- * once the window is on screen so the desktop/login fades in from black.
+ * Boot veil: an overlay covering the shell's first frame, fading out once
+ * the window is on screen so the desktop/login fades in from it. It's the
+ * boot screen's last frame (os/boot-screen/din.script): the same background,
+ * Din's logo at the foot and the progress bar above it, in the same places
+ * on the primary monitor, so the handover doesn't show. The bar goes on
+ * from where the boot screen leaves it to full as the veil fades.
  *
  * Doubles as the readiness signal for the Electron host: the shell window
  * starts hidden (electron/main.mts) and is only shown once the app has
@@ -44,13 +48,38 @@ export function BootVeil() {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [bridge]);
 
+  // Sizes are the boot screen's, which designs for 1080 lines and follows
+  // the screen's height: here, hundredths of the monitor's height (cqh).
   return (
-    <ScreenLayer
-      aria-hidden
-      className={cn(
-        'pointer-events-none z-[10001] bg-black',
-        visible && 'animate-veil-out motion-reduce:animate-none motion-reduce:opacity-0',
-      )}
-    />
+    <>
+      <ScreenLayer
+        aria-hidden
+        className={cn(
+          'pointer-events-none z-[10001] bg-[#0b0f14]',
+          visible && 'animate-veil-out motion-reduce:animate-none motion-reduce:opacity-0',
+        )}
+      />
+      <div
+        aria-hidden
+        className={cn(
+          'pointer-events-none fixed inset-0 z-[10001] [container-type:size]',
+          visible && 'animate-veil-out motion-reduce:animate-none motion-reduce:opacity-0',
+        )}
+      >
+        <div className="absolute bottom-[8.52cqh] left-1/2 h-[max(0.37cqh,2px)] w-[14.81cqh] -translate-x-1/2 overflow-hidden bg-white/15">
+          <div
+            className={cn(
+              'h-full bg-white/85 transition-[width] duration-1000 ease-out',
+              visible ? 'w-full' : 'w-[70%]',
+            )}
+          />
+        </div>
+        <img
+          src="/din-logo.svg"
+          alt=""
+          className="absolute bottom-[3.7cqh] left-1/2 h-[2.59cqh] -translate-x-1/2 opacity-85"
+        />
+      </div>
+    </>
   );
 }

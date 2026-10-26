@@ -58,5 +58,11 @@ pkgs.testers.runNixOSTest {
     print(machine.succeed("grep -vE 'ply_key_file|ply_event_loop|ply_boot_server|ply-buffer' /tmp/plymouth.log | tail -n 120 | cut -c 14-220"))
     typed = machine.succeed("cat /tmp/typed").strip()
     assert typed == "qwerty", f"typed {typed!r}"
+
+    # Once root is mounted the lock screen goes and the logo and progress
+    # bar stay, as Din's boot veil takes them over.
+    machine.succeed("plymouth update-root-fs --new-root-dir=/")
+    machine.sleep(3)
+    machine.screenshot("unlocked")
   '';
 }

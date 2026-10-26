@@ -280,6 +280,8 @@ let
     ScriptFile=$dir/din.script
     EOF
     magick -size 1x1 xc:black $dir/black.png
+    magick -size 1x1 xc:'rgba(255,255,255,0.18)' $dir/bar-track.png
+    magick -size 1x1 xc:white $dir/bar-fill.png
     magick -size 640x96 xc:none -fill 'rgba(255,255,255,0.14)' \
       -stroke 'rgba(255,255,255,0.32)' -strokewidth 2 \
       -draw 'roundrectangle 1,1 638,94 47,47' $dir/field.png
