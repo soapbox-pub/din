@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { registerMediaSource } from '@/lib/nowPlaying';
 import { EQ_BANDS, EQ_MAX_DB } from './eq';
 import { baseTitle, coverFor, isUrl, isVideoLocation, mediaUrl, trackInfo } from './metadata';
 
@@ -353,6 +354,7 @@ class MusicEngine {
 
     for (let i = 0; i < 2; i++) {
       const el = document.createElement('video');
+      el.dataset.dinPlayer = '';
       el.crossOrigin = 'anonymous';
       el.preload = 'auto';
       el.playsInline = true;
@@ -400,6 +402,7 @@ class MusicEngine {
   private get directElement(): HTMLAudioElement {
     if (!this.directEl) {
       const el = new Audio();
+      el.dataset.dinPlayer = '';
       el.preload = 'auto';
       el.addEventListener('ended', () => this.state.direct && this.advance(false));
       el.addEventListener('error', () => {
@@ -1096,6 +1099,63 @@ class MusicEngine {
 /** The one engine every Media Player window and skin drives. */
 export const player = new MusicEngine();
 export type { MusicEngine };
+
+// The volume menu's media controls.
+{
+  let cover: { location: string; url: string | null } | null = null;
+  let since = 0;
+  let listed = false;
+  const listeners = new Set<() => void>();
+  registerMediaSource({
+    current() {
+      const { status } = player.getState();
+      const track = player.currentTrack;
+      // Once it's been playing it stays: Next while paused stops the player
+      // (as Winamp does), and its controls mustn't vanish for that.
+      if (!track || (status === 'stopped' && !listed)) {
+        listed = false;
+        return null;
+      }
+      if (!listed) since = Date.now();
+      listed = true;
+      if (cover?.location !== track.location) {
+        const location = track.location;
+        cover = { location, url: null };
+        void coverFor(location).then((url) => {
+          if (cover?.location !== location || !url) return;
+          cover = { location, url };
+          for (const listener of listeners) listener();
+        });
+      }
+      return {
+        id: 'player',
+        kind: 'player',
+        title: track.title,
+        subtitle: track.artist || 'Media Player',
+        artwork: cover.url,
+        playing: status === 'playing',
+        canPlay: true,
+        canPrevious: true,
+        canNext: true,
+        since,
+      };
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      const unsubscribe = player.subscribe(listener);
+      return () => {
+        listeners.delete(listener);
+        unsubscribe();
+      };
+    },
+    control(action) {
+      if (action === 'play') player.play();
+      else if (action === 'pause') player.pause();
+      else if (action === 'nexttrack') player.next();
+      else player.previous();
+    },
+  });
+}
 
 /** Subscribe a component to part of the player's state. */
 export function usePlayer<T>(selector: (state: PlayerState) => T): T {

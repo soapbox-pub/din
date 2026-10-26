@@ -1,5 +1,17 @@
 import { useState } from 'react';
-import { Settings2, Volume1, Volume2, VolumeX } from 'lucide-react';
+import {
+  AppWindow,
+  Globe,
+  Music,
+  Pause,
+  Play,
+  Settings2,
+  SkipBack,
+  SkipForward,
+  Volume1,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OverdriveSlider, type OverdriveSliderProps } from '@/components/ui/overdrive-slider';
 import { PopoverClose } from '@/components/ui/popover';
@@ -7,6 +19,10 @@ import { cn } from '@/lib/utils';
 import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
 import { MAX_VOLUME, volumeText } from '@/lib/audio';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { artworkSrc, controlMedia, useNowPlaying, type MediaSource } from '@/lib/nowPlaying';
+
+/** How many sources the popover lists at most. */
+const MAX_NOW_PLAYING = 3;
 
 /**
  * Speaker glyph reflecting volume and mute state. Shared by the menu-bar item
@@ -70,6 +86,8 @@ export function VolumePopoverBody() {
         </span>
       </header>
 
+      <NowPlaying />
+
       <div className="flex items-center gap-2.5 px-3 py-3">
         <Button
           variant="ghost"
@@ -110,6 +128,107 @@ export function VolumePopoverBody() {
           </Button>
         </PopoverClose>
       </footer>
+    </div>
+  );
+}
+
+/** Media controls for whatever is playing, or was until paused. */
+function NowPlaying() {
+  const sources = useNowPlaying();
+  if (sources.length === 0) return null;
+  return (
+    <ul aria-label="Now playing" className="flex flex-col gap-1 border-b border-border/60 px-1.5 py-1.5">
+      {sources.slice(0, MAX_NOW_PLAYING).map((source) => (
+        <NowPlayingItem key={source.id} source={source} />
+      ))}
+    </ul>
+  );
+}
+
+function NowPlayingItem({ source }: { source: MediaSource }) {
+  const skippable = source.canPrevious || source.canNext;
+  const buttonClass = 'size-8 shrink-0 text-foreground/90 hover:bg-foreground/10 hover:text-foreground';
+  return (
+    <li className="flex items-center gap-2.5 rounded-md px-1.5 py-1.5">
+      <Artwork source={source} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-foreground" title={source.title}>
+          {source.title}
+        </p>
+        {source.subtitle && (
+          <p className="truncate text-xs text-muted-foreground" title={source.subtitle}>
+            {source.subtitle}
+          </p>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center">
+        {skippable && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Previous"
+            title="Previous"
+            disabled={!source.canPrevious}
+            className={buttonClass}
+            onClick={() => controlMedia(source.id, 'previoustrack')}
+          >
+            <SkipBack aria-hidden className="fill-current" />
+          </Button>
+        )}
+        {source.playing ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Pause ${source.title}`}
+            title="Pause"
+            className={buttonClass}
+            onClick={() => controlMedia(source.id, 'pause')}
+          >
+            <Pause aria-hidden className="fill-current" />
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Play ${source.title}`}
+            title="Play"
+            disabled={!source.canPlay}
+            className={buttonClass}
+            onClick={() => controlMedia(source.id, 'play')}
+          >
+            <Play aria-hidden className="fill-current" />
+          </Button>
+        )}
+        {skippable && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Next"
+            title="Next"
+            disabled={!source.canNext}
+            className={buttonClass}
+            onClick={() => controlMedia(source.id, 'nexttrack')}
+          >
+            <SkipForward aria-hidden className="fill-current" />
+          </Button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** The source's cover art, or an icon for what kind of source it is. */
+function Artwork({ source }: { source: MediaSource }) {
+  const src = artworkSrc(source.artwork);
+  const [failed, setFailed] = useState<string | null>(null);
+  const Icon = source.kind === 'web' ? Globe : source.kind === 'app' ? AppWindow : Music;
+  return (
+    <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md bg-muted text-muted-foreground">
+      {src && failed !== src ? (
+        <img src={src} alt="" className="size-full object-cover" onError={() => setFailed(src)} />
+      ) : (
+        <Icon aria-hidden className="size-5" />
+      )}
     </div>
   );
 }

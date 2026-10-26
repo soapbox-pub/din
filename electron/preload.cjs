@@ -78,6 +78,8 @@
 //     extension installs (see PromptHost)
 //   - window.screenShare: pages asking to share the screen, and the shares
 //     running (see ScreenShareHost.tsx / electron/screen-share.mts)
+//   - window.media: what web pages and native apps are playing, and their
+//     play/pause/next/previous (see src/lib/nowPlaying.ts / electron/media.mts)
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
 // but is deliberately NOT Node's fs module:
@@ -2743,4 +2745,29 @@ contextBridge.exposeInMainWorld('screenShare', {
    * @param {string} id
    */
   stop: (id) => ipcRenderer.invoke('screen-share:stop', id),
+});
+
+// Media playing in web pages and native apps (window.media), backed by
+// electron/media.mts, for the volume menu's media controls.
+contextBridge.exposeInMainWorld('media', {
+  /** What's playing (or paused) now. */
+  list: () => ipcRenderer.invoke('media:list'),
+
+  /**
+   * Subscribe to what's playing. Returns an unsubscribe fn.
+   * @param {(sources: unknown[]) => void} callback
+   */
+  onChange: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, sources: unknown[]) => void} */
+    const listener = (_event, sources) => callback(sources);
+    ipcRenderer.on('media:sources', listener);
+    return () => ipcRenderer.removeListener('media:sources', listener);
+  },
+
+  /**
+   * Play, pause, or skip a source.
+   * @param {string} id
+   * @param {'play' | 'pause' | 'nexttrack' | 'previoustrack'} action
+   */
+  control: (id, action) => ipcRenderer.invoke('media:control', id, action),
 });

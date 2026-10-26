@@ -87,6 +87,7 @@ import { airplayDisplays, registerAirPlayHandlers, switchAirPlayMode } from './a
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
+import { registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 import { registerProjectHandlers } from './project.mts';
@@ -2965,6 +2966,13 @@ const PRINT_PRELOAD = path.join(import.meta.dirname, 'print-preload.cjs');
  */
 const SCREEN_SHARE_PRELOAD = path.join(import.meta.dirname, 'screen-share-preload.cjs');
 
+/**
+ * Absolute path to the session preload that tells Din what a web page is
+ * playing, for the volume menu's media controls (see electron/media.mts).
+ * Every page gets it, in every frame.
+ */
+const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow: BrowserWindow | null = null;
 
@@ -4920,6 +4928,7 @@ app.whenReady().then(() => {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
     s.registerPreloadScript({ id: 'din-screen-share', type: 'frame', filePath: SCREEN_SHARE_PRELOAD });
+    s.registerPreloadScript({ id: 'din-media', type: 'frame', filePath: MEDIA_PRELOAD });
     allowScreenSharing(s);
   }
   registerScreenShareHandlers({
@@ -4932,6 +4941,13 @@ app.whenReady().then(() => {
       (isBrowserTabSession(contents.session) || contents.session === appSession()),
     isPrivate: (s) => s === privateBrowserSession(),
     undim: undimCapture,
+  });
+  registerMediaHandlers({
+    assertShellSender,
+    sendToShell,
+    isMediaGuest: (contents) =>
+      shellGuestFromId(contents.id) !== null &&
+      (isBrowserTabSession(contents.session) || contents.session === appSession()),
   });
   // And a window.nostr backed by Din's signer; private tabs get none.
   for (const s of [browserSession(), appSession()]) {
@@ -5392,6 +5408,7 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   forwardGuestInput(contents);
+  watchMediaGuest(contents);
 
   const isBrowserTab = contents.session === browserSession();
 

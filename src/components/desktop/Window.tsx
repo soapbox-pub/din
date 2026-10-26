@@ -1265,6 +1265,7 @@ export const Window = memo(function Window({
       ref={sectionRef}
       aria-label={title}
       data-window-id={win.id}
+      data-app-name={app?.name}
       onPointerDown={() => focus(win.id)}
       // Raise when focus lands anywhere inside the window (React's onFocus is
       // the bubbling focusin), so keyboard users tabbing into a window's
