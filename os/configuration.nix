@@ -1,4 +1,4 @@
-{ config, pkgs, lib, din, deckmon, ... }:
+{ config, pkgs, lib, din, deckmon, electron, ... }:
 
 let
   # The Din source tree (the repo root, via the flake's `din` input),
@@ -49,7 +49,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-niAPnoZFYP6eRp/OEYm7rmp4KclCJcz36SZUNuuWk5E=";
+    npmDepsHash = "sha256-BIa7P+VkgVvbONBfA4YR/yvHLlxE/IbW6uWMJoFxm3k=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -374,7 +374,7 @@ let
     # manager and don't have it; nothing in Din needs it. pam_systemd has no
     # setting for "none" (an empty one means its default).
     exec ${pkgs.util-linux}/bin/setpriv --inh-caps=-all --ambient-caps=-all \
-      ${pkgs.electron}/bin/electron \
+      ${electron}/bin/electron \
       ${din-app}/share/din/main.mjs \
       --ozone-platform=wayland ${extraFlags}
   '';

@@ -9,7 +9,7 @@
 // (with HMR) instead of the bundled dist/. See `npm run dev`.
 //
 // This file runs as TypeScript directly via Node's native type stripping
-// (Electron 41 embeds Node 24) - no build step, so only erasable TS syntax.
+// (Electron 43 embeds Node 24) - no build step, so only erasable TS syntax.
 
 import path from 'node:path';
 import fs from 'node:fs';
@@ -5156,6 +5156,8 @@ app.whenReady().then(() => {
   const win = new BrowserWindow({
     // Dev: normal windowed shell. Production: fills the displays, frameless.
     frame: !production,
+    // Electron 43 rounds frameless windows on Linux; the desktop is square.
+    roundedCorners: false,
     ...(production ? screenBounds() : { width: 1280, height: 800 }),
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',

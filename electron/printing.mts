@@ -506,7 +506,6 @@ function pdfOptions(layout: PrintLayout): Electron.PrintToPDFOptions {
     landscape: layout.landscape,
     pageSize: layout.paper,
     printBackground: layout.background,
-    margins: { marginType: 'default' },
   };
 }
 

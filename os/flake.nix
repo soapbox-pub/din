@@ -4,6 +4,13 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
+    # Electron, from a newer nixpkgs than the rest of the system: 26.05 stops
+    # at 42, and Electron 41's find-in-page looped forever when the shell had
+    # an iframe, freezing the desktop on Ctrl+F (electron/electron#54199,
+    # fixed in 43.7.8). Bump it with `nix flake update nixpkgs-electron`, and
+    # keep package.json's electron on the same version.
+    nixpkgs-electron.url = "github:NixOS/nixpkgs/nixos-unstable";
+
     # The Din desktop environment (the repository root).
     din = {
       url = "path:..";
@@ -28,10 +35,13 @@
     };
   };
 
-  outputs = { self, nixpkgs, din, nostrd, deckmon }:
+  outputs = { self, nixpkgs, nixpkgs-electron, din, nostrd, deckmon }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
+
+      # The Electron that runs Din (configuration.nix's `electron`).
+      electron = { _module.args.electron = nixpkgs-electron.legacyPackages.${system}.electron_43; };
 
       # OpenCode, the agent behind Din's Assistant (electron/assistant.mts),
       # as its v2 installer would put it in ~/.opencode/bin: the npm
@@ -82,14 +92,14 @@
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din deckmon; };
-        modules = [ nostrd.nixosModules.default ./configuration.nix ];
+        modules = [ nostrd.nixosModules.default electron ./configuration.nix ];
       };
 
       # The same system plus remote access (debug.nix), for real hardware.
       nixosConfigurations.dinos-debug = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din deckmon; };
-        modules = [ nostrd.nixosModules.default ./configuration.nix ./debug.nix ];
+        modules = [ nostrd.nixosModules.default electron ./configuration.nix ./debug.nix ];
       };
 
       packages.${system} = {
@@ -117,6 +127,7 @@
             pkgs = nixpkgs.legacyPackages.${system};
             modules = [
               nostrd.nixosModules.default
+              electron
               ./configuration.nix
               # The test driver wants the kernel's messages on its console.
               { boot.consoleLogLevel = nixpkgs.lib.mkForce 7; }
