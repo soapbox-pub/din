@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Airplay,
   BatteryFull,
@@ -192,114 +192,134 @@ type SectionId =
   | 'developers'
   | 'about';
 
+type SectionGroup = 'Connections' | 'Personal' | 'Devices' | 'Account' | 'System';
+
 /**
- * The sections, in sidebar order. `search` is what Settings search matches
+ * The sections, in sidebar order, under their group's heading; a group's
+ * sections stay together. `search` is what Settings search matches
  * besides the name: the section's headings and setting labels, then words
  * people might search for that aren't on screen. Keep it in step with the
  * section when adding or renaming a setting.
  */
-const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; search: string[] }[] = [
+const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionGroup; search: string[] }[] = [
   {
     id: 'wifi',
+    group: 'Connections',
     name: 'Wi-Fi',
     icon: Wifi,
     search: ['Add network', 'Saved networks', 'Network details', 'network', 'internet', 'wireless', 'WLAN', 'SSID', 'hotspot', 'connection'],
   },
   {
     id: 'bluetooth',
+    group: 'Connections',
     name: 'Bluetooth',
     icon: Bluetooth,
     search: ['My devices', 'Devices nearby', 'pair', 'headphones', 'speaker', 'mouse', 'keyboard', 'wireless', 'device'],
   },
   {
+    id: 'appearance',
+    group: 'Personal',
+    name: 'Appearance',
+    icon: Palette,
+    search: ['Sync with your profile theme', 'Effects', 'Wobbly windows', 'Cursor', 'Cursor style', 'Cursor size', 'theme', 'dark mode', 'light mode', 'colors', 'fonts', 'background', 'wallpaper', 'desktop picture', 'mouse pointer'],
+  },
+  {
+    id: 'notifications',
+    group: 'Personal',
+    name: 'Notifications',
+    icon: Bell,
+    search: ['Do Not Disturb', 'Keep notifications in the list without popping them up. Urgent ones still show.', 'On-screen alerts', 'Pop up new mentions, reactions, reposts, comments and zaps in the corner.', 'Only from people you follow', "Ignore interactions from accounts you don't follow.", 'Notify me about', 'alerts', 'quiet', 'silence'],
+  },
+  {
+    id: 'assistant',
+    group: 'Personal',
+    name: 'Assistant',
+    icon: Bot,
+    search: ['AI providers', 'OpenCode', 'AI', 'agent', 'chat', 'model', 'API key'],
+  },
+  {
     id: 'display',
+    group: 'Devices',
     name: 'Display',
     icon: Monitor,
     search: ['Zoom', 'Scale everything on the desktop up or down.', 'AirPlay', 'monitor', 'screen', 'resolution', 'refresh rate', 'arrange', 'mirror', 'scaling', 'external display', 'projector', 'TV'],
   },
   {
     id: 'brightness',
+    group: 'Devices',
     name: 'Brightness',
     icon: Sun,
     search: ['Night Light', "Warm the display's colors to reduce blue light.", 'Color temperature', 'Schedule', 'screen', 'dim', 'backlight', 'blue light'],
   },
   {
-    id: 'power',
-    name: 'Battery & Power',
-    icon: BatteryFull,
-    search: ['Battery', 'Power mode', 'Power profile', 'power saver', 'balanced', 'performance', 'charging', 'energy'],
-  },
-  {
     id: 'sound',
+    group: 'Devices',
     name: 'Sound',
     icon: Volume2,
     search: ['Output volume', 'Mute', 'Silence all output without losing your volume level.', 'Output device', 'Input device', 'Input volume', 'Play a test tone', 'volume', 'audio', 'speaker', 'headphones', 'microphone', 'mic'],
   },
   {
     id: 'keyboard',
+    group: 'Devices',
     name: 'Keyboard',
     icon: Keyboard,
     search: ['Keyboard layout', 'The layout everything on this computer types with.', 'language', 'input', 'typing', 'QWERTY', 'Dvorak'],
   },
   {
     id: 'printers',
+    group: 'Devices',
     name: 'Printers',
     icon: Printer,
     search: ['Add printer', 'Use as default', 'Print a test page', 'printing', 'print queue', 'scanner', 'CUPS'],
   },
   {
-    id: 'datetime',
-    name: 'Date & Time',
-    icon: Clock,
-    search: ['Time', 'Set time automatically', 'Time zone', 'Clock', 'Clock format', 'Show the date in the menu bar', 'The weekday and date, beside the time.', 'Show seconds in the menu bar', 'The clock ticks every second.', '24-hour', '12-hour', 'calendar', 'timezone'],
+    id: 'power',
+    group: 'Devices',
+    name: 'Battery & Power',
+    icon: BatteryFull,
+    search: ['Battery', 'Power mode', 'Power profile', 'power saver', 'balanced', 'performance', 'charging', 'energy'],
   },
   {
     id: 'password',
+    group: 'Account',
     name: 'Password',
     icon: KeyRound,
     search: ['Current password', 'New password', 'Changing it here changes it everywhere.', 'lock screen', 'login', 'security', 'disk encryption', 'passphrase'],
   },
   {
-    id: 'notifications',
-    name: 'Notifications',
-    icon: Bell,
-    search: ['Do Not Disturb', 'Keep notifications in the list without popping them up. Urgent ones still show.', 'On-screen alerts', 'Pop up new mentions, reactions, reposts, comments and zaps in the corner.', 'Only from people you follow', "Ignore interactions from accounts you don't follow.", 'Notify me about', 'alerts', 'quiet', 'silence'],
-  },
-  {
     id: 'nostr',
+    group: 'Account',
     name: 'Nostr & Storage',
     icon: Cloud,
     search: ['Encrypted sync', 'Relays', 'Blossom servers', 'sync', 'backup', 'cloud', 'media', 'uploads', 'NIP-65'],
   },
   {
     id: 'connected',
+    group: 'Account',
     name: 'Connected apps',
     icon: Link2,
     search: ['Connect an app', 'Sites and installed apps', 'Apps connected with a link', 'signer', 'bunker', 'Nostr Connect', 'remote signer', 'permissions', 'NIP-46'],
   },
   {
-    id: 'assistant',
-    name: 'Assistant',
-    icon: Bot,
-    search: ['AI providers', 'OpenCode', 'AI', 'agent', 'chat', 'model', 'API key'],
-  },
-  {
-    id: 'appearance',
-    name: 'Appearance',
-    icon: Palette,
-    search: ['Sync with your profile theme', 'Effects', 'Wobbly windows', 'Cursor', 'Cursor style', 'Cursor size', 'theme', 'dark mode', 'light mode', 'colors', 'fonts', 'background', 'wallpaper', 'desktop picture', 'mouse pointer'],
-  },
-  {
-    id: 'developers',
-    name: 'Developers',
-    icon: Bug,
-    search: ['Trigger an error', 'Crash', 'debug', 'error boundary'],
+    id: 'datetime',
+    group: 'System',
+    name: 'Date & Time',
+    icon: Clock,
+    search: ['Time', 'Set time automatically', 'Time zone', 'Clock', 'Clock format', 'Show the date in the menu bar', 'The weekday and date, beside the time.', 'Show seconds in the menu bar', 'The clock ticks every second.', '24-hour', '12-hour', 'calendar', 'timezone'],
   },
   {
     id: 'about',
+    group: 'System',
     name: 'About',
     icon: Info,
     search: ['Updates', 'Firmware', 'version', 'update', 'upgrade', 'restart', 'DinOS', 'system information'],
+  },
+  {
+    id: 'developers',
+    group: 'System',
+    name: 'Developers',
+    icon: Bug,
+    search: ['Trigger an error', 'Crash', 'debug', 'error boundary'],
   },
 ];
 
@@ -458,29 +478,40 @@ export function Settings({ params }: AppComponentProps) {
           />
         </div>
         <nav aria-label="Settings sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
-          {SECTIONS.map((s) => {
+          {SECTIONS.map((s, i) => {
             const current = searching ? results.includes(s) : section === s.id;
             return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => {
-                  setSection(s.id);
-                  setQuery('');
-                }}
-                aria-current={!searching && section === s.id ? 'page' : undefined}
-                className={cn(
-                  'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  current
-                    ? 'bg-foreground/15 text-foreground'
-                    : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
-                  searching && !current && 'opacity-50',
+              <Fragment key={s.id}>
+                {s.group !== SECTIONS[i - 1]?.group && (
+                  <h3
+                    className={cn(
+                      'px-2 pb-1 text-xs font-medium text-muted-foreground',
+                      i > 0 && 'mt-3',
+                    )}
+                  >
+                    {s.group}
+                  </h3>
                 )}
-              >
-                <s.icon className="size-4 shrink-0" aria-hidden />
-                <span className="truncate">{s.name}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSection(s.id);
+                    setQuery('');
+                  }}
+                  aria-current={!searching && section === s.id ? 'page' : undefined}
+                  className={cn(
+                    'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    current
+                      ? 'bg-foreground/15 text-foreground'
+                      : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+                    searching && !current && 'opacity-50',
+                  )}
+                >
+                  <s.icon className="size-4 shrink-0" aria-hidden />
+                  <span className="truncate">{s.name}</span>
+                </button>
+              </Fragment>
             );
           })}
         </nav>
