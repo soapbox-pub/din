@@ -53,6 +53,7 @@ import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
+import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
 import { registerCursorHandlers } from './cursor.mts';
 import { registerInddHandlers } from './indd.mts';
 import {
@@ -549,18 +550,7 @@ app.on('will-quit', () => {
 });
 
 // ---------------------------------------------------------------------------
-// WiFi bridge (window.wifi - see preload.cjs / the Settings app).
-//
-// Thin wrapper around `nmcli` (NetworkManager). The shell's OS user is in the
-// `networkmanager` group, so nmcli works without polkit prompts; in a plain
-// browser or on a machine without NetworkManager the bridge reports
-// `available: false` and the Settings app renders a fallback.
-//
-// Threat model: same boundaries as the other bridges (strict CSP, the sender
-// guard, arguments re-validated here). All nmcli invocations use execFile
-// with an argv array - no shell, so SSIDs/passwords can't inject commands.
-// Passwords do transit argv (briefly visible in /proc/<pid>/cmdline to other
-// processes of the same user); acceptable for this single-user demo.
+// System tools. The WiFi and VPN bridges live in network.mts.
 // ---------------------------------------------------------------------------
 
 /**
@@ -584,134 +574,6 @@ async function tool(
     const detail = (stderr || messageOf(error)).trim().split('\n')[0];
     throw new Error(detail || `${file} failed`, { cause: error });
   }
-}
-
-const NMCLI_TIMEOUT_MS = 15_000;
-const NMCLI_CONNECT_TIMEOUT_MS = 60_000;
-const WIFI_TYPE = '802-11-wireless';
-
-/** Run nmcli with an argv array; resolves stdout, rejects with a clean message. */
-function nmcli(args: string[], timeout = NMCLI_TIMEOUT_MS): Promise<string> {
-  return tool('nmcli', args, timeout, 4 * 1024 * 1024);
-}
-
-/**
- * Split one line of `nmcli -t` output into fields. Terse mode separates
- * fields with ':' and escapes literal ':' and '\' in values with a backslash.
- */
-function splitTerse(line: string): string[] {
-  const fields: string[] = [];
-  let current = '';
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '\\' && i + 1 < line.length) {
-      current += line[++i];
-    } else if (ch === ':') {
-      fields.push(current);
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  fields.push(current);
-  return fields;
-}
-
-/** Non-empty lines of nmcli terse output, split into fields. */
-function terseRows(stdout: string): string[][] {
-  return stdout.split('\n').filter((line) => line.length > 0).map(splitTerse);
-}
-
-/** Validate a caller-supplied SSID. */
-function validSsid(ssid: unknown): string {
-  if (
-    typeof ssid !== 'string' ||
-    ssid.length === 0 ||
-    ssid.length > 64 ||
-    ssid.includes('\0')
-  ) {
-    throw new Error('Invalid SSID');
-  }
-  return ssid;
-}
-
-/** Validate an optional caller-supplied WiFi password. */
-function validPassword(password: unknown): string | undefined {
-  if (password === undefined || password === null || password === '') return undefined;
-  if (typeof password !== 'string' || password.length > 256 || password.includes('\0')) {
-    throw new Error('Invalid password');
-  }
-  return password;
-}
-
-/** One NetworkManager device row. */
-interface NmDevice {
-  iface: string;
-  state: string;
-  connection: string | null;
-}
-
-/** The first WiFi device known to NetworkManager, or null. */
-async function wifiDevice(): Promise<NmDevice | null> {
-  const rows = terseRows(
-    await nmcli(['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device', 'status']),
-  );
-  const row = rows.find((fields) => fields[1] === 'wifi');
-  if (!row) return null;
-  return { iface: row[0], state: row[2], connection: row[3] || null };
-}
-
-/** The first wired (ethernet) device known to NetworkManager, or null. */
-async function ethernetDevice(): Promise<NmDevice | null> {
-  const rows = terseRows(
-    await nmcli(['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device', 'status']),
-  );
-  const row = rows.find((fields) => fields[1] === 'ethernet');
-  if (!row) return null;
-  return { iface: row[0], state: row[2], connection: row[3] || null };
-}
-
-/** Names of saved WiFi connection profiles. */
-async function savedWifiConnections(): Promise<string[]> {
-  const rows = terseRows(await nmcli(['-t', '-f', 'NAME,TYPE', 'connection', 'show']));
-  return rows.filter((fields) => fields[1] === WIFI_TYPE).map((fields) => fields[0]);
-}
-
-/** Connection types NetworkManager exposes as a VPN in the network menu. */
-const VPN_TYPES = new Set(['vpn', 'wireguard']);
-
-/**
- * Validate a caller-supplied NetworkManager connection name. Names transit
- * argv (no shell), so the concern is only well-formedness, not injection.
- */
-function validConnName(name: unknown): string {
-  if (
-    typeof name !== 'string' ||
-    name.length === 0 ||
-    name.length > 128 ||
-    name.includes('\0')
-  ) {
-    throw new Error('Invalid connection name');
-  }
-  return name;
-}
-
-/** One saved VPN profile and whether its tunnel is currently up. */
-interface VpnConnection {
-  name: string;
-  /** "vpn" (OpenVPN, IKEv2, ...) or "wireguard". */
-  type: string;
-  active: boolean;
-}
-
-/** Saved VPN/WireGuard connection profiles with their active state. */
-async function savedVpnConnections(): Promise<VpnConnection[]> {
-  const rows = terseRows(
-    await nmcli(['-t', '-f', 'NAME,TYPE,ACTIVE', 'connection', 'show']),
-  );
-  return rows
-    .filter((fields) => VPN_TYPES.has(fields[1]))
-    .map((fields) => ({ name: fields[0], type: fields[1], active: fields[2] === 'yes' }));
 }
 
 // ---------------------------------------------------------------------------
@@ -2527,6 +2389,8 @@ function registerSystemEvents(): void {
         // A mute or default-source change made anywhere (Settings, an app,
         // pactl in the Terminal) moves the mic-mute LED with it.
         if (topic === 'audio') void syncMicMuteLed();
+        // A network with a proxy of its own may have come up or gone down.
+        if (topic === 'network') void refreshWifiProxy().catch(() => {});
       }, SYSTEM_EVENT_DEBOUNCE_MS),
     );
   };
@@ -3021,159 +2885,6 @@ function watchEvdevKeys(): void {
   scan();
   // Keyboards come and go (docks, USB/BT keyboards): rescan periodically.
   setInterval(scan, 10_000).unref();
-}
-
-/** One WiFi network as listed by wifi:networks. */
-interface WifiNetwork {
-  ssid: string;
-  inUse: boolean;
-  signal: number;
-  security: string;
-  freqMhz: number;
-}
-
-function registerWifiHandlers(): void {
-  ipcMain.handle('wifi:status', async (event) => {
-    assertShellSender(event);
-    try {
-      const [device, ethernet, radio] = await Promise.all([
-        wifiDevice(),
-        ethernetDevice(),
-        nmcli(['-t', 'radio', 'wifi']),
-      ]);
-      return { available: true, radioEnabled: radio.trim() === 'enabled', device, ethernet };
-    } catch (error) {
-      if (messageOf(error) === 'nmcli-missing') {
-        return { available: false, radioEnabled: false, device: null, ethernet: null };
-      }
-      throw error;
-    }
-  });
-
-  ipcMain.handle('wifi:networks', async (event, rescan) => {
-    assertShellSender(event);
-    const rows = terseRows(
-      await nmcli(
-        [
-          '-t', '-f', 'IN-USE,SSID,SIGNAL,SECURITY,FREQ',
-          'device', 'wifi', 'list',
-          '--rescan', rescan === true ? 'yes' : 'auto',
-        ],
-        30_000,
-      ),
-    );
-
-    // One entry per SSID (strongest signal wins; hidden networks skipped).
-    const bySsid = new Map<string, WifiNetwork>();
-    for (const [inUse, ssid, signal, security, freq] of rows) {
-      if (!ssid) continue;
-      const network: WifiNetwork = {
-        ssid,
-        inUse: inUse === '*',
-        signal: Number.parseInt(signal, 10) || 0,
-        // e.g. "WPA2", "WPA1 WPA2", "" for open networks.
-        security: security.trim(),
-        freqMhz: Number.parseInt(freq, 10) || 0,
-      };
-      const existing = bySsid.get(ssid);
-      if (!existing || network.inUse || (!existing.inUse && network.signal > existing.signal)) {
-        bySsid.set(ssid, network);
-      }
-    }
-
-    return [...bySsid.values()].sort(
-      (a, b) => Number(b.inUse) - Number(a.inUse) || b.signal - a.signal,
-    );
-  });
-
-  ipcMain.handle('wifi:saved', async (event) => {
-    assertShellSender(event);
-    return savedWifiConnections();
-  });
-
-  ipcMain.handle('wifi:connect', async (event, rawSsid, rawPassword) => {
-    assertShellSender(event);
-    const ssid = validSsid(rawSsid);
-    const password = validPassword(rawPassword);
-    const saved = (await savedWifiConnections()).includes(ssid);
-
-    if (saved) {
-      // Reusing the profile (instead of `device wifi connect`) avoids nmcli
-      // piling up duplicate "SSID 1", "SSID 2" profiles.
-      if (password !== undefined) {
-        await nmcli(['connection', 'modify', 'id', ssid, 'wifi-sec.psk', password]);
-      }
-      await nmcli(['connection', 'up', 'id', ssid], NMCLI_CONNECT_TIMEOUT_MS);
-      return;
-    }
-
-    const args = ['device', 'wifi', 'connect', ssid];
-    if (password !== undefined) args.push('password', password);
-    try {
-      await nmcli(args, NMCLI_CONNECT_TIMEOUT_MS);
-    } catch (error) {
-      // A failed first attempt (wrong password) leaves a broken profile
-      // behind that would shadow the next try; drop it.
-      await nmcli(['connection', 'delete', 'id', ssid]).catch(() => {});
-      throw error;
-    }
-  });
-
-  ipcMain.handle('wifi:disconnect', async (event) => {
-    assertShellSender(event);
-    const device = await wifiDevice();
-    if (!device) throw new Error('No WiFi device');
-    await nmcli(['device', 'disconnect', device.iface]);
-  });
-
-  ipcMain.handle('wifi:forget', async (event, rawSsid) => {
-    assertShellSender(event);
-    const ssid = validSsid(rawSsid);
-    if (!(await savedWifiConnections()).includes(ssid)) {
-      throw new Error(`No saved network named "${ssid}"`);
-    }
-    await nmcli(['connection', 'delete', 'id', ssid]);
-  });
-
-  ipcMain.handle('wifi:setRadio', async (event, enabled) => {
-    assertShellSender(event);
-    await nmcli(['radio', 'wifi', enabled === true ? 'on' : 'off']);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// VPN bridge (window.vpn - see preload.cjs / the network selector).
-//
-// Same nmcli/NetworkManager substrate as the WiFi bridge, scoped to VPN and
-// WireGuard connection profiles. The menu can only toggle profiles that
-// already exist (imported via `nmcli connection import` / a .ovpn/.conf, or
-// the Terminal); it deliberately doesn't create or edit them, which would
-// mean handling credentials and per-provider config. `vpn:list` reports [] on
-// a machine without NetworkManager so the UI simply shows no VPN section.
-// ---------------------------------------------------------------------------
-
-function registerVpnHandlers(): void {
-  ipcMain.handle('vpn:list', async (event) => {
-    assertShellSender(event);
-    try {
-      return await savedVpnConnections();
-    } catch (error) {
-      if (messageOf(error) === 'nmcli-missing') return [];
-      throw error;
-    }
-  });
-
-  ipcMain.handle('vpn:connect', async (event, rawName) => {
-    assertShellSender(event);
-    const name = validConnName(rawName);
-    await nmcli(['connection', 'up', 'id', name], NMCLI_CONNECT_TIMEOUT_MS);
-  });
-
-  ipcMain.handle('vpn:disconnect', async (event, rawName) => {
-    assertShellSender(event);
-    const name = validConnName(rawName);
-    await nmcli(['connection', 'down', 'id', name]);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -5237,8 +4948,11 @@ app.whenReady().then(() => {
   registerProjectHandlers({ assertShellSender });
   registerLocalFileProtocol(SHELL_ORIGIN);
   registerPtyHandlers();
-  registerWifiHandlers();
-  registerVpnHandlers();
+  registerWifiHandlers({
+    assertShellSender,
+    proxySessions: () => [browserSession(), privateBrowserSession(), appSession()],
+  });
+  registerVpnHandlers({ assertShellSender });
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
   registerGuestVisibilityHandlers();

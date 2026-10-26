@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getWifiBridge } from '@/lib/wifi';
-import type { WifiNetwork, WifiStatus } from '@/lib/wifi';
+import type {
+  NewWifiNetwork,
+  SavedWifiNetwork,
+  WifiChanges,
+  WifiDetails,
+  WifiNetwork,
+  WifiStatus,
+} from '@/lib/wifi';
 
 /**
  * TanStack Query hooks over the OS WiFi bridge (window.wifi).
@@ -8,7 +15,7 @@ import type { WifiNetwork, WifiStatus } from '@/lib/wifi';
  * Status and scan results poll on a short interval so the Settings panel
  * tracks connection changes made elsewhere (e.g. nmcli in the Terminal app).
  * Mutations invalidate everything WiFi so the UI converges after connects,
- * disconnects and forgets.
+ * disconnects, edits and forgets.
  */
 
 function requireBridge() {
@@ -44,14 +51,26 @@ export function useWifiNetworks(enabled: boolean) {
   });
 }
 
-/** Names of saved network profiles. */
+/** Saved networks. */
 export function useSavedNetworks() {
   const wifi = getWifiBridge();
-  return useQuery<string[]>({
+  return useQuery<SavedWifiNetwork[]>({
     queryKey: ['wifi', 'saved'],
     queryFn: () => requireBridge().saved(),
     enabled: wifi !== undefined,
     staleTime: 10_000,
+    retry: false,
+  });
+}
+
+/** One saved network's settings and live link details. */
+export function useWifiDetails(uuid: string) {
+  const wifi = getWifiBridge();
+  return useQuery<WifiDetails>({
+    queryKey: ['wifi', 'details', uuid],
+    queryFn: () => requireBridge().details(uuid),
+    enabled: wifi !== undefined,
+    refetchInterval: 10_000,
     retry: false,
   });
 }
@@ -67,13 +86,29 @@ export function useWifiMutations() {
     onSettled: invalidate,
   });
 
+  const activate = useMutation({
+    mutationFn: (uuid: string) => requireBridge().activate(uuid),
+    onSettled: invalidate,
+  });
+
   const disconnect = useMutation({
     mutationFn: () => requireBridge().disconnect(),
     onSettled: invalidate,
   });
 
   const forget = useMutation({
-    mutationFn: (ssid: string) => requireBridge().forget(ssid),
+    mutationFn: (uuid: string) => requireBridge().forget(uuid),
+    onSettled: invalidate,
+  });
+
+  const update = useMutation({
+    mutationFn: ({ uuid, changes }: { uuid: string; changes: WifiChanges }) =>
+      requireBridge().update(uuid, changes),
+    onSettled: invalidate,
+  });
+
+  const add = useMutation({
+    mutationFn: (network: NewWifiNetwork) => requireBridge().add(network),
     onSettled: invalidate,
   });
 
@@ -82,5 +117,5 @@ export function useWifiMutations() {
     onSettled: invalidate,
   });
 
-  return { connect, disconnect, forget, setRadio };
+  return { connect, activate, disconnect, forget, update, add, setRadio };
 }

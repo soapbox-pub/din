@@ -351,8 +351,13 @@ files — `git add` new source files before `npm run os:build`.
   Settings → Connected apps lists all of them; the key button in the browser's
   toolbar shows the current site's.
 - The Settings app manages WiFi through NetworkManager (`nmcli` behind an
-  Electron IPC bridge). NetworkManager picks up physical adapters (wired and
-  wireless) automatically. Note that QEMU has no wireless hardware, so the
+  Electron IPC bridge, `electron/network.mts`): joining, Add network (hidden
+  and 802.1X enterprise networks), Saved networks, and each network's own
+  page with Android's options (auto-connect, metered, MAC privacy, password
+  or sign-in, static IP and DNS, proxy, hidden, share as a QR code). A
+  network's proxy is Din's own (kept in `wifi-proxy.json`) and applies to
+  Din's browser and apps while that network is up. NetworkManager picks up
+  physical adapters (wired and wireless) automatically. Note that QEMU has no wireless hardware, so the
   WiFi panel will show no networks inside the demo VM.
 - The Settings app and the menu bar manage Bluetooth through BlueZ over the
   system bus (`electron/bluetooth.mts`): turning it on and off, finding,

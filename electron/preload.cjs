@@ -425,8 +425,33 @@ contextBridge.exposeInMainWorld('wifi', {
    */
   networks: (rescan) => ipcRenderer.invoke('wifi:networks', rescan),
 
-  /** Names of saved (remembered) WiFi connection profiles. */
+  /** Saved (remembered) WiFi networks. */
   saved: () => ipcRenderer.invoke('wifi:saved'),
+
+  /**
+   * A saved network's settings, and its live link details while it's up.
+   * @param {string} uuid
+   */
+  details: (uuid) => ipcRenderer.invoke('wifi:details', uuid),
+
+  /**
+   * The password a saved network joins with, for sharing it; null if none.
+   * @param {string} uuid
+   */
+  secret: (uuid) => ipcRenderer.invoke('wifi:secret', uuid),
+
+  /**
+   * Change a saved network's settings.
+   * @param {string} uuid
+   * @param {unknown} changes
+   */
+  update: (uuid, changes) => ipcRenderer.invoke('wifi:update', uuid, changes),
+
+  /**
+   * Save a network entered by hand, then try to join it.
+   * @param {unknown} network
+   */
+  add: (network) => ipcRenderer.invoke('wifi:add', network),
 
   /**
    * Join a network, creating or updating its saved profile.
@@ -435,14 +460,20 @@ contextBridge.exposeInMainWorld('wifi', {
    */
   connect: (ssid, password) => ipcRenderer.invoke('wifi:connect', ssid, password),
 
+  /**
+   * Join a saved network.
+   * @param {string} uuid
+   */
+  activate: (uuid) => ipcRenderer.invoke('wifi:activate', uuid),
+
   /** Disconnect the WiFi adapter from its current network. */
   disconnect: () => ipcRenderer.invoke('wifi:disconnect'),
 
   /**
-   * Delete a saved network profile.
-   * @param {string} ssid
+   * Delete a saved network.
+   * @param {string} uuid
    */
-  forget: (ssid) => ipcRenderer.invoke('wifi:forget', ssid),
+  forget: (uuid) => ipcRenderer.invoke('wifi:forget', uuid),
 
   /**
    * Turn the WiFi radio on or off.

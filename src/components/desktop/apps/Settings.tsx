@@ -15,7 +15,6 @@ import {
   Cpu,
   Link2,
   CloudOff,
-  EthernetPort,
   Gauge,
   Globe,
   Headphones,
@@ -24,7 +23,6 @@ import {
   Keyboard,
   Laptop,
   Loader2,
-  Lock,
   Mic,
   MicOff,
   Minus,
@@ -44,15 +42,11 @@ import {
   Upload,
   Volume2,
   Wifi,
-  WifiOff,
   ZoomIn,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
-import { cleanWifiError, getWifiBridge, isEthernetConnected, isSecured } from '@/lib/wifi';
-import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
-import { VpnControls } from '@/components/desktop/VpnControls';
 import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
 import {
   cleanBluetoothBridgeError,
@@ -62,13 +56,6 @@ import {
 } from '@/lib/bluetooth';
 import type { BluetoothDevice } from '@/lib/bluetooth';
 import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState } from '@/hooks/useBluetooth';
-import type { WifiNetwork } from '@/lib/wifi';
-import {
-  useSavedNetworks,
-  useWifiMutations,
-  useWifiNetworks,
-  useWifiStatus,
-} from '@/hooks/useWifi';
 import {
   cleanDisplayError,
   formatMode,
@@ -180,6 +167,7 @@ import type { FirmwareState, FirmwareUpdate } from '@/lib/firmware';
 import { useFirmwareState } from '@/hooks/useFirmware';
 import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSection';
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
+import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 
@@ -313,7 +301,9 @@ export function Settings({ params }: AppComponentProps) {
 
       <div className="min-w-0 flex-1 overflow-y-auto">
         {section === 'wifi' ? (
-          <WifiSection />
+          <WifiSettingsSection
+            join={typeof params?.join === 'string' ? { ssid: params.join, nonce: params.nonce } : undefined}
+          />
         ) : section === 'bluetooth' ? (
           <BluetoothSection />
         ) : section === 'display' ? (
@@ -356,315 +346,8 @@ export function Settings({ params }: AppComponentProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Wi-Fi
+// Device lists
 // ---------------------------------------------------------------------------
-
-function WifiSection() {
-  const bridge = getWifiBridge();
-  const status = useWifiStatus();
-  const radioEnabled = status.data?.radioEnabled ?? false;
-  const hasAdapter = status.data?.device != null;
-  const ethernet = isEthernetConnected(status.data);
-  const networks = useWifiNetworks(radioEnabled && hasAdapter);
-  const saved = useSavedNetworks();
-  const { connect, disconnect, forget, setRadio } = useWifiMutations();
-
-  // SSID whose inline password/connect form is open, if any.
-  const [joining, setJoining] = useState<string | null>(null);
-  // Last failed operation, keyed to the SSID it concerned.
-  const [opError, setOpError] = useState<{ ssid: string; message: string } | null>(null);
-
-  if (!bridge) {
-    return (
-      <SectionShell title="Wi-Fi">
-        <FallbackCard>
-          Wi-Fi settings need the Electron shell to talk to NetworkManager. Run{' '}
-          <code className="rounded bg-foreground/10 px-1 py-0.5">make dev</code> or boot
-          the VM; the bridge is not available in a plain browser.
-        </FallbackCard>
-      </SectionShell>
-    );
-  }
-
-  const joinNetwork = (network: WifiNetwork, password?: string) => {
-    setOpError(null);
-    connect.mutate(
-      { ssid: network.ssid, password },
-      {
-        onSuccess: () => setJoining(null),
-        onError: (error) =>
-          setOpError({ ssid: network.ssid, message: cleanWifiError(error) }),
-      },
-    );
-  };
-
-  return (
-    <SectionShell
-      title="Wi-Fi"
-      actions={
-        <>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Rescan for networks"
-            title="Rescan for networks"
-            disabled={!radioEnabled || !hasAdapter}
-            onClick={() => networks.refetch()}
-          >
-            <RotateCw className={cn('size-4', networks.isFetching && 'animate-spin')} />
-          </Button>
-          <Switch
-            aria-label="Wi-Fi radio"
-            checked={radioEnabled}
-            disabled={status.data === undefined || !status.data.available || setRadio.isPending}
-            onCheckedChange={(checked) => setRadio.mutate(checked)}
-          />
-        </>
-      }
-    >
-      {ethernet && (
-        <div className="mb-3 flex items-center gap-3 rounded-lg border border-border/60 bg-accent/40 px-3 py-2.5">
-          <EthernetPort className="size-5 shrink-0 text-primary" aria-hidden />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-foreground">Connected via Ethernet</p>
-            {status.data?.ethernet?.iface && (
-              <p className="truncate text-xs text-muted-foreground">
-                {status.data.ethernet.iface}
-                {status.data.ethernet.connection ? ` · ${status.data.ethernet.connection}` : ''}
-              </p>
-            )}
-          </div>
-          <Check className="size-4 shrink-0 text-primary" aria-hidden />
-        </div>
-      )}
-      {status.isLoading ? (
-        <NetworkListSkeleton />
-      ) : status.isError ? (
-        <FallbackCard>Could not read Wi-Fi state: {cleanWifiError(status.error)}</FallbackCard>
-      ) : !status.data?.available ? (
-        <FallbackCard>
-          NetworkManager is not available on this system, so Wi-Fi cannot be managed here.
-        </FallbackCard>
-      ) : !hasAdapter ? (
-        <FallbackCard icon={WifiOff}>No Wi-Fi adapter was found on this system.</FallbackCard>
-      ) : !radioEnabled ? (
-        <FallbackCard icon={WifiOff}>Wi-Fi is turned off.</FallbackCard>
-      ) : networks.isLoading ? (
-        <NetworkListSkeleton />
-      ) : networks.isError ? (
-        <FallbackCard>Scan failed: {cleanWifiError(networks.error)}</FallbackCard>
-      ) : (networks.data?.length ?? 0) === 0 ? (
-        <FallbackCard icon={Wifi}>No networks found nearby.</FallbackCard>
-      ) : (
-        <ul className="flex flex-col gap-1" aria-label="Available networks">
-          {networks.data?.map((network) => (
-            <NetworkRow
-              key={network.ssid}
-              network={network}
-              isSaved={saved.data?.includes(network.ssid) ?? false}
-              isJoining={joining === network.ssid}
-              connectPending={connect.isPending && connect.variables?.ssid === network.ssid}
-              disconnectPending={disconnect.isPending}
-              error={opError?.ssid === network.ssid ? opError.message : null}
-              onOpenJoin={() => {
-                setOpError(null);
-                setJoining(network.ssid);
-              }}
-              onCancelJoin={() => setJoining(null)}
-              onConnect={(password) => joinNetwork(network, password)}
-              onDisconnect={() => {
-                setOpError(null);
-                disconnect.mutate(undefined, {
-                  onError: (error) =>
-                    setOpError({ ssid: network.ssid, message: cleanWifiError(error) }),
-                });
-              }}
-              onForget={() => {
-                setOpError(null);
-                forget.mutate(network.ssid, {
-                  onError: (error) =>
-                    setOpError({ ssid: network.ssid, message: cleanWifiError(error) }),
-                });
-              }}
-            />
-          ))}
-        </ul>
-      )}
-      <VpnControls />
-    </SectionShell>
-  );
-}
-
-/** Signal-strength icon for a network (0-100). */
-function SignalIcon({ network }: { network: WifiNetwork }) {
-  return (
-    <WifiSignalIcon
-      signal={network.signal}
-      className={cn(
-        'size-5 shrink-0',
-        network.inUse ? 'text-primary' : 'text-muted-foreground',
-      )}
-    />
-  );
-}
-
-function NetworkRow({
-  network,
-  isSaved,
-  isJoining,
-  connectPending,
-  disconnectPending,
-  error,
-  onOpenJoin,
-  onCancelJoin,
-  onConnect,
-  onDisconnect,
-  onForget,
-}: {
-  network: WifiNetwork;
-  isSaved: boolean;
-  isJoining: boolean;
-  connectPending: boolean;
-  disconnectPending: boolean;
-  error: string | null;
-  onOpenJoin: () => void;
-  onCancelJoin: () => void;
-  onConnect: (password?: string) => void;
-  onDisconnect: () => void;
-  onForget: () => void;
-}) {
-  const secured = isSecured(network);
-  // A password prompt is only needed for secured networks we don't know yet.
-  const needsPassword = secured && !isSaved;
-
-  return (
-    <li className="rounded-lg border border-border/60 bg-background/40">
-      <div className="flex items-center gap-3 px-3 py-2">
-        <SignalIcon network={network} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm text-foreground">{network.ssid}</p>
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            {secured && <Lock className="size-3 shrink-0" aria-label="Secured" />}
-            <span>{secured ? network.security : 'Open'}</span>
-            {isSaved && !network.inUse && <span aria-hidden>·</span>}
-            {isSaved && !network.inUse && <span>Saved</span>}
-          </p>
-        </div>
-
-        {network.inUse ? (
-          <>
-            <span className="flex items-center gap-1 text-xs font-medium text-primary">
-              <Check className="size-3.5" aria-hidden />
-              Connected
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={disconnectPending}
-              onClick={onDisconnect}
-            >
-              {disconnectPending ? 'Disconnecting…' : 'Disconnect'}
-            </Button>
-          </>
-        ) : isJoining && !needsPassword ? null : (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={connectPending}
-            onClick={() => {
-              if (needsPassword) onOpenJoin();
-              else onConnect();
-            }}
-          >
-            {connectPending ? (
-              <>
-                <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                Connecting…
-              </>
-            ) : (
-              'Connect'
-            )}
-          </Button>
-        )}
-
-        {isSaved && !network.inUse && (
-          <Button variant="ghost" size="sm" onClick={onForget}>
-            Forget
-          </Button>
-        )}
-      </div>
-
-      {isJoining && needsPassword && (
-        <PasswordForm
-          ssid={network.ssid}
-          pending={connectPending}
-          onSubmit={onConnect}
-          onCancel={onCancelJoin}
-        />
-      )}
-
-      {error !== null && (
-        <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
-          {error}
-        </p>
-      )}
-    </li>
-  );
-}
-
-/** Inline password entry for joining a secured network. */
-function PasswordForm({
-  ssid,
-  pending,
-  onSubmit,
-  onCancel,
-}: {
-  ssid: string;
-  pending: boolean;
-  onSubmit: (password: string) => void;
-  onCancel: () => void;
-}) {
-  const [password, setPassword] = useState('');
-  const valid = password.length >= 8;
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (valid && !pending) onSubmit(password);
-      }}
-      className="flex items-center gap-2 border-t border-border/60 px-3 py-2"
-    >
-      <Input
-        type="password"
-        aria-label={`Password for ${ssid}`}
-        placeholder="Network password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onCancel();
-        }}
-        disabled={pending}
-        autoFocus
-        autoComplete="off"
-        className="h-8 flex-1"
-      />
-      <Button type="submit" size="sm" disabled={!valid || pending}>
-        {pending ? (
-          <>
-            <Loader2 className="size-3.5 animate-spin" aria-hidden />
-            Connecting…
-          </>
-        ) : (
-          'Join'
-        )}
-      </Button>
-      <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={onCancel}>
-        Cancel
-      </Button>
-    </form>
-  );
-}
 
 function NetworkListSkeleton() {
   return (

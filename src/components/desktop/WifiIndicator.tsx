@@ -16,7 +16,7 @@ import { Switch } from '@/components/ui/switch';
 import { PopoverClose } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { cleanWifiError, isEthernetConnected, isSecured } from '@/lib/wifi';
+import { cleanWifiError, isEnterprise, isEthernetConnected, isSecured, savedFor } from '@/lib/wifi';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
   useSavedNetworks,
@@ -116,7 +116,10 @@ export function WifiPopoverBody() {
                       onError: (error) =>
                         setOpError({ ssid: network.ssid, message: cleanWifiError(error) }),
                     });
-                  } else if (isSecured(network) && !(saved.data?.includes(network.ssid) ?? false)) {
+                  } else if (isEnterprise(network) && !savedFor(saved.data, network.ssid)) {
+                    // Signing in to a work or school network takes the full form.
+                    open('settings', { section: 'wifi', join: network.ssid, nonce: Date.now() });
+                  } else if (isSecured(network) && !savedFor(saved.data, network.ssid)) {
                     setJoining(network.ssid);
                   } else {
                     joinNetwork(network);
