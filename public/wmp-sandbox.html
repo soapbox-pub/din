@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+  The Music Player runs Windows Media Player skins' JScript in here: an
+  iframe sandboxed without allow-same-origin, so it has an opaque origin and
+  can't touch Din's storage, bridges or files, and a CSP that allows no
+  network at all. Din sends the skin runtime's source in the first message
+  (see src/components/desktop/apps/music/wmp/vm.ts) and talks to it only
+  through postMessage.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'" />
+  </head>
+  <body>
+    <script>
+      addEventListener('message', function boot(e) {
+        if (e.source !== parent || !e.data || e.data.type !== 'runtime') return;
+        removeEventListener('message', boot);
+        (0, eval)(e.data.source);
+      });
+      parent.postMessage({ type: 'loaded' }, '*');
+    </script>
+  </body>
+</html>

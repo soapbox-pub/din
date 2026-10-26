@@ -26,7 +26,11 @@ const VIEWABLE_IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bm
 const VIDEO = new Set(['mp4', 'm4v', 'webm', 'mkv', 'mov', 'ogv', 'avi']);
 /** Video Chromium can play. */
 const PLAYABLE_VIDEO = new Set(['mp4', 'm4v', 'webm', 'mkv', 'mov', 'ogv']);
-const AUDIO = new Set(['mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'wav']);
+const AUDIO = new Set(['mp3', 'm4a', 'm4b', 'aac', 'ogg', 'oga', 'opus', 'flac', 'wav', 'weba']);
+/** Playlists: Winamp's, Windows Media Player's, and XSPF. */
+const PLAYLIST = new Set(['m3u', 'm3u8', 'pls', 'wpl', 'asx', 'wax', 'wvx', 'xspf']);
+/** Winamp and Windows Media Player skins. */
+const MEDIA_SKIN = new Set(['wsz', 'wmz']);
 const TEXT = new Set(['txt', 'md', 'markdown', 'log', 'csv', 'tsv', 'ini', 'conf', 'cfg', 'env', 'rst', 'org', 'srt', 'vtt']);
 const CODE = new Set([
   'js', 'cjs', 'mjs', 'ts', 'tsx', 'jsx', 'mts', 'cts', 'json', 'jsonc', 'css', 'scss', 'html', 'htm', 'xml',
@@ -53,7 +57,7 @@ export function fileCategory(name: string, kind: FsEntryKind): FileCategory {
   const ext = extensionOf(name);
   if (IMAGE.has(ext)) return 'image';
   if (VIDEO.has(ext)) return 'video';
-  if (AUDIO.has(ext)) return 'audio';
+  if (AUDIO.has(ext) || PLAYLIST.has(ext)) return 'audio';
   if (ext === 'pdf') return 'pdf';
   if (CODE.has(ext)) return 'code';
   if (TEXT.has(ext) || TEXT_NAMES.has(name.toLowerCase())) return 'text';
@@ -119,8 +123,15 @@ export function designAppFor(name: string): 'vector-editor' | 'publisher' | null
   return null;
 }
 
+/** Songs, playlists and player skins, which open in Music Player. */
+export function isMusicPlayerFile(name: string): boolean {
+  const ext = extensionOf(name);
+  return AUDIO.has(ext) || PLAYLIST.has(ext) || MEDIA_SKIN.has(ext);
+}
+
 /** The built-in app that opening a file starts, as Files does on double-click. */
 export function appForFile(name: string): string {
+  if (isMusicPlayerFile(name)) return 'music-player';
   if (isTextFile(name)) return 'text-editor';
   if (isLayeredImage(name)) return 'photo-editor';
   if (isCadFile(name)) return 'cad';

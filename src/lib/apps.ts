@@ -50,6 +50,9 @@ const Publisher = lazy(() =>
 const CAD = lazy(() =>
   import('@/components/desktop/apps/CAD').then((m) => ({ default: m.CAD })),
 );
+const MusicPlayer = lazy(() =>
+  import('@/components/desktop/apps/MusicPlayer').then((m) => ({ default: m.MusicPlayer })),
+);
 const Terminal = lazy(() =>
   import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
 );
@@ -278,6 +281,20 @@ export const APPS: readonly AppDefinition[] = [
     component: CAD,
     defaultSize: { width: 1360, height: 860 },
     keywords: ['autocad', 'dwg', 'dxf', 'drafting', 'drawing', 'cad', 'draftsight', 'librecad', 'blueprint', 'floor plan', 'technical drawing'],
+  },
+  {
+    // Music and video, Windows Media Player style with Winamp's soul: the
+    // Now Playing list, a library of the Music and Videos folders, internet
+    // radio, the equalizer and visualizations, and Winamp (.wsz) and Windows
+    // Media Player (.wmz) skins. Files opens songs, playlists and skins here.
+    // Launch params `{ paths, how: 'play' | 'enqueue' }` (or `{ path }`).
+    id: 'music-player',
+    name: 'Music Player',
+    icon: '/icons/apps/music-player.png',
+    component: MusicPlayer,
+    defaultSize: { width: 1040, height: 680 },
+    keywords: ['windows media player', 'wmp', 'winamp', 'itunes', 'music', 'mp3', 'audio', 'songs', 'playlist', 'radio', 'equalizer', 'visualization', 'skins', 'video', 'media'],
+    singleInstance: true,
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which
