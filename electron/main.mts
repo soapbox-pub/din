@@ -4722,6 +4722,7 @@ type ShellShortcut =
         | 'screenshot-area';
     }
   | { action: 'super-key'; down: boolean }
+  | { action: 'wm'; code: string; shift: boolean; ctrl: boolean; alt: boolean; repeat: boolean }
   | { action: 'alt-released' }
   | {
       action:
@@ -4744,6 +4745,12 @@ type ShellShortcut =
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
   | { action: 'goto-tab'; digit: number };
+
+/**
+ * The physical keys Super may bind for window management, with any of
+ * Shift, Ctrl and Alt. Keep in step with wmCommandFor in src/lib/wmBindings.ts.
+ */
+const WM_KEY_CODES = /^(?:Arrow(?:Left|Right|Up|Down)|Digit\d|Tab|Minus|Equal|Enter|Key[WQTFJMK])$/;
 
 /**
  * Map a guest before-input-event to a shell shortcut payload, or null.
@@ -4775,6 +4782,18 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
+  }
+  // Super plus a window-management key: the shell decides what it does
+  // (src/lib/wmBindings.ts), so the page never sees Super+1 and the like.
+  if (input.meta && WM_KEY_CODES.test(input.code)) {
+    return {
+      action: 'wm',
+      code: input.code,
+      shift: Boolean(input.shift),
+      ctrl: Boolean(input.control),
+      alt: Boolean(input.alt),
+      repeat: Boolean(input.isAutoRepeat),
+    };
   }
   // Ctrl+Shift+Escape: the System Monitor, as on Windows.
   if (input.control && input.shift && !input.alt && !input.meta && input.key === 'Escape') {
@@ -5604,7 +5623,8 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'security-options' ||
         shortcut?.action === 'screenshot' ||
-        shortcut?.action === 'screenshot-area'
+        shortcut?.action === 'screenshot-area' ||
+        shortcut?.action === 'wm'
       ) {
         claimGuestKey(contents, event, input);
         sendToShell('shortcut', shortcut);
@@ -5665,7 +5685,8 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'security-options' ||
         shortcut?.action === 'screenshot' ||
-        shortcut?.action === 'screenshot-area'
+        shortcut?.action === 'screenshot-area' ||
+        shortcut?.action === 'wm'
       ) {
         claimGuestKey(contents, event, input);
         sendToShell('shortcut', shortcut);

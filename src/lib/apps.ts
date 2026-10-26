@@ -122,6 +122,11 @@ export interface AppDefinition {
   /** Default window size when the app is launched. */
   defaultSize?: { width: number; height: number };
   /**
+   * The app's windows float above the tiling layout instead of taking a
+   * tile, as small tools and pop-ups do (Super+T tiles one anyway).
+   */
+  floating?: boolean;
+  /**
    * Extra terms the launcher search matches besides the name — a native
    * app's desktop-entry Keywords and Categories, so "browser" finds Firefox.
    */
@@ -253,6 +258,7 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/calculator.png',
     component: Calculator,
     defaultSize: { width: 380, height: 620 },
+    floating: true,
     keywords: ['arithmetic', 'TI-89', 'TI-84', 'graphing calculator', 'CAS', 'algebra', 'calculus', 'derivative', 'integral', 'solve', 'math', 'graph', 'homework'],
   },
   {
@@ -352,6 +358,7 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/screenshot.png',
     component: Screenshot,
     defaultSize: { width: 440, height: 400 },
+    floating: true,
     // One shot at a time.
     singleInstance: true,
   },
@@ -375,6 +382,7 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/web-browser.png',
     component: WebPopup,
     defaultSize: { width: 500, height: 640 },
+    floating: true,
     hidden: true,
     dockAs: 'web-browser',
   },

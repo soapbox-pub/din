@@ -1719,7 +1719,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         shortcut.action === 'super-key' ||
         shortcut.action === 'alt-released' ||
         shortcut.action === 'screenshot' ||
-        shortcut.action === 'screenshot-area'
+        shortcut.action === 'screenshot-area' ||
+        shortcut.action === 'wm'
       ) {
         return;
       }

@@ -69,6 +69,14 @@ export interface AppConfig {
    */
   wobblyWindows: boolean;
   /**
+   * Whether windows tile, Hyprland style, instead of floating: they share
+   * each monitor's workspace between them (see src/lib/tiling.ts). Kept on
+   * this device, like wobbly windows.
+   */
+  tilingEnabled: boolean;
+  /** Pixels between tiled windows, and between them and the screen's edges. */
+  tilingGap: number;
+  /**
    * Interface zoom level, as a percentage (100 = native size). Applied via
    * Chromium page zoom in the Electron shell (DPI-style scaling of the whole
    * desktop); has no effect in a plain browser, where the browser's own zoom

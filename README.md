@@ -320,6 +320,20 @@ idle minutes. DinOS ships the server and Whisper large-v3-turbo (about
 550 MB) and names them in `$DIN_WHISPER_SERVER` and `$DIN_WHISPER_MODEL`;
 elsewhere, set both to dictate.
 
+### Tiling and workspaces
+
+Windows float by default. Super+Shift+T (or Settings → Windows, or Super+T
+on a window) turns on Hyprland-style dwindle tiling: each new window splits
+the focused tile (`src/lib/tiling.ts`). The rest of the Super keys follow
+Omarchy's bindings (`src/lib/wmBindings.ts`; Super+K lists them), and work
+with tiling on or off. Each monitor has workspaces 1 to 10 of its own;
+windows on the ones not showing stay mounted, hidden like minimized ones.
+The window manager (`src/hooks/useWindows.ts`) keeps the tiling trees, and
+`settle()` derives every window's tile and visibility after each change.
+While tiling is on, or a workspace other than 1 is in use, the menu bar shows
+the workspaces and a switch to turn tiling off. Keys pressed inside web pages
+reach the shell through the host's `wm` shortcut (`electron/main.mts`).
+
 ### Updating npm dependencies
 
 The Nix build fetches npm deps from `package-lock.json` pinned by hash.

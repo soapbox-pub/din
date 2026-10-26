@@ -22,6 +22,7 @@ import {
   KeyRound,
   Keyboard,
   Laptop,
+  LayoutDashboard,
   Loader2,
   Mic,
   MicOff,
@@ -172,6 +173,7 @@ import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSet
 import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
+import { WM_BINDING_HELP } from '@/lib/wmBindings';
 
 type SectionId =
   | 'wifi'
@@ -189,6 +191,7 @@ type SectionId =
   | 'connected'
   | 'assistant'
   | 'appearance'
+  | 'windows'
   | 'developers'
   | 'about';
 
@@ -222,6 +225,13 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     name: 'Appearance',
     icon: Palette,
     search: ['Sync with your profile theme', 'Effects', 'Wobbly windows', 'Cursor', 'Cursor style', 'Cursor size', 'theme', 'dark mode', 'light mode', 'colors', 'fonts', 'background', 'wallpaper', 'desktop picture', 'mouse pointer'],
+  },
+  {
+    id: 'windows',
+    group: 'Personal',
+    name: 'Windows',
+    icon: LayoutDashboard,
+    search: ['Tiling', 'Tile windows', 'Gaps', 'Keyboard shortcuts', 'Workspaces', ...WM_BINDING_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
   },
   {
     id: 'notifications',
@@ -351,6 +361,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
  * shell theme between light, dark and a custom one of colors, fonts and a
  * background picture, synced with the profile theme or kept on this computer
  * (ThemeSettings), and toggles desktop effects like wobbly windows.
+ * Windows turns Hyprland-style tiling on or off, sets its gaps, and lists the
+ * Super-key shortcuts for windows and workspaces (src/lib/wmBindings.ts).
  * Developers holds debug utilities such as intentionally crashing the shell
  * to test the error boundary. About shows Din's logo and DinOS's version, and
  * the update it's staging through `window.updater`, and offers the restart
@@ -446,6 +458,8 @@ export function Settings({ params }: AppComponentProps) {
       <AssistantSettingsSection />
     ) : id === 'appearance' ? (
       <AppearanceSection />
+    ) : id === 'windows' ? (
+      <WindowsSection />
     ) : id === 'developers' ? (
       <DevelopersSection />
     ) : (
@@ -3358,6 +3372,79 @@ function AppearanceSection() {
         {getSystemCursorBridge() && <SystemCursorPicker />}
         <CursorThemePicker />
       </div>
+    </SectionShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Windows
+// ---------------------------------------------------------------------------
+
+/** The largest gap Settings offers between tiles, in pixels. */
+const MAX_TILING_GAP = 32;
+
+function WindowsSection() {
+  const { config, updateConfig } = useAppContext();
+  const [gap, setGap] = useState(config.tilingGap);
+  const [lastGap, setLastGap] = useState(config.tilingGap);
+  if (config.tilingGap !== lastGap) {
+    setLastGap(config.tilingGap);
+    setGap(config.tilingGap);
+  }
+
+  return (
+    <SectionShell title="Windows">
+      <SettingSwitchRow
+        id="tiling-enabled"
+        icon={LayoutDashboard}
+        label="Tile windows"
+        description="Windows share the screen side by side instead of overlapping, like Hyprland. Super+T floats one. Super+Shift+T turns tiling on or off."
+        checked={config.tilingEnabled}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, tilingEnabled: checked }))}
+      />
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="tiling-gap" className="text-sm">Gaps</Label>
+          <span className="text-xs tabular-nums text-muted-foreground">{gap} px</span>
+        </div>
+        <Slider
+          id="tiling-gap"
+          aria-label="Gaps"
+          value={[gap]}
+          min={0}
+          max={MAX_TILING_GAP}
+          step={2}
+          onValueChange={([v]) => setGap(v)}
+          onValueCommit={([v]) => updateConfig((current) => ({ ...current, tilingGap: v }))}
+        />
+        <p className="text-xs text-muted-foreground">Space between tiled windows, and around them.</p>
+      </div>
+
+      <p className="mt-2 text-sm text-muted-foreground">
+        Keyboard shortcuts work whether tiling is on or not. Each monitor has workspaces 1 to 10 of its own.
+      </p>
+      {WM_BINDING_HELP.map((group) => (
+        <div key={group.group} className="flex flex-col gap-1">
+          <p className="text-sm text-muted-foreground">{group.group}</p>
+          <div className="divide-y divide-border/60 rounded-md border bg-muted/20">
+            {group.bindings.map((b) => (
+              <div key={b.label} className="flex items-center justify-between gap-4 px-3 py-2">
+                <span className="text-sm text-foreground">{b.label}</span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {b.keys.map((k) => (
+                    <kbd
+                      key={k}
+                      className="rounded border border-border/80 bg-background/60 px-1.5 py-0.5 font-sans text-xs text-foreground"
+                    >
+                      {k}
+                    </kbd>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </SectionShell>
   );
 }

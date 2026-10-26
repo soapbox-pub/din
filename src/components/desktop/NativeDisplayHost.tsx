@@ -77,6 +77,8 @@ export function NativeDisplayHost() {
                 width: surface.width + chrome.width,
                 height: surface.height + chrome.height,
                 frameless: surface.csd,
+                // Dialogs float over the tiling layout.
+                floating: surface.kind !== 'NORMAL' || surface.transientFor !== null,
               });
               if (id) windowsRef.current.set(surface.id, id);
             });

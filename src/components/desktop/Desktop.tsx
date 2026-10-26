@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Wallpaper } from './Wallpaper';
 import { BootScreenSync } from './BootScreenSync';
 import { Dock } from './Dock';
@@ -8,6 +8,7 @@ import { SecurityOptions } from './SecurityOptions';
 import { ScreenshotHost } from './ScreenshotHost';
 import { MenuBar } from './MenuBar';
 import { VolumeOsd } from './VolumeOsd';
+import { WorkspaceOsd } from './WorkspacesIndicator';
 import { DictationOverlay } from './DictationOverlay';
 import { BrightnessOsd } from './BrightnessOsd';
 import { ScreenDimmer } from './ScreenDimmer';
@@ -39,7 +40,8 @@ import { BluetoothPromptHost } from './BluetoothIndicator';
 import { VolumesHost } from './VolumesHost';
 import { PrintHost } from './PrintHost';
 import { PageFullscreenHost } from './PageFullscreenHost';
-import { useWindows, windowRect, type WindowState } from '@/hooks/useWindows';
+import { isShown, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
+import { useAppContext } from '@/hooks/useAppContext';
 import { useMovingWindows } from '@/lib/windowGestures';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
@@ -63,7 +65,7 @@ function coveredWindows(
   areas: WorkArea[],
   moving: ReadonlySet<string>,
 ): Set<string> {
-  const shown = windows.filter((w) => !w.minimized && !w.closing);
+  const shown = windows.filter(isShown);
   const covers = shown
     .filter((w) => !w.frameless && !moving.has(w.id))
     .map((w) => ({ z: w.z, rect: windowRect(w, areas) }));
@@ -139,21 +141,38 @@ function DesktopSession() {
   useLayoutEffect(() => {
     monitorsRef.current = monitors;
   }, [monitors]);
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      const monitor = monitorsRef.current.find((m) => contains(m, e.clientX, e.clientY));
-      lastPointer.current = monitor ? { monitor: monitor.id, time: e.timeStamp } : null;
-    };
-    window.addEventListener('pointerdown', onPointerDown, true);
-    return () => window.removeEventListener('pointerdown', onPointerDown, true);
-  }, []);
   const getLaunchMonitor = useCallback(() => {
     const last = lastPointer.current;
     return last && performance.now() - last.time < LAUNCH_POINTER_MS ? last.monitor : null;
   }, []);
 
-  const manager = useWindows(getApp, getAreas, getLaunchMonitor);
-  const { fitToAreas } = manager.actions;
+  const { config } = useAppContext();
+  const tiling = useMemo<TilingSettings>(
+    () => ({ enabled: config.tilingEnabled, gap: config.tilingGap }),
+    [config.tilingEnabled, config.tilingGap],
+  );
+  const tilingRef = useRef(tiling);
+  const getTiling = useCallback(() => tilingRef.current, []);
+
+  const manager = useWindows(getApp, getAreas, getLaunchMonitor, getTiling);
+  const { fitToAreas, relayout, setCurrentMonitor } = manager.actions;
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const monitor = monitorsRef.current.find((m) => contains(m, e.clientX, e.clientY));
+      lastPointer.current = monitor ? { monitor: monitor.id, time: e.timeStamp } : null;
+      // Keyboard commands (Super+1, new windows from Super+Enter) act on
+      // the monitor last clicked on.
+      if (monitor) setCurrentMonitor(monitor.id);
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+  }, [setCurrentMonitor]);
+  // Turning tiling on or off, or changing the gaps, lays the windows out again.
+  useLayoutEffect(() => {
+    if (tilingRef.current === tiling) return;
+    tilingRef.current = tiling;
+    relayout();
+  }, [tiling, relayout]);
   // Windows stranded by a monitor going away (or shrinking) come home.
   useEffect(() => {
     fitToAreas(areas);
@@ -161,7 +180,7 @@ function DesktopSession() {
   // Focus ring goes to the highest visible window; minimized and closing
   // ones don't count.
   const topZ = manager.windows.reduce(
-    (max, w) => (w.minimized || w.closing ? max : Math.max(max, w.z)),
+    (max, w) => (isShown(w) ? Math.max(max, w.z) : max),
     0,
   );
   const moving = useMovingWindows();
@@ -222,7 +241,7 @@ function DesktopSession() {
                     <Window
                       key={win.id}
                       window={win}
-                      isTop={!win.minimized && win.z === topZ}
+                      isTop={isShown(win) && win.z === topZ}
                       covered={covered.has(win.id)}
                     />
                   ))}
@@ -231,6 +250,7 @@ function DesktopSession() {
                 <Dock workspaceRef={workspaceRef} />
                 <WindowSwitcher />
                 <VolumeOsd />
+                <WorkspaceOsd />
                 <BrightnessOsd />
                 <AirPlayOsd />
                 <DictationOverlay />

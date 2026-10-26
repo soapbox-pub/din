@@ -19,7 +19,7 @@ import type { AppDefinition } from '@/lib/apps';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
-import { windowRect, type WindowState } from '@/hooks/useWindows';
+import { focusedWindow, windowRect, type WindowState } from '@/hooks/useWindows';
 
 /** One window in a Dock tile. */
 interface DockWindow {
@@ -182,10 +182,7 @@ export function Dock({
   const entryIds = [...pinnedIds, ...unpinnedIds];
 
   // The Din window that currently holds focus: highest z among visible ones.
-  const activeWindow = windows.reduce<WindowState | null>(
-    (top, w) => (!w.minimized && !w.closing && (!top || w.z > top.z) ? w : top),
-    null,
-  );
+  const activeWindow = focusedWindow(windows);
 
   // Magnification is pointer-driven eye candy; skip it entirely for users
   // who prefer reduced motion (tiles then behave like plain buttons).

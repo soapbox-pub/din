@@ -15,6 +15,8 @@
  *   - Ctrl+Shift+Escape       -> { action: 'system-monitor' }
  *   - Ctrl+Alt+Delete         -> { action: 'security-options' }
  *   - Super down / up         -> { action: 'super-key', down }
+ *   - Super+arrows, digits, Tab, -, =, Enter, W/Q/T/F/J/M/K (any of
+ *     Shift/Ctrl/Alt)         -> { action: 'wm', code, shift, ctrl, alt, repeat }
  *   - Alt up                  -> { action: 'alt-released' }
  *   - Print Screen            -> { action: 'screenshot' }
  *   - Shift+Print Screen, or the laptop box-select key
@@ -84,6 +86,19 @@ export type ShellShortcut =
       /** Super pressed or released inside a guest (Super+drag moves windows). */
       action: 'super-key';
       down: boolean;
+    }
+  | {
+      /**
+       * A window-management key pressed inside a guest (Super plus a key
+       * src/lib/wmBindings.ts may bind), with the physical key and the
+       * modifiers besides Super.
+       */
+      action: 'wm';
+      code: string;
+      shift: boolean;
+      ctrl: boolean;
+      alt: boolean;
+      repeat: boolean;
     }
   | {
       /** Alt released inside a guest: ends an Alt+Tab started there. */

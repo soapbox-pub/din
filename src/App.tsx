@@ -60,6 +60,8 @@ const defaultConfig: AppConfig = {
   syncProfileTheme: true,
   localTheme: null,
   wobblyWindows: true,
+  tilingEnabled: false,
+  tilingGap: 8,
   zoomLevel: 100,
   customCursor: null,
   clockFormat: 'auto',

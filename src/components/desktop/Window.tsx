@@ -88,6 +88,20 @@ function pointerOn(areas: WorkArea[], px: number, py: number): { area: WorkArea;
 }
 
 /** The snap zone under a pointer (workspace coordinates), if any. */
+/**
+ * The tiled window (other than `self`) under a viewport point, and where it
+ * sits in workspace coordinates.
+ */
+function tileUnder(clientX: number, clientY: number, self: string): { id: string; rect: Rect } | null {
+  for (const el of document.elementsFromPoint(clientX, clientY)) {
+    if (!(el instanceof HTMLElement) || el.dataset.tiled === undefined) continue;
+    const id = el.dataset.windowId;
+    if (!id || id === self) continue;
+    return { id, rect: { x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight } };
+  }
+  return null;
+}
+
 function snapTargetAt(areas: WorkArea[], px: number, py: number): SnapTarget | null {
   const { area, x, y } = pointerOn(areas, px, py);
   // Top wins its (thinner) corner overlap. On the primary monitor the
@@ -236,7 +250,7 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object, `isTop` or `covered` changes.
-  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon, setAccent } =
+  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon, setAccent, dropTile } =
     useWindowActions();
   const { config } = useAppContext();
   const { getApp } = useInstalledApps();
@@ -280,6 +294,11 @@ export const Window = memo(function Window({
     snap: SnapTarget | null;
     /** The shared top edge the pointer is resting under, and whether it's armed yet. */
     dwell?: { areaId: string; timer: number; armed: boolean };
+    /**
+     * Dragging a tiled window: the tiled window under the pointer it would
+     * trade places with, and the pointer, in workspace coordinates.
+     */
+    tile?: { target: string | null; key: string; px: number; py: number };
   } | null>(null);
   const resizeState = useRef<{
     dir: ResizeDir;
@@ -683,14 +702,16 @@ export const Window = memo(function Window({
   // translate+scale from the old rect down to identity, decelerating into
   // place. Skipped mid-gesture: a tear-away drag already moves the window
   // under the pointer, and animating against it would fight the cursor.
-  const prevMode = useRef({ maximized: win.maximized, snapped: win.snapped });
+  // Tiled windows FLIP the same way whenever the layout moves their tile.
+  const tiledKey = win.tiled ? `${win.tiled.x},${win.tiled.y},${win.tiled.width},${win.tiled.height}` : '';
+  const prevMode = useRef({ maximized: win.maximized, snapped: win.snapped, tiledKey });
   useLayoutEffect(() => {
     const prev = prevMode.current;
-    prevMode.current = { maximized: win.maximized, snapped: win.snapped };
-    if (prev.maximized === win.maximized && prev.snapped === win.snapped) return;
+    prevMode.current = { maximized: win.maximized, snapped: win.snapped, tiledKey };
+    if (prev.maximized === win.maximized && prev.snapped === win.snapped && prev.tiledKey === tiledKey) return;
     const el = sectionRef.current;
     const from = paintedRect.current;
-    if (!el || !from || win.minimized) return;
+    if (!el || !from || win.minimized || win.away) return;
     if (dragState.current || resizeState.current) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
@@ -721,7 +742,15 @@ export const Window = memo(function Window({
       el.style.transformOrigin = '';
       endGesture();
     });
-  }, [win.maximized, win.snapped, win.minimized, beginGesture, endGesture, stopWobble]);
+  }, [win.maximized, win.snapped, win.minimized, win.away, tiledKey, beginGesture, endGesture, stopWobble]);
+
+  // A window going off to another workspace takes keyboard focus with it,
+  // or typing would go on into a window nobody can see.
+  useEffect(() => {
+    if (!win.away) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && sectionRef.current?.contains(active)) active.blur();
+  }, [win.away]);
 
   // Record the committed rect for the next FLIP. Declared after the FLIP
   // effect so it runs later in the same commit: the FLIP reads the previous
@@ -775,6 +804,26 @@ export const Window = memo(function Window({
       const ws = sectionRef.current?.parentElement?.getBoundingClientRect();
       const wsLeft = ws?.left ?? 0;
       const wsTop = ws?.top ?? 0;
+      if (win.tiled && !win.maximized) {
+        // A tiled window drags rigidly, and on release trades places with
+        // the tile it's dropped on (see onPointerMove and endDrag).
+        stopWobble(false);
+        dragState.current = {
+          px: e.clientX,
+          py: e.clientY,
+          wx: win.tiled.x,
+          wy: win.tiled.y,
+          x: win.tiled.x,
+          y: win.tiled.y,
+          wsLeft,
+          wsTop,
+          tearAway: null,
+          snap: null,
+          tile: { target: null, key: '', px: e.clientX - wsLeft, py: e.clientY - wsTop },
+        };
+        beginGesture();
+        return;
+      }
       if (win.maximized || win.snapped) {
         // Arm a tear-away: nothing moves yet - once the pointer travels past
         // TEAR_AWAY_PX (see onPointerMove), the window un-maximizes/un-tiles
@@ -852,7 +901,7 @@ export const Window = memo(function Window({
       st.anchorOrigin = { x: anchor.x, y: anchor.y };
       st.flags |= WOBBLY_INITIAL;
     },
-    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, win.restore, beginGesture, config.wobblyWindows, stopWobble, wobbleFrame],
+    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, win.restore, win.tiled, beginGesture, config.wobblyWindows, stopWobble, wobbleFrame],
   );
 
   const onPointerDown = useCallback(
@@ -881,6 +930,27 @@ export const Window = memo(function Window({
       const areas = areasRef.current;
       const px = e.clientX - s.wsLeft;
       const py = e.clientY - s.wsTop;
+
+      if (s.tile) {
+        s.x = s.wx + (e.clientX - s.px);
+        s.y = s.wy + (e.clientY - s.py);
+        s.tile.px = px;
+        s.tile.py = py;
+        el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
+        // Outline where it would go: the tile under the pointer, or a whole
+        // other monitor to tile on.
+        const under = tileUnder(e.clientX, e.clientY, win.id);
+        const area = under ? null : areaNear(areas, px, py);
+        const home = areaFor(areas, { x: win.x, y: win.y, width: win.width, height: win.height });
+        const elsewhere = area && area.id !== home.id ? area : null;
+        const key = under ? `tile:${under.id}` : elsewhere ? `area:${elsewhere.id}` : '';
+        if (key !== s.tile.key) {
+          s.tile.key = key;
+          s.tile.target = under?.id ?? null;
+          setSnapHint(under?.rect ?? elsewhere);
+        }
+        return;
+      }
 
       if (s.tearAway) {
         // Maximized window being dragged: past the threshold, restore it
@@ -1005,7 +1075,7 @@ export const Window = memo(function Window({
         el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
       }
     },
-    [beginGesture, unmaximize, win.id, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
+    [beginGesture, unmaximize, win.id, win.x, win.y, win.width, win.height, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
   );
 
   const endDrag = useCallback(
@@ -1020,6 +1090,17 @@ export const Window = memo(function Window({
       if (s.tearAway) return;
 
       const el = sectionRef.current;
+
+      if (s.tile) {
+        setSnapHint(null);
+        if (el) el.style.transform = '';
+        endGesture();
+        if (s.x === s.wx && s.y === s.wy) return;
+        // The FLIP into the new tile starts from where it was let go.
+        if (el) paintedRect.current = { x: s.x, y: s.y, width: el.offsetWidth, height: el.offsetHeight };
+        dropTile(win.id, s.tile.target, s.tile.px, s.tile.py);
+        return;
+      }
 
       if (s.snap) {
         // Dropped on an edge: maximize (top) or tile to a half (left/right).
@@ -1069,7 +1150,7 @@ export const Window = memo(function Window({
       endGesture();
       move(win.id, s.x, s.y);
     },
-    [move, win.id, win.width, win.height, endGesture, renderWobble, maximize, tile, stopWobble],
+    [move, win.id, win.width, win.height, endGesture, renderWobble, maximize, tile, stopWobble, dropTile],
   );
 
   const onPointerUp = useCallback(
@@ -1103,7 +1184,7 @@ export const Window = memo(function Window({
   /** Begin a resize from `dir`, like startDrag; false while maximized/tiled. */
   const startResize = useCallback(
     (dir: ResizeDir, e: ChromePoint) => {
-      if (win.maximized || win.snapped) return false;
+      if (win.maximized || win.snapped || win.tiled) return false;
       focus(win.id);
       // Resizing a still-jiggling window snaps it rigid first.
       stopWobble(false);
@@ -1121,7 +1202,7 @@ export const Window = memo(function Window({
       beginGesture();
       return true;
     },
-    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, beginGesture, stopWobble],
+    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, win.tiled, beginGesture, stopWobble],
   );
 
   const onResizePointerDown = useCallback(
@@ -1231,7 +1312,8 @@ export const Window = memo(function Window({
   // A covered window is hidden the same way: unlike a page's own
   // visibilityState, that is what stops Chromium painting it and running its
   // requestAnimationFrame loops.
-  if (win.minimized || hiddenBehind) geometry.visibility = 'hidden';
+  // So is a window on a workspace its monitor isn't showing.
+  if (win.minimized || win.away || hiddenBehind) geometry.visibility = 'hidden';
 
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
@@ -1265,6 +1347,7 @@ export const Window = memo(function Window({
       ref={sectionRef}
       aria-label={title}
       data-window-id={win.id}
+      data-tiled={win.tiled && !win.maximized ? '' : undefined}
       data-app-name={app?.name}
       onPointerDown={() => focus(win.id)}
       // Raise when focus lands anywhere inside the window (React's onFocus is
@@ -1313,6 +1396,9 @@ export const Window = memo(function Window({
           ? 'rounded-none'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
         !flush && !frameless && isTop && 'ring-ring/50',
+        // Tiles sit side by side, so the focused one needs a border that
+        // shows, like Hyprland's active border.
+        !flush && !frameless && isTop && win.tiled && 'ring-2 ring-primary/80',
       )}
     >
       {!frameless && (
@@ -1399,7 +1485,7 @@ export const Window = memo(function Window({
                     {/* Built-in apps are code-split (React.lazy); the fallback shows
                         while an app's chunk loads on its first launch. */}
                     <WindowAppContext.Provider value={app.id}>
-                      <WindowVisibleContext.Provider value={!win.minimized && !hiddenBehind}>
+                      <WindowVisibleContext.Provider value={!win.minimized && !win.away && !hiddenBehind}>
                         <Suspense
                           fallback={<div className="size-full animate-pulse bg-muted/40" />}
                         >
@@ -1415,8 +1501,10 @@ export const Window = memo(function Window({
         </WindowFocusContext.Provider>
       </div>
 
+      {/* Tiled windows are sized by the layout (Super+- / Super+=). */}
       {!flush &&
         !frameless &&
+        !win.tiled &&
         RESIZE_HANDLES.map(({ dir, className }) => (
           <div
             key={dir}
@@ -1428,7 +1516,7 @@ export const Window = memo(function Window({
           />
         ))}
 
-      {(superHeld || superDragging) && !win.minimized && !win.closing && (
+      {(superHeld || superDragging) && !win.minimized && !win.closing && !win.away && (
         <div
           aria-hidden
           onPointerDown={onSuperPointerDown}

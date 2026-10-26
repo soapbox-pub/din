@@ -185,7 +185,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         // The app resized (or, drawing its own title bar, moved) itself: the
         // Din window follows. Mid-gesture the window is the pointer's, and the
         // app's echo of the move would only pull it back.
-        if (event.type === 'configure' && !win.maximized && !win.snapped) {
+        if (event.type === 'configure' && !win.maximized && !win.snapped && !win.tiled) {
           const place = surface.csd && !gestureRef.current ? placeFor(surface) : win;
           resize(windowId, { x: place.x, y: place.y, ...size });
         }

@@ -58,6 +58,8 @@ const AppConfigSchema = z.object({
   syncProfileTheme: z.boolean(),
   localTheme: DesktopThemeSchema.nullable(),
   wobblyWindows: z.boolean(),
+  tilingEnabled: z.boolean(),
+  tilingGap: z.number().min(0).max(64),
   zoomLevel: z.number(),
   customCursor: CursorThemeSchema.nullable(),
   clockFormat: z.enum(['auto', '12', '24']),

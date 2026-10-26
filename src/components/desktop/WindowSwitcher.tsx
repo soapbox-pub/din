@@ -91,9 +91,11 @@ export function WindowSwitcher() {
         commitState({ ...prev, index });
         return;
       }
+      // Windows on other workspaces come after the ones on screen: the
+      // first one is the focused window, so a tap flips to the one below it.
       const ids = [...windowsRef.current]
         .filter((w) => !w.closing)
-        .sort((a, b) => b.z - a.z)
+        .sort((a, b) => Number(a.away) - Number(b.away) || b.z - a.z)
         .map((w) => w.id);
       // Nothing to switch between.
       if (ids.length < 2) return;

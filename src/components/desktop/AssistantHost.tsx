@@ -36,7 +36,7 @@ import {
 } from '@/lib/assistantPrompt';
 import { cancelDictation, elementTarget, getDictationState, startDictation } from '@/lib/dictation';
 import { closeNotification, notify } from '@/lib/notificationCenter';
-import type { WindowState } from '@/hooks/useWindows';
+import { focusedWindow, type WindowState } from '@/hooks/useWindows';
 
 const ASSISTANT_APP_ID = 'assistant';
 const SOURCE = { appId: ASSISTANT_APP_ID, name: 'Assistant' };
@@ -88,10 +88,7 @@ function useIsWatching(): (sessionID: string) => boolean {
   }, [windows]);
   return (sessionID) => {
     if (getViewedSession() !== sessionID || !document.hasFocus()) return false;
-    const top = windowsRef.current.reduce<WindowState | null>(
-      (best, w) => (!w.minimized && !w.closing && (!best || w.z > best.z) ? w : best),
-      null,
-    );
+    const top = focusedWindow(windowsRef.current);
     return top?.appId === ASSISTANT_APP_ID;
   };
 }

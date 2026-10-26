@@ -74,6 +74,8 @@ import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerCont
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { primaryArea } from '@/lib/monitors';
 import type { AppDefinition } from '@/lib/apps';
+import { focusedWindow, isShown } from '@/hooks/useWindows';
+import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
 
 /**
  * Menu bar along the top of the desktop.
@@ -102,7 +104,7 @@ export function MenuBar() {
   const primaryId = primaryArea(useWorkAreas()).id;
   const fullscreen = windows.reduce<(typeof windows)[number] | null>(
     (top, w) =>
-      w.maximized && !w.minimized && !w.closing && (w.monitor === null || w.monitor === primaryId) &&
+      w.maximized && isShown(w) && (w.monitor === null || w.monitor === primaryId) &&
       (!top || w.z > top.z)
         ? w
         : top,
@@ -110,10 +112,7 @@ export function MenuBar() {
   );
   const accent = fullscreen && !fullscreen.frameless ? fullscreen.accent : null;
   // The focused window is the highest visible one, as for its focus ring.
-  const focused = windows.reduce<(typeof windows)[number] | null>(
-    (top, w) => (w.minimized || w.closing || (top && top.z > w.z) ? top : w),
-    null,
-  );
+  const focused = focusedWindow(windows);
 
   return (
     <header
@@ -145,6 +144,7 @@ export function MenuBar() {
       <ClockMenuItem />
       <div className="flex min-w-0 items-center justify-end gap-1.5">
         <ScreenShareMenuItem />
+        <WorkspacesMenuItem />
         <TrayItems />
         <AssistantMenuItem />
         <AirPlayMenuItem />

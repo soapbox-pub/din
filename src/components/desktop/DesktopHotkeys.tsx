@@ -13,10 +13,15 @@ import { isSecurityOptionsActive, showSecurityOptions } from '@/lib/securityOpti
 import { isScreenshotSessionActive, requestScreenshot } from '@/lib/screenshot';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { isWindowSwitcherActive } from '@/lib/windowSwitcherState';
-import type { WindowState } from '@/hooks/useWindows';
+import { focusedWindow, type WindowState } from '@/hooks/useWindows';
+import { useAppContext } from '@/hooks/useAppContext';
+import { wmCommandFor, type WmCommand } from '@/lib/wmBindings';
 
 /** The built-in Web Browser's app id (see src/lib/apps.ts). */
 const WEB_BROWSER_APP_ID = 'web-browser';
+/** The Terminal's and Settings' app ids (see src/lib/apps.ts). */
+const TERMINAL_APP_ID = 'terminal';
+const SETTINGS_APP_ID = 'settings';
 /** The System Monitor's app id (see src/lib/apps.ts). */
 const SYSTEM_MONITOR_APP_ID = 'system-monitor';
 /** Super+A held this long dictates into the prompt instead of toggling it. */
@@ -76,6 +81,9 @@ function isAssistantKeyPressed(): boolean {
  * - Ctrl+Alt+Delete opens the security options screen (SecurityOptions):
  *   lock, switch account, sign out, change the password, System Monitor,
  *   restart and shut down. Everything else stands down while it's up.
+ * - Super plus a key manages windows and workspaces, Hyprland style (the
+ *   bindings are in src/lib/wmBindings.ts): Super+arrows focus, Super+1..0
+ *   switch workspace, Super+Shift+T turns tiling on or off, and so on.
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
@@ -123,13 +131,67 @@ export function DesktopHotkeys() {
     actionsRef.current = actions;
   }, [actions]);
 
+  const { config, updateConfig } = useAppContext();
+  const tilingRef = useRef(config.tilingEnabled);
   useEffect(() => {
-    /** The focused window: highest z among non-minimized (as the Dock). */
-    const topWindow = () =>
-      windowsRef.current.reduce<WindowState | null>(
-        (top, w) => (!w.minimized && (!top || w.z > top.z) ? w : top),
-        null,
-      );
+    tilingRef.current = config.tilingEnabled;
+  }, [config.tilingEnabled]);
+
+  // Runs a window-management binding, from either key source below.
+  const runWmRef = useRef<(cmd: WmCommand) => void>(() => {});
+  useEffect(() => {
+    const setTiling = (enabled: boolean) => {
+      tilingRef.current = enabled;
+      updateConfig((current) => ({ ...current, tilingEnabled: enabled }));
+    };
+    runWmRef.current = (cmd) => {
+      const a = actionsRef.current;
+      const top = focusedWindow(windowsRef.current);
+      switch (cmd.type) {
+        case 'focus':
+          return a.focusDirection(cmd.dir);
+        case 'swap':
+          return a.swapDirection(cmd.dir);
+        case 'move-to-monitor':
+          return top && a.moveToMonitor(top.id, cmd.dir);
+        case 'workspace':
+          return a.showWorkspace(cmd.n);
+        case 'move-to-workspace':
+          return top && a.moveToWorkspace(top.id, cmd.n, cmd.follow);
+        case 'workspace-step':
+          return a.stepWorkspace(cmd.step);
+        case 'workspace-previous':
+          return a.previousWorkspace();
+        case 'close':
+          return top && a.close(top.id);
+        case 'toggle-float':
+          // With tiling off, Super+T is the way in: tiling comes on, with
+          // this window tiled.
+          if (!tilingRef.current) setTiling(true);
+          return top && a.toggleFloating(top.id);
+        case 'toggle-tiling':
+          return setTiling(!tilingRef.current);
+        case 'fullscreen':
+          return top && a.toggleMaximize(top.id);
+        case 'toggle-split':
+          return top && a.toggleSplit(top.id);
+        case 'minimize':
+          return top && a.minimize(top.id);
+        case 'resize':
+          return top && a.resizeBy(top.id, cmd.dx, cmd.dy);
+        case 'terminal':
+          a.open(TERMINAL_APP_ID);
+          return;
+        case 'help':
+          a.open(SETTINGS_APP_ID, { section: 'windows' });
+          return;
+      }
+    };
+  }, [updateConfig]);
+
+  useEffect(() => {
+    /** The focused window: highest z among those on screen (as the Dock). */
+    const topWindow = () => focusedWindow(windowsRef.current);
 
     // Shortcuts that would fight the host browser (find, reload, tab and
     // history navigation) are only intercepted inside the Electron shell.
@@ -193,6 +255,17 @@ export function DesktopHotkeys() {
         e.stopPropagation();
         if (!e.repeat) toggleDictation();
         return;
+      }
+
+      // Super+key: window management (after Super+Space/A/H above).
+      if (e.metaKey) {
+        const cmd = wmCommandFor({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
+        if (cmd) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!e.repeat || cmd.type === 'resize') runWmRef.current(cmd);
+          return;
+        }
       }
 
       // Esc: stop dictating, throwing it away.
@@ -349,6 +422,9 @@ export function DesktopHotkeys() {
         assistantKeyUp();
       } else if (shortcut.action === 'super-key' && !shortcut.down) {
         if (isAssistantKeyPressed()) assistantKeyUp();
+      } else if (shortcut.action === 'wm') {
+        const cmd = wmCommandFor(shortcut);
+        if (cmd && (!shortcut.repeat || cmd.type === 'resize')) runWmRef.current(cmd);
       } else if (shortcut.action === 'dictation') {
         toggleDictation();
       } else if (shortcut.action === 'security-options') {
