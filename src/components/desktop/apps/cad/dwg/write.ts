@@ -20,17 +20,12 @@ import {
   LW_DEFAULT,
   TRUE_COLOR,
   type Attrib,
-  type Block,
-  type DimStyle,
   type Dimension,
   type Drawing,
   type Entity,
   type Hatch,
   type Insert,
-  type Layer,
-  type Linetype,
   type Text,
-  type TextStyle,
   type Vec,
 } from '../model';
 import { nearestAci } from '../aci';
@@ -46,15 +41,9 @@ import {
   SOFT_POINTER,
   unsignedModularChar,
 } from './bits';
+import { prepare, type WriteOptions } from '../prepare';
 
-export interface WriteOptions {
-  /** The model space's extents, for EXTMIN/EXTMAX and the initial view. */
-  extents: { min: Vec; max: Vec } | null;
-  /** The geometry of a dimension that has no block of its own yet. */
-  dimBlock: (dim: Dimension) => Entity[];
-  /** Times are Julian dates. */
-  now: number;
-}
+export type { WriteOptions };
 
 const SENTINEL = {
   headerStart: [0xcf, 0x7b, 0x1f, 0x23, 0xfd, 0xde, 0x38, 0xa9, 0x5f, 0x7c, 0x68, 0xb8, 0x4e, 0x6d, 0x33, 0x5f],
@@ -219,58 +208,7 @@ export function writeDwg(input: Drawing, opts: WriteOptions): Uint8Array {
   };
 
   // Tables, with everything the entities name.
-  const layers: Layer[] = d.layers.map((l) => ({ ...l }));
-  const haveLayer = (n: string) => layers.some((l) => upper(l.name) === upper(n));
-  const linetypes: Linetype[] = [];
-  for (const name of ['ByBlock', 'ByLayer', CONTINUOUS]) {
-    linetypes.push(d.linetypes.find((l) => upper(l.name) === upper(name)) ?? { name, description: name === CONTINUOUS ? 'Solid line' : '', pattern: [] });
-  }
-  for (const lt of d.linetypes) if (!linetypes.some((l) => upper(l.name) === upper(lt.name))) linetypes.push(lt);
-  const styles: TextStyle[] = d.textStyles.length ? [...d.textStyles] : [{ name: 'Standard', font: 'txt', bigfont: '', height: 0, width: 1, oblique: 0 }];
-  const dimstyles: DimStyle[] = [...d.dimStyles];
-
-  const blocks: Record<string, Block> = { ...d.blocks };
-  const allEntities = (fn: (e: Entity) => void) => {
-    const walk = (list: Entity[]) => list.forEach(fn);
-    walk(d.entities);
-    walk(d.paper);
-    for (const b of Object.values(blocks)) walk(b.entities);
-  };
-
-  // Dimensions without a block get one drawn now.
-  let anon = 1;
-  const usedNames = new Set(Object.keys(blocks).map(upper));
-  const freshAnon = (prefix: string) => {
-    let n: string;
-    do n = `${prefix}${anon++}`;
-    while (usedNames.has(upper(n)));
-    usedNames.add(upper(n));
-    return n;
-  };
-  const fixDims = (list: Entity[]): Entity[] =>
-    list.map((e) => {
-      if (e.type !== 'dim') return e;
-      if (e.block && blocks[e.block]) return e;
-      const name = freshAnon('*D');
-      blocks[name] = { name, base: { x: 0, y: 0 }, entities: opts.dimBlock(e), flags: 1, description: '' };
-      return { ...e, block: name };
-    });
-  const model = fixDims(d.entities);
-  const paper = fixDims(d.paper);
-  for (const b of Object.values({ ...blocks })) if (b.entities.some((e) => e.type === 'dim' && !(e.block && blocks[e.block]))) blocks[b.name] = { ...b, entities: fixDims(b.entities) };
-
-  allEntities((e) => {
-    if (!haveLayer(e.layer)) layers.push({ name: e.layer, color: 7, linetype: CONTINUOUS, lineweight: LW_DEFAULT, on: true, frozen: false, locked: false, plot: true });
-    if (!linetypes.some((l) => upper(l.name) === upper(e.linetype))) linetypes.push({ name: e.linetype, description: '', pattern: [] });
-    const style = e.type === 'text' || e.type === 'attdef' || e.type === 'mtext' ? e.style : null;
-    if (e.type === 'insert') for (const a of e.attribs) if (!styles.some((s) => upper(s.name) === upper(a.style))) styles.push({ name: a.style, font: 'txt', bigfont: '', height: 0, width: 1, oblique: 0 });
-    if (e.type === 'dim' || e.type === 'leader') {
-      if (!dimstyles.some((s) => upper(s.name) === upper(e.style))) dimstyles.push({ ...(dimstyles[0] ?? ({} as DimStyle)), name: e.style });
-    } else if (style && !styles.some((s) => upper(s.name) === upper(style))) styles.push({ name: style, font: 'txt', bigfont: '', height: 0, width: 1, oblique: 0 });
-  });
-  if (!haveLayer('0')) layers.unshift({ name: '0', color: 7, linetype: CONTINUOUS, lineweight: LW_DEFAULT, on: true, frozen: false, locked: false, plot: true });
-  if (!dimstyles.length) throw new Error('A drawing needs a dimension style.');
-  for (const l of layers) if (!linetypes.some((t) => upper(t.name) === upper(l.linetype))) l.linetype = CONTINUOUS;
+  const { layers, linetypes, styles, dimstyles, blocks, model, paper, view } = prepare(d, opts);
 
   const layerH = new Map<string, number>();
   for (const l of layers) layerH.set(upper(l.name), alloc());
@@ -437,7 +375,6 @@ export function writeDwg(input: Drawing, opts: WriteOptions): Uint8Array {
 
   // The view the drawing opens at.
   const ext = opts.extents;
-  const view = d.view ?? (ext ? { center: { x: (ext.min.x + ext.max.x) / 2, y: (ext.min.y + ext.max.y) / 2 }, height: Math.max(1e-6, (ext.max.y - ext.min.y) * 1.1, (ext.max.x - ext.min.x) * 0.6) } : { center: { x: (d.header.limmax.x + d.header.limmin.x) / 2, y: (d.header.limmax.y + d.header.limmin.y) / 2 }, height: d.header.limmax.y - d.header.limmin.y || 9 });
   {
     const w = obj(T.VPORT, H.vportActive, H.vportCtl);
     entryName(w, '*Active');
