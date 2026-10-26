@@ -14,6 +14,8 @@
 export interface NsiteAppInfo {
   /** The manifest event id this was derived from. */
   from: string;
+  /** Which derivation produced it (NSITE_APP_INFO_VERSION); absent from the first. */
+  version?: number;
   name: string | null;
   /** A small raster data URL. */
   icon: string | null;

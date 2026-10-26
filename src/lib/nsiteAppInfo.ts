@@ -159,8 +159,65 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 const ICON_SIZE = 256;
 
 /**
+ * Bumped whenever the derivation changes what it produces, so info stored by
+ * an older Din is derived again (3: full-bleed icons are cut to a squircle).
+ */
+export const NSITE_APP_INFO_VERSION = 3;
+
+/**
+ * Margin left around a squircle-cut icon, so it sits at the same visual size
+ * as Din's own icons, whose artwork stops just short of the edge.
+ */
+const SQUIRCLE_INSET = 10;
+
+/** Superellipse exponent: 2 is a circle, higher is squarer. iOS-like at 5. */
+const SQUIRCLE_EXPONENT = 5;
+
+/** Trace a squircle filling the square at (x, y) with edge `size`. */
+function traceSquircle(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+  const r = size / 2;
+  const cx = x + r;
+  const cy = y + r;
+  const steps = 128;
+  ctx.beginPath();
+  for (let i = 0; i < steps; i++) {
+    const t = (i / steps) * Math.PI * 2;
+    const cos = Math.cos(t);
+    const sin = Math.sin(t);
+    const px = cx + r * Math.sign(cos) * Math.abs(cos) ** (2 / SQUIRCLE_EXPONENT);
+    const py = cy + r * Math.sign(sin) * Math.abs(sin) ** (2 / SQUIRCLE_EXPONENT);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+/**
+ * Whether artwork runs edge to edge: almost none of the pixels around its
+ * border are transparent. That is a square picture drawn for a launcher to
+ * cut into its own shape (an apple-touch-icon, a maskable manifest icon), and
+ * left as it is it sits among Din's icons as a hard-cornered square. Artwork
+ * with a transparent border has a shape of its own and keeps it.
+ */
+function isFullBleed(ctx: CanvasRenderingContext2D, size: number): boolean {
+  const { data } = ctx.getImageData(0, 0, size, size);
+  const edge = Math.max(1, Math.round(size / 64));
+  let ring = 0;
+  let clear = 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (x >= edge && y >= edge && x < size - edge && y < size - edge) continue;
+      ring++;
+      if (data[(y * size + x) * 4 + 3] < 128) clear++;
+    }
+  }
+  return ring > 0 && clear / ring < 0.05;
+}
+
+/**
  * Rasterize icon bytes into a small data URL. SVG is drawn through an <img>,
  * which never runs its scripts, and the result is plain pixels either way.
+ * Full-bleed artwork comes out cut to a squircle (see isFullBleed).
  */
 async function rasterize(bytes: Uint8Array, path: string): Promise<string | null> {
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
@@ -174,10 +231,19 @@ async function rasterize(bytes: Uint8Array, path: string): Promise<string | null
     const canvas = document.createElement('canvas');
     canvas.width = ICON_SIZE;
     canvas.height = ICON_SIZE;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, 0, 0, ICON_SIZE, ICON_SIZE);
+    if (isFullBleed(ctx, ICON_SIZE)) {
+      const inner = ICON_SIZE - SQUIRCLE_INSET * 2;
+      ctx.clearRect(0, 0, ICON_SIZE, ICON_SIZE);
+      ctx.save();
+      traceSquircle(ctx, SQUIRCLE_INSET, SQUIRCLE_INSET, inner);
+      ctx.clip();
+      ctx.drawImage(img, SQUIRCLE_INSET, SQUIRCLE_INSET, inner, inner);
+      ctx.restore();
+    }
     const webp = canvas.toDataURL('image/webp', 0.85);
     return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png');
   } catch {
@@ -187,9 +253,20 @@ async function rasterize(bytes: Uint8Array, path: string): Promise<string | null
   }
 }
 
+/**
+ * A site's files, wherever they are read from: Din's nsite store for a site it
+ * keeps, or Blossom for one the App Store is only showing. Either way every
+ * read is checked against the hash in the signed manifest.
+ */
+export interface NsiteFileSource {
+  /** Path -> sha256 of the manifest being read. */
+  paths: Record<string, string>;
+  read(path: string): Promise<Uint8Array | null>;
+}
+
 /** Read and parse a JSON file of the site, or null. */
-async function readJson(store: NsiteStore, host: string, path: string): Promise<unknown> {
-  const bytes = await store.read(host, path);
+async function readJson(files: NsiteFileSource, path: string): Promise<unknown> {
+  const bytes = await files.read(path);
   if (!bytes) return null;
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
@@ -198,18 +275,46 @@ async function readJson(store: NsiteStore, host: string, path: string): Promise<
   }
 }
 
-/**
- * Derive how a stored site presents itself as an app, from the manifest
- * version in `summary`.
- */
-export async function deriveNsiteAppInfo(
-  store: NsiteStore,
-  summary: NsiteSummary,
-): Promise<NsiteAppInfo> {
-  const { host, paths } = summary;
-  const info: NsiteAppInfo = { from: summary.eventId, name: null, icon: null, themeColor: null };
+/** How a site presents itself, plus the blurb the App Store shows for it. */
+export interface NsiteAppDetails extends NsiteAppInfo {
+  /** The site's own description of itself, from its page or manifest. */
+  description: string | null;
+}
 
-  const index = paths['/index.html'] ? await store.read(host, '/index.html') : null;
+/** What the site says it is, for a site whose manifest has no `description`. */
+function pickDescription(doc: Document, webManifest: unknown): string | null {
+  const manifest = (
+    typeof webManifest === 'object' && webManifest !== null ? webManifest : {}
+  ) as Record<string, unknown>;
+  return (
+    tidyLabel(doc.querySelector('meta[name="description"]')?.getAttribute('content'), 500) ??
+    tidyLabel(
+      doc.querySelector('meta[property="og:description"]')?.getAttribute('content'),
+      500,
+    ) ??
+    tidyLabel(manifest.description, 500)
+  );
+}
+
+/**
+ * Derive how a site presents itself as an app from its files, as of the
+ * manifest event `from`.
+ */
+export async function deriveNsiteAppDetails(
+  files: NsiteFileSource,
+  from: string,
+): Promise<NsiteAppDetails> {
+  const { paths } = files;
+  const info: NsiteAppDetails = {
+    from,
+    version: NSITE_APP_INFO_VERSION,
+    name: null,
+    icon: null,
+    themeColor: null,
+    description: null,
+  };
+
+  const index = paths['/index.html'] ? await files.read('/index.html') : null;
   const doc = new DOMParser().parseFromString(
     index ? new TextDecoder().decode(index) : '',
     'text/html',
@@ -225,7 +330,7 @@ export async function deriveNsiteAppInfo(
     ?.trim();
   const manifestPath = manifestHref ? toPathname(manifestHref, '/') : null;
   if (manifestPath && paths[manifestPath]) {
-    webManifest = await readJson(store, host, manifestPath);
+    webManifest = await readJson(files, manifestPath);
     candidates.push(...collectFromWebManifest(webManifest, manifestPath.replace(/[^/]*$/, '')));
     // Only if the document named no color of its own.
     if (!info.themeColor && typeof webManifest === 'object' && webManifest !== null) {
@@ -235,6 +340,7 @@ export async function deriveNsiteAppInfo(
   }
 
   info.name = pickLabel(doc, webManifest);
+  info.description = pickDescription(doc, webManifest);
 
   for (const [path, rank] of CONVENTIONAL) {
     if (paths[path]) candidates.push({ href: path, base: '/', score: rank });
@@ -246,7 +352,7 @@ export async function deriveNsiteAppInfo(
   for (const candidate of candidates) {
     const path = toPathname(candidate.href, candidate.base);
     if (!path || !paths[path]) continue;
-    const bytes = await store.read(host, path);
+    const bytes = await files.read(path);
     if (!bytes) continue;
     const icon = await rasterize(bytes, path);
     if (icon) {
@@ -258,19 +364,37 @@ export async function deriveNsiteAppInfo(
   return info;
 }
 
+/**
+ * Derive how a stored site presents itself as an app, from the manifest
+ * version in `summary`.
+ */
+export async function deriveNsiteAppInfo(
+  store: NsiteStore,
+  summary: NsiteSummary,
+): Promise<NsiteAppInfo> {
+  const { description: _description, ...info } = await deriveNsiteAppDetails(
+    { paths: summary.paths, read: (path) => store.read(summary.host, path) },
+    summary.eventId,
+  );
+  return info;
+}
+
 /** Derivations in flight, by manifest event id. */
 const deriving = new Map<string, Promise<NsiteAppInfo | null>>();
 
 /**
  * The stored site's app info, deriving and storing it first when it's
- * missing or was derived from an older manifest. Concurrent calls for the
+ * missing, or was derived from an older manifest or by an older Din. Concurrent calls for the
  * same manifest share one derivation.
  */
 export function ensureNsiteAppInfo(
   store: NsiteStore,
   summary: NsiteSummary,
 ): Promise<NsiteAppInfo | null> {
-  if (summary.app?.from === summary.eventId) return Promise.resolve(summary.app);
+  const { app } = summary;
+  if (app?.from === summary.eventId && app.version === NSITE_APP_INFO_VERSION) {
+    return Promise.resolve(app);
+  }
   let promise = deriving.get(summary.eventId);
   if (!promise) {
     promise = deriveNsiteAppInfo(store, summary)

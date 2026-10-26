@@ -79,6 +79,8 @@ export interface NsiteEvents {
 export interface NsiteAppInfo {
   /** The manifest event id this was derived from. */
   from: string;
+  /** Which derivation produced it, so a newer Din can redo an older one's. */
+  version?: number;
   name: string | null;
   /** A small raster data URL (`data:image/webp` or `data:image/png`). */
   icon: string | null;
@@ -402,7 +404,11 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
     typeof value.themeColor === 'string' && /^#[0-9a-f]{6}$/i.test(value.themeColor)
       ? value.themeColor.toLowerCase()
       : null;
-  return { from: value.from, name, icon, themeColor };
+  const version =
+    typeof value.version === 'number' && Number.isInteger(value.version) && value.version > 0
+      ? value.version
+      : undefined;
+  return { from: value.from, ...(version ? { version } : {}), name, icon, themeColor };
 }
 
 async function loadRecords(): Promise<void> {
