@@ -86,6 +86,7 @@ import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
+import { registerProjectHandlers } from './project.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
 // named export too, which Node's ESM-CJS interop resolves statically.
@@ -5130,6 +5131,7 @@ app.whenReady().then(() => {
 
   registerFsHandlers();
   registerFileOpsHandlers({ assertShellSender, sendToShell });
+  registerProjectHandlers({ assertShellSender });
   registerLocalFileProtocol(SHELL_ORIGIN);
   registerPtyHandlers();
   registerWifiHandlers();

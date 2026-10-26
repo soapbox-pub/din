@@ -166,14 +166,16 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 760, height: 480 },
   },
   {
-    // Plain text and code. Files opens text files here; launch params
-    // `{ path }` open one, none starts an empty document.
+    // Plain text and code, VS Code style: a folder, tabs, quick open and
+    // search across files. Files opens text files here; launch params
+    // `{ path }` open one, `{ folder }` a folder, `{ blank: true }` nothing;
+    // none reopens the last folder.
     id: 'text-editor',
     name: 'Text Editor',
     icon: '/icons/apps/text-editor.png',
     component: TextEditor,
-    defaultSize: { width: 800, height: 600 },
-    keywords: ['notepad', 'gedit', 'editor', 'text', 'code', 'notes', 'write'],
+    defaultSize: { width: 1120, height: 720 },
+    keywords: ['notepad', 'gedit', 'editor', 'text', 'code', 'notes', 'write', 'ide', 'vscode', 'vs code', 'programming', 'develop'],
   },
   {
     // Pictures and pixel art, MS Paint style with Kid Pix's toys. Launch

@@ -114,11 +114,54 @@ export interface FsBridge {
    * pairs of the shell's own.
    */
   recent(extra: [string, number][]): Promise<FsRecentFile[]>;
+  // The Text Editor's project operations (electron/project.mts).
+
+  /**
+   * Every file beneath `root`, relative to it with `/` separators: a git
+   * checkout's tracked and unignored files, else a walk that skips
+   * dependency and build folders.
+   */
+  listFiles(root: string): Promise<{ files: string[]; truncated: boolean }>;
+  /** Search every file beneath `root`. Starting a new search stops the last one. */
+  search(root: string, options: FsSearchOptions): Promise<FsSearchResult>;
+
   /** Watch a folder for changes; resolves to a watch id, or null if it can't be watched. */
   watch(path: string): Promise<number | null>;
   unwatch(id: number): Promise<void>;
   /** Subscribe to changes in watched folders. Returns an unsubscribe fn. */
   onChange(callback: (path: string) => void): () => void;
+}
+
+export interface FsSearchOptions {
+  query: string;
+  regex: boolean;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  /** Comma-separated globs a file's relative path must match (empty: any). */
+  include: string;
+  /** Comma-separated globs that rule a file out. */
+  exclude: string;
+}
+
+export interface FsSearchMatch {
+  /** 1-based line. */
+  line: number;
+  /** 0-based offset of the match within its line. */
+  column: number;
+  length: number;
+  /** The line, cut down to the part around the match. */
+  preview: string;
+  /** Where the match starts in `preview`. */
+  previewColumn: number;
+}
+
+export interface FsSearchResult {
+  /** Files with matches, by path relative to the root, sorted. */
+  files: { path: string; matches: FsSearchMatch[] }[];
+  /** True when the match or file cap cut the search short. */
+  truncated: boolean;
+  /** How many files were searched. */
+  searched: number;
 }
 
 export interface FsDetails {

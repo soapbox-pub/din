@@ -1710,6 +1710,9 @@ function FileBrowserTab({
                         <ContextMenuItem onSelect={() => openInTerminal(singleFolderPath)}>
                           Open in Terminal
                         </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => open('text-editor', { folder: singleFolderPath })}>
+                          Open in Text Editor
+                        </ContextMenuItem>
                         {hasAssistant && (
                           <ContextMenuItem onSelect={() => openInAssistant(singleFolderPath)}>
                             Open in Assistant
@@ -1761,6 +1764,9 @@ function FileBrowserTab({
                     {viewMenuItems(contextParts)}
                     <ContextMenuSeparator />
                     <ContextMenuItem onSelect={() => cwd && openInTerminal(cwd)}>Open in Terminal</ContextMenuItem>
+                    {cwd && (
+                      <ContextMenuItem onSelect={() => open('text-editor', { folder: cwd })}>Open in Text Editor</ContextMenuItem>
+                    )}
                     {cwd && hasAssistant && (
                       <ContextMenuItem onSelect={() => openInAssistant(cwd)}>Open in Assistant</ContextMenuItem>
                     )}

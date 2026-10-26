@@ -269,6 +269,20 @@ contextBridge.exposeInMainWorld('fs', {
   recent: (extra) => ipcRenderer.invoke('fs:recent', extra),
 
   /**
+   * Every file beneath a folder, as paths relative to it: a git checkout's
+   * tracked and unignored files, else a walk that skips dependency folders.
+   * @param {string} root
+   */
+  listFiles: (root) => ipcRenderer.invoke('fs:listFiles', root),
+
+  /**
+   * Search every file beneath a folder. A new search stops the last one.
+   * @param {string} root
+   * @param {{ query: string, regex: boolean, caseSensitive: boolean, wholeWord: boolean, include: string, exclude: string }} options
+   */
+  search: (root, options) => ipcRenderer.invoke('fs:search', root, options),
+
+  /**
    * Watch a folder for changes; resolves to a watch id (null if it can't be
    * watched). Changes arrive through onChange.
    * @param {string} path
