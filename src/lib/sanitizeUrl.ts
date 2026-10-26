@@ -1,5 +1,5 @@
 import { normalizeInternalUrl } from '@/lib/internalPages';
-import { normalizeNsiteInput, NSITE_PROTOCOL } from '@/lib/nsite';
+import { normalizeNsiteInput, NSITE_PROTOCOL, parseCanonicalNsiteHost } from '@/lib/nsite';
 
 /**
  * Sanitize a user-entered URL for safe use as an iframe `src`.
@@ -27,6 +27,24 @@ export function sanitizeUrl(input: string): string | null {
   if (url.protocol !== 'https:') return null;
 
   return url.toString();
+}
+
+/**
+ * Sanitize an installed app's URL: https, or an nsite on its canonical,
+ * key-derived host. An nsite alias (`nsite://soapbox.pub/`) never qualifies:
+ * the name could be repointed at another key, and the app's storage and
+ * Nostr connection belong to the key it was installed from.
+ */
+export function sanitizeAppUrl(input: string): string | null {
+  const https = sanitizeUrl(input);
+  if (https) return https;
+  try {
+    const url = new URL(input.trim());
+    if (url.protocol !== NSITE_PROTOCOL) return null;
+    return parseCanonicalNsiteHost(url.hostname) ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -112,14 +130,25 @@ export function sanitizeImageUrl(input: string): string | null {
   return sanitizeUrl(trimmed);
 }
 
+/** A URL's origin, built by hand for nsite (whose `URL.origin` may be "null"). */
+function originOf(raw: string): string | null {
+  const url = new URL(raw);
+  if (url.protocol === NSITE_PROTOCOL) {
+    return url.hostname ? `${NSITE_PROTOCOL}//${url.hostname.toLowerCase()}` : null;
+  }
+  return url.origin === 'null' ? null : url.origin;
+}
+
 /**
  * Whether two URLs share the same origin (scheme + host + port). Non-URL
- * inputs are never equal. Used to keep an installed app's logged-in session
- * pinned to its own site when a link is routed into its window.
+ * inputs, and URLs with an opaque origin, are never equal. Used to keep an
+ * installed app's logged-in session pinned to its own site when a link is
+ * routed into its window.
  */
 export function sameOrigin(a: string, b: string): boolean {
   try {
-    return new URL(a).origin === new URL(b).origin;
+    const origin = originOf(a);
+    return origin !== null && origin === originOf(b);
   } catch {
     return false;
   }

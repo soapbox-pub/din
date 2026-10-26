@@ -47,6 +47,7 @@ import {
   clearNsiteManifestCache,
   clearNsiteBlobCache,
 } from './nsite.mts';
+import { parseCanonicalHost } from './nsite-store.mts';
 import { registerNativeAppHandlers, runWindowsProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
 import { isWindowsProgram } from './windows-apps.mts';
 import { registerNativeDisplayHandlers } from './native-display.mts';
@@ -4031,6 +4032,24 @@ function decisionKey(origin: string, capability: SiteCapability): string {
 }
 
 /**
+ * The origin an installed app may be pinned to: an https origin, or the
+ * canonical host of an nsite (built by hand, as Node's URL gives nsite:// the
+ * opaque origin "null"; it matches what Chromium reports as the frame origin).
+ */
+function appOriginOf(url: string): string | null {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol === 'nsite:') {
+      return parseCanonicalHost(hostname) ? `nsite://${hostname}` : null;
+    }
+  } catch {
+    return null;
+  }
+  const origin = originOf(url);
+  return origin?.startsWith('https:') ? origin : null;
+}
+
+/**
  * The origin a site's answers are filed under: http(s) and nsite pages only.
  * Node's URL gives every nsite:// URL the opaque origin "null" (Chromium,
  * which knows the scheme is standard, does not), so it is built by hand.
@@ -5682,20 +5701,21 @@ app.on('web-contents-created', (_event, contents) => {
   //
   // The pin is taken from the first committed load rather than the raw src,
   // so an app whose home URL redirects (example.com -> www.example.com) still
-  // opens; the src itself was vetted when the app was installed.
+  // opens; the src itself was vetted when the app was installed. An nsite app
+  // is pinned to its canonical, key-derived host, never to a name.
   if (contents.session === appSession()) {
     let appOrigin: string | null = null;
     contents.on('did-navigate', (_event, url) => {
-      // First real https commit only (an offline first load commits an error
-      // page, which mustn't become the pin).
-      const origin = originOf(url);
-      if (appOrigin || !origin?.startsWith('https:')) return;
+      // First real commit only (an offline first load commits an error page,
+      // which mustn't become the pin).
+      const origin = appOriginOf(url);
+      if (appOrigin || !origin) return;
       appOrigin = origin;
       appGuestOrigins.set(contents.id, origin);
     });
     contents.once('destroyed', () => appGuestOrigins.delete(contents.id));
     const keepAppHome = (event: Electron.Event, url: string) => {
-      if (appOrigin && originOf(url) === appOrigin) return;
+      if (appOrigin && appOriginOf(url) === appOrigin) return;
       event.preventDefault();
       if (/^(https?|nsite):\/\//i.test(url)) {
         sendToShell('crx:openTab', { url, openerWcId: contents.id });

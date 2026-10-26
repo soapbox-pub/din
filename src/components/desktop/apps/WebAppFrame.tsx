@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
+import { sanitizeAppUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import {
   APP_WEBVIEW_PARTITION,
@@ -23,8 +23,8 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
  * webview's own history and thus only work on the Electron surface; the iframe
  * fallback reports no navigations, so the carets never appear there.
  *
- * The URL is sanitized (https-only) even though it was validated at install
- * time — stored data is never trusted blindly.
+ * The URL is sanitized (https, or an nsite's canonical host) even though it
+ * was validated at install time — stored data is never trusted blindly.
  *
  * `initialUrl` opens the app at a deep link instead of its home URL — used
  * when a clicked link is routed into the app (see BrowserExtensionHost). It
@@ -61,8 +61,8 @@ export function WebAppFrame({
   const viewRef = useRef<BrowserViewHandle>(null);
   const setAccent = useWindowAccent();
   const setTitlebar = useWindowTitlebar();
-  const home = sanitizeUrl(url);
-  const deepLink = initialUrl ? sanitizeUrl(initialUrl) : null;
+  const home = sanitizeAppUrl(url);
+  const deepLink = initialUrl ? sanitizeAppUrl(initialUrl) : null;
   const src =
     deepLink && home && sameOrigin(home, deepLink) ? deepLink : home;
 
