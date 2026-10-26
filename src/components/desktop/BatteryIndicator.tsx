@@ -166,7 +166,7 @@ export function BatteryPopoverBody() {
             variant="ghost"
             size="sm"
             className="w-full justify-start text-muted-foreground hover:text-foreground"
-            onClick={() => open('settings', { section: 'battery' })}
+            onClick={() => open('settings', { section: 'power' })}
           >
             <Settings2 aria-hidden />
             Battery settings

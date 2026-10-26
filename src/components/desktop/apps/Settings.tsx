@@ -188,7 +188,6 @@ type SectionId =
   | 'bluetooth'
   | 'display'
   | 'brightness'
-  | 'battery'
   | 'power'
   | 'sound'
   | 'keyboard'
@@ -208,8 +207,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
   { id: 'bluetooth', name: 'Bluetooth', icon: Bluetooth },
   { id: 'display', name: 'Display', icon: Monitor },
   { id: 'brightness', name: 'Brightness', icon: Sun },
-  { id: 'battery', name: 'Battery', icon: BatteryFull },
-  { id: 'power', name: 'Power', icon: Gauge },
+  { id: 'power', name: 'Battery & Power', icon: BatteryFull },
   { id: 'sound', name: 'Sound', icon: Volume2 },
   { id: 'keyboard', name: 'Keyboard', icon: Keyboard },
   { id: 'printers', name: 'Printers', icon: Printer },
@@ -233,9 +231,9 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * explanatory fallback. The Bluetooth section pairs, connects and forgets
  * devices through `window.bluetooth` (BlueZ over D-Bus). The Display section arranges the monitors through
  * `window.display` (wlr-randr under cage, xrandr on bare X11), falling back
- * where neither can manage them. The Battery section reads `window.power`
- * (/sys/class/power_supply) and hides on machines with no battery. The Power
- * section switches the system power profile through the same bridge
+ * where neither can manage them. Battery & Power reads the battery through
+ * `window.power` (/sys/class/power_supply), leaving it out on machines with
+ * no battery, and switches the system power profile through the same bridge
  * (net.hadess.PowerProfiles over D-Bus: power-profiles-daemon / tuned-ppd),
  * falling back where no such daemon runs. The Sound
  * section drives the default sink's volume/mute through `window.audio`
@@ -263,6 +261,8 @@ function paramSection(params: AppComponentProps['params']): SectionId | undefine
   const s = params?.section;
   // Updates used to be a section of its own.
   if (s === 'updates') return 'about';
+  // So did Battery, apart from Power.
+  if (s === 'battery') return 'power';
   return typeof s === 'string' && SECTION_IDS.has(s) ? (s as SectionId) : undefined;
 }
 
@@ -319,8 +319,6 @@ export function Settings({ params }: AppComponentProps) {
           <DisplaySection />
         ) : section === 'brightness' ? (
           <BrightnessSection />
-        ) : section === 'battery' ? (
-          <BatterySection />
         ) : section === 'power' ? (
           <PowerSection />
         ) : section === 'sound' ? (
@@ -1479,30 +1477,72 @@ function DisplayListSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Battery
+// Battery & Power
 // ---------------------------------------------------------------------------
 
 /**
- * Battery and power state, via the power bridge (window.power, reading
- * /sys/class/power_supply). Works on any Linux session; hides behind a
- * fallback on machines with no battery (desktops, the VM) or in a plain
- * browser.
+ * Battery state and the system power profile, both via the power bridge
+ * (window.power). The battery comes from /sys/class/power_supply and is left
+ * out on machines with none (desktops, the VM). The profile (power-saver /
+ * balanced / performance) goes through net.hadess.PowerProfiles over D-Bus,
+ * served by power-profiles-daemon or tuned-ppd, and falls back where no such
+ * daemon is running.
  */
-function BatterySection() {
+function PowerSection() {
   const bridge = getPowerBridge();
   const status = useBatteryStatus();
+  const profiles = usePowerProfiles();
 
   if (!bridge) {
     return (
-      <SectionShell title="Battery">
+      <SectionShell title="Battery & Power">
         <FallbackCard icon={BatteryFull}>
-          Battery status needs the Din desktop shell; it isn't available in a
-          plain browser.
+          Battery status and power profiles need the Din desktop shell; they
+          aren't available in a plain browser.
         </FallbackCard>
       </SectionShell>
     );
   }
 
+  const hasBattery = status.isLoading || status.isError || !!status.data?.available;
+
+  return (
+    <SectionShell
+      title="Battery & Power"
+      actions={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh"
+          title="Refresh"
+          disabled={!status.data?.available && !profiles.data?.available}
+          onClick={() => {
+            void status.refetch();
+            void profiles.refetch();
+          }}
+        >
+          <RotateCw
+            className={cn('size-4', (status.isFetching || profiles.isFetching) && 'animate-spin')}
+          />
+        </Button>
+      }
+    >
+      {hasBattery && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-foreground">Battery</h3>
+          <BatteryPanel status={status} />
+        </div>
+      )}
+
+      <div className={cn('space-y-3', hasBattery && 'border-t border-border/60 pt-4')}>
+        <h3 className="text-sm font-medium text-foreground">Power mode</h3>
+        <PowerProfilesPanel profiles={profiles} />
+      </div>
+    </SectionShell>
+  );
+}
+
+function BatteryPanel({ status }: { status: ReturnType<typeof useBatteryStatus> }) {
   const data = status.data;
   const summary = data ? summarizePower(data) : null;
   const critical =
@@ -1512,30 +1552,12 @@ function BatterySection() {
     summary.percent <= 15;
 
   return (
-    <SectionShell
-      title="Battery"
-      actions={
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh battery status"
-          title="Refresh battery status"
-          disabled={!data?.available}
-          onClick={() => status.refetch()}
-        >
-          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
-        </Button>
-      }
-    >
+    <>
       {status.isLoading ? (
         <BatterySkeleton />
       ) : status.isError ? (
         <FallbackCard>Could not read battery state.</FallbackCard>
-      ) : !data?.available ? (
-        <FallbackCard icon={BatteryFull}>
-          No battery was detected. This looks like a desktop or virtual machine.
-        </FallbackCard>
-      ) : (
+      ) : !data?.available ? null : (
         <div className="flex flex-col gap-4">
           {summary && (
             <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
@@ -1568,7 +1590,7 @@ function BatterySection() {
           </ul>
         </div>
       )}
-    </SectionShell>
+    </>
   );
 }
 
@@ -1672,53 +1694,15 @@ function BatterySkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Power
-// ---------------------------------------------------------------------------
-
-/**
- * System power profile (power-saver / balanced / performance), via the power
- * bridge (window.power -> net.hadess.PowerProfiles over D-Bus, served by
- * power-profiles-daemon or tuned-ppd). Independent of battery presence, so it
- * shows on desktops too. Falls back in a plain browser or where no such daemon
- * is running.
- */
-function PowerSection() {
-  const bridge = getPowerBridge();
-  const profiles = usePowerProfiles();
+function PowerProfilesPanel({ profiles }: { profiles: ReturnType<typeof usePowerProfiles> }) {
   const setProfile = useSetPowerProfile();
-
-  if (!bridge) {
-    return (
-      <SectionShell title="Power">
-        <FallbackCard icon={Gauge}>
-          Power profiles need the Din desktop shell; they aren't available in a
-          plain browser.
-        </FallbackCard>
-      </SectionShell>
-    );
-  }
 
   const data = profiles.data;
   // While a switch is in flight, show the requested profile as selected.
   const selected = setProfile.isPending ? setProfile.variables : data?.active;
 
   return (
-    <SectionShell
-      title="Power"
-      actions={
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh power profiles"
-          title="Refresh power profiles"
-          disabled={!data?.available}
-          onClick={() => profiles.refetch()}
-        >
-          <RotateCw className={cn('size-4', profiles.isFetching && 'animate-spin')} />
-        </Button>
-      }
-    >
+    <>
       {profiles.isLoading ? (
         <PowerSkeleton />
       ) : profiles.isError ? (
@@ -1786,7 +1770,7 @@ function PowerSection() {
           )}
         </div>
       )}
-    </SectionShell>
+    </>
   );
 }
 
