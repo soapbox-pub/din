@@ -245,13 +245,14 @@ export function Grid(props: Props) {
     return () => clearInterval(id);
   }, [ants, schedule]);
 
-  // Canvas size follows its box.
+  // Canvas size follows its box. Layout size, not getBoundingClientRect: the
+  // window's maximize animation scales it with a transform, and this only
+  // fires as that starts.
   useEffect(() => {
     const el = host.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      const r = el.getBoundingClientRect();
-      size.current = { w: Math.floor(r.width), h: Math.floor(r.height) };
+      size.current = { w: el.clientWidth, h: el.clientHeight };
       if (canvas.current) {
         canvas.current.style.width = `${size.current.w}px`;
         canvas.current.style.height = `${size.current.h}px`;

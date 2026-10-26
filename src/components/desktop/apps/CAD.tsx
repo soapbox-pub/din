@@ -507,7 +507,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
     const el = viewportRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      const r = el.getBoundingClientRect();
+      const r = { width: el.offsetWidth, height: el.offsetHeight };
       const dpr = window.devicePixelRatio || 1;
       sizeRef.current = { w: r.width, h: r.height, dpr };
       for (const c of [baseRef.current, overRef.current]) {

@@ -469,7 +469,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
     const el = viewportRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      const r = el.getBoundingClientRect();
+      const r = { width: el.offsetWidth, height: el.offsetHeight };
       const was = sizeRef.current;
       sizeRef.current = { w: r.width, h: r.height };
       if (fitPending.current && docRef.current && r.width && r.height) {
