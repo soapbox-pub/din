@@ -109,6 +109,27 @@ async function show(message: Extract<ServerMessage, { type: 'notify' }>): Promis
   sendToShell('notifications:show', notification);
 }
 
+/** A notification from DinOS itself, for the notification center. */
+export function notifyFromSystem(key: string, title: string, body: string): void {
+  const notification: SystemNotification = {
+    id: `din:${key}`,
+    appName: 'DinOS',
+    appId: null,
+    icon: null,
+    image: null,
+    title,
+    body,
+    actions: [],
+    urgency: 'normal',
+    timeout: -1,
+    resident: false,
+    transient: false,
+    guest: null,
+    tag: '',
+  };
+  sendToShell('notifications:show', notification);
+}
+
 /** An icon name, absolute path or file:// URI, as a data URL. */
 async function iconFrom(icon: string): Promise<string | null> {
   if (!icon) return null;

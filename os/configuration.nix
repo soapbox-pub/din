@@ -1366,6 +1366,39 @@ in
       journalctl --relinquish-var
     '';
   };
+  # How quick the stick is, for Din to say when it's slow
+  # (electron/live-stick.mts): 64 uncached 4 KiB reads from random places on
+  # it, which is what loading programs does. A good stick takes well under a
+  # millisecond for one, a poor one 5 ms or more. Measured once the desktop
+  # is up and the stick has quietened, so booting doesn't make a quick one
+  # look slow, and written to /run/din/stick-speed as "slow" or "fast" and
+  # the median in microseconds.
+  systemd.services.dinos-live-speed = {
+    description = "Measure the USB stick DinOS is running from";
+    wantedBy = [ "graphical.target" ];
+    after = [ "graphical.target" "dinos-live.service" ];
+    unitConfig.ConditionPathExists = "/run/din/live";
+    serviceConfig.Type = "oneshot";
+    script = ''
+      sleep 20
+      ${pkgs.python3}/bin/python3 -I - "$(${pkgs.util-linux}/bin/findmnt -nvo SOURCE /)" <<'PY'
+      import mmap, os, random, sys, time
+      fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECT)
+      blocks = os.lseek(fd, 0, os.SEEK_END) // 4096
+      buf = mmap.mmap(-1, 4096)
+      times = []
+      for _ in range(64):
+          start = time.perf_counter()
+          os.preadv(fd, [buf], random.randrange(blocks) * 4096)
+          times.append(time.perf_counter() - start)
+      median = sorted(times)[len(times) // 2]
+      verdict = "slow" if median > 0.002 else "fast"
+      with open("/run/din/stick-speed.tmp", "w") as f:
+          f.write(f"{verdict} {int(median * 1e6)}\n")
+      os.rename("/run/din/stick-speed.tmp", "/run/din/stick-speed")
+      PY
+    '';
+  };
   # Chromium's caches under Din's profile (Electron's default name, as Din's
   # host has no package.json of its own) and ~/.cache, as tmpfs.
   systemd.services.dinos-live-caches = {

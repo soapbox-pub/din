@@ -67,6 +67,7 @@ import {
 import { registerTrayHandlers } from './tray.mts';
 import { registerOpenUri } from './open-uri.mts';
 import { registerNotificationHandlers } from './notifications.mts';
+import { watchLiveStick } from './live-stick.mts';
 import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
@@ -5499,6 +5500,7 @@ app.whenReady().then(() => {
       win.setKiosk(true);
     }
     win.show();
+    watchLiveStick();
   };
   ipcMain.handle('shell:bootReady', async (event) => {
     if (event.sender !== win.webContents) return;
