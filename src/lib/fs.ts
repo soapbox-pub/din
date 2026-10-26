@@ -102,8 +102,11 @@ export interface FsBridge {
   /** Total size and item counts beneath a folder. */
   du(path: string): Promise<FsDiskUsage>;
   chmod(path: string, mode: number): Promise<void>;
-  /** Extract an archive into `dir`; resolves to what was created. */
-  extract(archive: string, dir: string): Promise<string>;
+  /**
+   * Extract an archive into `dir`; resolves to what was created and the
+   * archive's entries that came out damaged or not at all (the rest still do).
+   */
+  extract(archive: string, dir: string): Promise<{ path: string; damaged: string[] }>;
   /** Pack entries of `dir` into `dir/outName` (format by its extension). */
   compress(dir: string, names: string[], outName: string): Promise<string>;
   /** An archive's member names (capped; `total` counts them all). */
@@ -225,6 +228,15 @@ export function getFsBridge(): FsBridge | undefined {
 export function cleanFsError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
+}
+
+/** The warning for an extraction with damaged entries (by archive path). */
+export function damagedExtractionMessage(damaged: string[]): string {
+  const names = damaged.map((p) => p.slice(p.lastIndexOf('/') + 1));
+  const listed = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+  return names.length === 1
+    ? `Extracted, but 1 file is damaged and may be incomplete: ${listed}`
+    : `Extracted, but ${names.length} files are damaged and may be incomplete: ${listed}`;
 }
 
 // ---------------------------------------------------------------------------

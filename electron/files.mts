@@ -323,8 +323,11 @@ async function diskUsage(root: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Archives. bsdtar (libarchive) reads and writes nearly everything; on a
-// system without it, GNU tar, unzip and zip cover the common cases.
+// Archives. bsdtar (libarchive) reads and writes nearly everything; unar
+// reads what it reads poorly (RAR above all) and, unlike it, carries on past
+// a damaged entry, so a damaged archive gives up everything it still can, as
+// 7-Zip and WinRAR do. On a system with neither, GNU tar, unzip and zip
+// cover the common cases.
 // ---------------------------------------------------------------------------
 
 /** Single-file compressors, for "notes.txt.gz" that isn't a tarball. */
@@ -361,7 +364,74 @@ function safeArg(name: string): string {
   return name.startsWith('-') ? `./${name}` : name;
 }
 
-async function extractInto(archive: string, dest: string): Promise<void> {
+/**
+ * Run an archive tool with nothing on stdin, so one that wants to ask
+ * something (unar about a password) can't sit waiting until the timeout.
+ */
+async function runNoInput(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  try {
+    return await runCommand('sh', ['-c', 'command -v "$0" >/dev/null || exit 127; exec "$0" "$@" </dev/null', file, ...args], {
+      timeout: ARCHIVE_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (error) {
+    if (error instanceof CommandError && error.code === 127) {
+      throw new CommandError(error.message, 'ENOENT', error.stderr);
+    }
+    throw error;
+  }
+}
+
+/** Whether a RAR archive (or a volume of one) by its name. */
+function isRar(lower: string): boolean {
+  return /\.(?:rar|r\d\d)$/.test(lower);
+}
+
+/** What a tool said about a whole archive failing, in plain words. */
+function archiveError(error: unknown): Error {
+  const raw = toolError(error).message;
+  if (/password|passphrase|encrypt/i.test(raw)) return new Error('This archive needs a password');
+  if (
+    /bad .* data|damaged|corrupt|truncat|checksum|crc|parsing failed|more data than was available|unrecognized archive format|invalid or incomplete|unexpected end/i
+      .test(raw)
+  ) {
+    return new Error('This archive is damaged or in a format Files can’t read');
+  }
+  return new Error(raw);
+}
+
+/** unar's report of an entry it couldn't unpack: "  name  (123 B)... Failed! (why)". */
+const UNAR_FAILED = /^\s*(.+?)(?:\s+\(\d+ B\))?\.\.\. Failed!/;
+
+/** Extract with unar; resolves to the entries it couldn't get out whole. */
+async function unarInto(archive: string, dest: string): Promise<string[]> {
+  try {
+    await runNoInput('unar', ['-q', '-f', '-D', '-o', dest, archive]);
+    return [];
+  } catch (error) {
+    if (!(error instanceof CommandError) || error.code !== 1) throw error;
+    // Exit 1 is for a failed entry as well as a failed archive: keep what
+    // came out if it got anywhere.
+    const damaged = error.stderr.split('\n').flatMap((line) => UNAR_FAILED.exec(line)?.[1] ?? []);
+    if (damaged.length === 0 || (await fsp.readdir(dest)).length === 0) throw error;
+    return damaged;
+  }
+}
+
+/**
+ * Given to bsdtar so that an encrypted archive fails with "Incorrect
+ * passphrase" instead of prompting on a terminal or stdin forever.
+ */
+const NO_PASSPHRASE = ['--passphrase', 'din-no-passphrase'];
+
+/** Extract with bsdtar; any damage fails the lot. */
+async function bsdtarInto(archive: string, dest: string): Promise<string[]> {
+  await runNoInput('bsdtar', [...NO_PASSPHRASE, '-xf', archive, '-C', dest]);
+  return [];
+}
+
+/** Extract `archive` into the empty `dest`; resolves to the damaged entries. */
+async function extractInto(archive: string, dest: string): Promise<string[]> {
   const lower = archive.toLowerCase();
   const ext = Object.keys(DECOMPRESSORS).find((e) => lower.endsWith(e));
   if (ext && !/\.tar\.[a-z0-9]+$/.test(lower)) {
@@ -369,46 +439,57 @@ async function extractInto(archive: string, dest: string): Promise<void> {
     const [stem] = splitName(path.basename(archive));
     await run('sh', ['-c', `${DECOMPRESSORS[ext]} -dc -- "$1" > "$2"`, 'sh', archive, path.join(dest, stem)])
       .catch((e: unknown) => { throw toolError(e); });
-    return;
+    return [];
   }
-  try {
-    await run('bsdtar', ['-xf', archive, '-C', dest]);
-    return;
-  } catch (error) {
-    if (!isMissing(error)) throw toolError(error);
+  // The first that works wins; a failure is retried with the other, from scratch.
+  const tools = isRar(lower) ? [unarInto, bsdtarInto] : [bsdtarInto, unarInto];
+  let failure: unknown = null;
+  for (const tool of tools) {
+    try {
+      return await tool(archive, dest);
+    } catch (error) {
+      if (isMissing(error)) continue;
+      failure ??= error;
+      for (const item of await fsp.readdir(dest)) {
+        await fsp.rm(path.join(dest, item), { recursive: true, force: true });
+      }
+    }
   }
-  // No bsdtar.
+  if (failure !== null) throw archiveError(failure);
+  // Neither bsdtar nor unar.
   try {
     if (lower.endsWith('.zip') || lower.endsWith('.jar')) {
       await run('unzip', ['-q', archive, '-d', dest]);
     } else {
       await run('tar', ['-xf', archive, '-C', dest]);
     }
+    return [];
   } catch (error) {
-    throw isMissing(error) ? new Error('No program to open this kind of archive is installed') : toolError(error);
+    throw isMissing(error) ? new Error('No program to open this kind of archive is installed') : archiveError(error);
   }
 }
 
 /**
  * Extract an archive next to itself: a single top-level item lands as is,
  * anything else in a folder named after the archive. Resolves to the path
- * of what was created.
+ * of what was created and the entries that came out damaged (partly or not
+ * at all) - an archive with some damage still gives up the rest.
  */
-async function extract(archive: string, destDir: string): Promise<string> {
+async function extract(archive: string, destDir: string): Promise<{ path: string; damaged: string[] }> {
   const tmp = path.join(destDir, `.${path.basename(archive)}.extracting-${randomBytes(4).toString('hex')}`);
   await fsp.mkdir(tmp);
   try {
-    await extractInto(archive, tmp);
+    const damaged = await extractInto(archive, tmp);
     const items = await fsp.readdir(tmp);
     if (items.length === 1) {
       const dest = await uniquePath(destDir, items[0]);
       await fsp.rename(path.join(tmp, items[0]), dest);
-      return dest;
+      return { path: dest, damaged };
     }
     const [stem] = splitName(path.basename(archive));
     const dest = await uniquePath(destDir, stem);
     await fsp.rename(tmp, dest);
-    return dest;
+    return { path: dest, damaged };
   } finally {
     await fsp.rm(tmp, { recursive: true, force: true });
   }
@@ -442,17 +523,28 @@ async function compress(dir: string, names: string[], outName: string): Promise<
 
 /** What's inside an archive, for the Preview window. */
 async function listArchive(archive: string) {
-  let stdout: string;
-  try {
-    stdout = await run('bsdtar', ['-tf', archive]);
-  } catch (error) {
-    if (!isMissing(error)) throw toolError(error);
+  const lower = archive.toLowerCase();
+  const bsdtar = async () => (await runNoInput('bsdtar', [...NO_PASSPHRASE, '-tf', archive])).stdout;
+  // lsar's first line names the archive and its format.
+  const lsar = async () => (await runNoInput('lsar', [archive])).stdout.split('\n').slice(1).join('\n');
+  let stdout: string | null = null;
+  let failure: unknown = null;
+  for (const tool of isRar(lower) ? [lsar, bsdtar] : [bsdtar, lsar]) {
     try {
-      stdout = archive.toLowerCase().endsWith('.zip')
+      stdout = await tool();
+      break;
+    } catch (error) {
+      if (!isMissing(error)) failure ??= error;
+    }
+  }
+  if (stdout === null && failure !== null) throw archiveError(failure);
+  if (stdout === null) {
+    try {
+      stdout = lower.endsWith('.zip')
         ? await run('unzip', ['-Z1', archive])
         : await run('tar', ['-tf', archive]);
     } catch (e) {
-      throw isMissing(e) ? new Error('No program to open this kind of archive is installed') : toolError(e);
+      throw isMissing(e) ? new Error('No program to open this kind of archive is installed') : archiveError(e);
     }
   }
   const entries = stdout.split('\n').filter(Boolean);

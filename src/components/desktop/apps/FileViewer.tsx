@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
-import { cleanFsError, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
+import { cleanFsError, damagedExtractionMessage, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
 import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } from '@/lib/printing';
 import { useQueryClient } from '@tanstack/react-query';
@@ -84,10 +84,11 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
     setExtractError(null);
     try {
       const out = await getFsBridge()!.extract(path, dir);
-      void invalidateListings(queryClient, out);
-      open('file-browser', { path: dir, select: out.slice(out.lastIndexOf('/') + 1) });
+      void invalidateListings(queryClient, out.path);
+      if (out.damaged.length > 0) setExtractError(damagedExtractionMessage(out.damaged));
+      open('file-browser', { path: dir, select: out.path.slice(out.path.lastIndexOf('/') + 1) });
     } catch (error) {
-      setExtractError(cleanFsError(error));
+      setExtractError(`Couldn’t extract: ${cleanFsError(error)}`);
     }
   }, [path, dir, open, queryClient]);
 
@@ -185,7 +186,7 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
       </div>
       {extractError !== null && (
         <p role="alert" className="shrink-0 border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
-          Couldn’t extract: {extractError}
+          {extractError}
         </p>
       )}
       {printError !== null && (

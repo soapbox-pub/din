@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import {
   cleanFsError,
+  damagedExtractionMessage,
   formatBytes,
   getFsBridge,
   joinPath,
@@ -839,8 +840,14 @@ function FileBrowserTab({
       if (archives.length === 0) return;
       void run(`Extracting ${describe(archives)}…`, async () => {
         const made: string[] = [];
+        const damaged: string[] = [];
         try {
-          for (const name of archives) made.push(await fs.extract(joinPath(cwd, name), cwd));
+          for (const name of archives) {
+            const out = await fs.extract(joinPath(cwd, name), cwd);
+            made.push(out.path);
+            damaged.push(...out.damaged);
+          }
+          if (damaged.length > 0) setStatus({ kind: 'error', text: damagedExtractionMessage(damaged) });
         } finally {
           refresh(cwd);
           if (made.length > 0) {
