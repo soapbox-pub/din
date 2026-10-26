@@ -1,4 +1,4 @@
-import { defaultStroke, IDENTITY, mul, newId, newLayer, NONE, segments, type Artboard, type Doc, type GradStop, type Gradient, type Item, type Mat, type Node, type Paint, type PathItem, type Rect, type Stroke, type SubPath, type TextItem } from './model';
+import { defaultStroke, IDENTITY, mul, newId, newLayer, NONE, segments, UNIT_PT, type Artboard, type Doc, type GradStop, type Gradient, type Item, type Layer, type Mat, type Node, type Paint, type PathItem, type Rect, type Stroke, type SubPath, type TextItem, type Units } from './model';
 import { hexColor, toHex, type Color } from './pdf/color';
 import { transformPaths } from './geom';
 import { layoutText } from './text';
@@ -7,10 +7,20 @@ import { ellipsePath, rectPath } from './ops';
 /**
  * SVG in and out: File > Export > SVG writes an artboard (or the whole art)
  * as SVG, and SVG files open as editable art, as they do in Illustrator.
+ *
+ * Both ways speak Inkscape's dialect too, which other programs ignore:
+ * layers are groups with inkscape:groupmode="layer", names are
+ * inkscape:label, locking is sodipodi:insensitive, and artboards are the
+ * inkscape:page elements (Inkscape 1.2+) in sodipodi:namedview, the first
+ * of which is the viewBox.
  */
+
+const INKSCAPE = 'http://www.inkscape.org/namespaces/inkscape';
+const SODIPODI = 'http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd';
 
 const f = (n: number) => String(Math.round(n * 1000) / 1000);
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const attr = (s: string) => esc(s).replace(/[\t\n\r]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function pathData(paths: SubPath[]): string {
   const out: string[] = [];
@@ -28,12 +38,22 @@ function pathData(paths: SubPath[]): string {
 
 export function writeSvg(doc: Doc, area: Rect | null): string {
   const defs: string[] = [];
+  // Ids are names where there are names, kept unique and valid as XML names.
+  const ids = new Set<string>();
+  const uid = (base: string) => {
+    let s = base.replace(/\s+/g, '_').replace(/[^\p{L}\p{N}_.-]/gu, '');
+    if (!/^[\p{L}_]/u.test(s)) s = `_${s}`;
+    let id = s;
+    for (let n = 2; ids.has(id); n++) id = `${s}-${n}`;
+    ids.add(id);
+    return id;
+  };
   let gid = 0;
   const paint = (p: Paint): string => {
     if (p.type === 'none') return 'none';
     if (p.type === 'color') return toHex(p.color);
     const g = p.gradient;
-    const id = `g${gid++}`;
+    const id = uid(`g${gid++}`);
     const m = g.matrix;
     const stops = [...g.stops]
       .sort((a, b) => a.t - b.t)
@@ -56,11 +76,12 @@ export function writeSvg(doc: Doc, area: Rect | null): string {
     if (s.dash.length) a += ` stroke-dasharray="${s.dash.map(f).join(' ')}"`;
     return a;
   };
-  const common = (it: Item) =>
-    `${it.opacity < 1 ? ` opacity="${f(it.opacity)}"` : ''}${it.blend !== 'normal' ? ` style="mix-blend-mode:${it.blend}"` : ''}${it.name ? ` id="${esc(it.name.replace(/\s+/g, '_'))}"` : ''}`;
+  const common = (it: Item) => {
+    const style = [it.blend !== 'normal' ? `mix-blend-mode:${it.blend}` : '', it.hidden ? 'display:none' : ''].filter(Boolean).join(';');
+    return `${it.opacity < 1 ? ` opacity="${f(it.opacity)}"` : ''}${style ? ` style="${style}"` : ''}${it.name ? ` id="${uid(it.name)}" inkscape:label="${attr(it.name)}"` : ''}${it.locked ? ' sodipodi:insensitive="true"' : ''}`;
+  };
   let clipId = 0;
   const item = (it: Item): string => {
-    if (it.hidden) return '';
     if (it.type === 'path') {
       return `<path d="${pathData(it.paths)}" fill="${paint(it.fill)}"${it.evenOdd ? ' fill-rule="evenodd"' : ''}${strokeAttrs(it.stroke)}${common(it)}/>`;
     }
@@ -91,19 +112,30 @@ export function writeSvg(doc: Doc, area: Rect | null): string {
     const kids = it.clip ? it.children.slice(1) : it.children;
     let clip = '';
     if (it.clip && it.children[0]?.type === 'path') {
-      const id = `clip${clipId++}`;
+      const id = uid(`clip${clipId++}`);
       defs.push(`<clipPath id="${id}"><path d="${pathData(it.children[0].paths)}"${it.children[0].evenOdd ? ' clip-rule="evenodd"' : ''}/></clipPath>`);
       clip = ` clip-path="url(#${id})"`;
     }
     return `<g${clip}${common(it)}>${kids.map(item).join('')}</g>`;
   };
-  const body = doc.layers
-    .filter((l) => !l.hidden)
-    .map((l) => `<g id="${esc(l.name.replace(/\s+/g, '_'))}">${l.children.map(item).join('')}</g>`)
-    .join('\n');
   const r = area ?? doc.artboards[0] ?? { x: 0, y: 0, w: 100, h: 100 };
+  // Every artboard is a page when the first one is the viewBox, as Inkscape's first page is.
+  const pages =
+    doc.artboards.length > 1 && area === doc.artboards[0]
+      ? doc.artboards.map((a, i) => `<inkscape:page id="${uid(`page${i + 1}`)}" inkscape:label="${attr(a.name)}" x="${f(a.x)}" y="${f(a.y)}" width="${f(a.w)}" height="${f(a.h)}"/>`).join('')
+      : '';
+  const namedview = `<sodipodi:namedview id="${uid('namedview')}" inkscape:document-units="${doc.units}">${pages}</sodipodi:namedview>`;
+  const body = doc.layers
+    .map(
+      (l) =>
+        `<g inkscape:groupmode="layer" id="${uid(l.name)}" inkscape:label="${attr(l.name)}"${l.hidden ? ' style="display:none"' : ''}${l.locked ? ' sodipodi:insensitive="true"' : ''}>${l.children.map(item).join('')}</g>`,
+    )
+    .join('\n');
+  // Points are user units; px documents leave the size unitless, as px is a point here.
+  const len = (v: number) => (doc.units === 'px' ? f(v) : `${f(v / UNIT_PT[doc.units])}${doc.units}`);
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="${f(r.x)} ${f(r.y)} ${f(r.w)} ${f(r.h)}" width="${f(r.w)}" height="${f(r.h)}">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="${INKSCAPE}" xmlns:sodipodi="${SODIPODI}" viewBox="${f(r.x)} ${f(r.y)} ${f(r.w)} ${f(r.h)}" width="${len(r.w)}" height="${len(r.h)}">
+${namedview}
 ${defs.length ? `<defs>${defs.join('')}</defs>\n` : ''}${body}
 </svg>
 `;
@@ -295,6 +327,8 @@ function arcToCubics(x1: number, y1: number, rx: number, ry: number, rotDeg: num
 function cssColor(v: string): { color: Color; alpha: number } | null {
   v = v.trim();
   if (!v || v === 'none' || v === 'transparent') return null;
+  if (/^#[0-9a-f]{6}$/i.test(v)) return { color: hexColor(v), alpha: 1 };
+  if (/^#[0-9a-f]{3}$/i.test(v)) return { color: hexColor(`#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`), alpha: 1 };
   const c = document.createElement('canvas').getContext('2d')!;
   c.fillStyle = '#000';
   c.fillStyle = v;
@@ -373,21 +407,60 @@ function styleOf(el: Element, parent: Style): Style {
   return s;
 }
 
+/** A root width or height in points (a px is a point, as in the rest of the app), and its unit. */
+function svgLength(v: string | null): { pt: number; unit: string } | null {
+  const m = /^\s*([-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?)\s*([a-z]*)\s*$/i.exec(v ?? '');
+  if (!m) return null;
+  const unit = m[2].toLowerCase();
+  const pt = Number(m[1]) * (isUnits(unit) ? UNIT_PT[unit] : 1);
+  return pt > 0 ? { pt, unit } : null;
+}
+
+function isUnits(u: string | null): u is Units {
+  return !!u && Object.hasOwn(UNIT_PT, u);
+}
+
+/** Inkscape's ids for things nobody named ("path12", "rect3-5"), which aren't names. */
+const AUTO_ID = /^(g|path|rect|circle|ellipse|line|polyline|polygon|text|tspan|image|use|layer|a|switch)-?\d+(-\d+)*$/;
+
+function nameOf(el: Element): string {
+  const label = el.getAttributeNS(INKSCAPE, 'label');
+  if (label) return label;
+  const id = el.getAttribute('id');
+  return id && !AUTO_ID.test(id) ? id.replace(/_/g, ' ') : '';
+}
+
+const isLayer = (el: Element) => el.nodeName.replace(/^.*:/, '') === 'g' && el.getAttributeNS(INKSCAPE, 'groupmode') === 'layer';
+
 /** Read an SVG file as a document. */
 export async function readSvg(source: string): Promise<Doc> {
   const xml = new DOMParser().parseFromString(source, 'image/svg+xml');
   const root = xml.documentElement;
   if (!root || root.nodeName.toLowerCase() !== 'svg' || xml.getElementsByTagName('parsererror').length) throw new Error('It isn’t an SVG file that can be read.');
   const vb = (root.getAttribute('viewBox') ?? '').split(/[\s,]+/).map(Number);
-  const w = parseFloat(root.getAttribute('width') ?? '') || vb[2] || 800;
-  const h = parseFloat(root.getAttribute('height') ?? '') || vb[3] || 600;
+  const wl = svgLength(root.getAttribute('width'));
+  const hl = svgLength(root.getAttribute('height'));
+  const w = wl?.pt || vb[2] || 800;
+  const h = hl?.pt || vb[3] || 600;
   let base: Mat = IDENTITY;
   if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) base = [w / vb[2], 0, 0, h / vb[3], (-vb[0] * w) / vb[2], (-vb[1] * h) / vb[3]];
-  const ab: Artboard = { id: newId(), name: 'Artboard 1', x: 0, y: 0, w, h };
+  const namedview = xml.getElementsByTagNameNS(SODIPODI, 'namedview')[0];
+  const docUnits = namedview?.getAttributeNS(INKSCAPE, 'document-units') ?? null;
+  const widthUnit = wl?.unit ?? null;
+  const units: Units = isUnits(docUnits) ? docUnits : isUnits(widthUnit) ? widthUnit : 'px';
+  // Inkscape's pages are in user units.
+  const pages = namedview ? Array.from(namedview.getElementsByTagNameNS(INKSCAPE, 'page')) : [];
+  const artboards: Artboard[] = pages
+    .map((p, i) => {
+      const n = (a: string) => parseFloat(p.getAttribute(a) ?? '') || 0;
+      return { id: newId(), name: p.getAttributeNS(INKSCAPE, 'label') || `Artboard ${i + 1}`, x: base[0] * n('x') + base[4], y: base[3] * n('y') + base[5], w: base[0] * n('width'), h: base[3] * n('height') };
+    })
+    .filter((a) => a.w > 0 && a.h > 0);
+  if (!artboards.length) artboards.push({ id: newId(), name: 'Artboard 1', x: 0, y: 0, w, h });
   const byId = new Map<string, Element>();
   for (const el of Array.from(xml.querySelectorAll('[id]'))) byId.set(el.getAttribute('id')!, el);
   const layer = newLayer('Layer 1', 0);
-  const doc: Doc = { artboards: [ab], layers: [layer], res: { images: new Map(), fonts: new Map() }, mode: 'rgb', units: 'px', notes: [] };
+  const doc: Doc = { artboards, layers: [layer], res: { images: new Map(), fonts: new Map() }, mode: 'rgb', units, notes: [] };
 
   const gradient = (id: string, m: Mat, bbox: () => Rect): Gradient | null => {
     let el = byId.get(id);
@@ -540,47 +613,90 @@ export async function readSvg(source: string): Promise<Doc> {
     return { id: newId(), type: 'image', name: '', opacity: st.opacity, blend: 'normal', image: key, matrix: mul([n('width', 1), 0, 0, n('height', 1), n('x'), n('y')], m) };
   };
 
-  const walkEl = (el: Element, parent: Style, m: Mat, out: Item[]) => {
-    for (const child of Array.from(el.children)) {
-      const tag = child.nodeName.replace(/^.*:/, '');
-      if (['defs', 'clipPath', 'mask', 'linearGradient', 'radialGradient', 'pattern', 'style', 'title', 'desc', 'metadata', 'symbol', 'marker', 'filter'].includes(tag)) continue;
-      const st = styleOf(child, parent);
-      if (st.display === 'none') continue;
-      const cm = mul(parseTransform(child.getAttribute('transform')), m);
-      if (tag === 'g' || tag === 'a' || tag === 'switch') {
-        const kids: Item[] = [];
-        walkEl(child, { ...st, opacity: 1 }, cm, kids);
-        if (!kids.length) continue;
-        const clipRef = /url\(\s*#([^)\s]+)\s*\)/.exec(child.getAttribute('clip-path') ?? '')?.[1];
-        const clipEl = clipRef ? byId.get(clipRef) : null;
-        const clipShape = clipEl ? Array.from(clipEl.children).map((c) => shape(c, BASE_STYLE, mul(parseTransform(c.getAttribute('transform')), cm))).find(Boolean) : null;
-        const name = child.getAttribute('id') ?? '';
-        out.push({ id: newId(), type: 'group', name: name.replace(/_/g, ' '), opacity: st.opacity, blend: 'normal', clip: !!clipShape, children: clipShape ? [{ ...clipShape, fill: NONE, stroke: defaultStroke() } as Item, ...kids] : kids });
-      } else if (tag === 'use') {
-        const ref = byId.get((child.getAttribute('href') ?? child.getAttribute('xlink:href') ?? '').replace('#', ''));
-        if (!ref) continue;
-        const dx = parseFloat(child.getAttribute('x') ?? '0') || 0;
-        const dy = parseFloat(child.getAttribute('y') ?? '0') || 0;
-        const wrap = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        wrap.appendChild(ref.cloneNode(true));
-        walkEl(wrap, st, mul([1, 0, 0, 1, dx, dy], cm), out);
-      } else if (tag === 'text') {
-        const t = text(child, st, cm);
-        if (t) out.push(t);
-      } else if (tag === 'image') {
-        const im = image(child, st, cm);
-        if (im) out.push(im);
-      } else {
-        const s = shape(child, st, cm);
-        if (s) out.push(s);
-      }
+  const walkOne = (child: Element, parent: Style, m: Mat, out: Item[]) => {
+    const tag = child.nodeName.replace(/^.*:/, '');
+    if (['defs', 'clipPath', 'mask', 'linearGradient', 'radialGradient', 'pattern', 'style', 'title', 'desc', 'metadata', 'symbol', 'marker', 'filter', 'namedview'].includes(tag)) return;
+    const st = styleOf(child, parent);
+    // Hidden things come in hidden, as Inkscape's hidden layers and objects do.
+    const hidden = st.display === 'none';
+    st.display = 'inline';
+    const cm = mul(parseTransform(child.getAttribute('transform')), m);
+    const start = out.length;
+    if (tag === 'g' || tag === 'a' || tag === 'switch') {
+      const kids: Item[] = [];
+      walkEl(child, { ...st, opacity: 1 }, cm, kids);
+      if (!kids.length) return;
+      const clipRef = /url\(\s*#([^)\s]+)\s*\)/.exec(child.getAttribute('clip-path') ?? '')?.[1];
+      const clipEl = clipRef ? byId.get(clipRef) : null;
+      const clipShape = clipEl ? Array.from(clipEl.children).map((c) => shape(c, BASE_STYLE, mul(parseTransform(c.getAttribute('transform')), cm))).find(Boolean) : null;
+      out.push({ id: newId(), type: 'group', name: '', opacity: st.opacity, blend: 'normal', clip: !!clipShape, children: clipShape ? [{ ...clipShape, fill: NONE, stroke: defaultStroke() } as Item, ...kids] : kids });
+    } else if (tag === 'use') {
+      const ref = byId.get((child.getAttribute('href') ?? child.getAttribute('xlink:href') ?? '').replace('#', ''));
+      if (!ref) return;
+      const dx = parseFloat(child.getAttribute('x') ?? '0') || 0;
+      const dy = parseFloat(child.getAttribute('y') ?? '0') || 0;
+      const wrap = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      wrap.appendChild(ref.cloneNode(true));
+      walkEl(wrap, st, mul([1, 0, 0, 1, dx, dy], cm), out);
+    } else if (tag === 'text') {
+      const t = text(child, st, cm);
+      if (t) out.push(t);
+    } else if (tag === 'image') {
+      const im = image(child, st, cm);
+      if (im) out.push(im);
+    } else {
+      const s = shape(child, st, cm);
+      if (s) out.push(s);
+    }
+    const locked = child.getAttributeNS(SODIPODI, 'insensitive') === 'true';
+    const name = out.length - start === 1 ? nameOf(child) : '';
+    for (const it of out.slice(start)) {
+      if (name) it.name = name;
+      if (hidden) it.hidden = true;
+      if (locked) it.locked = true;
     }
   };
+  const walkEl = (el: Element, parent: Style, m: Mat, out: Item[]) => {
+    for (const child of Array.from(el.children)) walkOne(child, parent, m, out);
+  };
   const pendingImages: Promise<unknown>[] = [];
-  walkEl(root, BASE_STYLE, base, layer.children);
-  // Top-level groups named like layers become layers.
-  if (layer.children.length > 1 && layer.children.every((c) => c.type === 'group' && c.name && c.opacity === 1 && !c.clip)) {
-    doc.layers = layer.children.map((g, i) => ({ ...newLayer(g.name, i), children: (g as Item & { type: 'group' }).children }));
+  const top = Array.from(root.children);
+  if (top.some(isLayer)) {
+    // Inkscape's layers; sublayers are groups, and anything outside a layer gets one of its own.
+    doc.layers = [];
+    let loose: Layer | null = null;
+    for (const el of top) {
+      const items: Item[] = [];
+      walkOne(el, BASE_STYLE, base, items);
+      if (isLayer(el)) {
+        loose = null;
+        const l = newLayer(nameOf(el) || el.getAttribute('id') || `Layer ${doc.layers.length + 1}`, doc.layers.length);
+        const g = items[0];
+        if (g?.type === 'group') {
+          l.hidden = !!g.hidden;
+          l.locked = !!g.locked;
+          // Layers have no opacity or clipping of their own, so a group inside keeps those.
+          l.children = g.opacity === 1 && !g.clip ? g.children : [{ ...g, name: '', hidden: false, locked: false }];
+        } else {
+          l.hidden = styleOf(el, BASE_STYLE).display === 'none';
+          l.locked = el.getAttributeNS(SODIPODI, 'insensitive') === 'true';
+        }
+        doc.layers.push(l);
+      } else if (items.length) {
+        if (!loose) {
+          loose = newLayer(`Layer ${doc.layers.length + 1}`, doc.layers.length);
+          doc.layers.push(loose);
+        }
+        loose.children.push(...items);
+      }
+    }
+    if (!doc.layers.length) doc.layers = [layer];
+  } else {
+    walkEl(root, BASE_STYLE, base, layer.children);
+    // Top-level groups named like layers become layers.
+    if (layer.children.length > 1 && layer.children.every((c) => c.type === 'group' && c.name && c.opacity === 1 && !c.clip)) {
+      doc.layers = layer.children.map((g, i) => ({ ...newLayer(g.name, i), hidden: !!g.hidden, locked: !!g.locked, children: (g as Item & { type: 'group' }).children }));
+    }
   }
   await Promise.all(pendingImages);
   return doc;
