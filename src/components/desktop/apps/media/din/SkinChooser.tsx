@@ -9,6 +9,7 @@ import { skinKindOf, skinsDir } from '../actions';
 import { setPrefs, usePrefs, type SkinChoice } from '../prefs';
 import { winampPreview } from '../winamp/skin';
 import { wmpPreview } from '../wmp/preview';
+import { BUILTIN_WMP_SKINS, builtinSkinBytes, isBuiltinSkin } from '../wmp/builtin';
 import type { Commands } from '../useCommands';
 
 interface SkinEntry {
@@ -17,11 +18,13 @@ interface SkinEntry {
   choice: SkinChoice;
   kind: 'din' | 'winamp' | 'wmp';
   removable: boolean;
+  description?: string;
 }
 
 const BUILT_IN: SkinEntry[] = [
   { id: 'din', name: 'Din', choice: { kind: 'din' }, kind: 'din', removable: false },
   { id: 'din-classic', name: 'Din Classic', choice: { kind: 'winamp', path: '' }, kind: 'winamp', removable: false },
+  ...BUILTIN_WMP_SKINS.map((s): SkinEntry => ({ id: s.path, name: s.name, choice: { kind: 'wmp', path: s.path }, kind: 'wmp', removable: false, description: s.description })),
 ];
 
 async function listSkins(): Promise<SkinEntry[]> {
@@ -53,7 +56,9 @@ function Preview({ entry }: { entry: SkinEntry }) {
     queryFn: async () => {
       if (entry.choice.kind === 'din') return '/icons/apps/media-player.png';
       if (!entry.choice.path) return winampPreview(null);
-      const { data } = await getFsBridge()!.readFile(entry.choice.path, 32 * 1024 * 1024);
+      const data = isBuiltinSkin(entry.choice.path)
+        ? await builtinSkinBytes(entry.choice.path)
+        : (await getFsBridge()!.readFile(entry.choice.path, 32 * 1024 * 1024)).data;
       return entry.kind === 'winamp' ? winampPreview(data) : wmpPreview(data);
     },
     staleTime: Infinity,
@@ -150,11 +155,11 @@ export function SkinChooser({ commands }: { commands: Commands }) {
             <div className="text-center">
               <h2 className="text-xl font-semibold">{selected.name}</h2>
               <p className="text-[var(--mp-ink-dim)]">
-                {selected.kind === 'din'
+                {selected.description ?? (selected.kind === 'din'
                   ? 'Din’s own look, after Windows Media Player 10.'
                   : selected.kind === 'winamp'
                     ? 'A classic Winamp skin: main window, equalizer and playlist editor.'
-                    : 'A Windows Media Player skin.'}
+                    : 'A Windows Media Player skin.')}
               </p>
             </div>
             <button type="button" className="mp-btn px-6 py-2 text-base" data-primary disabled={sameChoice(selected.choice, current)} onClick={() => setPrefs({ skin: selected.choice })}>

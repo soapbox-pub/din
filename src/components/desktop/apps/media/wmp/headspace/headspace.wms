@@ -1,0 +1,220 @@
+<THEME title="Headspace" author="Din" copyright="Din" authorVersion="1.0">
+  <VIEW
+    id="headspace"
+    titleBar="false"
+    resizable="false"
+    width="760"
+    height="394"
+    backgroundColor="none"
+    scriptFile="headspace.js"
+    onLoad="jscript:init();"
+    onClose="jscript:onClose();"
+  >
+    <EQUALIZERSETTINGS id="eq" enabled="true" />
+    <PLAYER
+      id="mediaWatch"
+      mediaChange="jscript:checkVideo();"
+      openStateChange="jscript:checkVideo();"
+      playStateChange="jscript:checkVideo();"
+    />
+
+    <!-- Left drawer: equalizer, balance and volume. -->
+    <SUBVIEW id="eqDrawer" left="207" top="86" width="269" height="170" zIndex="-1" onEndMove="jscript:eqMoveEnd();">
+      <SUBVIEW id="eqPanel" left="84" top="10" width="171" height="140" zIndex="-1" visible="false" backgroundColor="#285F03">
+        <BALANCESLIDER
+          id="balanceSlider"
+          left="8" top="11" width="71" height="11"
+          backgroundImage="hslider-track.png" thumbImage="hslider-thumb.png"
+          tiled="true" borderSize="7" transparencyColor="#FF00FF"
+          toolTip="Balance"
+        />
+        <TEXT id="balanceLabel" left="25" top="22" value="Balance" foregroundColor="#77CE07" fontFace="Verdana" fontSize="7" />
+        <VOLUMESLIDER
+          id="volumeSlider"
+          left="jscript:balanceSlider.left+balanceSlider.width+10" top="jscript:balanceSlider.top" width="71" height="11"
+          backgroundImage="hslider-track.png" thumbImage="hslider-thumb.png"
+          tiled="true" borderSize="7" transparencyColor="#FF00FF"
+          toolTip="Volume"
+        />
+        <TEXT id="volumeLabel" left="jscript:volumeSlider.left+19" top="22" value="Volume" foregroundColor="#77CE07" fontSize="7" />
+        <SLIDER id="band1" left="jscript:balanceSlider.left+3" top="jscript:balanceSlider.top+33" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel1" value_onchange="jscript:eq.gainLevel1=value;" />
+        <SLIDER id="band2" left="jscript:band1.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel2" value_onchange="jscript:eq.gainLevel2=value;" />
+        <SLIDER id="band3" left="jscript:band2.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel3" value_onchange="jscript:eq.gainLevel3=value;" />
+        <SLIDER id="band4" left="jscript:band3.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel4" value_onchange="jscript:eq.gainLevel4=value;" />
+        <SLIDER id="band5" left="jscript:band4.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel5" value_onchange="jscript:eq.gainLevel5=value;" />
+        <SLIDER id="band6" left="jscript:band5.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel6" value_onchange="jscript:eq.gainLevel6=value;" />
+        <SLIDER id="band7" left="jscript:band6.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel7" value_onchange="jscript:eq.gainLevel7=value;" />
+        <SLIDER id="band8" left="jscript:band7.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel8" value_onchange="jscript:eq.gainLevel8=value;" />
+        <SLIDER id="band9" left="jscript:band8.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel9" value_onchange="jscript:eq.gainLevel9=value;" />
+        <SLIDER id="band10" left="jscript:band9.left+15" top="jscript:band1.top" width="11" height="76" direction="vertical" min="-14" max="14" backgroundImage="vslider-track.png" thumbImage="vslider-thumb.png" tiled="true" borderSize="7" transparencyColor="#FF00FF" toolTip="Graphic equalizer control" value="wmpprop:eq.gainLevel10" value_onchange="jscript:eq.gainLevel10=value;" />
+        <TEXT
+          id="eqReset"
+          left="jscript:band10.left-6" top="jscript:band1.top+83"
+          value="reset" foregroundColor="#DDDDDD" fontSize="7" fontStyle="underline" cursor="hand"
+          toolTip="Reset graphic equalizer controls"
+          onClick="jscript:eq.reset();"
+        />
+        <SUBVIEW left="0" top="0" zIndex="3" passThrough="true" backgroundImage="panel-bevel-left.png" />
+        <SUBVIEW left="10" top="0" zIndex="3" passThrough="true" backgroundImage="panel-bevel-top.png" />
+        <SUBVIEW left="10" top="137" zIndex="3" passThrough="true" backgroundImage="panel-bevel-bottom.png" />
+        <SUBVIEW left="166" top="0" zIndex="3" passThrough="true" backgroundImage="panel-bevel-right.png" />
+      </SUBVIEW>
+      <SUBVIEW left="84" top="0" backgroundImage="eqdrawer-top.png" />
+      <SUBVIEW left="84" top="150" backgroundImage="eqdrawer-bottom.png" />
+      <SUBVIEW left="251" top="0" backgroundImage="eqdrawer-inner-edge.png" transparencyColor="#FF00FF" />
+      <SUBVIEW id="eqEar" left="0" top="0" zIndex="1" backgroundImage="ear-left.png" transparencyColor="#FF00FF">
+        <BUTTON
+          id="eqHandle"
+          left="8" top="66" zIndex="1"
+          image="handle-left-open.png" hoverImage="handle-left-open-hover.png" downImage="handle-left-open-down.png"
+          transparencyColor="#FF00FF" cursor="hand"
+          upToolTip="Open graphic equalizer controls"
+          onClick="jscript:toggleEq();"
+        />
+        <BUTTON
+          id="eqClose"
+          left="72" top="7" zIndex="1" visible="false"
+          image="x-left.png" hoverImage="x-left-hover.png" disabledImage="x-left-disabled.png"
+          transparencyColor="#FF00FF" cursor="hand"
+          upToolTip="Close graphic equalizer controls"
+          onClick="jscript:toggleEq();"
+        />
+      </SUBVIEW>
+    </SUBVIEW>
+
+    <!-- Right drawer: the playlist. -->
+    <SUBVIEW id="plDrawer" left="277" top="86" width="272" height="170" zIndex="-1" onEndMove="jscript:plMoveEnd();">
+      <SUBVIEW left="0" top="0" backgroundImage="pldrawer-inner-edge.png" transparencyColor="#FF00FF" />
+      <SUBVIEW left="13" top="0" backgroundImage="pldrawer-top.png" />
+      <SUBVIEW left="13" top="150" backgroundImage="pldrawer-bottom.png" />
+      <SUBVIEW id="plPanel" left="13" top="10" width="172" height="140" zIndex="-1" backgroundColor="#285F03">
+        <PLAYLIST
+          id="playlist"
+          left="0" top="0" width="172" height="140" visible="false"
+          backgroundColor="#285F03" foregroundColor="#FFFFFF"
+          itemPlayingColor="#C8FF4A" itemSelectedColor="#0B2400" itemSelectedBackgroundColor="#77CE07"
+          columnsVisible="false" columns="name=Name;duration=Time"
+          dropDownVisible="true" playlistItemsVisible="true"
+        />
+        <SUBVIEW left="0" top="0" zIndex="3" passThrough="true" backgroundImage="panel-bevel-left.png" />
+        <SUBVIEW left="10" top="0" zIndex="3" passThrough="true" backgroundImage="panel-bevel-top.png" />
+        <SUBVIEW left="10" top="137" zIndex="3" passThrough="true" backgroundImage="panel-bevel-bottom.png" />
+        <SUBVIEW left="167" top="0" zIndex="3" passThrough="true" backgroundImage="panel-bevel-right.png" />
+      </SUBVIEW>
+      <SUBVIEW id="plEar" left="185" top="0" zIndex="1" backgroundImage="ear-right.png" transparencyColor="#FF00FF">
+        <BUTTON
+          id="plHandle"
+          left="61" top="65" zIndex="1"
+          image="handle-right-open.png" hoverImage="handle-right-open-hover.png" downImage="handle-right-open-down.png"
+          transparencyColor="#FF00FF" cursor="hand"
+          upToolTip="Open playlist"
+          onClick="jscript:togglePl();"
+        />
+        <BUTTON
+          id="plClose"
+          left="4" top="7" zIndex="1" visible="false"
+          image="x-right.png" hoverImage="x-right-hover.png" disabledImage="x-right-disabled.png"
+          transparencyColor="#FF00FF" cursor="hand"
+          upToolTip="Close playlist"
+          onClick="jscript:togglePl();"
+        />
+      </SUBVIEW>
+    </SUBVIEW>
+
+    <!-- The head: always there, in front of both drawers. -->
+    <SUBVIEW id="head" left="261" top="0" backgroundImage="head.png" clippingColor="#FF0000" transparencyColor="#FF00FF">
+      <SUBVIEW id="screen" left="9" top="59" width="216" height="158" zIndex="-2" backgroundImage="screen-bg.png">
+        <WMPEFFECTS id="visEffects" left="0" top="0" width="216" height="158" visible="false" toolTip="Click for the next visualization" />
+        <WMPVIDEO id="video" left="12" top="11" width="193" height="135" visible="false" backgroundColor="#000000" />
+      </SUBVIEW>
+
+      <SUBVIEW id="visDrop" left="30" top="33" width="174" height="26" zIndex="-1" visible="false" backgroundImage="vis-bar.png" clippingColor="#FF00FF" onEndMove="jscript:visDropMoveEnd();">
+        <BUTTON
+          id="visPrev" left="9" top="3" zIndex="1"
+          image="vis-prev.png" hoverImage="vis-prev-hover.png" downImage="vis-prev-down.png" disabledImage="vis-prev-disabled.png"
+          transparencyColor="#FF00FF" cursor="hand"
+          upToolTip="Previous visualization"
+          onClick="jscript:visEffects.previous();"
+        />
+        <BUTTON
+          id="visNext" left="135" top="3" zIndex="1"
+          image="vis-next.png" hoverImage="vis-next-hover.png" downImage="vis-next-down.png" disabledImage="vis-next-disabled.png"
+          transparencyColor="#FF00FF" cursor="hand"
+          upToolTip="Next visualization"
+          onClick="jscript:visEffects.next();"
+        />
+        <BUTTON
+          id="visClose" left="157" top="8" zIndex="1"
+          image="vis-close.png" hoverImage="vis-close-hover.png" downImage="vis-close-down.png" disabledImage="vis-close-disabled.png"
+          transparencyColor="#FF00FF" cursor="hand"
+          upToolTip="Close visualization chooser"
+          onClick="jscript:toggleVis();"
+        />
+        <TEXT
+          id="visName" left="30" top="6" width="105" zIndex="2"
+          justification="center" foregroundColor="#C8FF4A"
+          value="wmpprop:visEffects.currentPresetTitle"
+        />
+      </SUBVIEW>
+
+      <BUTTONGROUP
+        id="titleButtons" left="101" top="4" zIndex="2"
+        mappingImage="title-map.png"
+        image="title.png" hoverImage="title-hover.png" downImage="title-down.png" disabledImage="title-disabled.png"
+        transparencyColor="#FF00FF"
+      >
+        <BUTTONELEMENT mappingColor="#FF0000" upToolTip="Minimize" onClick="jscript:view.minimize();" />
+        <BUTTONELEMENT mappingColor="#00FF00" upToolTip="Close" onClick="jscript:view.close();" />
+      </BUTTONGROUP>
+
+      <BUTTONGROUP
+        id="transport" left="48" top="31" zIndex="2"
+        mappingImage="transport-map.png"
+        image="transport.png" hoverImage="transport-hover.png" downImage="transport-down.png" disabledImage="transport-disabled.png"
+        transparencyColor="#FF00FF"
+      >
+        <PREVELEMENT mappingColor="#FF0000" />
+        <PLAYELEMENT mappingColor="#00FF00" tabStop="wmpenabled:player.controls.play" />
+        <STOPELEMENT mappingColor="#0000FF" />
+        <NEXTELEMENT mappingColor="#FFFF00" />
+        <BUTTONELEMENT id="visButton" mappingColor="#00FFFF" cursor="hand" upToolTip="Open visualization chooser" onClick="jscript:toggleVis();" />
+      </BUTTONGROUP>
+
+      <PAUSEBUTTON
+        id="pauseBtn" left="74" top="32" zIndex="3"
+        image="pause.png" hoverImage="pause-hover.png" downImage="pause-down.png"
+        transparencyColor="#FF00FF"
+        visible="wmpenabled:player.controls.pause"
+      />
+
+      <BUTTON
+        id="eqToggle" left="15" top="214" zIndex="2"
+        image="eq-toggle.png" hoverImage="eq-toggle-hover.png" downImage="eq-toggle-down.png" disabledImage="eq-toggle-disabled.png"
+        cursor="hand"
+        upToolTip="Open graphic equalizer controls"
+        onClick="jscript:toggleEq();"
+      />
+      <BUTTON
+        id="plToggle" left="204" top="214" zIndex="2"
+        image="pl-toggle.png" hoverImage="pl-toggle-hover.png" downImage="pl-toggle-down.png" disabledImage="pl-toggle-disabled.png"
+        cursor="hand"
+        upToolTip="Open playlist"
+        onClick="jscript:togglePl();"
+      />
+
+      <SEEKSLIDER
+        id="seek" left="39" top="223" width="163" height="9" zIndex="2"
+        backgroundImage="seek-track.png" foregroundImage="seek-fill.png"
+        thumbImage="seek-thumb.png" thumbHoverImage="seek-thumb-hover.png" thumbDownImage="seek-thumb-down.png"
+        tiled="false" slide="false" borderSize="9" transparencyColor="#FF00FF"
+        foregroundProgress="wmpprop:player.network.downloadProgress"
+      />
+
+      <RETURNBUTTON
+        id="fullModeBtn" left="101" top="232" zIndex="2"
+        image="fullmode.png" hoverImage="fullmode-hover.png" downImage="fullmode-down.png"
+        cursor="hand"
+      />
+    </SUBVIEW>
+  </VIEW>
+</THEME>

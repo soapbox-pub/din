@@ -19,6 +19,7 @@ import { WinampPlayer } from './media/winamp/WinampPlayer';
 import { winampLayout } from './media/winamp/layout';
 import { WmpPlayer } from './media/wmp/WmpPlayer';
 import { openWmz, type WmzPackage } from './media/wmp/wms';
+import { builtinSkinBytes, isBuiltinSkin } from './media/wmp/builtin';
 import './media/din/player.css';
 
 /** The Din skin's window size in full mode, and the Mini Player's. */
@@ -46,7 +47,9 @@ function useLoadedSkin(choice: SkinChoice, onError: (message: string) => void): 
     let made: WinampSkin | null = null;
     void (async () => {
       try {
-        const bytes = choice.path ? (await getFsBridge()!.readFile(choice.path, 64 * 1024 * 1024)).data : null;
+        const bytes = !choice.path ? null
+          : isBuiltinSkin(choice.path) ? await builtinSkinBytes(choice.path)
+            : (await getFsBridge()!.readFile(choice.path, 64 * 1024 * 1024)).data;
         if (choice.kind === 'winamp') {
           made = await loadWinampSkin(bytes, choice.path ? choice.path.slice(choice.path.lastIndexOf('/') + 1) : 'Din Classic');
           if (live) setLoaded({ key, skin: { kind: 'winamp', skin: made } });

@@ -7,6 +7,7 @@ import { MENU_BAR_TRIGGER_CLASS } from '@/lib/menuBarSlot';
 import { player, usePlayer } from '../engine';
 import { setPrefs, setWinampPrefs, TABS, usePrefs, type DinTab } from '../prefs';
 import { VISUALIZATIONS } from '../visualizations';
+import { BUILTIN_WMP_SKINS } from '../wmp/builtin';
 import type { Commands } from '../useCommands';
 
 /** WMP's View > Choose Color, as a handful of hues (null: Din's theme). */
@@ -106,6 +107,9 @@ export function AppMenus({ commands }: { commands: Commands }) {
               Din’s Own Skin<DropdownMenuShortcut>Ctrl+1</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setPrefs({ skin: { kind: 'winamp', path: '' } })}>Din Classic</DropdownMenuItem>
+            {BUILTIN_WMP_SKINS.map((s) => (
+              <DropdownMenuItem key={s.id} onSelect={() => setPrefs({ skin: { kind: 'wmp', path: s.path } })}>{s.name}</DropdownMenuItem>
+            ))}
             <DropdownMenuItem onSelect={() => setPrefs({ skin: { kind: 'din' }, tab: 'skins', mini: false })}>Skin Chooser…</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void commands.loadSkin()}>Apply a Skin File…</DropdownMenuItem>
             {prefs.skin.kind === 'winamp' && (
