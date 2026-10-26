@@ -534,9 +534,10 @@ function Slider({ node }: { node: VmNode }) {
             style={{
               position: 'absolute',
               ...(vertical ? { left: 0, right: 0, bottom: slide && fgImg ? pos - fgImg.h : 0, height: slide && fgImg ? fgImg.h : h } : { top: 0, bottom: 0, left: slide && fgImg ? pos - fgImg.w : 0, width: slide && fgImg ? fgImg.w : w }),
-              backgroundImage: fgUrl ? `url("${fgUrl}")` : undefined,
-              backgroundRepeat: tiled && !slide ? (vertical ? 'repeat-y' : 'repeat-x') : 'no-repeat',
-              background: fgUrl ? undefined : (grad(fgColor, a.foregroundendcolor) ?? fgColor),
+              // An undefined `background` shorthand would still reset the image, so only one is set.
+              ...(fgUrl
+                ? { backgroundImage: `url("${fgUrl}")`, backgroundRepeat: tiled && !slide ? (vertical ? 'repeat-y' : 'repeat-x') : 'no-repeat' }
+                : { background: grad(fgColor, a.foregroundendcolor) ?? fgColor }),
             }}
           />
         </div>
