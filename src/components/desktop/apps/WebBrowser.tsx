@@ -4338,7 +4338,7 @@ function InstallSiteButton({
               </div>
             </div>
             <p className="truncate text-xs text-muted-foreground" title={site.url}>
-              {site.url}
+              {nsiteHost ? nsiteDisplayUrl(site.url) : site.url}
             </p>
             <Button type="submit" className="w-full">
               Install

@@ -204,9 +204,17 @@ export function historyEntryHref(entry: BrowserHistoryEntry): string {
   return entry.name ? `nsite://${entry.name}${pathOf(entry.url)}` : entry.url;
 }
 
-/** How a history entry's address is shown: scheme-less, by name when it has one. */
+/** An nsite entry's address by name, scheme-less (`soapbox.pub/about`). */
+function namedUrl(entry: BrowserHistoryEntry): string {
+  return entry.name ? `${entry.name}${pathOf(entry.url)}` : '';
+}
+
+/**
+ * How a history entry's address is shown: scheme-less, except that an nsite
+ * shown by name keeps `nsite://`, or it would read as the https site.
+ */
 export function historyDisplayUrl(entry: BrowserHistoryEntry): string {
-  return entry.name ? `${entry.name}${pathOf(entry.url)}` : bareUrl(entry.url);
+  return entry.name ? `nsite://${namedUrl(entry)}` : bareUrl(entry.url);
 }
 
 /**
@@ -226,7 +234,7 @@ export function matchHistory(
   const scored: { entry: BrowserHistoryEntry; score: number }[] = [];
   for (const entry of history) {
     const url = bareUrl(entry.url).toLowerCase();
-    const named = entry.name ? historyDisplayUrl(entry).toLowerCase() : '';
+    const named = namedUrl(entry).toLowerCase();
     const title = entry.title?.toLowerCase() ?? '';
     let score = 0;
     if (url.startsWith(q) || (named && named.startsWith(q))) score = 3;
@@ -256,7 +264,7 @@ function completionTargets(entry: BrowserHistoryEntry, nsiteScheme: boolean): st
   const noScheme = entry.url.replace(/^(?:https?|nsite):\/\//i, '').replace(/\/$/, '');
   const bare = noScheme.replace(/^www\./i, '');
   const targets = bare === noScheme ? [bare] : [bare, noScheme];
-  if (entry.name && nsiteScheme) targets.unshift(historyDisplayUrl(entry).replace(/\/$/, ''));
+  if (entry.name && nsiteScheme) targets.unshift(namedUrl(entry).replace(/\/$/, ''));
   return targets;
 }
 
