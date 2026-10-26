@@ -8,13 +8,20 @@ export type SkinChoice =
 
 export type DinTab = 'now-playing' | 'library' | 'radio' | 'skins';
 
+export const TABS: { id: DinTab; label: string }[] = [
+  { id: 'now-playing', label: 'Now Playing' },
+  { id: 'library', label: 'Library' },
+  { id: 'radio', label: 'Radio' },
+  { id: 'skins', label: 'Skins' },
+];
+
 export interface MusicPrefs {
   skin: SkinChoice;
   tab: DinTab;
   /** Visualization id, or 'art' for album art. */
   vis: string;
-  /** Hue of Din's skin chrome (WMP's "Choose Color"). */
-  hue: number;
+  /** Hue of Din's skin chrome (WMP's "Choose Color"), or null to match Din's theme. */
+  hue: number | null;
   showList: boolean;
   showEnhancements: boolean;
   /** Din's compact Mini Player. */
@@ -49,7 +56,7 @@ const DEFAULTS: MusicPrefs = {
   skin: { kind: 'din' },
   tab: 'now-playing',
   vis: 'bars',
-  hue: 212,
+  hue: null,
   showList: true,
   showEnhancements: false,
   mini: false,

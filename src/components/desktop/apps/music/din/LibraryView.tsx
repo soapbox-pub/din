@@ -47,7 +47,7 @@ function NavItem({ icon, label, active, onClick, count }: { icon: ReactNode; lab
       aria-current={active ? 'page' : undefined}
       className={cn(
         'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]',
-        active ? 'bg-[var(--mp-row-selected)] text-white' : 'text-[var(--mp-ink-dim)] hover:bg-[var(--mp-row-hover)] hover:text-[var(--mp-ink)]',
+        active ? 'bg-[var(--mp-row-selected)] text-[var(--mp-ink)] font-medium' : 'text-[var(--mp-ink-dim)] hover:bg-[var(--mp-row-hover)] hover:text-[var(--mp-ink)]',
       )}
     >
       <span className="shrink-0 opacity-80">{icon}</span>
@@ -100,7 +100,7 @@ function SongTable({ items, ordered }: { items: LibraryItem[]; ordered?: boolean
             role="columnheader"
             aria-sort={sort?.key === c.key ? (sort.desc ? 'descending' : 'ascending') : 'none'}
             onClick={() => setSort((s) => (s?.key === c.key ? (s.desc ? null : { key: c.key, desc: true }) : { key: c.key, desc: false }))}
-            className={cn('truncate text-left hover:text-white', c.className)}
+            className={cn('truncate text-left hover:text-[var(--mp-ink)]', c.className)}
           >
             {c.label}
             {sort?.key === c.key && (sort.desc ? ' ▾' : ' ▴')}
@@ -129,7 +129,7 @@ function SongTable({ items, ordered }: { items: LibraryItem[]; ordered?: boolean
                     onContextMenu={() => !selected.has(item.location) && setSelected(new Set([item.location]))}
                     onDoubleClick={() => play(rows, i)}
                     style={{ top: i * ROW, height: ROW }}
-                    className={cn('mp-row absolute inset-x-0 flex cursor-default items-center gap-3 px-4', i % 2 === 1 && 'bg-white/[0.02]')}
+                    className={cn('mp-row absolute inset-x-0 flex cursor-default items-center gap-3 px-4', i % 2 === 1 && 'bg-foreground/[0.025]')}
                   >
                     <span className={cn(COLUMNS[0].className, 'truncate')}>
                       {ordered && item.track ? <span className="mr-2 tabular-nums text-[var(--mp-ink-faint)]">{item.track}</span> : null}
@@ -198,7 +198,7 @@ function AlbumGrid({ items, onOpen }: { items: LibraryItem[]; onOpen: (album: st
               className="relative block w-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]"
               aria-label={`${a.album} by ${a.artist}`}
             >
-              <Cover location={a.items[0].location} className="aspect-square w-full shadow-lg ring-1 ring-white/10 transition-transform motion-safe:group-hover:-translate-y-0.5" />
+              <Cover location={a.items[0].location} className="aspect-square w-full shadow-lg ring-1 ring-foreground/10 transition-transform motion-safe:group-hover:-translate-y-0.5" />
               <span
                 role="button"
                 tabIndex={-1}
@@ -254,7 +254,7 @@ function PlaylistView({ path }: { path: string }) {
   if (query.isLoading) {
     return (
       <div className="space-y-2 p-4" aria-hidden>
-        {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-5 w-full bg-white/10" />)}
+        {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-5 w-full bg-foreground/10" />)}
       </div>
     );
   }
@@ -360,7 +360,7 @@ export function LibraryView() {
           node: (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-end gap-4 border-b border-[var(--mp-line)] p-4">
-                <Cover location={list[0]?.location} className="size-28 shadow-xl ring-1 ring-white/10" />
+                <Cover location={list[0]?.location} className="size-28 shadow-xl ring-1 ring-foreground/10" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-wide text-[var(--mp-ink-faint)]">Album</p>
                   <h3 className="truncate text-2xl font-bold">{view.name}</h3>
@@ -463,8 +463,8 @@ export function LibraryView() {
           <div className="grid grid-cols-[repeat(auto-fill,minmax(136px,1fr))] gap-4 p-4" aria-hidden>
             {Array.from({ length: 8 }, (_, i) => (
               <div key={i} className="space-y-2">
-                <Skeleton className="aspect-square w-full bg-white/10" />
-                <Skeleton className="h-4 w-3/4 bg-white/10" />
+                <Skeleton className="aspect-square w-full bg-foreground/10" />
+                <Skeleton className="h-4 w-3/4 bg-foreground/10" />
               </div>
             ))}
           </div>

@@ -30,6 +30,7 @@ import { QuickLoginDialog } from '@/components/auth/QuickLoginDialog';
 import { RemoveAccountDialog } from '@/components/auth/RemoveAccountDialog';
 import { EditProfileForm } from '@/components/EditProfileForm';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { setMenuBarSlot } from '@/lib/menuBarSlot';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
@@ -139,6 +140,8 @@ export function MenuBar() {
       <div className="flex min-w-0 items-center gap-1.5">
         <AppsMenu />
         <FocusedAppName appId={focused?.appId ?? null} />
+        {/* The focused app's own menus (MenuBarMenus portals them here). */}
+        <div ref={setMenuBarSlot} className="flex min-w-0 items-center gap-0.5" />
       </div>
       <ClockMenuItem />
       <div className="flex min-w-0 items-center justify-end gap-1.5">
@@ -311,7 +314,7 @@ function AppGrid({
   webApps,
 }: {
   apps: AppDefinition[];
-  onOpen: (appId: string) => void;
+  onOpen: (appId: string, params?: Record<string, unknown>) => void;
   onUninstall: (appId: string) => void;
   /** Installed web apps, the only kind the launcher can uninstall. */
   webApps: readonly WebApp[];
@@ -336,6 +339,11 @@ function AppGrid({
           </ContextMenuTrigger>
           <ContextMenuContent className="w-52">
             <ContextMenuItem onSelect={() => onOpen(app.id)}>Open</ContextMenuItem>
+            {app.actions?.map((action) => (
+              <ContextMenuItem key={action.label} onSelect={() => onOpen(app.id, { ...action.params, actionAt: Date.now() })}>
+                {action.label}
+              </ContextMenuItem>
+            ))}
             {webApps.some((webApp) => webApp.id === app.id) && (
               <ContextMenuItem
                 variant="destructive"

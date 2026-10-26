@@ -347,8 +347,12 @@ export function wmpVmRuntime(): void {
     },
     set: (_, p, v) => {
       if (typeof p === 'string') {
-        local[`mc.${p.toLowerCase()}`] = v;
-        notify(`mc.${p.toLowerCase()}`);
+        const key = `mc.${p.toLowerCase()}`;
+        if (local[key] === v) return true;
+        local[key] = v;
+        notify(key);
+        // WMP kept this across sessions and skins.
+        if (v !== undefined && v !== null && typeof v !== 'object') call('theme', 'savePreference', [key, String(v)]);
       }
       return true;
     },
@@ -625,9 +629,11 @@ export function wmpVmRuntime(): void {
           return true;
         }
         if (k === 'currentpreset') {
+          // Skins restore this from WMP's own memory, which may be empty.
+          if (v === undefined || v === null || v === '' || !Number.isFinite(Number(v))) return true;
           const { e } = state();
           const count = fx[e].presets.length;
-          const p = ((Number(v) % count) + count) % count;
+          const p = ((Math.round(Number(v)) % count) + count) % count;
           if (el.attrs.currentpreset !== p) {
             el.attrs.currentpreset = p;
             queuePatch(el.iid, 'currentpreset', p);

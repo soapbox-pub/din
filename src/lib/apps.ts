@@ -143,6 +143,13 @@ export interface AppDefinition {
    * tile of their own. E.g. the browser's pop-up windows, under Web Browser.
    */
   dockAs?: string;
+  /**
+   * Shortcuts in the app's Dock and launcher menus, as a jump list: each
+   * opens the app (or, single-instance, its window) with these launch
+   * params plus `actionAt` (a timestamp, so choosing one twice is two
+   * requests). An app can be steered from here whatever state its window is in.
+   */
+  actions?: { label: string; params: Record<string, unknown> }[];
 }
 
 /** All apps installed on the desktop, in launcher order. */
@@ -295,6 +302,11 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 1040, height: 680 },
     keywords: ['windows media player', 'wmp', 'winamp', 'itunes', 'music', 'mp3', 'audio', 'songs', 'playlist', 'radio', 'equalizer', 'visualization', 'skins', 'video', 'media'],
     singleInstance: true,
+    actions: [
+      { label: 'Library', params: { show: 'library' } },
+      { label: 'Mini Player', params: { show: 'mini' } },
+      { label: 'Use Din’s Own Skin', params: { show: 'din-skin' } },
+    ],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { formatTime, player, usePlayer } from '../engine';
 import { VisCanvas } from '../din/common';
 import { useWindowDrag } from '../winamp/hooks';
-import { cssColor, type SkinImages } from './images';
+import { cssColor, maskRegion, type SkinImages } from './images';
 import { useAttrs, useView } from './mirror';
 import type { VmNode } from './protocol';
 import { visForEffect } from './effects';
@@ -32,7 +32,8 @@ function boxStyle(a: Attrs): CSSProperties {
     display: bool(a.visible, true) ? undefined : 'none',
     opacity: a.alphablend !== undefined ? Math.max(0, Math.min(255, num(a.alphablend, 255))) / 255 : undefined,
     zIndex: num(a.zindex),
-    pointerEvents: bool(a.passthrough, false) ? 'none' : undefined,
+    // Containers take no clicks themselves, so every element opts back in.
+    pointerEvents: bool(a.passthrough, false) ? 'none' : 'auto',
     cursor: CURSORS[str(a.cursor).toLowerCase()],
   };
 }
@@ -75,11 +76,18 @@ function useMouse(node: VmNode, a: Attrs) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * A VIEW or SUBVIEW. Its own box takes no clicks: only its background
+ * does, where it's painted (a color, or the image's pixels that aren't the
+ * transparency color), so a click on a see-through part reaches whatever
+ * is behind - a drawer tucked under it, or one with a lower zIndex.
+ */
 function Container({ node, root }: { node: VmNode; root?: boolean }) {
   const a = useAttrs(node.iid);
   const { images, send } = useView();
   const drag = useWindowDrag();
   const bg = str(a.backgroundimage);
+  const img = bg ? images.get(bg) : undefined;
   const w = num(a.width);
   const h = num(a.height);
   const transparency = a.transparencycolor;
@@ -95,37 +103,44 @@ function Container({ node, root }: { node: VmNode; root?: boolean }) {
   const filters: string[] = [];
   if (num(a.backgroundimagehueshift)) filters.push(`hue-rotate(${num(a.backgroundimagehueshift)}deg)`);
   if (a.backgroundimagesaturation !== undefined && num(a.backgroundimagesaturation, 1) !== 1) filters.push(`saturate(${num(a.backgroundimagesaturation, 1)})`);
+  const box = boxStyle(a);
   const style: CSSProperties = root
-    ? { position: 'absolute', left: 0, top: 0, width: w, height: h, opacity: boxStyle(a).opacity }
-    : { ...boxStyle(a) };
+    ? { position: 'absolute', left: 0, top: 0, width: w, height: h, opacity: box.opacity }
+    : box;
+  // Where the background catches the pointer: all of it under a color,
+  // else just the image's opaque pixels.
+  const fill = !!background || tiled || stretch;
+  const hit = fill || !img ? null : images.region(bg, transparency ?? a.clippingcolor ?? 'none');
   return (
-    <div
-      style={{ ...style, overflow: 'hidden', clipPath: clip ?? undefined, backgroundColor: background }}
-      onPointerDown={(e) => {
-        if (e.target !== e.currentTarget && !(e.target as HTMLElement).dataset.wmpBg) return;
-        if (hasHandler(a, 'onmousedown')) send({ type: 'event', iid: node.iid, name: 'mousedown', event: eventProps(e, e.currentTarget) });
-        drag.onPointerDown(e);
-      }}
-      onPointerMove={drag.onPointerMove}
-      onPointerUp={(e) => {
-        drag.onPointerUp();
-        if (hasHandler(a, 'onmouseup') && e.target === e.currentTarget) send({ type: 'event', iid: node.iid, name: 'mouseup', event: eventProps(e, e.currentTarget) });
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && hasHandler(a, 'onclick')) send({ type: 'event', iid: node.iid, name: 'click', event: eventProps(e, e.currentTarget) });
-      }}
-    >
-      {url && (
+    <div style={{ ...style, overflow: 'hidden', clipPath: clip ?? undefined, pointerEvents: 'none', isolation: 'isolate' }}>
+      {(url || background) && (
         <div
-          data-wmp-bg="1"
           style={{
             position: 'absolute',
-            inset: 0,
-            backgroundImage: `url("${url}")`,
+            left: 0,
+            top: 0,
+            width: fill || !img ? '100%' : img.w,
+            height: fill || !img ? '100%' : img.h,
+            backgroundColor: background,
+            backgroundImage: url ? `url("${url}")` : undefined,
             backgroundRepeat: tiled ? 'repeat' : 'no-repeat',
             backgroundSize: stretch ? '100% 100%' : undefined,
             filter: filters.join(' ') || undefined,
+            clipPath: hit ?? undefined,
             zIndex: 0,
+            pointerEvents: box.pointerEvents === 'none' ? 'none' : 'auto',
+          }}
+          onPointerDown={(e) => {
+            if (hasHandler(a, 'onmousedown')) send({ type: 'event', iid: node.iid, name: 'mousedown', event: eventProps(e, e.currentTarget) });
+            drag.onPointerDown(e);
+          }}
+          onPointerMove={drag.onPointerMove}
+          onPointerUp={(e) => {
+            drag.onPointerUp();
+            if (hasHandler(a, 'onmouseup')) send({ type: 'event', iid: node.iid, name: 'mouseup', event: eventProps(e, e.currentTarget) });
+          }}
+          onClick={(e) => {
+            if (hasHandler(a, 'onclick')) send({ type: 'event', iid: node.iid, name: 'click', event: eventProps(e, e.currentTarget) });
           }}
         />
       )}
@@ -289,6 +304,16 @@ function ButtonGroup({ node }: { node: VmNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redraws when any button's state (stateKey) changes
   }, [map, indexAt, stateKey, a.image, a.hoverimage, a.downimage, a.hoverdownimage, a.disabledimage, a.transparencycolor, a.showbackground, images]);
 
+  // Only the buttons' pixels take clicks (all of the image's, shown whole).
+  const showBackground = bool(a.showbackground, false);
+  const visibleKey = states.map((st) => (bool(st.visible, true) ? 1 : 0)).join('');
+  const hitClip = useMemo(() => {
+    if (!map || !indexAt || showBackground) return null;
+    const mask = new Uint8Array(indexAt.length);
+    for (let p = 0; p < mask.length; p++) mask[p] = indexAt[p] >= 0 && visibleKey[indexAt[p]] === '1' ? 1 : 0;
+    return maskRegion(mask, map.w, map.h);
+  }, [map, indexAt, showBackground, visibleKey]);
+
   const at = (e: React.PointerEvent | React.MouseEvent) => {
     if (!map || !indexAt) return -1;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -323,7 +348,7 @@ function ButtonGroup({ node }: { node: VmNode }) {
       role="group"
       aria-label={str(a.accname) || node.attrs.id || 'Buttons'}
       title={hover >= 0 ? tipOf(hover) : undefined}
-      style={{ ...boxStyle(a), width: w, height: h, cursor: hover >= 0 ? cursorOf(hover) : undefined }}
+      style={{ ...boxStyle(a), width: w, height: h, clipPath: hitClip ?? undefined, cursor: hover >= 0 ? cursorOf(hover) : undefined }}
       onPointerMove={(e) => {
         drag.onPointerMove(e);
         const idx = at(e);
@@ -395,6 +420,31 @@ function useDrag(onMove: (e: React.PointerEvent, rect: DOMRect) => void, onEnd: 
         onEnd(e, e.currentTarget.getBoundingClientRect());
       },
     },
+  };
+}
+
+/**
+ * A slider's track. Tiled, it's three slices along its direction: the
+ * first and last borderSize pixels are end caps, and the middle repeats.
+ */
+function trackStyle(url: string, img: { w: number; h: number } | undefined, tiled: boolean, vertical: boolean, border: number, w: number, h: number): CSSProperties {
+  const length = vertical ? h : w;
+  const imgLength = img ? (vertical ? img.h : img.w) : length;
+  if (!tiled || !img || imgLength >= length) {
+    return { backgroundImage: `url("${url}")`, backgroundRepeat: 'no-repeat', backgroundPosition: vertical ? 'center bottom' : 'left center' };
+  }
+  const cap = Math.max(0, Math.min(border, Math.floor((imgLength - 1) / 2)));
+  if (cap === 0) {
+    return { backgroundImage: `url("${url}")`, backgroundRepeat: vertical ? 'repeat-y' : 'repeat-x', backgroundPosition: vertical ? 'center bottom' : 'left center' };
+  }
+  const cross = vertical ? img.w : img.h;
+  const across = vertical ? (w - cross) / 2 : (h - cross) / 2;
+  return {
+    ...(vertical ? { left: across, right: across } : { top: across, bottom: across }),
+    borderImageSource: `url("${url}")`,
+    borderImageSlice: vertical ? `${cap} 0 fill` : `0 ${cap} fill`,
+    borderImageWidth: vertical ? `${cap}px 0` : `0 ${cap}px`,
+    borderImageRepeat: vertical ? 'stretch repeat' : 'repeat stretch',
   };
 }
 
@@ -476,7 +526,7 @@ function Slider({ node }: { node: VmNode }) {
       style={{ ...boxStyle(a), outline: 'none', background: grad(bgColor, a.backgroundendcolor) ?? bgColor, overflow: 'hidden' }}
     >
       {bgUrl && (
-        <div style={{ position: 'absolute', inset: 0, backgroundImage: `url("${bgUrl}")`, backgroundRepeat: tiled ? (vertical ? 'repeat-y' : 'repeat-x') : 'no-repeat', backgroundPosition: vertical ? 'center bottom' : 'left center' }} />
+        <div style={{ position: 'absolute', inset: 0, ...trackStyle(bgUrl, images.get(bgName), tiled, vertical, border, w, h) }} />
       )}
       {enabled && (fgUrl || fgColor) && (
         <div style={{ position: 'absolute', overflow: 'hidden', ...fillStyle }}>

@@ -52,20 +52,13 @@ function Preview({ entry }: { entry: SkinEntry }) {
     queryKey: ['music', 'skin-preview', entry.id],
     queryFn: async () => {
       if (entry.choice.kind === 'din') return '/icons/apps/music-player.png';
-      if (!entry.choice.path) return 'din-classic';
+      if (!entry.choice.path) return winampPreview(null);
       const { data } = await getFsBridge()!.readFile(entry.choice.path, 32 * 1024 * 1024);
       return entry.kind === 'winamp' ? winampPreview(data) : wmpPreview(data);
     },
     staleTime: Infinity,
   });
-  if (query.isLoading) return <Skeleton className="size-full bg-white/10" />;
-  if (query.data === 'din-classic') {
-    return (
-      <div className="grid size-full place-items-center bg-[linear-gradient(#3a4150,#232833)] font-mono text-xs tracking-widest text-[#5fd3ff]">
-        DIN CLASSIC
-      </div>
-    );
-  }
+  if (query.isLoading) return <Skeleton className="size-full bg-foreground/10" />;
   if (!query.data) return <div className="grid size-full place-items-center text-[var(--mp-ink-faint)]"><Palette className="size-10" /></div>;
   return <img src={query.data} alt="" className={cn('size-full object-contain', entry.kind !== 'din' && '[image-rendering:pixelated]')} />;
 }
@@ -140,10 +133,10 @@ export function SkinChooser({ commands }: { commands: Commands }) {
           ))}
         </ul>
         <div className="space-y-1 border-t border-[var(--mp-line)] p-2 text-xs">
-          <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-white" onClick={() => openUrl('https://skins.webamp.org/')}>
+          <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-[var(--mp-ink)]" onClick={() => openUrl('https://skins.webamp.org/')}>
             <ExternalLink className="size-3" /> Winamp Skin Museum
           </button>
-          <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-white" onClick={() => openUrl('https://archive.org/search?query=windows+media+player+skins')}>
+          <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-[var(--mp-ink)]" onClick={() => openUrl('https://archive.org/search?query=windows+media+player+skins')}>
             <ExternalLink className="size-3" /> Windows Media Player skins
           </button>
         </div>
@@ -151,7 +144,7 @@ export function SkinChooser({ commands }: { commands: Commands }) {
       <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-4 p-6">
         {selected && (
           <>
-            <div className="grid h-64 w-full max-w-lg place-items-center overflow-hidden rounded-xl bg-[repeating-conic-gradient(hsl(var(--mp-hue)_30%_14%)_0_25%,hsl(var(--mp-hue)_30%_11%)_0_50%)] bg-[length:16px_16px] p-4 ring-1 ring-white/10">
+            <div className="flex h-64 w-full max-w-lg items-center justify-center overflow-hidden rounded-xl bg-[repeating-conic-gradient(var(--color-muted)_0_25%,transparent_0_50%)] bg-[length:16px_16px] p-4 ring-1 ring-foreground/10">
               <Preview key={selected.id} entry={selected} />
             </div>
             <div className="text-center">
@@ -167,9 +160,9 @@ export function SkinChooser({ commands }: { commands: Commands }) {
             <button type="button" className="mp-btn px-6 py-2 text-base" data-primary disabled={sameChoice(selected.choice, current)} onClick={() => setPrefs({ skin: selected.choice })}>
               {sameChoice(selected.choice, current) ? 'In Use' : 'Apply Skin'}
             </button>
-            {(error ?? commands.message) && <p role="alert" className="text-sm text-amber-200">{error ?? commands.message}</p>}
+            {(error ?? commands.message) && <p role="alert" className="text-sm text-amber-700 dark:text-amber-200">{error ?? commands.message}</p>}
             <p className="max-w-md text-center text-xs text-[var(--mp-ink-faint)]">
-              Open a .wsz or .wmz file from Files to add it here. In a skin, the menu (or right-click) brings you back to Din’s skin.
+              Open a .wsz or .wmz file from Files to add it here. Whatever the skin, View › Skin in the menu bar, Ctrl+1, or right-clicking Music Player in the Dock brings back Din’s own.
             </p>
           </>
         )}

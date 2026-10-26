@@ -49,7 +49,7 @@ export function ListPane() {
   return (
     <aside aria-label="Now Playing list" className="mp-pane flex w-72 shrink-0 flex-col border-y-0 border-r-0">
       <div className="flex items-center gap-3 border-b border-[var(--mp-line)] p-3">
-        <Cover location={track?.location} className="size-16 shadow-lg ring-1 ring-white/10" />
+        <Cover location={track?.location} className="size-16 shadow-lg ring-1 ring-foreground/10" />
         <div className="min-w-0 flex-1 leading-snug">
           <p className="truncate font-semibold">{track?.album || track?.title || 'Now Playing'}</p>
           <p className="truncate text-xs text-[var(--mp-ink-dim)]">{track?.artist || (queue.length ? '' : 'Nothing queued')}</p>

@@ -1,73 +1,72 @@
 /*
- * Din's own skin for the Music Player: Windows Media Player 10's glossy
- * navy chrome, a touch flatter and softer. Every color hangs off --mp-hue,
- * which View > Choose Color turns (as WMP's color chooser did).
+ * Din's own skin for the Music Player: Windows Media Player 10's glass Play
+ * orb and glossy transport, on Din's own surfaces. Light or dark comes from
+ * Din's theme tokens; the tint (--mp-tint, with --mp-on-tint for text on
+ * it) is the theme's primary color when it has one, else WMP blue, or
+ * whatever View > Choose Color picked. Set inline on .mp-theme.
  */
 
 /* In the components layer, so Tailwind's utilities still override it. */
 @layer components {
+  /* Nests: an inner .mp-theme (with .dark) recomputes the tokens it uses. */
+  .mp-theme {
+    --mp-ink: var(--foreground);
+    --mp-ink-dim: color-mix(in oklab, var(--foreground) 72%, transparent);
+    --mp-ink-faint: var(--muted-foreground);
+    --mp-accent: var(--mp-tint);
+    --mp-current: color-mix(in oklab, var(--mp-tint) 78%, var(--foreground));
+    --mp-pane: color-mix(in oklab, var(--card) 55%, transparent);
+    --mp-pane-2: color-mix(in oklab, var(--mp-tint) 12%, var(--card));
+    --mp-line: color-mix(in oklab, var(--border) 80%, transparent);
+    --mp-row-hover: color-mix(in oklab, var(--mp-tint) 10%, transparent);
+    --mp-row-selected: color-mix(in oklab, var(--mp-tint) 24%, transparent);
+    --mp-track: color-mix(in oklab, var(--foreground) 16%, transparent);
+  }
+
   .mp-root {
-    --mp-hue: 212;
-    --mp-ink: hsl(var(--mp-hue) 45% 92%);
-    --mp-ink-dim: hsl(var(--mp-hue) 25% 72%);
-    --mp-ink-faint: hsl(var(--mp-hue) 20% 58%);
-    --mp-accent: hsl(var(--mp-hue) 90% 62%);
-    --mp-accent-soft: hsl(var(--mp-hue) 90% 62% / 0.18);
-    --mp-glow: hsl(calc(var(--mp-hue) - 10) 100% 70%);
-    --mp-bg: hsl(var(--mp-hue) 45% 8%);
-    --mp-pane: hsl(var(--mp-hue) 40% 11%);
-    --mp-pane-2: hsl(var(--mp-hue) 38% 14%);
-    --mp-line: hsl(var(--mp-hue) 40% 30% / 0.55);
-    --mp-row-hover: hsl(var(--mp-hue) 60% 50% / 0.12);
-    --mp-row-selected: hsl(var(--mp-hue) 75% 50% / 0.28);
     color: var(--mp-ink);
-    background:
-      radial-gradient(120% 80% at 50% 0%, hsl(var(--mp-hue) 55% 16%) 0%, transparent 60%),
-      var(--mp-bg);
     font-size: 13px;
   }
 
   .mp-root ::selection {
-    background: hsl(var(--mp-hue) 80% 50% / 0.5);
+    background: color-mix(in oklab, var(--mp-tint) 45%, transparent);
   }
 
   /* Glossy bars: a bright upper half over a deeper lower half, WMP style. */
   .mp-gloss {
-    background:
-      linear-gradient(180deg,
-        hsl(var(--mp-hue) 50% 36%) 0%,
-        hsl(var(--mp-hue) 55% 24%) 48%,
-        hsl(var(--mp-hue) 62% 15%) 52%,
-        hsl(var(--mp-hue) 58% 19%) 100%);
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--mp-tint) 10%, var(--card)) 0%,
+      color-mix(in oklab, var(--mp-tint) 6%, var(--card)) 48%,
+      color-mix(in oklab, var(--mp-tint) 14%, var(--background)) 52%,
+      color-mix(in oklab, var(--mp-tint) 8%, var(--background)) 100%);
     box-shadow:
-      inset 0 1px 0 hsl(var(--mp-hue) 80% 80% / 0.35),
-      inset 0 -1px 0 hsl(var(--mp-hue) 60% 5% / 0.8);
-  }
-
-  .mp-taskbar {
-    border-bottom: 1px solid hsl(var(--mp-hue) 60% 4%);
+      inset 0 1px 0 color-mix(in oklab, white 35%, transparent),
+      inset 0 -1px 0 var(--mp-line);
   }
 
   .mp-tab {
     position: relative;
     border-radius: 6px;
-    padding: 4px 12px;
+    padding: 2px 10px;
     color: var(--mp-ink-dim);
-    font-weight: 600;
-    letter-spacing: 0.01em;
+    font-size: 13px;
+    font-weight: 500;
     transition: color 120ms, background-color 120ms, box-shadow 120ms;
   }
   .mp-tab:hover {
     color: var(--mp-ink);
-    background: hsl(var(--mp-hue) 80% 70% / 0.1);
+    background: color-mix(in oklab, var(--foreground) 8%, transparent);
   }
   .mp-tab[data-active='true'] {
-    color: #fff;
-    background:
-      linear-gradient(180deg, hsl(var(--mp-hue) 85% 62% / 0.55), hsl(var(--mp-hue) 85% 42% / 0.55) 50%, hsl(var(--mp-hue) 90% 32% / 0.6) 51%, hsl(var(--mp-hue) 90% 40% / 0.5));
+    color: var(--mp-on-tint);
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--mp-tint), white 18%) 0%,
+      var(--mp-tint) 50%,
+      color-mix(in oklab, var(--mp-tint), black 12%) 51%,
+      var(--mp-tint) 100%);
     box-shadow:
-      inset 0 1px 0 hsl(var(--mp-hue) 100% 90% / 0.5),
-      0 0 12px hsl(var(--mp-hue) 100% 60% / 0.45);
+      inset 0 1px 0 color-mix(in oklab, white 45%, transparent),
+      0 0 10px color-mix(in oklab, var(--mp-tint) 40%, transparent);
   }
 
   .mp-pane {
@@ -82,11 +81,12 @@
     background: var(--mp-row-selected);
   }
   .mp-row[data-current='true'] {
-    color: hsl(calc(var(--mp-hue) - 20) 100% 78%);
+    color: var(--mp-current);
+    font-weight: 600;
   }
 
   .mp-input {
-    background: hsl(var(--mp-hue) 45% 6%);
+    background: color-mix(in oklab, var(--background) 70%, transparent);
     border: 1px solid var(--mp-line);
     border-radius: 6px;
     color: var(--mp-ink);
@@ -108,21 +108,21 @@
     border-radius: 6px;
     padding: 4px 10px;
     color: var(--mp-ink);
-    background: linear-gradient(180deg, hsl(var(--mp-hue) 40% 28%), hsl(var(--mp-hue) 45% 18%));
-    border: 1px solid hsl(var(--mp-hue) 50% 35% / 0.7);
-    box-shadow: inset 0 1px 0 hsl(var(--mp-hue) 70% 80% / 0.2);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--foreground) 6%, var(--card)), color-mix(in oklab, var(--foreground) 10%, var(--card)));
+    border: 1px solid var(--mp-line);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 25%, transparent);
     font-weight: 500;
   }
   .mp-btn:hover:not(:disabled) {
-    background: linear-gradient(180deg, hsl(var(--mp-hue) 50% 34%), hsl(var(--mp-hue) 55% 22%));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--foreground) 10%, var(--card)), color-mix(in oklab, var(--foreground) 15%, var(--card)));
   }
   .mp-btn:disabled {
     opacity: 0.45;
   }
   .mp-btn[data-primary='true'] {
-    background: linear-gradient(180deg, hsl(var(--mp-hue) 85% 58%), hsl(var(--mp-hue) 85% 42%));
-    border-color: hsl(var(--mp-hue) 90% 70% / 0.7);
-    color: #fff;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--mp-tint), white 14%), color-mix(in oklab, var(--mp-tint), black 10%));
+    border-color: color-mix(in oklab, var(--mp-tint), black 15%);
+    color: var(--mp-on-tint);
   }
 
   /* Small round chrome buttons (stop, previous, next, mute...). */
@@ -134,16 +134,14 @@
     transition: color 120ms, background-color 120ms, box-shadow 120ms, transform 80ms;
   }
   .mp-icon-btn:hover:not(:disabled) {
-    color: #fff;
-    background: hsl(var(--mp-hue) 80% 70% / 0.14);
-    box-shadow: 0 0 10px hsl(var(--mp-hue) 100% 65% / 0.35);
+    color: var(--mp-ink);
+    background: color-mix(in oklab, var(--foreground) 9%, transparent);
   }
   .mp-icon-btn:active:not(:disabled) {
     transform: scale(0.94);
   }
   .mp-icon-btn[aria-pressed='true'] {
-    color: hsl(calc(var(--mp-hue) - 15) 100% 75%);
-    text-shadow: 0 0 8px var(--mp-glow);
+    color: var(--mp-current);
   }
   .mp-icon-btn:disabled {
     opacity: 0.4;
@@ -154,24 +152,24 @@
     display: grid;
     place-items: center;
     border-radius: 9999px;
-    color: #fff;
+    color: var(--mp-on-tint);
     background:
-      radial-gradient(circle at 50% 28%, hsl(var(--mp-hue) 100% 88% / 0.95) 0%, hsl(var(--mp-hue) 100% 70% / 0.6) 22%, transparent 46%),
-      radial-gradient(circle at 50% 70%, hsl(var(--mp-hue) 100% 62%) 0%, hsl(var(--mp-hue) 90% 38%) 55%, hsl(var(--mp-hue) 95% 20%) 100%);
+      radial-gradient(circle at 50% 26%, color-mix(in oklab, white 85%, transparent) 0%, color-mix(in oklab, white 30%, transparent) 24%, transparent 46%),
+      radial-gradient(circle at 50% 72%, color-mix(in oklab, var(--mp-tint), white 25%) 0%, var(--mp-tint) 50%, color-mix(in oklab, var(--mp-tint), black 45%) 100%);
     box-shadow:
-      0 0 0 3px hsl(var(--mp-hue) 20% 82%),
-      0 0 0 4px hsl(var(--mp-hue) 40% 25%),
-      0 2px 10px hsl(var(--mp-hue) 100% 10% / 0.8),
-      0 0 18px hsl(var(--mp-hue) 100% 60% / 0.45);
+      0 0 0 3px color-mix(in oklab, #c9d0da 75%, var(--background)),
+      0 0 0 4px color-mix(in oklab, var(--foreground) 25%, transparent),
+      0 2px 8px color-mix(in oklab, black 35%, transparent),
+      0 0 16px color-mix(in oklab, var(--mp-tint) 40%, transparent);
     transition: box-shadow 160ms, filter 160ms, transform 80ms;
   }
   .mp-orb:hover {
-    filter: brightness(1.12);
+    filter: brightness(1.1);
     box-shadow:
-      0 0 0 3px hsl(var(--mp-hue) 25% 90%),
-      0 0 0 4px hsl(var(--mp-hue) 40% 25%),
-      0 2px 10px hsl(var(--mp-hue) 100% 10% / 0.8),
-      0 0 26px hsl(var(--mp-hue) 100% 65% / 0.75);
+      0 0 0 3px color-mix(in oklab, #dfe4ea 80%, var(--background)),
+      0 0 0 4px color-mix(in oklab, var(--foreground) 25%, transparent),
+      0 2px 8px color-mix(in oklab, black 35%, transparent),
+      0 0 24px color-mix(in oklab, var(--mp-tint) 65%, transparent);
   }
   .mp-orb:active {
     transform: scale(0.96);
@@ -188,8 +186,7 @@
   .mp-range::-webkit-slider-runnable-track {
     height: 4px;
     border-radius: 9999px;
-    background: linear-gradient(90deg, var(--mp-accent) 0 var(--mp-fill), hsl(var(--mp-hue) 40% 6%) var(--mp-fill) 100%);
-    box-shadow: inset 0 1px 1px hsl(0 0% 0% / 0.6), 0 1px 0 hsl(var(--mp-hue) 70% 70% / 0.15);
+    background: linear-gradient(90deg, var(--mp-accent) 0 var(--mp-fill), var(--mp-track) var(--mp-fill) 100%);
   }
   .mp-range::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -197,8 +194,8 @@
     height: 12px;
     margin-top: -4px;
     border-radius: 9999px;
-    background: radial-gradient(circle at 50% 35%, #fff, hsl(var(--mp-hue) 30% 75%));
-    box-shadow: 0 0 0 1px hsl(var(--mp-hue) 50% 20%), 0 0 8px hsl(var(--mp-hue) 100% 65% / 0.6);
+    background: radial-gradient(circle at 50% 35%, #fff, #c9d0da);
+    box-shadow: 0 0 0 1px color-mix(in oklab, black 30%, transparent), 0 1px 3px color-mix(in oklab, black 30%, transparent);
     opacity: 0;
     transition: opacity 120ms;
   }
@@ -211,7 +208,7 @@
     outline: none;
   }
   .mp-range:focus-visible::-webkit-slider-thumb {
-    box-shadow: 0 0 0 2px var(--mp-accent), 0 0 8px hsl(var(--mp-hue) 100% 65% / 0.6);
+    box-shadow: 0 0 0 2px var(--mp-accent);
   }
 
   /* Vertical EQ sliders. */
@@ -222,7 +219,7 @@
   .mp-vrange::-webkit-slider-runnable-track {
     width: 4px;
     height: auto;
-    background: linear-gradient(0deg, var(--mp-accent) 0 var(--mp-fill), hsl(var(--mp-hue) 40% 6%) var(--mp-fill) 100%);
+    background: linear-gradient(0deg, var(--mp-accent) 0 var(--mp-fill), var(--mp-track) var(--mp-fill) 100%);
   }
   .mp-vrange::-webkit-slider-thumb {
     margin-top: 0;
@@ -232,13 +229,12 @@
 
   .mp-scroll {
     scrollbar-width: thin;
-    scrollbar-color: hsl(var(--mp-hue) 40% 32%) transparent;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 25%, transparent) transparent;
   }
 
   .mp-lcd {
     font-variant-numeric: tabular-nums;
-    color: hsl(calc(var(--mp-hue) - 20) 100% 80%);
-    text-shadow: 0 0 6px hsl(var(--mp-hue) 100% 60% / 0.6);
+    color: var(--mp-current);
   }
 
   @keyframes mp-marquee {

@@ -1,5 +1,6 @@
 import { unzipSync } from 'fflate';
 import { makeDefaultSheets } from './defaultSkin';
+import { SPRITES } from './sprites';
 
 /**
  * A classic Winamp 2.x skin (.wsz, a renamed zip of bitmaps and a few text
@@ -218,16 +219,60 @@ export async function loadWinampSkin(bytes: Uint8Array | null, name: string): Pr
   };
 }
 
-/** The main window's background, as a URL (for the skin chooser's preview). */
-export async function winampPreview(bytes: Uint8Array): Promise<string | null> {
-  const find = finder(unzipSync(bytes));
-  const data = find('main.bmp') ?? find('main.png');
-  if (!data) return null;
-  const decoded = await decodeBitmap(data, 'main.bmp');
-  if (!decoded) return null;
-  // Draw the title bar over it, as Winamp shows it.
-  const title = find('titlebar.bmp');
-  const titleCanvas = title ? (await decodeBitmap(title, 'titlebar.bmp'))?.canvas : null;
-  if (titleCanvas) decoded.canvas.getContext('2d')!.drawImage(titleCanvas, 27, 0, 275, 14, 0, 0, 275, 14);
-  return decoded.canvas.toDataURL();
+/**
+ * A picture of the main window and equalizer as Winamp shows them, for the
+ * skin chooser: a skin file's bitmaps (or Din Classic's, with null).
+ */
+export async function winampPreview(bytes: Uint8Array | null): Promise<string | null> {
+  const find = finder(bytes ? unzipSync(bytes) : {});
+  const defaults = makeDefaultSheets();
+  const sheets = new Map<SheetName, CanvasImageSource>();
+  for (const name of SHEETS) {
+    const data = find(`${name}.bmp`) ?? find(`${name}.png`);
+    const decoded = data ? await decodeBitmap(data, find(`${name}.bmp`) ? `${name}.bmp` : `${name}.png`) : null;
+    const canvas = decoded?.canvas ?? defaults[name];
+    if (canvas) sheets.set(name, canvas);
+  }
+  if (!sheets.has('main')) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 275;
+  canvas.height = 232;
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  const draw = (name: keyof typeof SPRITES, x: number, y: number, dy = 0) => {
+    const [sheet, sx, sy, w, h] = SPRITES[name];
+    const src = sheets.get(sheet);
+    if (src) ctx.drawImage(src, sx, sy + dy, w, h, x, y, w, h);
+  };
+  draw('mainBg', 0, 0);
+  draw('titleActive', 0, 0);
+  draw('clutter', 10, 22);
+  draw('playing', 26, 28);
+  draw('stereoOn', 239, 41);
+  draw('mono', 212, 41);
+  const volume = sheets.get('volume');
+  if (volume) ctx.drawImage(volume, 0, 21 * 15, 68, 13, 107, 57, 68, 13);
+  const balance = sheets.get('balance');
+  if (balance) ctx.drawImage(balance, 9, 0, 38, 13, 177, 57, 38, 13);
+  draw('volThumb', 107 + 43, 58);
+  draw('balThumb', 177 + 12, 58);
+  draw('eqBtnOn', 219, 58);
+  draw('plBtnOn', 242, 58);
+  draw('posBg', 16, 72);
+  draw('posThumb', 16 + 60, 72);
+  draw('prev', 16, 88);
+  draw('play', 39, 88);
+  draw('pause', 62, 88);
+  draw('stop', 85, 88);
+  draw('next', 108, 88);
+  draw('eject', 136, 89);
+  draw('shuffle', 164, 89);
+  draw('repeatOn', 210, 89);
+  draw('eqBg', 0, 116);
+  draw('eqTitleActive', 0, 116);
+  draw('eqOnSel', 14, 134);
+  draw('eqAuto', 40, 134);
+  draw('eqPresets', 217, 134);
+  draw('eqGraphBg', 86, 133);
+  return canvas.toDataURL();
 }

@@ -138,19 +138,7 @@ export class SkinImages {
     const id = `${baseName(String(name))}|${key?.join(',') ?? ''}`;
     let url = this.urls.get(id);
     if (!url) {
-      if (!key) url = img.canvas.toDataURL();
-      else {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.w;
-        canvas.height = img.h;
-        const ctx = canvas.getContext('2d')!;
-        const out = ctx.createImageData(img.w, img.h);
-        out.data.set(img.data);
-        const mask = this.mask(name, color)!;
-        for (let p = 0; p < mask.length; p++) if (!mask[p]) out.data[p * 4 + 3] = 0;
-        ctx.putImageData(out, 0, 0);
-        url = canvas.toDataURL();
-      }
+      url = (key ? this.keyed(name, color)! : img.canvas).toDataURL();
       this.urls.set(id, url);
     }
     return url;
@@ -167,41 +155,65 @@ export class SkinImages {
     if (!img) return null;
     const key = this.key(name, color);
     const id = `${baseName(String(name))}|${key?.join(',') ?? ''}|${width ?? ''}x${height ?? ''}`;
-    if (this.regions.has(id)) return this.regions.get(id)!;
-    const mask = this.mask(name, color)!;
-    const w = Math.min(img.w, width ?? img.w);
-    const h = Math.min(img.h, height ?? img.h);
-    let cut = false;
-    const rects: string[] = [];
-    let open = new Map<string, { y: number; x0: number; x1: number }>();
-    const close = (r: { y: number; x0: number; x1: number }, y: number) => rects.push(`M${r.x0} ${r.y}H${r.x1}V${y}H${r.x0}Z`);
-    for (let y = 0; y < h; y++) {
-      const runs: [number, number][] = [];
-      let x = 0;
-      while (x < w) {
-        while (x < w && !mask[y * img.w + x]) {
-          cut = true;
-          x++;
-        }
-        const start = x;
-        while (x < w && mask[y * img.w + x]) x++;
-        if (x > start) runs.push([start, x]);
-      }
-      const next = new Map<string, { y: number; x0: number; x1: number }>();
-      for (const [x0, x1] of runs) {
-        const k = `${x0},${x1}`;
-        next.set(k, open.get(k) ?? { y, x0, x1 });
-        open.delete(k);
-      }
-      for (const r of open.values()) close(r, y);
-      open = next;
-    }
-    for (const r of open.values()) close(r, h);
-    // Everything outside the image (when the element is bigger) stays.
-    if (width !== undefined && width > img.w) rects.push(`M${img.w} 0H${width}V${height ?? h}H${img.w}Z`);
-    if (height !== undefined && height > img.h) rects.push(`M0 ${img.h}H${img.w}V${height}H0Z`);
-    const path = cut ? `path('${rects.join('')}')` : null;
-    this.regions.set(id, path);
-    return path;
+    if (!this.regions.has(id)) this.regions.set(id, maskRegion(this.mask(name, color)!, img.w, img.h, width, height));
+    return this.regions.get(id)!;
   }
+
+  /** The image with its key color made transparent, to draw from. */
+  keyed(name: unknown, color: unknown): HTMLCanvasElement | null {
+    const img = this.get(name);
+    if (!img) return null;
+    const key = this.key(name, color);
+    if (!key) return img.canvas;
+    const canvas = document.createElement('canvas');
+    canvas.width = img.w;
+    canvas.height = img.h;
+    const ctx = canvas.getContext('2d')!;
+    const out = ctx.createImageData(img.w, img.h);
+    out.data.set(img.data);
+    const mask = this.mask(name, color)!;
+    for (let p = 0; p < mask.length; p++) if (!mask[p]) out.data[p * 4 + 3] = 0;
+    ctx.putImageData(out, 0, 0);
+    return canvas;
+  }
+}
+
+/**
+ * A clip-path covering the set pixels of a mask (w×h), as a union of
+ * rectangles, or null when every pixel is set. An element bigger than the
+ * mask (width, height) keeps the part outside it.
+ */
+export function maskRegion(mask: ArrayLike<number>, w: number, h: number, width?: number, height?: number): string | null {
+  let cut = false;
+  const rects: string[] = [];
+  let open = new Map<string, { y: number; x0: number; x1: number }>();
+  const close = (r: { y: number; x0: number; x1: number }, y: number) => rects.push(`M${r.x0} ${r.y}H${r.x1}V${y}H${r.x0}Z`);
+  const cw = Math.min(w, width ?? w);
+  const ch = Math.min(h, height ?? h);
+  for (let y = 0; y < ch; y++) {
+    const runs: [number, number][] = [];
+    let x = 0;
+    while (x < cw) {
+      while (x < cw && !mask[y * w + x]) {
+        cut = true;
+        x++;
+      }
+      const start = x;
+      while (x < cw && mask[y * w + x]) x++;
+      if (x > start) runs.push([start, x]);
+    }
+    const next = new Map<string, { y: number; x0: number; x1: number }>();
+    for (const [x0, x1] of runs) {
+      const k = `${x0},${x1}`;
+      next.set(k, open.get(k) ?? { y, x0, x1 });
+      open.delete(k);
+    }
+    for (const r of open.values()) close(r, y);
+    open = next;
+  }
+  for (const r of open.values()) close(r, ch);
+  if (width !== undefined && width > w) rects.push(`M${w} 0H${width}V${height ?? ch}H${w}Z`);
+  if (height !== undefined && height > h) rects.push(`M0 ${h}H${w}V${height}H0Z`);
+  if (!cut) return null;
+  return rects.length > 0 ? `path('${rects.join('')}')` : 'inset(50%)';
 }

@@ -28,7 +28,7 @@ function AlbumArtStage({ location }: { location: string | null }) {
   return (
     <div className="absolute inset-0 grid place-items-center overflow-hidden">
       {cover && <img src={cover} alt="" aria-hidden className="absolute inset-0 size-full scale-125 object-cover opacity-40 blur-3xl" />}
-      <div className="relative aspect-square h-[70%] max-h-[420px] overflow-hidden rounded-lg bg-[linear-gradient(135deg,hsl(var(--mp-hue)_50%_24%),hsl(var(--mp-hue)_55%_8%))] shadow-[0_20px_60px_rgb(0_0_0/0.6)] ring-1 ring-white/10">
+      <div className="relative aspect-square h-[70%] max-h-[420px] overflow-hidden rounded-lg bg-[linear-gradient(135deg,color-mix(in_oklab,var(--mp-tint)_45%,black),color-mix(in_oklab,var(--mp-tint)_15%,black))] shadow-[0_20px_60px_rgb(0_0_0/0.6)] ring-1 ring-white/10">
         {cover ? (
           <img src={cover} alt="Album art" className="size-full object-cover" />
         ) : (
@@ -96,7 +96,7 @@ function VisPicker() {
         <ChevronLeft className="size-4" />
       </IconButton>
       <DropdownMenu>
-        <DropdownMenuTrigger className="max-w-40 truncate rounded px-1 text-xs text-[var(--mp-ink-dim)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]">
+        <DropdownMenuTrigger className="max-w-40 truncate rounded px-1 text-xs text-[var(--mp-ink-dim)] hover:text-[var(--mp-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]">
           {visName(vis)}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
@@ -133,7 +133,7 @@ export function NowPlaying() {
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="group relative min-h-0 flex-1 overflow-hidden bg-black" onDoubleClick={() => !video && setPrefs({ vis: VIS_IDS[(VIS_IDS.indexOf(vis) + 1) % VIS_IDS.length] })}>
+        <div className="mp-theme dark group relative min-h-0 flex-1 overflow-hidden bg-black" onDoubleClick={() => !video && setPrefs({ vis: VIS_IDS[(VIS_IDS.indexOf(vis) + 1) % VIS_IDS.length] })}>
           {video ? <VideoStage /> : vis === 'art' ? <AlbumArtStage location={track?.location ?? null} /> : <VisCanvas vis={vis} className="absolute inset-0" />}
           {!video && <InfoOverlay />}
           {lyrics && track && !video && <Lyrics location={track.location} />}

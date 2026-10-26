@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AppComponentProps } from '@/lib/apps';
 import { getFsBridge, cleanFsError } from '@/lib/fs';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { areaFor } from '@/lib/monitors';
+import { MIN_HEIGHT, MIN_WIDTH } from '@/hooks/useWindows';
 import { FILES_MIME } from './files/dnd';
 import { openPaths } from './music/actions';
 import { player, usePlayer } from './music/engine';
 import { getPrefs, setPrefs, setWinampPrefs, usePrefs, type SkinChoice } from './music/prefs';
 import { useCommands, type Commands } from './music/useCommands';
+import { AppMenus } from './music/din/AppMenus';
 import { DinSkin } from './music/din/DinSkin';
 import { TextPromptHost } from './music/din/TextPrompt';
 import { loadWinampSkin, type WinampSkin } from './music/winamp/skin';
@@ -21,7 +23,7 @@ import './music/din/player.css';
 
 /** The Din skin's window size in full mode, and the Mini Player's. */
 const FULL_SIZE = { width: 1040, height: 680 };
-const MINI_SIZE = { width: 460, height: 128 };
+const MINI_SIZE = { width: 460, height: 168 };
 
 type LoadedSkin =
   | { kind: 'din' }
@@ -74,11 +76,21 @@ function useLoadedSkin(choice: SkinChoice, onError: (message: string) => void): 
  * mini), any other skin frameless at exactly the skin's size. A component
  * of its own because it follows every window change.
  */
-function FitWindow({ windowId, frameless, width, height }: { windowId: string; frameless: boolean; width: number; height: number }) {
+function FitWindow({
+  windowId, frameless, width: wantWidth, height: wantHeight, remember,
+}: {
+  windowId: string;
+  frameless: boolean;
+  width: number;
+  height: number;
+  /** Keep the size the user drags it to (Din's full mode). */
+  remember: boolean;
+}) {
   const { windows } = useWindowManager();
   const { resize, setFrameless } = useWindowActions();
   const areas = useWorkAreas();
   const current = useRef({ windows, areas });
+  const target = useRef<{ width: number; height: number; settled: boolean } | null>(null);
   useEffect(() => {
     current.current = { windows, areas };
   }, [windows, areas]);
@@ -86,8 +98,23 @@ function FitWindow({ windowId, frameless, width, height }: { windowId: string; f
     const { windows, areas } = current.current;
     const win = windows.find((w) => w.id === windowId);
     if (!win || win.maximized || win.snapped) return;
-    if (win.frameless === frameless && win.width === width && win.height === height) return;
+    let width = Math.round(wantWidth);
+    let height = Math.round(wantHeight);
+    // A framed window is never smaller than the window manager allows.
+    if (!frameless) {
+      width = Math.max(MIN_WIDTH, width);
+      height = Math.max(MIN_HEIGHT, height);
+    }
     let { x, y } = win;
+    if (areas.length > 0) {
+      const area = areaFor(areas, win);
+      // No bigger than the monitor it's on.
+      width = Math.min(width, Math.max(frameless ? 1 : MIN_WIDTH, area.width));
+      height = Math.min(height, Math.max(frameless ? 1 : MIN_HEIGHT, area.height));
+    }
+    const fits = win.frameless === frameless && win.width === width && win.height === height;
+    target.current = { width, height, settled: fits };
+    if (fits) return;
     if (areas.length > 0) {
       const area = areaFor(areas, win);
       x = Math.max(area.x, Math.min(x, area.x + area.width - Math.min(width, area.width)));
@@ -95,22 +122,44 @@ function FitWindow({ windowId, frameless, width, height }: { windowId: string; f
     }
     if (win.frameless !== frameless) setFrameless(windowId, frameless, { x, y, width, height });
     else resize(windowId, { x, y, width, height });
-  }, [windowId, frameless, width, height, resize, setFrameless]);
+  }, [windowId, frameless, wantWidth, wantHeight, resize, setFrameless]);
+
+  // Once the window has reached the size asked for, later changes are the
+  // user's: remember them. (Before then they're the window manager's.)
+  const win = windows.find((w) => w.id === windowId);
+  const free = !!win && !win.frameless && !win.maximized && !win.snapped;
+  const width = win ? Math.round(win.width) : 0;
+  const height = win ? Math.round(win.height) : 0;
+  useEffect(() => {
+    const t = target.current;
+    if (!t || !free) return;
+    if (width === t.width && height === t.height) {
+      t.settled = true;
+      return;
+    }
+    if (!t.settled || !remember || height <= MINI_SIZE.height + 40) return;
+    const saved = getPrefs().dinSize;
+    if (saved?.width !== width || saved?.height !== height) setPrefs({ dinSize: { width, height } });
+  }, [free, width, height, remember]);
   return null;
 }
 
-/** Remember the full-mode window size as the user resizes it. */
-function RememberSize({ windowId }: { windowId: string }) {
-  const { windows } = useWindowManager();
-  const win = windows.find((w) => w.id === windowId);
-  const width = win && !win.frameless && !win.maximized && !win.snapped ? win.width : null;
-  const height = win?.height ?? null;
-  useEffect(() => {
-    if (width === null || height === null || height <= MINI_SIZE.height + 40) return;
-    const saved = getPrefs().dinSize;
-    if (saved?.width !== width || saved?.height !== height) setPrefs({ dinSize: { width, height } });
-  }, [width, height]);
-  return null;
+/** A skin that throws while drawing gives way to Din's own, saying why. */
+class SkinBoundary extends Component<{ children: ReactNode; onError: (message: string) => void }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    this.props.onError(`That skin stopped working, so Din’s own is back: ${error instanceof Error ? error.message : String(error)}`);
+    setPrefs({ skin: { kind: 'din' } });
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
 }
 
 /** Keyboard shortcuts: Windows Media Player's everywhere, Winamp's too in a Winamp skin. */
@@ -200,6 +249,17 @@ export function MusicPlayer({ windowId, params }: AppComponentProps) {
     void openPaths(paths, how).then((message) => message && setMessage(message));
   }, [request, setMessage]);
 
+  // A jump-list action from the Dock or the apps menu.
+  const show = typeof params?.show === 'string' ? params.show : null;
+  const showRequest = show ? `${show}:${String(params?.actionAt ?? '')}` : null;
+  useEffect(() => {
+    if (!showRequest) return;
+    const what = showRequest.slice(0, showRequest.indexOf(':'));
+    if (what === 'din-skin') setPrefs({ skin: { kind: 'din' } });
+    else if (what === 'mini') setPrefs({ skin: { kind: 'din' }, mini: true });
+    else if (what === 'library') setPrefs({ skin: { kind: 'din' }, mini: false, tab: 'library' });
+  }, [showRequest]);
+
   useEffect(() => {
     rootRef.current?.focus({ preventScroll: true });
     return () => player.shutdown();
@@ -239,11 +299,19 @@ export function MusicPlayer({ windowId, params }: AppComponentProps) {
       }}
       className="relative size-full outline-none"
     >
-      {size && <FitWindow windowId={windowId} frameless={size.frameless} width={size.width} height={size.height} />}
-      {skin?.kind === 'din' && !mini && <RememberSize windowId={windowId} />}
+      {size && <FitWindow windowId={windowId} frameless={size.frameless} width={size.width} height={size.height} remember={skin?.kind === 'din' && !mini} />}
       {skin?.kind === 'din' && <DinSkin commands={commands} />}
-      {skin?.kind === 'winamp' && <WinampPlayer skin={skin.skin} commands={commands} />}
-      {skin?.kind === 'wmp' && <WmpPlayer pkg={skin.pkg} commands={commands} onSize={setWmpSize} />}
+      {skin?.kind === 'winamp' && (
+        <SkinBoundary key={`winamp:${skin.skin.name}`} onError={commands.setMessage}>
+          <WinampPlayer skin={skin.skin} commands={commands} />
+        </SkinBoundary>
+      )}
+      {skin?.kind === 'wmp' && (
+        <SkinBoundary key={`wmp:${skin.pkg.name}`} onError={commands.setMessage}>
+          <WmpPlayer pkg={skin.pkg} commands={commands} onSize={setWmpSize} />
+        </SkinBoundary>
+      )}
+      <AppMenus commands={commands} />
       {dragOver && <div aria-hidden className="pointer-events-none absolute inset-0 rounded-[inherit] ring-4 ring-inset ring-sky-400/70" />}
       <TextPromptHost />
     </div>

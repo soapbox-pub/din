@@ -118,7 +118,7 @@ function Equalizer() {
       </div>
       <div className={cn('flex min-w-0 flex-1 items-end justify-between gap-1 overflow-x-auto', !eqOn && 'opacity-50')}>
         <EqSlider label="Preamp" value={preamp} onValue={(v) => player.setPreamp(v)} />
-        <span className="mx-1 h-full w-px shrink-0 bg-white/10" aria-hidden />
+        <span className="mx-1 h-full w-px shrink-0 bg-[var(--mp-line)]" aria-hidden />
         {EQ_BANDS.map((hz, i) => (
           <EqSlider key={hz} label={bandLabel(hz)} value={bands[i]} onValue={(v) => player.setBand(i, v)} />
         ))}

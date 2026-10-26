@@ -68,7 +68,7 @@ export function PlayButton({ size = 'lg' }: { size?: 'lg' | 'sm' }) {
       disabled={empty}
       onClick={() => player.toggle()}
       className={cn(
-        'mp-orb shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-60',
+        'mp-orb shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60',
         size === 'lg' ? 'size-12' : 'size-9',
       )}
     >
@@ -127,7 +127,7 @@ export function Transport() {
   const stopped = usePlayer((s) => s.status === 'stopped');
   const enhancements = usePrefs((p) => p.showEnhancements);
   return (
-    <div className="mp-gloss shrink-0 border-t border-black/60">
+    <div className="mp-gloss shrink-0 border-t border-[var(--mp-line)]">
       <div className="px-3 pt-1">
         <SeekBar />
       </div>
@@ -135,7 +135,7 @@ export function Transport() {
         <Status />
         <div className="flex items-center gap-1">
           <ShuffleRepeat />
-          <span className="mx-1 h-5 w-px bg-white/10" aria-hidden />
+          <span className="mx-1 h-5 w-px bg-[var(--mp-line)]" aria-hidden />
           <IconButton label="Stop (Ctrl+S)" disabled={empty || stopped} onClick={() => player.stop()} className="size-8">
             <Square className="size-3.5 fill-current" />
           </IconButton>
@@ -146,7 +146,7 @@ export function Transport() {
           <IconButton label="Next (Ctrl+F)" disabled={empty} onClick={() => player.next()} className="size-8">
             <SkipForward className="size-4 fill-current" />
           </IconButton>
-          <span className="mx-1 h-5 w-px bg-white/10" aria-hidden />
+          <span className="mx-1 h-5 w-px bg-[var(--mp-line)]" aria-hidden />
           <VolumeControl />
         </div>
         <div className="flex items-center justify-end gap-1">

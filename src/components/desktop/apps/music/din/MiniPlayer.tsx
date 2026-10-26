@@ -12,7 +12,7 @@ export function MiniPlayer() {
   return (
     <div className="mp-gloss flex size-full flex-col justify-center gap-1 px-3 py-2">
       <div className="flex min-w-0 items-center gap-3">
-        <Cover location={track?.location} className="size-12 shadow-md ring-1 ring-white/10" />
+        <Cover location={track?.location} className="size-12 shadow-md ring-1 ring-foreground/10" />
         <div className="min-w-0 flex-1 leading-tight">
           <Marquee text={track?.title ?? 'Nothing playing'} className="font-semibold" />
           <p className="truncate text-xs text-[var(--mp-ink-dim)]">{track?.artist || track?.album || ' '}</p>

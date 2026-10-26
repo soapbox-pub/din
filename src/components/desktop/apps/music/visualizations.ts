@@ -69,22 +69,31 @@ export const VISUALIZATIONS: Visualization[] = [
     name: 'Bars',
     group: 'Bars and Waves',
     draw(ctx, w, h, { freq }, mem) {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, w, h);
+      ctx.clearRect(0, 0, w, h);
       const count = Math.max(16, Math.min(64, Math.floor(w / 14)));
       const values = bands(freq, count);
       const tops = peaks(mem, values, 0.012);
       const gap = Math.max(2, w / count / 5);
       const bw = w / count - gap;
-      const grad = ctx.createLinearGradient(0, h, 0, 0);
-      grad.addColorStop(0, '#0b3d91');
-      grad.addColorStop(0.5, '#2d8cf0');
-      grad.addColorStop(1, '#bfe6ff');
+      // In the player's tint, shaded darker at the foot and paler at the top.
+      ctx.fillStyle = (mem.tint as string | undefined) ?? '#2d8cf0';
       values.forEach((v, i) => {
-        const x = i * (bw + gap) + gap / 2;
         const bh = v * h * 0.9;
-        ctx.fillStyle = grad;
-        ctx.fillRect(x, h - bh, bw, bh);
+        ctx.fillRect(i * (bw + gap) + gap / 2, h - bh, bw, bh);
+      });
+      const shade = ctx.createLinearGradient(0, h, 0, 0);
+      shade.addColorStop(0, 'rgba(0,0,0,0.55)');
+      shade.addColorStop(0.5, 'rgba(0,0,0,0)');
+      shade.addColorStop(1, 'rgba(255,255,255,0.6)');
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = shade;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'source-over';
+      values.forEach((_, i) => {
+        const x = i * (bw + gap) + gap / 2;
         if (tops[i] > 0.01) {
           ctx.fillStyle = '#e6f4ff';
           ctx.fillRect(x, h - tops[i] * h * 0.9 - 3, bw, 2);

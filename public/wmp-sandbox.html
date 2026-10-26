@@ -1,25 +1,25 @@
-<!doctype html>
+<!DOCTYPE html>
 <!--
-  The Music Player runs Windows Media Player skins' JScript in here: an
-  iframe sandboxed without allow-same-origin, so it has an opaque origin and
-  can't touch Din's storage, bridges or files, and a CSP that allows no
-  network at all. Din sends the skin runtime's source in the first message
-  (see src/components/desktop/apps/music/wmp/vm.ts) and talks to it only
-  through postMessage.
+    The Music Player runs Windows Media Player skins' JScript in here: an
+    iframe sandboxed without allow-same-origin, so it has an opaque origin and
+    can't touch Din's storage, bridges or files, and a CSP that allows no
+    network at all. wmp-sandbox.js waits for Din to send the skin runtime
+    (src/components/desktop/apps/music/wmp/vm.ts); after that the two talk
+    only through postMessage.
 -->
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'" />
-  </head>
-  <body>
-    <script>
-      addEventListener('message', function boot(e) {
-        if (e.source !== parent || !e.data || e.data.type !== 'runtime') return;
-        removeEventListener('message', boot);
-        (0, eval)(e.data.source);
-      });
-      parent.postMessage({ type: 'loaded' }, '*');
-    </script>
-  </body>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Skin script</title>
+        <meta name="description" content="Where Din's Music Player runs a Windows Media Player skin's script.">
+        <meta property="og:type" content="website">
+        <meta property="og:title" content="Skin script">
+        <meta property="og:description" content="Where Din's Music Player runs a Windows Media Player skin's script.">
+        <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; manifest-src 'self'">
+        <link rel="manifest" href="/manifest.webmanifest">
+    </head>
+    <body>
+        <script src="/wmp-sandbox.js"></script>
+    </body>
 </html>

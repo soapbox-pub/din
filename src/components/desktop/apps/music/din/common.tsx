@@ -71,7 +71,7 @@ export function Cover({ location, className, iconClassName }: { location: string
   return (
     <div
       className={cn(
-        'relative grid shrink-0 place-items-center overflow-hidden rounded-md bg-[linear-gradient(135deg,hsl(var(--mp-hue)_50%_22%),hsl(var(--mp-hue)_55%_10%))] text-[var(--mp-ink-faint)]',
+        'relative grid shrink-0 place-items-center overflow-hidden rounded-md bg-[linear-gradient(135deg,color-mix(in_oklab,var(--mp-tint)_30%,var(--card)),color-mix(in_oklab,var(--mp-tint)_12%,var(--background)))] text-[var(--mp-ink-faint)]',
         className,
       )}
     >
@@ -109,8 +109,15 @@ export function VisCanvas({ vis, className, pixelScale = 1 }: { vis: string; cla
         canvas.height = h;
       }
     };
+    let tintAt = 0;
     const loop = () => {
       resize();
+      // The skin's tint, for visualizations drawn in it (checked now and then: it's a style lookup).
+      if (performance.now() - tintAt > 1000) {
+        tintAt = performance.now();
+        const tint = getComputedStyle(canvas).getPropertyValue('--mp-tint').trim();
+        if (tint) mem.tint = tint;
+      }
       v.draw(ctx, canvas.width, canvas.height, readFrame((performance.now() - start) / 1000), mem);
       raf = requestAnimationFrame(loop);
     };

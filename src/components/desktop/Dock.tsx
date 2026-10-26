@@ -36,7 +36,7 @@ interface DockWindow {
 /** How a tile acts on its app and its windows. */
 interface DockControls {
   /** Launch a new instance. */
-  open: (appId: string) => void;
+  open: (appId: string, params?: Record<string, unknown>) => void;
   /** Raise and focus a window. */
   focus: (id: string) => void;
   minimize: (id: string) => void;
@@ -786,6 +786,16 @@ const DockItem = memo(function DockItem({
               className={cn(w.id === activeWindowId && 'font-semibold', w.minimized && 'text-muted-foreground')}
             >
               <span className="truncate">{w.title ?? `${app.name} ${i + 1}`}</span>
+            </ContextMenuItem>
+          ))}
+          <ContextMenuSeparator />
+        </>
+      )}
+      {app.actions && app.actions.length > 0 && (
+        <>
+          {app.actions.map((action) => (
+            <ContextMenuItem key={action.label} onSelect={() => open(app.id, { ...action.params, actionAt: Date.now() })}>
+              {action.label}
             </ContextMenuItem>
           ))}
           <ContextMenuSeparator />
