@@ -25,10 +25,18 @@
 //
 // The display-switch key does the same switch (switchAirPlayMode).
 //
-// Receivers are found over mDNS: a scan every half minute, and one whenever
-// the shell asks (the menu or Settings opening). deckmon's event stream
-// keeps the sessions current, including a receiver asking for the PIN it
-// shows on screen.
+// Receivers are found over mDNS: a scan every half minute, one whenever the
+// shell asks (the menu or Settings opening), and one as soon as the computer
+// joins a network (airplayNetworkChanged), then every few seconds for a
+// minute while none has answered. deckmon's event stream keeps the sessions
+// current, including a receiver asking for the PIN it shows on screen.
+//
+// The receivers found are remembered for the network they were found on
+// (NetworkManager's connection, by UUID, so two networks that share a name
+// aren't confused), and listed again as soon as the computer is back on it,
+// before any scan has answered. One that turns out not to be there any more
+// fails to connect, said as much; one not seen on its network for a month
+// is forgotten.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -45,6 +53,14 @@ const SCAN_INTERVAL_MS = 30_000;
 const SCAN_TIMEOUT_MS = 3_000;
 /** How many scans in a row may miss a receiver before it's dropped. */
 const SCAN_MISSES = 2;
+/** While nothing has answered since joining a network, scans come this often... */
+const SCAN_SOON_MS = 5_000;
+/** ...for this long. */
+const SCAN_SOON_FOR_MS = 60_000;
+/** A remembered receiver not seen on its network for this long is forgotten. */
+const REMEMBER_FOR_MS = 30 * 24 * 60 * 60_000;
+/** When a receiver was last seen is written down at most this often. */
+const SEEN_SAVE_MS = 60 * 60_000;
 /** Connecting waits on the receiver, and on the user typing its PIN. */
 const CONNECT_TIMEOUT_MS = 6 * 60_000;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -165,30 +181,83 @@ function noDaemon(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ECONNREFUSED';
 }
 
-/** How each receiver was last shared, by name, in the user's config. */
-function modesPath(): string {
+interface RememberedReceiver {
+  host: string;
+  model: string;
+  /** When a scan last found it, in ms. */
+  seen: number;
+}
+
+interface Config {
+  /** How each receiver was last shared, by name. */
+  modes: Record<string, AirPlayMode>;
+  /** The receivers found on each network, by connection UUID, then name. */
+  networks: Record<string, Record<string, RememberedReceiver>>;
+}
+
+/** The user's AirPlay config. */
+function configPath(): string {
   return path.join(app.getPath('userData'), 'airplay.json');
 }
 
-function readModes(): Record<string, AirPlayMode> {
+let config: Config | null = null;
+
+function readConfig(): Config {
+  if (config) return config;
+  config = { modes: {}, networks: {} };
+  let data: { modes?: unknown; networks?: unknown } | null;
   try {
-    const data: unknown = JSON.parse(fs.readFileSync(modesPath(), 'utf8'));
-    const modes = (data as { modes?: unknown } | null)?.modes;
-    if (!modes || typeof modes !== 'object') return {};
-    return Object.fromEntries(
-      Object.entries(modes).filter((e): e is [string, AirPlayMode] => e[1] === 'mirror' || e[1] === 'extend'),
-    );
+    data = JSON.parse(fs.readFileSync(configPath(), 'utf8')) as typeof data;
   } catch {
-    return {};
+    return config;
+  }
+  if (data?.modes && typeof data.modes === 'object') {
+    for (const [name, mode] of Object.entries(data.modes)) {
+      if (mode === 'mirror' || mode === 'extend') config.modes[name] = mode;
+    }
+  }
+  if (data?.networks && typeof data.networks === 'object') {
+    for (const [network, receivers] of Object.entries(data.networks)) {
+      if (!receivers || typeof receivers !== 'object') continue;
+      const kept: Record<string, RememberedReceiver> = {};
+      for (const [name, r] of Object.entries(receivers as Record<string, Partial<RememberedReceiver> | null>)) {
+        if (typeof r?.host === 'string' && typeof r.model === 'string' && typeof r.seen === 'number') {
+          kept[name] = { host: r.host, model: r.model, seen: r.seen };
+        }
+      }
+      config.networks[network] = kept;
+    }
+  }
+  return config;
+}
+
+function writeConfig(): void {
+  try {
+    fs.writeFileSync(configPath(), JSON.stringify(readConfig(), null, 2));
+  } catch (error) {
+    console.warn('airplay: could not save settings:', messageOf(error));
   }
 }
 
 function saveMode(target: string, mode: AirPlayMode): void {
-  const modes = { ...readModes(), [target]: mode };
+  readConfig().modes[target] = mode;
+  writeConfig();
+}
+
+/** The networks the computer is on: NetworkManager's active Wi-Fi and wired connections, by UUID. */
+async function activeNetworks(): Promise<string[]> {
   try {
-    fs.writeFileSync(modesPath(), JSON.stringify({ modes }, null, 2));
-  } catch (error) {
-    console.warn('airplay: could not save how to share:', messageOf(error));
+    const { stdout } = await runCommand('nmcli', ['-t', '-f', 'UUID,TYPE,STATE', 'connection', 'show', '--active'], {
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+    return stdout
+      .split('\n')
+      .map((line) => line.split(':'))
+      .filter(([uuid, type, active]) => uuid && /^802-(11-wireless|3-ethernet)$/.test(type) && active === 'activated')
+      .map(([uuid]) => uuid)
+      .sort();
+  } catch {
+    return [];
   }
 }
 
@@ -236,6 +305,13 @@ export function switchAirPlayMode(): void {
   switchMode?.();
 }
 
+let networkChanged: (() => void) | null = null;
+
+/** NetworkManager says something changed: the computer may be on another network. */
+export function airplayNetworkChanged(): void {
+  networkChanged?.();
+}
+
 export function registerAirPlayHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;
@@ -270,7 +346,13 @@ export function registerAirPlayHandlers(options: {
   let starting: Promise<void> | null = null;
   const startDaemon = () => {
     starting ??= runCommand(deckmon, ['status'], { timeout: REQUEST_TIMEOUT_MS })
-      .then(() => undefined)
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          // `status` fails ("not connected") when nothing is shared; the daemon is up all the same.
+          if (!fs.existsSync(socketPath())) throw error;
+        },
+      )
       .finally(() => {
         starting = null;
       });
@@ -295,6 +377,18 @@ export function registerAirPlayHandlers(options: {
   // its sessions; it's watched again once it's back.
   const sessions = new Map<string, AirPlaySession>();
   const publishSessions = () => update({ sessions: [...sessions.values()] });
+
+  /** Receivers that answered the connection being made to them (asked for a code, or streamed). */
+  const answered = new Set<string>();
+  /**
+   * Why connecting failed, in words. A receiver the last scan didn't find
+   * that never answered is most likely one remembered from before that isn't
+   * there any more, or is off; deckmon's own error would be about the address.
+   */
+  const explainFailure = (target: string, message: string): string => {
+    if (answered.has(target) || seen.get(target)?.misses === 0) return message;
+    return `${target} isn’t answering. Check that it’s on and on the same network as this computer.`;
+  };
   const watch = () => {
     const socket = net.createConnection(socketPath());
     socket.once('connect', () => socket.write('{"cmd":"watch"}\n'));
@@ -310,10 +404,12 @@ export function registerAirPlayHandlers(options: {
       const session = toSession(raw);
       if (session) {
         sessions.set(session.target, session);
+        if (session.state !== 'connecting') answered.add(session.target);
       } else if (typeof raw.target === 'string') {
         sessions.delete(raw.target);
         if (raw.state === 'ended' && typeof raw.error === 'string' && raw.error) {
-          state = { ...state, failure: { target: raw.target, message: raw.error, at: Date.now() } };
+          const message = explainFailure(raw.target, raw.error);
+          state = { ...state, failure: { target: raw.target, message, at: Date.now() } };
         }
       }
       publishSessions();
@@ -331,24 +427,75 @@ export function registerAirPlayHandlers(options: {
     });
   };
 
+  /** The networks the computer is on, as activeNetworks gives them. */
+  let networks: string[] = [];
+
+  /** The receivers scans found, then those remembered for these networks. */
+  const listReceivers = (): AirPlayReceiver[] => {
+    const receivers = new Map<string, AirPlayReceiver>();
+    const { networks: remembered } = readConfig();
+    for (const network of networks) {
+      for (const [name, r] of Object.entries(remembered[network] ?? {})) {
+        if (Date.now() - r.seen < REMEMBER_FOR_MS) receivers.set(name, { name, host: r.host, model: r.model });
+      }
+    }
+    for (const { receiver } of seen.values()) receivers.set(receiver.name, receiver);
+    return [...receivers.values()].sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  /** Remember the receivers a scan found for the networks it ran on, and forget the old. */
+  const remember = (found: AirPlayReceiver[], on: string[]) => {
+    const { networks: remembered } = readConfig();
+    const now = Date.now();
+    let dirty = false;
+    for (const network of on) {
+      const saved = (remembered[network] ??= {});
+      for (const r of found) {
+        const old = saved[r.name];
+        if (old && old.host === r.host && old.model === r.model && now - old.seen < SEEN_SAVE_MS) continue;
+        saved[r.name] = { host: r.host, model: r.model, seen: now };
+        dirty = true;
+      }
+    }
+    for (const [network, saved] of Object.entries(remembered)) {
+      for (const [name, r] of Object.entries(saved)) {
+        if (now - r.seen < REMEMBER_FOR_MS) continue;
+        delete saved[name];
+        dirty = true;
+      }
+      if (Object.keys(saved).length === 0) {
+        delete remembered[network];
+        dirty = true;
+      }
+    }
+    if (dirty) writeConfig();
+  };
+
   let scanning: Promise<void> | null = null;
+  /** Scans come quickly until this time, while nothing has answered. */
+  let soonUntil = 0;
+  let nextScan: NodeJS.Timeout | null = null;
+  const scheduleScan = () => {
+    if (nextScan) clearTimeout(nextScan);
+    const soon = Date.now() < soonUntil && ![...seen.values()].some((e) => e.misses === 0);
+    nextScan = setTimeout(() => void scan(), soon ? SCAN_SOON_MS : SCAN_INTERVAL_MS);
+  };
   const scan = () => {
     scanning ??= (async () => {
       update({ scanning: true });
+      const on = networks;
       try {
         const { devices = [] } = await send({ cmd: 'discover', timeout_ms: SCAN_TIMEOUT_MS }, SCAN_TIMEOUT_MS + REQUEST_TIMEOUT_MS);
-        const found = new Set<string>();
+        const found = new Map<string, AirPlayReceiver>();
         for (const d of devices) {
           if (typeof d.name !== 'string' || !d.name) continue;
-          found.add(d.name);
-          seen.set(d.name, {
-            receiver: {
-              name: d.name,
-              host: typeof d.host === 'string' ? d.host : '',
-              model: typeof d.model === 'string' ? d.model : '',
-            },
-            misses: 0,
-          });
+          const receiver = {
+            name: d.name,
+            host: typeof d.host === 'string' ? d.host : '',
+            model: typeof d.model === 'string' ? d.model : '',
+          };
+          found.set(d.name, receiver);
+          seen.set(d.name, { receiver, misses: 0 });
         }
         for (const [name, entry] of seen) {
           if (found.has(name)) continue;
@@ -356,20 +503,56 @@ export function registerAirPlayHandlers(options: {
           entry.misses += 1;
           if (entry.misses > SCAN_MISSES && !sessions.has(name)) seen.delete(name);
         }
+        // Not if the computer changed networks while it looked.
+        if (on === networks) remember([...found.values()], on);
       } catch (error) {
         console.warn('airplay: scan failed:', messageOf(error));
       } finally {
-        const receivers = [...seen.values()].map((e) => e.receiver).sort((a, b) => a.name.localeCompare(b.name));
-        update({ scanning: false, receivers });
+        update({ scanning: false, receivers: listReceivers() });
         scanning = null;
+        scheduleScan();
       }
     })();
     return scanning;
   };
 
-  /** A receiver the shell names, which must be one Din found. */
+  // On another network, what was found on the last one is gone (but what's
+  // streaming stays), and this one's receivers are listed at once.
+  let checkingNetworks: Promise<void> | null = null;
+  /** A change came in while checking, which the check may have missed. */
+  let checkAgain = false;
+  const checkNetworks = (): Promise<void> => {
+    if (checkingNetworks) {
+      checkAgain = true;
+      return checkingNetworks;
+    }
+    checkingNetworks = activeNetworks()
+      .then((now) => {
+        if (now.join() === networks.join()) return;
+        networks = now;
+        for (const name of seen.keys()) if (!sessions.has(name)) seen.delete(name);
+        update({ receivers: listReceivers() });
+        if (now.length === 0) return;
+        soonUntil = Date.now() + SCAN_SOON_FOR_MS;
+        if (scanning) void scanning.then(() => scan());
+        else void scan();
+      })
+      .finally(() => {
+        checkingNetworks = null;
+        if (checkAgain) {
+          checkAgain = false;
+          void checkNetworks();
+        }
+      });
+    return checkingNetworks;
+  };
+  networkChanged = () => void checkNetworks();
+
+  /** A receiver the shell names, which must be one Din found or remembers here. */
   const knownReceiver = (raw: unknown): string => {
-    if (typeof raw !== 'string' || !seen.has(raw)) throw new Error('Unknown AirPlay receiver');
+    if (typeof raw !== 'string' || !state.receivers.some((r) => r.name === raw)) {
+      throw new Error('Unknown AirPlay receiver');
+    }
     return raw;
   };
   const sessionTarget = (raw: unknown): string => {
@@ -393,6 +576,7 @@ export function registerAirPlayHandlers(options: {
     const output = extend ? null : await primaryOutput().catch(() => null);
     const range = portRange();
     state = { ...state, failure: null };
+    answered.delete(target);
     await send(
       {
         cmd: 'connect',
@@ -410,7 +594,11 @@ export function registerAirPlayHandlers(options: {
   ipcMain.handle('airplay:connect', async (event, rawTarget) => {
     assertShellSender(event);
     const target = knownReceiver(rawTarget);
-    await start(target, readModes()[target] ?? 'extend');
+    try {
+      await start(target, readConfig().modes[target] ?? 'extend');
+    } catch (error) {
+      throw new Error(explainFailure(target, messageOf(error)), { cause: error });
+    }
   });
 
   /** Remember MODE for a receiver, and switch it over if it's streaming. */
@@ -465,11 +653,13 @@ export function registerAirPlayHandlers(options: {
     await send({ cmd: 'disconnect', target }, 30_000);
   });
 
+  // The receivers remembered for this network are listed before the daemon
+  // is even up; joining it scans.
+  void checkNetworks();
   void startDaemon()
     .catch((error: unknown) => console.warn('airplay: starting deckmon:', messageOf(error)))
     .finally(() => {
       watch();
-      void scan();
-      setInterval(() => void scan(), SCAN_INTERVAL_MS);
+      if (!scanning) void scan();
     });
 }

@@ -83,7 +83,7 @@ import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
-import { airplayDisplays, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
+import { airplayDisplays, airplayNetworkChanged, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
@@ -2392,6 +2392,8 @@ function registerSystemEvents(): void {
         if (topic === 'audio') void syncMicMuteLed();
         // A network with a proxy of its own may have come up or gone down.
         if (topic === 'network') void refreshWifiProxy().catch(() => {});
+        // A network just joined has its AirPlay receivers looked for at once.
+        if (topic === 'network') airplayNetworkChanged();
       }, SYSTEM_EVENT_DEBOUNCE_MS),
     );
   };
