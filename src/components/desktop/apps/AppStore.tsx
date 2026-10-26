@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Search, Store } from 'lucide-react';
-import { nip19 } from 'nostr-tools';
 import type { AppComponentProps } from '@/lib/apps';
-import type { StoreApp } from '@/lib/nostrApps';
-import { useNostrApps } from '@/hooks/useNostrApps';
-import { useAppSearch } from '@/hooks/useAppSearch';
+import type { StoreApp } from '@/lib/nsiteCatalog';
+import { nsiteAppId } from '@/lib/nsiteApps';
+import { getNsiteStore } from '@/lib/nsiteStore';
+import { useNsiteCatalog } from '@/hooks/useNsiteCatalog';
+import { useNsiteLookup } from '@/hooks/useNsiteLookup';
 import { useFeaturedApps } from '@/hooks/useFeaturedApps';
-import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useStoreAppDetails } from '@/hooks/useStoreAppDetails';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useToast } from '@/hooks/useToast';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
@@ -18,51 +19,52 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 /**
- * The App Store: browses NIP-89 app listings published to the user's relays
- * and installs any of them as a desktop web app in one click.
+ * The App Store: browses nsites (NIP-5A static websites), the only kind of
+ * app it offers, and installs any of them in one click.
  *
- * The landing page leads with a featured rail — apps by the members of a
- * curated follow pack (useFeaturedApps) — presented App Store-style: a hero
- * card, a horizontally scrolling shelf, then the full catalog grid. Typing
- * in the search box switches to NIP-50 relay search (useAppSearch, routed to
- * dedicated search relays), merged with instant substring matches from the
- * already-fetched catalog.
+ * The catalog is Tenna's: the sites a known set of publishers put on Nostr
+ * plus whatever the user and the people they follow publish
+ * (useNsiteCatalog). The landing page leads with a featured rail, the
+ * packaged apps of a curated follow pack's members (useFeaturedApps),
+ * presented App Store-style: a hero card, a horizontally scrolling shelf,
+ * then the full catalog grid. Typing in the search box filters the catalog;
+ * pasting a site's address (`npub1…`, `naddr1…`, or an nsite:// URL) looks
+ * that site up instead (useNsiteLookup).
  *
- * Installed entries go through the same installWebApp() path as the
- * browser's "install site as app" button, so they land in the launcher,
- * roam via encrypted app data, and get the injected window.nostr bridge.
+ * Each card reads the site's icon and name from its own files on Blossom
+ * (useStoreAppDetails), the same derivation the launcher uses, so the store
+ * shows the icon the user will get. Installing goes through the same
+ * installNsiteApp() path as the browser's "install site as app" button: the
+ * nsite store downloads every file, and the entry roams via encrypted app
+ * data.
  */
 export function AppStore(_props: AppComponentProps) {
-  const catalog = useNostrApps();
+  const catalog = useNsiteCatalog();
   const featured = useFeaturedApps();
   const [search, setSearch] = useState('');
 
   const rawQuery = search.trim();
-  const query = useDebouncedValue(rawQuery, 400);
   const searching = rawQuery.length > 0;
-  const results = useAppSearch(query);
-  const searchPending = searching && (rawQuery !== query || results.isFetching);
+  const lookup = useNsiteLookup(rawQuery);
 
-  // Instant substring matches from the already-fetched catalog; relay
-  // relevance results lead once they arrive, deduped by address.
   const searchMatches = useMemo(() => {
     if (!searching) return [];
+    if (lookup.isAddress) return lookup.data ? [lookup.data] : [];
     const q = rawQuery.toLowerCase();
-    const local = (catalog.data ?? []).filter((app) => {
-      const haystack = [app.name, app.about, app.website, ...app.hashtags]
+    const seen = new Set<string>();
+    const matches: StoreApp[] = [];
+    for (const app of [...(featured.data?.apps ?? []), ...(catalog.data ?? [])]) {
+      if (seen.has(app.host)) continue;
+      seen.add(app.host);
+      const haystack = [app.name ?? '', app.about, app.dtag ?? '', ...app.hashtags]
         .join('\u0000')
         .toLowerCase();
-      return haystack.includes(q);
-    });
-    const seen = new Set<string>();
-    const merged: StoreApp[] = [];
-    for (const app of [...(results.data ?? []), ...local]) {
-      if (seen.has(app.address)) continue;
-      seen.add(app.address);
-      merged.push(app);
+      if (haystack.includes(q)) matches.push(app);
     }
-    return merged;
-  }, [searching, rawQuery, catalog.data, results.data]);
+    return matches;
+  }, [searching, rawQuery, lookup.isAddress, lookup.data, featured.data, catalog.data]);
+
+  const searchPending = lookup.isAddress ? lookup.isLoading : catalog.isLoading;
 
   return (
     <div className="flex h-full w-full flex-col bg-background text-foreground">
@@ -80,8 +82,8 @@ export function AppStore(_props: AppComponentProps) {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search apps…"
-            aria-label="Search apps"
+            placeholder="Search apps, or paste an address"
+            aria-label="Search apps, or paste an address"
             autoComplete="off"
             spellCheck={false}
             className="h-8 pl-8"
@@ -111,14 +113,20 @@ export function AppStore(_props: AppComponentProps) {
         <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
           {searching ? (
             <section className="flex flex-col gap-4" aria-label="Search results">
-              <SectionHeader title={`Results for “${rawQuery}”`} />
+              <SectionHeader
+                title={lookup.isAddress ? 'Site at this address' : `Results for “${rawQuery}”`}
+              />
               {searchMatches.length > 0 ? (
                 <CatalogGrid apps={searchMatches} />
               ) : searchPending ? (
                 <CatalogSkeleton />
               ) : (
                 <EmptyState
-                  message={`No apps match “${rawQuery}”. Search covers the relay directory and your local catalog.`}
+                  message={
+                    lookup.isAddress
+                      ? 'No site is published at that address on your relays.'
+                      : `No apps match “${rawQuery}”. You can also paste a site’s address to find it.`
+                  }
                 />
               )}
             </section>
@@ -128,7 +136,7 @@ export function AppStore(_props: AppComponentProps) {
               <section className="flex flex-col gap-4" aria-label="All apps">
                 <SectionHeader
                   title="All Apps"
-                  subtitle="Every app published to your relays."
+                  subtitle="Sites from Din’s publishers and the people you follow."
                 />
                 {catalog.isLoading ? (
                   <CatalogSkeleton />
@@ -145,6 +153,76 @@ export function AppStore(_props: AppComponentProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Whether an element has come on screen, latching true. Cards read their
+ * site's files from Blossom, so they wait until someone can see them.
+ */
+function useSeen<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || seen) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [seen]);
+  return [ref, seen] as const;
+}
+
+/** Everything a card shows of a site, from its manifest, its files, and its author. */
+function useStoreAppView(app: StoreApp, enabled = true) {
+  const details = useStoreAppDetails(app, enabled);
+  const author = useAuthor(enabled ? app.pubkey : undefined);
+  const metadata = author.data?.metadata;
+  const publisher = (metadata?.display_name || metadata?.name)?.trim() || null;
+
+  // The site's own name for itself beats its manifest's; a site that says
+  // neither is named after whoever published it.
+  const name = details.data?.name ?? app.name ?? publisher ?? `${app.host.slice(0, 12)}…`;
+  const about = app.about || details.data?.description || '';
+  const by = publisher && publisher.toLowerCase() !== name.toLowerCase() ? publisher : null;
+
+  return { name, about, by, icon: details.data?.icon ?? null, iconPending: details.isPending };
+}
+
+/**
+ * A site's icon: the raster its own files declare (squircle-cut when it is
+ * full-bleed, see nsiteAppInfo), a skeleton while it loads, or a tile with
+ * the site's initial when it ships none.
+ */
+function StoreAppIcon({
+  name,
+  icon,
+  pending,
+  className,
+}: {
+  name: string;
+  icon: string | null;
+  pending: boolean;
+  className?: string;
+}) {
+  if (icon) return <AppIcon icon={icon} className={cn('object-contain', className)} />;
+  if (pending) return <Skeleton className={cn('rounded-[28%]', className)} />;
+  const initial = name.match(/\p{L}|\p{N}/u)?.[0]?.toUpperCase() ?? '?';
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'grid place-items-center rounded-[28%] bg-gradient-to-br from-primary to-primary/70 text-2xl font-semibold text-primary-foreground',
+        className,
+      )}
+    >
+      {initial}
+    </span>
   );
 }
 
@@ -165,7 +243,7 @@ function FeaturedSection() {
           <SectionHeader title={featured.title} subtitle={featured.description} />
           <div className="-mx-1 flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-2">
             {shelf.map((app) => (
-              <ShelfCard key={app.address} app={app} />
+              <ShelfCard key={app.host} app={app} />
             ))}
           </div>
         </>
@@ -176,7 +254,7 @@ function FeaturedSection() {
 
 /** The big editorial card at the top of the landing page. */
 function FeaturedHero({ app }: { app: StoreApp }) {
-  const hostname = useMemo(() => new URL(app.website).hostname, [app.website]);
+  const view = useStoreAppView(app);
 
   return (
     <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 p-6 text-primary-foreground shadow-sm">
@@ -184,49 +262,63 @@ function FeaturedHero({ app }: { app: StoreApp }) {
         Featured
       </p>
       <div className="mt-4 flex items-center gap-4">
-        <AppIcon
-          icon={app.picture ?? ''}
-          className="size-20 shrink-0 rounded-[1.25rem] border border-white/20 bg-white/10 object-cover shadow-lg"
+        <StoreAppIcon
+          name={view.name}
+          icon={view.icon}
+          pending={view.iconPending}
+          className="size-20 shrink-0 drop-shadow-lg"
         />
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-2xl font-bold tracking-tight" title={app.name}>
-            {app.name}
+          <h2 className="truncate text-2xl font-bold tracking-tight" title={view.name}>
+            {view.name}
           </h2>
-          <p className="truncate text-sm text-primary-foreground/70" title={hostname}>
-            {hostname}
-          </p>
+          {view.by && (
+            <p className="truncate text-sm text-primary-foreground/70" title={view.by}>
+              by {view.by}
+            </p>
+          )}
         </div>
-        <GetPill app={app} onHero />
+        <GetPill app={app} name={view.name} onHero />
       </div>
-      <p className="mt-4 line-clamp-2 max-w-prose text-sm text-primary-foreground/85">
-        {app.about}
-      </p>
+      {view.about && (
+        <p className="mt-4 line-clamp-2 max-w-prose text-sm text-primary-foreground/85">
+          {view.about}
+        </p>
+      )}
     </div>
   );
 }
 
 /** A compact card in the horizontally scrolling featured shelf. */
 function ShelfCard({ app }: { app: StoreApp }) {
-  const hostname = useMemo(() => new URL(app.website).hostname, [app.website]);
+  const [ref, seen] = useSeen<HTMLDivElement>();
+  const view = useStoreAppView(app, seen);
 
   return (
-    <div className="flex w-64 shrink-0 snap-start flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md">
+    <div
+      ref={ref}
+      className="flex w-64 shrink-0 snap-start flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
+    >
       <div className="flex items-center gap-3">
-        <AppIcon
-          icon={app.picture ?? ''}
-          className="size-14 shrink-0 rounded-2xl border border-border object-cover"
+        <StoreAppIcon
+          name={view.name}
+          icon={view.icon}
+          pending={view.iconPending}
+          className="size-14 shrink-0"
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold" title={app.name}>
-            {app.name}
+          <p className="truncate font-semibold" title={view.name}>
+            {view.name}
           </p>
-          <p className="truncate text-xs text-muted-foreground" title={hostname}>
-            {hostname}
-          </p>
+          {view.by && (
+            <p className="truncate text-xs text-muted-foreground" title={view.by}>
+              by {view.by}
+            </p>
+          )}
         </div>
       </div>
-      <p className="line-clamp-3 flex-1 text-sm text-muted-foreground">{app.about}</p>
-      <GetPill app={app} className="self-start" />
+      <p className="line-clamp-3 flex-1 text-sm text-muted-foreground">{view.about}</p>
+      <GetPill app={app} name={view.name} className="self-start" />
     </div>
   );
 }
@@ -235,7 +327,7 @@ function CatalogGrid({ apps }: { apps: StoreApp[] }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {apps.map((app) => (
-        <StoreAppCard key={app.address} app={app} />
+        <StoreAppCard key={app.host} app={app} />
       ))}
     </div>
   );
@@ -243,34 +335,34 @@ function CatalogGrid({ apps }: { apps: StoreApp[] }) {
 
 /** One catalog entry: icon, name, publisher, blurb, and the Get button. */
 function StoreAppCard({ app }: { app: StoreApp }) {
-  const author = useAuthor(app.pubkey);
-
-  const publisher =
-    author.data?.metadata?.name ??
-    author.data?.metadata?.display_name ??
-    `${nip19.npubEncode(app.pubkey).slice(0, 12)}…`;
-  const hostname = useMemo(() => new URL(app.website).hostname, [app.website]);
+  const [ref, seen] = useSeen<HTMLDivElement>();
+  const view = useStoreAppView(app, seen);
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md">
+    <div
+      ref={ref}
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
+    >
       <div className="flex items-center gap-3">
-        <AppIcon
-          icon={app.picture ?? ''}
-          className="size-14 shrink-0 rounded-2xl border border-border object-cover"
+        <StoreAppIcon
+          name={view.name}
+          icon={view.icon}
+          pending={view.iconPending}
+          className="size-14 shrink-0"
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold" title={app.name}>
-            {app.name}
+          <p className="truncate font-semibold" title={view.name}>
+            {view.name}
           </p>
-          <p className="truncate text-xs text-muted-foreground" title={hostname}>
-            {hostname} · by {publisher}
+          <p className="truncate text-xs text-muted-foreground" title={view.by ?? undefined}>
+            {view.by ? `by ${view.by}` : 'nsite'}
           </p>
         </div>
-        <GetPill app={app} />
+        <GetPill app={app} name={view.name} />
       </div>
 
       <p className="line-clamp-2 min-h-10 flex-1 text-sm text-muted-foreground">
-        {app.about}
+        {view.about}
       </p>
 
       {app.hashtags.length > 0 && (
@@ -290,42 +382,44 @@ function StoreAppCard({ app }: { app: StoreApp }) {
 }
 
 /**
- * The App Store-style pill button: "Get" installs the app, flipping to
- * "Open" once it's in the launcher.
+ * The App Store-style pill button: "Get" installs the site, flipping to
+ * "Open" once it's in the launcher. nsites install into the OS-level nsite
+ * store, so outside the Electron shell there is nothing to install into.
  */
 function GetPill({
   app,
+  name,
   onHero = false,
   className,
 }: {
   app: StoreApp;
+  /** What the card calls the app, for the button's label and the toast. */
+  name: string;
   /** Renders the inverted variant for the hero card's gradient background. */
   onHero?: boolean;
   className?: string;
 }) {
-  const { installWebApp, findWebAppByUrl } = useInstalledApps();
+  const { installNsiteApp, findNsiteApp } = useInstalledApps();
   const { open: openApp } = useWindowActions();
   const { toast } = useToast();
+  const canInstall = Boolean(getNsiteStore());
 
-  const installed = findWebAppByUrl(app.website);
+  const installed = findNsiteApp(app.host);
 
   const install = () => {
-    const webApp = installWebApp({
-      name: app.name,
-      url: app.website,
-      icon: app.picture,
-    });
-    if (!webApp) {
+    const entry = installNsiteApp(app.host);
+    if (!entry) {
       toast({
         title: 'Could not install app',
-        description: 'The app listing has an invalid URL.',
+        description: 'This site’s address is not one Din can install.',
         variant: 'destructive',
       });
       return;
     }
     toast({
-      title: `${webApp.name} installed`,
-      description: 'Find it in the app launcher, or right-click it to pin it to the taskbar.',
+      title: `${name} installed`,
+      description:
+        'Find it in the app launcher. Its files are downloading, so it will work offline too.',
     });
   };
 
@@ -333,8 +427,10 @@ function GetPill({
     <Button
       size="sm"
       variant="secondary"
-      onClick={installed ? () => openApp(installed.id) : install}
-      aria-label={installed ? `Open ${app.name}` : `Install ${app.name}`}
+      onClick={installed ? () => openApp(nsiteAppId(app.host)) : install}
+      disabled={!installed && !canInstall}
+      title={canInstall ? undefined : 'Apps install in the Din desktop app'}
+      aria-label={installed ? `Open ${name}` : `Install ${name}`}
       className={cn(
         'h-8 shrink-0 rounded-full px-5 font-semibold',
         onHero

@@ -1,17 +1,16 @@
-import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
+import { queryManifests, useManifestRelays } from '@/hooks/useNsiteCatalog';
 import {
-  APP_CATEGORY_TAGS,
-  APP_HANDLER_KIND,
   FEATURED_APPS_PACK,
-  dedupeStoreApps,
-  findFeaturedHero,
-  pinFeaturedHero,
+  FEATURED_HERO,
+  isFeaturedHero,
+  NSITE_KINDS,
   type StoreApp,
-} from '@/lib/nostrApps';
+} from '@/lib/nsiteCatalog';
+import { NSITE_NAMED_KIND } from '@/lib/nsite';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
 
-/** The store's featured rail: a follow pack plus its members' app listings. */
+/** The store's featured rail: a follow pack plus its members' apps. */
 export interface FeaturedApps {
   /** Pack `title` tag, e.g. "Team Soapbox". */
   title: string;
@@ -19,20 +18,21 @@ export interface FeaturedApps {
   description?: string;
   /** Sanitized pack `image` URL, if present. */
   image?: string;
-  /** Installable listings authored by pack members, newest first. */
+  /** The hero (Ditto) first, then the members' packaged apps. */
   apps: StoreApp[];
 }
 
 /**
  * Featured apps for the store's landing page. The curated follow pack
- * (kind 39089) supplies the rail's title/description and the shelf — the
- * kind 31990 listings authored by its members. The hero (Ditto) is resolved
- * separately from the general catalog *after* fetching and pinned to the
- * front, so the rail always leads with it even when the pack is missing or
- * Ditto isn't one of its members. Returns null only when nothing loads.
+ * (kind 39089) supplies the rail's title and description, and its members'
+ * nsites fill the shelf - only the ones packaged as apps, with a `title` and
+ * a `description`, since a member's personal pages are sites, not apps. The
+ * hero (FEATURED_HERO, Ditto) is asked for by its own address in the same
+ * round trip and pinned to the front, so the rail leads with it even when the
+ * pack is missing. Returns null only when nothing loads.
  */
 export function useFeaturedApps() {
-  const { nostr } = useNostr();
+  const relays = useManifestRelays();
 
   return useQuery<FeaturedApps | null>({
     queryKey: ['nostr', 'app-store', 'featured'],
@@ -41,7 +41,7 @@ export function useFeaturedApps() {
 
       // Addressable event, so the query is author-scoped: the d tag alone is
       // not a trust boundary.
-      const packEvents = await nostr.query(
+      const packEvents = await relays.query(
         [{
           kinds: [FEATURED_APPS_PACK.kind],
           authors: [FEATURED_APPS_PACK.pubkey],
@@ -62,34 +62,20 @@ export function useFeaturedApps() {
           ))
         : [];
 
-      // The pack's members supply the shelf. Defensive re-filter in case a
-      // relay ignores the authors constraint.
-      const memberSet = new Set(members);
-      const memberEvents = members.length
-        ? await nostr.query(
-            [{ kinds: [APP_HANDLER_KIND], authors: members, limit: 100 }],
-            { signal },
-          )
-        : [];
-      const shelf = dedupeStoreApps(memberEvents.filter((event) => memberSet.has(event.pubkey)));
+      const sites = await queryManifests(
+        relays,
+        [
+          { kinds: [NSITE_NAMED_KIND], authors: [FEATURED_HERO.pubkey], '#d': [FEATURED_HERO.dtag], limit: 1 },
+          ...(members.length ? [{ kinds: NSITE_KINDS, authors: members, limit: 300 }] : []),
+        ],
+        signal,
+      );
 
-      // Feature the hero (Ditto) after fetching: if no member published it,
-      // resolve it from the general catalog so the rail still leads with it
-      // when the pack is missing or Ditto isn't a member. Same recency + `#t`
-      // scan the catalog uses, since host matching can't be a relay filter.
-      let apps = shelf;
-      if (!findFeaturedHero(apps)) {
-        const heroEvents = await nostr.query(
-          [
-            { kinds: [APP_HANDLER_KIND], limit: 100 },
-            { kinds: [APP_HANDLER_KIND], '#t': APP_CATEGORY_TAGS, limit: 100 },
-          ],
-          { signal },
-        );
-        const hero = findFeaturedHero(dedupeStoreApps(heroEvents));
-        if (hero) apps = [hero, ...shelf];
-      }
-      apps = pinFeaturedHero(apps);
+      const hero = sites.find(isFeaturedHero);
+      const shelf = sites
+        .filter((app) => !isFeaturedHero(app) && app.name && app.about)
+        .sort((a, b) => b.createdAt - a.createdAt);
+      const apps = hero ? [hero, ...shelf] : shelf;
 
       if (apps.length === 0) return null;
 
