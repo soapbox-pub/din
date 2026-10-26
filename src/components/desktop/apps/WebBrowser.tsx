@@ -34,7 +34,7 @@ import {
   sanitizeUrl,
   viewSourceUrl,
 } from '@/lib/sanitizeUrl';
-import { nsiteDisplayUrl } from '@/lib/nsite';
+import { nsiteDisplayUrl, nsiteResolvedName } from '@/lib/nsite';
 import { canonicalHostOfUrl, nsiteAppId, nsiteAppUrl } from '@/lib/nsiteApps';
 import { getNsiteStore } from '@/lib/nsiteStore';
 import { ensureNsiteAppInfo } from '@/lib/nsiteAppInfo';
@@ -85,6 +85,7 @@ import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowChrome } from '@/contexts/WindowChromeContext';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
+import { useNsiteIcon } from '@/hooks/useNsiteIcon';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { moveItem, useDragReorder } from '@/hooks/useDragReorder';
 import { useTabTransfer, type TabTransfer, type TabTransferOptions } from '@/hooks/useTabTransfer';
@@ -102,7 +103,8 @@ import {
 import { TabContextMenu } from '@/components/desktop/TabContextMenu';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
-  bareUrl,
+  historyDisplayUrl,
+  historyEntryHref,
   inlineCompletion,
   matchHistory,
   topSites,
@@ -1004,8 +1006,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // redirects, back/forward); recordVisit ignores non-https URLs
           // (about:blank, chrome-extension://). The iframe fallback never
           // fires this event - it records in navigateTab / go instead.
-          // Private windows keep no history.
-          if (!isPrivate) recordVisit(event.url);
+          // Private windows keep no history. An nsite is recorded under its
+          // canonical URL, with the name it was reached through, if any.
+          if (!isPrivate) recordVisit(event.url, nsiteResolvedName(event.url));
           break;
         case 'loadError':
           // Ignore the error for a URL the tab has already navigated past
@@ -2169,7 +2172,7 @@ function AddressBar({
       if (next < -1) next = count - 1;
       else if (next >= count) next = -1;
       setHighlighted(next);
-      onChangeValue(next === -1 ? typed : suggestions[next].url);
+      onChangeValue(next === -1 ? typed : historyEntryHref(suggestions[next]));
     } else if (e.key === 'Escape' && show) {
       e.preventDefault();
       dismiss();
@@ -2247,7 +2250,7 @@ function AddressBar({
               aria-selected={i === highlighted}
               onClick={() => {
                 dismiss();
-                onNavigate(entry.url);
+                onNavigate(historyEntryHref(entry));
               }}
               className={cn(
                 'flex cursor-default items-center gap-2.5 px-3 py-1.5 text-sm',
@@ -2258,10 +2261,10 @@ function AddressBar({
             >
               <History className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 max-w-[50%] truncate">
-                {entry.title ?? hostnameOf(entry.url) ?? entry.url}
+                {entry.title ?? entry.name ?? hostnameOf(entry.url) ?? entry.url}
               </span>
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                {bareUrl(entry.url)}
+                {historyDisplayUrl(entry)}
               </span>
             </li>
           ))}
@@ -3609,7 +3612,10 @@ function NewTabTile({
   onNavigate: (url: string) => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const icon = link.icon ? sanitizeImageUrl(link.icon) : null;
+  // An nsite's icon is the one Din read from its own files.
+  const nsiteIcon = useNsiteIcon(link.nsiteHost);
+  const raw = link.nsiteHost ? nsiteIcon : link.icon;
+  const icon = raw ? sanitizeImageUrl(raw) : null;
 
   return (
     <button

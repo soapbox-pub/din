@@ -402,6 +402,20 @@ export function rememberNsiteAlias(aliasUrl: string, canonicalUrl: string): void
 }
 
 /**
+ * The name (display spelling, e.g. `soapbox.pub` or `mk@ditto.pub+polaroids`)
+ * Din resolved a canonical nsite URL's host through this session, if any.
+ */
+export function nsiteResolvedName(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== NSITE_PROTOCOL) return null;
+    return resolvedAliases.get(url.hostname.toLowerCase()) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The address-bar spelling of an nsite URL: the name it was reached through
  * when Din resolved one, otherwise the URL unchanged. The result is always
  * something the address bar can navigate back to, so retyping what's shown
