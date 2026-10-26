@@ -24,7 +24,7 @@ import { WEB_POPUP_APP_ID, popupWindowSize } from '@/lib/webPopup';
  */
 export function BrowserExtensionHost() {
   const { open } = useWindowActions();
-  const { findWebAppForUrl } = useInstalledApps();
+  const { findAppIdForUrl } = useInstalledApps();
 
   useEffect(() => {
     const crx = getCrxBridge();
@@ -46,9 +46,9 @@ export function BrowserExtensionHost() {
       // If the URL belongs to an installed web app, open it in that app's own
       // window (at the deep link) instead of a browser tab.
       if (command.type === 'open') {
-        const webApp = findWebAppForUrl(command.url);
-        if (webApp) {
-          open(webApp.id, { url: command.url });
+        const appId = findAppIdForUrl(command.url);
+        if (appId) {
+          open(appId, { url: command.url });
           return;
         }
       }
@@ -59,7 +59,7 @@ export function BrowserExtensionHost() {
       }
       publishTabCommand(command);
     });
-  }, [open, findWebAppForUrl]);
+  }, [open, findAppIdForUrl]);
 
   return null;
 }

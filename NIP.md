@@ -43,6 +43,7 @@ and never publishes plaintext.
 |---|---|---|
 | `computer.din.settings` | `{ "theme": "light" \| "dark" \| "system", "useAppBlossomServers": boolean }` | Desktop settings that roam across devices |
 | `computer.din.web-apps` | `{ "id": string, "name": string, "url": string, "icon"?: string }[]` | Websites installed as desktop apps (PWA-style); `url` and `icon` are https URLs |
+| `computer.din.nsite-apps` | `{ "host": string, "installedAt": number, "name"?: string }[]` | [NIP-5A](https://github.com/nostr-protocol/nips/blob/master/5A.md) nsites installed as desktop apps. `host` is the site's canonical host (`npub1…` for a root site, `<pubkeyB36><d>` for a named one), never a NIP-05 name; `installedAt` is Unix seconds; `name` is set only when the user renamed the app. Only addresses roam: each device keeps the signed manifests and files itself, and installs whatever the list names that it doesn't have |
 | `computer.din.signer-permissions` | `{ [origin: string]: { "status": "connected" \| "blocked", "name"?: string, "methods": { [method: string]: "allow" \| "deny" }, "kinds": { [kind: string]: "allow" \| "deny" }, "createdAt": number, "lastUsed": number } }` | Sites and installed apps connected to the account through Din's NIP-07 signer, and what each may do without asking: `methods` holds `nip04.encrypt` / `nip04.decrypt` / `nip44.encrypt` / `nip44.decrypt`, `kinds` holds `signEvent` per event kind; times are Unix ms |
 
 ### Retired keys
@@ -78,5 +79,6 @@ id), and `["k", "30078"]`.
 | 0 | NIP-01 | Profile metadata (published on signup) |
 | 10002 | NIP-65 | Relay list; read on login, published from Settings → Nostr & Storage |
 | 10063 | BUD-03 | Blossom server list; read on login, published from Settings → Nostr & Storage |
+| 15128, 35128 | NIP-5A | nsite manifests; read to serve `nsite://` sites, and kept (signature-checked) in the device's nsite store for sites that were opened or installed |
 | 16767 | Profile Themes | Active profile theme; read-only, applied as the OS theme |
 | 22242 | NIP-42 | Relay authentication |

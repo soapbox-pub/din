@@ -113,7 +113,7 @@ export function Dock({
   const areas = useWorkAreas();
   const dinActions = useWindowActions();
   const { closeApp } = dinActions;
-  const { getApp, webApps, uninstallWebApp } = useInstalledApps();
+  const { getApp, canUninstall, uninstallApp } = useInstalledApps();
   // Pinned apps belong to this device and never sync to relays, seeded from
   // the pre-app-data localStorage key on first run.
   const [pinned, setPinned] = useAppData<string[]>(
@@ -135,14 +135,14 @@ export function Dock({
     [setPinned],
   );
 
-  /** Uninstall a web app: close its windows, unpin it, drop the entry. */
+  /** Uninstall an app: close its windows, unpin it, drop the entry. */
   const uninstall = useCallback(
     (appId: string) => {
       closeApp(appId);
       setPinned((prev) => prev.filter((id) => id !== appId));
-      uninstallWebApp(appId);
+      uninstallApp(appId);
     },
-    [closeApp, setPinned, uninstallWebApp],
+    [closeApp, setPinned, uninstallApp],
   );
 
   // Din's own window actions, bundled into the shape a tile consumes. The
@@ -606,11 +606,7 @@ export function Dock({
                 reordering={dragging}
                 onTogglePin={togglePin}
                 onDragPointerDown={reorder.onPointerDown}
-                onUninstall={
-                  webApps.some((webApp) => webApp.id === appId)
-                    ? uninstall
-                    : undefined
-                }
+                onUninstall={canUninstall(appId) ? uninstall : undefined}
               />
             );
           })}

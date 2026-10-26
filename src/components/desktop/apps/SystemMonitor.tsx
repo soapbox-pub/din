@@ -132,7 +132,7 @@ function pagesLabel(pages: PageInfo[]): string {
 /** Sort processes into the groups the table shows. */
 function groupProcesses(
   processes: ProcessInfo[],
-  apps: Pick<InstalledAppsManager, 'getApp' | 'findWebAppForUrl'>,
+  apps: Pick<InstalledAppsManager, 'getApp' | 'findAppIdForUrl'>,
 ): Group[] {
   const groups = new Map<string, Group>();
   const add = (key: string, label: string, icon: LucideIcon | string, member: Member) => {
@@ -176,8 +176,8 @@ function groupProcesses(
           detail: first.kind === 'private-tab' ? '' : hostOf(first.url),
         };
         if (first.kind === 'web-app') {
-          const webApp = apps.findWebAppForUrl(first.url);
-          const app = webApp && apps.getApp(webApp.id);
+          const appId = apps.findAppIdForUrl(first.url);
+          const app = appId && apps.getApp(appId);
           if (app) add(`app:${app.id}`, app.name, app.icon, member);
           else add(`pid:${process.pid}`, member.label, WEB_APP_ICON, member);
         } else if (first.kind === 'page') {
@@ -587,7 +587,7 @@ function TableSkeleton() {
  */
 export function SystemMonitor() {
   const { available, snapshot, cpuHistory, memoryHistory } = useSystemMonitor();
-  const { getApp, findWebAppForUrl } = useInstalledApps();
+  const { getApp, findAppIdForUrl } = useInstalledApps();
   const { toast } = useToast();
 
   const [mineOnly, setMineOnly] = useState(true);
@@ -599,8 +599,8 @@ export function SystemMonitor() {
   const [confirming, setConfirming] = useState<Row | null>(null);
 
   const groups = useMemo(
-    () => (snapshot ? groupProcesses(snapshot.processes, { getApp, findWebAppForUrl }) : []),
-    [snapshot, getApp, findWebAppForUrl],
+    () => (snapshot ? groupProcesses(snapshot.processes, { getApp, findAppIdForUrl }) : []),
+    [snapshot, getApp, findAppIdForUrl],
   );
   const rows = useMemo(
     () => buildRows(groups, { mineOnly, query, sort, expanded }),

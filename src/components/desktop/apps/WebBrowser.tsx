@@ -35,6 +35,9 @@ import {
   viewSourceUrl,
 } from '@/lib/sanitizeUrl';
 import { nsiteDisplayUrl } from '@/lib/nsite';
+import { canonicalHostOfUrl, nsiteAppId, nsiteAppUrl } from '@/lib/nsiteApps';
+import { getNsiteStore } from '@/lib/nsiteStore';
+import { ensureNsiteAppInfo } from '@/lib/nsiteAppInfo';
 import { pickBestIcon, type IconCandidate } from '@/lib/appIcon';
 import {
   internalPageTitle,
@@ -4122,7 +4125,9 @@ function ClearDataOption({
 
 /**
  * Toolbar button + popover to install the current site as a desktop app,
- * like installing a PWA on other OSes.
+ * like installing a PWA on other OSes. An https site becomes a web app; an
+ * nsite is installed into the OS-level nsite store by its canonical host, with
+ * its name and icon read from its own files (see src/lib/nsiteAppInfo.ts).
  */
 function InstallSiteButton({
   url,
@@ -4137,17 +4142,32 @@ function InstallSiteButton({
   themeColor: string | null;
   collectIcons: () => Promise<IconCandidate[]>;
 }) {
-  const { installWebApp, findWebAppByUrl } = useInstalledApps();
+  const { installWebApp, findWebAppByUrl, installNsiteApp, findNsiteApp, getApp } =
+    useInstalledApps();
   const { open: openApp } = useWindowActions();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  // An nsite's own name for itself, so a name the user didn't change isn't
+  // saved over it (and later versions of the site can rename the app).
+  const [derivedName, setDerivedName] = useState<string | null>(null);
+  const nameEdited = useRef(false);
+  // nsites can only be installed where Din's nsite store exists.
+  const nsiteHost = getNsiteStore() ? canonicalHostOfUrl(url) : null;
   // The best icon resolved from the page's link/manifest hints (prefers SVG),
   // filled in asynchronously when the popover opens. Null until resolved, so
   // the preview shows the reported-favicon baseline in the meantime.
   const [resolvedIcon, setResolvedIcon] = useState<string | null>(null);
 
   const site = useMemo(() => {
+    if (nsiteHost) {
+      return {
+        url: nsiteAppUrl(nsiteHost),
+        // The name Din resolved it through, when there was one.
+        hostname: nsiteDisplayUrl(nsiteAppUrl(nsiteHost)).replace(/^nsite:\/\/|\/$/g, ''),
+        icon: '',
+      };
+    }
     const safe = sanitizeUrl(url);
     if (!safe) return null;
     const { hostname, origin } = new URL(safe);
@@ -4158,9 +4178,13 @@ function InstallSiteButton({
       // conventional /favicon.ico (AppIcon degrades to a glyph on 404).
       icon: (favicon && sanitizeImageUrl(favicon)) || `${origin}/favicon.ico`,
     };
-  }, [url, favicon]);
+  }, [url, favicon, nsiteHost]);
 
-  const installed = site ? findWebAppByUrl(site.url) : undefined;
+  const installed = nsiteHost
+    ? findNsiteApp(nsiteHost) && getApp(nsiteAppId(nsiteHost))
+    : site
+      ? findWebAppByUrl(site.url)
+      : undefined;
   // Prefer the higher-quality icon resolved from the page's hints, falling
   // back to the reported-favicon baseline until (or unless) that resolves.
   const effectiveIcon = resolvedIcon ?? site?.icon ?? '';
@@ -4170,7 +4194,26 @@ function InstallSiteButton({
     if (!next) return;
     setName(pageTitle ?? site?.hostname ?? '');
     setResolvedIcon(null);
-    if (site) {
+    setDerivedName(null);
+    nameEdited.current = false;
+    const store = getNsiteStore();
+    if (nsiteHost && store) {
+      store
+        .info(nsiteHost)
+        .then((summary) => (summary ? ensureNsiteAppInfo(store, summary).then((info) => ({ summary, info })) : null))
+        .then((found) => {
+          if (!found) return;
+          const declared = found.info?.name ?? found.summary.title;
+          if (found.info?.icon) setResolvedIcon(found.info.icon);
+          if (declared) {
+            setDerivedName(declared);
+            if (!nameEdited.current) setName(declared);
+          }
+        })
+        .catch(() => {
+          /* Leave the page title in place. */
+        });
+    } else if (site) {
       const forSite = site.url;
       collectIcons()
         .then((candidates) => setResolvedIcon(pickBestIcon(candidates, forSite, favicon)))
@@ -4182,6 +4225,20 @@ function InstallSiteButton({
 
   const install = () => {
     if (!site) return;
+    if (nsiteHost) {
+      const entry = installNsiteApp(
+        nsiteHost,
+        name.trim() && name.trim() !== derivedName ? name : undefined,
+      );
+      if (!entry) return;
+      setOpen(false);
+      toast({
+        title: `${name.trim() || derivedName || site.hostname} installed`,
+        description:
+          'Find it in the app launcher. Its files are downloading, so it will work offline too.',
+      });
+      return;
+    }
     // Capture the page's theme color (normalized) so the installed app's
     // window opens pre-tinted instead of flashing default chrome.
     const webApp = installWebApp({
@@ -4263,8 +4320,11 @@ function InstallSiteButton({
                 <Input
                   id="install-app-name"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={site.hostname}
+                  onChange={(e) => {
+                    nameEdited.current = true;
+                    setName(e.target.value);
+                  }}
+                  placeholder={derivedName ?? site.hostname}
                   autoComplete="off"
                   spellCheck={false}
                   className="h-8"

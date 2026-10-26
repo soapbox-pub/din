@@ -74,7 +74,6 @@ import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerCont
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { primaryArea } from '@/lib/monitors';
 import type { AppDefinition } from '@/lib/apps';
-import type { WebApp } from '@/lib/webApps';
 
 /**
  * Menu bar along the top of the desktop.
@@ -178,7 +177,7 @@ const FocusedAppName = memo(function FocusedAppName({ appId }: { appId: string |
 
 /** Left menu: the full searchable apps launcher. */
 const AppsMenu = memo(function AppsMenu() {
-  const { apps, uninstallWebApp, webApps } = useInstalledApps();
+  const { apps, uninstallApp, canUninstall } = useInstalledApps();
   // Actions only: keeps the launcher (a large Radix popover tree) out of
   // the per-window-commit re-render cascade.
   const { open, closeApp } = useWindowActions();
@@ -200,10 +199,10 @@ const AppsMenu = memo(function AppsMenu() {
     [setMenuOpen],
   );
 
-  /** Uninstall a web app: close its windows, then drop the entry. */
+  /** Uninstall an app: close its windows, then drop the entry. */
   const uninstall = (appId: string) => {
     closeApp(appId);
-    uninstallWebApp(appId);
+    uninstallApp(appId);
   };
 
   // Native apps also match on their desktop entry's Keywords and Categories,
@@ -281,7 +280,7 @@ const AppsMenu = memo(function AppsMenu() {
                 apps={dinApps}
                 onOpen={open}
                 onUninstall={uninstall}
-                webApps={webApps}
+                canUninstall={canUninstall}
               />
               {nativeApps.length > 0 && (
                 <>
@@ -294,7 +293,7 @@ const AppsMenu = memo(function AppsMenu() {
                     apps={nativeApps}
                     onOpen={open}
                     onUninstall={uninstall}
-                    webApps={webApps}
+                    canUninstall={canUninstall}
                   />
                 </>
               )}
@@ -311,13 +310,13 @@ function AppGrid({
   apps,
   onOpen,
   onUninstall,
-  webApps,
+  canUninstall,
 }: {
   apps: AppDefinition[];
   onOpen: (appId: string, params?: Record<string, unknown>) => void;
   onUninstall: (appId: string) => void;
-  /** Installed web apps, the only kind the launcher can uninstall. */
-  webApps: readonly WebApp[];
+  /** Whether an app can be uninstalled (installed web apps and nsites). */
+  canUninstall: (appId: string) => boolean;
 }) {
   return (
     <div className="grid grid-cols-4 gap-1">
@@ -344,7 +343,7 @@ function AppGrid({
                 {action.label}
               </ContextMenuItem>
             ))}
-            {webApps.some((webApp) => webApp.id === app.id) && (
+            {canUninstall(app.id) && (
               <ContextMenuItem
                 variant="destructive"
                 onSelect={() => onUninstall(app.id)}

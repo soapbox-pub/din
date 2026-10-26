@@ -72,6 +72,8 @@
 //     FilePickerBridgeHost)
 //   - window.nsiteHost: relays nsite:// manifest lookups to the renderer's
 //     Nostr client (see NsiteBridgeHost / electron/nsite.mts)
+//   - window.nsiteStore: the OS-level store of nsites, and which are
+//     installed as apps (see src/lib/nsiteStore.ts / electron/nsite-store.mts)
 //   - window.promptHost: yes/no questions for the user - site permissions and
 //     extension installs (see PromptHost)
 //   - window.screenShare: pages asking to share the screen, and the shares
@@ -2486,6 +2488,60 @@ contextBridge.exposeInMainWorld('nsiteHost', {
    * @param {{ requestId: number, resolution: unknown }} response
    */
   respond: (response) => ipcRenderer.send('nsite:response', response),
+});
+
+// The OS-level nsite store (window.nsiteStore), backed by the nsite:* handlers
+// in electron/nsite.mts: the signed manifests of the sites Din has opened, and
+// which of them are installed as apps. Hosts are always canonical
+// (`npub1…` or `<pubkeyB36><dtag>`); main rejects anything else.
+contextBridge.exposeInMainWorld('nsiteStore', {
+  /** Summaries of every installed site. */
+  installed: () => ipcRenderer.invoke('nsite:installed'),
+  /**
+   * The stored summary of one site, installed or visited, or null.
+   * @param {string} host
+   */
+  info: (host) => ipcRenderer.invoke('nsite:info', host),
+  /**
+   * Install a site and download all of its files.
+   * @param {string} host
+   */
+  install: (host) => ipcRenderer.invoke('nsite:install', host),
+  /** @param {string} host */
+  uninstall: (host) => ipcRenderer.invoke('nsite:uninstall', host),
+  /**
+   * One file of a stored site, hash-verified, or null.
+   * @param {string} host
+   * @param {string} filePath
+   */
+  read: (host, filePath) => ipcRenderer.invoke('nsite:read', host, filePath),
+  /**
+   * Store how a site presents itself as an app.
+   * @param {string} host
+   * @param {{ from: string, name: string | null, icon: string | null, themeColor: string | null }} info
+   */
+  setAppInfo: (host, info) => ipcRenderer.invoke('nsite:setAppInfo', host, info),
+  /**
+   * A stored site changed (installed, updated, uninstalled, app info).
+   * Returns an unsubscribe fn.
+   * @param {(event: { host: string }) => void} callback
+   */
+  onChanged: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, payload: { host: string }) => void} */
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('nsite:changed', listener);
+    return () => ipcRenderer.removeListener('nsite:changed', listener);
+  },
+  /**
+   * Download progress while a site installs. Returns an unsubscribe fn.
+   * @param {(event: { host: string, done: number, total: number }) => void} callback
+   */
+  onProgress: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, payload: { host: string, done: number, total: number }) => void} */
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('nsite:progress', listener);
+    return () => ipcRenderer.removeListener('nsite:progress', listener);
+  },
 });
 
 // File-picker bridge host (window.filePickerHost), backed by the filepicker:*
