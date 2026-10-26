@@ -1154,6 +1154,11 @@ export type { MusicEngine };
       else if (action === 'nexttrack') player.next();
       else player.previous();
     },
+    playIdle() {
+      if (player.getState().queue.length === 0) return false;
+      player.play();
+      return true;
+    },
   });
 }
 

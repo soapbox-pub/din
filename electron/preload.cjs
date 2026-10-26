@@ -2770,4 +2770,16 @@ contextBridge.exposeInMainWorld('media', {
    * @param {'play' | 'pause' | 'nexttrack' | 'previoustrack'} action
    */
   control: (id, action) => ipcRenderer.invoke('media:control', id, action),
+
+  /**
+   * Subscribe to the media keys (play/pause, next, previous, stop). Returns
+   * an unsubscribe fn.
+   * @param {(key: string) => void} callback
+   */
+  onKey: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, key: string) => void} */
+    const listener = (_event, key) => callback(key);
+    ipcRenderer.on('media:key', listener);
+    return () => ipcRenderer.removeListener('media:key', listener);
+  },
 });

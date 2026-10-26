@@ -2424,7 +2424,32 @@ function registerMediaKeys(): void {
   globalShortcut.register('VolumeUp', () => pushAudioOsd(audioAdjust(5)));
   globalShortcut.register('VolumeDown', () => pushAudioOsd(audioAdjust(-5)));
   globalShortcut.register('VolumeMute', () => pushAudioOsd(audioToggleMute()));
+  for (const [accelerator, key] of [
+    ['MediaPlayPause', 'playpause'],
+    ['MediaNextTrack', 'nexttrack'],
+    ['MediaPreviousTrack', 'previoustrack'],
+    ['MediaStop', 'stop'],
+  ] as const) {
+    globalShortcut.register(accelerator, () => sendToShell('media:key', key));
+  }
 }
+
+/**
+ * Play/pause, next, previous and stop keys, from keyboards and from Bluetooth
+ * headsets (BlueZ turns their buttons into a keyboard of their own). Like
+ * the volume keys they reach Din as the focused client's input, so they're
+ * taken here and sent to the shell, which picks what they control (see
+ * src/lib/nowPlaying.ts). The page never sees them: Chromium acting on the
+ * key in a focused tab as well would toggle playback twice.
+ */
+const MEDIA_KEYS: Record<string, string> = {
+  MediaPlayPause: 'playpause',
+  MediaPlay: 'play',
+  MediaPause: 'pause',
+  MediaStop: 'stop',
+  MediaTrackNext: 'nexttrack',
+  MediaTrackPrevious: 'previoustrack',
+};
 
 // ---------------------------------------------------------------------------
 // Brightness bridge (window.brightness). Two independent halves:
@@ -2657,7 +2682,7 @@ function undimCapture(image: Electron.NativeImage): Electron.NativeImage {
 
 
 /**
- * Brightness and volume media keys (mic-mute is read from evdev; see
+ * Brightness, volume and playback media keys (mic-mute is read from evdev; see
  * watchEvdevKeys). Electron's accelerator grammar has no brightness key
  * names, and on Wayland globalShortcut can't grab anything,
  * but the compositor delivers XF86MonBrightness* and XF86Audio* keys to the
@@ -2676,6 +2701,12 @@ function attachMediaKeys(contents: Electron.WebContents): void {
       if (key === 'AudioVolumeUp') pushAudioOsd(audioAdjust(5));
       else if (key === 'AudioVolumeDown') pushAudioOsd(audioAdjust(-5));
       else pushAudioOsd(audioToggleMute());
+      return;
+    }
+    const mediaKey = MEDIA_KEYS[key];
+    if (mediaKey) {
+      event.preventDefault();
+      if (!input.isAutoRepeat) sendToShell('media:key', mediaKey);
       return;
     }
     let delta: number | null = null;

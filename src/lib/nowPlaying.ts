@@ -11,9 +11,15 @@ import { localFileUrl } from '@/lib/fs';
  * Pause works on all of them. Play, Next and Previous depend on the source:
  * a web page has them only if it says how (its Media Session), and the
  * shell's elements have no next or previous.
+ *
+ * The media keys (keyboards' and Bluetooth headsets') control one source,
+ * the way GNOME and KDE pick: Play/Pause pauses the newest one playing, or
+ * resumes the newest paused one; Next and Previous go to the newest one
+ * that has them, preferring one that's playing.
  */
 
 export type MediaAction = 'play' | 'pause' | 'nexttrack' | 'previoustrack';
+export type MediaKey = 'playpause' | 'play' | 'pause' | 'stop' | 'nexttrack' | 'previoustrack';
 
 export interface MediaSource {
   id: string;
@@ -35,6 +41,7 @@ export interface MediaBridge {
   list(): Promise<MediaSource[]>;
   onChange(callback: (sources: MediaSource[]) => void): () => void;
   control(id: string, action: MediaAction): Promise<void>;
+  onKey(callback: (key: MediaKey) => void): () => void;
 }
 
 declare global {
@@ -49,6 +56,11 @@ export interface LocalMediaSource {
   current(): MediaSource | null;
   subscribe(listener: () => void): () => void;
   control(action: MediaAction): void;
+  /**
+   * Start playing though it isn't listed (stopped, with something queued),
+   * for a play key pressed with nothing else to play. False if it can't.
+   */
+  playIdle?(): boolean;
 }
 
 const locals = new Set<LocalMediaSource>();
@@ -124,6 +136,25 @@ function start(): void {
   };
   bridge.onChange(receive);
   bridge.list().then(receive, () => {});
+  bridge.onKey(handleMediaKey);
+}
+
+function handleMediaKey(key: MediaKey): void {
+  const playing = snapshot.find((s) => s.playing);
+  if (key === 'pause' || key === 'stop' || (key === 'playpause' && playing)) {
+    if (playing) controlMedia(playing.id, 'pause');
+    return;
+  }
+  if (key === 'play' || key === 'playpause') {
+    if (playing) return;
+    const paused = snapshot.find((s) => s.canPlay);
+    if (paused) controlMedia(paused.id, 'play');
+    else for (const local of locals) if (local.playIdle?.()) return;
+    return;
+  }
+  const can = (s: MediaSource) => (key === 'nexttrack' ? s.canNext : s.canPrevious);
+  const target = snapshot.find((s) => s.playing && can(s)) ?? snapshot.find(can);
+  if (target) controlMedia(target.id, key);
 }
 
 if (typeof document !== 'undefined') start();

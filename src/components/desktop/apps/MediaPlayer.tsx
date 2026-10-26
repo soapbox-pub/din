@@ -187,10 +187,6 @@ function useShortcuts(commands: Commands, winamp: boolean) {
     else if (e.key === 'F7') player.setMuted(!s.muted);
     else if (e.key === 'F8') player.setVolume(s.volume - 0.05);
     else if (e.key === 'F9') player.setVolume(s.volume + 0.05);
-    else if (e.key === 'MediaPlayPause') player.toggle();
-    else if (e.key === 'MediaTrackNext') player.next();
-    else if (e.key === 'MediaTrackPrevious') player.previous();
-    else if (e.key === 'MediaStop') player.stop();
     else if (ctrl || e.altKey) {
       if (winamp && e.altKey && key === 'g') setWinampPrefs({ eq: !getPrefs().winamp.eq });
       else if (winamp && e.altKey && key === 'e') setWinampPrefs({ playlist: !getPrefs().winamp.playlist });
