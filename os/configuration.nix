@@ -313,14 +313,15 @@ let
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
   # their keyboard layout (electron/keyboard.mts), gsettings (glib) for the
   # pointer's theme and size (electron/cursor.mts), Wine for Windows
-  # programs, bsdtar (libarchive), unar plus gzip/xz/bzip2/zstd for the
-  # Files app's archives (electron/files.mts), CUPS's tools and poppler's
+  # programs, bsdtar (libarchive), 7-Zip (the free build, without unRAR),
+  # unar plus gzip/xz/bzip2/zstd for the Files app's archives
+  # (electron/files.mts), CUPS's tools and poppler's
   # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
   # and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, and the time
   # zone's helpers.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs.unar pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils ]}:/run/wrappers/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils ]}:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so

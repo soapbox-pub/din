@@ -241,11 +241,19 @@ contextBridge.exposeInMainWorld('fs', {
   chmod: (path, mode) => ipcRenderer.invoke('fs:chmod', path, mode),
 
   /**
-   * Extract an archive into `dir`; resolves to what was created.
+   * Extract an archive into `dir`; resolves to what was created and what
+   * came out damaged. `job` names it for `cancelExtract`.
    * @param {string} archive
    * @param {string} dir
+   * @param {string} [job]
    */
-  extract: (archive, dir) => ipcRenderer.invoke('fs:extract', archive, dir),
+  extract: (archive, dir, job) => ipcRenderer.invoke('fs:extract', archive, dir, job),
+
+  /**
+   * Stop an extraction started with this `job`; nothing of it is kept.
+   * @param {string} job
+   */
+  cancelExtract: (job) => ipcRenderer.invoke('fs:cancelExtract', job),
 
   /**
    * Pack entries of `dir` into `dir/outName` (format by extension).

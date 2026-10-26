@@ -85,7 +85,8 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
     try {
       const out = await getFsBridge()!.extract(path, dir);
       void invalidateListings(queryClient, out.path);
-      if (out.damaged.length > 0) setExtractError(damagedExtractionMessage(out.damaged));
+      const warning = damagedExtractionMessage(out);
+      if (warning) setExtractError(warning);
       open('file-browser', { path: dir, select: out.path.slice(out.path.lastIndexOf('/') + 1) });
     } catch (error) {
       setExtractError(`Couldn’t extract: ${cleanFsError(error)}`);

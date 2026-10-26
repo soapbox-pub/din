@@ -420,6 +420,9 @@ function FileBrowserTab({
   const [quickLook, setQuickLook] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [status, setStatus] = useState<Status>(null);
+  /** The extraction in progress, which the status bar can cancel. */
+  const [extractJob, setExtractJob] = useState<string | null>(null);
+  const canceledJobs = useRef(new Set<string>());
   const [focused, setFocused] = useState(false);
   const [columns, setColumns] = useState(1);
   const [menuFor, setMenuFor] = useState<'items' | 'background'>('background');
@@ -838,17 +841,27 @@ function FileBrowserTab({
       if (cwd === null) return;
       const archives = names.filter(isExtractable);
       if (archives.length === 0) return;
+      const job = crypto.randomUUID();
+      setExtractJob(job);
       void run(`Extracting ${describe(archives)}…`, async () => {
         const made: string[] = [];
         const damaged: string[] = [];
+        let incomplete = false;
         try {
           for (const name of archives) {
-            const out = await fs.extract(joinPath(cwd, name), cwd);
+            const out = await fs.extract(joinPath(cwd, name), cwd, job);
             made.push(out.path);
             damaged.push(...out.damaged);
+            incomplete ||= out.incomplete;
           }
-          if (damaged.length > 0) setStatus({ kind: 'error', text: damagedExtractionMessage(damaged) });
+          const warning = damagedExtractionMessage({ path: '', damaged, incomplete });
+          if (warning) setStatus({ kind: 'error', text: warning });
+        } catch (error) {
+          if (!canceledJobs.current.has(job)) throw error;
+          setStatus({ kind: 'info', text: 'Extraction canceled' });
         } finally {
+          canceledJobs.current.delete(job);
+          setExtractJob((current) => (current === job ? null : current));
           refresh(cwd);
           if (made.length > 0) {
             setPending({ names: made.map(basename) });
@@ -865,6 +878,12 @@ function FileBrowserTab({
     },
     [cwd, fs, run, refresh],
   );
+
+  const cancelExtract = useCallback(() => {
+    if (extractJob === null) return;
+    canceledJobs.current.add(extractJob);
+    void fs.cancelExtract(extractJob);
+  }, [extractJob, fs]);
 
   const compress = useCallback(
     (names: string[], fileName: string) => {
@@ -1926,6 +1945,15 @@ function FileBrowserTab({
           </button>
         )}
         {status?.kind === 'busy' && <RotateCw className="size-3 shrink-0 animate-spin" aria-hidden />}
+        {status?.kind === 'busy' && extractJob !== null && (
+          <button
+            type="button"
+            onClick={cancelExtract}
+            className="shrink-0 rounded px-1.5 hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Cancel
+          </button>
+        )}
         {cwdDetails.data?.free != null && !status && (
           <span className="shrink-0 tabular-nums">{formatBytes(cwdDetails.data.free)} free</span>
         )}

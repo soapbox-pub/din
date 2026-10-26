@@ -103,10 +103,14 @@ export interface FsBridge {
   du(path: string): Promise<FsDiskUsage>;
   chmod(path: string, mode: number): Promise<void>;
   /**
-   * Extract an archive into `dir`; resolves to what was created and the
-   * archive's entries that came out damaged or not at all (the rest still do).
+   * Extract an archive into `dir`; resolves to what was created, the
+   * archive's entries that came out damaged or not at all (the rest still
+   * do), and whether it was damaged beyond those. `job` names the
+   * extraction for `cancelExtract`. One too big for the disk is refused.
    */
-  extract(archive: string, dir: string): Promise<{ path: string; damaged: string[] }>;
+  extract(archive: string, dir: string, job?: string): Promise<FsExtraction>;
+  /** Stop an extraction in progress; nothing of it is kept. */
+  cancelExtract(job: string): Promise<void>;
   /** Pack entries of `dir` into `dir/outName` (format by its extension). */
   compress(dir: string, names: string[], outName: string): Promise<string>;
   /** An archive's member names (capped; `total` counts them all). */
@@ -200,6 +204,15 @@ export interface FsDiskUsage {
   truncated: boolean;
 }
 
+export interface FsExtraction {
+  /** What was created: the archive's one top-level item, or a folder. */
+  path: string;
+  /** Members that came out damaged, partly or not at all. */
+  damaged: string[];
+  /** The archive was damaged in a way no member was named for. */
+  incomplete: boolean;
+}
+
 /**
  * A URL the shell can load a local file from (img, video, fetch), served by
  * electron/files.mts with Range support.
@@ -230,8 +243,11 @@ export function cleanFsError(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
 }
 
-/** The warning for an extraction with damaged entries (by archive path). */
-export function damagedExtractionMessage(damaged: string[]): string {
+/** The warning for an extraction that came out damaged, if it did. */
+export function damagedExtractionMessage({ damaged, incomplete }: FsExtraction): string | null {
+  if (damaged.length === 0) {
+    return incomplete ? 'Extracted, but the archive is damaged: some files may be missing or incomplete' : null;
+  }
   const names = damaged.map((p) => p.slice(p.lastIndexOf('/') + 1));
   const listed = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
   return names.length === 1

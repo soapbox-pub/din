@@ -16,28 +16,32 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
 type Request =
   | { type: 'run'; id: number; file: string; args: string[]; timeout: number; maxBuffer: number }
+  | { type: 'kill'; id: number }
   | { type: 'watch'; name: string; file: string; args: string[] };
 
 /** How long to wait before restarting a monitor that exited. */
 const WATCH_RESTART_MS = 5_000;
 
 let port: Electron.MessagePortMain | null = null;
+/** Commands still running, by request id, so that they can be stopped. */
+const running = new Map<number, ChildProcess>();
 
 function post(message: unknown): void {
   port?.postMessage(message);
 }
 
 function run(request: Extract<Request, { type: 'run' }>): void {
-  execFile(
+  const child = execFile(
     request.file,
     request.args,
     { timeout: request.timeout, maxBuffer: request.maxBuffer },
     (error, stdout, stderr) => {
+      running.delete(request.id);
       post({
         type: 'result',
         id: request.id,
@@ -49,6 +53,7 @@ function run(request: Extract<Request, { type: 'run' }>): void {
       });
     },
   );
+  running.set(request.id, child);
 }
 
 /**
@@ -95,6 +100,7 @@ export function start(channel: Electron.MessagePortMain): void {
   channel.on('message', (event) => {
     const request = event.data as Request;
     if (request.type === 'run') run(request);
+    else if (request.type === 'kill') running.get(request.id)?.kill();
     else if (request.type === 'watch') watch(request);
   });
 }

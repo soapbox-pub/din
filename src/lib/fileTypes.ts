@@ -146,10 +146,16 @@ export function isPlayableAudio(name: string): boolean {
   return AUDIO.has(extensionOf(name));
 }
 
+/** Containers 7-Zip unpacks besides the archives (installers, disk images). */
+const EXTRACTABLE = new Set([
+  'iso', 'msi', 'dmg', 'wim', 'swm', 'esd', 'vhd', 'vhdx', 'vmdk', 'vdi', 'qcow2', 'squashfs',
+  'lzh', 'lha', 'arj', 'xar', 'pkg', 'z', 'chm', 'udeb', 'xpi',
+]);
+
 /** Whether "Extract Here" applies (electron/files.mts can unpack it). */
 export function isExtractable(name: string): boolean {
   const ext = extensionOf(name);
-  return ARCHIVE.has(ext) || ext === 'iso';
+  return ARCHIVE.has(ext) || EXTRACTABLE.has(ext);
 }
 
 const CATEGORY_LABEL: Record<FileCategory, string> = {

@@ -80,16 +80,36 @@ function systemWorker(): Service {
   return service;
 }
 
-/** Run a command to completion; rejects with a CommandError on failure. */
+/**
+ * Run a command to completion; rejects with a CommandError on failure.
+ * Aborting `signal` kills it (SIGTERM).
+ */
 export function runCommand(
   file: string,
   args: string[],
-  options: { timeout: number; maxBuffer?: number },
+  options: { timeout: number; maxBuffer?: number; signal?: AbortSignal },
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    const { signal } = options;
+    if (signal?.aborted) {
+      reject(new CommandError('aborted', null, ''));
+      return;
+    }
     const id = nextId++;
-    pending.set(id, { resolve, reject });
-    systemWorker().postMessage({
+    const service = systemWorker();
+    const kill = () => service.postMessage({ type: 'kill', id });
+    signal?.addEventListener('abort', kill, { once: true });
+    pending.set(id, {
+      resolve: (output) => {
+        signal?.removeEventListener('abort', kill);
+        resolve(output);
+      },
+      reject: (error) => {
+        signal?.removeEventListener('abort', kill);
+        reject(error);
+      },
+    });
+    service.postMessage({
       type: 'run',
       id,
       file,

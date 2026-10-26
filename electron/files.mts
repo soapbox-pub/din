@@ -323,11 +323,26 @@ async function diskUsage(root: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Archives. bsdtar (libarchive) reads and writes nearly everything; unar
-// reads what it reads poorly (RAR above all) and, unlike it, carries on past
-// a damaged entry, so a damaged archive gives up everything it still can, as
-// 7-Zip and WinRAR do. On a system with neither, GNU tar, unzip and zip
-// cover the common cases.
+// Archives, read by three free tools, each where it does best:
+//   - bsdtar (libarchive): tarballs, compressed or not, and the package
+//     formats built like them (deb, rpm, apk, cpio). 7-Zip only takes those
+//     apart one layer at a time (a .tgz to its .tar).
+//   - 7-Zip (7zz, built without RARLAB's non-free unRAR code): everything
+//     else - zip, 7z, cab, iso, msi, dmg, wim, disk images and more.
+//   - unar: RAR, which that build of 7-Zip can't unpack.
+// When the first fails, the others get a try, from scratch. 7-Zip and unar
+// carry on past a damaged entry, so a damaged archive still gives up
+// everything else, as 7-Zip and WinRAR do on Windows. bsdtar also makes
+// archives. On a system with none of them, GNU tar, unzip and zip cover the
+// common cases.
+//
+// Archives are untrusted. All three keep what they write inside the folder
+// they unpack into: "../" and absolute names are rewritten, and nothing is
+// written through a symlink that came out of the archive. Against zip
+// bombs, an archive whose listing adds up to more than the disk has room
+// for is refused before anything is written, and since a listing can lie
+// (and tarballs have none), extraction is stopped and undone if the disk
+// nears full while it runs.
 // ---------------------------------------------------------------------------
 
 /** Single-file compressors, for "notes.txt.gz" that isn't a tarball. */
@@ -337,6 +352,24 @@ const DECOMPRESSORS: Record<string, string> = {
   '.bz2': 'bzip2',
   '.zst': 'zstd',
 };
+
+/** Tarballs and the formats bsdtar unpacks whole where 7-Zip doesn't. */
+const TARBALL = /\.(?:tar(?:\.[a-z0-9]+)?|tgz|tbz2?|txz|tzst|tlz|deb|udeb|rpm|apk|cpio)$/;
+
+/** How often the disk's free space is checked while extracting. */
+const SPACE_CHECK_MS = 250;
+/** Free space extraction leaves alone, at most (see `diskRoom`). */
+const MAX_RESERVE = 2 * 1024 ** 3;
+/** Bytes an archive listing may print. */
+const LISTING_BUFFER = 64 * 1024 * 1024;
+
+/**
+ * A password given to every tool, so that an encrypted archive fails as
+ * one ("Wrong password") instead of prompting on a terminal or stdin.
+ */
+const NO_PASSPHRASE = 'din-no-passphrase';
+
+type ArchiveTool = 'bsdtar' | '7zz' | 'unar';
 
 function isMissing(error: unknown): boolean {
   return error instanceof CommandError && error.code === 'ENOENT';
@@ -366,13 +399,18 @@ function safeArg(name: string): string {
 
 /**
  * Run an archive tool with nothing on stdin, so one that wants to ask
- * something (unar about a password) can't sit waiting until the timeout.
+ * something can't sit waiting until the timeout. Aborting `signal` stops it.
  */
-async function runNoInput(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+async function runNoInput(
+  file: string,
+  args: string[],
+  options: { signal?: AbortSignal; maxBuffer?: number } = {},
+): Promise<{ stdout: string; stderr: string }> {
   try {
     return await runCommand('sh', ['-c', 'command -v "$0" >/dev/null || exit 127; exec "$0" "$@" </dev/null', file, ...args], {
       timeout: ARCHIVE_TIMEOUT_MS,
-      maxBuffer: 16 * 1024 * 1024,
+      maxBuffer: options.maxBuffer ?? 16 * 1024 * 1024,
+      signal: options.signal,
     });
   } catch (error) {
     if (error instanceof CommandError && error.code === 127) {
@@ -387,67 +425,196 @@ function isRar(lower: string): boolean {
   return /\.(?:rar|r\d\d)$/.test(lower);
 }
 
+/** The tools to try on an archive, best first. */
+function archiveTools(archive: string): ArchiveTool[] {
+  const lower = archive.toLowerCase();
+  if (isRar(lower)) return ['unar', '7zz', 'bsdtar'];
+  if (TARBALL.test(lower)) return ['bsdtar', '7zz', 'unar'];
+  return ['7zz', 'bsdtar', 'unar'];
+}
+
 /** What a tool said about a whole archive failing, in plain words. */
 function archiveError(error: unknown): Error {
   const raw = toolError(error).message;
-  if (/password|passphrase|encrypt/i.test(raw)) return new Error('This archive needs a password');
+  // 7-Zip puts the archive's name and the reason on separate lines.
+  const said = error instanceof CommandError ? error.stderr : raw;
+  if (/password|passphrase|encrypt/i.test(said)) return new Error('This archive needs a password');
   if (
-    /bad .* data|damaged|corrupt|truncat|checksum|crc|parsing failed|more data than was available|unrecognized archive format|invalid or incomplete|unexpected end/i
-      .test(raw)
+    /bad .* data|damaged|corrupt|truncat|checksum|crc|parsing failed|more data than was available|unrecognized archive format|invalid or incomplete|unexpected end|as archive|headers error|unsupported method/i
+      .test(said)
   ) {
     return new Error('This archive is damaged or in a format Files can’t read');
   }
   return new Error(raw);
 }
 
+function formatSize(bytes: number): string {
+  const units = ['bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'];
+  let n = bytes;
+  let i = 0;
+  while (n >= 1000 && i < units.length - 1) {
+    n /= 1000;
+    i++;
+  }
+  return i === 0 ? `${n} bytes` : `${n.toFixed(n < 10 ? 1 : 0)} ${units[i]}`;
+}
+
+// ---- Listing ----------------------------------------------------------------
+
+interface ArchiveContents {
+  /** Member paths, folders included. */
+  entries: string[];
+  /** The files' total unpacked size, when the format records it. */
+  bytes: number | null;
+}
+
+/** 7-Zip's technical listing: one "Key = value" block per member. */
+function parseSevenZipListing(stdout: string): ArchiveContents {
+  // Blocks before the dashes describe the archive itself.
+  const start = stdout.indexOf('\n----------\n');
+  if (start === -1) throw new CommandError('Unreadable listing', null, stdout);
+  const entries: string[] = [];
+  let bytes = 0;
+  for (const block of stdout.slice(start + 12).split(/\n\s*\n/)) {
+    const fields = new Map<string, string>();
+    for (const line of block.split('\n')) {
+      const eq = line.indexOf(' = ');
+      if (eq > 0) fields.set(line.slice(0, eq), line.slice(eq + 3));
+      else if (line.endsWith(' =')) fields.set(line.slice(0, -2), '');
+    }
+    const name = fields.get('Path');
+    if (!name) continue;
+    entries.push(name);
+    if (fields.get('Folder') !== '+') bytes += Number(fields.get('Size')) || 0;
+  }
+  return { entries, bytes };
+}
+
+interface LsarListing {
+  lsarContents?: { XADFileName?: string; XADFileSize?: number; XADIsDirectory?: number }[];
+}
+
+async function listWith(tool: ArchiveTool, archive: string, signal?: AbortSignal): Promise<ArchiveContents> {
+  const options = { signal, maxBuffer: LISTING_BUFFER };
+  if (tool === '7zz') {
+    const { stdout } = await runNoInput('7zz', ['l', '-slt', `-p${NO_PASSPHRASE}`, '--', archive], options);
+    return parseSevenZipListing(stdout);
+  }
+  if (tool === 'unar') {
+    const { stdout } = await runNoInput('lsar', ['-j', archive], options);
+    const members = (JSON.parse(stdout) as LsarListing).lsarContents ?? [];
+    return {
+      entries: members.flatMap((m) => m.XADFileName ?? []),
+      bytes: members.reduce((sum, m) => sum + (m.XADIsDirectory ? 0 : m.XADFileSize ?? 0), 0),
+    };
+  }
+  // A tarball has no index: its sizes are only known by reading it all.
+  const { stdout } = await runNoInput('bsdtar', ['--passphrase', NO_PASSPHRASE, '-tf', archive], options);
+  return { entries: stdout.split('\n').filter(Boolean), bytes: null };
+}
+
+/** List an archive with the first tool that can. */
+async function inspectArchive(archive: string, signal?: AbortSignal): Promise<ArchiveContents> {
+  let failure: unknown = null;
+  for (const tool of archiveTools(archive)) {
+    try {
+      return await listWith(tool, archive, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (!isMissing(error)) failure ??= error;
+    }
+  }
+  if (failure !== null) throw archiveError(failure);
+  // None of them.
+  try {
+    const stdout = archive.toLowerCase().endsWith('.zip')
+      ? await run('unzip', ['-Z1', archive])
+      : await run('tar', ['-tf', archive]);
+    return { entries: stdout.split('\n').filter(Boolean), bytes: null };
+  } catch (e) {
+    throw isMissing(e) ? new Error('No program to open this kind of archive is installed') : archiveError(e);
+  }
+}
+
+// ---- Extracting -------------------------------------------------------------
+
+interface Unpacked {
+  /** Members that came out damaged, partly or not at all. */
+  damaged: string[];
+  /** The archive was damaged in a way no member was named for. */
+  incomplete: boolean;
+}
+
 /** unar's report of an entry it couldn't unpack: "  name  (123 B)... Failed! (why)". */
 const UNAR_FAILED = /^\s*(.+?)(?:\s+\(\d+ B\))?\.\.\. Failed!/;
 
-/** Extract with unar; resolves to the entries it couldn't get out whole. */
-async function unarInto(archive: string, dest: string): Promise<string[]> {
+async function unarInto(archive: string, dest: string, signal: AbortSignal): Promise<Unpacked> {
   try {
-    await runNoInput('unar', ['-q', '-f', '-D', '-o', dest, archive]);
-    return [];
+    await runNoInput('unar', ['-q', '-f', '-D', '-o', dest, archive], { signal });
+    return { damaged: [], incomplete: false };
   } catch (error) {
-    if (!(error instanceof CommandError) || error.code !== 1) throw error;
+    if (signal.aborted || !(error instanceof CommandError) || error.code !== 1) throw error;
     // Exit 1 is for a failed entry as well as a failed archive: keep what
     // came out if it got anywhere.
     const damaged = error.stderr.split('\n').flatMap((line) => UNAR_FAILED.exec(line)?.[1] ?? []);
     if (damaged.length === 0 || (await fsp.readdir(dest)).length === 0) throw error;
-    return damaged;
+    return { damaged, incomplete: false };
   }
 }
 
-/**
- * Given to bsdtar so that an encrypted archive fails with "Incorrect
- * passphrase" instead of prompting on a terminal or stdin forever.
- */
-const NO_PASSPHRASE = ['--passphrase', 'din-no-passphrase'];
+/** 7-Zip's report of a member it couldn't unpack: "ERROR: Data Error : name". */
+const SEVENZIP_ERROR = /^ERROR: .+ : (.+)$/;
 
-/** Extract with bsdtar; any damage fails the lot. */
-async function bsdtarInto(archive: string, dest: string): Promise<string[]> {
-  await runNoInput('bsdtar', [...NO_PASSPHRASE, '-xf', archive, '-C', dest]);
-  return [];
+async function sevenZipInto(archive: string, dest: string, signal: AbortSignal): Promise<Unpacked> {
+  try {
+    await runNoInput('7zz', ['x', '-y', '-bso0', '-bsp0', `-p${NO_PASSPHRASE}`, `-o${dest}`, '--', archive], { signal });
+    return { damaged: [], incomplete: false };
+  } catch (error) {
+    // 1 is a warning, 2 a fatal error: either may follow some good output.
+    if (signal.aborted || !(error instanceof CommandError) || (error.code !== 1 && error.code !== 2)) throw error;
+    // Encrypted, or a method this build lacks (RAR's): let another try.
+    if (/password|unsupported method|as archive/i.test(error.stderr)) throw error;
+    if ((await fsp.readdir(dest)).length === 0) throw error;
+    const damaged = new Set<string>();
+    for (const line of error.stderr.split('\n')) {
+      const name = SEVENZIP_ERROR.exec(line.trim())?.[1];
+      if (name) damaged.add(name.startsWith(`${dest}/`) ? name.slice(dest.length + 1) : name);
+    }
+    return { damaged: [...damaged], incomplete: damaged.size === 0 && error.code === 2 };
+  }
 }
 
-/** Extract `archive` into the empty `dest`; resolves to the damaged entries. */
-async function extractInto(archive: string, dest: string): Promise<string[]> {
+/** bsdtar stops at the first damaged entry, so any damage fails the lot. */
+async function bsdtarInto(archive: string, dest: string, signal: AbortSignal): Promise<Unpacked> {
+  await runNoInput('bsdtar', ['--passphrase', NO_PASSPHRASE, '-xf', archive, '-C', dest], { signal });
+  return { damaged: [], incomplete: false };
+}
+
+const EXTRACTORS: Record<ArchiveTool, (archive: string, dest: string, signal: AbortSignal) => Promise<Unpacked>> = {
+  bsdtar: bsdtarInto,
+  '7zz': sevenZipInto,
+  unar: unarInto,
+};
+
+/** Extract `archive` into the empty `dest`. */
+async function extractInto(archive: string, dest: string, signal: AbortSignal): Promise<Unpacked> {
   const lower = archive.toLowerCase();
   const ext = Object.keys(DECOMPRESSORS).find((e) => lower.endsWith(e));
-  if (ext && !/\.tar\.[a-z0-9]+$/.test(lower)) {
+  if (ext && !TARBALL.test(lower)) {
     // A bare compressed file, not a tarball: its compressor unpacks it.
     const [stem] = splitName(path.basename(archive));
-    await run('sh', ['-c', `${DECOMPRESSORS[ext]} -dc -- "$1" > "$2"`, 'sh', archive, path.join(dest, stem)])
-      .catch((e: unknown) => { throw toolError(e); });
-    return [];
+    await runCommand('sh', ['-c', `exec ${DECOMPRESSORS[ext]} -dc -- "$1" > "$2"`, 'sh', archive, path.join(dest, stem)], {
+      timeout: ARCHIVE_TIMEOUT_MS,
+      signal,
+    }).catch((e: unknown) => { throw signal.aborted ? e : toolError(e); });
+    return { damaged: [], incomplete: false };
   }
-  // The first that works wins; a failure is retried with the other, from scratch.
-  const tools = isRar(lower) ? [unarInto, bsdtarInto] : [bsdtarInto, unarInto];
   let failure: unknown = null;
-  for (const tool of tools) {
+  for (const tool of archiveTools(archive)) {
     try {
-      return await tool(archive, dest);
+      return await EXTRACTORS[tool](archive, dest, signal);
     } catch (error) {
+      if (signal.aborted) throw error;
       if (isMissing(error)) continue;
       failure ??= error;
       for (const item of await fsp.readdir(dest)) {
@@ -456,43 +623,117 @@ async function extractInto(archive: string, dest: string): Promise<string[]> {
     }
   }
   if (failure !== null) throw archiveError(failure);
-  // Neither bsdtar nor unar.
+  // None of them.
   try {
     if (lower.endsWith('.zip') || lower.endsWith('.jar')) {
       await run('unzip', ['-q', archive, '-d', dest]);
     } else {
       await run('tar', ['-xf', archive, '-C', dest]);
     }
-    return [];
+    return { damaged: [], incomplete: false };
   } catch (error) {
     throw isMissing(error) ? new Error('No program to open this kind of archive is installed') : archiveError(error);
   }
 }
 
 /**
+ * Free space and files on the disk holding `dir`, and how much of the space
+ * extraction must leave: 2 GB, or less on a small or nearly full disk, so
+ * that a bomb can't take the last of it from Din and everything else.
+ */
+async function diskRoom(dir: string): Promise<{ free: number; files: number; reserve: number }> {
+  const sfs = await fsp.statfs(dir);
+  const free = sfs.bavail * sfs.bsize;
+  return {
+    free,
+    // Filesystems without a fixed number of inodes (btrfs) report none.
+    files: sfs.files > 0 ? sfs.ffree : Infinity,
+    reserve: Math.min(MAX_RESERVE, (sfs.blocks * sfs.bsize) / 10, free / 2),
+  };
+}
+
+const FILLED_DISK = 'Stopped: this archive would have filled the disk';
+
+/** Extractions in progress, by the job id the shell gave, to cancel them. */
+const extractJobs = new Map<string, AbortController>();
+
+/**
  * Extract an archive next to itself: a single top-level item lands as is,
  * anything else in a folder named after the archive. Resolves to the path
- * of what was created and the entries that came out damaged (partly or not
- * at all) - an archive with some damage still gives up the rest.
+ * of what was created and what came out damaged - an archive with some
+ * damage still gives up the rest. One too big for the disk is refused.
  */
-async function extract(archive: string, destDir: string): Promise<{ path: string; damaged: string[] }> {
+async function extract(
+  archive: string,
+  destDir: string,
+  job?: string,
+): Promise<{ path: string } & Unpacked> {
+  const controller = new AbortController();
+  const { signal } = controller;
+  if (job !== undefined) extractJobs.set(job, controller);
+  const room = await diskRoom(destDir);
   const tmp = path.join(destDir, `.${path.basename(archive)}.extracting-${randomBytes(4).toString('hex')}`);
-  await fsp.mkdir(tmp);
+  let checking = false;
+  const watch = setInterval(() => {
+    if (checking) return;
+    checking = true;
+    diskRoom(destDir)
+      .then(({ free }) => {
+        if (free < room.reserve / 2) {
+          controller.abort(new Error(FILLED_DISK));
+        }
+      })
+      .catch(() => {})
+      .finally(() => { checking = false; });
+  }, SPACE_CHECK_MS);
   try {
-    const damaged = await extractInto(archive, tmp);
+    const lower = archive.toLowerCase();
+    // Tarballs are read through to be listed: the watch covers them.
+    if (!TARBALL.test(lower) && !Object.keys(DECOMPRESSORS).some((e) => lower.endsWith(e))) {
+      const contents = await inspectArchive(archive, signal).catch(() => null);
+      const spare = Math.max(0, room.free - room.reserve);
+      if (contents?.bytes != null && contents.bytes > spare) {
+        throw new Error(
+          `This archive unpacks to ${formatSize(contents.bytes)}, more than the ${formatSize(spare)} this disk can spare`,
+        );
+      }
+      if (contents && contents.entries.length > room.files) {
+        throw new Error(
+          `This archive holds ${contents.entries.length.toLocaleString('en-US')} files, more than this disk has room for`,
+        );
+      }
+    }
+    await fsp.mkdir(tmp);
+    let unpacked: Unpacked;
+    try {
+      unpacked = await extractInto(archive, tmp, signal);
+    } catch (error) {
+      if (signal.aborted) throw signal.reason as Error;
+      // Faster than the watch could catch it.
+      if (/no space left/i.test(error instanceof Error ? error.message : '')) throw new Error(FILLED_DISK, { cause: error });
+      throw error;
+    }
+    if (signal.aborted) throw signal.reason as Error;
     const items = await fsp.readdir(tmp);
     if (items.length === 1) {
       const dest = await uniquePath(destDir, items[0]);
       await fsp.rename(path.join(tmp, items[0]), dest);
-      return { path: dest, damaged };
+      return { path: dest, ...unpacked };
     }
     const [stem] = splitName(path.basename(archive));
     const dest = await uniquePath(destDir, stem);
     await fsp.rename(tmp, dest);
-    return { path: dest, damaged };
+    return { path: dest, ...unpacked };
   } finally {
+    clearInterval(watch);
+    if (job !== undefined && extractJobs.get(job) === controller) extractJobs.delete(job);
     await fsp.rm(tmp, { recursive: true, force: true });
   }
+}
+
+/** Stop an extraction in progress; what it wrote so far is removed. */
+function cancelExtract(job: string): void {
+  extractJobs.get(job)?.abort(new Error('Extraction canceled'));
 }
 
 /** Pack `names` (entries of `dir`) into a new archive; format by extension. */
@@ -523,31 +764,7 @@ async function compress(dir: string, names: string[], outName: string): Promise<
 
 /** What's inside an archive, for the Preview window. */
 async function listArchive(archive: string) {
-  const lower = archive.toLowerCase();
-  const bsdtar = async () => (await runNoInput('bsdtar', [...NO_PASSPHRASE, '-tf', archive])).stdout;
-  // lsar's first line names the archive and its format.
-  const lsar = async () => (await runNoInput('lsar', [archive])).stdout.split('\n').slice(1).join('\n');
-  let stdout: string | null = null;
-  let failure: unknown = null;
-  for (const tool of isRar(lower) ? [lsar, bsdtar] : [bsdtar, lsar]) {
-    try {
-      stdout = await tool();
-      break;
-    } catch (error) {
-      if (!isMissing(error)) failure ??= error;
-    }
-  }
-  if (stdout === null && failure !== null) throw archiveError(failure);
-  if (stdout === null) {
-    try {
-      stdout = lower.endsWith('.zip')
-        ? await run('unzip', ['-Z1', archive])
-        : await run('tar', ['-tf', archive]);
-    } catch (e) {
-      throw isMissing(e) ? new Error('No program to open this kind of archive is installed') : archiveError(e);
-    }
-  }
-  const entries = stdout.split('\n').filter(Boolean);
+  const { entries } = await inspectArchive(archive);
   return {
     entries: entries.slice(0, MAX_ARCHIVE_LISTING),
     total: entries.length,
@@ -785,7 +1002,11 @@ export function registerFileOpsHandlers({ assertShellSender, sendToShell }: {
     await fsp.chmod(absolute(target), mode);
   });
 
-  handle('fs:extract', async (archive, dir) => extract(absolute(archive), absolute(dir)));
+  handle('fs:extract', async (archive, dir, job) =>
+    extract(absolute(archive), absolute(dir), typeof job === 'string' ? job : undefined));
+  handle('fs:cancelExtract', async (job) => {
+    if (typeof job === 'string') cancelExtract(job);
+  });
   handle('fs:compress', async (dir, names, outName) => {
     if (!Array.isArray(names) || names.length === 0) throw new Error('Nothing to compress');
     return compress(absolute(dir), names.map(entryName), entryName(outName));
