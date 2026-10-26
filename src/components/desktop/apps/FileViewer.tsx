@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer, Wallpaper } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
 import { cleanFsError, extractionWarning, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
@@ -8,6 +8,7 @@ import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } fro
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useDesktopBackground } from '@/contexts/DesktopBackgroundContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowIcon } from '@/contexts/WindowIconContext';
 import { FileViewerBody } from './files/FileViewerBody';
@@ -26,6 +27,7 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
   const [path, setPath] = useState(initial);
   const [dirty, setDirty] = useState(false);
   const { open, close } = useWindowActions();
+  const { setBackground } = useDesktopBackground();
 
   // A new file asked of this window (launch params merged in).
   const [prevInitial, setPrevInitial] = useState(initial);
@@ -161,6 +163,11 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
         {path && isPhotoEditable(name) && (
           <BarButton label="Edit in Photo Editor" onClick={() => open('photo-editor', { path })}>
             <Layers className="size-4" />
+          </BarButton>
+        )}
+        {path && isViewableImage(name) && (
+          <BarButton label="Set as Desktop Background" onClick={() => void setBackground({ path })}>
+            <Wallpaper className="size-4" />
           </BarButton>
         )}
         {printable && (

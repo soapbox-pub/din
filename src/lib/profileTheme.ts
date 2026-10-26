@@ -68,6 +68,76 @@ export const ProfileThemeSchema = z.object({
 export type ProfileTheme = z.infer<typeof ProfileThemeSchema>;
 export type ThemeFont = z.infer<typeof ThemeFontSchema>;
 
+/** The prefix of a local file's URL (see `localFileUrl` in src/lib/fs.ts). */
+const LOCAL_FILE_PREFIX = 'din-file://localhost/';
+
+/**
+ * A desktop background's URL: https, or a local file on this computer, which
+ * only a theme kept off the profile can use. Quotes, backslashes and line
+ * breaks never appear in either once normalized, so the URL is safe inside a
+ * CSS `url("…")`.
+ */
+const BackgroundUrlSchema = z
+  .string()
+  .refine((url) => !/["\\\n\r]/.test(url), { message: 'Invalid URL' })
+  .refine((url) => url.startsWith(LOCAL_FILE_PREFIX) || HttpsUrlSchema.safeParse(url).success, {
+    message: 'Only https: and local file URLs are allowed',
+  });
+
+/**
+ * The theme the desktop wears: a profile theme, or one kept on this computer
+ * only, whose background may also be a local file.
+ */
+export const DesktopThemeSchema = ProfileThemeSchema.extend({
+  background: z
+    .object({
+      url: BackgroundUrlSchema,
+      mode: z.enum(['cover', 'tile']),
+      mimeType: z.string().min(1),
+    })
+    .optional(),
+});
+
+export type DesktopTheme = z.infer<typeof DesktopThemeSchema>;
+
+/** Whether a background URL names a file on this computer. */
+export function isLocalBackground(url: string): boolean {
+  return url.startsWith(LOCAL_FILE_PREFIX);
+}
+
+/** A desktop theme as a profile theme, or null when it can't be one (a local background). */
+export function toProfileTheme(theme: DesktopTheme): ProfileTheme | null {
+  const result = ProfileThemeSchema.safeParse(theme);
+  return result.success ? result.data : null;
+}
+
+/**
+ * The core colors of Din's built-in light and dark themes (index.css), which
+ * a new custom theme starts from.
+ */
+export const PRESET_THEME_COLORS: Record<'light' | 'dark', ProfileTheme['colors']> = {
+  light: { background: '#ffffff', text: '#020817', primary: '#0f172a' },
+  dark: { background: '#020817', text: '#f8fafc', primary: '#f8fafc' },
+};
+
+/** The tags of a kind 16767 event for a theme, as `parseProfileThemeEvent` reads them. */
+export function buildProfileThemeTags(theme: ProfileTheme): string[][] {
+  const tags: string[][] = [
+    ['c', theme.colors.background, 'background'],
+    ['c', theme.colors.text, 'text'],
+    ['c', theme.colors.primary, 'primary'],
+  ];
+  if (theme.fonts.body) tags.push(['f', theme.fonts.body.family, theme.fonts.body.url, 'body']);
+  if (theme.fonts.title) tags.push(['f', theme.fonts.title.family, theme.fonts.title.url, 'title']);
+  if (theme.background) {
+    const { url, mode, mimeType } = theme.background;
+    tags.push(['bg', `url ${url}`, `mode ${mode}`, `m ${mimeType}`]);
+  }
+  if (theme.title) tags.push(['title', theme.title]);
+  tags.push(['alt', 'Active profile theme']);
+  return tags;
+}
+
 /** Stored sync state for the logged-in user's active profile theme. */
 export const ProfileThemeMetadataSchema = z.object({
   /** Parsed active theme, or null if the user has none (or it was invalid). */

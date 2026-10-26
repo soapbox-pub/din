@@ -12,7 +12,9 @@
 // syntax only, like the rest of electron/.
 
 import { spawn } from 'node:child_process';
+import fsp from 'node:fs/promises';
 import { ipcMain, nativeImage, net } from 'electron';
+import { LOCAL_FILE_SCHEME } from './files.mts';
 
 const HELPER = process.env.DIN_BOOT_SCREEN;
 
@@ -25,10 +27,20 @@ const MAX_FETCH_BYTES = 32 * 1024 * 1024;
 let written: string | null = null;
 let queue: Promise<unknown> = Promise.resolve();
 
-async function wallpaperPng(url: URL): Promise<Buffer> {
+async function wallpaperBytes(url: URL): Promise<Buffer> {
+  if (url.protocol === `${LOCAL_FILE_SCHEME}:`) {
+    const file = decodeURIComponent(url.pathname);
+    const { size } = await fsp.stat(file);
+    if (size > MAX_FETCH_BYTES) throw new Error('The wallpaper is too big');
+    return fsp.readFile(file);
+  }
   const response = await net.fetch(url.toString());
   if (!response.ok) throw new Error(`The wallpaper didn't load (${response.status})`);
-  const bytes = Buffer.from(await response.arrayBuffer());
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function wallpaperPng(url: URL): Promise<Buffer> {
+  const bytes = await wallpaperBytes(url);
   if (bytes.length > MAX_FETCH_BYTES) throw new Error('The wallpaper is too big');
   let image = nativeImage.createFromBuffer(bytes);
   if (image.isEmpty()) throw new Error("The wallpaper isn't an image Din can read");
@@ -71,7 +83,7 @@ export function registerBootScreenHandlers(options: {
   const { assertShellSender } = options;
 
   /**
-   * The wallpaper (a URL: https, or the shell's own) and whether the clock is
+   * The wallpaper (a URL: https, the shell's own, or a local file) and whether the clock is
    * 12-hour. A null wallpaper leaves the boot screen its plain background.
    */
   ipcMain.handle('boot-screen:update', (event, wallpaper: unknown, hour12: unknown) => {
@@ -83,8 +95,9 @@ export function registerBootScreenHandlers(options: {
       if (typeof wallpaper !== 'string') throw new Error('The wallpaper must be a URL');
       const shell = new URL(event.sender.getURL());
       url = new URL(wallpaper, shell);
-      if (url.protocol !== 'https:' && url.origin !== shell.origin) {
-        throw new Error('The wallpaper must be https or part of Din');
+      const local = url.protocol === `${LOCAL_FILE_SCHEME}:` && url.host === 'localhost';
+      if (url.protocol !== 'https:' && url.origin !== shell.origin && !local) {
+        throw new Error('The wallpaper must be https, part of Din, or a local file');
       }
     }
     const key = `${url?.toString() ?? ''}|${hour12}`;

@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 import { MonitorsContext } from '@/contexts/MonitorsContext';
-import { useProfileTheme } from '@/hooks/useProfileTheme';
+import { useDesktopTheme } from '@/hooks/useDesktopTheme';
 import { rectStyle, viewportMonitor } from '@/lib/monitors';
 
 /**
@@ -17,13 +17,14 @@ export function Wallpaper({
   children: React.ReactNode;
   backdrop?: React.ReactNode;
 }) {
-  const theme = useProfileTheme();
+  const theme = useDesktopTheme();
   const layout = useContext(MonitorsContext);
   const monitors = layout?.monitors ?? [viewportMonitor()];
   const primary = layout?.primary ?? monitors[0];
 
-  // Profile theme background (already sanitized to an https-only URL at the
-  // parse layer). Video backgrounds are intentionally not rendered.
+  // Theme background (already sanitized at the parse layer to an https URL,
+  // or a local file for a theme kept on this computer). Video backgrounds
+  // are intentionally not rendered.
   const themeBackground =
     theme?.background && theme.background.mimeType.startsWith('image/')
       ? theme.background

@@ -145,7 +145,6 @@ import type { NightLightSchedule, NightLightState } from '@/lib/brightness';
 import { useBrightnessMutations, useBrightnessStatus } from '@/hooks/useBrightness';
 import { BrightnessGlyph, BrightnessSlider } from '@/components/desktop/BrightnessIndicator';
 import { Slider } from '@/components/ui/slider';
-import { useTheme } from '@/hooks/useTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
@@ -182,6 +181,7 @@ import { useFirmwareState } from '@/hooks/useFirmware';
 import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSection';
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
+import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 
 type SectionId =
   | 'wifi'
@@ -247,8 +247,9 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon }[] = [
  * sites and apps that may use the account through Din's signer
  * (ConnectedAppsSection). Assistant turns OpenCode, the AI agent, on or off
  * and connects its providers (AssistantSettingsSection). Appearance switches the
- * shell theme (AppContext, persisted to localStorage and roamed via
- * encrypted sync) and toggles desktop effects like wobbly windows.
+ * shell theme between light, dark and a custom one of colors, fonts and a
+ * background picture, synced with the profile theme or kept on this computer
+ * (ThemeSettings), and toggles desktop effects like wobbly windows.
  * Developers holds debug utilities such as intentionally crashing the shell
  * to test the error boundary. About shows Din's logo and DinOS's version, and
  * the update it's staging through `window.updater`, and offers the restart
@@ -3401,38 +3402,11 @@ function SyncStatusBadge({ status }: { status: ReturnType<typeof useAppDataSyncS
 // ---------------------------------------------------------------------------
 
 function AppearanceSection() {
-  const { theme, setTheme } = useTheme();
   const { config, updateConfig } = useAppContext();
 
   return (
     <SectionShell title="Appearance">
-      <p className="mb-3 text-sm text-muted-foreground">Theme</p>
-      <div className="flex gap-2" role="radiogroup" aria-label="Theme">
-        {(
-          [
-            { value: 'light', name: 'Light', icon: Sun },
-            { value: 'dark', name: 'Dark', icon: Moon },
-          ] as const
-        ).map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={theme === option.value}
-            onClick={() => setTheme(option.value)}
-            className={cn(
-              'flex w-28 flex-col items-center gap-2 rounded-xl border p-4',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              theme === option.value
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-            )}
-          >
-            <option.icon className="size-6" aria-hidden />
-            <span className="text-sm">{option.name}</span>
-          </button>
-        ))}
-      </div>
+      <ThemeSettings />
 
       <p className="mb-3 mt-4 text-sm text-muted-foreground">Effects</p>
       <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
@@ -4210,7 +4184,7 @@ function SectionShell({
   return (
     <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
       <header className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+        <h2 className="font-[family-name:var(--font-title)] text-lg font-semibold text-foreground">{title}</h2>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </header>
       {children}

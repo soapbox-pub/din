@@ -5952,6 +5952,16 @@ app.on('web-contents-created', (_event, contents) => {
           click: () => contents.copyImageAt(params.x, params.y),
         }),
       );
+      // https only: the URL may go into the user's profile theme as is.
+      if (/^https:\/\//i.test(params.srcURL)) {
+        menu.insert(
+          3,
+          new MenuItem({
+            label: 'Set Image as Desktop Background',
+            click: () => sendToShell('theme:setBackground', { url: params.srcURL }),
+          }),
+        );
+      }
     }
     // Chrome's "Search Google for “…”" on selected text, after "Copy". The
     // search opens in a new foreground tab with the same engine the address

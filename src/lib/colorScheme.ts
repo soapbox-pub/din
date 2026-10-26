@@ -10,6 +10,11 @@
 
 export interface ColorSchemeBridge {
   set(source: 'light' | 'dark' | 'system'): void;
+  /**
+   * Subscribe to "Set Image as Desktop Background" in a page's right-click
+   * menu, with the image's https URL. Returns an unsubscribe fn.
+   */
+  onSetBackground(callback: (url: string) => void): () => void;
 }
 
 declare global {

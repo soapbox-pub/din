@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useProfileTheme } from '@/hooks/useProfileTheme';
+import { useDesktopTheme } from '@/hooks/useDesktopTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getColorSchemeBridge } from '@/lib/colorScheme';
 import { deriveThemeTokens, isDarkTheme } from '@/lib/profileTheme';
@@ -9,8 +9,9 @@ const FONT_SANS_FALLBACK =
   "'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'";
 
 /**
- * ProfileThemeApplier - applies the logged-in user's active profile theme
- * (kind 16767, Profile Themes NIP) to the entire OS.
+ * ProfileThemeApplier - applies the desktop's custom theme to the entire OS:
+ * the logged-in user's active profile theme (kind 16767, Profile Themes NIP),
+ * or the one kept on this computer (see useDesktopTheme).
  *
  * Colors are written as inline CSS custom properties on <html>, which take
  * precedence over both the `:root` and `.dark` token sets in index.css, so
@@ -20,10 +21,10 @@ const FONT_SANS_FALLBACK =
  *
  * All values were sanitized at the parse layer (see src/lib/profileTheme.ts):
  * colors match /^#[0-9a-f]{6}$/, font families are character-allowlisted,
- * and URLs are https-only.
+ * and URLs are https-only (a local theme's background may be a local file).
  */
 export function ProfileThemeApplier() {
-  const theme = useProfileTheme();
+  const theme = useDesktopTheme();
   const { config } = useAppContext();
   const configuredTheme = config.theme;
 
@@ -70,10 +71,13 @@ export function ProfileThemeApplier() {
     };
   }, [theme, configuredTheme]);
 
-  // Load and apply theme fonts.
+  // Load and apply theme fonts, again only when they change: not when a
+  // color does, which would flash the default font while they reload.
+  const bodyFamily = theme?.fonts.body?.family;
+  const bodyUrl = theme?.fonts.body?.url;
+  const titleFamily = theme?.fonts.title?.family;
+  const titleUrl = theme?.fonts.title?.url;
   useEffect(() => {
-    if (!theme) return;
-
     const root = document.documentElement;
     const loadedFaces: FontFace[] = [];
     let cancelled = false;
@@ -94,20 +98,18 @@ export function ProfileThemeApplier() {
       }
     };
 
-    const { body, title } = theme.fonts;
-
-    if (body) {
-      loadFont(body, () => {
-        const stack = `'${body.family}', ${FONT_SANS_FALLBACK}`;
+    if (bodyFamily && bodyUrl) {
+      loadFont({ family: bodyFamily, url: bodyUrl }, () => {
+        const stack = `'${bodyFamily}', ${FONT_SANS_FALLBACK}`;
         root.style.setProperty('--font-sans', stack);
         root.style.fontFamily = stack;
       });
     }
 
-    if (title) {
-      // Exposed as a token for display-name styling (e.g. font-[family-name:var(--font-title)]).
-      loadFont(title, () => {
-        root.style.setProperty('--font-title', `'${title.family}', ${FONT_SANS_FALLBACK}`);
+    if (titleFamily && titleUrl) {
+      // Exposed as a token for titles (font-[family-name:var(--font-title)]).
+      loadFont({ family: titleFamily, url: titleUrl }, () => {
+        root.style.setProperty('--font-title', `'${titleFamily}', ${FONT_SANS_FALLBACK}`);
       });
     }
 
@@ -120,7 +122,7 @@ export function ProfileThemeApplier() {
       root.style.removeProperty('--font-title');
       root.style.removeProperty('font-family');
     };
-  }, [theme]);
+  }, [bodyFamily, bodyUrl, titleFamily, titleUrl]);
 
   return null;
 }

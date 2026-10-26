@@ -2,7 +2,7 @@ import { ReactNode, useCallback, useEffect, useMemo } from 'react';
 import { z } from 'zod';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { AppContext, type AppConfig, type AppContextType, type Theme, type RelayMetadata, type BlossomServerMetadata } from '@/contexts/AppContext';
-import { ProfileThemeMetadataSchema } from '@/lib/profileTheme';
+import { DesktopThemeSchema, ProfileThemeMetadataSchema } from '@/lib/profileTheme';
 import { getZoomBridge } from '@/lib/zoom';
 
 interface AppProviderProps {
@@ -54,6 +54,9 @@ const AppConfigSchema = z.object({
   blossomServerMetadata: BlossomServerMetadataSchema,
   useAppBlossomServers: z.boolean(),
   profileThemeMetadata: ProfileThemeMetadataSchema,
+  customThemeEnabled: z.boolean(),
+  syncProfileTheme: z.boolean(),
+  localTheme: DesktopThemeSchema.nullable(),
   wobblyWindows: z.boolean(),
   zoomLevel: z.number(),
   customCursor: CursorThemeSchema.nullable(),

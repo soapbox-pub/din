@@ -51,6 +51,7 @@ import {
   useFileClipboard,
 } from '@/lib/fileClipboard';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useDesktopBackground } from '@/contexts/DesktopBackgroundContext';
 import { parkedTab } from '@/lib/tabTransfer';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
@@ -392,6 +393,7 @@ function FileBrowserTab({
 }) {
   const queryClient = useQueryClient();
   const { open } = useWindowActions();
+  const { setBackground } = useDesktopBackground();
   const isTop = useWindowIsTop();
   const home = useHomeDir();
   const trash = useTrashDir();
@@ -1706,6 +1708,11 @@ function FileBrowserTab({
                     )}
                     {single?.kind === 'file' && !isTrash && canPrint && isPrintableFile(single.name) && (
                       <ContextMenuItem onSelect={() => print(pathsOf([single.name])[0])}>Print…</ContextMenuItem>
+                    )}
+                    {single?.kind === 'file' && !isTrash && isViewableImage(single.name) && (
+                      <ContextMenuItem onSelect={() => void setBackground({ path: pathsOf([single.name])[0] })}>
+                        Set as Desktop Background
+                      </ContextMenuItem>
                     )}
                     <ContextMenuSeparator />
                     {isTrash ? (

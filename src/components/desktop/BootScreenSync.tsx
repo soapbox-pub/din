@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useProfileTheme } from '@/hooks/useProfileTheme';
+import { useDesktopTheme } from '@/hooks/useDesktopTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { usesHour12 } from '@/lib/datetime';
 
@@ -16,14 +16,14 @@ declare global {
 
 /**
  * Gives DinOS's boot and unlock screen the wallpaper the desktop shows (as
- * Wallpaper draws it: the profile theme's image, none for a theme without
+ * Wallpaper draws it: the custom theme's image, none for a theme without
  * one, or Din's own) and the clock format set in Settings → Date & Time
  * (by default, the locale's). The boot screen keeps a copy on the boot
  * partition (electron/boot-screen.mts), so it's only sent once things have
  * settled.
  */
 export function BootScreenSync() {
-  const theme = useProfileTheme();
+  const theme = useDesktopTheme();
   const background = theme?.background;
   const wallpaper = theme
     ? background?.mimeType.startsWith('image/') ? background.url : null

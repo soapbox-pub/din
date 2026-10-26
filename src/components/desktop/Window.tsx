@@ -1345,7 +1345,8 @@ export const Window = memo(function Window({
         ) : (
           <>
             <AppIcon icon={win.icon ?? app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
-            <span className={cn('flex-1 truncate text-sm font-medium', chromeText)}>
+            {/* In the theme's title font, if it has one (else the var is unset and it inherits). */}
+            <span className={cn('flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium', chromeText)}>
               {title}
             </span>
           </>

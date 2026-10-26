@@ -957,6 +957,20 @@ contextBridge.exposeInMainWorld('theme', {
    * @param {'light' | 'dark' | 'system'} source
    */
   set: (source) => ipcRenderer.send('theme:set', source),
+  /**
+   * Subscribe to "Set Image as Desktop Background" in a page's right-click
+   * menu. Returns an unsubscribe fn.
+   * @param {(url: string) => void} callback
+   */
+  onSetBackground: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ url: string }} d
+     */
+    const listener = (_event, d) => callback(d.url);
+    ipcRenderer.on('theme:setBackground', listener);
+    return () => ipcRenderer.removeListener('theme:setBackground', listener);
+  },
 });
 
 // Power bridge (window.power), backed by the power:* handlers in main.mts.

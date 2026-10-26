@@ -1,5 +1,5 @@
 import { createContext } from "react";
-import type { ProfileThemeMetadata } from "@/lib/profileTheme";
+import type { DesktopTheme, ProfileThemeMetadata } from "@/lib/profileTheme";
 import type { CursorTheme } from "@/lib/cursorTheme";
 
 export type Theme = "dark" | "light" | "system";
@@ -48,6 +48,20 @@ export interface AppConfig {
    * as the theme of the entire OS.
    */
   profileThemeMetadata: ProfileThemeMetadata;
+  /**
+   * Whether the desktop wears a custom theme (colors, fonts and background)
+   * rather than the built-in light or dark one `theme` names. When there is
+   * no custom theme to wear, `theme` applies either way.
+   */
+  customThemeEnabled: boolean;
+  /**
+   * When true (default), the custom theme is the profile theme: Din wears
+   * the one the user publishes, and publishes their edits. When false, this
+   * computer keeps `localTheme` and leaves the profile theme alone.
+   */
+  syncProfileTheme: boolean;
+  /** The custom theme kept on this computer, worn while `syncProfileTheme` is off. */
+  localTheme: DesktopTheme | null;
   /**
    * When true (default), dragging a window runs the Compiz wobbly-windows
    * spring model so it wriggles like jelly. Automatically suppressed when
