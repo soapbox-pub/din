@@ -16,6 +16,8 @@
  * serve), so callers must feature-detect via `getNsiteHostBridge()`.
  */
 
+import type { NostrEvent } from '@nostrify/nostrify';
+
 /** A URL the main-process protocol handler needs resolved. */
 export interface NsiteBridgeRequest {
   /** Correlates the answer back to the waiting request. */
@@ -24,22 +26,17 @@ export interface NsiteBridgeRequest {
   url: string;
 }
 
-/** A resolved NIP-5A site manifest, flattened for the protocol handler. */
-export interface NsiteSiteManifest {
-  /** Canonical host this manifest serves (`npub1…` or `<pubkeyB36><dtag>`). */
-  host: string;
-  /** 64-char lowercase hex pubkey of the site's author. */
-  pubkey: string;
-  /** The `d` tag for a named site, or null for a root site. */
-  dtag: string | null;
-  /** Absolute path -> sha256 hex, from the manifest's `path` tags. */
-  paths: Record<string, string>;
-  /** Blossom servers to try, most trusted first. */
+/**
+ * The signed events a site resolves to. Main verifies the signatures itself
+ * and keeps the events in its nsite store, so nothing here is taken on trust.
+ */
+export interface NsiteSiteEvents {
+  /** The newest kind 15128 / 35128 manifest found for the site. */
+  manifest: NostrEvent;
+  /** The author's BUD-03 server list (kind 10063), if they publish one. */
+  serverList: NostrEvent | null;
+  /** Din's own Blossom servers, tried after the author's. */
   servers: string[];
-  /** The manifest's `title` tag, if any. */
-  title: string | null;
-  /** The manifest event's `created_at`. */
-  updatedAt: number;
 }
 
 /** Why a lookup failed, in terms the error page can speak. */
@@ -47,7 +44,7 @@ export type NsiteErrorCode = 'bad-url' | 'no-nip05' | 'no-manifest' | 'timeout';
 
 /** The renderer's answer to a relayed lookup. */
 export type NsiteResolution =
-  | { kind: 'site'; site: NsiteSiteManifest }
+  | ({ kind: 'site' } & NsiteSiteEvents)
   | { kind: 'redirect'; url: string }
   | { kind: 'error'; code: NsiteErrorCode; message: string };
 

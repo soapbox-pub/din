@@ -4688,8 +4688,9 @@ function registerBrowserDataHandlers(): void {
     if (opts.cache === true) {
       await s.clearCache();
       // nsite blobs and manifests live outside Chromium's HTTP cache, so
-      // clearing that alone would leave a site's files on disk.
-      clearNsiteManifestCache();
+      // clearing that alone would leave a site's files on disk. Installed
+      // sites and their files stay: they're apps, not browsing data.
+      await clearNsiteManifestCache();
       await clearNsiteBlobCache();
     }
     if (opts.cookies === true) {
@@ -5288,11 +5289,16 @@ app.whenReady().then(() => {
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
   });
 
-  // nsite:// in both browser sessions. This process has no Nostr client, so
-  // manifest lookups are relayed to the shell renderer (NsiteBridgeHost),
-  // which owns Nostrify, the relay list, and the query cache.
+  // nsite:// in both browser sessions and for installed apps. This process
+  // has no Nostr client, so manifest lookups are relayed to the shell renderer
+  // (NsiteBridgeHost), which owns Nostrify, the relay list, and the query
+  // cache. Private windows never write the nsite store.
   registerNsiteProtocol({
-    sessions: [browserSession(), privateBrowserSession()],
+    sessions: [
+      { session: browserSession(), persist: true },
+      { session: privateBrowserSession(), persist: false },
+      { session: appSession(), persist: true },
+    ],
     sendToShell,
     isShellSender,
   });

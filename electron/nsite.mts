@@ -17,19 +17,45 @@
 //
 //   manifest  a signed Nostr event, fetched from relays by the shell renderer
 //             (this process has no Nostr client - see registerNsiteHandlers)
+//             and signature-checked here before it is stored or served
 //   blobs     fetched straight from Blossom servers by sha256, and *verified*
 //             against the hash in the signed manifest before the page sees a
 //             byte. A lying server fails the hash and the next one is tried.
 //
-// Blobs are content-addressed, therefore immutable, therefore perfectly
-// cacheable: they land in userData/nsite-blobs/<hash> and are LRU-trimmed.
+// Manifests and blobs live in the OS-level nsite store (nsite-store.mts),
+// which also keeps installed sites for good. A stored site is served at once,
+// offline included, and checked against relays in the background.
 
-import { app, ipcMain, net } from 'electron';
+import { ipcMain, net } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import {
+  acceptSite,
+  blobUrl,
+  cachedBlobSize,
+  cachePathFor,
+  clearUnpinnedBlobs,
+  clearVisitedSites,
+  ensureBlobs,
+  fetchBlobVerified,
+  initNsiteStore,
+  installedSites,
+  markInstalled,
+  markUninstalled,
+  needsCheck,
+  nsiteStoreReady,
+  parseCanonicalHost,
+  readSiteFile,
+  setAppInfo,
+  siteSummary,
+  storedSite,
+  storeBlob,
+  touchSite,
+  type NsiteEvents,
+  type NsiteSite,
+} from './nsite-store.mts';
 
 /** The scheme this module serves. */
 export const NSITE_SCHEME = 'nsite';
@@ -43,31 +69,19 @@ function toWebStream(stream: Readable): ReadableStream<Uint8Array> {
   return Readable.toWeb(stream) as unknown as ReadableStream<Uint8Array>;
 }
 
-/** A resolved site manifest, as returned by the shell renderer. */
-export interface NsiteSite {
-  /** Canonical host this manifest serves (`npub1…` or `<pubkeyB36><dtag>`). */
-  host: string;
-  /** 64-char lowercase hex pubkey of the site's author. */
-  pubkey: string;
-  /** The `d` tag for a named site, or null for a root site. */
-  dtag: string | null;
-  /** Absolute path -> sha256 hex, from the manifest's `path` tags. */
-  paths: Record<string, string>;
-  /** Blossom servers to try, most trusted first. */
-  servers: string[];
-  /** The manifest's `title` tag, if any. */
-  title: string | null;
-  /** The manifest event's `created_at`. */
-  updatedAt: number;
-}
-
 /** What the shell renderer answers an `nsite:request` with. */
 export type NsiteResolution =
+  | ({ kind: 'site' } & NsiteEvents)
+  | { kind: 'redirect'; url: string }
+  | { kind: 'error'; code: string; message: string };
+
+/** A resolution after this process has checked and stored it. */
+type Resolved =
   | { kind: 'site'; site: NsiteSite }
   | { kind: 'redirect'; url: string }
   | { kind: 'error'; code: string; message: string };
 
-/** How long a resolved manifest is reused before being re-queried. */
+/** How long a stored manifest is served before relays are asked again. */
 const MANIFEST_TTL_MS = 5 * 60_000;
 
 /** How long the shell renderer gets to answer a resolution request. */
@@ -87,12 +101,6 @@ const VERIFY_IN_FULL_LIMIT = 4 * 1024 * 1024;
 
 /** Content types that can execute script; always verified before release. */
 const SCRIPT_BEARING = /^(text\/html|text\/javascript|image\/svg\+xml|application\/xml|application\/wasm)/;
-
-/** Disk budget for the content-addressed blob cache. */
-const CACHE_BUDGET_BYTES = 512 * 1024 * 1024;
-
-/** Bytes written since the last trim; trigger a sweep past this. */
-const CACHE_TRIM_INTERVAL_BYTES = 32 * 1024 * 1024;
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -140,11 +148,6 @@ function mimeFor(pathname: string): string {
   return MIME_TYPES[ext] ?? 'application/octet-stream';
 }
 
-/** Lowercase hex sha256 of a buffer. */
-function sha256(data: Buffer): string {
-  return crypto.createHash('sha256').update(data).digest('hex');
-}
-
 const HASH_RE = /^[0-9a-f]{64}$/;
 
 // ---------------------------------------------------------------------------
@@ -152,7 +155,7 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 // ---------------------------------------------------------------------------
 
 let sendToShell: (channel: string, payload: unknown) => void = () => {};
-let isShellSender: (event: Electron.IpcMainEvent) => boolean = () => false;
+let isShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => boolean = () => false;
 
 let nextRequestId = 1;
 const pendingResolutions = new Map<number, {
@@ -160,11 +163,8 @@ const pendingResolutions = new Map<number, {
   timer: NodeJS.Timeout;
 }>();
 
-/** Cached manifests, keyed by canonical host. */
-const manifestCache = new Map<string, { site: NsiteSite; fetchedAt: number }>();
-
 /** In-flight resolutions, so a burst of subresources costs one relay query. */
-const inFlight = new Map<string, Promise<NsiteResolution>>();
+const inFlight = new Map<string, Promise<Resolved>>();
 
 /**
  * Ask the shell renderer to resolve a URL: NIP-19 decoding, the NIP-05 lookup,
@@ -188,161 +188,47 @@ function resolveViaShell(url: string): Promise<NsiteResolution> {
   });
 }
 
-/** Resolve a URL, collapsing concurrent requests for the same key. */
-function resolveOnce(key: string, url: string): Promise<NsiteResolution> {
-  const existing = inFlight.get(key);
+/**
+ * Resolve a URL and store what comes back, collapsing concurrent requests for
+ * the same key. `persist` is false for private windows, whose lookups must
+ * never reach the disk.
+ */
+function resolveOnce(key: string, url: string, persist: boolean): Promise<Resolved> {
+  const flightKey = `${persist ? 'p' : 'e'}:${key}`;
+  const existing = inFlight.get(flightKey);
   if (existing) return existing;
 
-  const promise = resolveViaShell(url).then((resolution) => {
-    if (resolution.kind === 'site') {
-      manifestCache.set(resolution.site.host, {
-        site: resolution.site,
-        fetchedAt: Date.now(),
-      });
+  const promise = resolveViaShell(url).then((resolution): Resolved => {
+    inFlight.delete(flightKey);
+    if (resolution.kind !== 'site') return resolution;
+    const accepted = acceptSite(resolution, persist);
+    if ('error' in accepted) {
+      return { kind: 'error', code: 'bad-manifest', message: accepted.error };
     }
-    inFlight.delete(key);
-    return resolution;
+    return { kind: 'site', site: accepted.site };
   });
 
-  inFlight.set(key, promise);
+  inFlight.set(flightKey, promise);
   return promise;
 }
 
-/** A cached manifest for a host, if one is still fresh. */
-function cachedSite(host: string): NsiteSite | null {
-  const entry = manifestCache.get(host);
-  if (!entry) return null;
-  if (Date.now() - entry.fetchedAt > MANIFEST_TTL_MS) {
-    manifestCache.delete(host);
-    return null;
-  }
-  return entry.site;
-}
-
 /**
- * Whether a host looks like a canonical (key-derived) one. Only used to pick a
- * cache key - the renderer stays authoritative about what a host really means.
+ * Whether a host is a canonical (key-derived) one, the only kind the store
+ * keeps sites under.
  */
-function looksCanonical(host: string): boolean {
-  if (/^npub1[0-9a-z]{58}$/.test(host)) return true;
-  return /^[0-9a-z]{50}[a-z0-9-]{1,13}$/.test(host) && !host.endsWith('-');
+function isCanonical(host: string): boolean {
+  return parseCanonicalHost(host) !== null;
+}
+
+/** Check a stored site against relays in the background. */
+function refreshInBackground(host: string, persist: boolean): void {
+  if (!needsCheck(host, MANIFEST_TTL_MS)) return;
+  void resolveOnce(host, `${NSITE_SCHEME}://${host}/`, persist);
 }
 
 // ---------------------------------------------------------------------------
-// Content-addressed blob cache
+// Blossom streaming
 // ---------------------------------------------------------------------------
-
-let cacheDir = '';
-let bytesSinceTrim = 0;
-let trimming = false;
-
-function cachePathFor(hash: string): string {
-  return path.join(cacheDir, hash.slice(0, 2), hash);
-}
-
-/** Drop the least recently used blobs until the cache is back under budget. */
-async function trimCache(): Promise<void> {
-  if (trimming) return;
-  trimming = true;
-  try {
-    const files: Array<{ file: string; size: number; atime: number }> = [];
-    let total = 0;
-    for (const shard of await fsp.readdir(cacheDir).catch(() => [])) {
-      const shardDir = path.join(cacheDir, shard);
-      for (const name of await fsp.readdir(shardDir).catch(() => [])) {
-        const file = path.join(shardDir, name);
-        const stat = await fsp.stat(file).catch(() => null);
-        if (!stat?.isFile()) continue;
-        files.push({ file, size: stat.size, atime: stat.atimeMs });
-        total += stat.size;
-      }
-    }
-    if (total <= CACHE_BUDGET_BYTES) return;
-    files.sort((a, b) => a.atime - b.atime);
-    for (const entry of files) {
-      if (total <= CACHE_BUDGET_BYTES) break;
-      await fsp.unlink(entry.file).catch(() => {});
-      total -= entry.size;
-    }
-  } finally {
-    trimming = false;
-  }
-}
-
-/** Note bytes added to the cache, sweeping it occasionally. */
-function noteCacheWrite(size: number): void {
-  bytesSinceTrim += size;
-  if (bytesSinceTrim < CACHE_TRIM_INTERVAL_BYTES) return;
-  bytesSinceTrim = 0;
-  void trimCache();
-}
-
-/** Write a verified blob into the cache, atomically. */
-async function storeBlob(hash: string, data: Buffer): Promise<void> {
-  const target = cachePathFor(hash);
-  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    await fsp.mkdir(path.dirname(target), { recursive: true });
-    await fsp.writeFile(temp, data);
-    await fsp.rename(temp, target);
-    noteCacheWrite(data.length);
-  } catch {
-    await fsp.unlink(temp).catch(() => {});
-  }
-}
-
-/** A cached blob's size, or null when it isn't cached. */
-async function cachedBlobSize(hash: string): Promise<number | null> {
-  const stat = await fsp.stat(cachePathFor(hash)).catch(() => null);
-  return stat?.isFile() ? stat.size : null;
-}
-
-// ---------------------------------------------------------------------------
-// Blossom fetch
-// ---------------------------------------------------------------------------
-
-/** BUD-01 blob URL on a server. */
-function blobUrl(server: string, hash: string): string | null {
-  try {
-    const base = server.endsWith('/') ? server : `${server}/`;
-    const url = new URL(hash, base);
-    // https only: the server list comes from the site author, and these
-    // fetches run from the main process - a plain-http "server" would let any
-    // site aim requests at the user's LAN or localhost.
-    if (url.protocol !== 'https:') return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Download a blob and verify it against its hash, trying each server in turn.
- * Returns the bytes, or null if no server produced content matching the hash
- * from the signed manifest.
- */
-async function fetchBlobVerified(hash: string, servers: string[]): Promise<Buffer | null> {
-  for (const server of servers) {
-    const url = blobUrl(server, hash);
-    if (!url) continue;
-    try {
-      const response = await net.fetch(url, {
-        credentials: 'omit',
-        signal: AbortSignal.timeout(BLOB_TIMEOUT_MS),
-      });
-      if (!response.ok) continue;
-      const data = Buffer.from(await response.arrayBuffer());
-      // The manifest is signed; the server is not trusted. A mismatch means
-      // this server is lying or corrupt, so try the next one.
-      if (sha256(data) !== hash) continue;
-      await storeBlob(hash, data);
-      return data;
-    } catch {
-      // Network error, timeout, abort: fall through to the next server.
-    }
-  }
-  return null;
-}
 
 /**
  * Stream a large blob, hashing as it goes and erroring the stream if the
@@ -455,6 +341,7 @@ function resolutionErrorPage(code: string, message: string, url: string): Respon
     'no-nip05': "That domain doesn't point to a Nostr key",
     'no-manifest': "This site isn't published yet",
     timeout: 'Relays took too long to answer',
+    'bad-manifest': "This site's manifest isn't validly signed",
   };
   const status = code === 'bad-url' ? 400 : code === 'no-manifest' ? 404 : 502;
   return errorPage(status, titles[code] ?? 'This nsite could not be loaded', message, url);
@@ -513,11 +400,15 @@ function safeDecode(pathname: string): string {
 /**
  * Map a request path to a blob hash, following NIP-5A's fallback chain: the
  * exact path, then `index.html` when the path names no file, then `/404.html`.
+ *
+ * An installed site that just updated also answers for the files of the
+ * version before, so a page still running that version can load the chunks
+ * it was built with.
  */
 function resolvePath(site: NsiteSite, pathname: string): ResolvedPath | null {
   const requested = safeDecode(pathname) || '/';
 
-  const exact = site.paths[requested];
+  const exact = site.paths[requested] ?? site.previousPaths?.[requested];
   if (exact) return { hash: exact, path: requested, status: 200 };
 
   const lastSegment = requested.slice(requested.lastIndexOf('/') + 1);
@@ -574,8 +465,11 @@ async function serveFromCache(
   return new Response(toWebStream(fs.createReadStream(file)), { status, headers });
 }
 
-/** Handle one nsite:// request. */
-async function handleRequest(request: Request): Promise<Response> {
+/**
+ * Handle one nsite:// request. `persist` is false in private windows, whose
+ * lookups are kept in memory only.
+ */
+async function handleRequest(request: Request, persist: boolean): Promise<Response> {
   const url = new URL(request.url);
   const host = url.hostname;
 
@@ -585,10 +479,16 @@ async function handleRequest(request: Request): Promise<Response> {
   const head = request.method === 'HEAD';
 
   // Resolve the host to a manifest, or bounce an alias to its canonical URL.
-  let site = looksCanonical(host) ? cachedSite(host) : null;
-  if (!site) {
-    const key = looksCanonical(host) ? host : request.url;
-    const resolution = await resolveOnce(key, request.url);
+  // A stored site is served straight away and checked in the background.
+  await nsiteStoreReady();
+  const canonical = isCanonical(host);
+  let site = canonical ? storedSite(host, persist) : null;
+  if (site) {
+    refreshInBackground(host, persist);
+    if (persist) touchSite(host);
+  } else {
+    const key = canonical ? host : request.url;
+    const resolution = await resolveOnce(key, request.url, persist);
     if (resolution.kind === 'redirect') return redirectTo(resolution.url);
     if (resolution.kind === 'error') {
       return resolutionErrorPage(resolution.code, resolution.message, request.url);
@@ -731,30 +631,63 @@ async function handleRequest(request: Request): Promise<Response> {
 // Wiring
 // ---------------------------------------------------------------------------
 
+/** Throw unless an IPC call comes from the shell renderer. */
+function assertShell(event: Electron.IpcMainInvokeEvent): void {
+  if (!isShellSender(event)) throw new Error('nsite: unauthorized sender');
+}
+
+/** A canonical host from IPC, or a thrown error. */
+function canonicalArg(host: unknown): string {
+  if (typeof host !== 'string' || !isCanonical(host)) {
+    throw new Error('nsite: expected a canonical nsite host');
+  }
+  return host;
+}
+
 /**
- * Register the nsite:// handler on each browser session, and the IPC channel
- * the shell renderer answers manifest lookups on.
+ * Install a site: store its manifest (looking it up if Din has never opened
+ * it), keep it for good, and download every file it names, reporting progress
+ * to the shell as `nsite:progress`.
+ */
+async function installSite(
+  host: string,
+): Promise<{ ok: true; total: number; missing: number } | { ok: false; error: string }> {
+  await nsiteStoreReady();
+  if (!(await siteSummary(host))) {
+    const resolution = await resolveOnce(host, `${NSITE_SCHEME}://${host}/`, true);
+    if (resolution.kind === 'error') return { ok: false, error: resolution.message };
+    if (resolution.kind !== 'site') return { ok: false, error: 'This site could not be found.' };
+  }
+  if (!(await markInstalled(host))) return { ok: false, error: 'This site could not be found.' };
+  const { total, missing } = await ensureBlobs(host, (done, count) =>
+    sendToShell('nsite:progress', { host, done, total: count }),
+  );
+  return { ok: true, total, missing };
+}
+
+/**
+ * Register the nsite:// handler on each session that loads sites, and the IPC
+ * the shell renderer uses to answer manifest lookups and manage the store.
+ * Sessions marked `persist: false` (private windows) never write the store.
  */
 export function registerNsiteProtocol({
   sessions,
   sendToShell: send,
   isShellSender: isShell,
 }: {
-  sessions: Electron.Session[];
+  sessions: Array<{ session: Electron.Session; persist: boolean }>;
   sendToShell: (channel: string, payload: unknown) => void;
-  isShellSender: (event: Electron.IpcMainEvent) => boolean;
+  isShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => boolean;
 }): void {
   sendToShell = send;
   isShellSender = isShell;
 
-  cacheDir = path.join(app.getPath('userData'), 'nsite-blobs');
-  fs.mkdirSync(cacheDir, { recursive: true });
-  void trimCache();
+  initNsiteStore({ onChange: (host) => sendToShell('nsite:changed', { host }) });
 
-  for (const target of sessions) {
+  for (const { session: target, persist } of sessions) {
     if (target.protocol.isProtocolHandled(NSITE_SCHEME)) continue;
     target.protocol.handle(NSITE_SCHEME, (request) =>
-      handleRequest(request).catch((error: unknown) =>
+      handleRequest(request, persist).catch((error: unknown) =>
         errorPage(
           500,
           'This nsite could not be loaded',
@@ -775,16 +708,42 @@ export function registerNsiteProtocol({
     pendingResolutions.delete(payload.requestId);
     pending.resolve(payload.resolution as NsiteResolution);
   });
+
+  // The store, for the shell only (window.nsiteStore in preload.cjs). Guests
+  // never reach these: an nsite app learns nothing about other sites.
+  ipcMain.handle('nsite:installed', (event) => {
+    assertShell(event);
+    return installedSites();
+  });
+  ipcMain.handle('nsite:info', (event, host) => {
+    assertShell(event);
+    return siteSummary(canonicalArg(host));
+  });
+  ipcMain.handle('nsite:install', (event, host) => {
+    assertShell(event);
+    return installSite(canonicalArg(host));
+  });
+  ipcMain.handle('nsite:uninstall', (event, host) => {
+    assertShell(event);
+    return markUninstalled(canonicalArg(host));
+  });
+  ipcMain.handle('nsite:read', async (event, host, filePath) => {
+    assertShell(event);
+    const data = await readSiteFile(canonicalArg(host), String(filePath));
+    return data ? new Uint8Array(data) : null;
+  });
+  ipcMain.handle('nsite:setAppInfo', (event, host, info) => {
+    assertShell(event);
+    return setAppInfo(canonicalArg(host), info);
+  });
 }
 
-/** Forget every cached manifest (called when browsing data is cleared). */
-export function clearNsiteManifestCache(): void {
-  manifestCache.clear();
+/** Forget every site that isn't installed (called when browsing data is cleared). */
+export function clearNsiteManifestCache(): Promise<void> {
+  return clearVisitedSites();
 }
 
-/** Delete every cached blob (called when browsing data is cleared). */
-export async function clearNsiteBlobCache(): Promise<void> {
-  if (!cacheDir) return;
-  await fsp.rm(cacheDir, { recursive: true, force: true }).catch(() => {});
-  await fsp.mkdir(cacheDir, { recursive: true }).catch(() => {});
+/** Delete every blob no installed site needs (called when browsing data is cleared). */
+export function clearNsiteBlobCache(): Promise<void> {
+  return clearUnpinnedBlobs();
 }

@@ -16,7 +16,6 @@ import {
 import {
   getNsiteHostBridge,
   type NsiteResolution,
-  type NsiteSiteManifest,
 } from '@/lib/nsiteBridge';
 
 /** How long a NIP-05 name -> pubkey mapping is reused. */
@@ -95,43 +94,6 @@ function isManifestFor(event: NostrEvent, pubkey: string, dtag: string | null): 
   return event.tags.some(([name, value]) => name === 'd' && value === dtag);
 }
 
-/** Collect the manifest's `path` tags into an absolute-path -> sha256 map. */
-function collectPaths(event: NostrEvent): Record<string, string> {
-  const paths: Record<string, string> = {};
-  for (const [name, filePath, hash] of event.tags) {
-    if (name !== 'path') continue;
-    if (typeof filePath !== 'string' || !filePath.startsWith('/')) continue;
-    if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) continue;
-    paths[filePath] = hash;
-  }
-  return paths;
-}
-
-/** First value of a single-valued tag, or null. */
-function tagValue(event: NostrEvent, name: string): string | null {
-  const tag = event.tags.find(([tagName]) => tagName === name);
-  return typeof tag?.[1] === 'string' ? tag[1] : null;
-}
-
-/** Keep only https/http server URLs, deduplicated, in order. */
-function normalizeServers(urls: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of urls) {
-    try {
-      const url = new URL(raw);
-      if (url.protocol !== 'https:' && url.protocol !== 'http:') continue;
-      const normalized = url.toString();
-      if (seen.has(normalized)) continue;
-      seen.add(normalized);
-      out.push(normalized);
-    } catch {
-      // Skip anything that isn't a URL.
-    }
-  }
-  return out;
-}
-
 /**
  * Desktop-lifetime fulfiller for nsite:// lookups relayed from the Electron
  * main process (see electron/nsite.mts). Main serves the bytes but has no
@@ -195,29 +157,19 @@ export function NsiteBridgeHost() {
         };
       }
 
-      const serverList = events.find(
-        (event) => event.kind === 10063 && event.pubkey === pubkey,
-      );
+      const serverList =
+        events
+          .filter((event) => event.kind === 10063 && event.pubkey === pubkey)
+          .sort((a, b) => b.created_at - a.created_at)[0] ?? null;
 
-      const site: NsiteSiteManifest = {
-        host: canonicalNsiteHost(pubkey, dtag),
-        pubkey,
-        dtag,
-        paths: collectPaths(manifest),
-        servers: normalizeServers([
-          // NIP-5A: the manifest's own hints first, then the author's server
-          // list, then Din's defaults. Any of them can serve any blob - the
-          // hash from the signed manifest is what makes the order safe.
-          ...manifest.tags.filter(([name]) => name === 'server').map(([, url]) => url),
-          ...(serverList?.tags.filter(([name]) => name === 'server').map(([, url]) => url) ??
-            []),
-          ...getEffectiveBlossomServers(blossomMetadata, useAppBlossomServers),
-        ]),
-        title: tagValue(manifest, 'title'),
-        updatedAt: manifest.created_at,
+      // Main checks the signatures and keeps the events in its nsite store;
+      // Din's own servers ride along as the last resort NIP-5A allows.
+      return {
+        kind: 'site',
+        manifest,
+        serverList,
+        servers: getEffectiveBlossomServers(blossomMetadata, useAppBlossomServers),
       };
-
-      return { kind: 'site', site };
     }
 
     async function resolve(rawUrl: string, signal: AbortSignal): Promise<NsiteResolution> {
