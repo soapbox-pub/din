@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { WEB_APP_ICON } from '@/lib/appIcons';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
+import { cn } from '@/lib/utils';
 
 /**
  * Renders a desktop app icon: a root-relative image path for built-in apps
@@ -26,9 +27,16 @@ function cancelLoadOnUnmount(img: HTMLImageElement | null) {
 export function AppIcon({
   icon,
   className,
+  web = false,
 }: {
   icon: LucideIcon | string;
   className?: string;
+  /**
+   * Badge the icon with a small globe in its corner, marking a website
+   * installed as an app (AppDefinition.web). Skipped when the icon already is
+   * the globe.
+   */
+  web?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
 
@@ -41,16 +49,31 @@ export function AppIcon({
   // the https-only sanitizer (protocol-relative `//` is remote, not local).
   const isLocal = icon.startsWith('/') && !icon.startsWith('//');
   const src = isLocal ? icon : sanitizeImageUrl(icon);
+  const shown = !src || failed ? WEB_APP_ICON : src;
 
-  return (
+  const img = (
     <img
       ref={cancelLoadOnUnmount}
-      src={!src || failed ? WEB_APP_ICON : src}
+      src={shown}
       alt=""
       aria-hidden
       draggable={false}
       onError={() => setFailed(true)}
-      className={className}
+      className={web && shown !== WEB_APP_ICON ? 'size-full object-contain' : className}
     />
+  );
+
+  if (!web || shown === WEB_APP_ICON) return img;
+
+  return (
+    <span aria-hidden className={cn('relative inline-block', className)}>
+      {img}
+      <img
+        src={WEB_APP_ICON}
+        alt=""
+        draggable={false}
+        className="absolute -bottom-[4%] -right-[4%] size-[42%] drop-shadow-[0_1px_1.5px_rgba(0,0,0,0.45)]"
+      />
+    </span>
   );
 }

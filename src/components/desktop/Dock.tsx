@@ -749,6 +749,7 @@ const DockItem = memo(function DockItem({
     >
       <AppIcon
         icon={tileIcon}
+        web={app.web}
         className={cn('size-[82%] text-foreground drop-shadow-md', launching && 'motion-safe:animate-dock-bounce')}
       />
       {/* Name label, floating above the (possibly magnified) icon. */}

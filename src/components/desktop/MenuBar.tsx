@@ -329,7 +329,7 @@ function AppGrid({
                 onClick={() => onOpen(app.id)}
                 className="flex flex-col items-center gap-2 rounded-xl p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <AppIcon icon={app.icon} className="size-9 text-foreground" />
+                <AppIcon icon={app.icon} web={app.web} className="size-9 text-foreground" />
                 <span className="line-clamp-2 text-xs leading-tight text-foreground">
                   {app.name}
                 </span>

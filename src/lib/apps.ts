@@ -155,6 +155,13 @@ export interface AppDefinition {
    * requests). An app can be steered from here whatever state its window is in.
    */
   actions?: { label: string; params: Record<string, unknown> }[];
+  /**
+   * An http(s) website installed as an app (a PWA, in effect). Its icon wears
+   * a small globe in the corner, the way Android badges a Chrome-installed
+   * web app, so it reads as a page from the web rather than an app Din keeps;
+   * installed nsites, whose files Din holds, wear none.
+   */
+  web?: boolean;
 }
 
 /** All apps installed on the desktop, in launcher order. */

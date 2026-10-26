@@ -85,6 +85,7 @@ function webAppToDefinition(webApp: WebApp): AppDefinition {
     // app navigates the existing window (via a changed `url` param) instead
     // of spawning a duplicate. See WebAppFrame for the deep-link handling.
     singleInstance: true,
+    web: true,
   };
 }
 
@@ -94,7 +95,7 @@ function webAppToDefinition(webApp: WebApp): AppDefinition {
  * come from the nsite store, derived from the site's own files.
  */
 function nsiteAppToDefinition(entry: NsiteAppEntry, summary: NsiteSummary | undefined): AppDefinition {
-  return webAppToDefinition({
+  const definition = webAppToDefinition({
     id: nsiteAppId(entry.host),
     name:
       entry.name ??
@@ -105,6 +106,7 @@ function nsiteAppToDefinition(entry: NsiteAppEntry, summary: NsiteSummary | unde
     icon: summary?.app?.icon ?? undefined,
     themeColor: summary?.app?.themeColor ?? undefined,
   });
+  return { ...definition, web: false };
 }
 
 /** Hosts this session has already asked the store to install. */

@@ -290,6 +290,7 @@ export function WindowSwitcher() {
                     {app && (
                       <AppIcon
                         icon={w.icon ?? app.icon}
+                        web={app.web}
                         className="size-14 text-white drop-shadow"
                       />
                     )}
