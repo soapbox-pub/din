@@ -488,7 +488,7 @@ export function Settings({ params }: AppComponentProps) {
             }}
             placeholder="Search settings"
             aria-label="Search settings"
-            className="h-8 pl-8 text-sm"
+            className="h-8 pr-2 pl-8 text-sm [&:placeholder-shown::-webkit-search-cancel-button]:hidden"
           />
         </div>
         <nav aria-label="Settings sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
