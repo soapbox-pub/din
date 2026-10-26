@@ -767,6 +767,14 @@ in
   systemd.services.cage-tty1.serviceConfig.RestartSec = 1;
   systemd.services.cage-tty1.unitConfig.StartLimitIntervalSec = 60;
   systemd.services.cage-tty1.unitConfig.StartLimitBurst = 10;
+  # Din pings this watchdog from its main thread (electron/watchdog.mts).
+  # When that thread hangs, nothing on screen moves; this restarts Din
+  # instead of leaving the computer frozen. Din is cage's child, so its
+  # pings need NotifyAccess=all. A hung Electron never handles the SIGTERM
+  # that follows, so the stop timeout is what ends it.
+  systemd.services.cage-tty1.serviceConfig.WatchdogSec = 20;
+  systemd.services.cage-tty1.serviceConfig.NotifyAccess = "all";
+  systemd.services.cage-tty1.serviceConfig.TimeoutStopSec = 10;
 
   # cage's unit conflicts with the console login on tty1 (autovt@tty1), which
   # getty.target still wants. A system switch re-starts both targets, and

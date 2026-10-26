@@ -1,5 +1,6 @@
 //! din-fd: the one thing Node can't do for Din's embedded display -
-//! receive file descriptors over a Unix socket (SCM_RIGHTS).
+//! receive file descriptors over a Unix socket (SCM_RIGHTS) - and the
+//! datagram it can't send to systemd's watchdog (`notify`).
 //!
 //! The Wayland compositor (native/din-compositor) renders each window on the
 //! GPU into dmabufs. Electron can show a dmabuf without copying it
@@ -113,6 +114,24 @@ pub fn connect(
         on_close.call((), ThreadsafeFunctionCallMode::Blocking);
         drop(stream);
     });
+    Ok(())
+}
+
+/// Send `state` (e.g. "WATCHDOG=1") to systemd's notify socket at `socket`,
+/// the value of $NOTIFY_SOCKET. Node has no Unix datagram sockets, and a
+/// `systemd-notify` child exits before systemd can tell whose message it was.
+#[napi]
+pub fn notify(socket: String, state: String) -> Result<()> {
+    use std::os::linux::net::SocketAddrExt;
+    use std::os::unix::net::{SocketAddr, UnixDatagram};
+    let fail = |e: io::Error| Error::from_reason(format!("din-fd: notify {socket}: {e}"));
+    let address = match socket.strip_prefix('@') {
+        Some(name) => SocketAddr::from_abstract_name(name),
+        None => SocketAddr::from_pathname(&socket),
+    }
+    .map_err(fail)?;
+    let datagram = UnixDatagram::unbound().map_err(fail)?;
+    datagram.send_to_addr(state.as_bytes(), &address).map_err(fail)?;
     Ok(())
 }
 

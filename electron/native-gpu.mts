@@ -27,6 +27,7 @@ interface DinFd {
     onClose: () => void,
   ): void;
   close(fd: number): void;
+  notify(socket: string, state: string): void;
 }
 
 let addon: DinFd | null | undefined;

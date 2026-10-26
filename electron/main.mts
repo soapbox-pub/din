@@ -91,6 +91,7 @@ import { registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 import { registerProjectHandlers } from './project.mts';
+import { startWatchdog } from './watchdog.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
 // named export too, which Node's ESM-CJS interop resolves statically.
@@ -183,6 +184,8 @@ protocol.registerSchemesAsPrivileged([
 // every page, when it can't tell). Din is the whole desktop: losing WebGL
 // leaves the Terminal on its DOM renderer until Din restarts.
 app.disableDomainBlockingFor3DAPIs();
+
+startWatchdog();
 
 /** Map a request pathname to a file inside dist/, with SPA fallback. */
 function resolveFile(pathname: string): string {
