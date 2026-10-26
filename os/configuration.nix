@@ -163,20 +163,6 @@ let
     hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
   };
 
-  # OpenCode, the agent behind the Assistant, as its v2 installer would fetch
-  # it (the npm package's prebuilt binary, run through nix-ld). Din copies it
-  # into ~/.opencode/bin where that's empty (electron/assistant.mts), so a new
-  # computer has it without a download and it updates itself from there.
-  opencode-seed = pkgs.runCommand "opencode-seed-2.1.4" {
-    src = pkgs.fetchurl {
-      url = "https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.1.4.tgz";
-      hash = "sha256-zgWr4tzhBBORyOyM242gZvZA/UcecqyEbcsInEQeEeE=";
-    };
-  } ''
-    tar -xzf $src package/bin/opencode
-    install -Dm755 package/bin/opencode $out/bin/opencode
-  '';
-
   # The local UDP ports AirPlay receivers send timing and sound control to,
   # three per session; the firewall lets them in (below).
   airplayPorts = { from = 7010; to = 7039; };
@@ -347,7 +333,6 @@ let
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
     export DIN_WHISPER_SERVER=${whisper}/bin/whisper-server
     export DIN_WHISPER_MODEL=${whisper-model}
-    export DIN_OPENCODE_SEED=${opencode-seed}/bin/opencode
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Din is the whole desktop: the session's services (the desktop portal's
@@ -892,8 +877,8 @@ in
   };
 
   # OpenCode, the agent behind Din's Assistant (electron/assistant.mts), is
-  # the user's own install in ~/.opencode, which updates itself; Din puts the
-  # copy DinOS ships (opencode-seed) there when it's missing. On PATH,
+  # the user's own install in ~/.opencode, which updates itself; the disk
+  # image comes with it there (os/flake.nix). On PATH,
   # `opencode` in a Terminal attaches to the same background server Din
   # started.
   environment.extraInit = ''
@@ -1331,35 +1316,6 @@ in
     device = "/dev/disk/dinos-esp";
     fsType = "vfat";
     options = [ "umask=0077" "nofail" ];
-  };
-
-  # The image is built at a minimal size; on first boot the root partition and
-  # filesystem grow to fill whatever disk it was written to. ext4 grows while
-  # mounted, so it happens once the desktop is up, at idle priority: on a
-  # USB stick it takes a minute, which the first boot used to wait out. If
-  # it's cut short, the next boot finishes it. The mounted root is found
-  # through sysfs, where it's always the real device. An installed root is a
-  # volume, not a partition (the Installer already made its partition fill
-  # the space), so there's nothing to grow.
-  systemd.services.dinos-grow-root = {
-    description = "Grow the root partition to fill its disk";
-    wantedBy = [ "graphical.target" ];
-    after = [ "graphical.target" ];
-    path = [ pkgs.util-linux pkgs.e2fsprogs ];
-    serviceConfig = {
-      Type = "oneshot";
-      Nice = 19;
-      IOSchedulingClass = "idle";
-    };
-    script = ''
-      root=$(findmnt -nvo SOURCE /)
-      part=/sys/class/block/''${root#/dev/}
-      [ -e "$part/partition" ] || exit 0
-      disk=$(basename "$(readlink -f "$part/..")")
-      # 1: there was no room to grow it into.
-      "${pkgs.cloud-utils.guest}/bin/growpart" "/dev/$disk" "$(cat "$part/partition")" || [ $? -eq 1 ]
-      resize2fs "$root"
-    '';
   };
 
   # Booted from a USB stick (as the Installer and updater tell, by the root

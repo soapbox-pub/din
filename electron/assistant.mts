@@ -5,16 +5,18 @@
 // OpenCode v2 keeps one server per user (`opencode serve --service`) that
 // every client shares: the TUI in a Terminal, `opencode run`, and Din. The
 // first client to need it starts it, and it writes where it listens and a
-// generated password to ~/.local/state/opencode/service.json. Din starts it
-// at login while the assistant is on (the shell says so, from its config),
-// so the agent is there to be asked from anywhere; a Terminal's `opencode`
-// then finds it running and attaches.
+// generated password to ~/.local/state/opencode/service.json. While the
+// assistant is on (the shell says so, from its config), Din starts it the
+// first time the assistant is wanted rather than at login: it's a big
+// program, and from a USB stick loading it held up the desktop. One already
+// running is picked up at login, and a Terminal's `opencode` attaches to
+// Din's.
 //
 // OpenCode itself is the user's install in ~/.opencode, which updates
 // itself, rather than a copy pinned into DinOS: it moves faster than DinOS
-// releases. Where it's missing, Din copies in the one DinOS ships
-// (DIN_OPENCODE_SEED), else turning the assistant on runs OpenCode's v2
-// installer. DIN_OPENCODE names another binary.
+// releases. DinOS's disk image comes with it there (os/flake.nix); where
+// it's missing, turning the assistant on runs OpenCode's v2 installer.
+// DIN_OPENCODE names another binary.
 //
 // The server's API is HTTP with Basic auth, and that password is as good as
 // a shell as this user: the agent runs commands. It stays in this process.
@@ -185,31 +187,7 @@ function isSupported(version: string | null): boolean {
   return version !== null && Number(version.split('.')[0]) >= 2;
 }
 
-/**
- * Copy the OpenCode DinOS ships (DIN_OPENCODE_SEED) into ~/.opencode/bin, so
- * it's there from the first boot and updates itself like an installed one.
- * It's the AVX2 build; older CPUs get the installer's baseline one instead.
- */
-async function seed(): Promise<void> {
-  const from = process.env.DIN_OPENCODE_SEED;
-  if (!from || !isExecutable(from)) return;
-  const cpuinfo = await fs.promises.readFile('/proc/cpuinfo', 'utf8').catch(() => '');
-  if (!/\bavx2\b/.test(cpuinfo)) return;
-  const to = path.join(INSTALL_DIR, 'opencode');
-  const partial = `${to}.din-seed`;
-  try {
-    await fs.promises.mkdir(INSTALL_DIR, { recursive: true });
-    await fs.promises.copyFile(from, partial);
-    await fs.promises.chmod(partial, 0o755);
-    await fs.promises.rename(partial, to);
-  } catch (error) {
-    await fs.promises.rm(partial, { force: true });
-    console.warn('[assistant] Couldn’t copy the shipped OpenCode:', messageOf(error));
-  }
-}
-
 async function locate(): Promise<string | null> {
-  if (!findBinary() && !process.env.DIN_OPENCODE) await seed();
   const binary = findBinary();
   const version = binary ? await readVersion(binary) : null;
   update({ binary: binary && isSupported(version) ? binary : null, version });
@@ -354,6 +332,7 @@ async function send(s: Service, method: string, apiPath: string, body: string | 
 }
 
 async function request(method: string, apiPath: string, body: string | undefined): Promise<Reply> {
+  startWatching();
   let s: Service;
   try {
     s = service ?? (await ensureService());
@@ -447,11 +426,24 @@ async function watch(controller: AbortController): Promise<void> {
   }
 }
 
+/** Open the event stream (which starts the server) while it's on. */
+function startWatching(): void {
+  if (!status.enabled || stream) return;
+  stream = new AbortController();
+  void watch(stream);
+}
+
 function setEnabled(enabled: boolean): void {
   update({ enabled });
   if (enabled && !stream) {
-    stream = new AbortController();
-    void watch(stream);
+    // Only a server that's running already; otherwise the first time the
+    // assistant is wanted starts one.
+    const known = readService();
+    if (known) {
+      void answers(known).then((up) => {
+        if (up) startWatching();
+      });
+    }
   } else if (!enabled && stream) {
     stream.abort();
     stream = null;
@@ -494,6 +486,11 @@ export function registerAssistantHandlers(options: {
     assertShellSender(event);
     setEnabled(enabled === true);
     return status;
+  });
+
+  ipcMain.handle('assistant:start', (event) => {
+    assertShellSender(event);
+    startWatching();
   });
 
   ipcMain.handle('assistant:install', async (event) => {

@@ -74,7 +74,8 @@ be installed on a physical machine. Write it to a drive and boot from it:
 sudo dd if=result/nixos.img of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-On first boot the root partition grows to fill the disk.
+The image is 14 GiB, to fit any 16 GB stick; any tool that writes images
+(Etcher, Rufus, `dd`) will do.
 
 Written to a USB stick instead, the same image is a live system: boot a laptop
 from it and Din opens the **Install DinOS** app, which copies the running
@@ -294,15 +295,16 @@ poppler (`electron/printing.mts`). Save as PDF needs no printer at all.
 The Assistant app, the menu bar's robot, and Super+A (a prompt from
 anywhere) talk to [OpenCode](https://opencode.ai) v2, the coding agent,
 through its per-user background server (`opencode serve --service`). Din
-starts it at login while Settings → Assistant has it on, and holds its
+starts it the first time the assistant is wanted while Settings → Assistant
+has it on, and holds its
 password and event stream in the main process (`electron/assistant.mts`);
 the shell only gets what it asks for under `/api/`. Conversations are
 OpenCode's sessions, so `opencode` in a Terminal shares them. OpenCode is the
 user's own self-updating install in `~/.opencode/bin` (DinOS puts it on
-PATH). Where it's missing, Din copies in the version DinOS ships
-(`$DIN_OPENCODE_SEED`, `opencode-seed` in `os/configuration.nix`; bump its
-version and hash now and then), or runs the v2 installer where there's none
-or the CPU lacks AVX2; `$DIN_OPENCODE` names another binary.
+PATH). DinOS's disk image comes with it there (`opencode` in
+`os/flake.nix`; bump its version and hash now and then). Where it's missing,
+or won't run (it's the AVX2 build), Din runs the v2 installer;
+`$DIN_OPENCODE` names another binary.
 
 ### Dictation
 

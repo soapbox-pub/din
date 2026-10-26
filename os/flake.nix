@@ -31,14 +31,45 @@
   outputs = { self, nixpkgs, din, nostrd, deckmon }:
     let
       system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+
+      # OpenCode, the agent behind Din's Assistant (electron/assistant.mts),
+      # as its v2 installer would put it in ~/.opencode/bin: the npm
+      # package's prebuilt binary, run through nix-ld. It's in the image
+      # rather than the system, so a new computer has it from the first boot
+      # (and the Installer copies it with /home), it updates itself from
+      # there, and system updates don't carry it. Bump now and then.
+      opencode = pkgs.runCommand "opencode-home-2.1.4" {
+        src = pkgs.fetchurl {
+          url = "https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.1.4.tgz";
+          hash = "sha256-zgWr4tzhBBORyOyM242gZvZA/UcecqyEbcsInEQeEeE=";
+        };
+      } ''
+        tar -xzf $src package/bin/opencode
+        install -Dm755 package/bin/opencode $out/bin/opencode
+      '';
+
       makeImage = nixos: import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
         inherit (nixos) config pkgs;
         lib = nixpkgs.lib;
         format = "raw";
         partitionTableType = "efi";
-        diskSize = "auto";
+        # A fixed size that fits any "16 GB" USB stick (15 GB or so, in
+        # bytes), whatever writes it: the root filesystem's free space is
+        # what a live session has for apps and downloads, and nothing grows
+        # it later. The Installer sizes an installed system's own. The
+        # release compresses the empty space away (scripts/dinos-release.sh).
+        diskSize = 14 * 1024;
         # An appliance image doesn't need a nixpkgs channel copy on disk.
         copyChannel = false;
+        # Writable, so it can update itself.
+        contents = [{
+          source = opencode;
+          target = "/home/din/.opencode";
+          mode = "u+w";
+          user = "din";
+          group = "users";
+        }];
         # Mark the root partition as an x86-64 root, which is how the
         # initrd finds it (see fileSystems in configuration.nix).
         postVM = ''
@@ -65,8 +96,7 @@
         # The real product: a disk image for physical machines.
         # `nix build ./os#image` -> ./result/nixos.img; write it to a drive
         # (e.g. `dd if=result/nixos.img of=/dev/sdX bs=4M status=progress`)
-        # and boot via UEFI. The root partition grows to fill the disk on
-        # first boot. Written to a USB stick, it's a live system whose
+        # and boot via UEFI. Written to a USB stick, it's a live system whose
         # Installer app puts DinOS on the computer's own disk.
         image = makeImage self.nixosConfigurations.dinos;
 

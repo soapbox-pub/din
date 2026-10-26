@@ -1524,13 +1524,16 @@ contextBridge.exposeInMainWorld('assistant', {
   status: () => ipcRenderer.invoke('assistant:status'),
 
   /**
-   * Turn the assistant on (start the server and follow its events) or off.
+   * Turn the assistant on (follow the server's events once it runs) or off.
    * @param {boolean} enabled
    */
   setEnabled: (enabled) => ipcRenderer.invoke('assistant:setEnabled', enabled),
 
   /** Run OpenCode's installer. */
   install: () => ipcRenderer.invoke('assistant:install'),
+
+  /** Start the server, which waits until the assistant is first wanted. */
+  start: () => ipcRenderer.invoke('assistant:start'),
 
   /** Restart the server. */
   restart: () => ipcRenderer.invoke('assistant:restart'),
