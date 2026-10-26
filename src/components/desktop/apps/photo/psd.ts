@@ -1,13 +1,14 @@
 import { readPsd, writePsdUint8Array, type Color, type Layer as PsdLayer, type LayerMaskData, type Psd } from 'ag-psd';
 import { colorToRgb } from './adjust';
 import { allLayers, blankLayer, ctx2d, makeCanvas, type Doc, type Layer, type LayerKind, type Mask, type TextData } from './model';
+import { ORA_MIME, readOraDoc, writeOraDoc } from './ora';
 import { rgbToHex } from './paint';
 import { flatten } from './render';
 
 /** Bigger than this on a side isn't opened: a browser canvas can't hold it well. */
 export const MAX_SIDE = 16384;
 
-export const OPEN_EXTENSIONS = ['.psd', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.avif', '.ico', '.svg'];
+export const OPEN_EXTENSIONS = ['.psd', '.ora', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.avif', '.ico', '.svg'];
 const RASTER_MIME: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
@@ -22,6 +23,7 @@ const RASTER_MIME: Record<string, string> = {
 
 export const SAVE_TYPES = [
   { name: 'Photoshop (keeps layers)', patterns: ['*.psd'], mimeTypes: ['image/vnd.adobe.photoshop'] },
+  { name: 'OpenRaster (keeps layers)', patterns: ['*.ora'], mimeTypes: [ORA_MIME] },
   { name: 'PNG', patterns: ['*.png'], mimeTypes: ['image/png'] },
   { name: 'JPEG', patterns: ['*.jpg', '*.jpeg'], mimeTypes: ['image/jpeg'] },
   { name: 'WebP', patterns: ['*.webp'], mimeTypes: ['image/webp'] },
@@ -34,7 +36,10 @@ export const extOf = (path: string) => {
 };
 
 export const isPsd = (path: string) => extOf(path) === 'psd';
-export const savesAs = (path: string) => ['psd', 'png', 'jpg', 'jpeg', 'webp'].includes(extOf(path));
+/** Photoshop and OpenRaster, which keep layers; everything else saves flattened. */
+export const LAYERED_EXTENSIONS = ['.psd', '.ora'];
+export const isLayered = (path: string) => LAYERED_EXTENSIONS.includes(`.${extOf(path)}`);
+export const savesAs = (path: string) => ['psd', 'ora', 'png', 'jpg', 'jpeg', 'webp'].includes(extOf(path));
 
 // ---- Reading ---------------------------------------------------------------------
 
@@ -187,6 +192,7 @@ export async function decodeImage(bytes: Uint8Array, path: string): Promise<HTML
 /** Open any supported file as a document. */
 export async function readDoc(bytes: Uint8Array, path: string): Promise<Doc> {
   if (isPsd(path)) return readPsdDoc(bytes);
+  if (extOf(path) === 'ora') return readOraDoc(bytes);
   const canvas = await decodeImage(bytes, path);
   const bg = blankLayer('Background', canvas, { canvas });
   return { width: canvas.width, height: canvas.height, layers: [bg], source: null };
@@ -356,10 +362,11 @@ function blobOf(canvas: HTMLCanvasElement, type: string, quality?: number): Prom
   );
 }
 
-/** Encode the document for saving, by the file's extension. Anything but PSD is flattened. */
+/** Encode the document for saving, by the file's extension. Anything but PSD and OpenRaster is flattened. */
 export async function encodeDoc(doc: Doc, path: string, quality = 0.92): Promise<Uint8Array> {
   const ext = extOf(path);
   if (ext === 'psd') return writePsdDoc(doc);
+  if (ext === 'ora') return writeOraDoc(doc);
   const flat = flatten(doc);
   let blob: Blob;
   if (ext === 'jpg' || ext === 'jpeg') {

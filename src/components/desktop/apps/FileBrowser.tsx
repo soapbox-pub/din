@@ -27,7 +27,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { appForFile, isDelimitedText, isExtractable, isPhotoEditable, isPhotoshopFile, isTextFile, isVectorEditable, isViewableImage } from '@/lib/fileTypes';
+import { appForFile, isDelimitedText, isExtractable, isLayeredImage, isPhotoEditable, isTextFile, isVectorEditable, isViewableImage } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -1660,7 +1660,7 @@ function FileBrowserTab({
                         Edit in Paint
                       </ContextMenuItem>
                     )}
-                    {single?.kind === 'file' && !isTrash && isPhotoEditable(single.name) && !isPhotoshopFile(single.name) && (
+                    {single?.kind === 'file' && !isTrash && isPhotoEditable(single.name) && !isLayeredImage(single.name) && (
                       <ContextMenuItem onSelect={() => open('photo-editor', { path: pathsOf([single.name])[0] })}>
                         Edit in Photo Editor
                       </ContextMenuItem>

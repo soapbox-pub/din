@@ -16,6 +16,8 @@ const SUBTYPE_EXTENSIONS: Record<string, string[]> = {
   jpeg: ['jpg', 'jpeg', 'jpe'],
   'svg+xml': ['svg'],
   'x-icon': ['ico'],
+  'vnd.adobe.photoshop': ['psd'],
+  openraster: ['ora'],
   'vnd.microsoft.icon': ['ico'],
   tiff: ['tif', 'tiff'],
   plain: ['txt', 'text'],

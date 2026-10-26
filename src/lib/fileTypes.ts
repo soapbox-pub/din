@@ -20,7 +20,7 @@ export type FileCategory =
   | 'disk'
   | 'other';
 
-const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'heic', 'jxl', 'tif', 'tiff', 'psd']);
+const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'heic', 'jxl', 'tif', 'tiff', 'psd', 'ora']);
 /** Images Chromium can decode (and so thumbnail and show). */
 const VIEWABLE_IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg']);
 const VIDEO = new Set(['mp4', 'm4v', 'webm', 'mkv', 'mov', 'ogv', 'avi']);
@@ -80,9 +80,10 @@ export function isViewableImage(name: string): boolean {
   return VIEWABLE_IMAGE.has(extensionOf(name));
 }
 
-/** Photoshop documents, which open in Photo Editor. */
-export function isPhotoshopFile(name: string): boolean {
-  return extensionOf(name) === 'psd';
+/** Layered pictures, Photoshop's and OpenRaster's, which open in Photo Editor. */
+export function isLayeredImage(name: string): boolean {
+  const ext = extensionOf(name);
+  return ext === 'psd' || ext === 'ora';
 }
 
 const WORD = new Set(['docx', 'docm', 'dotx', 'doc']);
@@ -121,7 +122,7 @@ export function designAppFor(name: string): 'vector-editor' | 'publisher' | null
 /** The built-in app that opening a file starts, as Files does on double-click. */
 export function appForFile(name: string): string {
   if (isTextFile(name)) return 'text-editor';
-  if (isPhotoshopFile(name)) return 'photo-editor';
+  if (isLayeredImage(name)) return 'photo-editor';
   if (isCadFile(name)) return 'cad';
   return officeAppFor(name) ?? designAppFor(name) ?? 'preview';
 }
@@ -132,9 +133,9 @@ export function isVectorEditable(name: string): boolean {
   return ext === 'pdf' || ext === 'svg' || ext === 'eps';
 }
 
-/** Pictures Photo Editor opens: Photoshop documents and whatever Chromium can decode. */
+/** Pictures Photo Editor opens: layered documents and whatever Chromium can decode. */
 export function isPhotoEditable(name: string): boolean {
-  return isPhotoshopFile(name) || isViewableImage(name);
+  return isLayeredImage(name) || isViewableImage(name);
 }
 
 export function isPlayableVideo(name: string): boolean {

@@ -54,7 +54,7 @@ import {
 import * as ops from './photo/ops';
 import { dab, drawGradient, fillRegion, hardDab, stampLine } from './photo/paint';
 import { ColorPanel, HistoryPanel, LayersPanel, Panel, PropertiesPanel, SwatchesPanel } from './photo/panels';
-import { decodeImage, encodeDoc, isPsd, OPEN_EXTENSIONS, pngBlob, readDoc, SAVE_TYPES, savesAs } from './photo/psd';
+import { decodeImage, encodeDoc, extOf, isLayered, LAYERED_EXTENSIONS, OPEN_EXTENSIONS, pngBlob, readDoc, SAVE_TYPES, savesAs } from './photo/psd';
 import { renderDoc, renderLayerAlone, renderLayers } from './photo/render';
 import * as selection from './photo/selection';
 import type { Point, SelectMode, Selection } from './photo/selection';
@@ -228,8 +228,9 @@ function placeFloat(f: Float, layer: Layer): Layer {
 /**
  * Photo Editor - layered pictures, Photoshop style: opens and saves PSDs
  * with their layers, groups, masks, blend modes, adjustment layers and
- * type, with Photoshop's tools, menus, panels and shortcuts. Also opens
- * PNG, JPEG and the like, and exports them.
+ * type, with Photoshop's tools, menus, panels and shortcuts. Also opens and
+ * saves OpenRaster (GIMP, Krita) with its layers, and opens PNG, JPEG and the
+ * like, and exports them.
  *
  * Launch params: `{ path?: string }` (absolute).
  */
@@ -618,7 +619,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
         const bytes = await encodeDoc(d, p);
         await fs.writeFile(p, bytes);
         const entry = hist.entries[hist.index];
-        if (isPsd(p) || allLayers(d.layers).length === 1) {
+        if (isLayered(p) || allLayers(d.layers).length === 1) {
           setSavedEntry(entry);
           setPath(p);
           setDocName(basename(p));
@@ -640,17 +641,17 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
   const saveAs = useCallback(
     async (exporting = false): Promise<boolean> => {
       const stem = docName.replace(/\.[^.]*$/, '');
-      const types = exporting ? SAVE_TYPES.slice(1) : SAVE_TYPES;
+      const types = exporting ? SAVE_TYPES.filter((f) => !isLayered(f.patterns[0])) : SAVE_TYPES;
       const result = await pickFiles({
         mode: 'save',
         title: exporting ? 'Export As' : 'Save As',
-        currentName: `${stem}.${exporting ? 'png' : 'psd'}`,
+        currentName: `${stem}.${exporting ? 'png' : path && isLayered(path) ? extOf(path) : 'psd'}`,
         initialPath: path ? parentPath(path) : undefined,
         filters: types,
       });
       if (!result) return false;
       let t = result.paths[0];
-      if (!savesAs(t) || (exporting && isPsd(t))) {
+      if (!savesAs(t) || (exporting && isLayered(t))) {
         const filter = types[result.filter ?? 0] ?? types[0];
         t += filter.patterns[0].slice(1);
       }
@@ -662,8 +663,8 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
   const save = useCallback((): Promise<boolean> => {
     const d = docRef.current;
     if (!d) return Promise.resolve(false);
-    // Layers only survive in a PSD; a flat picture can go back where it came from.
-    if (path && (isPsd(path) || (savesAs(path) && allLayers(d.layers).length === 1))) return writeTo(path);
+    // Layers only survive in a PSD or OpenRaster file; a flat picture can go back where it came from.
+    if (path && (isLayered(path) || (savesAs(path) && allLayers(d.layers).length === 1))) return writeTo(path);
     return saveAs();
   }, [path, writeTo, saveAs]);
 
@@ -1778,7 +1779,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
       if (!fs) return;
       const t = await pickFile({
         title: 'Place Embedded',
-        extensions: OPEN_EXTENSIONS.filter((x) => x !== '.psd'),
+        extensions: OPEN_EXTENSIONS.filter((x) => !LAYERED_EXTENSIONS.includes(x)),
         initialPath: path ? parentPath(path) : undefined,
       });
       if (!t) return;
@@ -2556,7 +2557,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
                 <div className="w-full max-w-md space-y-6 text-center">
                   <div className="space-y-2">
                     <h1 className="text-[40px] leading-tight font-semibold tracking-tight text-[#f0f0f0]">Photo Editor</h1>
-                    <p className="text-lg text-[#b5b5b5]">Layers, masks and adjustments. Opens and saves Photoshop documents.</p>
+                    <p className="text-lg text-[#b5b5b5]">Layers, masks and adjustments. Opens and saves Photoshop and OpenRaster documents.</p>
                   </div>
                   {error && (
                     <p role="alert" className="rounded-md border border-[#7a2b2b] bg-[#3a2323] px-3 py-2 text-sm text-[#ffb4b4]">
@@ -2774,7 +2775,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
         >
           <p className="text-sm text-[#e6e6e6]">Save changes to “{docName}” before closing?</p>
           <p className="mt-1 text-xs text-[#a0a0a0]">
-            {path && !isPsd(path) && allLayers(doc?.layers ?? []).length > 1
+            {path && !isLayered(path) && allLayers(doc?.layers ?? []).length > 1
               ? 'It has layers, so it will be saved as a Photoshop document.'
               : 'If you don’t, your changes will be lost.'}
           </p>

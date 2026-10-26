@@ -189,15 +189,16 @@ export const APPS: readonly AppDefinition[] = [
     keywords: ['mspaint', 'kid pix', 'draw', 'drawing', 'pixel art', 'sprite', 'image', 'picture', 'art'],
   },
   {
-    // Layered pictures, Photoshop style: opens and saves PSDs. Files opens
-    // .psd files here. Launch params `{ path }` open one; `{ width, height,
-    // background, name }` start a new document (File > New from another window).
+    // Layered pictures, Photoshop style: opens and saves PSDs and OpenRaster
+    // (.ora). Files opens both here. Launch params `{ path }` open one;
+    // `{ width, height, background, name }` start a new document (File > New
+    // from another window).
     id: 'photo-editor',
     name: 'Photo Editor',
     icon: '/icons/apps/photo-editor.png',
     component: PhotoEditor,
     defaultSize: { width: 1280, height: 800 },
-    keywords: ['photoshop', 'psd', 'gimp', 'photopea', 'layers', 'photo', 'retouch', 'image', 'picture', 'editor'],
+    keywords: ['photoshop', 'psd', 'openraster', 'ora', 'krita', 'gimp', 'photopea', 'layers', 'photo', 'retouch', 'image', 'picture', 'editor'],
   },
   {
     // Documents, Microsoft Word style: opens and saves .docx. Files opens
