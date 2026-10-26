@@ -814,6 +814,17 @@ in
     options = "--delete-older-than 30d";
   };
   boot.loader.systemd-boot.configurationLimit = 10;
+  # Builds do their work in the home volume, which has the rest of the disk,
+  # rather than on root: a disk image needs as much scratch space again as
+  # the image, and root also holds the hibernation swap file, as big as
+  # memory. Only what a build produces goes into the store on root. Off the
+  # home volume (the live stick) it's the same filesystem either way.
+  nix.settings.build-dir = "/home/.nix-build";
+  systemd.tmpfiles.settings."10-nix-build-dir"."/home/.nix-build".d = {
+    mode = "0700";
+    user = "root";
+    group = "root";
+  };
 
   # What install scripts and a developer's first hour assume is present.
   # distrobox is the escape hatch for anything else: a full Ubuntu/Fedora/Arch

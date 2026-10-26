@@ -442,7 +442,7 @@ install() {
     --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*'
     --exclude='/tmp/*' --exclude='/boot' --exclude='/mnt/*' --exclude='/media/*'
     --exclude='/var/tmp/*' --exclude='/var/cache/*' --exclude='/var/log/journal/*'
-    --exclude='/home/*/.cache/*' --exclude='/lost+found'
+    --exclude='/home/*/.cache/*' --exclude='/home/.nix-build/*' --exclude='/lost+found'
   )
   [[ $mode != keep ]] || excludes+=(--exclude='/home/*')
   # rsync's overall progress, as whole percents.
