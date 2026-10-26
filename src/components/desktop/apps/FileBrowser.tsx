@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import {
   cleanFsError,
-  damagedExtractionMessage,
+  extractionWarning,
   formatBytes,
   getFsBridge,
   joinPath,
@@ -846,15 +846,17 @@ function FileBrowserTab({
       void run(`Extracting ${describe(archives)}…`, async () => {
         const made: string[] = [];
         const damaged: string[] = [];
+        const removedLinks: string[] = [];
         let incomplete = false;
         try {
           for (const name of archives) {
             const out = await fs.extract(joinPath(cwd, name), cwd, job);
             made.push(out.path);
             damaged.push(...out.damaged);
+            removedLinks.push(...out.removedLinks);
             incomplete ||= out.incomplete;
           }
-          const warning = damagedExtractionMessage({ path: '', damaged, incomplete });
+          const warning = extractionWarning({ path: '', damaged, incomplete, removedLinks });
           if (warning) setStatus({ kind: 'error', text: warning });
         } catch (error) {
           if (!canceledJobs.current.has(job)) throw error;

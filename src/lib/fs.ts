@@ -211,6 +211,8 @@ export interface FsExtraction {
   damaged: string[];
   /** The archive was damaged in a way no member was named for. */
   incomplete: boolean;
+  /** Symlinks left out because they led outside the archive's files, or nowhere. */
+  removedLinks: string[];
 }
 
 /**
@@ -243,16 +245,21 @@ export function cleanFsError(error: unknown): string {
   return message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
 }
 
-/** The warning for an extraction that came out damaged, if it did. */
-export function damagedExtractionMessage({ damaged, incomplete }: FsExtraction): string | null {
-  if (damaged.length === 0) {
-    return incomplete ? 'Extracted, but the archive is damaged: some files may be missing or incomplete' : null;
+/** The warning for an extraction that came out damaged or short, if it did. */
+export function extractionWarning({ damaged, incomplete, removedLinks }: FsExtraction): string | null {
+  const list = (paths: string[]) => {
+    const names = paths.map((p) => p.slice(p.lastIndexOf('/') + 1));
+    return names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+  };
+  const parts: string[] = [];
+  if (damaged.length === 1) parts.push(`1 file is damaged and may be incomplete: ${list(damaged)}`);
+  else if (damaged.length > 1) parts.push(`${damaged.length} files are damaged and may be incomplete: ${list(damaged)}`);
+  else if (incomplete) parts.push('the archive is damaged: some files may be missing or incomplete');
+  if (removedLinks.length === 1) parts.push(`1 link that led outside it was left out: ${list(removedLinks)}`);
+  else if (removedLinks.length > 1) {
+    parts.push(`${removedLinks.length} links that led outside it were left out: ${list(removedLinks)}`);
   }
-  const names = damaged.map((p) => p.slice(p.lastIndexOf('/') + 1));
-  const listed = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
-  return names.length === 1
-    ? `Extracted, but 1 file is damaged and may be incomplete: ${listed}`
-    : `Extracted, but ${names.length} files are damaged and may be incomplete: ${listed}`;
+  return parts.length > 0 ? `Extracted, but ${parts.join('; ')}` : null;
 }
 
 // ---------------------------------------------------------------------------

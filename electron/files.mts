@@ -336,13 +336,24 @@ async function diskUsage(root: string) {
 // archives. On a system with none of them, GNU tar, unzip and zip cover the
 // common cases.
 //
-// Archives are untrusted. All three keep what they write inside the folder
-// they unpack into: "../" and absolute names are rewritten, and nothing is
-// written through a symlink that came out of the archive. Against zip
-// bombs, an archive whose listing adds up to more than the disk has room
-// for is refused before anything is written, and since a listing can lie
-// (and tarballs have none), extraction is stopped and undone if the disk
-// nears full while it runs.
+// Archives are untrusted, and so, a little, are the tools: they're big
+// parsers of many old formats, with security bugs found every year, and
+// the Preview window lists an archive as soon as it's opened. So each runs
+// in a bubblewrap sandbox with no network and nothing of the user's: it
+// sees the system's programs, the archive (and its other volumes), and the
+// one folder it unpacks into, with a cap on its memory and at low priority.
+// Where bubblewrap is missing or can't make namespaces, they run as before.
+//
+// All three keep what they write inside the folder they unpack into: "../"
+// and absolute names are rewritten, and nothing is written through a
+// symlink that came out of the archive. Symlinks that lead out of it (or
+// nowhere) are then removed, as files could be read through them later -
+// dragged into a web page, say. A lone hidden item (".bash_login") still
+// gets a folder of its own, so that it can't land in home unseen. Against
+// zip bombs, an archive whose listing adds up to more than the disk has
+// room for is refused before anything is written, and since a listing can
+// lie (and tarballs have none), extraction is stopped and undone if the
+// disk nears full while it runs.
 // ---------------------------------------------------------------------------
 
 /** Single-file compressors, for "notes.txt.gz" that isn't a tarball. */
@@ -397,17 +408,68 @@ function safeArg(name: string): string {
   return name.startsWith('-') ? `./${name}` : name;
 }
 
+/** System folders an archive tool may read (those that exist). */
+const SANDBOX_SYSTEM = ['/nix/store', '/run/current-system', '/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc'];
+
+/** The sandbox's fixed part; the archive and output folder are added. */
+function sandboxBase(): string[] {
+  return [
+    '--unshare-all',
+    '--die-with-parent',
+    // No controlling terminal to push keystrokes into (TIOCSTI).
+    '--new-session',
+    ...SANDBOX_SYSTEM.flatMap((dir) => ['--ro-bind-try', dir, dir]),
+    '--proc', '/proc',
+    '--dev', '/dev',
+    '--tmpfs', '/tmp',
+    '--clearenv',
+    '--setenv', 'PATH', process.env.PATH ?? '/usr/bin:/bin',
+    '--setenv', 'HOME', '/tmp',
+    '--setenv', 'LANG', process.env.LANG ?? 'C.UTF-8',
+  ];
+}
+
+let sandboxWorks: Promise<boolean> | null = null;
+
+/** Whether bubblewrap is here and allowed to make namespaces (checked once). */
+function canSandbox(): Promise<boolean> {
+  sandboxWorks ??= runCommand('bwrap', [...sandboxBase(), '--', 'true'], { timeout: 10_000 }).then(
+    () => true,
+    (error: unknown) => {
+      console.warn('Archive tools run unsandboxed: bubblewrap', isMissing(error) ? 'is missing' : 'failed', error);
+      return false;
+    },
+  );
+  return sandboxWorks;
+}
+
+/** Address space an archive tool may use: half the memory, 2 to 8 GB. */
+function memoryLimitKiB(): number {
+  return Math.floor(Math.min(8 * 1024 ** 3, Math.max(2 * 1024 ** 3, os.totalmem() / 2)) / 1024);
+}
+
 /**
- * Run an archive tool with nothing on stdin, so one that wants to ask
- * something can't sit waiting until the timeout. Aborting `signal` stops it.
+ * Run an archive tool in the sandbox, seeing only `read` (read-only) and
+ * `write`, with nothing on stdin, so one that wants to ask something can't
+ * sit waiting until the timeout. Aborting `signal` stops it.
  */
-async function runNoInput(
+async function runArchiveTool(
   file: string,
   args: string[],
-  options: { signal?: AbortSignal; maxBuffer?: number } = {},
+  options: { read: string[]; write?: string; signal?: AbortSignal; maxBuffer?: number },
 ): Promise<{ stdout: string; stderr: string }> {
+  const sandbox = (await canSandbox())
+    ? [
+      'bwrap',
+      ...sandboxBase(),
+      ...options.read.flatMap((p) => ['--ro-bind', p, p]),
+      ...(options.write ? ['--bind', options.write, options.write] : []),
+      '--',
+    ]
+    : [];
+  const script = 'tool=$1; limit=$2; shift 2; command -v "$tool" >/dev/null || exit 127; ulimit -v "$limit"; exec nice -n 10 "$@" </dev/null';
   try {
-    return await runCommand('sh', ['-c', 'command -v "$0" >/dev/null || exit 127; exec "$0" "$@" </dev/null', file, ...args], {
+    return await runCommand('sh', ['-c', script, 'sh', file, String(memoryLimitKiB()), ...sandbox, file, ...args], {
       timeout: ARCHIVE_TIMEOUT_MS,
       maxBuffer: options.maxBuffer ?? 16 * 1024 * 1024,
       signal: options.signal,
@@ -494,14 +556,40 @@ interface LsarListing {
   lsarContents?: { XADFileName?: string; XADFileSize?: number; XADIsDirectory?: number }[];
 }
 
-async function listWith(tool: ArchiveTool, archive: string, signal?: AbortSignal): Promise<ArchiveContents> {
-  const options = { signal, maxBuffer: LISTING_BUFFER };
+/** An archive and the files it's made of (several, for multi-volume ones). */
+interface ArchiveSource {
+  archive: string;
+  volumes: string[];
+}
+
+/** "name.partN.rar", "name.r00", "name.7z.001", "name.z01": the volumes' stem. */
+const VOLUME = /^(.+?)(?:\.part\d+\.rar|\.rar|\.r\d\d|\.(?:7z|zip|tar)\.\d{3}|\.zip|\.z\d\d|\.\d{3})$/i;
+/** Volumes the sandbox shows a tool, at most. */
+const MAX_VOLUMES = 1_000;
+
+/**
+ * The archive and, if it may be one volume of several, its siblings by the
+ * same stem: the sandbox shows a tool those and nothing else.
+ */
+async function archiveSource(archive: string): Promise<ArchiveSource> {
+  const name = path.basename(archive);
+  const stem = VOLUME.exec(name)?.[1];
+  if (!stem) return { archive, volumes: [archive] };
+  const dir = path.dirname(archive);
+  const siblings = (await fsp.readdir(dir).catch(() => []))
+    .filter((n) => n !== name && VOLUME.exec(n)?.[1] === stem)
+    .slice(0, MAX_VOLUMES);
+  return { archive, volumes: [archive, ...siblings.map((n) => path.join(dir, n))] };
+}
+
+async function listWith(tool: ArchiveTool, { archive, volumes }: ArchiveSource, signal?: AbortSignal): Promise<ArchiveContents> {
+  const options = { read: volumes, signal, maxBuffer: LISTING_BUFFER };
   if (tool === '7zz') {
-    const { stdout } = await runNoInput('7zz', ['l', '-slt', `-p${NO_PASSPHRASE}`, '--', archive], options);
+    const { stdout } = await runArchiveTool('7zz', ['l', '-slt', `-p${NO_PASSPHRASE}`, '--', archive], options);
     return parseSevenZipListing(stdout);
   }
   if (tool === 'unar') {
-    const { stdout } = await runNoInput('lsar', ['-j', archive], options);
+    const { stdout } = await runArchiveTool('lsar', ['-j', archive], options);
     const members = (JSON.parse(stdout) as LsarListing).lsarContents ?? [];
     return {
       entries: members.flatMap((m) => m.XADFileName ?? []),
@@ -509,16 +597,17 @@ async function listWith(tool: ArchiveTool, archive: string, signal?: AbortSignal
     };
   }
   // A tarball has no index: its sizes are only known by reading it all.
-  const { stdout } = await runNoInput('bsdtar', ['--passphrase', NO_PASSPHRASE, '-tf', archive], options);
+  const { stdout } = await runArchiveTool('bsdtar', ['--passphrase', NO_PASSPHRASE, '-tf', archive], options);
   return { entries: stdout.split('\n').filter(Boolean), bytes: null };
 }
 
 /** List an archive with the first tool that can. */
 async function inspectArchive(archive: string, signal?: AbortSignal): Promise<ArchiveContents> {
+  const source = await archiveSource(archive);
   let failure: unknown = null;
   for (const tool of archiveTools(archive)) {
     try {
-      return await listWith(tool, archive, signal);
+      return await listWith(tool, source, signal);
     } catch (error) {
       if (signal?.aborted) throw error;
       if (!isMissing(error)) failure ??= error;
@@ -548,9 +637,9 @@ interface Unpacked {
 /** unar's report of an entry it couldn't unpack: "  name  (123 B)... Failed! (why)". */
 const UNAR_FAILED = /^\s*(.+?)(?:\s+\(\d+ B\))?\.\.\. Failed!/;
 
-async function unarInto(archive: string, dest: string, signal: AbortSignal): Promise<Unpacked> {
+async function unarInto({ archive, volumes }: ArchiveSource, dest: string, signal: AbortSignal): Promise<Unpacked> {
   try {
-    await runNoInput('unar', ['-q', '-f', '-D', '-o', dest, archive], { signal });
+    await runArchiveTool('unar', ['-q', '-f', '-D', '-o', dest, archive], { read: volumes, write: dest, signal });
     return { damaged: [], incomplete: false };
   } catch (error) {
     if (signal.aborted || !(error instanceof CommandError) || error.code !== 1) throw error;
@@ -565,9 +654,13 @@ async function unarInto(archive: string, dest: string, signal: AbortSignal): Pro
 /** 7-Zip's report of a member it couldn't unpack: "ERROR: Data Error : name". */
 const SEVENZIP_ERROR = /^ERROR: .+ : (.+)$/;
 
-async function sevenZipInto(archive: string, dest: string, signal: AbortSignal): Promise<Unpacked> {
+async function sevenZipInto({ archive, volumes }: ArchiveSource, dest: string, signal: AbortSignal): Promise<Unpacked> {
   try {
-    await runNoInput('7zz', ['x', '-y', '-bso0', '-bsp0', `-p${NO_PASSPHRASE}`, `-o${dest}`, '--', archive], { signal });
+    await runArchiveTool('7zz', ['x', '-y', '-bso0', '-bsp0', `-p${NO_PASSPHRASE}`, `-o${dest}`, '--', archive], {
+      read: volumes,
+      write: dest,
+      signal,
+    });
     return { damaged: [], incomplete: false };
   } catch (error) {
     // 1 is a warning, 2 a fatal error: either may follow some good output.
@@ -585,12 +678,12 @@ async function sevenZipInto(archive: string, dest: string, signal: AbortSignal):
 }
 
 /** bsdtar stops at the first damaged entry, so any damage fails the lot. */
-async function bsdtarInto(archive: string, dest: string, signal: AbortSignal): Promise<Unpacked> {
-  await runNoInput('bsdtar', ['--passphrase', NO_PASSPHRASE, '-xf', archive, '-C', dest], { signal });
+async function bsdtarInto({ archive, volumes }: ArchiveSource, dest: string, signal: AbortSignal): Promise<Unpacked> {
+  await runArchiveTool('bsdtar', ['--passphrase', NO_PASSPHRASE, '-xf', archive, '-C', dest], { read: volumes, write: dest, signal });
   return { damaged: [], incomplete: false };
 }
 
-const EXTRACTORS: Record<ArchiveTool, (archive: string, dest: string, signal: AbortSignal) => Promise<Unpacked>> = {
+const EXTRACTORS: Record<ArchiveTool, (source: ArchiveSource, dest: string, signal: AbortSignal) => Promise<Unpacked>> = {
   bsdtar: bsdtarInto,
   '7zz': sevenZipInto,
   unar: unarInto,
@@ -603,22 +696,24 @@ async function extractInto(archive: string, dest: string, signal: AbortSignal): 
   if (ext && !TARBALL.test(lower)) {
     // A bare compressed file, not a tarball: its compressor unpacks it.
     const [stem] = splitName(path.basename(archive));
-    await runCommand('sh', ['-c', `exec ${DECOMPRESSORS[ext]} -dc -- "$1" > "$2"`, 'sh', archive, path.join(dest, stem)], {
-      timeout: ARCHIVE_TIMEOUT_MS,
+    await runArchiveTool('sh', ['-c', `exec ${DECOMPRESSORS[ext]} -dc -- "$0" > "$1"`, archive, path.join(dest, stem)], {
+      read: [archive],
+      write: dest,
       signal,
     }).catch((e: unknown) => { throw signal.aborted ? e : toolError(e); });
     return { damaged: [], incomplete: false };
   }
+  const source = await archiveSource(archive);
   let failure: unknown = null;
   for (const tool of archiveTools(archive)) {
     try {
-      return await EXTRACTORS[tool](archive, dest, signal);
+      return await EXTRACTORS[tool](source, dest, signal);
     } catch (error) {
       if (signal.aborted) throw error;
       if (isMissing(error)) continue;
       failure ??= error;
       for (const item of await fsp.readdir(dest)) {
-        await fsp.rm(path.join(dest, item), { recursive: true, force: true });
+        await removeTree(path.join(dest, item));
       }
     }
   }
@@ -658,16 +753,64 @@ const FILLED_DISK = 'Stopped: this archive would have filled the disk';
 const extractJobs = new Map<string, AbortController>();
 
 /**
- * Extract an archive next to itself: a single top-level item lands as is,
- * anything else in a folder named after the archive. Resolves to the path
- * of what was created and what came out damaged - an archive with some
- * damage still gives up the rest. One too big for the disk is refused.
+ * Walk the tree under `root`, calling `onLink` for each symlink, and give
+ * its owner full access to every folder on the way: an archive can make
+ * folders that can't be entered or changed, which nothing could check,
+ * use, or remove.
+ */
+async function walkOpeningFolders(root: string, onLink: (link: string) => Promise<void>): Promise<void> {
+  const dirs = [root];
+  for (let dir = dirs.pop(); dir !== undefined; dir = dirs.pop()) {
+    const { mode } = await fsp.lstat(dir);
+    if ((mode & 0o700) !== 0o700) await fsp.chmod(dir, (mode & 0o7777) | 0o700);
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) dirs.push(p);
+      else if (entry.isSymbolicLink()) await onLink(p);
+    }
+  }
+}
+
+/** Remove a temporary tree, however the archive left its folders' modes. */
+async function removeTree(root: string): Promise<void> {
+  try {
+    await fsp.rm(root, { recursive: true, force: true });
+  } catch {
+    await walkOpeningFolders(root, async () => {}).catch(() => {});
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Remove the symlinks under `root` that lead out of it, or nowhere (so
+ * can't be checked); resolves to their paths, relative to `root`. Each is
+ * judged by where it really leads, through any links on the way, at the
+ * time - one that led out through another was already out when checked.
+ */
+async function removeEscapingLinks(root: string): Promise<string[]> {
+  const realRoot = await fsp.realpath(root);
+  const removed: string[] = [];
+  await walkOpeningFolders(root, async (p) => {
+    const target = await fsp.realpath(p).catch(() => null);
+    if (target !== null && isWithin(target, realRoot)) return;
+    await fsp.rm(p, { force: true });
+    removed.push(path.relative(root, p));
+  });
+  return removed;
+}
+
+/**
+ * Extract an archive next to itself: a single top-level item lands as is
+ * (unless hidden), anything else in a folder named after the archive.
+ * Resolves to the path of what was created, what came out damaged - an
+ * archive with some damage still gives up the rest - and the symlinks left
+ * out. One too big for the disk is refused.
  */
 async function extract(
   archive: string,
   destDir: string,
   job?: string,
-): Promise<{ path: string } & Unpacked> {
+): Promise<{ path: string; removedLinks: string[] } & Unpacked> {
   const controller = new AbortController();
   const { signal } = controller;
   if (job !== undefined) extractJobs.set(job, controller);
@@ -714,20 +857,21 @@ async function extract(
       throw error;
     }
     if (signal.aborted) throw signal.reason as Error;
+    const removedLinks = await removeEscapingLinks(tmp);
     const items = await fsp.readdir(tmp);
-    if (items.length === 1) {
+    if (items.length === 1 && !items[0].startsWith('.')) {
       const dest = await uniquePath(destDir, items[0]);
       await fsp.rename(path.join(tmp, items[0]), dest);
-      return { path: dest, ...unpacked };
+      return { path: dest, removedLinks, ...unpacked };
     }
     const [stem] = splitName(path.basename(archive));
     const dest = await uniquePath(destDir, stem);
     await fsp.rename(tmp, dest);
-    return { path: dest, ...unpacked };
+    return { path: dest, removedLinks, ...unpacked };
   } finally {
     clearInterval(watch);
     if (job !== undefined && extractJobs.get(job) === controller) extractJobs.delete(job);
-    await fsp.rm(tmp, { recursive: true, force: true });
+    await removeTree(tmp);
   }
 }
 

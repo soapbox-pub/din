@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
-import { cleanFsError, damagedExtractionMessage, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
+import { cleanFsError, extractionWarning, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
 import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } from '@/lib/printing';
 import { useQueryClient } from '@tanstack/react-query';
@@ -85,7 +85,7 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
     try {
       const out = await getFsBridge()!.extract(path, dir);
       void invalidateListings(queryClient, out.path);
-      const warning = damagedExtractionMessage(out);
+      const warning = extractionWarning(out);
       if (warning) setExtractError(warning);
       open('file-browser', { path: dir, select: out.path.slice(out.path.lastIndexOf('/') + 1) });
     } catch (error) {
