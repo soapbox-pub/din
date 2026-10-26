@@ -1343,6 +1343,88 @@ function registerGuestVisibilityHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Guest file drop bridge (window.guestFileDrop). Files dragged out of the
+// Files app are an in-page drag of paths, with no File objects a page could
+// read, and a drag over a <webview> goes to the guest instead of the shell.
+// So while one is on, the shell covers its guests and forwards the drag
+// here, and this replays it into the page through the DevTools protocol,
+// which can drop real files by path, as a drag from a file manager would.
+// ---------------------------------------------------------------------------
+
+/** A drag being replayed into a guest. */
+interface GuestDrag {
+  /** Whether the debugger was attached for the drag (and so is detached after). */
+  ownsDebugger: boolean;
+  /** Commands go out in order, each after the last has been answered. */
+  queue: Promise<unknown>;
+}
+
+const guestDrags = new Map<number, GuestDrag>();
+
+function registerGuestFileDropHandlers(): void {
+  ipcMain.on('guestFileDrop:send', (event, wcId, type, rawX, rawY, rawPaths) => {
+    if (!isShellSender(event)) return;
+    const guest = shellGuestFromId(wcId);
+    const x = Number(rawX);
+    const y = Number(rawY);
+    if (!guest || (type !== 'over' && type !== 'drop' && type !== 'cancel')) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const paths = Array.isArray(rawPaths)
+      ? rawPaths.filter((p): p is string => typeof p === 'string' && path.isAbsolute(p))
+      : [];
+
+    let drag = guestDrags.get(guest.id);
+    if (!drag) {
+      if (type !== 'over' || paths.length === 0) return;
+      const ownsDebugger = !guest.debugger.isAttached();
+      try {
+        if (ownsDebugger) guest.debugger.attach('1.3');
+      } catch {
+        return;
+      }
+      drag = { ownsDebugger, queue: Promise.resolve() };
+      guestDrags.set(guest.id, drag);
+      dispatchGuestDrag(guest, drag, 'dragEnter', x, y, paths);
+    }
+    if (type === 'over') {
+      dispatchGuestDrag(guest, drag, 'dragOver', x, y, paths);
+      return;
+    }
+    dispatchGuestDrag(guest, drag, type === 'drop' ? 'drop' : 'dragCancel', x, y, paths);
+    guestDrags.delete(guest.id);
+    const { ownsDebugger } = drag;
+    void drag.queue.then(() => {
+      if (!ownsDebugger || guest.isDestroyed()) return;
+      try {
+        if (guest.debugger.isAttached()) guest.debugger.detach();
+      } catch {
+        // Gone already.
+      }
+    });
+  });
+}
+
+function dispatchGuestDrag(
+  guest: Electron.WebContents,
+  drag: GuestDrag,
+  type: 'dragEnter' | 'dragOver' | 'drop' | 'dragCancel',
+  x: number,
+  y: number,
+  files: string[],
+): void {
+  // Copy is all a page gets; the files stay where they are.
+  const data = { items: [], files, dragOperationsMask: 1 };
+  drag.queue = drag.queue
+    .then(() => {
+      if (guest.isDestroyed() || !guest.debugger.isAttached()) return;
+      return guest.debugger.sendCommand('Input.dispatchDragEvent', { type, x, y, data });
+    })
+    .catch(() => {
+      // The page navigated or went away mid-drag.
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Monitors bridge (window.monitors): where each display sits inside the shell
 // window, for the desktop's layout (src/lib/monitors.ts). The production
 // window spans every display - cage stretches it over all outputs, and on bare
@@ -5139,6 +5221,7 @@ app.whenReady().then(() => {
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
   registerGuestVisibilityHandlers();
+  registerGuestFileDropHandlers();
   registerMonitorsHandlers();
   registerPowerHandlers();
   registerAudioHandlers();

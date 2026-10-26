@@ -503,6 +503,21 @@ contextBridge.exposeInMainWorld('guestVisibility', {
   set: (webContentsId, hidden) => ipcRenderer.send('guestVisibility:set', webContentsId, hidden),
 });
 
+// Guest file drop bridge (window.guestFileDrop), backed by the
+// guestFileDrop:* handler in main.mts: replays a drag of files from Files
+// into a <webview> page, so the page can take them as files.
+contextBridge.exposeInMainWorld('guestFileDrop', {
+  /**
+   * @param {number} webContentsId the <webview>'s guest
+   * @param {'over' | 'drop' | 'cancel'} type
+   * @param {number} x in the page's CSS pixels
+   * @param {number} y in the page's CSS pixels
+   * @param {string[]} paths the files being dragged
+   */
+  send: (webContentsId, type, x, y, paths) =>
+    ipcRenderer.send('guestFileDrop:send', webContentsId, type, x, y, paths),
+});
+
 // Monitors bridge (window.monitors), backed by the monitors:* handler in
 // main.mts: each display's rectangle within the shell window (null when the
 // window covers just one), so the desktop can keep its menu bar and Dock on

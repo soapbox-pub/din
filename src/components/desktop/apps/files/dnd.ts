@@ -1,5 +1,6 @@
 /**
- * Drag and drop of files between Files windows, tabs, and the sidebar.
+ * Drag and drop of files between Files windows, tabs, and the sidebar, and
+ * out of Files into native apps and web pages.
  *
  * The paths ride in the DataTransfer under a private type, but a drag's
  * data can't be read until the drop, and drop targets need to know sooner
@@ -17,9 +18,26 @@ export interface ActiveDrag {
 }
 
 let active: ActiveDrag | null = null;
+const listeners = new Set<() => void>();
+
+function setActive(drag: ActiveDrag | null): void {
+  active = drag;
+  for (const listener of listeners) listener();
+}
+
+/** Hear when a drag of files starts or ends (for useSyncExternalStore). */
+export function subscribeFileDrag(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** Whether files are being dragged anywhere in the shell right now. */
+export function fileDragActive(): boolean {
+  return active !== null;
+}
 
 export function startFileDrag(e: React.DragEvent, drag: ActiveDrag, label: string): void {
-  active = drag;
+  setActive(drag);
   e.dataTransfer.setData(FILES_MIME, JSON.stringify(drag.paths));
   e.dataTransfer.setData('text/plain', drag.paths.join('\n'));
   e.dataTransfer.effectAllowed = 'copyMove';
@@ -37,7 +55,7 @@ export function startFileDrag(e: React.DragEvent, drag: ActiveDrag, label: strin
 }
 
 export function endFileDrag(): void {
-  active = null;
+  setActive(null);
 }
 
 /** The files being dragged right now, if the drag is one of ours. */

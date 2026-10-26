@@ -5,8 +5,10 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { RotateCw, Unplug } from 'lucide-react';
+import { activeFileDrag, fileDragActive, subscribeFileDrag } from '@/components/desktop/apps/files/dnd';
 import { Button } from '@/components/ui/button';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -143,10 +145,16 @@ interface GuestVisibilityBridge {
   set(webContentsId: number, hidden: boolean): void;
 }
 
+interface GuestFileDropBridge {
+  send(webContentsId: number, type: 'over' | 'drop' | 'cancel', x: number, y: number, paths: string[]): void;
+}
+
 declare global {
   interface Window {
     /** Present only inside the Electron shell. */
     guestVisibility?: GuestVisibilityBridge;
+    /** Present only inside the Electron shell. */
+    guestFileDrop?: GuestFileDropBridge;
   }
 }
 
@@ -545,11 +553,63 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       };
     }, [pageHidden]);
 
+    // Files dragged from Files: a drag over the guest would go to the page,
+    // as paths it can't open, so the shell takes it and has the page dropped
+    // on with the files themselves (see guestFileDrop in electron/main.mts).
+    const fileDrag = useSyncExternalStore(subscribeFileDrag, fileDragActive);
+    const sendFileDrag = (type: 'over' | 'drop' | 'cancel', event: React.DragEvent<HTMLElement>) => {
+      const el = webviewRef.current;
+      const bridge = window.guestFileDrop;
+      if (!el || !bridge) return;
+      // The page's CSS pixels: the shell's, through any transform on the
+      // window, then the page's own zoom on top of the interface zoom.
+      const rect = event.currentTarget.getBoundingClientRect();
+      const scaleX = rect.width > 0 ? event.currentTarget.clientWidth / rect.width : 1;
+      const scaleY = rect.height > 0 ? event.currentTarget.clientHeight / rect.height : 1;
+      const x = ((event.clientX - rect.left) * scaleX) / pageZoom;
+      const y = ((event.clientY - rect.top) * scaleY) / pageZoom;
+      try {
+        bridge.send(el.getWebContentsId(), type, x, y, activeFileDrag(event)?.paths ?? []);
+      } catch {
+        // Guest not attached yet.
+      }
+    };
+    // A drag that ended without leaving the page (dropped elsewhere by a key,
+    // say) still lets go of it; one already dropped or left is ignored.
+    useEffect(() => {
+      const el = webviewRef.current;
+      if (fileDrag || !el || !window.guestFileDrop) return;
+      try {
+        window.guestFileDrop.send(el.getWebContentsId(), 'cancel', 0, 0, []);
+      } catch {
+        // Guest not attached yet.
+      }
+    }, [fileDrag]);
+
     // Host for the guest built in the mount effect above. The <webview> itself
     // is not rendered by React so its attributes can be set before insertion.
     return (
       <div className="relative h-full w-full" style={{ display: 'flex' }}>
         <div ref={containerRef} className="h-full w-full" style={{ display: 'flex' }} />
+        {fileDrag && window.guestFileDrop && (
+          <div
+            className="absolute inset-0 z-10"
+            onDragOver={(event) => {
+              if (!activeFileDrag(event)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'copy';
+              sendFileDrag('over', event);
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) sendFileDrag('cancel', event);
+            }}
+            onDrop={(event) => {
+              if (!activeFileDrag(event)) return;
+              event.preventDefault();
+              sendFileDrag('drop', event);
+            }}
+          />
+        )}
         {gone && <PageGone onReload={() => webviewRef.current?.reload()} />}
       </div>
     );
