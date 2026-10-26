@@ -274,7 +274,7 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/cad.png',
     component: CAD,
     defaultSize: { width: 1360, height: 860 },
-    keywords: ['autocad', 'dwg', 'drafting', 'drawing', 'cad', 'draftsight', 'librecad', 'blueprint', 'floor plan', 'technical drawing'],
+    keywords: ['autocad', 'dwg', 'dxf', 'drafting', 'drawing', 'cad', 'draftsight', 'librecad', 'blueprint', 'floor plan', 'technical drawing'],
   },
   {
     // Conversations with OpenCode, the coding agent. One window, which

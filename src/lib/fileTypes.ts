@@ -38,7 +38,7 @@ const ARCHIVE = new Set([
   'cpio', 'cab', 'deb', 'rpm', 'apk',
 ]);
 const DISK = new Set(['iso', 'img', 'qcow2', 'vmdk', 'vdi', 'dmg']);
-const DOCUMENT = new Set(['dwg', 'ai', 'ait', 'indd', 'indt', 'idml', 'pub', 'doc', 'docx', 'docm', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'epub']);
+const DOCUMENT = new Set(['dwg', 'dxf', 'ai', 'ait', 'indd', 'indt', 'idml', 'pub', 'doc', 'docx', 'docm', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'epub']);
 /** Names that are text whatever their extension. */
 const TEXT_NAMES = new Set(['readme', 'license', 'copying', 'makefile', 'dockerfile', 'changelog', 'authors', '.gitignore', '.bashrc', '.zshrc', '.profile']);
 
@@ -98,9 +98,10 @@ export function officeAppFor(name: string): 'word-processor' | 'spreadsheet' | '
   return null;
 }
 
-/** AutoCAD drawings, which open in CAD. */
-export function isDwgFile(name: string): boolean {
-  return extensionOf(name) === 'dwg';
+/** AutoCAD drawings, DWG and DXF, which open in CAD. */
+export function isCadFile(name: string): boolean {
+  const ext = extensionOf(name);
+  return ext === 'dwg' || ext === 'dxf';
 }
 
 /** Tables in text that Spreadsheet opens too. */
@@ -121,7 +122,7 @@ export function designAppFor(name: string): 'vector-editor' | 'publisher' | null
 export function appForFile(name: string): string {
   if (isTextFile(name)) return 'text-editor';
   if (isPhotoshopFile(name)) return 'photo-editor';
-  if (isDwgFile(name)) return 'cad';
+  if (isCadFile(name)) return 'cad';
   return officeAppFor(name) ?? designAppFor(name) ?? 'preview';
 }
 

@@ -54,7 +54,8 @@ import { ALIASES, COMMANDS, editAnnotation, escapeMText, fmt, resolveCommand, ty
 import { grips as gripsOf, type Grip } from './cad/edit';
 import { dimGeometry } from './cad/dim';
 import { writeDwg } from './cad/dwg/write';
-import { convertDwg, dwgVersion, readDwgBytes, versionName } from './cad/dwg/read';
+import { convertDwg, dwgVersion, readDwgBytes, versionName, type ReadResult } from './cad/dwg/read';
+import { isDxf, readDxf } from './cad/dxf/read';
 import { CAP, ensureFonts, fontFamily } from './cad/text';
 import { findTextStyle } from './cad/model';
 import { Ribbon, type RibbonTabId } from './cad/ui/ribbon';
@@ -169,7 +170,8 @@ let textEditSeq = 0;
 /**
  * CAD - 2D drafting for people who know AutoCAD: the ribbon, command line,
  * aliases, object snaps, grips and dialogs where AutoCAD keeps them. Opens
- * DWG files from R13 to AutoCAD 2018 and saves AutoCAD 2000 DWGs.
+ * DWG files from R13 to AutoCAD 2018 and DXF files of any version, and saves
+ * AutoCAD 2000 DWGs.
  *
  * Launch params: `{ path?: string }` opens a drawing; `{ new?: 'imperial' |
  * 'metric' }` starts one.
@@ -637,17 +639,23 @@ export function CAD({ windowId, params }: AppComponentProps) {
           const r = await fs.readFile(p, MAX_BYTES);
           if (r.truncated) throw new Error(`It’s too big to open (${formatBytes(r.size ?? r.data.length)}).`);
           const version = dwgVersion(r.data);
-          if (!version) throw new Error('It isn’t a DWG drawing.');
-          if (version < 'AC1012') throw new Error(`It’s from ${versionName(version)} or earlier, older than CAD can read (R13 and later).`);
-          const db = await readDwgBytes(r.data);
-          if (seq !== loadSeq.current) return;
-          const res = convertDwg(db, version);
-          versionRef.current = version;
+          const dxf = !version && isDxf(r.data);
+          if (!version && !dxf) throw new Error('It isn’t a DWG or DXF drawing.');
+          let res: ReadResult;
+          if (version) {
+            if (version < 'AC1012') throw new Error(`It’s from ${versionName(version)} or earlier, older than CAD can read (R13 and later).`);
+            const db = await readDwgBytes(r.data);
+            if (seq !== loadSeq.current) return;
+            res = convertDwg(db, version);
+          } else {
+            res = readDxf(r.data);
+          }
+          versionRef.current = dxf ? 'DXF' : res.version;
           dropped.current = res.dropped;
           startDoc(res.drawing, basename(p), p);
           setRecent(addRecent(p));
           const n = Object.values(res.dropped).reduce((a, b) => a + b, 0);
-          setStatus(`Opened ${versionName(version)} drawing`);
+          setStatus(`Opened ${versionName(res.version)} ${dxf ? 'DXF' : 'drawing'}`);
           if (n) {
             const what = Object.entries(res.dropped)
               .map(([k, v]) => `${v} ${k}${v === 1 ? '' : 's'}`)
@@ -742,10 +750,11 @@ export function CAD({ windowId, params }: AppComponentProps) {
     return writeTo(t);
   }, [pickFiles, docName, path, writeTo]);
 
-  const save = useCallback((): Promise<boolean> => (path ? writeTo(path) : saveAs()), [path, writeTo, saveAs]);
+  // Saving writes DWG, so a drawing opened from anything else is saved under a new name.
+  const save = useCallback((): Promise<boolean> => (path && /\.dwg$/i.test(path) ? writeTo(path) : saveAs()), [path, writeTo, saveAs]);
 
   const openFile = useCallback(async () => {
-    const t = await pickFile({ title: 'Select File', extensions: ['.dwg'], initialPath: path ? parentPath(path) : undefined });
+    const t = await pickFile({ title: 'Select File', extensions: ['.dwg', '.dxf'], initialPath: path ? parentPath(path) : undefined });
     if (!t) return;
     if (docRef.current && (dirty || path)) open('cad', { path: t });
     else openPath(t);
@@ -2017,7 +2026,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
             <img src="/icons/apps/cad.png" alt="" className="size-16" />
             <div className="space-y-2 text-[12.5px] text-[#c4ccd7]">
               <p className="text-[15px] font-semibold text-white">CAD</p>
-              <p>2D drafting that opens DWG drawings from AutoCAD R13 through AutoCAD 2018 and later, and saves AutoCAD 2000 DWG files every AutoCAD and DWG viewer reads.</p>
+              <p>2D drafting that opens DWG drawings from AutoCAD R13 through AutoCAD 2018 and later and DXF files of any version, and saves AutoCAD 2000 DWG files every AutoCAD and DWG viewer reads.</p>
               <p className="text-[11.5px] text-[#8e98a6]">DWG reading by LibreDWG (GPL-3.0). AutoCAD is a trademark of Autodesk, Inc.; CAD isn’t affiliated with Autodesk.</p>
             </div>
           </div>
@@ -2177,7 +2186,7 @@ function StartPage({ error, recent, onNew, onOpen, onOpenPath }: { error: string
           <img src="/icons/apps/cad.png" alt="" className="size-20 drop-shadow-[0_6px_14px_rgba(0,0,0,0.4)]" draggable={false} />
           <div>
             <h1 className="text-[40px] leading-tight font-semibold tracking-tight text-white">CAD</h1>
-            <p className="text-[18px] text-[#a9b2bf]">Draw and edit DWG drawings, the AutoCAD way.</p>
+            <p className="text-[18px] text-[#a9b2bf]">Draw and edit DWG and DXF drawings, the AutoCAD way.</p>
           </div>
         </div>
         {error && (

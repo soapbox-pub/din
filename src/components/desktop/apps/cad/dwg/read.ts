@@ -63,6 +63,8 @@ export function readDwgBytes(bytes: Uint8Array): Promise<DwgDatabase> {
 }
 
 const VERSIONS: Record<string, string> = {
+  AC1006: 'AutoCAD R10',
+  AC1009: 'AutoCAD R12',
   AC1012: 'AutoCAD R13',
   AC1014: 'AutoCAD R14',
   AC1015: 'AutoCAD 2000',
@@ -560,7 +562,7 @@ export function convertDwg(db: DwgDatabase, version: string): ReadResult {
   return { drawing: d, dropped, version };
 }
 
-const DROPPED_NAMES: Record<string, string> = {
+export const DROPPED_NAMES: Record<string, string> = {
   '3DSOLID': '3D solid',
   REGION: 'region',
   BODY: '3D body',
