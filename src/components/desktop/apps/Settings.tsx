@@ -31,6 +31,7 @@ import {
   Moon,
   MousePointer2,
   Play,
+  Power,
   Printer,
   Palette,
   Plug,
@@ -42,6 +43,7 @@ import {
   Trash2,
   Upload,
   Volume2,
+  VolumeX,
   Wifi,
   ZoomIn,
 } from 'lucide-react';
@@ -156,6 +158,13 @@ import {
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -773,43 +782,74 @@ function BluetoothDeviceRow({
 
   return (
     <li className="rounded-lg border border-border/60 bg-background/40">
-      <div className="flex items-center gap-3 px-3 py-2">
-        <BluetoothDeviceIcon
-          icon={device.icon}
-          className={cn('size-5 shrink-0', device.connected ? 'text-primary' : 'text-muted-foreground')}
-        />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm text-foreground">{device.name}</p>
-          <p
-            className={cn(
-              'flex items-center gap-1.5 truncate text-xs',
-              device.connected ? 'text-primary' : 'text-muted-foreground',
-            )}
-          >
-            {busy && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />}
-            {describeDevice(device)}
-          </p>
-        </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="flex items-center gap-3 px-3 py-2">
+            <BluetoothDeviceIcon
+              icon={device.icon}
+              className={cn('size-5 shrink-0', device.connected ? 'text-primary' : 'text-muted-foreground')}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm text-foreground">{device.name}</p>
+              <p
+                className={cn(
+                  'flex items-center gap-1.5 truncate text-xs',
+                  device.connected ? 'text-primary' : 'text-muted-foreground',
+                )}
+              >
+                {busy && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />}
+                {describeDevice(device)}
+              </p>
+            </div>
 
-        {!device.paired ? (
-          <Button variant="outline" size="sm" disabled={busy} onClick={onPair}>
-            Pair
-          </Button>
-        ) : device.connected ? (
-          <Button variant="outline" size="sm" disabled={busy} onClick={onDisconnect}>
-            Disconnect
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm" disabled={busy} onClick={onConnect}>
-            Connect
-          </Button>
-        )}
-        {device.paired && (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onForget}>
-            Forget
-          </Button>
-        )}
-      </div>
+            {!device.paired ? (
+              <Button variant="outline" size="sm" disabled={busy} onClick={onPair}>
+                Pair
+              </Button>
+            ) : device.connected ? (
+              <Button variant="outline" size="sm" disabled={busy} onClick={onDisconnect}>
+                Disconnect
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" disabled={busy} onClick={onConnect}>
+                Connect
+              </Button>
+            )}
+            {device.paired && (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={onForget}>
+                Forget
+              </Button>
+            )}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {!device.paired ? (
+            <ContextMenuItem disabled={busy} onSelect={onPair}>
+              <Link2 aria-hidden />
+              Pair
+            </ContextMenuItem>
+          ) : device.connected ? (
+            <ContextMenuItem disabled={busy} onSelect={onDisconnect}>
+              <Plug aria-hidden />
+              Disconnect
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem disabled={busy} onSelect={onConnect}>
+              <Plug aria-hidden />
+              Connect
+            </ContextMenuItem>
+          )}
+          {device.paired && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem variant="destructive" disabled={busy} onSelect={onForget}>
+                <Trash2 aria-hidden />
+                Forget
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
 
       {error !== null && (
         <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
@@ -1048,7 +1088,15 @@ function DisplaySection() {
         Drag a display to position it. Changes preview below and take effect
         when you apply them.
       </p>
-      <DisplayArrange draft={draft} selected={selected} onSelect={setSelected} onMove={moveTo} />
+      <DisplayArrange
+        draft={draft}
+        selected={selected}
+        canDisable={enabledCount > 1}
+        onSelect={setSelected}
+        onMove={moveTo}
+        onToggle={setEnabled}
+        onPrimary={setPrimary}
+      />
 
       <div className="flex items-center justify-end gap-2">
         <Button variant="ghost" size="sm" disabled={!dirty || apply.isPending} onClick={onRevert}>
@@ -1178,13 +1226,19 @@ const ARRANGE_PAD = 16; // px inset around the scaled arrangement
 function DisplayArrange({
   draft,
   selected,
+  canDisable,
   onSelect,
   onMove,
+  onToggle,
+  onPrimary,
 }: {
   draft: DisplayDraft[];
   selected: string | null;
+  canDisable: boolean;
   onSelect: (name: string) => void;
   onMove: (name: string, x: number, y: number) => void;
+  onToggle: (name: string, enabled: boolean) => void;
+  onPrimary: (name: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -1217,7 +1271,7 @@ function DisplayArrange({
 
   const onPointerDown = (e: React.PointerEvent, d: DisplayDraft) => {
     onSelect(d.name);
-    if (scale === 0) return;
+    if (e.button !== 0 || scale === 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { name: d.name, px: e.clientX, py: e.clientY, ox: d.x, oy: d.y };
   };
@@ -1257,37 +1311,50 @@ function DisplayArrange({
         </p>
       ) : (
         on.map((d) => (
-          <button
-            key={d.name}
-            type="button"
-            aria-label={`Position ${d.friendly}`}
-            onPointerDown={(e) => onPointerDown(e, d)}
-            className={cn(
-              'absolute flex select-none flex-col items-center justify-center overflow-hidden rounded-md border text-center',
-              'cursor-grab touch-none active:cursor-grabbing',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              d.primary ? 'border-primary bg-primary/15' : 'border-border bg-foreground/10',
-              selected === d.name && 'ring-2 ring-ring',
-            )}
-            style={{
-              left: offX + (d.x - minX) * scale,
-              top: offY + (d.y - minY) * scale,
-              width: Math.max(d.width * scale, 8),
-              height: Math.max(d.height * scale, 8),
-            }}
-          >
-            <span className="truncate px-1 text-[11px] font-medium text-foreground">
-              {d.friendly}
-            </span>
-            <span className="truncate px-1 text-[10px] text-muted-foreground">
-              {d.width} × {d.height}
-            </span>
-            {d.primary && (
-              <span className="text-[9px] font-medium uppercase tracking-wide text-primary">
-                Primary
-              </span>
-            )}
-          </button>
+          <ContextMenu key={d.name}>
+            <ContextMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={`Position ${d.friendly}`}
+                onPointerDown={(e) => onPointerDown(e, d)}
+                className={cn(
+                  'absolute flex select-none flex-col items-center justify-center overflow-hidden rounded-md border text-center',
+                  'cursor-grab touch-none active:cursor-grabbing',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  d.primary ? 'border-primary bg-primary/15' : 'border-border bg-foreground/10',
+                  selected === d.name && 'ring-2 ring-ring',
+                )}
+                style={{
+                  left: offX + (d.x - minX) * scale,
+                  top: offY + (d.y - minY) * scale,
+                  width: Math.max(d.width * scale, 8),
+                  height: Math.max(d.height * scale, 8),
+                }}
+              >
+                <span className="truncate px-1 text-[11px] font-medium text-foreground">
+                  {d.friendly}
+                </span>
+                <span className="truncate px-1 text-[10px] text-muted-foreground">
+                  {d.width} × {d.height}
+                </span>
+                {d.primary && (
+                  <span className="text-[9px] font-medium uppercase tracking-wide text-primary">
+                    Primary
+                  </span>
+                )}
+              </button>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem disabled={d.primary} onSelect={() => onPrimary(d.name)}>
+                <Monitor aria-hidden />
+                Make primary
+              </ContextMenuItem>
+              <ContextMenuItem disabled={!canDisable} onSelect={() => onToggle(d.name, false)}>
+                <Power aria-hidden />
+                Turn off
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))
       )}
     </div>
@@ -2030,55 +2097,71 @@ function AudioDeviceRow({
 }) {
   const Icon = kind === 'input' ? Mic : Volume2;
   return (
-    <div
-      className={cn(
-        'flex items-center gap-2 rounded-md border p-2.5',
-        device.isDefault
-          ? 'border-primary/50 bg-primary/5'
-          : 'border-border/60 bg-background/40',
-      )}
-    >
-      <button
-        type="button"
-        role="radio"
-        aria-checked={device.isDefault}
-        onClick={onSelect}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <span
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
           className={cn(
-            'flex size-4 shrink-0 items-center justify-center rounded-full border',
-            device.isDefault ? 'border-primary' : 'border-muted-foreground/50',
+            'flex items-center gap-2 rounded-md border p-2.5',
+            device.isDefault
+              ? 'border-primary/50 bg-primary/5'
+              : 'border-border/60 bg-background/40',
           )}
-          aria-hidden
         >
-          {device.isDefault && <span className="size-2 rounded-full bg-primary" />}
-        </span>
-        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="min-w-0 truncate text-sm">{device.name}</span>
-        {device.isDefault && (
-          <span className="ml-auto shrink-0 text-xs text-muted-foreground">Default</span>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={device.isDefault}
+            onClick={onSelect}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span
+              className={cn(
+                'flex size-4 shrink-0 items-center justify-center rounded-full border',
+                device.isDefault ? 'border-primary' : 'border-muted-foreground/50',
+              )}
+              aria-hidden
+            >
+              {device.isDefault && <span className="size-2 rounded-full bg-primary" />}
+            </span>
+            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="min-w-0 truncate text-sm">{device.name}</span>
+            {device.isDefault && (
+              <span className="ml-auto shrink-0 text-xs text-muted-foreground">Default</span>
+            )}
+          </button>
+          {onTest && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 gap-1.5"
+              onClick={onTest}
+              disabled={testing}
+              aria-label={`Test ${device.name}`}
+              title="Play a test tone"
+            >
+              {testing ? (
+                <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Play className="size-3.5" aria-hidden />
+              )}
+              Test
+            </Button>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem disabled={device.isDefault} onSelect={onSelect}>
+          <Check aria-hidden />
+          Set as default
+        </ContextMenuItem>
+        {onTest && (
+          <ContextMenuItem disabled={testing} onSelect={onTest}>
+            <Play aria-hidden />
+            Test
+          </ContextMenuItem>
         )}
-      </button>
-      {onTest && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="shrink-0 gap-1.5"
-          onClick={onTest}
-          disabled={testing}
-          aria-label={`Test ${device.name}`}
-          title="Play a test tone"
-        >
-          {testing ? (
-            <Loader2 className="size-3.5 animate-spin" aria-hidden />
-          ) : (
-            <Play className="size-3.5" aria-hidden />
-          )}
-          Test
-        </Button>
-      )}
-    </div>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -2100,25 +2183,35 @@ function AudioPortRow({
 }) {
   const Icon = kind === 'input' ? Mic : /headphone|headset/i.test(port.port) ? Headphones : Volume2;
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/40 p-2.5">
-      <button
-        type="button"
-        role="radio"
-        aria-checked={false}
-        onClick={onSelect}
-        disabled={pending}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <span
-          className="flex size-4 shrink-0 items-center justify-center rounded-full border border-muted-foreground/50"
-          aria-hidden
-        >
-          {pending && <Loader2 className="size-3 animate-spin" />}
-        </span>
-        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="min-w-0 truncate text-sm">{port.name}</span>
-      </button>
-    </div>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/40 p-2.5">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={false}
+            onClick={onSelect}
+            disabled={pending}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span
+              className="flex size-4 shrink-0 items-center justify-center rounded-full border border-muted-foreground/50"
+              aria-hidden
+            >
+              {pending && <Loader2 className="size-3 animate-spin" />}
+            </span>
+            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="min-w-0 truncate text-sm">{port.name}</span>
+          </button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem disabled={pending} onSelect={onSelect}>
+          <Check aria-hidden />
+          Set as default
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -2140,37 +2233,47 @@ function AudioStreamRow({
   }
   const shown = Math.min(MAX_VOLUME, value);
   return (
-    <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-8 shrink-0"
-        aria-label={stream.muted ? `Unmute ${stream.name}` : `Mute ${stream.name}`}
-        onClick={() => onMuted(!stream.muted)}
-      >
-        <VolumeGlyph
-          volume={shown}
-          muted={stream.muted}
-          className={cn('size-4', stream.muted && 'text-muted-foreground')}
-        />
-      </Button>
-      <span className="w-28 shrink-0 truncate text-sm" title={stream.name}>
-        {stream.name}
-      </span>
-      <VolumeSlider
-        aria-label={`${stream.name} volume`}
-        value={stream.muted ? 0 : shown}
-        className="flex-1"
-        onValueChange={(v) => {
-          if (stream.muted) onMuted(false);
-          setValue(v);
-        }}
-        onValueCommit={(v) => onVolume(v)}
-      />
-      <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-        {stream.muted ? 'Muted' : `${shown}%`}
-      </span>
-    </div>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0"
+            aria-label={stream.muted ? `Unmute ${stream.name}` : `Mute ${stream.name}`}
+            onClick={() => onMuted(!stream.muted)}
+          >
+            <VolumeGlyph
+              volume={shown}
+              muted={stream.muted}
+              className={cn('size-4', stream.muted && 'text-muted-foreground')}
+            />
+          </Button>
+          <span className="w-28 shrink-0 truncate text-sm" title={stream.name}>
+            {stream.name}
+          </span>
+          <VolumeSlider
+            aria-label={`${stream.name} volume`}
+            value={stream.muted ? 0 : shown}
+            className="flex-1"
+            onValueChange={(v) => {
+              if (stream.muted) onMuted(false);
+              setValue(v);
+            }}
+            onValueCommit={(v) => onVolume(v)}
+          />
+          <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+            {stream.muted ? 'Muted' : `${shown}%`}
+          </span>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onMuted(!stream.muted)}>
+          {stream.muted ? <Volume2 aria-hidden /> : <VolumeX aria-hidden />}
+          {stream.muted ? 'Unmute' : 'Mute'}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

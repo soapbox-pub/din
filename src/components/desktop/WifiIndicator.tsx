@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Check,
   EthernetPort,
@@ -8,9 +8,17 @@ import {
   Wifi,
   WifiHigh,
   WifiLow,
+  WifiOff,
   WifiZero,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { PopoverClose } from '@/components/ui/popover';
@@ -127,6 +135,7 @@ export function WifiPopoverBody() {
                 }}
                 onCancelJoin={() => setJoining(null)}
                 onConnect={(password) => joinNetwork(network, password)}
+                onOpenSettings={() => open('settings', { section: 'wifi' })}
               />
             ))}
           </ul>
@@ -162,6 +171,7 @@ function QuickNetworkRow({
   onSelect,
   onCancelJoin,
   onConnect,
+  onOpenSettings,
 }: {
   network: WifiNetwork;
   isJoining: boolean;
@@ -171,49 +181,80 @@ function QuickNetworkRow({
   onSelect: () => void;
   onCancelJoin: () => void;
   onConnect: (password?: string) => void;
+  onOpenSettings: () => void;
 }) {
   const secured = isSecured(network);
   const pending = connectPending || (network.inUse && disconnectPending);
+  // Connect may open the password form; the closing menu mustn't take its focus.
+  const keepFocus = useRef(false);
 
   return (
     <li>
-      <button
-        type="button"
-        onClick={onSelect}
-        disabled={pending}
-        aria-label={
-          network.inUse
-            ? `Disconnect from ${network.ssid}`
-            : `Connect to ${network.ssid}`
-        }
-        className={cn(
-          'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
-          'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          'disabled:opacity-70',
-          network.inUse && 'bg-accent/60',
-        )}
-      >
-        <WifiSignalIcon
-          signal={network.signal}
-          className={cn(
-            'size-4.5 shrink-0',
-            network.inUse ? 'text-primary' : 'text-muted-foreground',
-          )}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-foreground">{network.ssid}</span>
-          {network.inUse && (
-            <span className="block text-xs text-primary">Connected</span>
-          )}
-        </span>
-        {pending ? (
-          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
-        ) : network.inUse ? (
-          <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
-        ) : (
-          secured && <Lock className="size-3 shrink-0 text-muted-foreground" aria-label="Secured" />
-        )}
-      </button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            onClick={onSelect}
+            disabled={pending}
+            aria-label={
+              network.inUse
+                ? `Disconnect from ${network.ssid}`
+                : `Connect to ${network.ssid}`
+            }
+            className={cn(
+              'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
+              'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'disabled:opacity-70',
+              network.inUse && 'bg-accent/60',
+            )}
+          >
+            <WifiSignalIcon
+              signal={network.signal}
+              className={cn(
+                'size-4.5 shrink-0',
+                network.inUse ? 'text-primary' : 'text-muted-foreground',
+              )}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-foreground">{network.ssid}</span>
+              {network.inUse && (
+                <span className="block text-xs text-primary">Connected</span>
+              )}
+            </span>
+            {pending ? (
+              <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+            ) : network.inUse ? (
+              <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
+            ) : (
+              secured && <Lock className="size-3 shrink-0 text-muted-foreground" aria-label="Secured" />
+            )}
+          </button>
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          onCloseAutoFocus={(e) => {
+            if (keepFocus.current) e.preventDefault();
+            keepFocus.current = false;
+          }}
+        >
+          <ContextMenuItem
+            disabled={pending}
+            onSelect={() => {
+              keepFocus.current = !network.inUse;
+              onSelect();
+            }}
+          >
+            {network.inUse ? <WifiOff aria-hidden /> : <Wifi aria-hidden />}
+            {network.inUse ? 'Disconnect' : 'Connect'}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <PopoverClose asChild>
+            <ContextMenuItem onSelect={onOpenSettings}>
+              <Settings2 aria-hidden />
+              Wi-Fi settings
+            </ContextMenuItem>
+          </PopoverClose>
+        </ContextMenuContent>
+      </ContextMenu>
 
       {isJoining && (
         <QuickPasswordForm

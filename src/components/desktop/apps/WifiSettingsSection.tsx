@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, ChevronRight, EthernetPort, Loader2, Lock, Plus, RotateCw, Settings2, Wifi, WifiOff } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, EthernetPort, Loader2, Lock, Plus, RotateCw, Settings2, Trash2, Wifi, WifiOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { TorControls } from '@/components/desktop/TorControls';
 import { VpnControls } from '@/components/desktop/VpnControls';
@@ -7,6 +7,13 @@ import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { AddNetworkDialog } from '@/components/desktop/apps/WifiForms';
 import { WifiNetworkDetails } from '@/components/desktop/apps/WifiNetworkDetails';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
@@ -121,7 +128,7 @@ function NetworkListView({
   const hasAdapter = status.data?.device != null;
   const ethernet = isEthernetConnected(status.data);
   const networks = useWifiNetworks(radioEnabled && hasAdapter);
-  const { connect, disconnect, setRadio } = useWifiMutations();
+  const { connect, disconnect, forget, setRadio } = useWifiMutations();
 
   // SSID whose inline password form is open, if any.
   const [joining, setJoining] = useState<string | null>(null);
@@ -137,6 +144,13 @@ function NetworkListView({
         onError: (error) => setOpError({ ssid: network.ssid, message: cleanWifiError(error) }),
       },
     );
+  };
+
+  const forgetNetwork = (network: WifiNetwork, uuid: string) => {
+    setOpError(null);
+    forget.mutate(uuid, {
+      onError: (error) => setOpError({ ssid: network.ssid, message: cleanWifiError(error) }),
+    });
   };
 
   const select = (network: WifiNetwork) => {
@@ -219,6 +233,7 @@ function NetworkListView({
               error={opError?.ssid === network.ssid ? opError.message : null}
               onSelect={() => select(network)}
               onDetails={onDetails}
+              onForget={(uuid) => forgetNetwork(network, uuid)}
               onCancelJoin={() => setJoining(null)}
               onConnect={(password) => joinNetwork(network, password)}
               onDisconnect={() => {
@@ -283,6 +298,7 @@ function NetworkRow({
   error,
   onSelect,
   onDetails,
+  onForget,
   onCancelJoin,
   onConnect,
   onDisconnect,
@@ -295,65 +311,109 @@ function NetworkRow({
   error: string | null;
   onSelect: () => void;
   onDetails: (uuid: string) => void;
+  onForget: (uuid: string) => void;
   onCancelJoin: () => void;
   onConnect: (password: string) => void;
   onDisconnect: () => void;
 }) {
   const secured = isSecured(network);
   const securityText = secured || network.security ? network.security : 'Open';
+  // Connect may open the password form; the closing menu mustn't take its focus.
+  const keepFocus = useRef(false);
 
   return (
     <li className="rounded-lg border border-border/60 bg-background/40">
-      <div className="flex items-center gap-1 pr-2">
-        <button
-          type="button"
-          onClick={onSelect}
-          disabled={connectPending}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-l-lg px-3 py-2 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <WifiSignalIcon
-            signal={network.signal}
-            className={cn('size-5 shrink-0', network.inUse ? 'text-primary' : 'text-muted-foreground')}
-          />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm text-foreground">{network.ssid}</span>
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {connectPending ? (
-                <>
-                  <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
-                  Connecting…
-                </>
-              ) : network.inUse ? (
-                <span className="font-medium text-primary">Connected</span>
-              ) : (
-                <>
-                  {secured && <Lock className="size-3 shrink-0" aria-label="Secured" />}
-                  <span>{securityText}</span>
-                  {saved && <span aria-hidden>·</span>}
-                  {saved && <span>Saved</span>}
-                </>
-              )}
-            </span>
-          </span>
-        </button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="flex items-center gap-1 pr-2">
+            <button
+              type="button"
+              onClick={onSelect}
+              disabled={connectPending}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-l-lg px-3 py-2 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <WifiSignalIcon
+                signal={network.signal}
+                className={cn('size-5 shrink-0', network.inUse ? 'text-primary' : 'text-muted-foreground')}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-foreground">{network.ssid}</span>
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {connectPending ? (
+                    <>
+                      <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
+                      Connecting…
+                    </>
+                  ) : network.inUse ? (
+                    <span className="font-medium text-primary">Connected</span>
+                  ) : (
+                    <>
+                      {secured && <Lock className="size-3 shrink-0" aria-label="Secured" />}
+                      <span>{securityText}</span>
+                      {saved && <span aria-hidden>·</span>}
+                      {saved && <span>Saved</span>}
+                    </>
+                  )}
+                </span>
+              </span>
+            </button>
 
-        {network.inUse && (
-          <Button variant="outline" size="sm" disabled={disconnectPending} onClick={onDisconnect}>
-            {disconnectPending ? 'Disconnecting…' : 'Disconnect'}
-          </Button>
-        )}
-        {saved && (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={`Settings for ${network.ssid}`}
-            title="Network details"
-            onClick={() => onDetails(saved.uuid)}
-          >
-            <Settings2 className="size-4" />
-          </Button>
-        )}
-      </div>
+            {network.inUse && (
+              <Button variant="outline" size="sm" disabled={disconnectPending} onClick={onDisconnect}>
+                {disconnectPending ? 'Disconnecting…' : 'Disconnect'}
+              </Button>
+            )}
+            {saved && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Settings for ${network.ssid}`}
+                title="Network details"
+                onClick={() => onDetails(saved.uuid)}
+              >
+                <Settings2 className="size-4" />
+              </Button>
+            )}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          onCloseAutoFocus={(e) => {
+            if (keepFocus.current) e.preventDefault();
+            keepFocus.current = false;
+          }}
+        >
+          {network.inUse ? (
+            <ContextMenuItem disabled={disconnectPending} onSelect={onDisconnect}>
+              <WifiOff aria-hidden />
+              Disconnect
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem
+              disabled={connectPending}
+              onSelect={() => {
+                keepFocus.current = true;
+                onSelect();
+              }}
+            >
+              <Wifi aria-hidden />
+              Connect
+            </ContextMenuItem>
+          )}
+          {saved && (
+            <>
+              <ContextMenuItem onSelect={() => onDetails(saved.uuid)}>
+                <Settings2 aria-hidden />
+                Network details
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem variant="destructive" onSelect={() => onForget(saved.uuid)}>
+                <Trash2 aria-hidden />
+                Forget
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
 
       {isJoining && (
         <PasswordForm
@@ -443,8 +503,17 @@ function SavedNetworksView({
   onBack: () => void;
   onOpen: (uuid: string) => void;
 }) {
+  const { activate, disconnect, forget } = useWifiMutations();
+  const [error, setError] = useState<string | null>(null);
+  const onError = (e: unknown) => setError(cleanWifiError(e));
+
   return (
     <Shell title="Saved networks" onBack={onBack}>
+      {error !== null && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {error}
+        </p>
+      )}
       {loading ? (
         <NetworkListSkeleton />
       ) : !saved || saved.length === 0 ? (
@@ -453,25 +522,70 @@ function SavedNetworksView({
         <ul className="flex flex-col divide-y divide-border/60 rounded-lg border border-border/60 bg-background/40" aria-label="Saved networks">
           {saved.map((network) => (
             <li key={network.uuid}>
-              <button
-                type="button"
-                onClick={() => onOpen(network.uuid)}
-                className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {network.active || inRange.has(network.ssid) ? (
-                  <Wifi className={cn('size-5 shrink-0', network.active ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
-                ) : (
-                  <WifiOff className="size-5 shrink-0 text-muted-foreground/60" aria-hidden />
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-foreground">{network.ssid}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {network.active ? 'Connected' : SECURITY_LABELS[network.security]}
-                    {!network.autoconnect && ' · Won’t auto-connect'}
-                  </span>
-                </span>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-              </button>
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(network.uuid)}
+                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {network.active || inRange.has(network.ssid) ? (
+                      <Wifi className={cn('size-5 shrink-0', network.active ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
+                    ) : (
+                      <WifiOff className="size-5 shrink-0 text-muted-foreground/60" aria-hidden />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm text-foreground">{network.ssid}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {network.active ? 'Connected' : SECURITY_LABELS[network.security]}
+                        {!network.autoconnect && ' · Won’t auto-connect'}
+                      </span>
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  {network.active ? (
+                    <ContextMenuItem
+                      disabled={disconnect.isPending}
+                      onSelect={() => {
+                        setError(null);
+                        disconnect.mutate(undefined, { onError });
+                      }}
+                    >
+                      <WifiOff aria-hidden />
+                      Disconnect
+                    </ContextMenuItem>
+                  ) : (
+                    <ContextMenuItem
+                      disabled={activate.isPending || (!inRange.has(network.ssid) && !network.hidden)}
+                      onSelect={() => {
+                        setError(null);
+                        activate.mutate(network.uuid, { onError });
+                      }}
+                    >
+                      <Wifi aria-hidden />
+                      Connect
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuItem onSelect={() => onOpen(network.uuid)}>
+                    <Settings2 aria-hidden />
+                    Network details
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    variant="destructive"
+                    disabled={forget.isPending}
+                    onSelect={() => {
+                      setError(null);
+                      forget.mutate(network.uuid, { onError });
+                    }}
+                  >
+                    <Trash2 aria-hidden />
+                    Forget
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             </li>
           ))}
         </ul>

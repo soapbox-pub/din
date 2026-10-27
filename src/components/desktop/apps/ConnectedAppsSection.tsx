@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Ban, ChevronDown, Copy, Globe, Link2, Loader2, Plus, Smartphone, X } from 'lucide-react';
+import { Ban, ChevronDown, Copy, Globe, Link2, Loader2, Plus, Smartphone, Unplug, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -18,6 +18,13 @@ import { originLabel, ruleLabel } from '@/lib/signerLabels';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import {
   Dialog,
   DialogContent,
@@ -68,27 +75,37 @@ function RuleList({ rules, onRevoke }: { rules: Rule[]; onRevoke: (rule: Rule) =
   return (
     <ul className="space-y-1">
       {rules.map((rule) => (
-        <li key={`${rule.method}:${rule.kind ?? ''}`} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-foreground/5">
-          <span
-            className={cn(
-              'shrink-0 rounded px-1.5 py-0.5 text-xs font-medium',
-              rule.decision === 'allow'
-                ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                : 'bg-destructive/15 text-destructive',
-            )}
-          >
-            {rule.decision === 'allow' ? 'Allow' : 'Deny'}
-          </span>
-          <span className="min-w-0 flex-1 truncate">{ruleLabel(rule.method, rule.kind)}</span>
-          <button
-            type="button"
-            aria-label={`Forget: ${ruleLabel(rule.method, rule.kind)}`}
-            onClick={() => onRevoke(rule)}
-            className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <X className="size-3.5" aria-hidden />
-          </button>
-        </li>
+        <ContextMenu key={`${rule.method}:${rule.kind ?? ''}`}>
+          <ContextMenuTrigger asChild>
+            <li className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-foreground/5">
+              <span
+                className={cn(
+                  'shrink-0 rounded px-1.5 py-0.5 text-xs font-medium',
+                  rule.decision === 'allow'
+                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-destructive/15 text-destructive',
+                )}
+              >
+                {rule.decision === 'allow' ? 'Allow' : 'Deny'}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{ruleLabel(rule.method, rule.kind)}</span>
+              <button
+                type="button"
+                aria-label={`Forget: ${ruleLabel(rule.method, rule.kind)}`}
+                onClick={() => onRevoke(rule)}
+                className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="size-3.5" aria-hidden />
+              </button>
+            </li>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onSelect={() => onRevoke(rule)}>
+              <X aria-hidden />
+              Forget
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       ))}
     </ul>
   );
@@ -98,29 +115,44 @@ function Row({
   icon,
   title,
   subtitle,
+  menu,
   children,
 }: {
   icon: React.ReactNode;
   title: string;
   subtitle: string;
+  /** The row's right-click menu items. */
+  menu: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border bg-muted/20">
-      <CollapsibleTrigger asChild>
-        <button
-          type="button"
-          className="flex w-full items-center gap-3 rounded-md p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <span aria-hidden className="shrink-0">{icon}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-foreground">{title}</span>
-            <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
-          </span>
-          <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} aria-hidden />
-        </button>
-      </CollapsibleTrigger>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center gap-3 rounded-md p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span aria-hidden className="shrink-0">{icon}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-foreground">{title}</span>
+                <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
+              </span>
+              <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} aria-hidden />
+            </button>
+          </CollapsibleTrigger>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onSelect={() => setOpen(!open)}>
+            <ChevronDown className={cn(open && 'rotate-180')} aria-hidden />
+            {open ? 'Hide details' : 'Show details'}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          {menu}
+        </ContextMenuContent>
+      </ContextMenu>
       <CollapsibleContent className="space-y-3 border-t border-border/60 p-3">{children}</CollapsibleContent>
     </Collapsible>
   );
@@ -130,21 +162,21 @@ function Tile({ children }: { children: React.ReactNode }) {
   return <span className="grid size-9 place-items-center rounded-lg bg-secondary text-muted-foreground">{children}</span>;
 }
 
-function CopyLink({ uri }: { uri: string }) {
+function useCopyLink() {
   const { toast } = useToast();
+  return (uri: string) =>
+    navigator.clipboard.writeText(uri).then(
+      () => toast({ title: 'Link copied' }),
+      () => toast({ title: "Couldn't copy the link", variant: 'destructive' }),
+    );
+}
+
+function CopyLink({ uri }: { uri: string }) {
+  const copy = useCopyLink();
   return (
     <div className="flex items-center gap-2">
       <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">{uri}</code>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          navigator.clipboard.writeText(uri).then(
-            () => toast({ title: 'Link copied' }),
-            () => toast({ title: "Couldn't copy the link", variant: 'destructive' }),
-          );
-        }}
-      >
+      <Button variant="outline" size="sm" onClick={() => copy(uri)}>
         <Copy className="size-4" aria-hidden />
         Copy
       </Button>
@@ -327,6 +359,7 @@ export function ConnectedAppsSection({ nostrconnect, nonce }: { nostrconnect?: s
   const { grants, disconnect, revoke } = useSignerGrants();
   const connections = useBunkerConnections();
   const bridge = getBunkerBridge();
+  const copyLink = useCopyLink();
   const [connecting, setConnecting] = useState(Boolean(nostrconnect));
   const [dialogKey, setDialogKey] = useState(0);
   const [initialLink, setInitialLink] = useState(nostrconnect ?? '');
@@ -393,6 +426,15 @@ export function ConnectedAppsSection({ nostrconnect, nonce }: { nostrconnect?: s
                     icon={<Tile>{blocked ? <Ban className="size-4" /> : <Globe className="size-4" />}</Tile>}
                     title={originLabel(origin)}
                     subtitle={`${blocked ? 'Blocked' : summary(rules)} · ${ago(grant.lastUsed)}`}
+                    menu={
+                      <ContextMenuItem
+                        variant={blocked ? 'default' : 'destructive'}
+                        onSelect={() => disconnect(origin)}
+                      >
+                        {blocked ? <Ban aria-hidden /> : <Unplug aria-hidden />}
+                        {blocked ? 'Unblock' : 'Disconnect'}
+                      </ContextMenuItem>
+                    }
                   >
                     <p className="break-all text-xs text-muted-foreground">{origin}</p>
                     {!blocked && <RuleList rules={rules} onRevoke={(r) => revoke(origin, r.method, r.kind)} />}
@@ -440,6 +482,20 @@ export function ConnectedAppsSection({ nostrconnect, nonce }: { nostrconnect?: s
                         waiting
                           ? `Link made ${ago(c.createdAt)}`
                           : `${summary(rules)} · ${ago(c.lastUsed ?? c.createdAt)}`
+                      }
+                      menu={
+                        <>
+                          {waiting && c.uri && (
+                            <ContextMenuItem onSelect={() => c.uri && copyLink(c.uri)}>
+                              <Copy aria-hidden />
+                              Copy link
+                            </ContextMenuItem>
+                          )}
+                          <ContextMenuItem variant="destructive" onSelect={() => bridge.remove(c.id)}>
+                            {waiting ? <X aria-hidden /> : <Unplug aria-hidden />}
+                            {waiting ? 'Delete link' : 'Disconnect'}
+                          </ContextMenuItem>
+                        </>
                       }
                     >
                       {c.url && <p className="break-all text-xs text-muted-foreground">{c.url}</p>}

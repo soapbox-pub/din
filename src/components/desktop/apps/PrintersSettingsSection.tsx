@@ -1,6 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { Check, EllipsisVertical, Loader2, Network, Plus, Printer as PrinterIcon, TriangleAlert, Usb, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -118,6 +125,56 @@ function describePrinter(printer: Printer): string {
   return 'Ready';
 }
 
+/** The pieces a printer's ⋯ menu and its right-click menu are both built from. */
+interface MenuParts {
+  Item: ComponentType<{
+    disabled?: boolean;
+    variant?: 'default' | 'destructive';
+    onSelect?: () => void;
+    children?: ReactNode;
+  }>;
+  Separator: ComponentType;
+}
+
+const DROPDOWN_PARTS: MenuParts = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator };
+const CONTEXT_PARTS: MenuParts = { Item: ContextMenuItem, Separator: ContextMenuSeparator };
+
+function PrinterMenuItems({
+  parts: { Item, Separator },
+  printer,
+  onSetDefault,
+  onTestPage,
+  onRemove,
+}: {
+  parts: MenuParts;
+  printer: Printer;
+  onSetDefault: () => void;
+  onTestPage: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <>
+      <Item disabled={printer.isDefault} onSelect={onSetDefault}>
+        {printer.isDefault ? <Check className="size-4" aria-hidden /> : <span className="size-4" aria-hidden />}
+        Use as default
+      </Item>
+      <Item onSelect={onTestPage}>
+        <span className="size-4" aria-hidden />
+        Print a test page
+      </Item>
+      {printer.configured && (
+        <>
+          <Separator />
+          <Item variant="destructive" onSelect={onRemove}>
+            <span className="size-4" aria-hidden />
+            Remove
+          </Item>
+        </>
+      )}
+    </>
+  );
+}
+
 function PrinterRow({
   printer,
   jobs,
@@ -136,88 +193,99 @@ function PrinterRow({
   onCancelJob: (job: string) => void;
 }) {
   const status = describePrinter(printer);
+  const menu = { printer, onSetDefault, onTestPage, onRemove };
   return (
     <li className="rounded-lg border border-border/60 bg-background/40">
-      <div className="flex items-center gap-3 px-3 py-2">
-        <PrinterIcon
-          className={cn('size-5 shrink-0', printer.problem ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}
-          aria-hidden
-        />
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2 truncate text-sm text-foreground">
-            <span className="truncate">{printer.displayName}</span>
-            {printer.isDefault && (
-              <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
-                Default
-              </span>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="flex items-center gap-3 px-3 py-2">
+            <PrinterIcon
+              className={cn('size-5 shrink-0', printer.problem ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-2 truncate text-sm text-foreground">
+                <span className="truncate">{printer.displayName}</span>
+                {printer.isDefault && (
+                  <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+                    Default
+                  </span>
+                )}
+              </p>
+              <p
+                className={cn(
+                  'flex items-center gap-1.5 truncate text-xs',
+                  printer.problem ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground',
+                )}
+              >
+                {printer.problem && <TriangleAlert className="size-3 shrink-0" aria-hidden />}
+                {status}
+                {printer.location && ` · ${printer.location}`}
+              </p>
+            </div>
+            {printer.state === 'stopped' && (
+              <Button variant="outline" size="sm" onClick={onResume}>
+                Resume
+              </Button>
             )}
-          </p>
-          <p
-            className={cn(
-              'flex items-center gap-1.5 truncate text-xs',
-              printer.problem ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground',
-            )}
-          >
-            {printer.problem && <TriangleAlert className="size-3 shrink-0" aria-hidden />}
-            {status}
-            {printer.location && ` · ${printer.location}`}
-          </p>
-        </div>
-        {printer.state === 'stopped' && (
-          <Button variant="outline" size="sm" onClick={onResume}>
-            Resume
-          </Button>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label={`${printer.displayName} options`}>
-              <EllipsisVertical className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled={printer.isDefault} onSelect={onSetDefault}>
-              {printer.isDefault ? <Check className="size-4" aria-hidden /> : <span className="size-4" aria-hidden />}
-              Use as default
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onTestPage}>
-              <span className="size-4" aria-hidden />
-              Print a test page
-            </DropdownMenuItem>
-            {printer.configured && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={onRemove}>
-                  <span className="size-4" aria-hidden />
-                  Remove
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label={`${printer.displayName} options`}>
+                  <EllipsisVertical className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <PrinterMenuItems parts={DROPDOWN_PARTS} {...menu} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {printer.state === 'stopped' && (
+            <>
+              <ContextMenuItem onSelect={onResume}>
+                <span className="size-4" aria-hidden />
+                Resume
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
+          <PrinterMenuItems parts={CONTEXT_PARTS} {...menu} />
+        </ContextMenuContent>
+      </ContextMenu>
 
       {jobs.length > 0 && (
         <ul className="border-t border-border/60" aria-label={`Waiting to print on ${printer.displayName}`}>
           {jobs.map((job) => (
-            <li key={job.id} className="flex items-center gap-3 px-3 py-1.5 pl-11">
-              {job.active ? (
-                <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Printing" />
-              ) : (
-                <span className="size-3.5 shrink-0" aria-hidden />
-              )}
-              <span className="min-w-0 flex-1 truncate text-xs text-foreground">{job.title}</span>
-              <span className="shrink-0 text-xs text-muted-foreground">{job.active ? 'Printing' : 'Waiting'}</span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7"
-                aria-label={`Cancel “${job.title}”`}
-                title="Cancel"
-                onClick={() => onCancelJob(job.id)}
-              >
-                <X className="size-3.5" />
-              </Button>
-            </li>
+            <ContextMenu key={job.id}>
+              <ContextMenuTrigger asChild>
+                <li className="flex items-center gap-3 px-3 py-1.5 pl-11">
+                  {job.active ? (
+                    <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Printing" />
+                  ) : (
+                    <span className="size-3.5 shrink-0" aria-hidden />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-xs text-foreground">{job.title}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{job.active ? 'Printing' : 'Waiting'}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    aria-label={`Cancel “${job.title}”`}
+                    title="Cancel"
+                    onClick={() => onCancelJob(job.id)}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </li>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => onCancelJob(job.id)}>
+                  <X aria-hidden />
+                  Cancel
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </ul>
       )}

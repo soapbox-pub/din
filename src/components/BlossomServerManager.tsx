@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
-import { HardDrive, Plus, X } from 'lucide-react';
+import { Copy, HardDrive, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -80,6 +87,13 @@ export function BlossomServerManager() {
     saveServers(newServers);
   };
 
+  const copyUrl = (url: string) => {
+    navigator.clipboard.writeText(url).then(
+      () => toast({ title: 'URL copied' }),
+      () => toast({ title: "Couldn't copy the URL", variant: 'destructive' }),
+    );
+  };
+
   const saveServers = (newServers: string[]) => {
     // Only called from event handlers, not during render.
      
@@ -139,24 +153,38 @@ export function BlossomServerManager() {
           </p>
         ) : (
           servers.map((url) => (
-            <div
-              key={url}
-              className="flex items-center gap-3 rounded-md border bg-muted/20 p-3"
-            >
-              <HardDrive className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate font-mono text-sm" title={url}>
-                {renderServerUrl(url)}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Remove ${renderServerUrl(url)}`}
-                onClick={() => handleRemoveServer(url)}
-                className="size-5 shrink-0 text-muted-foreground hover:bg-transparent hover:text-destructive"
-              >
-                <X className="size-4" />
-              </Button>
-            </div>
+            <ContextMenu key={url}>
+              <ContextMenuTrigger asChild>
+                <div
+                  className="flex items-center gap-3 rounded-md border bg-muted/20 p-3"
+                >
+                  <HardDrive className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate font-mono text-sm" title={url}>
+                    {renderServerUrl(url)}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Remove ${renderServerUrl(url)}`}
+                    onClick={() => handleRemoveServer(url)}
+                    className="size-5 shrink-0 text-muted-foreground hover:bg-transparent hover:text-destructive"
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => copyUrl(url)}>
+                  <Copy aria-hidden />
+                  Copy URL
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem variant="destructive" onSelect={() => handleRemoveServer(url)}>
+                  <X aria-hidden />
+                  Remove
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ))
         )}
       </div>

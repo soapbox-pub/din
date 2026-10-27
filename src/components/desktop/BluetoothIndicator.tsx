@@ -10,6 +10,7 @@ import {
   Loader2,
   Monitor,
   Mouse,
+  Plug,
   Printer,
   Settings2,
   Smartphone,
@@ -17,6 +18,13 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import {
   Dialog,
   DialogContent,
@@ -77,6 +85,8 @@ export function BluetoothPopoverBody() {
   const powered = data?.adapter?.powered ?? false;
   const paired = sortDevices((data?.devices ?? []).filter((d) => d.paired));
 
+  const openSettings = () => open('settings', { section: 'bluetooth' });
+
   const toggle = (device: BluetoothDevice) => {
     setError(null);
     const onError = (e: Error) => setError({ path: device.path, message: cleanBluetoothBridgeError(e) });
@@ -109,35 +119,52 @@ export function BluetoothPopoverBody() {
           <ul className="flex flex-col gap-0.5" aria-label="Paired devices">
             {paired.map((device) => (
               <li key={device.path}>
-                <button
-                  type="button"
-                  onClick={() => toggle(device)}
-                  disabled={device.busy !== null}
-                  aria-label={device.connected ? `Disconnect ${device.name}` : `Connect ${device.name}`}
-                  className={cn(
-                    'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
-                    'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    'disabled:opacity-70',
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'grid size-7 shrink-0 place-items-center rounded-full',
-                      device.connected ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-foreground/80',
-                    )}
-                  >
-                    <BluetoothDeviceIcon icon={device.icon} className="size-3.5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-foreground">{device.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {describeDevice(device)}
-                    </span>
-                  </span>
-                  {device.busy && (
-                    <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
-                  )}
-                </button>
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => toggle(device)}
+                      disabled={device.busy !== null}
+                      aria-label={device.connected ? `Disconnect ${device.name}` : `Connect ${device.name}`}
+                      className={cn(
+                        'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
+                        'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        'disabled:opacity-70',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'grid size-7 shrink-0 place-items-center rounded-full',
+                          device.connected ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-foreground/80',
+                        )}
+                      >
+                        <BluetoothDeviceIcon icon={device.icon} className="size-3.5" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm text-foreground">{device.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {describeDevice(device)}
+                        </span>
+                      </span>
+                      {device.busy && (
+                        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+                      )}
+                    </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem disabled={device.busy !== null} onSelect={() => toggle(device)}>
+                      <Plug aria-hidden />
+                      {device.connected ? 'Disconnect' : 'Connect'}
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <PopoverClose asChild>
+                      <ContextMenuItem onSelect={openSettings}>
+                        <Settings2 aria-hidden />
+                        Bluetooth settings
+                      </ContextMenuItem>
+                    </PopoverClose>
+                  </ContextMenuContent>
+                </ContextMenu>
                 {error?.path === device.path && (
                   <p role="alert" className="px-2 py-1 text-xs text-destructive">
                     {error.message}
@@ -160,7 +187,7 @@ export function BluetoothPopoverBody() {
             variant="ghost"
             size="sm"
             className="w-full justify-start text-muted-foreground hover:text-foreground"
-            onClick={() => open('settings', { section: 'bluetooth' })}
+            onClick={openSettings}
           >
             <Settings2 aria-hidden />
             Bluetooth settings

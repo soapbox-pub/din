@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, Wifi, Settings } from 'lucide-react';
+import { Copy, Plus, X, Wifi, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuCheckboxItem,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -110,6 +118,13 @@ export function RelayListManager() {
     saveRelays(newRelays);
   };
 
+  const copyUrl = (url: string) => {
+    navigator.clipboard.writeText(url).then(
+      () => toast({ title: 'URL copied' }),
+      () => toast({ title: "Couldn't copy the URL", variant: 'destructive' }),
+    );
+  };
+
   const saveRelays = (newRelays: Relay[]) => {
     // Only called from event handlers, not during render, so Date.now() is safe.
     // eslint-disable-next-line react-hooks/purity
@@ -190,65 +205,89 @@ export function RelayListManager() {
       {/* Relay List */}
       <div className="space-y-2">
         {relays.map((relay) => (
-          <div
-            key={relay.url}
-            className="flex items-center gap-3 p-3 rounded-md border bg-muted/20"
-          >
-            <Wifi className="h-4 w-4 text-muted-foreground shrink-0" />
-            <span className="font-mono text-sm flex-1 truncate" title={relay.url}>
-              {renderRelayUrl(relay.url)}
-            </span>
+          <ContextMenu key={relay.url}>
+            <ContextMenuTrigger asChild>
+              <div
+                className="flex items-center gap-3 p-3 rounded-md border bg-muted/20"
+              >
+                <Wifi className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="font-mono text-sm flex-1 truncate" title={relay.url}>
+                  {renderRelayUrl(relay.url)}
+                </span>
 
-            {/* Settings Popover */}
-            <Popover>
-              <PopoverTrigger asChild>
+                {/* Settings Popover */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-5 text-muted-foreground hover:text-foreground shrink-0"
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-48" align="end">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor={`read-${relay.url}`} className="text-sm cursor-pointer">
+                          Read
+                        </Label>
+                        <Switch
+                          id={`read-${relay.url}`}
+                          checked={relay.read}
+                          onCheckedChange={() => handleToggleRead(relay.url)}
+                          className="data-[state=checked]:bg-green-500 scale-75"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor={`write-${relay.url}`} className="text-sm cursor-pointer">
+                          Write
+                        </Label>
+                        <Switch
+                          id={`write-${relay.url}`}
+                          checked={relay.write}
+                          onCheckedChange={() => handleToggleWrite(relay.url)}
+                          className="data-[state=checked]:bg-blue-500 scale-75"
+                        />
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Remove Button */}
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-5 text-muted-foreground hover:text-foreground shrink-0"
+                  onClick={() => handleRemoveRelay(relay.url)}
+                  className="size-5 text-muted-foreground hover:text-destructive hover:bg-transparent shrink-0"
+                  disabled={relays.length <= 1}
                 >
-                  <Settings className="h-4 w-4" />
+                  <X className="h-4 w-4" />
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-48" align="end">
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor={`read-${relay.url}`} className="text-sm cursor-pointer">
-                      Read
-                    </Label>
-                    <Switch
-                      id={`read-${relay.url}`}
-                      checked={relay.read}
-                      onCheckedChange={() => handleToggleRead(relay.url)}
-                      className="data-[state=checked]:bg-green-500 scale-75"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor={`write-${relay.url}`} className="text-sm cursor-pointer">
-                      Write
-                    </Label>
-                    <Switch
-                      id={`write-${relay.url}`}
-                      checked={relay.write}
-                      onCheckedChange={() => handleToggleWrite(relay.url)}
-                      className="data-[state=checked]:bg-blue-500 scale-75"
-                    />
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            {/* Remove Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleRemoveRelay(relay.url)}
-              className="size-5 text-muted-foreground hover:text-destructive hover:bg-transparent shrink-0"
-              disabled={relays.length <= 1}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuCheckboxItem checked={relay.read} onCheckedChange={() => handleToggleRead(relay.url)}>
+                Read
+              </ContextMenuCheckboxItem>
+              <ContextMenuCheckboxItem checked={relay.write} onCheckedChange={() => handleToggleWrite(relay.url)}>
+                Write
+              </ContextMenuCheckboxItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => copyUrl(relay.url)}>
+                <Copy aria-hidden />
+                Copy URL
+              </ContextMenuItem>
+              <ContextMenuItem
+                variant="destructive"
+                disabled={relays.length <= 1}
+                onSelect={() => handleRemoveRelay(relay.url)}
+              >
+                <X aria-hidden />
+                Remove
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
       </div>
 
