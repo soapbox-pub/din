@@ -379,7 +379,7 @@ function ProfileBody({ event }: { event: DraftEvent }) {
   if (!metadata) {
     return (
       <>
-        <Meta icon={UserRound}>Profile details Tenna could not read</Meta>
+        <Meta icon={UserRound}>Profile details Din could not read</Meta>
         <Prose text={event.content} clamp={4} />
       </>
     );
@@ -608,7 +608,7 @@ function EncryptedBody({ event }: { event: DraftEvent }) {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Tenna cannot read this, and neither can anyone but its recipients.
+        Din cannot read this, and neither can anyone but its recipients.
       </p>
     </>
   );
@@ -837,7 +837,7 @@ function ListBody({ event }: { event: DraftEvent }) {
           can count. Both are reasons the number above may not be the whole
           list. */}
       {event.content.length > 0 && (
-        <p className="text-xs text-muted-foreground">Plus private entries Tenna cannot read.</p>
+        <p className="text-xs text-muted-foreground">Plus private entries Din cannot read.</p>
       )}
     </>
   );
@@ -1160,7 +1160,7 @@ export function UnreadableEvent({ kind }: { kind: number | null }) {
     <div className="space-y-1 rounded-xl border border-dashed p-3">
       <Meta icon={Ban}>{kind === null ? 'Unreadable event' : getKindLabel(kind)}</Meta>
       <p className="text-xs text-muted-foreground">
-        Tenna could not read what this app sent, so there is nothing to show but the request
+        Din could not read what this app sent, so there is nothing to show but the request
         itself. Deny it unless you know what it is.
       </p>
     </div>
