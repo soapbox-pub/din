@@ -18,6 +18,7 @@ import {
   Search,
   Settings,
   ShieldAlert,
+  ShieldCheck,
   SquarePlus,
   Trash2,
   VenetianMask,
@@ -29,7 +30,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getTorBridge, isOnionUrl, torState, type TorStatus } from '@/lib/tor';
-import { useOnionLocation, useTorStatus } from '@/hooks/useTor';
+import { useTorStatus } from '@/hooks/useTor';
+import { useSiteLocations } from '@/hooks/useSiteLocations';
 import { OnionIcon } from '@/components/icons/OnionIcon';
 import {
   resolveNavigation,
@@ -502,10 +504,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   useWindowTitle(activeTab.title ?? hostnameOf(activeTab.url) ?? (isPrivate ? 'Private window' : 'New tab'));
-  // The onion service the page names, offered while there's a Tor to reach it.
+  // The onion service the page names, offered while there's a Tor to reach
+  // it, and the nsite it names.
   const torStatus = useTorStatus();
-  const pageOnion = useOnionLocation(activeTab.wcId);
-  const onionLocation = torStatus?.port != null ? pageOnion : null;
+  const siteLocations = useSiteLocations(activeTab.wcId);
+  const onionLocation = torStatus?.port != null ? siteLocations.onion : null;
 
   const updateTab = useCallback(
     (id: string, patch: Partial<Tab> | ((tab: Tab) => Partial<Tab>)) => {
@@ -1909,6 +1912,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onChangeValue={(text) => updateTab(activeId, { address: text })}
           onNavigate={navigate}
           onionLocation={onionLocation}
+          nsiteLocation={siteLocations.nsite}
           site={
             /^(https?|nsite):\/\//i.test(activeTab.url) ? (
               <SiteInfoButton
@@ -2187,6 +2191,7 @@ function AddressBar({
   onChangeValue,
   onNavigate,
   onionLocation,
+  nsiteLocation,
   site,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
@@ -2198,6 +2203,8 @@ function AddressBar({
   onNavigate: (raw: string) => void;
   /** The onion service the page names (Onion-Location), offered at the end of the bar. */
   onionLocation?: string | null;
+  /** The nsite the page names (Nsite-Location), offered at the end of the bar. */
+  nsiteLocation?: string | null;
   /** The page's site info button, shown in place of the search icon. */
   site?: React.ReactNode;
 }) {
@@ -2269,6 +2276,12 @@ function AddressBar({
 
   // Typing hides it, along with the site's icon.
   const showOnion = !!onionLocation && !open;
+  const showNsite = !!nsiteLocation && !open;
+  const badgeClass = cn(
+    'flex h-6 items-center gap-1 rounded-full px-2 text-xs font-medium text-white shadow-sm',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95',
+  );
 
   return (
     <div className="relative flex-1">
@@ -2320,27 +2333,40 @@ function AddressBar({
         autoComplete="off"
         className={cn(
           'h-8 w-full rounded-full border border-border/60 bg-secondary/80 pl-8 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-          showOnion ? 'pr-36' : 'pr-3',
+          showOnion && showNsite ? 'pr-68' : showOnion || showNsite ? 'pr-36' : 'pr-3',
         )}
       />
-      {showOnion && (
-        <button
-          type="button"
-          // Keep the click from selecting the address first.
+      {(showOnion || showNsite) && (
+        // Keep a click from selecting the address first.
+        <div
+          className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onNavigate(onionLocation)}
-          title={`Open this site's onion service: ${hostnameOf(onionLocation) ?? onionLocation}`}
-          aria-label="Open this site's onion service"
-          className={cn(
-            'absolute right-1 top-1/2 flex h-6 -translate-y-1/2 items-center gap-1 rounded-full px-2',
-            'bg-violet-600 text-xs font-medium text-white shadow-sm',
-            'hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95',
-          )}
         >
-          <OnionIcon className="size-3.5" />
-          .onion available
-        </button>
+          {showNsite && (
+            <button
+              type="button"
+              onClick={() => onNavigate(nsiteLocation)}
+              title={`Open this site's nsite: ${nsiteLocation}`}
+              aria-label="Open this site's nsite"
+              className={cn(badgeClass, 'bg-emerald-700 hover:bg-emerald-800')}
+            >
+              <ShieldCheck className="size-3.5" aria-hidden />
+              nsite available
+            </button>
+          )}
+          {showOnion && (
+            <button
+              type="button"
+              onClick={() => onNavigate(onionLocation)}
+              title={`Open this site's onion service: ${hostnameOf(onionLocation) ?? onionLocation}`}
+              aria-label="Open this site's onion service"
+              className={cn(badgeClass, 'bg-violet-600 hover:bg-violet-700')}
+            >
+              <OnionIcon className="size-3.5" />
+              .onion available
+            </button>
+          )}
+        </div>
       )}
       {show && (
         <ul

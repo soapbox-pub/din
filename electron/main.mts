@@ -54,15 +54,13 @@ import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
+import { isOnionUrl, keepTorSession, registerTorHandlers, torNetworkChanged } from './tor.mts';
 import {
-  attachOnionLocation,
-  isOnionUrl,
-  keepTorSession,
-  onionLocationHeader,
-  onionLocationResponse,
-  registerTorHandlers,
-  torNetworkChanged,
-} from './tor.mts';
+  attachSiteLocations,
+  registerSiteLocationHandlers,
+  responseHeader,
+  siteLocationResponse,
+} from './site-locations.mts';
 import { registerCursorHandlers } from './cursor.mts';
 import { registerInddHandlers } from './indd.mts';
 import {
@@ -5106,6 +5104,7 @@ app.whenReady().then(() => {
   });
   registerVpnHandlers({ assertShellSender });
   registerTorHandlers({ assertShellSender, sendToShell });
+  registerSiteLocationHandlers({ assertShellSender, sendToShell });
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
   registerGuestVisibilityHandlers();
@@ -5221,9 +5220,9 @@ app.whenReady().then(() => {
     isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents,
     assertShellSender,
     sendToShell,
-    onTopLevelResponse: (url, coop, onionLocation) => {
+    onTopLevelResponse: (url, coop, onionLocation, nsiteLocation) => {
       topLevelResponse(browserSession(), url, coop);
-      onionLocationResponse(url, onionLocation);
+      siteLocationResponse(url, onionLocation, nsiteLocation);
     },
   });
 
@@ -5238,7 +5237,9 @@ app.whenReady().then(() => {
     assertShellSender,
     sendToShell,
     onTopLevelResponse: (s, url, headers) => {
-      if (isBrowserTabSession(s)) onionLocationResponse(url, onionLocationHeader(headers));
+      if (isBrowserTabSession(s)) {
+        siteLocationResponse(url, responseHeader(headers, 'onion-location'), responseHeader(headers, 'nsite-location'));
+      }
     },
   });
 
@@ -5667,9 +5668,10 @@ app.on('web-contents-created', (_event, contents) => {
   // The ad blocker's per-page blocked count (electron/adblock.mts).
   if (isBrowserTabSession(contents.session) && !isExtensionPageGuest) {
     attachAdblock(contents);
-    // The onion service the page names, for the address bar, and onion sites
-    // in Tor's session and nothing else there (electron/tor.mts).
-    attachOnionLocation(contents);
+    // The onion service and nsite the page names, for the address bar
+    // (electron/site-locations.mts), and onion sites in Tor's session and
+    // nothing else there (electron/tor.mts).
+    attachSiteLocations(contents);
     keepTorSession(contents, contents.session === torBrowserSession());
   }
 

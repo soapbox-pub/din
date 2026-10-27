@@ -125,15 +125,21 @@ chrome.webRequest.onBeforeRequest.addListener(
 );
 
 // Every top-level response's COOP goes to the pop-up blocker (popups.mts),
-// and its Onion-Location to the address bar (tor.mts), blocking on or off: a
-// session.webRequest listener there would switch this one off. Electron
+// and its Onion-Location and Nsite-Location to the address bar
+// (site-locations.mts), blocking on or off: a session.webRequest listener
+// there would switch this one off. Electron
 // doesn't fire onHeadersReceived here; onResponseStarted, with the same
 // headers, it does.
 chrome.webRequest.onResponseStarted.addListener(
   (details) => {
     if (details.statusCode >= 300 && details.statusCode < 400) return;
     const header = (name) => details.responseHeaders?.find((h) => h.name.toLowerCase() === name)?.value ?? null;
-    dinAdblock.reportDocument(details.url, header('cross-origin-opener-policy'), header('onion-location'));
+    dinAdblock.reportDocument(
+      details.url,
+      header('cross-origin-opener-policy'),
+      header('onion-location'),
+      header('nsite-location'),
+    );
   },
   { urls: ['http://*/*', 'https://*/*'], types: ['main_frame'] },
   ['responseHeaders'],

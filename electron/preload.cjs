@@ -515,7 +515,7 @@ contextBridge.exposeInMainWorld('vpn', {
 
 // Tor bridge (window.tor), backed by the tor:* handlers in electron/tor.mts:
 // whether there's a Tor and how far it has got connecting, turning it on and
-// off on DinOS, and the onion services browser tabs' pages name.
+// off on DinOS.
 contextBridge.exposeInMainWorld('tor', {
   /** @returns {Promise<TorStatus>} */
   status: () => ipcRenderer.invoke('tor:status'),
@@ -529,13 +529,6 @@ contextBridge.exposeInMainWorld('tor', {
    * @returns {Promise<TorStatus>}
    */
   setEnabled: (enabled) => ipcRenderer.invoke('tor:set-enabled', enabled),
-
-  /**
-   * The onion service a browser tab's page names (Onion-Location), or null.
-   * @param {number} wcId
-   * @returns {Promise<string | null>}
-   */
-  onionLocation: (wcId) => ipcRenderer.invoke('tor:onion-location', wcId),
 
   /**
    * Subscribe to status changes. Returns an unsubscribe fn.
@@ -552,20 +545,6 @@ contextBridge.exposeInMainWorld('tor', {
   },
 
   /**
-   * Subscribe to tabs' onion services. Returns an unsubscribe fn.
-   * @param {(update: { wcId: number, url: string | null }) => void} callback
-   */
-  onOnionLocation: (callback) => {
-    /**
-     * @param {Electron.IpcRendererEvent} _event
-     * @param {{ wcId: number, url: string | null }} update
-     */
-    const listener = (_event, update) => callback(update);
-    ipcRenderer.on('tor:onion-location', listener);
-    return () => ipcRenderer.removeListener('tor:onion-location', listener);
-  },
-
-  /**
    * Subscribe to browser tabs going to or from an onion site, which the
    * main process stopped so the tab can load it in the other session.
    * Returns an unsubscribe fn.
@@ -579,6 +558,32 @@ contextBridge.exposeInMainWorld('tor', {
     const listener = (_event, move) => callback(move);
     ipcRenderer.on('tor:move-tab', listener);
     return () => ipcRenderer.removeListener('tor:move-tab', listener);
+  },
+});
+
+// Site locations bridge (window.siteLocations), backed by
+// electron/site-locations.mts: the onion service (Onion-Location) and nsite
+// (Nsite-Location) browser tabs' pages name.
+contextBridge.exposeInMainWorld('siteLocations', {
+  /**
+   * What a browser tab's page names.
+   * @param {number} wcId
+   * @returns {Promise<{ onion: string | null, nsite: string | null }>}
+   */
+  get: (wcId) => ipcRenderer.invoke('site-locations:get', wcId),
+
+  /**
+   * Subscribe to what tabs' pages name. Returns an unsubscribe fn.
+   * @param {(update: { wcId: number, onion: string | null, nsite: string | null }) => void} callback
+   */
+  onChange: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, onion: string | null, nsite: string | null }} update
+     */
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on('site-locations:changed', listener);
+    return () => ipcRenderer.removeListener('site-locations:changed', listener);
   },
 });
 

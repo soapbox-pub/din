@@ -1,6 +1,5 @@
 // Tor (window.tor - see preload.cjs, Settings → Wi-Fi and the Web
-// Browser): finding it, how far it has got connecting, and the onion
-// services websites point to.
+// Browser): finding it, and how far it has got connecting.
 //
 // DinOS runs Tor from boot (os/configuration.nix). Elsewhere Din uses one
 // that's running already: a system Tor on 9050, or Tor Browser's on 9150.
@@ -14,12 +13,7 @@
 // names in DIN_TOR and the shell's user runs through sudo without a
 // password, like the time zone's helper.
 //
-// Onion-Location: an https site can name its onion service in a response
-// header or a <meta http-equiv>, and the address bar offers to go there, as
-// Tor Browser's does. The header reaches this module from whichever listener
-// sees the session's responses (the ad blocker's extension in the persistent
-// session, popups.mts's in the private one); the meta tag is read from an
-// isolated world once the page's DOM is ready.
+// The onion services sites name (Onion-Location) are site-locations.mts's.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -247,112 +241,11 @@ async function helper(args: string[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Onion-Location
+// Onion sites
 // ---------------------------------------------------------------------------
-
-/** A v3 onion service's address, with any subdomains. */
-const ONION_HOST = /(^|\.)[a-z2-7]{56}\.onion$/;
 
 function isOnionHost(hostname: string): boolean {
   return /(^|\.)onion\.?$/i.test(hostname);
-}
-
-/**
- * The onion service a page names, as Tor Browser takes it: only from an
- * https page that isn't on an onion service itself, and only an http(s)
- * address on one.
- */
-function onionLocationFor(pageUrl: string, value: unknown): string | null {
-  if (typeof value !== 'string' || value.length > 2048) return null;
-  try {
-    const page = new URL(pageUrl);
-    if (page.protocol !== 'https:' || isOnionHost(page.hostname)) return null;
-    const target = new URL(value.trim());
-    if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
-    if (target.username || target.password || !ONION_HOST.test(target.hostname.toLowerCase())) return null;
-    return target.href;
-  } catch {
-    return null;
-  }
-}
-
-/** A URL as the response and the committed page both have it. */
-function withoutHash(url: string): string {
-  const hash = url.indexOf('#');
-  return hash < 0 ? url : url.slice(0, hash);
-}
-
-/** Onion-Location headers of recent top-level responses, by response URL. */
-const headerOnions = new Map<string, { onion: string; at: number }>();
-const HEADER_TTL_MS = 60_000;
-/** Each browser tab's page's onion service, if it names one. */
-const onionLocations = new Map<number, string>();
-const tabs = new Set<Electron.WebContents>();
-
-function setOnionLocation(contents: Electron.WebContents, onion: string | null): void {
-  if ((onionLocations.get(contents.id) ?? null) === onion) return;
-  if (onion) onionLocations.set(contents.id, onion);
-  else onionLocations.delete(contents.id);
-  sendToShell('tor:onion-location', { wcId: contents.id, url: onion });
-}
-
-/**
- * A top-level response in a browser session, with its Onion-Location
- * header (null without one). It may come in before the page commits or,
- * from the extension, just after.
- */
-export function onionLocationResponse(url: string, header: string | null): void {
-  const now = Date.now();
-  for (const [key, entry] of headerOnions) if (now - entry.at > HEADER_TTL_MS) headerOnions.delete(key);
-  const onion = onionLocationFor(url, header);
-  if (!onion) return;
-  const key = withoutHash(url);
-  headerOnions.set(key, { onion, at: now });
-  for (const tab of tabs) {
-    if (!tab.isDestroyed() && withoutHash(tab.getURL()) === key) setOnionLocation(tab, onion);
-  }
-}
-
-/** The Onion-Location header among a response's headers, whatever its case. */
-export function onionLocationHeader(headers: Record<string, string[]> | undefined): string | null {
-  for (const [name, values] of Object.entries(headers ?? {})) {
-    if (name.toLowerCase() === 'onion-location') return values[0] ?? null;
-  }
-  return null;
-}
-
-/** An isolated world of its own, so the page's scripts can't stand in for the DOM's. */
-const META_WORLD_ID = 1_337;
-const READ_META = `(() => {
-  const meta = document.querySelector('meta[http-equiv="onion-location" i]');
-  return meta ? meta.getAttribute('content') : null;
-})()`;
-
-/** Follow a browser tab's pages for the onion services they name. */
-export function attachOnionLocation(contents: Electron.WebContents): void {
-  tabs.add(contents);
-  contents.on('did-start-navigation', (event) => {
-    if (event.isMainFrame && !event.isSameDocument) setOnionLocation(contents, null);
-  });
-  contents.on('did-navigate', (_event, url) => {
-    const entry = headerOnions.get(withoutHash(url));
-    if (entry) setOnionLocation(contents, entry.onion);
-  });
-  contents.on('dom-ready', () => {
-    const url = contents.getURL();
-    if (onionLocations.has(contents.id) || !url.startsWith('https:')) return;
-    contents
-      .executeJavaScriptInIsolatedWorld(META_WORLD_ID, [{ code: READ_META }])
-      .then((content: unknown) => {
-        const onion = onionLocationFor(url, content);
-        if (onion && !contents.isDestroyed() && contents.getURL() === url) setOnionLocation(contents, onion);
-      })
-      .catch(() => {});
-  });
-  contents.once('destroyed', () => {
-    tabs.delete(contents);
-    onionLocations.delete(contents.id);
-  });
 }
 
 /** Whether a URL is on an onion service. */
@@ -411,10 +304,5 @@ export function registerTorHandlers(options: {
     if (typeof enabled !== 'boolean') throw new Error('Invalid setting');
     await helper([enabled ? 'on' : 'off']);
     return refresh();
-  });
-
-  ipcMain.handle('tor:onion-location', (event, wcId: unknown) => {
-    assertShellSender(event);
-    return typeof wcId === 'number' ? (onionLocations.get(wcId) ?? null) : null;
   });
 }
