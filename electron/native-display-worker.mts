@@ -1075,6 +1075,8 @@ type ShellMessage =
   | { type: 'focus'; id: number }
   /** Din maximized or restored the window. */
   | { type: 'state'; id: number; maximized: boolean }
+  /** Din put the window in full screen or took it out (Wayland only). */
+  | { type: 'fullscreen'; id: number; fullscreen: boolean }
   | { type: 'raise'; id: number }
   | { type: 'close'; id: number }
   | { type: 'motion'; id: number; x: number; y: number; dx?: number; dy?: number }

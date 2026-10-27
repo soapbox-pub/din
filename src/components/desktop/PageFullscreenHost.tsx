@@ -33,6 +33,9 @@ const STYLE_ID = 'din-page-fullscreen';
  * Only a modal dialog outranks the fullscreen element, so the desktop's
  * layer (index.html's `#shell`) opens as one, above the frame, with a hole
  * cut over the frame's monitor.
+ *
+ * A native app in full screen is the same, with its window's canvas host
+ * (NativeWindowView.tsx) as the frame; the app sizes itself to the monitor.
  */
 export function PageFullscreenHost() {
   const { monitors } = useMonitors();
@@ -46,7 +49,7 @@ export function PageFullscreenHost() {
     if (!bridge) return;
     const shell = document.getElementById('shell');
     const layer = shell instanceof HTMLDialogElement ? shell : null;
-    let fitted: HTMLIFrameElement | null = null;
+    let fitted: HTMLElement | null = null;
 
     // Escape belongs to the fullscreen page, not to the desktop's layer.
     const onCancel = (event: Event) => event.preventDefault();
@@ -66,13 +69,16 @@ export function PageFullscreenHost() {
     const onChange = () => {
       unfit();
       const host = document.fullscreenElement;
-      if (!host || host.tagName !== 'WEBVIEW' || monitorsRef.current.length < 2) return;
-      const frame = host.shadowRoot?.querySelector('iframe');
+      if (!(host instanceof HTMLElement) || monitorsRef.current.length < 2) return;
+      const page = host.tagName === 'WEBVIEW';
+      if (!page && host.dataset.nativeWindow === undefined) return;
+      const frame = page ? host.shadowRoot?.querySelector('iframe') : host;
       if (!frame) return;
 
       // The window's monitor: the one under the middle of the webview, which
-      // keeps its place in the window while its frame is fullscreen.
-      const box = host.getBoundingClientRect();
+      // keeps its place in the window while its frame is fullscreen (or of
+      // the native app's Din window, likewise).
+      const box = (page ? host : (host.closest('section') ?? host)).getBoundingClientRect();
       const cx = box.x + box.width / 2;
       const cy = box.y + box.height / 2;
       const monitor: Monitor =
@@ -80,7 +86,7 @@ export function PageFullscreenHost() {
         monitorsRef.current.find((m) => m.primary) ??
         monitorsRef.current[0];
 
-      if (!host.shadowRoot?.getElementById(STYLE_ID)) {
+      if (page && !host.shadowRoot?.getElementById(STYLE_ID)) {
         const style = document.createElement('style');
         style.id = STYLE_ID;
         style.textContent = 'iframe::backdrop { background: transparent; }';
@@ -117,7 +123,7 @@ export function PageFullscreenHost() {
 
       const getId = (host as HTMLElement & { getWebContentsId?: () => number }).getWebContentsId;
       const zoom = getMonitorsBridge()?.zoomFactor() ?? 1;
-      if (getId) {
+      if (page && getId) {
         void bridge
           .fit(getId.call(host), monitor.width * zoom, monitor.height * zoom)
           .catch((error: unknown) => console.warn('page fullscreen: fitting failed:', error));

@@ -547,6 +547,32 @@ impl State {
         }
     }
 
+    /// The shell put a window in full screen or took it out. Its size
+    /// follows from the geometry the shell reports, as for maximize.
+    fn set_fullscreen(&mut self, id: u32, fullscreen: bool) {
+        let Some(t) = self.toplevels.iter().find(|t| t.id == id) else { return };
+        if let Some(x11) = t.x11() {
+            let _ = x11.set_fullscreen(fullscreen);
+            return;
+        }
+        let toplevel = t.window.toplevel().expect("wayland window");
+        let known_size = t.known_size;
+        toplevel.with_pending_state(|state| {
+            if fullscreen {
+                // Never 0x0: see set_maximized.
+                if state.size.is_none() {
+                    state.size = known_size;
+                }
+                state.states.set(xdg_toplevel::State::Fullscreen);
+            } else {
+                state.states.unset(xdg_toplevel::State::Fullscreen);
+            }
+        });
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+    }
+
     /// The surface under a point and its origin, both in root coordinates.
     /// `id` 0 means the point is already in root coordinates (the shell's
     /// menu shield), where only popups can be hit.
@@ -799,6 +825,7 @@ impl State {
             ),
             "focus" => self.set_focus(id),
             "state" => self.set_maximized(id, message["maximized"] == true),
+            "fullscreen" => self.set_fullscreen(id, message["fullscreen"] == true),
             "close" => self.close(id),
             "motion" => {
                 let delta = message.get("dx").is_some().then(|| (num("dx"), num("dy")));

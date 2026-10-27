@@ -274,6 +274,14 @@ impl XwmHandler for State {
         self.x11_request(&window, serde_json::json!({ "type": "minimize" }));
     }
 
+    fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_request(&window, serde_json::json!({ "type": "fullscreen", "fullscreen": true }));
+    }
+
+    fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_request(&window, serde_json::json!({ "type": "fullscreen", "fullscreen": false }));
+    }
+
     fn allow_selection_access(&mut self, _xwm: XwmId, selection: SelectionTarget) -> bool {
         selection == SelectionTarget::Clipboard
     }

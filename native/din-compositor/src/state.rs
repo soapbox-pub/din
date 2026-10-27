@@ -32,7 +32,7 @@ use smithay::{
         wayland_server::{
             Client, DisplayHandle, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
-            protocol::{wl_buffer, wl_seat, wl_surface::WlSurface},
+            protocol::{wl_buffer, wl_output, wl_seat, wl_surface::WlSurface},
         },
     },
     backend::input::KeyState,
@@ -681,6 +681,16 @@ impl XdgShellHandler for State {
         let Some(id) = self.xdg_toplevel_mut(&surface).map(|t| t.id) else { return };
         self.window_request(id, serde_json::json!({ "type": "minimize" }));
     }
+
+    // The output asked for is ignored: the shell puts the window on the
+    // monitor it's on.
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<wl_output::WlOutput>) {
+        self.xdg_fullscreen_request(surface, true);
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        self.xdg_fullscreen_request(surface, false);
+    }
 }
 
 impl State {
@@ -692,6 +702,15 @@ impl State {
         }
         let Some(id) = self.xdg_toplevel_mut(&surface).map(|t| t.id) else { return };
         self.window_request(id, serde_json::json!({ "type": "maximize", "maximized": maximized }));
+    }
+
+    /// As for maximize; the shell answers with a "fullscreen" message.
+    fn xdg_fullscreen_request(&mut self, surface: ToplevelSurface, fullscreen: bool) {
+        if surface.is_initial_configure_sent() {
+            surface.send_configure();
+        }
+        let Some(id) = self.xdg_toplevel_mut(&surface).map(|t| t.id) else { return };
+        self.window_request(id, serde_json::json!({ "type": "fullscreen", "fullscreen": fullscreen }));
     }
 }
 

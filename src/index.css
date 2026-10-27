@@ -286,6 +286,12 @@
   pointer-events: none;
 }
 
+/* A native app in full screen covers only its own monitor; the others keep
+   showing the desktop (PageFullscreenHost.tsx). */
+[data-native-window]::backdrop {
+  background: transparent;
+}
+
 /* ===== Scrollbars =====
 
    Styled with ::-webkit-scrollbar so Blink treats every scrollbar as a

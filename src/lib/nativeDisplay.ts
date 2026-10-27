@@ -69,6 +69,8 @@ export type NativeDisplayEvent =
   /** The app's own maximize/minimize buttons. */
   | { type: 'maximize'; surface: NativeSurface; maximized: boolean }
   | { type: 'minimize'; surface: NativeSurface }
+  /** The app asked to go full screen (a video's or game's), or to leave it. */
+  | { type: 'fullscreen'; surface: NativeSurface; fullscreen: boolean }
   /** Asked to close twice, and still open: offer to force quit. */
   | { type: 'close-ignored'; surface: NativeSurface }
   /** The app locked the pointer (mouse-look) or let it go. */
@@ -110,6 +112,7 @@ type WorkerMessage =
   | { type: 'resize'; id: number; edge: string }
   | { type: 'maximize'; id: number; maximized: boolean }
   | { type: 'minimize'; id: number }
+  | { type: 'fullscreen'; id: number; fullscreen: boolean }
   | { type: 'pointer-lock'; id: number; locked: boolean }
   /** `source` names the server (X or Wayland) that wants the ack. */
   | { type: 'frames'; source?: string; updates: FrameUpdate[] }
@@ -355,6 +358,11 @@ function onMessage(message: WorkerMessage): void {
       if (surface && !surface.popup) emit({ type: 'maximize', surface, maximized: message.maximized === true });
       return;
     }
+    case 'fullscreen': {
+      const surface = surfaces.get(message.id);
+      if (surface && !surface.popup) emit({ type: 'fullscreen', surface, fullscreen: message.fullscreen === true });
+      return;
+    }
     case 'pointer-lock': {
       const surface = surfaces.get(message.id);
       if (surface) emit({ type: 'pointer-lock', surface, locked: message.locked === true });
@@ -514,6 +522,11 @@ export function setNativeFocus(id: number, focused: boolean): void {
 /** Tell the app whether Din has its window maximized (its own title bar shows it). */
 export function setNativeMaximized(id: number, maximized: boolean): void {
   send({ type: 'state', id, maximized });
+}
+
+/** Tell the app whether its window is in full screen. */
+export function setNativeFullscreen(id: number, fullscreen: boolean): void {
+  send({ type: 'fullscreen', id, fullscreen });
 }
 
 export function raiseNativeWindow(id: number): void {

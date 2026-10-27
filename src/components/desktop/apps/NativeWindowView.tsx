@@ -23,6 +23,7 @@ import {
   sendNativeRelative,
   sendNativeWheel,
   setNativeFocus,
+  setNativeFullscreen,
   setNativeGeometry,
   setNativeMaximized,
   subscribeNativeDisplay,
@@ -31,6 +32,8 @@ import {
   type NativeSurface,
 } from '@/lib/nativeDisplay';
 import { registerDictationTarget } from '@/lib/dictation';
+import { useMonitors } from '@/contexts/MonitorsContext';
+import { contains } from '@/lib/monitors';
 
 /**
  * How often the canvas's screen position is re-reported. Pointer and focus
@@ -50,6 +53,11 @@ const POSITION_SYNC_MS = 500;
  * An app that draws its own title bar (client-side decorations) gets none
  * from Din; drags on its title bar and edges, and its maximize and minimize
  * buttons, drive the Din window instead (WindowChromeContext).
+ *
+ * An app that asks for full screen (a video player's button, a game) gets
+ * it the way a web page does: the canvas's box goes fullscreen in the shell's
+ * page, over the menu bar and Dock, on its window's monitor
+ * (PageFullscreenHost.tsx).
  */
 export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const xid = typeof params?.xid === 'number' ? params.xid : 0;
@@ -70,6 +78,13 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const pressRef = useRef<ChromePoint>({ clientX: 0, clientY: 0 });
   /** A move or resize the app asked for is under way: the pointer drives it. */
   const gestureRef = useRef(false);
+  /** Whether the app was last told it's in full screen. */
+  const fullscreenRef = useRef(false);
+  const { monitors } = useMonitors();
+  const monitorsRef = useRef(monitors);
+  useEffect(() => {
+    monitorsRef.current = monitors;
+  }, [monitors]);
   const app = getApp(appId);
   useWindowTitle(title);
 
@@ -104,12 +119,18 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     const rect = host.getBoundingClientRect();
     // Size from layout, not the bounding box: a wobble or genie transform
     // distorts the box, and must never resize the app.
-    setNativeGeometry(xid, {
-      x: rect.left,
-      y: rect.top,
-      width: host.clientWidth,
-      height: host.clientHeight,
-    });
+    let width = host.clientWidth;
+    let height = host.clientHeight;
+    // In full screen the box spans the whole page, but only the monitor it
+    // was moved onto shows.
+    if (document.fullscreenElement === host) {
+      const monitor = monitorsRef.current.find((m) => contains(m, rect.left, rect.top));
+      if (monitor) {
+        width = Math.min(width, monitor.width);
+        height = Math.min(height, monitor.height);
+      }
+    }
+    setNativeGeometry(xid, { x: rect.left, y: rect.top, width, height });
   }, [xid]);
 
   // Dictation while this window has the keyboard types into the app.
@@ -153,8 +174,32 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     if (isTop) {
       syncGeometry();
       hostRef.current?.focus({ preventScroll: true });
+    } else if (hostRef.current && document.fullscreenElement === hostRef.current) {
+      // Another window came up (Alt+Tab, a launch): full screen ends.
+      void document.exitFullscreen();
     }
   }, [xid, isTop, syncGeometry]);
+
+  // Full screen ended, or began, on the shell's side too (Escape, another
+  // window): the app is told either way, and fits the new box.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !xid) return;
+    const onChange = () => {
+      const fullscreen = document.fullscreenElement === host;
+      if (fullscreen === fullscreenRef.current) return;
+      fullscreenRef.current = fullscreen;
+      setNativeFullscreen(xid, fullscreen);
+      if (fullscreen) host.focus({ preventScroll: true });
+      // After PageFullscreenHost has moved the box onto its monitor.
+      requestAnimationFrame(syncGeometry);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      if (document.fullscreenElement === host) void document.exitFullscreen();
+    };
+  }, [xid, syncGeometry]);
   useEffect(() => () => setNativeFocus(xid, false), [xid]);
 
   // Title changes, and the app resizing (or moving) itself, drawing its own
@@ -215,6 +260,24 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
           else setNativeMaximized(xid, win.maximized);
         }
         if (event.type === 'minimize') minimize(windowId);
+        if (event.type === 'fullscreen') {
+          const host = hostRef.current;
+          const fullscreen = !!host && document.fullscreenElement === host;
+          if (event.fullscreen && host && !fullscreen) {
+            // Blink allows it only just after a click or key, which is how
+            // apps ask. One that asks on its own (a game starting in full
+            // screen) fills its monitor instead.
+            host.requestFullscreen().catch(() => {
+              setNativeFullscreen(xid, false);
+              if (!currentRef.current?.maximized) maximize(windowId);
+            });
+          } else if (!event.fullscreen && fullscreen) {
+            void document.exitFullscreen();
+          } else {
+            // Nothing changed: the app still hears back.
+            setNativeFullscreen(xid, fullscreen);
+          }
+        }
       }),
     [xid, windowId, resize, setFrameless, placeFor, maximize, minimize, toggleMaximize, chrome],
   );
@@ -291,6 +354,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   return (
     <div
       ref={hostRef}
+      data-native-window=""
       tabIndex={0}
       aria-label={title || app?.name}
       className="size-full overflow-hidden bg-background outline-none"
