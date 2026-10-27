@@ -27,6 +27,14 @@ import { ADJUSTMENT_NAMES, MENU_ADJUSTMENTS } from './adjust';
 import { AdjustmentEditor } from './adjustEditor';
 import { IconButton, NumberField, Select } from './chrome';
 import { ColorPicker } from './color';
+import {
+  ContextMenu,
+  ContextMenuCheckboxItem,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from './contextMenu';
 import { FOCUS, INPUT, SWATCHES } from './styles';
 import { findLayer, findPlace, walkTopDown, type Doc, type Layer } from './model';
 import { BLEND_GROUPS, blendLabel } from './render';
@@ -172,6 +180,8 @@ export function LayersPanel(p: LayersPanelProps) {
   const [drop, setDrop] = useState<DropTarget | null>(null);
   const [adjMenu, setAdjMenu] = useState(false);
   const dragId = useRef<number | null>(null);
+  // Rename puts focus in the name field; the closing menu mustn't take it back.
+  const keepFocus = useRef(false);
 
   const targetFor = (l: Layer, e: React.DragEvent): DropTarget | null => {
     const place = findPlace(doc.layers, l.id);
@@ -257,137 +267,187 @@ export function LayersPanel(p: LayersPanelProps) {
           const isActive = l.id === activeId;
           const Icon = l.kind === 'text' || l.kind === 'smart' || l.kind === 'shape' ? KIND_ICON[l.kind] : null;
           const hasFx = !!l.effects && !l.effects.disabled && Object.keys(l.effects).some((k) => k !== 'scale' && k !== 'disabled');
+          const many = selected && p.selectedIds.size > 1;
           return (
-            <div
-              key={l.id}
-              role="option"
-              aria-selected={selected}
-              draggable={renaming !== l.id}
-              onDragStart={(e) => {
-                dragId.current = l.id;
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', l.name);
-              }}
-              onDragOver={(e) => {
-                if (dragId.current === null) return;
-                e.preventDefault();
-                setDrop(targetFor(l, e));
-              }}
-              onDragLeave={() => setDrop((d) => (d?.rowId === l.id ? null : d))}
-              onDrop={(e) => {
-                e.preventDefault();
-                const t = targetFor(l, e);
-                if (t && dragId.current !== null && dragId.current !== l.id) p.onDrop(dragId.current, t.parentId, t.index);
-                dragId.current = null;
-                setDrop(null);
-              }}
-              onDragEnd={() => {
-                dragId.current = null;
-                setDrop(null);
-              }}
-              onPointerDown={(e) => {
-                if (e.button !== 0 || renaming === l.id) return;
-                p.onSelect(l.id, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
-              }}
-              onDoubleClick={() => setRenaming(l.id)}
-              className={cn(
-                'group relative flex h-10 cursor-default items-center gap-1 border-b border-[#2c2c2c] pr-2 text-xs select-none',
-                selected ? 'bg-[#4f4f4f] text-white' : 'text-[#d6d6d6] hover:bg-[#424242]',
-                drop?.rowId === l.id && drop.edge === 'into' && 'outline outline-2 -outline-offset-2 outline-[#2d8ceb]',
-              )}
-            >
-              {drop?.rowId === l.id && drop.edge !== 'into' && (
-                <span className={cn('pointer-events-none absolute inset-x-0 h-0.5 bg-[#2d8ceb]', drop.edge === 'above' ? 'top-0' : 'bottom-0')} />
-              )}
-              <button
-                type="button"
-                aria-label={l.hidden ? `Show ${l.name}` : `Hide ${l.name}`}
-                title="Show/hide (Alt+click: show only this layer)"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => p.onToggleVisible(l.id, e.altKey)}
-                className={cn('grid h-full w-7 shrink-0 place-items-center border-r border-[#2c2c2c] text-[#cfcfcf]', FOCUS)}
-              >
-                {l.hidden ? <EyeOff className="size-3.5 opacity-40" /> : <Eye className="size-3.5" />}
-              </button>
-              <span style={{ width: depth * 14 }} className="shrink-0" />
-              {l.clipping && <CornerLeftDown className="size-3 shrink-0 text-[#bdbdbd]" aria-label="Clipped to the layer below" />}
-              {l.kind === 'group' ? (
-                <button
-                  type="button"
-                  aria-label={l.open ? 'Collapse group' : 'Expand group'}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => p.onToggleOpen(l.id)}
-                  className={cn('flex shrink-0 items-center gap-0.5 rounded-[2px] px-0.5 text-[#cfcfcf]', FOCUS)}
-                >
-                  {l.open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-                  {l.open ? <FolderOpen className="size-4" /> : <Folder className="size-4" />}
-                </button>
-              ) : l.kind === 'adjustment' ? (
-                <span className="grid size-8 shrink-0 place-items-center rounded-[2px] bg-[#2a2a2a] text-[#cfcfcf]" title={ADJUSTMENT_NAMES[l.adjustment?.type ?? ''] ?? 'Adjustment'}>
-                  <SlidersHorizontal className="size-4" />
-                </span>
-              ) : (
-                <span
-                  className={cn('relative shrink-0 rounded-[2px] p-px', isActive && !p.editMask ? 'ring-1 ring-[#e6e6e6]' : '')}
-                  title="Ctrl+click: select this layer's pixels"
-                  onPointerDown={(e) => {
-                    if (e.ctrlKey || e.metaKey) {
-                      e.stopPropagation();
-                      p.onLoadSelection(l.id);
-                    } else if (p.editMask && isActive) {
-                      e.stopPropagation();
-                      p.onSelect(l.id, { shift: false, ctrl: false });
-                    }
+            <ContextMenu key={l.id}>
+              <ContextMenuTrigger asChild disabled={renaming === l.id}>
+                <div
+                  role="option"
+                  aria-selected={selected}
+                  draggable={renaming !== l.id}
+                  onDragStart={(e) => {
+                    dragId.current = l.id;
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', l.name);
                   }}
+                  onDragOver={(e) => {
+                    if (dragId.current === null) return;
+                    e.preventDefault();
+                    setDrop(targetFor(l, e));
+                  }}
+                  onDragLeave={() => setDrop((d) => (d?.rowId === l.id ? null : d))}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const t = targetFor(l, e);
+                    if (t && dragId.current !== null && dragId.current !== l.id) p.onDrop(dragId.current, t.parentId, t.index);
+                    dragId.current = null;
+                    setDrop(null);
+                  }}
+                  onDragEnd={() => {
+                    dragId.current = null;
+                    setDrop(null);
+                  }}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0 || renaming === l.id) return;
+                    p.onSelect(l.id, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
+                  }}
+                  onContextMenu={() => {
+                    if (!selected && renaming !== l.id) p.onSelect(l.id, { shift: false, ctrl: false });
+                  }}
+                  onDoubleClick={() => setRenaming(l.id)}
+                  className={cn(
+                    'group relative flex h-10 cursor-default items-center gap-1 border-b border-[#2c2c2c] pr-2 text-xs select-none',
+                    selected ? 'bg-[#4f4f4f] text-white' : 'text-[#d6d6d6] hover:bg-[#424242]',
+                    drop?.rowId === l.id && drop.edge === 'into' && 'outline outline-2 -outline-offset-2 outline-[#2d8ceb]',
+                  )}
                 >
-                  <Thumb canvas={l.canvas} left={l.left} top={l.top} docW={doc.width} docH={doc.height} />
-                  {Icon && (
-                    <span className="absolute right-0 bottom-0 grid size-3.5 place-items-center rounded-tl-[3px] bg-[#232323] text-[#e6e6e6]">
-                      <Icon className="size-2.5" />
+                  {drop?.rowId === l.id && drop.edge !== 'into' && (
+                    <span className={cn('pointer-events-none absolute inset-x-0 h-0.5 bg-[#2d8ceb]', drop.edge === 'above' ? 'top-0' : 'bottom-0')} />
+                  )}
+                  <button
+                    type="button"
+                    aria-label={l.hidden ? `Show ${l.name}` : `Hide ${l.name}`}
+                    title="Show/hide (Alt+click: show only this layer)"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => p.onToggleVisible(l.id, e.altKey)}
+                    className={cn('grid h-full w-7 shrink-0 place-items-center border-r border-[#2c2c2c] text-[#cfcfcf]', FOCUS)}
+                  >
+                    {l.hidden ? <EyeOff className="size-3.5 opacity-40" /> : <Eye className="size-3.5" />}
+                  </button>
+                  <span style={{ width: depth * 14 }} className="shrink-0" />
+                  {l.clipping && <CornerLeftDown className="size-3 shrink-0 text-[#bdbdbd]" aria-label="Clipped to the layer below" />}
+                  {l.kind === 'group' ? (
+                    <button
+                      type="button"
+                      aria-label={l.open ? 'Collapse group' : 'Expand group'}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => p.onToggleOpen(l.id)}
+                      className={cn('flex shrink-0 items-center gap-0.5 rounded-[2px] px-0.5 text-[#cfcfcf]', FOCUS)}
+                    >
+                      {l.open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                      {l.open ? <FolderOpen className="size-4" /> : <Folder className="size-4" />}
+                    </button>
+                  ) : l.kind === 'adjustment' ? (
+                    <span className="grid size-8 shrink-0 place-items-center rounded-[2px] bg-[#2a2a2a] text-[#cfcfcf]" title={ADJUSTMENT_NAMES[l.adjustment?.type ?? ''] ?? 'Adjustment'}>
+                      <SlidersHorizontal className="size-4" />
+                    </span>
+                  ) : (
+                    <span
+                      className={cn('relative shrink-0 rounded-[2px] p-px', isActive && !p.editMask ? 'ring-1 ring-[#e6e6e6]' : '')}
+                      title="Ctrl+click: select this layer's pixels"
+                      onPointerDown={(e) => {
+                        if (e.ctrlKey || e.metaKey) {
+                          e.stopPropagation();
+                          p.onLoadSelection(l.id);
+                        } else if (p.editMask && isActive) {
+                          e.stopPropagation();
+                          p.onSelect(l.id, { shift: false, ctrl: false });
+                        }
+                      }}
+                    >
+                      <Thumb canvas={l.canvas} left={l.left} top={l.top} docW={doc.width} docH={doc.height} />
+                      {Icon && (
+                        <span className="absolute right-0 bottom-0 grid size-3.5 place-items-center rounded-tl-[3px] bg-[#232323] text-[#e6e6e6]">
+                          <Icon className="size-2.5" />
+                        </span>
+                      )}
                     </span>
                   )}
-                </span>
-              )}
-              {l.mask && (
-                <span
-                  className={cn('relative shrink-0 rounded-[2px] p-px', isActive && p.editMask && 'ring-1 ring-[#e6e6e6]')}
-                  title="Layer mask (Shift+click to turn it off)"
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    if (e.shiftKey) p.onToggleMask(l.id);
-                    else p.onSelectMask(l.id);
+                  {l.mask && (
+                    <span
+                      className={cn('relative shrink-0 rounded-[2px] p-px', isActive && p.editMask && 'ring-1 ring-[#e6e6e6]')}
+                      title="Layer mask (Shift+click to turn it off)"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        if (e.shiftKey) p.onToggleMask(l.id);
+                        else p.onSelectMask(l.id);
+                      }}
+                    >
+                      <Thumb canvas={l.mask.canvas} left={l.mask.left} top={l.mask.top} docW={doc.width} docH={doc.height} mask defaultColor={l.mask.defaultColor} />
+                      {l.mask.disabled && <span className="absolute inset-0 grid place-items-center text-lg font-bold text-red-500">✕</span>}
+                    </span>
+                  )}
+                  {renaming === l.id ? (
+                    <input
+                      autoFocus
+                      defaultValue={l.name}
+                      aria-label="Layer name"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onFocus={(e) => e.target.select()}
+                      onBlur={(e) => {
+                        const name = e.target.value.trim();
+                        if (name && name !== l.name) p.onRename(l.id, name);
+                        setRenaming(null);
+                      }}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        else if (e.key === 'Escape') setRenaming(null);
+                      }}
+                      className={cn(INPUT, 'ml-1 min-w-0 flex-1')}
+                    />
+                  ) : (
+                    <span className={cn('ml-1 min-w-0 flex-1 truncate', l.name === 'Background' && 'italic')}>{l.name}</span>
+                  )}
+                  {hasFx && <span className="shrink-0 text-[10px] font-semibold text-[#bdbdbd] italic">fx</span>}
+                  {l.locked && <Lock className="size-3 shrink-0 text-[#bdbdbd]" aria-label="Locked" />}
+                  {!l.locked && l.lockAlpha && <SquareDashed className="size-3 shrink-0 text-[#bdbdbd]" aria-label="Transparency locked" />}
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent
+                onCloseAutoFocus={(e) => {
+                  if (keepFocus.current) e.preventDefault();
+                  keepFocus.current = false;
+                }}
+              >
+                <ContextMenuItem
+                  onSelect={() => {
+                    keepFocus.current = true;
+                    setRenaming(l.id);
                   }}
                 >
-                  <Thumb canvas={l.mask.canvas} left={l.mask.left} top={l.mask.top} docW={doc.width} docH={doc.height} mask defaultColor={l.mask.defaultColor} />
-                  {l.mask.disabled && <span className="absolute inset-0 grid place-items-center text-lg font-bold text-red-500">✕</span>}
-                </span>
-              )}
-              {renaming === l.id ? (
-                <input
-                  autoFocus
-                  defaultValue={l.name}
-                  aria-label="Layer name"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onFocus={(e) => e.target.select()}
-                  onBlur={(e) => {
-                    const name = e.target.value.trim();
-                    if (name && name !== l.name) p.onRename(l.id, name);
-                    setRenaming(null);
-                  }}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                    else if (e.key === 'Escape') setRenaming(null);
-                  }}
-                  className={cn(INPUT, 'ml-1 min-w-0 flex-1')}
-                />
-              ) : (
-                <span className={cn('ml-1 min-w-0 flex-1 truncate', l.name === 'Background' && 'italic')}>{l.name}</span>
-              )}
-              {hasFx && <span className="shrink-0 text-[10px] font-semibold text-[#bdbdbd] italic">fx</span>}
-              {l.locked && <Lock className="size-3 shrink-0 text-[#bdbdbd]" aria-label="Locked" />}
-              {!l.locked && l.lockAlpha && <SquareDashed className="size-3 shrink-0 text-[#bdbdbd]" aria-label="Transparency locked" />}
-            </div>
+                  Rename Layer
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => p.onToggleVisible(l.id, false)}>{l.hidden ? 'Show Layer' : 'Hide Layer'}</ContextMenuItem>
+                <ContextMenuCheckboxItem checked={l.locked} disabled={!isActive} onCheckedChange={(v) => p.onSetProps({ locked: v === true }, 'Lock Change')}>
+                  Lock All
+                </ContextMenuCheckboxItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem shortcut="Shift+Ctrl+N" onSelect={p.onNewLayer}>
+                  New Layer
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={p.onNewGroup}>New Group</ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem disabled={!isActive || l.kind === 'adjustment'} onSelect={p.onLayerStyle}>
+                  Blending Options…
+                </ContextMenuItem>
+                {l.mask ? (
+                  <ContextMenuItem onSelect={() => p.onToggleMask(l.id)}>{l.mask.disabled ? 'Enable Layer Mask' : 'Disable Layer Mask'}</ContextMenuItem>
+                ) : (
+                  <ContextMenuItem disabled={!isActive} onSelect={p.onAddMask}>
+                    Add Layer Mask
+                  </ContextMenuItem>
+                )}
+                <ContextMenuItem shortcut="Alt+Ctrl+G" disabled={!isActive} onSelect={() => p.onToggleClipping(l.id)}>
+                  {l.clipping ? 'Release Clipping Mask' : 'Create Clipping Mask'}
+                </ContextMenuItem>
+                {l.kind !== 'group' && l.kind !== 'adjustment' && <ContextMenuItem onSelect={() => p.onLoadSelection(l.id)}>Select Pixels</ContextMenuItem>}
+                <ContextMenuSeparator />
+                <ContextMenuItem destructive disabled={walkTopDown(doc.layers).length <= 1} onSelect={p.onDelete}>
+                  {many ? 'Delete Layers' : 'Delete Layer'}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
       </div>

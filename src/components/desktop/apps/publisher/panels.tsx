@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, FilePlus, FileImage, Link2Off, Lock, LockOpen, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { IconButton, Select, SliderRow } from '../photo/chrome';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuTrigger } from '../photo/contextMenu';
 import { FOCUS, INPUT } from '../photo/styles';
 import { cmykToRgb, css, hex, rgbToCmyk, swatchLabel, type Swatch, type Swatches } from './colors';
 import type { ObjectInfo, TypeInfo } from './control';
@@ -27,7 +28,7 @@ const NONE = new Set<string>();
 
 export type ThumbDraw = (spread: Spread, canvas: HTMLCanvasElement, w: number, h: number) => void;
 
-const SpreadThumb = memo(function SpreadThumb({ spread, draw, version, selected, current, onPage, onGo, prefixes, order }: {
+const SpreadThumb = memo(function SpreadThumb({ spread, draw, version, selected, current, onPage, onGo, prefixes, order, onPageMenu, menu }: {
   spread: Spread;
   prefixes: Map<string, string>;
   /** Position in the panel: thumbnails are drawn one after another, not all at once. */
@@ -38,6 +39,9 @@ const SpreadThumb = memo(function SpreadThumb({ spread, draw, version, selected,
   current: string | null;
   onPage: (p: Page, e: React.MouseEvent) => void;
   onGo: (p: Page) => void;
+  onPageMenu?: (p: Page) => void;
+  /** A page's right-click menu items. */
+  menu: (p: Page) => React.ReactNode;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const H = 64;
@@ -61,19 +65,24 @@ const SpreadThumb = memo(function SpreadThumb({ spread, draw, version, selected,
           const w = p.bounds.w * k;
           const sel = selected.has(p.self);
           return (
-            <button
-              key={p.self}
-              type="button"
-              title={spread.isMaster ? `${spread.prefix}-${spread.name}` : `Page ${p.name}`}
-              aria-label={spread.isMaster ? `${spread.prefix}-${spread.name}` : `Page ${p.name}`}
-              aria-current={current === p.self ? 'page' : undefined}
-              onClick={(e) => onPage(p, e)}
-              onDoubleClick={() => onGo(p)}
-              className={cn('absolute top-0 h-full border', sel ? 'border-[#2d8ceb] bg-[#2d8ceb]/20' : 'border-[#1a1a1a]', FOCUS)}
-              style={{ left: x, width: w }}
-            >
-              {!spread.isMaster && p.master && <span className="absolute top-0.5 left-1 text-[9px] font-semibold text-[#555]">{prefixes.get(p.master) ?? ''}</span>}
-            </button>
+            <ContextMenu key={p.self}>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  title={spread.isMaster ? `${spread.prefix}-${spread.name}` : `Page ${p.name}`}
+                  aria-label={spread.isMaster ? `${spread.prefix}-${spread.name}` : `Page ${p.name}`}
+                  aria-current={current === p.self ? 'page' : undefined}
+                  onClick={(e) => onPage(p, e)}
+                  onDoubleClick={() => onGo(p)}
+                  onContextMenu={() => onPageMenu?.(p)}
+                  className={cn('absolute top-0 h-full border', sel ? 'border-[#2d8ceb] bg-[#2d8ceb]/20' : 'border-[#1a1a1a]', FOCUS)}
+                  style={{ left: x, width: w }}
+                >
+                  {!spread.isMaster && p.master && <span className="absolute top-0.5 left-1 text-[9px] font-semibold text-[#555]">{prefixes.get(p.master) ?? ''}</span>}
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent>{menu(p)}</ContextMenuContent>
+            </ContextMenu>
           );
         })}
       </div>
@@ -125,20 +134,41 @@ export function PagesPanel({
       onSelect(n);
     } else onSelect(new Set([p.self]));
   };
+  const pageMenu = (p: Page) => (
+    <>
+      <ContextMenuItem onSelect={() => onGo(p)}>Go to Page</ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem shortcut="Shift+Ctrl+P" onSelect={onInsert}>
+        Add Page
+      </ContextMenuItem>
+      <ContextMenuSub label="Apply Master" disabled={!masters.length}>
+        <ContextMenuItem onSelect={() => onApplyMaster(null)}>[None]</ContextMenuItem>
+        {masters.map((m) => (
+          <ContextMenuItem key={m.self} onSelect={() => onApplyMaster(m.self)}>
+            {m.prefix}-{m.name}
+          </ContextMenuItem>
+        ))}
+      </ContextMenuSub>
+      <ContextMenuSeparator />
+      <ContextMenuItem destructive disabled={pageCount < 2} onSelect={onDelete}>
+        {selected.size > 1 ? 'Delete Pages' : 'Delete Page'}
+      </ContextMenuItem>
+    </>
+  );
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="max-h-[96px] shrink-0 overflow-y-auto border-b border-[#2a2a2a] bg-[#3f3f3f]">
         <div className="px-2 pt-1 text-[10px] text-[#a0a0a0]">[None]</div>
         <div className="flex flex-wrap justify-center gap-2 px-1">
           {masters.map((m, i) => (
-            <SpreadThumb key={m.self} order={i} prefixes={prefixes} spread={m} draw={draw} version={version} selected={NONE} current={null} onPage={() => {}} onGo={() => onGoMaster(m)} />
+            <SpreadThumb key={m.self} order={i} prefixes={prefixes} spread={m} draw={draw} version={version} selected={NONE} current={null} onPage={() => {}} onGo={() => onGoMaster(m)} menu={() => <ContextMenuItem onSelect={() => onGoMaster(m)}>Go to Master</ContextMenuItem>} />
           ))}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto bg-[#383838]">
         <div className="flex flex-col items-center">
           {spreads.map((s, i) => (
-            <SpreadThumb key={s.self} order={masters.length + i} prefixes={prefixes} spread={s} draw={draw} version={version} selected={selected} current={current} onPage={click} onGo={onGo} />
+            <SpreadThumb key={s.self} order={masters.length + i} prefixes={prefixes} spread={s} draw={draw} version={version} selected={selected} current={current} onPage={click} onGo={onGo} onPageMenu={(p) => !selected.has(p.self) && onSelect(new Set([p.self]))} menu={pageMenu} />
           ))}
         </div>
       </div>
@@ -188,49 +218,81 @@ export function LayersPanel({
   onMoveSelection: (self: string) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  // Rename puts focus in the name field; the closing menu mustn't take it back.
+  const keepFocus = useRef(false);
   return (
     <div className="flex flex-col">
       <ul className="max-h-[30vh] overflow-y-auto" aria-label="Layers">
         {layers.map((l) => (
-          <li key={l.self} className={cn(ROW, 'border-b border-[#2f2f2f]', active === l.self && 'bg-[#4b4b4b]')}>
-            <button type="button" aria-label={l.visible ? `Hide ${l.name}` : `Show ${l.name}`} onClick={() => onToggle(l.self, 'Visible')} className={cn('grid size-5 place-items-center text-[#cfcfcf]', FOCUS)}>
-              {l.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5 opacity-40" />}
-            </button>
-            <button type="button" aria-label={l.locked ? `Unlock ${l.name}` : `Lock ${l.name}`} onClick={() => onToggle(l.self, 'Locked')} className={cn('grid size-5 place-items-center text-[#cfcfcf]', FOCUS)}>
-              {l.locked ? <Lock className="size-3" /> : <LockOpen className="size-3 opacity-25" />}
-            </button>
-            <span className="h-3.5 w-1 shrink-0" style={{ background: l.color }} />
-            {editing === l.self ? (
-              <input
-                autoFocus
-                defaultValue={l.name}
-                aria-label="Layer name"
-                onBlur={(e) => {
-                  setEditing(null);
-                  if (e.target.value.trim() && e.target.value !== l.name) onRename(l.self, e.target.value.trim());
-                }}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                  if (e.key === 'Escape') setEditing(null);
-                }}
-                className={cn(INPUT, 'h-5 min-w-0 flex-1')}
-              />
-            ) : (
-              <button type="button" onClick={() => onActive(l.self)} onDoubleClick={() => setEditing(l.self)} className={cn('min-w-0 flex-1 truncate text-left', FOCUS)}>
-                {l.name}
-              </button>
-            )}
-            <button
-              type="button"
-              aria-label={withSelection.has(l.self) ? `Selection is on ${l.name}` : `Move selection to ${l.name}`}
-              title="Click to move the selection to this layer"
-              onClick={() => onMoveSelection(l.self)}
-              className={cn('grid size-4 place-items-center', FOCUS)}
+          <ContextMenu key={l.self}>
+            <ContextMenuTrigger asChild disabled={editing === l.self}>
+              <li className={cn(ROW, 'border-b border-[#2f2f2f]', active === l.self && 'bg-[#4b4b4b]')} onContextMenu={() => editing !== l.self && onActive(l.self)}>
+                <button type="button" aria-label={l.visible ? `Hide ${l.name}` : `Show ${l.name}`} onClick={() => onToggle(l.self, 'Visible')} className={cn('grid size-5 place-items-center text-[#cfcfcf]', FOCUS)}>
+                  {l.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5 opacity-40" />}
+                </button>
+                <button type="button" aria-label={l.locked ? `Unlock ${l.name}` : `Lock ${l.name}`} onClick={() => onToggle(l.self, 'Locked')} className={cn('grid size-5 place-items-center text-[#cfcfcf]', FOCUS)}>
+                  {l.locked ? <Lock className="size-3" /> : <LockOpen className="size-3 opacity-25" />}
+                </button>
+                <span className="h-3.5 w-1 shrink-0" style={{ background: l.color }} />
+                {editing === l.self ? (
+                  <input
+                    autoFocus
+                    defaultValue={l.name}
+                    aria-label="Layer name"
+                    onBlur={(e) => {
+                      setEditing(null);
+                      if (e.target.value.trim() && e.target.value !== l.name) onRename(l.self, e.target.value.trim());
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      if (e.key === 'Escape') setEditing(null);
+                    }}
+                    className={cn(INPUT, 'h-5 min-w-0 flex-1')}
+                  />
+                ) : (
+                  <button type="button" onClick={() => onActive(l.self)} onDoubleClick={() => setEditing(l.self)} className={cn('min-w-0 flex-1 truncate text-left', FOCUS)}>
+                    {l.name}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-label={withSelection.has(l.self) ? `Selection is on ${l.name}` : `Move selection to ${l.name}`}
+                  title="Click to move the selection to this layer"
+                  onClick={() => onMoveSelection(l.self)}
+                  className={cn('grid size-4 place-items-center', FOCUS)}
+                >
+                  <span className={cn('size-2', withSelection.has(l.self) ? '' : 'border border-[#6a6a6a]')} style={withSelection.has(l.self) ? { background: l.color } : undefined} />
+                </button>
+              </li>
+            </ContextMenuTrigger>
+            <ContextMenuContent
+              onCloseAutoFocus={(e) => {
+                if (keepFocus.current) e.preventDefault();
+                keepFocus.current = false;
+              }}
             >
-              <span className={cn('size-2', withSelection.has(l.self) ? '' : 'border border-[#6a6a6a]')} style={withSelection.has(l.self) ? { background: l.color } : undefined} />
-            </button>
-          </li>
+              <ContextMenuItem
+                onSelect={() => {
+                  keepFocus.current = true;
+                  setEditing(l.self);
+                }}
+              >
+                Rename Layer
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => onToggle(l.self, 'Visible')}>{l.visible ? 'Hide Layer' : 'Show Layer'}</ContextMenuItem>
+              <ContextMenuItem onSelect={() => onToggle(l.self, 'Locked')}>{l.locked ? 'Unlock Layer' : 'Lock Layer'}</ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem disabled={!withSelection.size || (withSelection.size === 1 && withSelection.has(l.self))} onSelect={() => onMoveSelection(l.self)}>
+                Move Selection Here
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={onNew}>New Layer</ContextMenuItem>
+              <ContextMenuItem destructive disabled={layers.length < 2} onSelect={() => onDelete(l.self)}>
+                Delete Layer
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
       </ul>
       <div className="flex h-7 items-center justify-end gap-1 border-t border-[#2a2a2a] bg-[#323232] px-2">
@@ -269,22 +331,30 @@ export function LinksPanel({ links, selected, onSelect, onRelink }: { links: Lin
       <ul className="max-h-[26vh] overflow-y-auto">
         {links.map((l) => (
           <li key={l.self}>
-            <button
-              type="button"
-              onClick={() => onSelect(l.self)}
-              onDoubleClick={() => onRelink(l.self)}
-              title={l.status === 'missing' ? 'Missing: double-click to relink' : l.status === 'preview' ? 'The file isn’t here; showing InDesign’s preview. Double-click to relink.' : l.name}
-              className={cn(ROW, 'w-full text-left', selected === l.self && 'bg-[#4b4b4b]', FOCUS)}
-            >
-              <FileImage className="size-3.5 shrink-0 text-[#a0a0a0]" />
-              <span className="min-w-0 flex-1 truncate">{l.name}</span>
-              <span className="grid w-8 place-items-center">
-                {l.status === 'missing' && <TriangleAlert className="size-3.5 text-[#ff6b6b]" />}
-                {l.status === 'preview' && <Link2Off className="size-3.5 text-[#f0b429]" />}
-                {l.status === 'embedded' && <span className="text-[9px] text-[#bdbdbd]">EMB</span>}
-              </span>
-              <span className="w-8 text-right text-[#bdbdbd] tabular-nums">{l.page}</span>
-            </button>
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => onSelect(l.self)}
+                  onDoubleClick={() => onRelink(l.self)}
+                  title={l.status === 'missing' ? 'Missing: double-click to relink' : l.status === 'preview' ? 'The file isn’t here; showing InDesign’s preview. Double-click to relink.' : l.name}
+                  className={cn(ROW, 'w-full text-left', selected === l.self && 'bg-[#4b4b4b]', FOCUS)}
+                >
+                  <FileImage className="size-3.5 shrink-0 text-[#a0a0a0]" />
+                  <span className="min-w-0 flex-1 truncate">{l.name}</span>
+                  <span className="grid w-8 place-items-center">
+                    {l.status === 'missing' && <TriangleAlert className="size-3.5 text-[#ff6b6b]" />}
+                    {l.status === 'preview' && <Link2Off className="size-3.5 text-[#f0b429]" />}
+                    {l.status === 'embedded' && <span className="text-[9px] text-[#bdbdbd]">EMB</span>}
+                  </span>
+                  <span className="w-8 text-right text-[#bdbdbd] tabular-nums">{l.page}</span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => onSelect(l.self)}>Go to Link</ContextMenuItem>
+                <ContextMenuItem onSelect={() => onRelink(l.self)}>Relink…</ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           </li>
         ))}
       </ul>

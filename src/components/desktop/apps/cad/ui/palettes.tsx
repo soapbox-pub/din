@@ -24,6 +24,7 @@ import { findDimStyle } from '../model';
 import { fmt, fmtAngle } from '../commands';
 import { PATTERNS, patternLines } from '../hatch';
 import { MenuContent, MenuItem } from './chrome';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './contextMenu';
 import { ColorMenu, LwSample, Swatch } from './ribbon';
 import { FIELD, FOCUS, lwName } from './style';
 import { cn } from '@/lib/utils';
@@ -671,105 +672,145 @@ export function LayerManager({ drawing: d, commit, onClose, inUse, pos, onMove, 
                   {v ? a : b}
                 </button>
               );
+              const toggleIsolate = () => (isolated?.layer === l.name ? unisolate() : isolate(l.name));
+              const toggleOn = () => setLayer(l.name, { on: !l.on });
+              const toggleFrozen = () => (l.name === d.header.clayer ? setMsg('The current layer can’t be frozen.') : setLayer(l.name, { frozen: !l.frozen }));
+              const toggleLocked = () => setLayer(l.name, { locked: !l.locked });
+              const togglePlot = () => setLayer(l.name, { plot: !l.plot });
               return (
-                <tr key={l.name} onClick={() => setSel(l.name)} onDoubleClick={() => commit('Set Current Layer', { ...d, header: { ...d.header, clayer: l.name } })} className={cn('cursor-default', isSel ? 'bg-[#0b6aa8]/60' : 'odd:bg-[#353c48] hover:bg-[#3d4552]')}>
-                  <td className={cell}>{l.name === d.header.clayer && <Check className="size-3.5 text-[#6fdc8c]" />}</td>
-                  <td className={cn(cell, 'min-w-32')}>
-                    {renaming === l.name ? (
-                      <input
-                        autoFocus
-                        defaultValue={l.name}
-                        aria-label="Layer name"
-                        onKeyDown={(e) => {
-                          e.stopPropagation();
-                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                          if (e.key === 'Escape') setRenaming(null);
-                        }}
-                        onBlur={(e) => {
-                          const v = e.target.value.trim();
-                          setRenaming(null);
-                          if (!v || v === l.name) return;
-                          if (l.name === '0') return setMsg('Layer 0 can’t be renamed.');
-                          if (/[<>/\\":;?*|,=`]/.test(v)) return setMsg('That name has characters layers can’t use.');
-                          if (findLayer(d, v)) return setMsg(`There’s already a layer called “${v}”.`);
-                          setLayer(l.name, { name: v }, 'Rename Layer');
-                          setSel(v);
-                        }}
-                        className={cn(FIELD, 'h-5 w-full')}
-                      />
-                    ) : (
-                      <span onDoubleClick={(e) => (e.stopPropagation(), setRenaming(l.name))}>{l.name}</span>
-                    )}
-                  </td>
-                  <td className={cell}>{tog(isolated?.layer !== l.name, <Focus className="size-3.5 text-[#6c7480]" />, <Focus className="size-3.5 text-[#f5c542]" />, isolated?.layer === l.name ? 'Unisolate' : `Isolate ${l.name}`, () => (isolated?.layer === l.name ? unisolate() : isolate(l.name)))}</td>
-                  <td className={cell}>{tog(l.on, <Lightbulb className="size-3.5 text-[#f5c542]" />, <LightbulbOff className="size-3.5 text-[#6c7480]" />, l.on ? 'Turn off' : 'Turn on', () => setLayer(l.name, { on: !l.on }))}</td>
-                  <td className={cell}>{tog(!l.frozen, <Sun className="size-3.5 text-[#f5c542]" />, <Snowflake className="size-3.5 text-[#7cc4ff]" />, l.frozen ? 'Thaw' : 'Freeze', () => (l.name === d.header.clayer ? setMsg('The current layer can’t be frozen.') : setLayer(l.name, { frozen: !l.frozen })))}</td>
-                  <td className={cell}>{tog(!l.locked, <LockOpen className="size-3.5" />, <Lock className="size-3.5 text-[#f5c542]" />, l.locked ? 'Unlock' : 'Lock', () => setLayer(l.name, { locked: !l.locked }))}</td>
-                  <td className={cell}>{tog(l.plot, <Printer className="size-3.5" />, <Printer className="size-3.5 text-[#ff6b6b] opacity-60" />, l.plot ? 'Don’t plot' : 'Plot', () => setLayer(l.name, { plot: !l.plot }))}</td>
-                  <td className={cell}>
-                    <Menu.Root modal={false}>
-                      <Menu.Trigger asChild>
-                        <button type="button" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1.5 rounded-[2px] px-1 hover:bg-white/10">
-                          <Swatch color={l.color} />
-                          {colorName(l.color === BYLAYER ? 7 : l.color)}
-                        </button>
-                      </Menu.Trigger>
-                      <MenuContent>
-                        <ColorMenu onPick={(c) => setLayer(l.name, { color: c === BYLAYER || c === 0 ? 7 : c })} />
-                      </MenuContent>
-                    </Menu.Root>
-                  </td>
-                  <td className={cell}>
-                    <Menu.Root modal={false}>
-                      <Menu.Trigger asChild>
-                        <button type="button" onClick={(e) => e.stopPropagation()} className="rounded-[2px] px-1 hover:bg-white/10">
-                          {l.linetype}
-                        </button>
-                      </Menu.Trigger>
-                      <MenuContent>
-                        {d.linetypes
-                          .filter((t) => !/^by(layer|block)$/i.test(t.name))
-                          .map((t) => (
-                            <MenuItem key={t.name} onSelect={() => setLayer(l.name, { linetype: t.name })} checked={t.name === l.linetype}>
-                              {t.name}
-                            </MenuItem>
-                          ))}
-                        {EXTRA_LINETYPES.filter((t) => !d.linetypes.some((x) => x.name.toUpperCase() === t.name.toUpperCase())).map((t) => (
-                          <MenuItem
-                            key={t.name}
-                            onSelect={() => {
-                              const dd = loadLinetype(t.name);
-                              commit('Load Linetype', { ...dd, layers: dd.layers.map((x) => (x.name === l.name ? { ...x, linetype: t.name } : x)) });
+                <ContextMenu key={l.name}>
+                  <ContextMenuTrigger asChild disabled={renaming === l.name}>
+                    <tr onClick={() => setSel(l.name)} onContextMenu={() => renaming !== l.name && setSel(l.name)} onDoubleClick={() => commit('Set Current Layer', { ...d, header: { ...d.header, clayer: l.name } })} className={cn('cursor-default', isSel ? 'bg-[#0b6aa8]/60' : 'odd:bg-[#353c48] hover:bg-[#3d4552]')}>
+                      <td className={cell}>{l.name === d.header.clayer && <Check className="size-3.5 text-[#6fdc8c]" />}</td>
+                      <td className={cn(cell, 'min-w-32')}>
+                        {renaming === l.name ? (
+                          <input
+                            autoFocus
+                            defaultValue={l.name}
+                            aria-label="Layer name"
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                              if (e.key === 'Escape') setRenaming(null);
                             }}
-                          >
-                            {t.name} <span className="text-[#8e98a6]">(load)</span>
-                          </MenuItem>
-                        ))}
-                      </MenuContent>
-                    </Menu.Root>
-                  </td>
-                  <td className={cell}>
-                    <Menu.Root modal={false}>
-                      <Menu.Trigger asChild>
-                        <button type="button" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1.5 rounded-[2px] px-1 hover:bg-white/10">
-                          <LwSample lw={l.lineweight} />
-                          {lwName(l.lineweight)}
-                        </button>
-                      </Menu.Trigger>
-                      <MenuContent>
-                        {[LW_DEFAULT, ...LINEWEIGHTS].map((w) => (
-                          <MenuItem key={w} onSelect={() => setLayer(l.name, { lineweight: w })} checked={w === l.lineweight}>
-                            <span className="inline-flex items-center gap-3">
-                              <LwSample lw={w} />
-                              {lwName(w)}
-                            </span>
-                          </MenuItem>
-                        ))}
-                      </MenuContent>
-                    </Menu.Root>
-                  </td>
-                  <td className={cn(cell, 'min-w-24 text-[#a9b2bf]')}>{l.description ?? ''}</td>
-                </tr>
+                            onBlur={(e) => {
+                              const v = e.target.value.trim();
+                              setRenaming(null);
+                              if (!v || v === l.name) return;
+                              if (l.name === '0') return setMsg('Layer 0 can’t be renamed.');
+                              if (/[<>/\\":;?*|,=`]/.test(v)) return setMsg('That name has characters layers can’t use.');
+                              if (findLayer(d, v)) return setMsg(`There’s already a layer called “${v}”.`);
+                              setLayer(l.name, { name: v }, 'Rename Layer');
+                              setSel(v);
+                            }}
+                            className={cn(FIELD, 'h-5 w-full')}
+                          />
+                        ) : (
+                          <span onDoubleClick={(e) => (e.stopPropagation(), setRenaming(l.name))}>{l.name}</span>
+                        )}
+                      </td>
+                      <td className={cell}>{tog(isolated?.layer !== l.name, <Focus className="size-3.5 text-[#6c7480]" />, <Focus className="size-3.5 text-[#f5c542]" />, isolated?.layer === l.name ? 'Unisolate' : `Isolate ${l.name}`, toggleIsolate)}</td>
+                      <td className={cell}>{tog(l.on, <Lightbulb className="size-3.5 text-[#f5c542]" />, <LightbulbOff className="size-3.5 text-[#6c7480]" />, l.on ? 'Turn off' : 'Turn on', toggleOn)}</td>
+                      <td className={cell}>{tog(!l.frozen, <Sun className="size-3.5 text-[#f5c542]" />, <Snowflake className="size-3.5 text-[#7cc4ff]" />, l.frozen ? 'Thaw' : 'Freeze', toggleFrozen)}</td>
+                      <td className={cell}>{tog(!l.locked, <LockOpen className="size-3.5" />, <Lock className="size-3.5 text-[#f5c542]" />, l.locked ? 'Unlock' : 'Lock', toggleLocked)}</td>
+                      <td className={cell}>{tog(l.plot, <Printer className="size-3.5" />, <Printer className="size-3.5 text-[#ff6b6b] opacity-60" />, l.plot ? 'Don’t plot' : 'Plot', togglePlot)}</td>
+                      <td className={cell}>
+                        <Menu.Root modal={false}>
+                          <Menu.Trigger asChild>
+                            <button type="button" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1.5 rounded-[2px] px-1 hover:bg-white/10">
+                              <Swatch color={l.color} />
+                              {colorName(l.color === BYLAYER ? 7 : l.color)}
+                            </button>
+                          </Menu.Trigger>
+                          <MenuContent>
+                            <ColorMenu onPick={(c) => setLayer(l.name, { color: c === BYLAYER || c === 0 ? 7 : c })} />
+                          </MenuContent>
+                        </Menu.Root>
+                      </td>
+                      <td className={cell}>
+                        <Menu.Root modal={false}>
+                          <Menu.Trigger asChild>
+                            <button type="button" onClick={(e) => e.stopPropagation()} className="rounded-[2px] px-1 hover:bg-white/10">
+                              {l.linetype}
+                            </button>
+                          </Menu.Trigger>
+                          <MenuContent>
+                            {d.linetypes
+                              .filter((t) => !/^by(layer|block)$/i.test(t.name))
+                              .map((t) => (
+                                <MenuItem key={t.name} onSelect={() => setLayer(l.name, { linetype: t.name })} checked={t.name === l.linetype}>
+                                  {t.name}
+                                </MenuItem>
+                              ))}
+                            {EXTRA_LINETYPES.filter((t) => !d.linetypes.some((x) => x.name.toUpperCase() === t.name.toUpperCase())).map((t) => (
+                              <MenuItem
+                                key={t.name}
+                                onSelect={() => {
+                                  const dd = loadLinetype(t.name);
+                                  commit('Load Linetype', { ...dd, layers: dd.layers.map((x) => (x.name === l.name ? { ...x, linetype: t.name } : x)) });
+                                }}
+                              >
+                                {t.name} <span className="text-[#8e98a6]">(load)</span>
+                              </MenuItem>
+                            ))}
+                          </MenuContent>
+                        </Menu.Root>
+                      </td>
+                      <td className={cell}>
+                        <Menu.Root modal={false}>
+                          <Menu.Trigger asChild>
+                            <button type="button" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1.5 rounded-[2px] px-1 hover:bg-white/10">
+                              <LwSample lw={l.lineweight} />
+                              {lwName(l.lineweight)}
+                            </button>
+                          </Menu.Trigger>
+                          <MenuContent>
+                            {[LW_DEFAULT, ...LINEWEIGHTS].map((w) => (
+                              <MenuItem key={w} onSelect={() => setLayer(l.name, { lineweight: w })} checked={w === l.lineweight}>
+                                <span className="inline-flex items-center gap-3">
+                                  <LwSample lw={w} />
+                                  {lwName(w)}
+                                </span>
+                              </MenuItem>
+                            ))}
+                          </MenuContent>
+                        </Menu.Root>
+                      </td>
+                      <td className={cn(cell, 'min-w-24 text-[#a9b2bf]')}>{l.description ?? ''}</td>
+                    </tr>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem icon={<Check className="text-[#6fdc8c]" />} disabled={l.name === d.header.clayer} onSelect={current}>
+                      Set Current
+                    </ContextMenuItem>
+                    <ContextMenuItem icon={<Plus className="text-[#6fdc8c]" />} onSelect={create}>
+                      New Layer
+                    </ContextMenuItem>
+                    <ContextMenuItem disabled={l.name === '0'} onSelect={() => setRenaming(l.name)}>
+                      Rename Layer
+                    </ContextMenuItem>
+                    <ContextMenuItem icon={<Trash2 />} destructive onSelect={remove}>
+                      Delete Layer
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem icon={<Focus className={isolated?.layer === l.name ? 'text-[#f5c542]' : 'text-[#7cc4ff]'} />} onSelect={toggleIsolate}>
+                      {isolated?.layer === l.name ? 'Unisolate' : 'Isolate'}
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem icon={l.on ? <LightbulbOff /> : <Lightbulb />} onSelect={toggleOn}>
+                      {l.on ? 'Turn Off' : 'Turn On'}
+                    </ContextMenuItem>
+                    <ContextMenuItem icon={l.frozen ? <Sun /> : <Snowflake />} onSelect={toggleFrozen}>
+                      {l.frozen ? 'Thaw' : 'Freeze'}
+                    </ContextMenuItem>
+                    <ContextMenuItem icon={l.locked ? <LockOpen /> : <Lock />} onSelect={toggleLocked}>
+                      {l.locked ? 'Unlock' : 'Lock'}
+                    </ContextMenuItem>
+                    <ContextMenuItem icon={<Printer />} onSelect={togglePlot}>
+                      {l.plot ? 'Don’t Plot' : 'Plot'}
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               );
             })}
           </tbody>

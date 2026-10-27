@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   AlignCenterHorizontal,
   AlignCenterVertical,
@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button, IconButton, NumberField, Select } from '../photo/chrome';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../photo/contextMenu';
 import { FOCUS, INPUT } from '../photo/styles';
 import { LengthField, PaintChip } from './bars';
 import { BLEND_OPTIONS, STROKE_WEIGHTS } from './units';
@@ -501,39 +502,64 @@ export function AlignPanel({ onAlign, onDistribute, alignTo, onAlignTo, count }:
 
 export function ArtboardsPanel({ artboards, active, onActivate, onRename, onAdd, onDelete }: { artboards: Artboard[]; active: number; onActivate: (i: number) => void; onRename: (i: number, name: string) => void; onAdd: () => void; onDelete: (i: number) => void }) {
   const [editing, setEditing] = useState<number | null>(null);
+  const keepFocus = useRef(false);
   return (
     <div className="flex flex-col">
       <ul className="max-h-48 overflow-y-auto py-1" role="listbox" aria-label="Artboards">
         {artboards.map((a, i) => (
-          <li
-            key={a.id}
-            role="option"
-            aria-selected={i === active}
-            onClick={() => onActivate(i)}
-            onDoubleClick={() => setEditing(i)}
-            className={cn('flex h-7 cursor-default items-center gap-2 px-3 text-xs', i === active ? 'bg-[#4b4b4b] text-white' : 'text-[#d6d6d6] hover:bg-[#424242]')}
-          >
-            <span className="w-4 text-right text-[#9a9a9a] tabular-nums">{i + 1}</span>
-            {editing === i ? (
-              <input
-                autoFocus
-                defaultValue={a.name}
-                aria-label="Artboard name"
-                onBlur={(e) => {
-                  onRename(i, e.target.value || a.name);
-                  setEditing(null);
+          <ContextMenu key={a.id}>
+            <ContextMenuTrigger asChild disabled={editing === i}>
+              <li
+                role="option"
+                aria-selected={i === active}
+                onClick={() => onActivate(i)}
+                onDoubleClick={() => setEditing(i)}
+                className={cn('flex h-7 cursor-default items-center gap-2 px-3 text-xs', i === active ? 'bg-[#4b4b4b] text-white' : 'text-[#d6d6d6] hover:bg-[#424242]')}
+              >
+                <span className="w-4 text-right text-[#9a9a9a] tabular-nums">{i + 1}</span>
+                {editing === i ? (
+                  <input
+                    autoFocus
+                    defaultValue={a.name}
+                    aria-label="Artboard name"
+                    onBlur={(e) => {
+                      onRename(i, e.target.value || a.name);
+                      setEditing(null);
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      if (e.key === 'Escape') setEditing(null);
+                    }}
+                    className={cn(INPUT, 'h-5 flex-1')}
+                  />
+                ) : (
+                  <span className="flex-1 truncate">{a.name}</span>
+                )}
+              </li>
+            </ContextMenuTrigger>
+            <ContextMenuContent
+              onCloseAutoFocus={(e) => {
+                if (keepFocus.current) e.preventDefault();
+                keepFocus.current = false;
+              }}
+            >
+              <ContextMenuItem onSelect={() => onActivate(i)}>Go to Artboard</ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => {
+                  keepFocus.current = true;
+                  setEditing(i);
                 }}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                  if (e.key === 'Escape') setEditing(null);
-                }}
-                className={cn(INPUT, 'h-5 flex-1')}
-              />
-            ) : (
-              <span className="flex-1 truncate">{a.name}</span>
-            )}
-          </li>
+              >
+                Rename
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={onAdd}>New Artboard</ContextMenuItem>
+              <ContextMenuItem destructive disabled={artboards.length < 2} onSelect={() => onDelete(i)}>
+                Delete Artboard
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
       </ul>
       <div className="flex justify-end gap-0.5 border-t border-[#2a2a2a] px-1 py-0.5">
@@ -609,6 +635,8 @@ function Row({
   draggable,
   onDragStart,
   onDrop,
+  onContextMenu,
+  menu,
 }: {
   depth: number;
   color: string;
@@ -627,53 +655,79 @@ function Row({
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
+  onContextMenu: () => void;
+  /** The right-click menu's items after Rename. */
+  menu: React.ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
+  // Rename puts focus in the name field; the closing menu mustn't take it back.
+  const keepFocus = useRef(false);
   return (
-    <div
-      className={cn('flex h-7 items-center border-b border-[#2c2c2c] text-xs select-none', current ? 'bg-[#4b4b4b]' : 'hover:bg-[#424242]')}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragOver={(e) => onDrop && e.preventDefault()}
-      onDrop={onDrop}
-    >
-      <button type="button" aria-label={hidden ? 'Show' : 'Hide'} title="Toggles Visibility" onClick={onToggleHidden} className={cn('grid h-full w-7 shrink-0 place-items-center border-r border-[#2c2c2c] text-[#cfcfcf]', FOCUS)}>
-        {hidden ? <EyeOff className="size-3.5 opacity-30" /> : <Eye className="size-3.5" />}
-      </button>
-      <button type="button" aria-label={locked ? 'Unlock' : 'Lock'} title="Toggles Lock" onClick={onToggleLocked} className={cn('grid h-full w-6 shrink-0 place-items-center border-r border-[#2c2c2c] text-[#cfcfcf]', FOCUS)}>
-        {locked ? <Lock className="size-3" /> : null}
-      </button>
-      <span className="h-full w-1 shrink-0" style={{ background: depth === 0 ? color : 'transparent' }} />
-      <span style={{ width: depth * 12 }} className="shrink-0" />
-      <button type="button" aria-label={open ? 'Collapse' : 'Expand'} onClick={onToggleOpen} className={cn('grid size-5 shrink-0 place-items-center text-[#bdbdbd]', !hasKids && 'invisible', FOCUS)}>
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-      </button>
-      {editing ? (
-        <input
-          autoFocus
-          defaultValue={name}
-          aria-label="Name"
-          onBlur={(e) => {
-            onRename(e.target.value);
-            setEditing(false);
+    <ContextMenu>
+      <ContextMenuTrigger asChild disabled={editing}>
+        <div
+          className={cn('flex h-7 items-center border-b border-[#2c2c2c] text-xs select-none', current ? 'bg-[#4b4b4b]' : 'hover:bg-[#424242]')}
+          draggable={draggable}
+          onDragStart={onDragStart}
+          onDragOver={(e) => onDrop && e.preventDefault()}
+          onDrop={onDrop}
+          onContextMenu={() => !editing && onContextMenu()}
+        >
+          <button type="button" aria-label={hidden ? 'Show' : 'Hide'} title="Toggles Visibility" onClick={onToggleHidden} className={cn('grid h-full w-7 shrink-0 place-items-center border-r border-[#2c2c2c] text-[#cfcfcf]', FOCUS)}>
+            {hidden ? <EyeOff className="size-3.5 opacity-30" /> : <Eye className="size-3.5" />}
+          </button>
+          <button type="button" aria-label={locked ? 'Unlock' : 'Lock'} title="Toggles Lock" onClick={onToggleLocked} className={cn('grid h-full w-6 shrink-0 place-items-center border-r border-[#2c2c2c] text-[#cfcfcf]', FOCUS)}>
+            {locked ? <Lock className="size-3" /> : null}
+          </button>
+          <span className="h-full w-1 shrink-0" style={{ background: depth === 0 ? color : 'transparent' }} />
+          <span style={{ width: depth * 12 }} className="shrink-0" />
+          <button type="button" aria-label={open ? 'Collapse' : 'Expand'} onClick={onToggleOpen} className={cn('grid size-5 shrink-0 place-items-center text-[#bdbdbd]', !hasKids && 'invisible', FOCUS)}>
+            {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          </button>
+          {editing ? (
+            <input
+              autoFocus
+              defaultValue={name}
+              aria-label="Name"
+              onBlur={(e) => {
+                onRename(e.target.value);
+                setEditing(false);
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                if (e.key === 'Escape') setEditing(false);
+              }}
+              className={cn(INPUT, 'h-5 min-w-0 flex-1')}
+            />
+          ) : (
+            <span className={cn('min-w-0 flex-1 cursor-default truncate pl-1', hidden ? 'text-[#8a8a8a]' : 'text-[#e0e0e0]')} onClick={onClick} onDoubleClick={() => setEditing(true)}>
+              {name}
+            </span>
+          )}
+          <button type="button" aria-label={`Select ${name}`} title="Click to target, drag to move appearance" onClick={onClick} className={cn('grid h-full w-7 shrink-0 place-items-center', FOCUS)}>
+            <span className={cn('block size-2.5 rounded-full border border-[#bdbdbd]', selected && 'border-0')} style={selected ? { background: color, boxShadow: `0 0 0 2px ${color}55` } : undefined} />
+          </button>
+          <span className={cn('mr-1 size-2 shrink-0', selected ? '' : 'invisible')} style={{ background: color }} />
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent
+        onCloseAutoFocus={(e) => {
+          if (keepFocus.current) e.preventDefault();
+          keepFocus.current = false;
+        }}
+      >
+        <ContextMenuItem
+          onSelect={() => {
+            keepFocus.current = true;
+            setEditing(true);
           }}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-            if (e.key === 'Escape') setEditing(false);
-          }}
-          className={cn(INPUT, 'h-5 min-w-0 flex-1')}
-        />
-      ) : (
-        <span className={cn('min-w-0 flex-1 cursor-default truncate pl-1', hidden ? 'text-[#8a8a8a]' : 'text-[#e0e0e0]')} onClick={onClick} onDoubleClick={() => setEditing(true)}>
-          {name}
-        </span>
-      )}
-      <button type="button" aria-label={`Select ${name}`} title="Click to target, drag to move appearance" onClick={onClick} className={cn('grid h-full w-7 shrink-0 place-items-center', FOCUS)}>
-        <span className={cn('block size-2.5 rounded-full border border-[#bdbdbd]', selected && 'border-0')} style={selected ? { background: color, boxShadow: `0 0 0 2px ${color}55` } : undefined} />
-      </button>
-      <span className={cn('mr-1 size-2 shrink-0', selected ? '' : 'invisible')} style={{ background: color }} />
-    </div>
+        >
+          Rename
+        </ContextMenuItem>
+        {menu}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -707,6 +761,19 @@ export function LayersPanel(p: LayersProps) {
           onToggleLocked={() => p.onItemProps(it.id, { locked: !it.locked })}
           onClick={(e) => p.onSelectItem(it.id, e.shiftKey || e.ctrlKey || e.metaKey)}
           onRename={(name) => p.onItemProps(it.id, { name })}
+          onContextMenu={() => !p.selected.has(it.id) && p.onSelectItem(it.id, false)}
+          menu={
+            <>
+              <ContextMenuItem onSelect={() => p.onItemProps(it.id, { hidden: !it.hidden })}>{it.hidden ? 'Show' : 'Hide'}</ContextMenuItem>
+              <ContextMenuItem onSelect={() => p.onItemProps(it.id, { locked: !it.locked })}>{it.locked ? 'Unlock' : 'Lock'}</ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={p.onClip}>Make/Release Clipping Mask</ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem destructive onSelect={p.onDelete}>
+                Delete Selection
+              </ContextMenuItem>
+            </>
+          }
         />,
         ...(isOpen ? itemRows(kids, depth + 1, color) : []),
       ];
@@ -747,6 +814,32 @@ export function LayersPanel(p: LayersProps) {
                   if (id && id !== l.id) p.onMoveLayer(id, p.doc.layers.findIndex((x) => x.id === l.id));
                   else if (!id) p.onMoveSelectionTo(l.id);
                 }}
+                onContextMenu={() => p.onActivateLayer(l.id)}
+                menu={
+                  <>
+                    <ContextMenuItem onSelect={() => p.onLayerProps(l.id, { hidden: !l.hidden })}>{l.hidden ? 'Show Layer' : 'Hide Layer'}</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => p.onLayerProps(l.id, { locked: !l.locked })}>{l.locked ? 'Unlock Layer' : 'Lock Layer'}</ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem disabled={l.hidden || l.locked} onSelect={() => p.onSelectLayer(l.id)}>
+                      Select All on Layer
+                    </ContextMenuItem>
+                    <ContextMenuItem disabled={!p.selected.size} onSelect={() => p.onMoveSelectionTo(l.id)}>
+                      Move Selection Here
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={p.onClip}>Make/Release Clipping Mask</ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={p.onNewLayer}>Create New Layer</ContextMenuItem>
+                    {p.selected.size ? (
+                      <ContextMenuItem destructive onSelect={p.onDelete}>
+                        Delete Selection
+                      </ContextMenuItem>
+                    ) : (
+                      <ContextMenuItem destructive disabled={p.doc.layers.length < 2} onSelect={p.onDelete}>
+                        Delete Layer
+                      </ContextMenuItem>
+                    )}
+                  </>
+                }
               />
               {isOpen && itemRows(l.children, 1, l.color)}
             </div>
