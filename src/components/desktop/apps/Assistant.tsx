@@ -34,6 +34,7 @@ import {
   useAssistantReady,
   useAssistantSession,
   useAssistantSessions,
+  useBackgroundSession,
   useCancelQueued,
   useHomeDirectory,
   useInterruptSession,
@@ -176,6 +177,7 @@ function Conversation({
   const home = useHomeDirectory();
   const send = useSendPrompt(sessionID);
   const interrupt = useInterruptSession();
+  const background = useBackgroundSession();
   const cancelQueued = useCancelQueued();
   const switchModel = useSwitchModel();
   const switchAgent = useSwitchAgent();
@@ -195,8 +197,20 @@ function Conversation({
   const fail = (title: string) => (error: unknown) =>
     toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
 
+  const toBackground = () => background.mutate(sessionID, { onError: fail('Couldn’t move it to the background') });
+
   return (
-    <>
+    // Focusable so Ctrl+B still reaches it after a click in the transcript.
+    <div
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col outline-none"
+      onKeyDown={(event) => {
+        if (event.key.toLowerCase() !== 'b' || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
+        if (!running) return;
+        event.preventDefault();
+        toBackground();
+      }}
+    >
       <ConversationHeader session={session} home={home} running={running} onShowList={onShowList} onDeleted={onDeleted} />
       <div
         ref={scrollRef}
@@ -222,6 +236,7 @@ function Conversation({
                 onCancelQueued={(message) =>
                   cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
                 }
+                onBackground={toBackground}
               />
             </>
           )}
@@ -263,7 +278,7 @@ function Conversation({
           }
         />
       </div>
-    </>
+    </div>
   );
 }
 

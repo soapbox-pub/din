@@ -380,6 +380,13 @@ export const assistantApi = {
 
   interrupt: (sessionID: string) => call<unknown>('POST', `/api/session/${id(sessionID)}/interrupt`),
 
+  /**
+   * Move the commands and subagents the agent is waiting on to the
+   * background, so it carries on while they run (the TUI's Ctrl+B). A no-op
+   * when it isn't waiting on any.
+   */
+  background: (sessionID: string) => call<unknown>('POST', `/api/session/${id(sessionID)}/background`),
+
   rename: (sessionID: string, title: string) => call<unknown>('PATCH', `/api/session/${id(sessionID)}`, { title }),
 
   remove: (sessionID: string) => call<unknown>('DELETE', `/api/session/${id(sessionID)}`),

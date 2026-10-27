@@ -507,6 +507,14 @@ export function useInterruptSession() {
   });
 }
 
+export function useBackgroundSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionID: string) => assistantApi.background(sessionID),
+    onSuccess: (_data, sessionID) => invalidateSession(queryClient, sessionID),
+  });
+}
+
 export function useCancelQueued() {
   const queryClient = useQueryClient();
   return useMutation({
