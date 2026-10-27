@@ -1039,9 +1039,20 @@ in
   # password is typed through the console's US keymap.
   boot.initrd.systemd.storePaths = [ pkgs.xkeyboard_config ];
   boot.initrd.kernelModules = [ "evdev" ];
+  # `plymouth quit` returns before plymouthd has let go of the GPU, and cage,
+  # which starts next, finds it busy and exits, leaving the screen black
+  # until it's restarted. So this waits for plymouthd to be gone (2s at most).
   systemd.services.plymouth-quit.serviceConfig.ExecStart = [
     ""
-    "${config.boot.plymouth.package}/bin/plymouth quit --retain-splash"
+    (pkgs.writeShellScript "plymouth-quit" ''
+      pid=$(cat /run/plymouth/pid 2>/dev/null || true)
+      ${config.boot.plymouth.package}/bin/plymouth quit --retain-splash
+      [[ $pid =~ ^[0-9]+$ ]] || exit 0
+      for _ in $(${pkgs.coreutils}/bin/seq 200); do
+        [ -e /proc/$pid ] || break
+        ${pkgs.coreutils}/bin/sleep 0.01
+      done
+    '')
   ];
 
   # Before Plymouth starts: its images into its ImageDir, then from the boot
