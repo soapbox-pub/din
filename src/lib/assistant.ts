@@ -233,6 +233,10 @@ export interface ModelInfo {
   enabled: boolean;
   time: { released: number };
   limit: { context: number; output: number };
+  /** Where requests go; the provider's icon comes from its site. */
+  settings?: { baseURL?: string };
+  /** US dollars per million tokens, cheapest tier first. */
+  cost?: { input: number; output: number }[];
 }
 
 export interface AgentInfo {
