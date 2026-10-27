@@ -70,6 +70,7 @@ import { registerTrayHandlers } from './tray.mts';
 import { registerOpenUri } from './open-uri.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { registerGeolocationHandlers } from './geolocation.mts';
+import { forgetNappSite, nappPermissionChanged, registerNappHandlers } from './napp.mts';
 import { watchLiveStick } from './live-stick.mts';
 import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
@@ -3017,6 +3018,14 @@ const SCREEN_SHARE_PRELOAD = path.join(import.meta.dirname, 'screen-share-preloa
  */
 const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
 
+/**
+ * Absolute path to the session preload that gives installed nsites the napp
+ * runtime (see electron/napp.mts): window.napp, notifications and periodic
+ * sync from the page and the service worker, and window.ENV. Registered on
+ * the apps session for frames and for service workers alike.
+ */
+const NAPP_PRELOAD = path.join(import.meta.dirname, 'napp-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow: BrowserWindow | null = null;
 
@@ -3715,9 +3724,15 @@ function hardenWebStorePreload(): void {
 // ---------------------------------------------------------------------------
 
 /** A capability a site must ask the user for. */
-type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications';
+type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications' | 'background-sync';
 
-const SITE_CAPABILITIES: readonly SiteCapability[] = ['camera', 'microphone', 'geolocation', 'notifications'];
+const SITE_CAPABILITIES: readonly SiteCapability[] = [
+  'camera',
+  'microphone',
+  'geolocation',
+  'notifications',
+  'background-sync',
+];
 
 type ShellPrompt =
   | { kind: 'permission'; origin: string; capabilities: SiteCapability[]; remembered: boolean }
@@ -3912,6 +3927,7 @@ function decide(s: Electron.Session, origin: string, capability: SiteCapability,
   if (allow === null) decisions.delete(decisionKey(origin, capability));
   else decisions.set(decisionKey(origin, capability), allow);
   if (remembersDecisions(s)) saveDecisions(decisions);
+  if (remembersDecisions(s)) nappPermissionChanged(origin, capability, allow);
 }
 
 /** The askable capabilities a permission request needs, or null if not askable. */
@@ -5038,6 +5054,9 @@ app.whenReady().then(() => {
   for (const s of [browserSession(), appSession()]) {
     s.registerPreloadScript({ id: 'din-nostr', type: 'frame', filePath: NOSTR_PRELOAD });
   }
+  // Installed nsites are napps: their pages and their service workers.
+  appSession().registerPreloadScript({ id: 'din-napp', type: 'frame', filePath: NAPP_PRELOAD });
+  appSession().registerPreloadScript({ id: 'din-napp-worker', type: 'service-worker', filePath: NAPP_PRELOAD });
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
@@ -5087,6 +5106,20 @@ app.whenReady().then(() => {
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerOpenUri({ sendToShell });
   registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
+  registerNappHandlers({
+    session: appSession,
+    sendToShell,
+    assertShellSender,
+    appOrigin: (contents) => (isAppGuest(contents) ? appGuestOrigins.get(contents.id) ?? null : null),
+    permission: (origin, capability) => {
+      const allowed = decisionsFor(appSession()).get(decisionKey(origin, capability));
+      return allowed === undefined ? 'default' : allowed ? 'granted' : 'denied';
+    },
+    requestPermission: (origin, capability) => requestSiteCapability(appSession(), origin, capability),
+    forgetPermissions: (origin) => {
+      for (const capability of SITE_CAPABILITIES) decide(appSession(), origin, capability, null);
+    },
+  });
   registerGeolocationHandlers({
     request: (s, origin) => requestSiteCapability(s, origin, 'geolocation'),
     allowed: (s, origin) => siteCapabilityAllowed(s, origin, 'geolocation'),
@@ -5139,6 +5172,7 @@ app.whenReady().then(() => {
     ],
     sendToShell,
     isShellSender,
+    onUninstall: (host) => void forgetNappSite(host),
   });
 
   // Must run before any <webview> is created so the extension system's

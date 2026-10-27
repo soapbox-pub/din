@@ -34,6 +34,11 @@ export interface SystemNotification {
   guest: { webContentsId: number; origin: string } | null;
   /** A web page's tag: one with the same tag and origin replaces it. */
   tag: string;
+  /**
+   * For an installed nsite's (electron/napp.mts): its host, and where a click
+   * opens it, or null for its front page.
+   */
+  site: { host: string; url: string | null } | null;
 }
 
 export interface SystemNotificationsBridge {

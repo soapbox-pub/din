@@ -15,6 +15,10 @@
 // closes go back to the page as its Notification's events, and its
 // notifications go when the page does.
 //
+// Installed nsites' come from napp.mts (their pages' and service workers'
+// registration.showNotification). They outlive the page; clicks and
+// dismissals go back to napp.mts, which raises them in the site's worker.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
@@ -54,6 +58,12 @@ export interface SystemNotification {
   guest: { webContentsId: number; origin: string } | null;
   /** A web page's tag: one with the same tag and origin replaces it. */
   tag: string;
+  /**
+   * For an installed nsite's (napp.mts): its host, and where a click opens
+   * it (its `data.url`, already checked to be on the site), or null for its
+   * front page.
+   */
+  site: { host: string; url: string | null } | null;
 }
 
 type CloseReason = 'expired' | 'dismissed' | 'closed';
@@ -105,6 +115,7 @@ async function show(message: Extract<ServerMessage, { type: 'notify' }>): Promis
     transient: message.transient,
     guest: null,
     tag: '',
+    site: null,
   };
   sendToShell('notifications:show', notification);
 }
@@ -126,6 +137,7 @@ export function notifyFromSystem(key: string, title: string, body: string): void
     transient: false,
     guest: null,
     tag: '',
+    site: null,
   };
   sendToShell('notifications:show', notification);
 }
@@ -212,12 +224,12 @@ function webText(value: unknown, max: number): string {
  * its nsite:// handler). Images are scaled down; SVG stays SVG, which an
  * <img> never runs scripts in.
  */
-async function fetchIcon(s: Electron.Session, url: string): Promise<string | null> {
+async function fetchIcon(s: Electron.Session, url: string, credentials: RequestCredentials = 'include'): Promise<string | null> {
   if (!/^(https?|nsite):/i.test(url)) {
     return /^data:image\/[a-z0-9.+-]+[;,]/i.test(url) && url.length <= MAX_IMAGE_BYTES ? url : null;
   }
   try {
-    const response = await s.fetch(url, { signal: AbortSignal.timeout(ICON_FETCH_TIMEOUT_MS) });
+    const response = await s.fetch(url, { credentials, signal: AbortSignal.timeout(ICON_FETCH_TIMEOUT_MS) });
     if (!response.ok || Number(response.headers.get('content-length') ?? 0) > MAX_FETCHED_ICON_BYTES) return null;
     const data = Buffer.from(await response.arrayBuffer());
     if (data.length > MAX_FETCHED_ICON_BYTES) return null;
@@ -298,6 +310,7 @@ function registerWebHandlers(permission: (s: Electron.Session, origin: string) =
       transient: false,
       guest: { webContentsId: contents.id, origin },
       tag: webText(opts.tag, 256),
+      site: null,
     };
     sendToShell('notifications:show', notification);
     return id;
@@ -310,11 +323,73 @@ function registerWebHandlers(permission: (s: Electron.Session, origin: string) =
   });
 }
 
+// ---------------------------------------------------------------------------
+// Installed nsites (napp.mts)
+// ---------------------------------------------------------------------------
+
+/** What napp.mts hears back about the notifications it showed. */
+export interface SiteNotificationHandlers {
+  activate: (id: number, action: string) => void;
+  closed: (id: number, reason: CloseReason) => void;
+}
+
+let siteHandlers: SiteNotificationHandlers | null = null;
+
+export function setSiteNotificationHandlers(handlers: SiteNotificationHandlers): void {
+  siteHandlers = handlers;
+}
+
+/**
+ * Show an installed nsite's notification (from its page or its service
+ * worker; napp.mts has checked it may). The icon is fetched without
+ * cookies: a site's own path through its nsite:// handler, or an https URL.
+ */
+export async function showSiteNotification(
+  s: Electron.Session,
+  notification: {
+    id: number;
+    host: string;
+    title: string;
+    body: string;
+    icon: string;
+    tag: string;
+    actions: { action: string; title: string }[];
+    requireInteraction: boolean;
+    silent: boolean;
+    url: string | null;
+  },
+): Promise<void> {
+  const image = notification.icon ? await fetchIcon(s, notification.icon, 'omit') : null;
+  const shown: SystemNotification = {
+    id: `napp:${notification.id}`,
+    appName: notification.host,
+    appId: null,
+    icon: null,
+    image,
+    title: notification.title.slice(0, MAX_WEB_TITLE),
+    body: notification.body.slice(0, MAX_WEB_BODY),
+    actions: notification.actions.slice(0, 3).map((a) => ({ id: a.action, label: a.title })),
+    urgency: notification.silent ? 'low' : 'normal',
+    timeout: notification.requireInteraction ? 0 : -1,
+    resident: false,
+    transient: false,
+    guest: null,
+    tag: notification.tag,
+    site: { host: notification.host, url: notification.url },
+  };
+  sendToShell('notifications:show', shown);
+}
+
+/** Take down an installed nsite's notification. */
+export function closeSiteNotification(id: number): void {
+  sendToShell('notifications:close', `napp:${id}`);
+}
+
 /** The id behind an opaque shell id, by kind. */
-function parseId(id: unknown): { kind: 'dbus' | 'web'; id: number } | null {
+function parseId(id: unknown): { kind: 'dbus' | 'web' | 'napp'; id: number } | null {
   if (typeof id !== 'string') return null;
-  const match = /^(dbus|web):(\d+)$/.exec(id);
-  return match ? { kind: match[1] as 'dbus' | 'web', id: Number(match[2]) } : null;
+  const match = /^(dbus|web|napp):(\d+)$/.exec(id);
+  return match ? { kind: match[1] as 'dbus' | 'web' | 'napp', id: Number(match[2]) } : null;
 }
 
 /** Register the notifications IPC surface (window.systemNotifications) and start the server. */
@@ -331,12 +406,14 @@ export function registerNotificationHandlers(options: {
     const target = parseId(id);
     if (!isShellSender(event) || !target || typeof action !== 'string') return;
     if (target.kind === 'dbus') command({ type: 'action', id: target.id, key: action.slice(0, 256) });
+    else if (target.kind === 'napp') siteHandlers?.activate(target.id, action.slice(0, 256));
     else if (action === 'default') webEvent(target.id, 'click');
   });
   ipcMain.on('notifications:closed', (event, id, reason) => {
     const target = parseId(id);
     if (!isShellSender(event) || !target) return;
     if (target.kind === 'dbus') command({ type: 'closed', id: target.id, reason: REASON_CODES[reason as CloseReason] ?? 4 });
+    else if (target.kind === 'napp') siteHandlers?.closed(target.id, reason in REASON_CODES ? (reason as CloseReason) : 'closed');
     else webEvent(target.id, 'close');
   });
 

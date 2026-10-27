@@ -16,8 +16,11 @@
  * must feature-detect via `getBrowserBridge()`.
  */
 
-/** A capability a site has to ask the user for. */
-export type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications';
+/**
+ * A capability a site has to ask the user for. `background-sync` is an
+ * installed nsite's periodic sync (electron/napp.mts).
+ */
+export type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications' | 'background-sync';
 
 /** Details of a rejected TLS certificate for a browser tab. */
 export interface CertificateErrorInfo {

@@ -10,8 +10,9 @@
 // user acts on it in Din. Permission is still Chromium's: asked through the
 // same prompt, and checked again in the main process for every notification.
 //
-// Service workers' showNotification() isn't covered (a preload can't reach a
-// worker); those still go through libnotify, to Din's D-Bus server.
+// registration.showNotification() isn't covered here. Installed nsites get
+// theirs from napp-preload.cjs, which also runs in their service workers;
+// anyone else's still goes through libnotify, to Din's D-Bus server.
 //
 // Registered with session.registerPreloadScript in main.mts, so it runs
 // alongside each guest's own preload. Top documents of web pages only.

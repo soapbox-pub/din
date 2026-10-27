@@ -74,6 +74,8 @@
 //     Nostr client (see NsiteBridgeHost / electron/nsite.mts)
 //   - window.nsiteStore: the OS-level store of nsites, and which are
 //     installed as apps (see src/lib/nsiteStore.ts / electron/nsite-store.mts)
+//   - window.nappHost: installed nsites' napp runtime - their ENV, clearing
+//     their data, opening their windows (see src/lib/napp.ts / electron/napp.mts)
 //   - window.promptHost: yes/no questions for the user - site permissions and
 //     extension installs (see PromptHost)
 //   - window.screenShare: pages asking to share the screen, and the shares
@@ -2588,6 +2590,41 @@ contextBridge.exposeInMainWorld('nsiteStore', {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('nsite:progress', listener);
     return () => ipcRenderer.removeListener('nsite:progress', listener);
+  },
+});
+
+// The napp runtime's side of installed nsites (window.nappHost), backed by
+// the napp:* handlers in electron/napp.mts: what an app has set up on this
+// computer, its ENV, clearing its data, and its service worker asking for its
+// window. Hosts are canonical; main rejects anything else.
+contextBridge.exposeInMainWorld('nappHost', {
+  /**
+   * An app's ENV, how many push subscriptions it holds, and its periodic sync tags.
+   * @param {string} host
+   */
+  status: (host) => ipcRenderer.invoke('napp:status', host),
+  /**
+   * Replace an app's ENV (read by its pages the next time they load).
+   * @param {string} host
+   * @param {Record<string, string>} env
+   */
+  setEnv: (host, env) => ipcRenderer.invoke('napp:setEnv', host, env),
+  /**
+   * Forget everything an app keeps outside its files: storage, service
+   * worker, subscriptions, notifications, ENV and permissions.
+   * @param {string} host
+   */
+  clearData: (host) => ipcRenderer.invoke('napp:clearData', host),
+  /**
+   * An app's worker opened or focused its window, after a click on one of
+   * its notifications. Returns an unsubscribe fn.
+   * @param {(request: { host: string, url: string | null }) => void} callback
+   */
+  onOpen: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, payload: { host: string, url: string | null }) => void} */
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('napp:open', listener);
+    return () => ipcRenderer.removeListener('napp:open', listener);
   },
 });
 

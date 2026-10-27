@@ -672,10 +672,13 @@ export function registerNsiteProtocol({
   sessions,
   sendToShell: send,
   isShellSender: isShell,
+  onUninstall,
 }: {
   sessions: Array<{ session: Electron.Session; persist: boolean }>;
   sendToShell: (channel: string, payload: unknown) => void;
   isShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => boolean;
+  /** A site stopped being an installed app: what it kept as one goes too. */
+  onUninstall: (host: string) => void;
 }): void {
   sendToShell = send;
   isShellSender = isShell;
@@ -723,7 +726,9 @@ export function registerNsiteProtocol({
   });
   ipcMain.handle('nsite:uninstall', (event, host) => {
     assertShell(event);
-    return markUninstalled(canonicalArg(host));
+    const site = canonicalArg(host);
+    onUninstall(site);
+    return markUninstalled(site);
   });
   ipcMain.handle('nsite:read', async (event, host, filePath) => {
     assertShell(event);

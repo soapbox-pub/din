@@ -44,8 +44,8 @@ import { WebAppFrame } from '@/components/desktop/apps/WebAppFrame';
  */
 const componentCache = new Map<string, ComponentType<AppComponentProps>>();
 
-function webAppComponent(webApp: WebApp, favicon?: string): ComponentType<AppComponentProps> {
-  const cacheKey = `${webApp.id}\u0000${webApp.url}\u0000${webApp.themeColor ?? ''}\u0000${webApp.name}\u0000${webApp.icon ?? ''}\u0000${favicon ?? ''}`;
+function webAppComponent(webApp: WebApp, favicon?: string, nsiteHost?: string): ComponentType<AppComponentProps> {
+  const cacheKey = `${webApp.id}\u0000${webApp.url}\u0000${webApp.themeColor ?? ''}\u0000${webApp.name}\u0000${webApp.icon ?? ''}\u0000${favicon ?? ''}\u0000${nsiteHost ?? ''}`;
   let component = componentCache.get(cacheKey);
   if (!component) {
     const { url, name, themeColor } = webApp;
@@ -65,6 +65,7 @@ function webAppComponent(webApp: WebApp, favicon?: string): ComponentType<AppCom
           icon={icon}
           favicon={favicon}
           themeColor={themeColor}
+          nsiteHost={nsiteHost}
         />
       );
     };
@@ -75,15 +76,16 @@ function webAppComponent(webApp: WebApp, favicon?: string): ComponentType<AppCom
 
 /**
  * Convert a stored WebApp entry into a launchable desktop app. `favicon`, if
- * given, stands in for the icon in the window's title bar.
+ * given, stands in for the icon in the window's title bar; `nsiteHost` marks
+ * an installed nsite.
  */
-function webAppToDefinition(webApp: WebApp, favicon?: string): AppDefinition {
+function webAppToDefinition(webApp: WebApp, favicon?: string, nsiteHost?: string): AppDefinition {
   return {
     id: webApp.id,
     name: webApp.name,
     // AppIcon falls back to the globe icon when a favicon fails to load.
     icon: webApp.icon ?? WEB_APP_ICON,
-    component: webAppComponent(webApp, favicon),
+    component: webAppComponent(webApp, favicon, nsiteHost),
     defaultSize: WEB_APP_DEFAULT_SIZE,
     // One window per installed web app: clicking a link that belongs to the
     // app navigates the existing window (via a changed `url` param) instead
@@ -109,7 +111,7 @@ function nsiteAppToDefinition(entry: NsiteAppEntry, summary: NsiteSummary | unde
     url: nsiteAppUrl(entry.host),
     icon: summary?.app?.icon ?? undefined,
     themeColor: summary?.app?.themeColor ?? undefined,
-  }, summary?.app?.favicon ?? undefined);
+  }, summary?.app?.favicon ?? undefined, entry.host);
   return { ...definition, web: false };
 }
 

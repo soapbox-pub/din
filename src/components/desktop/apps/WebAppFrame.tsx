@@ -10,6 +10,7 @@ import {
   type BrowserViewHandle,
 } from '@/components/desktop/apps/BrowserView';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { NappInfoButton } from '@/components/desktop/apps/NappInfoButton';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 
@@ -30,6 +31,9 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
  * when a clicked link is routed into the app (see BrowserExtensionHost). It
  * is honored only when it shares the app's origin, so a stray param can never
  * point the app's logged-in session at a foreign site.
+ *
+ * An installed nsite (`nsiteHost`) also gets an info button in the title bar:
+ * its permissions, window.ENV and data (see NappInfoButton).
  */
 export function WebAppFrame({
   url,
@@ -38,6 +42,7 @@ export function WebAppFrame({
   icon,
   favicon,
   themeColor,
+  nsiteHost,
 }: {
   url: string;
   initialUrl?: string;
@@ -46,6 +51,8 @@ export function WebAppFrame({
   /** Drawn in the title bar instead of the icon, when the site has one. */
   favicon?: string;
   themeColor?: string;
+  /** The canonical host, when the app is an installed nsite. */
+  nsiteHost?: string;
 }) {
   // A web app always opens by loading `src`, so start in the loading state to
   // show the launch splash from the very first frame (no white gap).
@@ -145,10 +152,18 @@ export function WebAppFrame({
             <ChevronRight className="size-4" />
           </NavButton>
         )}
+        {nsiteHost && (
+          <NappInfoButton
+            host={nsiteHost}
+            name={name}
+            onReload={() => viewRef.current?.reload()}
+            className={cn(muted, hover)}
+          />
+        )}
       </div>,
     );
     return () => setTitlebar(null);
-  }, [src, name, icon, favicon, pageColor, nav.canBack, nav.canForward, setTitlebar]);
+  }, [src, name, icon, favicon, pageColor, nav.canBack, nav.canForward, nsiteHost, setTitlebar]);
 
   if (!src) {
     return (
