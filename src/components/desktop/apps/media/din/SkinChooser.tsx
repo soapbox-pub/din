@@ -141,7 +141,7 @@ export function SkinChooser({ commands }: { commands: Commands }) {
           <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-[var(--mp-ink)]" onClick={() => openUrl('https://skins.webamp.org/')}>
             <ExternalLink className="size-3" /> Winamp Skin Museum
           </button>
-          <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-[var(--mp-ink)]" onClick={() => openUrl('https://archive.org/search?query=windows+media+player+skins')}>
+          <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-[var(--mp-ink)]" onClick={() => openUrl('https://wmpskinsarchive.neocities.org/')}>
             <ExternalLink className="size-3" /> Windows Media Player skins
           </button>
         </div>
