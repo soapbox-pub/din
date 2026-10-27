@@ -788,9 +788,10 @@ in
   # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
   # writes (os/din-keyboard.sh). cage applies it, and Din inherits it.
   systemd.services.cage-tty1.serviceConfig.EnvironmentFile = "-/var/lib/din/keyboard";
-  # The GPU's driver loads after the disk unlocks, and cage can start before
-  # it has: it finds no GPU and exits, leaving a black screen. It tries
-  # again until the driver is there.
+  # A GPU whose driver isn't in the initrd (amdgpu, i915 and xe are) gets it
+  # after the disk unlocks, and cage can start before it has: it finds no
+  # GPU and exits, leaving a black screen. It tries again until the driver
+  # is there.
   systemd.services.cage-tty1.serviceConfig.Restart = "on-failure";
   systemd.services.cage-tty1.serviceConfig.RestartSec = 1;
   systemd.services.cage-tty1.unitConfig.StartLimitIntervalSec = 60;
