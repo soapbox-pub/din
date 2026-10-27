@@ -762,7 +762,19 @@ in
 
   # brightnessctl ships udev rules that grant the `video` group write access to
   # /sys/class/backlight, so the Settings brightness panel works unprivileged.
-  services.udev.packages = [ pkgs.brightnessctl ];
+  #
+  # The second gives the logged-in user USB CD/DVD drives themselves, so apps
+  # can drive one directly (WebUSB through libusb) rather than through
+  # /dev/sr0. It matches ATAPI over Bulk-Only Transport (interface 08:02:50),
+  # which a USB stick or disk (subclass 06) never is. It has to sort before
+  # 73-seat-late.rules, which turns the `uaccess` tag into an ACL, so it can't
+  # go in extraRules (99-local.rules).
+  services.udev.packages = [
+    pkgs.brightnessctl
+    (pkgs.writeTextDir "lib/udev/rules.d/70-usb-optical-drives.rules" ''
+      SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080250:*", TAG+="uaccess"
+    '')
+  ];
 
   # Power profiles for Settings → Power (net.hadess.PowerProfiles over D-Bus,
   # electron/main.mts): power-saver / balanced / performance set the CPU's
