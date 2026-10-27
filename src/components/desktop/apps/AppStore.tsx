@@ -1,25 +1,41 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, Search, Store } from 'lucide-react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { Check, ChevronLeft, Copy, Globe, RefreshCw, Search, Store } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import type { StoreApp } from '@/lib/nsiteCatalog';
+import { canonicalNsiteUrl } from '@/lib/nsite';
 import { nsiteAppId } from '@/lib/nsiteApps';
 import { getNsiteStore } from '@/lib/nsiteStore';
+import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
+import { isWebviewAvailable } from '@/lib/isElectron';
 import { useNsiteCatalog } from '@/hooks/useNsiteCatalog';
 import { useNsiteLookup } from '@/hooks/useNsiteLookup';
 import { useFeaturedApps } from '@/hooks/useFeaturedApps';
 import { useStoreAppDetails } from '@/hooks/useStoreAppDetails';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 const APP_STORE_ICON = '/icons/apps/app-store.png';
+
+/** Opens a site's detail page; provided by AppStore to every card. */
+const SelectAppContext = createContext<(app: StoreApp) => void>(() => {});
 
 /**
  * The App Store: browses nsites (NIP-5A static websites), the only kind of
@@ -45,6 +61,9 @@ export function AppStore(_props: AppComponentProps) {
   const catalog = useNsiteCatalog();
   const featured = useFeaturedApps();
   const [search, setSearch] = useState('');
+  // The site whose detail page is showing. The list stays mounted underneath
+  // so going back returns to the same scroll position.
+  const [selected, setSelected] = useState<StoreApp | null>(null);
 
   const rawQuery = search.trim();
   const searching = rawQuery.length > 0;
@@ -79,6 +98,18 @@ export function AppStore(_props: AppComponentProps) {
   useEffect(() => {
     setTitlebar(
       <div className="flex min-w-0 flex-1 items-center gap-2 pl-1">
+        {selected && (
+          <button
+            type="button"
+            data-window-no-drag
+            onClick={() => setSelected(null)}
+            aria-label="Back to all apps"
+            title="Back"
+            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronLeft className="size-4" aria-hidden />
+          </button>
+        )}
         <AppIcon icon={APP_STORE_ICON} className="size-4 shrink-0 text-muted-foreground" />
         <span className="mr-auto truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
           App Store
@@ -94,7 +125,10 @@ export function AppStore(_props: AppComponentProps) {
           />
           <Input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setSelected(null);
+            }}
             placeholder="Search apps, or paste an address"
             aria-label="Search apps, or paste an address"
             autoComplete="off"
@@ -117,56 +151,80 @@ export function AppStore(_props: AppComponentProps) {
         </button>
       </div>,
     );
-  }, [setTitlebar, search, refetchCatalog, refetchFeatured, refreshing, refreshDisabled]);
+  }, [setTitlebar, search, selected, refetchCatalog, refetchFeatured, refreshing, refreshDisabled]);
   useEffect(() => () => setTitlebar(null), [setTitlebar]);
 
+  const moreFromPublisher = useMemo(() => {
+    if (!selected) return [];
+    const seen = new Set([selected.host]);
+    const apps: StoreApp[] = [];
+    for (const app of [...(featured.data?.apps ?? []), ...(catalog.data ?? [])]) {
+      if (app.pubkey !== selected.pubkey || seen.has(app.host)) continue;
+      seen.add(app.host);
+      apps.push(app);
+    }
+    return apps;
+  }, [selected, featured.data, catalog.data]);
+
   return (
-    <div className="flex h-full w-full flex-col bg-background text-foreground">
-      {/* Content */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
-          {searching ? (
-            <section className="flex flex-col gap-4" aria-label="Search results">
-              <SectionHeader
-                title={lookup.isAddress ? 'Site at this address' : `Results for “${rawQuery}”`}
-              />
-              {searchMatches.length > 0 ? (
-                <CatalogGrid apps={searchMatches} />
-              ) : searchPending ? (
-                <CatalogSkeleton />
-              ) : (
-                <EmptyState
-                  message={
-                    lookup.isAddress
-                      ? 'No site is published at that address on your relays.'
-                      : `No apps match “${rawQuery}”. You can also paste a site’s address to find it.`
-                  }
-                />
-              )}
-            </section>
-          ) : (
-            <>
-              <FeaturedSection />
-              <section className="flex flex-col gap-4" aria-label="All apps">
+    <SelectAppContext.Provider value={setSelected}>
+      <div
+        className="flex h-full w-full flex-col bg-background text-foreground"
+        onKeyDown={(e) => {
+          if (selected && e.key === 'Escape') {
+            setSelected(null);
+          }
+        }}
+      >
+        {selected && (
+          <AppDetail key={selected.host} app={selected} moreFromPublisher={moreFromPublisher} />
+        )}
+        {/* Content */}
+        <div className={cn('min-h-0 flex-1 overflow-y-auto', selected && 'hidden')}>
+          <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+            {searching ? (
+              <section className="flex flex-col gap-4" aria-label="Search results">
                 <SectionHeader
-                  title="All Apps"
-                  subtitle="Sites from Din’s publishers and the people you follow."
+                  title={lookup.isAddress ? 'Site at this address' : `Results for “${rawQuery}”`}
                 />
-                {catalog.isLoading ? (
+                {searchMatches.length > 0 ? (
+                  <CatalogGrid apps={searchMatches} />
+                ) : searchPending ? (
                   <CatalogSkeleton />
-                ) : catalog.isError ? (
-                  <EmptyState message="Could not load the app catalog. Check your relay connections and try refreshing." />
-                ) : !catalog.data || catalog.data.length === 0 ? (
-                  <EmptyState message="No apps found on your relays yet. Try refreshing, or add more relays in Settings." />
                 ) : (
-                  <CatalogGrid apps={catalog.data} />
+                  <EmptyState
+                    message={
+                      lookup.isAddress
+                        ? 'No site is published at that address on your relays.'
+                        : `No apps match “${rawQuery}”. You can also paste a site’s address to find it.`
+                    }
+                  />
                 )}
               </section>
-            </>
-          )}
+            ) : (
+              <>
+                <FeaturedSection />
+                <section className="flex flex-col gap-4" aria-label="All apps">
+                  <SectionHeader
+                    title="All Apps"
+                    subtitle="Sites from Din’s publishers and the people you follow."
+                  />
+                  {catalog.isLoading ? (
+                    <CatalogSkeleton />
+                  ) : catalog.isError ? (
+                    <EmptyState message="Could not load the app catalog. Check your relay connections and try refreshing." />
+                  ) : !catalog.data || catalog.data.length === 0 ? (
+                    <EmptyState message="No apps found on your relays yet. Try refreshing, or add more relays in Settings." />
+                  ) : (
+                    <CatalogGrid apps={catalog.data} />
+                  )}
+                </section>
+              </>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </SelectAppContext.Provider>
   );
 }
 
@@ -205,7 +263,32 @@ function useStoreAppView(app: StoreApp, enabled = true) {
   const about = app.about || details.data?.description || '';
   const by = publisher && publisher.toLowerCase() !== name.toLowerCase() ? publisher : null;
 
-  return { name, about, by, icon: details.data?.icon ?? null, iconPending: details.isPending };
+  return {
+    name,
+    about,
+    by,
+    publisher,
+    picture: metadata?.picture ? sanitizeImageUrl(metadata.picture) : null,
+    icon: details.data?.icon ?? null,
+    iconPending: details.isPending,
+    themeColor: details.data?.themeColor ?? null,
+  };
+}
+
+/**
+ * Makes a whole card open the site's detail page: a button stretched over the
+ * card, under the Get pill (which sits above it with `relative z-10`).
+ */
+function CardLink({ app, name }: { app: StoreApp; name: string }) {
+  const select = useContext(SelectAppContext);
+  return (
+    <button
+      type="button"
+      onClick={() => select(app)}
+      aria-label={`View details for ${name}`}
+      className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    />
+  );
 }
 
 /**
@@ -271,7 +354,8 @@ function FeaturedHero({ app }: { app: StoreApp }) {
   const view = useStoreAppView(app);
 
   return (
-    <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 p-6 text-primary-foreground shadow-sm">
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 p-6 text-primary-foreground shadow-sm">
+      <CardLink app={app} name={view.name} />
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary-foreground/70">
         Featured
       </p>
@@ -311,8 +395,9 @@ function ShelfCard({ app }: { app: StoreApp }) {
   return (
     <div
       ref={ref}
-      className="flex w-64 shrink-0 snap-start flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
+      className="relative flex w-64 shrink-0 snap-start flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
     >
+      <CardLink app={app} name={view.name} />
       <div className="flex items-center gap-3">
         <StoreAppIcon
           name={view.name}
@@ -355,8 +440,9 @@ function StoreAppCard({ app }: { app: StoreApp }) {
   return (
     <div
       ref={ref}
-      className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
+      className="relative flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
     >
+      <CardLink app={app} name={view.name} />
       <div className="flex items-center gap-3">
         <StoreAppIcon
           name={view.name}
@@ -391,6 +477,164 @@ function StoreAppCard({ app }: { app: StoreApp }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * A site's detail page: the full blurb, who published it, its address, and
+ * the publisher's other sites. Opening it in the browser previews the site
+ * without installing it.
+ */
+function AppDetail({
+  app,
+  moreFromPublisher,
+}: {
+  app: StoreApp;
+  moreFromPublisher: StoreApp[];
+}) {
+  const view = useStoreAppView(app);
+  const openUrl = useOpenUrl();
+  const [copied, setCopied] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const address = canonicalNsiteUrl(app.pubkey, app.dtag, '/');
+  const fileCount = app.event.tags.filter(([name]) => name === 'path').length;
+  const updated = new Date(app.createdAt * 1000).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  // Take focus so Escape goes back without a click first.
+  useEffect(() => ref.current?.focus(), []);
+
+  const copyAddress = () => {
+    void navigator.clipboard.writeText(address).then(() => setCopied(true));
+  };
+
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      className="min-h-0 flex-1 overflow-y-auto outline-none"
+      aria-label={`${view.name} details`}
+    >
+      <div
+        className="border-b border-border"
+        style={
+          view.themeColor
+            ? { backgroundImage: `linear-gradient(to bottom, ${view.themeColor}33, transparent)` }
+            : undefined
+        }
+      >
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4 sm:flex-row sm:items-center sm:gap-6 sm:p-6">
+          <StoreAppIcon
+            name={view.name}
+            icon={view.icon}
+            pending={view.iconPending}
+            className="size-24 shrink-0 text-4xl drop-shadow-md sm:size-28"
+          />
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
+            <div className="min-w-0">
+              <h1 className="break-words text-3xl font-bold tracking-tight">{view.name}</h1>
+              {view.publisher && (
+                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                  <Avatar className="size-5">
+                    {view.picture && <AvatarImage src={view.picture} alt="" />}
+                    <AvatarFallback className="text-[10px]">
+                      {view.publisher.slice(0, 1).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="truncate">{view.publisher}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <GetPill app={app} name={view.name} />
+              {isWebviewAvailable() && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => openUrl(address)}
+                  className="h-8 rounded-full px-4"
+                >
+                  <Globe aria-hidden />
+                  Open in Browser
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+        {view.about ? (
+          <p className="max-w-prose whitespace-pre-line text-base leading-relaxed">{view.about}</p>
+        ) : (
+          <p className="text-muted-foreground">This site doesn’t describe itself.</p>
+        )}
+
+        {app.hashtags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {app.hashtags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md bg-secondary px-2 py-0.5 text-sm text-secondary-foreground"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <section className="flex flex-col gap-4" aria-label="Information">
+          <SectionHeader title="Information" />
+          <dl className="grid grid-cols-1 divide-y divide-border rounded-2xl border border-border bg-card text-sm">
+            <InfoRow label="Publisher">{view.publisher ?? 'Unknown'}</InfoRow>
+            <InfoRow label="Updated">{updated}</InfoRow>
+            <InfoRow label="Files">{fileCount.toLocaleString()}</InfoRow>
+            <InfoRow label="Address">
+              <span className="flex min-w-0 items-center justify-end gap-2">
+                <span className="truncate font-mono text-xs" title={address}>
+                  {address}
+                </span>
+                <button
+                  type="button"
+                  onClick={copyAddress}
+                  aria-label={copied ? 'Address copied' : 'Copy address'}
+                  title={copied ? 'Copied' : 'Copy address'}
+                  className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {copied ? (
+                    <Check className="size-3.5" aria-hidden />
+                  ) : (
+                    <Copy className="size-3.5" aria-hidden />
+                  )}
+                </button>
+              </span>
+            </InfoRow>
+          </dl>
+        </section>
+
+        {moreFromPublisher.length > 0 && (
+          <section className="flex flex-col gap-4" aria-label="More from this publisher">
+            <SectionHeader
+              title={view.publisher ? `More from ${view.publisher}` : 'More from this publisher'}
+            />
+            <CatalogGrid apps={moreFromPublisher} />
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-3">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-right">{children}</dd>
     </div>
   );
 }
@@ -456,7 +700,7 @@ function GetPill({
       title={canInstall ? undefined : 'Apps install in the Din desktop app'}
       aria-label={installed ? `Open ${name}` : `Install ${name}`}
       className={cn(
-        'h-8 shrink-0 rounded-full px-5 font-semibold',
+        'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold',
         onHero
           ? 'bg-primary-foreground text-primary hover:bg-primary-foreground/90'
           : 'bg-secondary text-primary hover:bg-secondary/80',
