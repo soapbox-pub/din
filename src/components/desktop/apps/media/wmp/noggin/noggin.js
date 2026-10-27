@@ -1,4 +1,4 @@
-// Headspace: a head with a screen for a mind and speakers for ears.
+// Noggin: a head with a screen for a mind and speakers for ears.
 // The left ear pulls out the equalizer, the right ear the playlist, and the
 // starburst button lowers the visualization chooser over the screen.
 

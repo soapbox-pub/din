@@ -1,12 +1,12 @@
-<THEME title="Headspace" author="Din" copyright="Din" authorVersion="1.0">
+<THEME title="Noggin" author="Din" copyright="Din" authorVersion="1.0">
   <VIEW
-    id="headspace"
+    id="noggin"
     titleBar="false"
     resizable="false"
     width="760"
     height="394"
     backgroundColor="none"
-    scriptFile="headspace.js"
+    scriptFile="noggin.js"
     onLoad="jscript:init();"
     onClose="jscript:onClose();"
   >

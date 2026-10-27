@@ -6,13 +6,27 @@ import { zipSync } from 'fflate';
  * skin file from disk would. Prefs name them by a `builtin:` path.
  */
 export const BUILTIN_WMP_SKINS = [
-  { id: 'headspace', name: 'Headspace', path: 'builtin:headspace', description: 'A head with a screen for a mind and speakers for ears: pull them out for the equalizer and the playlist.' },
+  { id: 'noggin', name: 'Noggin', path: 'builtin:noggin', description: 'A head with a screen for a mind and speakers for ears: pull them out for the equalizer and the playlist.' },
 ];
 
-const texts = import.meta.glob<string>('./headspace/*.{wms,js}', { query: '?raw', import: 'default' });
-const images = import.meta.glob<string>('./headspace/*.png', { query: '?url', import: 'default' });
+const texts = import.meta.glob<string>('./noggin/*.{wms,js}', { query: '?raw', import: 'default' });
+const images = import.meta.glob<string>('./noggin/*.png', { query: '?url', import: 'default' });
 
 export const isBuiltinSkin = (path: string) => path.startsWith('builtin:');
+
+/**
+ * The bytes behind an asset URL. Vite inlines small images as base64 `data:`
+ * URLs in a build, and the CSP's connect-src won't let fetch() read those.
+ */
+async function assetBytes(url: string): Promise<Uint8Array> {
+  if (url.startsWith('data:')) {
+    const binary = atob(url.slice(url.indexOf(',') + 1));
+    return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  return new Uint8Array(await response.arrayBuffer());
+}
 
 /** The .wmz bytes of a built-in skin. */
 export async function builtinSkinBytes(path: string): Promise<Uint8Array> {
@@ -29,8 +43,7 @@ export async function builtinSkinBytes(path: string): Promise<Uint8Array> {
     ...Object.entries(images)
       .filter(([p]) => p.startsWith(prefix))
       .map(async ([p, load]) => {
-        const response = await fetch(await load());
-        files[p.slice(prefix.length)] = new Uint8Array(await response.arrayBuffer());
+        files[p.slice(prefix.length)] = await assetBytes(await load());
       }),
   ]);
   if (Object.keys(files).length === 0) throw new Error(`No built-in skin “${id}”`);
