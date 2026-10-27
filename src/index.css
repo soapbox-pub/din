@@ -59,7 +59,10 @@
 
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
-  --animate-veil-out: veil-out 1.2s ease-out forwards;
+  /* The boot veil: its bar fills (0.25s), the bar and logo go (0.15s), and
+     only then does the veil itself fade. */
+  --animate-veil-marks-out: veil-out 0.15s ease-in 0.25s both;
+  --animate-veil-out: veil-out 0.7s ease-out 0.4s both;
   --animate-dock-bounce: dock-bounce 0.8s infinite;
   --animate-shimmer: shimmer 2s linear infinite;
 

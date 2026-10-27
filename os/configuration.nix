@@ -410,11 +410,14 @@ let
   # `default` theme at 24px whatever the user picked; patched, it takes
   # XCURSOR_THEME and XCURSOR_SIZE, which the wrapper reads from dconf (the
   # GSettings Din's Settings writes, electron/cursor.mts), so the pointer is
-  # the same from the first frame. Din inherits them too.
+  # the same from the first frame. Din inherits them too. Until Din's window
+  # maps it shows the boot screen's background and no pointer, so there's no
+  # black screen with a cursor between the boot screen and Din.
   cage-patched = pkgs.cage.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./patches/cage-gamma-control.patch
       ./patches/cage-xcursor-env.patch
+      ./patches/cage-boot-handover.patch
     ];
   });
   cage-launcher = pkgs.writeShellScriptBin "cage" ''
@@ -823,13 +826,14 @@ in
 
   # Root is a fixed-size volume on an installed system (os/din-install.sh), so
   # the Nix store mustn't grow without end: old systems leave the boot menu
-  # after ten, and what's unused for a month goes.
+  # after five (each initrd carries the GPUs' firmware, and the ESP is
+  # 512MB), and what's unused for a month goes.
   nix.gc = {
     automatic = true;
     dates = "weekly";
     options = "--delete-older-than 30d";
   };
-  boot.loader.systemd-boot.configurationLimit = 10;
+  boot.loader.systemd-boot.configurationLimit = 5;
   # Builds do their work in the home volume, which has the rest of the disk,
   # rather than on root: a disk image needs as much scratch space again as
   # the image, and root also holds the hibernation swap file, as big as
@@ -1446,6 +1450,12 @@ in
     "sdhci_pci"
     # The ESP, which the boot screen reads before root is unlocked.
     "vfat" "nls_cp437" "nls_iso8859_1"
+    # The GPU's driver, which udev loads for the hardware there is. Loaded
+    # after root, it takes the screen from the firmware's framebuffer and
+    # switches the panel off until cage lights it again; in the initrd it
+    # does that under the firmware's logo, and the boot screen draws on it
+    # from the start. Its firmware comes along, about 40MB per initrd.
+    "amdgpu" "i915" "xe"
   ];
 
   # GPU acceleration for cage/Electron, plus the firmware real WiFi and

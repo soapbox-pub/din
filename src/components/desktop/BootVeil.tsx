@@ -9,7 +9,8 @@ import { ScreenLayer } from './MonitorsProvider';
  * boot screen's last frame (os/boot-screen/din.script): the same background,
  * Din's logo at the foot and the progress bar above it, in the same places
  * on the primary monitor, so the handover doesn't show. The bar goes on
- * from where the boot screen leaves it to full as the veil fades.
+ * from where the boot screen leaves it to full, then it and the logo go,
+ * and only then does the veil fade, so they're never seen over the desktop.
  *
  * Doubles as the readiness signal for the Electron host: the shell window
  * starts hidden (electron/main.mts) and is only shown once the app has
@@ -63,13 +64,13 @@ export function BootVeil() {
         aria-hidden
         className={cn(
           'pointer-events-none fixed inset-0 z-[10001] [container-type:size]',
-          visible && 'animate-veil-out motion-reduce:animate-none motion-reduce:opacity-0',
+          visible && 'animate-veil-marks-out motion-reduce:animate-none motion-reduce:opacity-0',
         )}
       >
         <div className="absolute bottom-[8.52cqh] left-1/2 h-[max(0.37cqh,2px)] w-[14.81cqh] -translate-x-1/2 overflow-hidden bg-white/15">
           <div
             className={cn(
-              'h-full bg-white/85 transition-[width] duration-1000 ease-out',
+              'h-full bg-white/85 transition-[width] duration-250 ease-out',
               visible ? 'w-full' : 'w-[70%]',
             )}
           />
