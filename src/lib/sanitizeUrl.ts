@@ -159,7 +159,8 @@ export function sameOrigin(a: string, b: string): boolean {
  * the browser's own internal pages. If it looks like a bare search term, hand
  * it to a search engine instead. Bare loopback
  * addresses (`localhost:8080`, `127.0.0.1:3000`, `[::1]:8080`) default to
- * `http:` since that's what dev servers speak; every other schemeless input
+ * `http:` since that's what dev servers speak, and so do `.onion` addresses
+ * since that's what most onion services speak; every other schemeless input
  * defaults to `https:`.
  */
 export function resolveNavigation(input: string): string | null {
@@ -189,11 +190,14 @@ export function resolveNavigation(input: string): string | null {
   const isLoopback =
     /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[?::1\]?)(:\d+)?(\/.*)?$/i.test(trimmed);
   const looksLikeDomain = /^[^\s]+\.[^\s]{2,}(\/.*)?$/i.test(trimmed);
+  // Onion services are mostly plain http: Tor already encrypts and
+  // authenticates the connection end to end.
+  const isOnion = /^[^\s/:]+\.onion\.?(:\d+)?([/?#].*)?$/i.test(trimmed);
 
   if (hasScheme || isLoopback || looksLikeDomain) {
     const candidate = hasScheme
       ? trimmed
-      : `${isLoopback ? 'http' : 'https'}://${trimmed}`;
+      : `${isLoopback || isOnion ? 'http' : 'https'}://${trimmed}`;
     const sanitized = sanitizeNavigationUrl(candidate);
     if (sanitized) return sanitized;
   }

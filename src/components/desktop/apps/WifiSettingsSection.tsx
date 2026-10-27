@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, ChevronRight, EthernetPort, Loader2, Lock, Plus, RotateCw, Settings2, Wifi, WifiOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { TorControls } from '@/components/desktop/TorControls';
 import { VpnControls } from '@/components/desktop/VpnControls';
 import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { AddNetworkDialog } from '@/components/desktop/apps/WifiForms';
@@ -243,6 +244,7 @@ function NetworkListView({
         </div>
       )}
       <VpnControls />
+      <TorControls />
     </Shell>
   );
 }

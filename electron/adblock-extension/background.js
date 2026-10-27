@@ -124,16 +124,24 @@ chrome.webRequest.onBeforeRequest.addListener(
   ['blocking'],
 );
 
-// Filters can add a Content-Security-Policy to documents (`$csp`). Every
-// top-level response's COOP also goes to the pop-up blocker (popups.mts),
-// blocking on or off: a session.webRequest listener there would switch this
-// one off.
+// Every top-level response's COOP goes to the pop-up blocker (popups.mts),
+// and its Onion-Location to the address bar (tor.mts), blocking on or off: a
+// session.webRequest listener there would switch this one off. Electron
+// doesn't fire onHeadersReceived here; onResponseStarted, with the same
+// headers, it does.
+chrome.webRequest.onResponseStarted.addListener(
+  (details) => {
+    if (details.statusCode >= 300 && details.statusCode < 400) return;
+    const header = (name) => details.responseHeaders?.find((h) => h.name.toLowerCase() === name)?.value ?? null;
+    dinAdblock.reportDocument(details.url, header('cross-origin-opener-policy'), header('onion-location'));
+  },
+  { urls: ['http://*/*', 'https://*/*'], types: ['main_frame'] },
+  ['responseHeaders'],
+);
+
+// Filters can add a Content-Security-Policy to documents (`$csp`).
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    if (details.type === 'main_frame' && (details.statusCode < 300 || details.statusCode >= 400)) {
-      const coop = details.responseHeaders?.find((h) => h.name.toLowerCase() === 'cross-origin-opener-policy');
-      dinAdblock.reportDocument(details.url, coop?.value ?? null);
-    }
     if (!enabled || !engine || allowlist.has(pageOf(details).site)) return {};
     const policy = engine.getCSPDirectives(requestOf(details));
     if (!policy) return {};

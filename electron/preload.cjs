@@ -8,6 +8,8 @@
 //   - window.pty: interactive shell sessions for the Terminal app
 //   - window.wifi: NetworkManager (nmcli) control for the Settings app
 //   - window.vpn: VPN/WireGuard profile toggles for the network selector
+//   - window.tor: Tor's status and on/off switch for Settings, and the
+//     onion services pages name, for the Web Browser
 //   - window.display: multi-output arrangement (wlr-randr/xrandr) for the
 //     Settings app
 //   - window.pageFullscreen: fits a fullscreen web page to its monitor
@@ -504,6 +506,64 @@ contextBridge.exposeInMainWorld('vpn', {
    * @param {string} name
    */
   disconnect: (name) => ipcRenderer.invoke('vpn:disconnect', name),
+});
+
+/**
+ * @typedef {{ canToggle: boolean, enabled: boolean | null, port: number | null,
+ *   progress: number | null, summary: string | null }} TorStatus
+ */
+
+// Tor bridge (window.tor), backed by the tor:* handlers in electron/tor.mts:
+// whether there's a Tor and how far it has got connecting, turning it on and
+// off on DinOS, and the onion services browser tabs' pages name.
+contextBridge.exposeInMainWorld('tor', {
+  /** @returns {Promise<TorStatus>} */
+  status: () => ipcRenderer.invoke('tor:status'),
+
+  /** Look for Tor again now. @returns {Promise<TorStatus>} */
+  refresh: () => ipcRenderer.invoke('tor:refresh'),
+
+  /**
+   * Turn Tor on or off (DinOS only).
+   * @param {boolean} enabled
+   * @returns {Promise<TorStatus>}
+   */
+  setEnabled: (enabled) => ipcRenderer.invoke('tor:set-enabled', enabled),
+
+  /**
+   * The onion service a browser tab's page names (Onion-Location), or null.
+   * @param {number} wcId
+   * @returns {Promise<string | null>}
+   */
+  onionLocation: (wcId) => ipcRenderer.invoke('tor:onion-location', wcId),
+
+  /**
+   * Subscribe to status changes. Returns an unsubscribe fn.
+   * @param {(status: TorStatus) => void} callback
+   */
+  onStatus: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {TorStatus} status
+     */
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('tor:status', listener);
+    return () => ipcRenderer.removeListener('tor:status', listener);
+  },
+
+  /**
+   * Subscribe to tabs' onion services. Returns an unsubscribe fn.
+   * @param {(update: { wcId: number, url: string | null }) => void} callback
+   */
+  onOnionLocation: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, url: string | null }} update
+     */
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on('tor:onion-location', listener);
+    return () => ipcRenderer.removeListener('tor:onion-location', listener);
+  },
 });
 
 // Display bridge (window.display), backed by the display:* handlers in

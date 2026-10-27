@@ -29,8 +29,10 @@ if (location.origin === EXTENSION_ORIGIN) {
     /**
      * @param {string} url a top-level response's URL
      * @param {string | null} coop its Cross-Origin-Opener-Policy header
+     * @param {string | null} onionLocation its Onion-Location header
      */
-    reportDocument: (url, coop) => ipcRenderer.send('adblock-ext:document', url, coop),
+    reportDocument: (url, coop, onionLocation) =>
+      ipcRenderer.send('adblock-ext:document', url, coop, onionLocation),
 
     /** @param {(settings: { enabled: boolean, allowlist: string[] }) => void} callback */
     onSettings: (callback) => {

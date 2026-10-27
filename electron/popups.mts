@@ -556,6 +556,8 @@ export function setupPopups(options: {
   isWebGuest: (contents: Electron.WebContents) => boolean;
   assertShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;
+  /** Every web guest's top-level response in the sessions without extensions, for others to read. */
+  onTopLevelResponse?: (s: Electron.Session, url: string, headers: Record<string, string[]> | undefined) => void;
 }): void {
   sendToShell = options.sendToShell;
   isWebGuest = options.isWebGuest;
@@ -570,7 +572,9 @@ export function setupPopups(options: {
     s.webRequest.onResponseStarted({ urls: ['https://*/*', 'http://*/*'] }, (details) => {
       if (details.resourceType !== 'mainFrame' || details.webContentsId === undefined) return;
       const contents = liveContents(details.webContentsId);
-      if (contents && isWebGuest(contents)) documentArriving(contents.id, details.url, details.responseHeaders);
+      if (!contents || !isWebGuest(contents)) return;
+      documentArriving(contents.id, details.url, details.responseHeaders);
+      options.onTopLevelResponse?.(s, details.url, details.responseHeaders);
     });
   }
   registerBridge();

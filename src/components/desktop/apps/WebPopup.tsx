@@ -12,6 +12,7 @@ import { LoadErrorPage } from '@/components/desktop/apps/WebBrowser';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { consumeTabCommands, publishTabCommand } from '@/lib/browserTabBus';
+import { isOnionUrl } from '@/lib/tor';
 import { isAllowedTabUrl } from '@/lib/crx';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 
@@ -112,7 +113,7 @@ export function WebPopup({ windowId, params }: AppComponentProps) {
     );
   }
 
-  const secure = url.startsWith('https:') || url.startsWith('nsite:');
+  const secure = url.startsWith('https:') || url.startsWith('nsite:') || isOnionUrl(url);
   const SiteIcon = secure ? Lock : Globe;
 
   return (

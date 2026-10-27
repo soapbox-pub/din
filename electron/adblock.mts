@@ -375,10 +375,11 @@ export function setupAdblock(options: {
   sendToShell: (channel: string, payload?: unknown) => void;
   /**
    * A top-level response in the persistent session, with its
-   * Cross-Origin-Opener-Policy. The extension is the one thing there that may
-   * watch responses (see popups.mts), so it passes them on.
+   * Cross-Origin-Opener-Policy and Onion-Location. The extension is the one
+   * thing there that may watch responses (see popups.mts), so it passes them
+   * on.
    */
-  onTopLevelResponse: (url: string, coop: string | null) => void;
+  onTopLevelResponse: (url: string, coop: string | null, onionLocation: string | null) => void;
 }): void {
   sendToShell = options.sendToShell;
   isBrowserTab = options.isBrowserTab;
@@ -419,9 +420,13 @@ export function setupAdblock(options: {
       }
     }
   });
-  ipcMain.on('adblock-ext:document', (event, url: unknown, coop: unknown) => {
+  ipcMain.on('adblock-ext:document', (event, url: unknown, coop: unknown, onionLocation: unknown) => {
     if (!isExtensionSender(event) || typeof url !== 'string') return;
-    options.onTopLevelResponse(url, typeof coop === 'string' ? coop : null);
+    options.onTopLevelResponse(
+      url,
+      typeof coop === 'string' ? coop : null,
+      typeof onionLocation === 'string' ? onionLocation : null,
+    );
   });
   options.browserSession.extensions.loadExtension(EXTENSION_DIR).catch((error) => {
     console.error('adblock: failed to load the extension:', error);

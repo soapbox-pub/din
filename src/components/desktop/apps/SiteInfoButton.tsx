@@ -3,6 +3,8 @@ import { AppWindow, Lock, RotateCw, ShieldCheck, TriangleAlert } from 'lucide-re
 import { cn } from '@/lib/utils';
 import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
 import { getPopupsBridge } from '@/lib/popups';
+import { isOnionUrl } from '@/lib/tor';
+import { OnionIcon } from '@/components/icons/OnionIcon';
 import type { SiteCapability } from '@/lib/promptBridge';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 import { usePopupSettings } from '@/hooks/usePopups';
@@ -25,9 +27,14 @@ function siteName(url: string): string {
   return url.replace(/^[a-z]+:\/\//i, '').split('/')[0] || url;
 }
 
-type Security = 'secure' | 'verified' | 'exception' | 'insecure';
+type Security = 'secure' | 'verified' | 'onion' | 'exception' | 'insecure';
 
 const SECURITY: Record<Security, { title: string; detail: string; warn: boolean }> = {
+  onion: {
+    title: 'Onion service',
+    detail: "Tor encrypts this connection end to end, and the address is the site's own key, so no one can stand in for it.",
+    warn: false,
+  },
   secure: {
     title: 'Connection is secure',
     detail: 'Information you send to this site is private to it.',
@@ -104,7 +111,9 @@ export function SiteInfoButton({
   const security: Security =
     scheme === 'nsite'
       ? 'verified'
-      : scheme === 'https'
+      : isOnionUrl(url) && !info?.certificateException
+        ? 'onion'
+        : scheme === 'https'
         ? info?.certificateException
           ? 'exception'
           : 'secure'
@@ -149,6 +158,8 @@ export function SiteInfoButton({
         >
           {warn ? (
             <TriangleAlert className="size-3.5" aria-hidden />
+          ) : security === 'onion' ? (
+            <OnionIcon className="size-3.5" />
           ) : (
             <Lock className="size-3.5" aria-hidden />
           )}
@@ -168,6 +179,8 @@ export function SiteInfoButton({
               <TriangleAlert className="size-4" aria-hidden />
             ) : security === 'verified' ? (
               <ShieldCheck className="size-4" aria-hidden />
+            ) : security === 'onion' ? (
+              <OnionIcon className="size-4" />
             ) : (
               <Lock className="size-4" aria-hidden />
             )}

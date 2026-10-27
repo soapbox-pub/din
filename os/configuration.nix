@@ -210,6 +210,14 @@ let
     text = builtins.readFile ./din-time.sh;
   };
 
+  # The privileged half of Settings → Wi-Fi → Tor, which turns Tor on and
+  # off (see the script, and electron/tor.mts).
+  din-tor = pkgs.writeShellApplication {
+    name = "din-tor";
+    runtimeInputs = with pkgs; [ coreutils systemd ];
+    text = builtins.readFile ./din-tor.sh;
+  };
+
   # Puts what the boot screen shows on the boot partition (see the script,
   # and electron/boot-screen.mts).
   din-boot-screen = pkgs.writeShellApplication {
@@ -318,8 +326,8 @@ let
   # bubblewrap to sandbox them (electron/files.mts), CUPS's tools and poppler's
   # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
   # and sudo (from /run/wrappers) for
-  # the Installer's, the updater's, the keyboard layout's, and the time
-  # zone's helpers.
+  # the Installer's, the updater's, the keyboard layout's, the time zone's
+  # and Tor's helpers.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xorg.xvfb}/bin:${pkgs.xorg.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils ]}:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
@@ -330,6 +338,7 @@ let
     export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
     export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
     export DIN_TIME=${din-time}/bin/din-time
+    export DIN_TOR=${din-tor}/bin/din-tor
     export DIN_FWUPDMGR=${config.services.fwupd.package}/bin/fwupdmgr
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
@@ -447,6 +456,19 @@ in
   # picked up by NetworkManager automatically.
   networking.networkmanager.enable = true;
 
+  # Tor, running from boot so it has connected by the time anyone types an
+  # .onion address: Din sends those to its SOCKS port and nothing else, for
+  # now (electron/tor.mts, electron/network.mts). The control socket, which
+  # the `tor` group may use, tells Din how far Tor has got connecting.
+  # Settings → Wi-Fi turns it off by leaving a file behind (os/din-tor.sh),
+  # since NixOS's read-only /etc can't disable a unit.
+  services.tor = {
+    enable = true;
+    client.enable = true;
+    controlSocket.enable = true;
+  };
+  systemd.services.tor.unitConfig.ConditionPathExists = "!/var/lib/din/tor-off";
+
   # GeoClue answers web pages' navigator.geolocation (electron/geolocation.mts):
   # it looks the nearby WiFi networks up in BeaconDB (the module's default
   # provider), and reads a GPS if there is one. Din asks each site in its own
@@ -552,12 +574,13 @@ in
   # before-input-event; nothing new is exposed to renderers. `wheel` gives
   # the developer the machine: sudo, behind the computer's password.
   # The uid is pinned because this user used to be called `web`: installed
-  # machines keep owning their home directory across the rename.
+  # machines keep owning their home directory across the rename. `tor` lets
+  # Din ask Tor, through its control socket, how far it has got connecting.
   users.users.din = {
     isNormalUser = true;
     uid = 1000;
     description = "Din desktop user";
-    extraGroups = [ "wheel" "networkmanager" "video" "audio" "input" ];
+    extraGroups = [ "wheel" "networkmanager" "video" "audio" "input" "tor" ];
     shell = pkgs.zsh;
   };
 
@@ -581,6 +604,7 @@ in
       "${din-keyboard}/bin/din-keyboard"
       "${din-boot-screen}/bin/din-boot-screen"
       "${din-time}/bin/din-time"
+      "${din-tor}/bin/din-tor"
       "${din-lock}/bin/din-lock start"
       "${din-lock}/bin/din-lock status"
       # It checks the old password itself.

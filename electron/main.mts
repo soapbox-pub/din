@@ -54,6 +54,13 @@ import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
+import {
+  attachOnionLocation,
+  onionLocationHeader,
+  onionLocationResponse,
+  registerTorHandlers,
+  torNetworkChanged,
+} from './tor.mts';
 import { registerCursorHandlers } from './cursor.mts';
 import { registerInddHandlers } from './indd.mts';
 import {
@@ -2397,6 +2404,8 @@ function registerSystemEvents(): void {
         if (topic === 'audio') void syncMicMuteLed();
         // A network with a proxy of its own may have come up or gone down.
         if (topic === 'network') void refreshWifiProxy().catch(() => {});
+        // Tor reconnects, or goes quiet, with the network.
+        if (topic === 'network') torNetworkChanged();
         // A network just joined has its AirPlay receivers looked for at once.
         if (topic === 'network') airplayNetworkChanged();
       }, SYSTEM_EVENT_DEBOUNCE_MS),
@@ -5073,6 +5082,7 @@ app.whenReady().then(() => {
     proxySessions: () => [browserSession(), privateBrowserSession(), appSession()],
   });
   registerVpnHandlers({ assertShellSender });
+  registerTorHandlers({ assertShellSender, sendToShell });
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
   registerGuestVisibilityHandlers();
@@ -5187,7 +5197,10 @@ app.whenReady().then(() => {
     isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents,
     assertShellSender,
     sendToShell,
-    onTopLevelResponse: (url, coop) => topLevelResponse(browserSession(), url, coop),
+    onTopLevelResponse: (url, coop, onionLocation) => {
+      topLevelResponse(browserSession(), url, coop);
+      onionLocationResponse(url, onionLocation);
+    },
   });
 
   // The pop-up blocker, and window.opener for windows pages open
@@ -5200,6 +5213,9 @@ app.whenReady().then(() => {
       (isBrowserTabSession(contents.session) || contents.session === appSession()),
     assertShellSender,
     sendToShell,
+    onTopLevelResponse: (s, url, headers) => {
+      if (isBrowserTabSession(s)) onionLocationResponse(url, onionLocationHeader(headers));
+    },
   });
 
   // Route chrome.action popups into the shell instead of native windows.
@@ -5625,6 +5641,8 @@ app.on('web-contents-created', (_event, contents) => {
   // The ad blocker's per-page blocked count (electron/adblock.mts).
   if (isBrowserTabSession(contents.session) && !isExtensionPageGuest) {
     attachAdblock(contents);
+    // The onion service the page names, for the address bar (electron/tor.mts).
+    attachOnionLocation(contents);
   }
 
   if (isBrowserTab && !isExtensionPageGuest) {

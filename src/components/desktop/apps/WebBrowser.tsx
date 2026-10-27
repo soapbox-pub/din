@@ -28,6 +28,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isOnionUrl, torState, type TorStatus } from '@/lib/tor';
+import { useOnionLocation, useTorStatus } from '@/hooks/useTor';
+import { OnionIcon } from '@/components/icons/OnionIcon';
 import {
   resolveNavigation,
   sanitizeImageUrl,
@@ -485,6 +488,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   useWindowTitle(activeTab.title ?? hostnameOf(activeTab.url) ?? (isPrivate ? 'Private window' : 'New tab'));
+  // The onion service the page names, offered while there's a Tor to reach it.
+  const torStatus = useTorStatus();
+  const pageOnion = useOnionLocation(activeTab.wcId);
+  const onionLocation = torStatus?.port != null ? pageOnion : null;
 
   const updateTab = useCallback(
     (id: string, patch: Partial<Tab> | ((tab: Tab) => Partial<Tab>)) => {
@@ -1823,6 +1830,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           history={browsingHistory}
           onChangeValue={(text) => updateTab(activeId, { address: text })}
           onNavigate={navigate}
+          onionLocation={onionLocation}
           site={
             /^(https?|nsite):\/\//i.test(activeTab.url) ? (
               <SiteInfoButton
@@ -2097,6 +2105,7 @@ function AddressBar({
   history,
   onChangeValue,
   onNavigate,
+  onionLocation,
   site,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
@@ -2106,6 +2115,8 @@ function AddressBar({
   history: BrowserHistoryEntry[];
   onChangeValue: (text: string) => void;
   onNavigate: (raw: string) => void;
+  /** The onion service the page names (Onion-Location), offered at the end of the bar. */
+  onionLocation?: string | null;
   /** The page's site info button, shown in place of the search icon. */
   site?: React.ReactNode;
 }) {
@@ -2175,6 +2186,9 @@ function AddressBar({
     }
   };
 
+  // Typing hides it, along with the site's icon.
+  const showOnion = !!onionLocation && !open;
+
   return (
     <div className="relative flex-1">
       {/* While the user types, the box is a search box; otherwise its icon
@@ -2223,8 +2237,30 @@ function AddressBar({
         placeholder="Search or type a URL"
         spellCheck={false}
         autoComplete="off"
-        className="h-8 w-full rounded-full border border-border/60 bg-secondary/80 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className={cn(
+          'h-8 w-full rounded-full border border-border/60 bg-secondary/80 pl-8 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          showOnion ? 'pr-36' : 'pr-3',
+        )}
       />
+      {showOnion && (
+        <button
+          type="button"
+          // Keep the click from selecting the address first.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onNavigate(onionLocation)}
+          title={`Open this site's onion service: ${hostnameOf(onionLocation) ?? onionLocation}`}
+          aria-label="Open this site's onion service"
+          className={cn(
+            'absolute right-1 top-1/2 flex h-6 -translate-y-1/2 items-center gap-1 rounded-full px-2',
+            'bg-violet-600 text-xs font-medium text-white shadow-sm',
+            'hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95',
+          )}
+        >
+          <OnionIcon className="size-3.5" />
+          .onion available
+        </button>
+      )}
       {show && (
         <ul
           id="address-bar-suggestions"
@@ -3070,8 +3106,9 @@ function CertificateWarning({
 /**
  * Map a failed load to a friendly headline + explanation. Falls back to a
  * generic message carrying Chromium's raw error string for anything unmapped.
+ * An onion site's failure is mostly Tor's, so it says where Tor stands.
  */
-function describeLoadError(info: LoadErrorInfo): {
+function describeLoadError(info: LoadErrorInfo, tor: TorStatus | null): {
   title: string;
   detail: string;
   offline: boolean;
@@ -3081,6 +3118,34 @@ function describeLoadError(info: LoadErrorInfo): {
     host = new URL(info.url).host || null;
   } catch {
     // Malformed URL: fall back to the generic "this site" phrasing.
+  }
+  if (isOnionUrl(info.url) && info.errorDescription !== 'ERR_INTERNET_DISCONNECTED') {
+    switch (tor ? torState(tor) : 'missing') {
+      case 'off':
+        return {
+          title: 'Tor is turned off',
+          detail: 'Onion sites open through Tor. Turn it on in Settings → Wi-Fi, and this page loads once Tor connects.',
+          offline: false,
+        };
+      case 'missing':
+        return {
+          title: "Tor isn't running",
+          detail: 'Onion sites open through Tor. Start Tor or Tor Browser, and this page loads once Din finds it.',
+          offline: false,
+        };
+      case 'connecting':
+        return {
+          title: 'Tor is still connecting',
+          detail: `This page loads once Tor has connected${tor?.progress != null ? ` (${tor.progress}% so far)` : ''}.`,
+          offline: false,
+        };
+      case 'ready':
+        return {
+          title: "This onion site can't be reached",
+          detail: `${host ?? 'The site'} didn't answer through Tor. It may be offline, or the address may be wrong.`,
+          offline: false,
+        };
+    }
   }
   switch (info.errorDescription) {
     case 'ERR_NAME_NOT_RESOLVED':
@@ -3141,9 +3206,19 @@ export function LoadErrorPage({
   info: LoadErrorInfo;
   onRetry: () => void;
 }) {
-  const { title, detail, offline } = describeLoadError(info);
+  const tor = useTorStatus();
+  const onion = isOnionUrl(info.url);
+  const { title, detail, offline } = describeLoadError(info, tor);
   const code = info.errorDescription || `Error ${info.errorCode}`;
-  const Icon = offline ? WifiOff : Globe;
+  const Icon = offline ? WifiOff : onion ? OnionIcon : Globe;
+
+  // An onion site that failed for want of Tor loads once Tor is ready.
+  const torReady = !!tor && torState(tor) === 'ready';
+  const wasReady = useRef(torReady);
+  useEffect(() => {
+    if (onion && torReady && !wasReady.current) onRetry();
+    wasReady.current = torReady;
+  }, [onion, torReady, onRetry]);
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-background p-6">
       <div className="w-full max-w-md space-y-5 text-center">
