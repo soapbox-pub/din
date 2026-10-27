@@ -69,6 +69,7 @@ import {
 import { registerTrayHandlers } from './tray.mts';
 import { registerOpenUri } from './open-uri.mts';
 import { registerNotificationHandlers } from './notifications.mts';
+import { registerGeolocationHandlers } from './geolocation.mts';
 import { watchLiveStick } from './live-stick.mts';
 import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
@@ -2989,6 +2990,13 @@ const HIGHLIGHT_PRELOAD = path.join(import.meta.dirname, 'browser-highlight-prel
 const NOTIFICATION_PRELOAD = path.join(import.meta.dirname, 'notification-preload.cjs');
 
 /**
+ * Absolute path to the session preload that answers web pages'
+ * navigator.geolocation from GeoClue (see electron/geolocation.mts). Every
+ * page gets it - browser tabs, private ones, and installed web apps.
+ */
+const GEOLOCATION_PRELOAD = path.join(import.meta.dirname, 'geolocation-preload.cjs');
+
+/**
  * Absolute path to the session preload that sends web pages' print() to
  * Din's print dialog (see electron/printing.mts). Every page gets it, in
  * every frame.
@@ -3926,12 +3934,49 @@ function siteNotificationPermission(s: Electron.Session, origin: string): Notifi
   return allowed === undefined ? 'default' : allowed ? 'granted' : 'denied';
 }
 
+/** Per session: ask for capabilities as its permission request handler does. */
+const siteAskers = new WeakMap<Electron.Session, (origin: string, capabilities: SiteCapability[]) => Promise<boolean>>();
+
+/** Ask (or recall) whether a site may use a capability, as Chromium's own requests are. */
+function requestSiteCapability(s: Electron.Session, origin: string, capability: SiteCapability): Promise<boolean> {
+  return siteAskers.get(s)?.(origin, [capability]) ?? Promise.resolve(false);
+}
+
+/** Whether the user has allowed a site a capability. */
+function siteCapabilityAllowed(s: Electron.Session, origin: string, capability: SiteCapability): boolean {
+  return decisionsFor(s).get(decisionKey(origin, capability)) === true;
+}
+
 function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean }): void {
   const decisions = decisionsFor(s);
   const dismissed = dismissedFor(s);
   const key = decisionKey;
   // One prompt per (origin, capabilities) at a time; repeat requests share it.
   const asking = new Map<string, Promise<boolean>>();
+
+  const ask = (origin: string, capabilities: SiteCapability[]): Promise<boolean> => {
+    if (capabilities.some((c) => decisions.get(key(origin, c)) === false || dismissed.has(key(origin, c)))) {
+      return Promise.resolve(false);
+    }
+    const undecided = capabilities.filter((c) => !decisions.has(key(origin, c)));
+    if (undecided.length === 0) return Promise.resolve(true);
+    const askKey = `${origin}\u0000${undecided.join(',')}`;
+    let answer = asking.get(askKey);
+    if (!answer) {
+      const remembered = remembersDecisions(s);
+      answer = askShell({ kind: 'permission', origin, capabilities: undecided, remembered }).then((allow) => {
+        for (const c of undecided) {
+          if (allow === null) dismissed.add(key(origin, c));
+          else decide(s, origin, c, allow);
+        }
+        asking.delete(askKey);
+        return allow === true;
+      });
+      asking.set(askKey, answer);
+    }
+    return answer;
+  };
+  if (prompts) siteAskers.set(s, ask);
 
   s.setPermissionRequestHandler((_contents, permission, callback, details) => {
     // A nostrconnect:// link is an app asking to use the user's account
@@ -3964,36 +4009,20 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
       callback(prompts);
       return;
     }
+    // Chromium's own geolocation can't locate anything here (it would send
+    // the request to Google, without a key); pages get Din's instead
+    // (geolocation-preload.cjs), which asks through `ask` below.
+    if (permission === 'geolocation') {
+      callback(false);
+      return;
+    }
     const capabilities = prompts ? requestedCapabilities(permission, details) : null;
     const origin = siteOriginOf(details.requestingUrl);
     if (!capabilities || !origin) {
       callback(false);
       return;
     }
-    if (capabilities.some((c) => decisions.get(key(origin, c)) === false || dismissed.has(key(origin, c)))) {
-      callback(false);
-      return;
-    }
-    const undecided = capabilities.filter((c) => !decisions.has(key(origin, c)));
-    if (undecided.length === 0) {
-      callback(true);
-      return;
-    }
-    const askKey = `${origin}\u0000${undecided.join(',')}`;
-    let answer = asking.get(askKey);
-    if (!answer) {
-      const remembered = remembersDecisions(s);
-      answer = askShell({ kind: 'permission', origin, capabilities: undecided, remembered }).then((allow) => {
-        for (const c of undecided) {
-          if (allow === null) dismissed.add(key(origin, c));
-          else decide(s, origin, c, allow);
-        }
-        asking.delete(askKey);
-        return allow === true;
-      });
-      asking.set(askKey, answer);
-    }
-    answer.then(callback, () => callback(false));
+    ask(origin, capabilities).then(callback, () => callback(false));
   });
 
   s.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) => {
@@ -4981,6 +5010,7 @@ app.whenReady().then(() => {
   // Web pages' notifications go to Din's notification center.
   for (const s of [browserSession(), privateBrowserSession(), appSession()]) {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
+    s.registerPreloadScript({ id: 'din-geolocation', type: 'frame', filePath: GEOLOCATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
     s.registerPreloadScript({ id: 'din-screen-share', type: 'frame', filePath: SCREEN_SHARE_PRELOAD });
     s.registerPreloadScript({ id: 'din-media', type: 'frame', filePath: MEDIA_PRELOAD });
@@ -5057,6 +5087,10 @@ app.whenReady().then(() => {
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerOpenUri({ sendToShell });
   registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
+  registerGeolocationHandlers({
+    request: (s, origin) => requestSiteCapability(s, origin, 'geolocation'),
+    allowed: (s, origin) => siteCapabilityAllowed(s, origin, 'geolocation'),
+  });
   registerInstallerHandlers({ assertShellSender, sendToShell });
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerBluetoothHandlers({ assertShellSender, sendToShell });

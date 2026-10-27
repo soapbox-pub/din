@@ -447,6 +447,20 @@ in
   # picked up by NetworkManager automatically.
   networking.networkmanager.enable = true;
 
+  # GeoClue answers web pages' navigator.geolocation (electron/geolocation.mts):
+  # it looks the nearby WiFi networks up in BeaconDB (the module's default
+  # provider), and reads a GPS if there is one. Din asks each site in its own
+  # prompt and is the user's GeoClue agent itself, in place of the demo one.
+  services.geoclue2 = {
+    enable = true;
+    enableDemoAgent = false;
+    whitelistedAgents = [ "din" ];
+    appConfig.din = {
+      isAllowed = true;
+      isSystem = true;
+    };
+  };
+
   # udisks backs the USB sticks and SD cards Din mounts as they're plugged in
   # and ejects from Files (electron/volumes.mts), under /run/media/din. Din's
   # session has no seat, so udisks would ask for an admin password even for
