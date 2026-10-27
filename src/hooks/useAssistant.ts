@@ -13,6 +13,7 @@ import {
   type PermissionDecision,
   type PermissionRequest,
   type PromptAttachment,
+  worktreeMainCheckout,
 } from '@/lib/assistant';
 import { getFsBridge } from '@/lib/fs';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -328,6 +329,28 @@ export function useHomeDirectory(): string | undefined {
     staleTime: Infinity,
   });
   return data;
+}
+
+/**
+ * For each folder that is a git worktree, the main checkout it belongs to,
+ * so a project's conversations can go under one name however many
+ * worktrees they ran in. Folders that aren't worktrees are left out.
+ */
+export function useMainCheckouts(directories: string[]): Map<string, string> {
+  const fs = getFsBridge();
+  return useQueries({
+    queries: directories.map((directory) => ({
+      queryKey: ['fs', 'git-main-checkout', directory],
+      queryFn: async () => {
+        const file = await fs!.readFile(`${directory.replace(/\/+$/, '')}/.git`, 4096).catch(() => null);
+        return file ? worktreeMainCheckout(new TextDecoder().decode(file.data)) : null;
+      },
+      enabled: fs !== undefined,
+      staleTime: Infinity,
+    })),
+    combine: (results) =>
+      new Map(directories.flatMap((directory, i) => (results[i].data ? [[directory, results[i].data] as const] : []))),
+  });
 }
 
 /** The folder new conversations work in. */

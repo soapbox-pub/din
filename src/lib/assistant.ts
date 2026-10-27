@@ -85,6 +85,8 @@ export interface TokenUsage {
 export interface SessionInfo {
   id: string;
   parentID?: string;
+  /** The same for every worktree of a repository (its root commit). */
+  projectID?: string;
   title?: string;
   agent?: string;
   model?: ModelRef;
@@ -461,6 +463,17 @@ export function directoryName(directory: string, home: string | undefined): stri
 export function tildify(directory: string, home: string | undefined): string {
   if (home && (directory === home || directory.startsWith(`${home}/`))) return `~${directory.slice(home.length)}`;
   return directory;
+}
+
+/**
+ * The main checkout a git worktree belongs to, from the worktree's `.git`
+ * file (`gitdir: /repo/.git/worktrees/name`), or null when it says
+ * something else.
+ */
+export function worktreeMainCheckout(gitFile: string): string | null {
+  const gitdir = /^gitdir:\s*(.+)$/m.exec(gitFile)?.[1].trim();
+  const match = gitdir && /^(\/.*)\/\.git\/worktrees\/[^/]+\/?$/.exec(gitdir);
+  return match ? match[1] : null;
 }
 
 /** What a session is called before the server has titled it. */
