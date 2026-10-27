@@ -7,6 +7,11 @@
 //   - each subscription becomes one REQ on each of its relays; relays match
 //   - `since` on every filter is raised to when the site subscribed, and then
 //     to the newest event delivered, so a reconnection doesn't replay history
+//   - except by two days on filters that can match gift wraps (kind 1059),
+//     whose created_at NIP-59 backdates by up to that much: relays hold live
+//     events to `since` too, so without the margin they'd send almost none.
+//     What a REQ turns up before EOSE that is older than `since` is history,
+//     not news, and isn't delivered
 //   - events are signature-checked and deduplicated per site, then handed to
 //     `deliver` (the site's service worker)
 //   - dropped connections come back with backoff, and at once when the
@@ -33,6 +38,12 @@ const MAX_LIST = 500;
 const SEEN_LIMIT = 2_000;
 const BACKOFF_MIN_MS = 2_000;
 const BACKOFF_MAX_MS = 5 * 60_000;
+/** How far back NIP-59 lets a gift wrap's created_at be set, in seconds. */
+const GIFT_WRAP_BACKDATE = 2 * 86_400;
+
+function matchesGiftWraps(filter: NostrFilter): boolean {
+  return !Array.isArray(filter.kinds) || filter.kinds.includes(1059);
+}
 
 export type NostrFilter = Record<string, unknown>;
 
@@ -271,7 +282,10 @@ class Relay {
     const since = this.#pool.sinceFor(wanted.site);
     const filters = wanted.filters.map((f) => ({
       ...f,
-      since: Math.max(typeof f.since === 'number' ? f.since : 0, since),
+      since: Math.max(
+        typeof f.since === 'number' ? f.since : 0,
+        matchesGiftWraps(f) ? since - GIFT_WRAP_BACKDATE : since,
+      ),
     }));
     if (!this.#open) return;
     this.#send(['REQ', id, ...filters]);
@@ -301,7 +315,7 @@ class Relay {
         if (!wanted || !isEvent(second)) return;
         const status = this.#subStatus.get(first);
         if (status) status.events++;
-        this.#pool.received(wanted.site, second, this.url);
+        this.#pool.received(wanted.site, second, this.url, !status?.eose);
         return;
       }
       case 'EOSE': {
@@ -379,6 +393,8 @@ export interface PushPoolOptions {
 export interface SiteStats {
   delivered: number;
   duplicates: number;
+  /** Stored events older than `since`, skipped. */
+  history: number;
   badSignatures: number;
   lastDelivered: { id: string; kind: number; created_at: number; relay: string; at: number } | null;
 }
@@ -414,7 +430,7 @@ export class PushPool {
   #siteStats(site: string): SiteStats {
     let stats = this.#stats.get(site);
     if (!stats) {
-      stats = { delivered: 0, duplicates: 0, badSignatures: 0, lastDelivered: null };
+      stats = { delivered: 0, duplicates: 0, history: 0, badSignatures: 0, lastDelivered: null };
       this.#stats.set(site, stats);
     }
     return stats;
@@ -436,15 +452,22 @@ export class PushPool {
     this.changed();
   }
 
-  received(site: string, event: NostrEvent, relay: string): void {
+  /** An event a relay sent; `stored` when it came before the REQ's EOSE. */
+  received(site: string, event: NostrEvent, relay: string, stored: boolean): void {
     const push = this.#sites.get(site);
     if (!push) return;
+    const stats = this.#siteStats(site);
+    // History the gift-wrap margin turned up. Not marked seen: a copy of it
+    // that some other relay sends live is still news.
+    if (stored && event.created_at <= push.since) {
+      stats.history++;
+      return;
+    }
     let seen = this.#seen.get(site);
     if (!seen) {
       seen = new Set();
       this.#seen.set(site, seen);
     }
-    const stats = this.#siteStats(site);
     if (seen.has(event.id)) {
       stats.duplicates++;
       return;
