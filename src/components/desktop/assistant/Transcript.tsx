@@ -1,4 +1,4 @@
-import { createElement, memo, useState, type ReactNode } from 'react';
+import { createElement, memo, useEffect, useState, type ReactNode } from 'react';
 import {
   Bot,
   Braces,
@@ -36,21 +36,55 @@ import { cn } from '@/lib/utils';
 const MAX_OUTPUT_CHARS = 20_000;
 
 type AssistantMessage = Extract<SessionMessage, { type: 'assistant' }>;
+type UserMessage = Extract<SessionMessage, { type: 'user' }>;
+type IdleMessage = Extract<SessionMessage, { type: 'idle' }>;
 
-/** Messages grouped as the transcript shows them: each assistant run is one turn. */
-type Entry =
-  | { kind: 'user'; message: Extract<SessionMessage, { type: 'user' }> }
-  | { kind: 'turn'; id: string; messages: AssistantMessage[] }
-  | { kind: 'note'; message: SessionMessage };
+/** The agent's work on one prompt: from the user's message to the session going idle. */
+interface TurnEntry {
+  kind: 'turn';
+  id: string;
+  /** When the prompt was sent. */
+  start: number;
+  /** Its assistant messages, and whatever else the session recorded meanwhile. */
+  items: SessionMessage[];
+  /** How it ended, once it has. */
+  idle?: IdleMessage;
+}
+
+/** Messages grouped as the transcript shows them. */
+type Entry = { kind: 'user'; message: UserMessage } | TurnEntry | { kind: 'note'; message: SessionMessage };
 
 function group(messages: SessionMessage[]): Entry[] {
   const entries: Entry[] = [];
+  let turn: TurnEntry | undefined;
+  // The prompt the agent is working on, until the session goes idle.
+  let prompt: UserMessage | undefined;
   for (const message of messages) {
-    if (message.type === 'user') entries.push({ kind: 'user', message });
-    else if (message.type === 'assistant') {
-      const last = entries[entries.length - 1];
-      if (last?.kind === 'turn') last.messages.push(message);
-      else entries.push({ kind: 'turn', id: message.id, messages: [message] });
+    if (message.type === 'user') {
+      // One sent while it works closes the turn so far; the agent's next steps start another.
+      entries.push({ kind: 'user', message });
+      turn = undefined;
+      prompt = message;
+    } else if (message.type === 'idle') {
+      if (!turn && prompt) {
+        turn = { kind: 'turn', id: `turn:${prompt.id}`, start: prompt.time.created, items: [] };
+        entries.push(turn);
+      }
+      if (turn) turn.idle = message;
+      else entries.push({ kind: 'note', message });
+      turn = undefined;
+      prompt = undefined;
+    } else if (message.type === 'assistant' || turn || prompt) {
+      if (!turn) {
+        turn = {
+          kind: 'turn',
+          id: prompt ? `turn:${prompt.id}` : message.id,
+          start: prompt?.time.created ?? message.time.created,
+          items: [],
+        };
+        entries.push(turn);
+      }
+      turn.items.push(message);
     } else entries.push({ kind: 'note', message });
   }
   return entries;
@@ -90,14 +124,24 @@ export const Transcript = memo(function Transcript({
         if (entry.kind === 'turn') {
           return (
             <li key={entry.id} className="group/turn">
-              <Turn messages={entry.messages} working={running && entry === last} latest={entry === last} />
+              <Turn turn={entry} working={running && entry === last} latest={entry === last} home={home} />
             </li>
           );
         }
         const note = <Note message={entry.message} home={home} />;
         return note ? <li key={entry.message.id}>{note}</li> : null;
       })}
-      {running && last?.kind !== 'turn' && (
+      {running && last?.kind === 'user' && (
+        <li key={`turn:${last.message.id}`} className="group/turn">
+          <Turn
+            turn={{ kind: 'turn', id: `turn:${last.message.id}`, start: last.message.time.created, items: [] }}
+            working
+            latest
+            home={home}
+          />
+        </li>
+      )}
+      {running && last?.kind === 'note' && (
         <li>
           <Working />
         </li>
@@ -197,11 +241,16 @@ type Step = (ToolPart | ReasoningPart) & { key: string };
 type Block =
   | { kind: 'text'; key: string; text: string }
   | { kind: 'steps'; key: string; steps: Step[] }
-  | { kind: 'error'; key: string; message: string };
+  | { kind: 'error'; key: string; message: string }
+  | { kind: 'note'; key: string; message: SessionMessage };
 
-function blocks(messages: AssistantMessage[]): Block[] {
+function blocks(items: SessionMessage[]): Block[] {
   const out: Block[] = [];
-  for (const message of messages) {
+  for (const message of items) {
+    if (message.type !== 'assistant') {
+      out.push({ kind: 'note', key: message.id, message });
+      continue;
+    }
     message.content.forEach((part, index) => {
       const key = part.type === 'tool' ? part.id : `${message.id}:${index}`;
       if (part.type === 'text') {
@@ -224,28 +273,104 @@ function toolRunning(step: Step): boolean {
   return step.type === 'tool' && (step.state.status === 'streaming' || step.state.status === 'running');
 }
 
-function Turn({ messages, working, latest }: { messages: AssistantMessage[]; working: boolean; latest: boolean }) {
-  const lastMessage = messages[messages.length - 1];
-  const list = blocks(messages);
+/** The current time, ticking each second while `active`. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+/** "12s", "5m 12s", "1h 5m". */
+function duration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/**
+ * One turn: the work folded into a single line that narrates it while it runs
+ * and sums it up after ("Worked for 5m 12s"), then the reply in full.
+ */
+function Turn({ turn, working, latest, home }: { turn: TurnEntry; working: boolean; latest: boolean; home?: string }) {
+  const [open, setOpen] = useState(false);
+  const now = useNow(working);
+  const assistants = turn.items.filter((m): m is AssistantMessage => m.type === 'assistant');
+  const lastMessage = assistants[assistants.length - 1];
+  const list = blocks(turn.items);
   const tail = list[list.length - 1];
   const tailSteps = tail?.kind === 'steps' ? tail.steps : [];
   const lastStep = tailSteps[tailSteps.length - 1];
   // The trailing group narrates the work while a step in it is still going.
   const live = working && (tailSteps.some(toolRunning) || (lastStep?.type === 'reasoning' && !lastStep.time?.completed));
-  const reply = list.flatMap((block) => (block.kind === 'text' ? [block.text.trim()] : [])).join('\n\n');
+
+  // The reply is the prose after the last step; everything before it is the work.
+  let cut = -1;
+  list.forEach((block, index) => {
+    if (block.kind === 'steps' || block.kind === 'note') cut = index;
+  });
+  const work = list.slice(0, cut + 1).filter((block) => block.kind !== 'error');
+  const workErrors = list.slice(0, cut + 1).filter((block) => block.kind === 'error');
+  const after = list.slice(cut + 1);
+  const reply = after.flatMap((block) => (block.kind === 'text' ? [block.text.trim()] : [])).join('\n\n');
+
+  const outcome = turn.idle?.outcome ?? (lastMessage?.error ? 'failed' : 'succeeded');
+  const end = turn.idle?.time.created ?? Math.max(turn.start, ...assistants.map((m) => m.time.completed ?? m.time.created));
+  const elapsed = duration(Math.max(0, (working ? now : end) - turn.start));
+  let label: string;
+  if (working) {
+    const step = live ? activeLabel(tailSteps) : tail?.kind === 'text' ? 'Writing…' : 'Thinking…';
+    label = `Working · ${elapsed} · ${step}`;
+  } else if (outcome === 'interrupted') label = `Stopped after ${elapsed}`;
+  else if (outcome === 'failed') label = `Failed after ${elapsed}`;
+  else label = `Worked for ${elapsed}`;
+
+  const render = (block: Block) => {
+    if (block.kind === 'text') return <Markdown key={block.key} text={block.text} />;
+    if (block.kind === 'error') return <ErrorBanner key={block.key} message={block.message} />;
+    if (block.kind === 'note') return <Note key={block.key} message={block.message} home={home} />;
+    return <Steps key={block.key} steps={block.steps} live={live && block === tail} />;
+  };
+
+  const summary = (
+    <>
+      {working && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
+      <span className={cn('min-w-0 truncate', working && SHIMMER)}>{label}</span>
+    </>
+  );
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {list.map((block) => {
-        if (block.kind === 'text') return <Markdown key={block.key} text={block.text} />;
-        if (block.kind === 'error') return <ErrorBanner key={block.key} message={block.message} />;
-        return <Steps key={block.key} steps={block.steps} live={live && block === tail} />;
-      })}
-      {lastMessage?.retry && (
+      {work.length > 0 ? (
+        <Collapsible open={open} onOpenChange={setOpen}>
+          <CollapsibleTrigger className={cn(TRIGGER, 'max-w-full')}>
+            {summary}
+            <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="ml-1.5 mt-3 flex flex-col gap-4 border-l border-border pl-4">{work.map(render)}</div>
+          </CollapsibleContent>
+        </Collapsible>
+      ) : (
+        (working || outcome !== 'succeeded') && (
+          <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">{summary}</p>
+        )
+      )}
+      {workErrors.map(render)}
+      {after.map(render)}
+      {turn.idle?.outcome === 'failed' && turn.idle.error && (
+        <ErrorBanner message={turn.idle.error.message ?? 'The assistant stopped with an error'} />
+      )}
+      {working && lastMessage?.retry && (
         <p className="text-xs text-muted-foreground">
           Retrying (attempt {lastMessage.retry.attempt})… {lastMessage.retry.error.message}
         </p>
       )}
-      {working && !live && <Working />}
       {!working && reply && (
         <div
           className={cn(

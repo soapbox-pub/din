@@ -540,6 +540,7 @@ function TranscriptSkeleton() {
         <Skeleton className="h-11 w-2/3 rounded-3xl" />
       </div>
       <div className="space-y-3">
+        <Skeleton className="mb-5 h-4 w-32" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-5/6" />
         <Skeleton className="h-8 w-full rounded-lg" />
