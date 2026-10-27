@@ -9,6 +9,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
@@ -1069,27 +1070,60 @@ function AccountPanel({
       <div className="flex flex-col gap-1 p-2">
         {otherUsers.map((user) => {
           const userPending = isLoading && !user.metadata.name;
+          const userNpub = nip19.npubEncode(user.pubkey);
           return (
-            <button
-              key={user.id}
-              type="button"
-              onClick={() => void setLogin(user.id)}
-              className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Avatar className="size-7" shape={getAvatarShape(user.metadata)}>
-                <AvatarImage src={user.metadata.picture} alt="" />
-                <AvatarFallback className="text-xs">
-                  {userPending ? (
-                    <Skeleton className="size-full rounded-full" />
-                  ) : (
-                    displayName(user).charAt(0)
-                  )}
-                </AvatarFallback>
-              </Avatar>
-              <span className="truncate text-sm text-foreground">
-                {userPending ? <Skeleton className="h-3.5 w-20" /> : displayName(user)}
-              </span>
-            </button>
+            <ContextMenu key={user.id}>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => void setLogin(user.id)}
+                  className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Avatar className="size-7" shape={getAvatarShape(user.metadata)}>
+                    <AvatarImage src={user.metadata.picture} alt="" />
+                    <AvatarFallback className="text-xs">
+                      {userPending ? (
+                        <Skeleton className="size-full rounded-full" />
+                      ) : (
+                        displayName(user).charAt(0)
+                      )}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="truncate text-sm text-foreground">
+                    {userPending ? <Skeleton className="h-3.5 w-20" /> : displayName(user)}
+                  </span>
+                </button>
+              </ContextMenuTrigger>
+              {/* Items that leave the panel close it, as its own buttons do. */}
+              <ContextMenuContent className="w-56">
+                <ContextMenuItem onSelect={() => void setLogin(user.id)}>Switch to this account</ContextMenuItem>
+                <PopoverClose asChild>
+                  <ContextMenuItem onSelect={() => openUrl(`https://ditto.pub/${userNpub}`)}>
+                    View profile
+                  </ContextMenuItem>
+                </PopoverClose>
+                <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(userNpub).catch(() => {})}>
+                  Copy npub
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                {isNostrdAccount(user.id) ? (
+                  <PopoverClose asChild>
+                    <ContextMenuItem
+                      variant="destructive"
+                      onSelect={() => onRemoveAccount({ pubkey: user.pubkey, name: displayName(user) })}
+                    >
+                      <UserMinus />
+                      Remove from this computer…
+                    </ContextMenuItem>
+                  </PopoverClose>
+                ) : (
+                  <ContextMenuItem variant="destructive" onSelect={() => removeLogin(user.id)}>
+                    <UserMinus />
+                    Remove account
+                  </ContextMenuItem>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
 

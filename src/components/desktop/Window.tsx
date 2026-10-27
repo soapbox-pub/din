@@ -5,6 +5,7 @@ import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { WindowContextMenu } from '@/components/desktop/WindowContextMenu';
 import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
 import { animateGenieMesh } from '@/lib/genieMesh';
@@ -910,6 +911,8 @@ export const Window = memo(function Window({
       // controls (buttons) and any app-provided controls (e.g. tab strip
       // tabs, which are role="tab" divs). Capturing the pointer for a drag
       // here would swallow their click, so bail before setPointerCapture.
+      // A right press opens the title bar's menu instead.
+      if (e.button !== 0) return;
       const target = e.target as HTMLElement;
       if (target.closest('button, [role="tab"], [data-window-no-drag]')) return;
       // Presses in menus the title bar's content portals elsewhere (a tab's
@@ -1402,77 +1405,103 @@ export const Window = memo(function Window({
       )}
     >
       {!frameless && (
-        <header
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onDoubleClick={(e) => {
-            if (!e.currentTarget.contains(e.target as Node)) return;
-            stopWobble(false);
-            toggleMaximize(win.id);
-          }}
-          style={accent ? { backgroundColor: accent } : undefined}
-          className={cn(
-            'flex h-9 shrink-0 touch-none select-none items-center gap-2 rounded-t-[inherit] border-b pr-3',
-            accent
-              ? accentDark ? 'border-white/10' : 'border-black/10'
-              : 'border-border/60 bg-background/60',
-            titlebar ? 'pl-2' : 'pl-3',
-        )}
-      >
-        {titlebar ? (
-          // The app owns the flexible region (drag still works on its empty
-          // space; interactive controls inside handle their own events).
-          <div className="flex min-w-0 flex-1 items-center self-stretch" style={titlebarTint}>
-            {/* Rendered here rather than under the app, so it needs its own
-                chrome: a window's only tab drags the window. */}
-            <WindowChromeContext.Provider value={chrome}>{titlebar}</WindowChromeContext.Provider>
-          </div>
-        ) : (
-          <>
-            <AppIcon icon={win.icon ?? app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
-            {/* In the theme's title font, if it has one (else the var is unset and it inherits). */}
-            <span className={cn('flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium', chromeText)}>
-              {title}
-            </span>
-          </>
-        )}
-        <button
-          type="button"
-          aria-label="Minimize window"
-          onClick={() => {
+        <WindowContextMenu
+          win={win}
+          onMinimize={() => {
             stopWobble(false);
             minimize(win.id);
           }}
-          className={cn('grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted, chromeHover)}
-        >
-          <Minus className="size-4" />
-        </button>
-        <button
-          type="button"
-          aria-label={win.maximized ? 'Restore window' : 'Maximize window'}
-          onClick={() => {
+          onToggleMaximize={() => {
             stopWobble(false);
             toggleMaximize(win.id);
           }}
-          className={cn('grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted, chromeHover)}
         >
-          {win.maximized ? (
-            <Minimize2 className="size-3.5" />
-          ) : (
-            <Maximize2 className="size-3.5" />
+          <header
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onContextMenu={(e) => {
+              // From a menu the title bar's content portals elsewhere, not the
+              // title bar itself: preventing it keeps the window menu shut.
+              if (!e.currentTarget.contains(e.target as Node)) e.preventDefault();
+            }}
+            onDoubleClick={(e) => {
+              if (!e.currentTarget.contains(e.target as Node)) return;
+              stopWobble(false);
+              toggleMaximize(win.id);
+            }}
+            style={accent ? { backgroundColor: accent } : undefined}
+            className={cn(
+              'flex h-9 shrink-0 touch-none select-none items-center gap-2 rounded-t-[inherit] border-b pr-3',
+              accent
+                ? accentDark ? 'border-white/10' : 'border-black/10'
+                : 'border-border/60 bg-background/60',
+              titlebar ? 'pl-2' : 'pl-3',
           )}
-        </button>
-        <button
-          type="button"
-          aria-label="Close window"
-          onClick={() => close(win.id)}
-          className={cn('grid size-6 place-items-center rounded-md hover:bg-destructive/80 hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted)}
         >
-          <X className="size-4" />
-        </button>
-      </header>
+          {titlebar ? (
+            // The app owns the flexible region (drag still works on its empty
+            // space; interactive controls inside handle their own events).
+            // Its text fields keep their native menu; its own menus (a tab's)
+            // already claim the event, which the window menu then leaves be.
+            <div
+              className="flex min-w-0 flex-1 items-center self-stretch"
+              style={titlebarTint}
+              onContextMenu={(e) => {
+                const field = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
+                if ((e.target as HTMLElement).closest(field)) e.stopPropagation();
+              }}
+            >
+              {/* Rendered here rather than under the app, so it needs its own
+                  chrome: a window's only tab drags the window. */}
+              <WindowChromeContext.Provider value={chrome}>{titlebar}</WindowChromeContext.Provider>
+            </div>
+          ) : (
+            <>
+              <AppIcon icon={win.icon ?? app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
+              {/* In the theme's title font, if it has one (else the var is unset and it inherits). */}
+              <span className={cn('flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium', chromeText)}>
+                {title}
+              </span>
+            </>
+          )}
+          <button
+            type="button"
+            aria-label="Minimize window"
+            onClick={() => {
+              stopWobble(false);
+              minimize(win.id);
+            }}
+            className={cn('grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted, chromeHover)}
+          >
+            <Minus className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={win.maximized ? 'Restore window' : 'Maximize window'}
+            onClick={() => {
+              stopWobble(false);
+              toggleMaximize(win.id);
+            }}
+            className={cn('grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted, chromeHover)}
+          >
+            {win.maximized ? (
+              <Minimize2 className="size-3.5" />
+            ) : (
+              <Maximize2 className="size-3.5" />
+            )}
+          </button>
+          <button
+            type="button"
+            aria-label="Close window"
+            onClick={() => close(win.id)}
+            className={cn('grid size-6 place-items-center rounded-md hover:bg-destructive/80 hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted)}
+          >
+            <X className="size-4" />
+          </button>
+        </header>
+        </WindowContextMenu>
       )}
 
       <div className={cn('relative flex-1 overflow-hidden rounded-b-[inherit]', !frameless && 'bg-background/80')}>

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { Copy, FolderOpen, Layers, Paintbrush, Trash2, X } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { portalContainer } from '@/lib/portalContainer';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -8,7 +16,8 @@ import { useMonitors } from '@/contexts/MonitorsContext';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 import { CaptureOverlay } from '@/components/desktop/CaptureOverlay';
 import { endFileDrag, startFileDrag } from '@/components/desktop/apps/files/dnd';
-import { cleanFsError, getFsBridge } from '@/lib/fs';
+import { cleanFsError, getFsBridge, parentPath } from '@/lib/fs';
+import { invalidateListings } from '@/hooks/useFileSystem';
 import {
   cleanScreenshotError,
   copyScreenshot,
@@ -54,6 +63,7 @@ interface Thumbnail {
 export function ScreenshotHost() {
   const { toast } = useToast();
   const { open } = useWindowActions();
+  const queryClient = useQueryClient();
   const [selecting, setSelecting] = useState(false);
   const [thumbnail, setThumbnail] = useState<Thumbnail | null>(null);
   const thumbnailRef = useRef<Thumbnail | null>(null);
@@ -66,6 +76,19 @@ export function ScreenshotHost() {
   const finish = useCallback(() => {
     setScreenshotSessionActive(false);
   }, []);
+
+  const copy = useCallback(
+    (shot: Screenshot) => {
+      copyScreenshot(shot).catch((e: unknown) => {
+        toast({
+          title: 'Could not copy the screenshot',
+          description: cleanScreenshotError(e),
+          variant: 'destructive',
+        });
+      });
+    },
+    [toast],
+  );
 
   const capture = useCallback(
     async (region: ViewportRect | null) => {
@@ -91,13 +114,7 @@ export function ScreenshotHost() {
       const id = nextId.current++;
       setThumbnail({ id, shot, path: null });
 
-      copyScreenshot(shot).catch((e: unknown) => {
-        toast({
-          title: 'Could not copy the screenshot',
-          description: cleanScreenshotError(e),
-          variant: 'destructive',
-        });
-      });
+      copy(shot);
       const fs = getFsBridge();
       if (fs) {
         try {
@@ -112,7 +129,7 @@ export function ScreenshotHost() {
         }
       }
     },
-    [finish, toast],
+    [copy, finish, toast],
   );
 
   useEffect(
@@ -173,6 +190,24 @@ export function ScreenshotHost() {
             dismiss(thumbnail.id);
             open('preview', { path });
           }}
+          onOpenWith={(appId, params) => {
+            dismiss(thumbnail.id);
+            open(appId, params);
+          }}
+          onCopy={() => copy(thumbnail.shot)}
+          onTrash={async (path) => {
+            dismiss(thumbnail.id);
+            try {
+              await getFsBridge()!.trash(path);
+              void invalidateListings(queryClient, path);
+            } catch (e) {
+              toast({
+                title: 'Could not move the screenshot to the Trash',
+                description: cleanFsError(e),
+                variant: 'destructive',
+              });
+            }
+          }}
           onDismiss={() => dismiss(thumbnail.id)}
         />
       )}
@@ -200,24 +235,31 @@ function flashScreen(): void {
 function CaptureThumbnail({
   thumbnail,
   onOpen,
+  onOpenWith,
+  onCopy,
+  onTrash,
   onDismiss,
 }: {
   thumbnail: Thumbnail;
   onOpen: (path: string) => void;
+  onOpenWith: (appId: string, params: { path: string; select?: string }) => void;
+  onCopy: () => void;
+  onTrash: (path: string) => void;
   onDismiss: () => void;
 }) {
   const { primary } = useMonitors();
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const { shot, path } = thumbnail;
 
-  // Hold still while the pointer is on it or it's being dragged; the
-  // countdown starts over when it leaves.
+  // Hold still while the pointer is on it, it's being dragged, or its menu
+  // is open; the countdown starts over when it leaves.
   useEffect(() => {
-    if (hovered || dragging) return;
+    if (hovered || dragging || menuOpen) return;
     const t = setTimeout(onDismiss, THUMBNAIL_MS);
     return () => clearTimeout(t);
-  }, [hovered, dragging, onDismiss]);
+  }, [hovered, dragging, menuOpen, onDismiss]);
 
   const scale = Math.min(THUMB_MAX_W / shot.width, THUMB_MAX_H / shot.height, 1);
   const width = Math.max(48, Math.round(shot.width * scale));
@@ -230,47 +272,86 @@ function CaptureThumbnail({
         className="absolute"
         style={{ left: primary.x, top: primary.y, width: primary.width, height: primary.height }}
       >
-        <div
-          className="group pointer-events-auto absolute right-6 bottom-6 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-8 motion-safe:duration-300"
-          onPointerEnter={() => setHovered(true)}
-          onPointerLeave={() => setHovered(false)}
-        >
-          <button
-            type="button"
-            disabled={!path}
-            draggable={!!path}
-            onClick={() => path && onOpen(path)}
-            onDragStart={(e) => {
-              if (!path || !name) return;
-              setDragging(true);
-              startFileDrag(e, { paths: [path], folders: new Set() }, name);
-            }}
-            onDragEnd={() => {
-              endFileDrag();
-              setDragging(false);
-              setHovered(false);
-            }}
-            title={path ? 'Click to open, or drag into Files' : 'Saving…'}
-            aria-label={name ? `Open ${name}` : 'Screenshot taken'}
-            className="block overflow-hidden rounded-lg border border-white/70 bg-background shadow-xl ring-1 ring-black/20 transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-progress"
-          >
-            <img
-              src={shot.dataUrl}
-              alt=""
-              draggable={false}
-              style={{ width, height }}
-              className="block object-cover"
-            />
-          </button>
-          <button
-            type="button"
-            onClick={onDismiss}
-            aria-label="Dismiss"
-            className="absolute -top-2 -left-2 grid size-6 place-items-center rounded-full border border-border bg-background text-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <X className="size-3.5" aria-hidden />
-          </button>
-        </div>
+        <ContextMenu onOpenChange={setMenuOpen}>
+          <ContextMenuTrigger asChild>
+            <div
+              className="group pointer-events-auto absolute right-6 bottom-6 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-8 motion-safe:duration-300"
+              onPointerEnter={() => setHovered(true)}
+              onPointerLeave={() => setHovered(false)}
+            >
+              <button
+                type="button"
+                disabled={!path}
+                draggable={!!path}
+                onClick={() => path && onOpen(path)}
+                onDragStart={(e) => {
+                  if (!path || !name) return;
+                  setDragging(true);
+                  startFileDrag(e, { paths: [path], folders: new Set() }, name);
+                }}
+                onDragEnd={() => {
+                  endFileDrag();
+                  setDragging(false);
+                  setHovered(false);
+                }}
+                title={path ? 'Click to open, or drag into Files' : 'Saving…'}
+                aria-label={name ? `Open ${name}` : 'Screenshot taken'}
+                className="block overflow-hidden rounded-lg border border-white/70 bg-background shadow-xl ring-1 ring-black/20 transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-progress"
+              >
+                <img
+                  src={shot.dataUrl}
+                  alt=""
+                  draggable={false}
+                  style={{ width, height }}
+                  className="block object-cover"
+                />
+              </button>
+              <button
+                type="button"
+                onClick={onDismiss}
+                aria-label="Dismiss"
+                className="absolute -top-2 -left-2 grid size-6 place-items-center rounded-full border border-border bg-background text-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="size-3.5" aria-hidden />
+              </button>
+            </div>
+          </ContextMenuTrigger>
+          {/* Above the thumbnail's layer (z-[10000]). The file items wait for the save. */}
+          <ContextMenuContent className="z-[10001] w-52">
+            <ContextMenuItem disabled={!path} onSelect={() => path && onOpen(path)}>
+              Open
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={!path}
+              onSelect={() => path && name && onOpenWith('file-browser', { path: parentPath(path), select: name })}
+            >
+              <FolderOpen />
+              Show in Files
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={onCopy}>
+              <Copy />
+              Copy Image
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem disabled={!path} onSelect={() => path && onOpenWith('paint', { path })}>
+              <Paintbrush />
+              Edit in Paint
+            </ContextMenuItem>
+            <ContextMenuItem disabled={!path} onSelect={() => path && onOpenWith('photo-editor', { path })}>
+              <Layers />
+              Edit in Photo Editor
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem variant="destructive" disabled={!path} onSelect={() => path && onTrash(path)}>
+              <Trash2 />
+              Move to Trash
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={onDismiss}>
+              <X />
+              Dismiss
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       </div>
     </ScreenLayer>,
     portalContainer(),

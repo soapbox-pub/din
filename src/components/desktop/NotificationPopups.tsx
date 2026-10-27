@@ -4,7 +4,8 @@ import { expirePopup, useNotificationCenter, type DesktopNotification } from '@/
 
 /**
  * New notifications, popped up in the top-right corner under the menu bar.
- * Each goes after its timeout (held while the pointer is over it) and stays
+ * Each goes after its timeout (held while the pointer is over it or its menu
+ * is open) and stays
  * in the notification center.
  */
 export function NotificationPopups() {
@@ -25,14 +26,15 @@ export function NotificationPopups() {
 
 function Popup({ notification }: { notification: DesktopNotification }) {
   const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const { id, timeout, createdAt } = notification;
 
   // createdAt restarts the clock when a notification is replaced in place.
   useEffect(() => {
-    if (hovered || timeout <= 0) return;
+    if (hovered || menuOpen || timeout <= 0) return;
     const timer = window.setTimeout(() => expirePopup(id), timeout);
     return () => window.clearTimeout(timer);
-  }, [id, timeout, createdAt, hovered]);
+  }, [id, timeout, createdAt, hovered, menuOpen]);
 
   return (
     <div
@@ -40,7 +42,7 @@ function Popup({ notification }: { notification: DesktopNotification }) {
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
     >
-      <NotificationCard notification={notification} variant="popup" />
+      <NotificationCard notification={notification} variant="popup" onMenuOpenChange={setMenuOpen} />
     </div>
   );
 }

@@ -1,8 +1,21 @@
 import { useState } from 'react';
 import { Bell, X } from 'lucide-react';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { activateNotification, closeNotification, type DesktopNotification } from '@/lib/notificationCenter';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
+import {
+  activateNotification,
+  clearNotifications,
+  closeNotification,
+  type DesktopNotification,
+} from '@/lib/notificationCenter';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 
@@ -16,84 +29,111 @@ export function NotificationCard({
   notification,
   variant,
   onActivated,
+  onMenuOpenChange,
 }: {
   notification: DesktopNotification;
   variant: 'popup' | 'list';
   /** After a click on it or one of its actions (the list closes). */
   onActivated?: () => void;
+  /** Its right-click menu opened or closed (a popup holds its timeout meanwhile). */
+  onMenuOpenChange?: (open: boolean) => void;
 }) {
   const { getApp } = useInstalledApps();
+  const { open } = useWindowActions();
   const { source } = notification;
   const app = source.appId ? getApp(source.appId) : undefined;
   const sourceName = app?.name ?? source.name;
   const sourceIcon = app?.icon ?? source.icon ?? Bell;
 
+  const activate = (action?: string) => {
+    activateNotification(notification.id, action);
+    onActivated?.();
+  };
+
   return (
-    <div
-      role={variant === 'popup' ? 'status' : undefined}
-      className={cn(
-        'group relative flex flex-col gap-1.5 p-3',
-        variant === 'popup' &&
-          'pointer-events-auto rounded-2xl border border-border/60 bg-background/85 shadow-lg backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-4',
-        variant === 'list' && 'px-4 hover:bg-accent/60',
-        variant === 'list' && !notification.read && 'bg-primary/5',
-      )}
-    >
-      <div className="flex items-center gap-1.5 pr-6 text-xs text-muted-foreground">
-        <AppIcon icon={sourceIcon} className="size-3.5 shrink-0 object-contain" />
-        <span className="truncate">{sourceName}</span>
-        <span aria-hidden>·</span>
-        <time className="shrink-0" dateTime={new Date(notification.createdAt).toISOString()}>
-          {formatAge(notification.createdAt)}
-        </time>
-      </div>
+    <ContextMenu onOpenChange={onMenuOpenChange}>
+      <ContextMenuTrigger asChild>
+        <div
+          role={variant === 'popup' ? 'status' : undefined}
+          className={cn(
+            'group relative flex flex-col gap-1.5 p-3',
+            variant === 'popup' &&
+              'pointer-events-auto rounded-2xl border border-border/60 bg-background/85 shadow-lg backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-4',
+            variant === 'list' && 'px-4 hover:bg-accent/60',
+            variant === 'list' && !notification.read && 'bg-primary/5',
+          )}
+        >
+          <div className="flex items-center gap-1.5 pr-6 text-xs text-muted-foreground">
+            <AppIcon icon={sourceIcon} className="size-3.5 shrink-0 object-contain" />
+            <span className="truncate">{sourceName}</span>
+            <span aria-hidden>·</span>
+            <time className="shrink-0" dateTime={new Date(notification.createdAt).toISOString()}>
+              {formatAge(notification.createdAt)}
+            </time>
+          </div>
 
-      <button
-        type="button"
-        aria-label="Dismiss"
-        onClick={() => closeNotification(notification.id)}
-        className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <X className="size-3.5" />
-      </button>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => closeNotification(notification.id)}
+            className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <X className="size-3.5" />
+          </button>
 
-      <button
-        type="button"
-        onClick={() => {
-          activateNotification(notification.id);
-          onActivated?.();
-        }}
-        className="flex min-w-0 gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <NotificationImage notification={notification} />
-        <div className="min-w-0 flex-1">
-          <p className="line-clamp-2 break-words text-sm font-medium text-foreground">{notification.title}</p>
-          {notification.body && (
-            <p className="mt-0.5 line-clamp-3 whitespace-pre-line break-words text-xs text-muted-foreground">
-              {notification.body}
-            </p>
+          <button
+            type="button"
+            onClick={() => activate()}
+            className="flex min-w-0 gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <NotificationImage notification={notification} />
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 break-words text-sm font-medium text-foreground">{notification.title}</p>
+              {notification.body && (
+                <p className="mt-0.5 line-clamp-3 whitespace-pre-line break-words text-xs text-muted-foreground">
+                  {notification.body}
+                </p>
+              )}
+            </div>
+          </button>
+
+          {notification.actions.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {notification.actions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  onClick={() => activate(action.id)}
+                  className="min-w-0 flex-1 truncate rounded-lg bg-foreground/10 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
-      </button>
-
-      {notification.actions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-0.5">
-          {notification.actions.map((action) => (
-            <button
-              key={action.id}
-              type="button"
-              onClick={() => {
-                activateNotification(notification.id, action.id);
-                onActivated?.();
-              }}
-              className="min-w-0 flex-1 truncate rounded-lg bg-foreground/10 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+      </ContextMenuTrigger>
+      {/* Above the popups (z-[9998]). */}
+      <ContextMenuContent className="z-[10000] w-56">
+        <ContextMenuItem onSelect={() => activate()}>Open</ContextMenuItem>
+        {notification.actions.map((action) => (
+          <ContextMenuItem key={action.id} onSelect={() => activate(action.id)}>
+            <span className="truncate">{action.label}</span>
+          </ContextMenuItem>
+        ))}
+        <ContextMenuItem onSelect={() => closeNotification(notification.id)}>Dismiss</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onSelect={() => {
+            onActivated?.();
+            open('settings', { section: 'notifications' });
+          }}
+        >
+          Notification settings
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={clearNotifications}>Clear all</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

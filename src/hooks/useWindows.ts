@@ -350,7 +350,7 @@ function carryTo(w: WindowState, from: WorkArea, to: WorkArea): WindowState {
  * The best of `candidates` in direction `dir` from `from`: centers that lie
  * that way, nearest along the axis, with a penalty for being off to the side.
  */
-function inDirection<T>(from: Rect, dir: Direction, candidates: { item: T; rect: Rect }[]): T | null {
+export function inDirection<T>(from: Rect, dir: Direction, candidates: { item: T; rect: Rect }[]): T | null {
   const cx = from.x + from.width / 2;
   const cy = from.y + from.height / 2;
   const horizontal = dir === 'left' || dir === 'right';

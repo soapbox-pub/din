@@ -6,6 +6,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PopoverClose } from '@/components/ui/popover';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { NotificationCard } from '@/components/desktop/NotificationCard';
 import { getAvatarShape } from '@/lib/avatarShape';
 import {
@@ -95,7 +102,7 @@ export function NotificationsPanel({
           </ul>
         )}
         {user ? (
-          <NostrNotificationsList separated={appNotifications.length > 0} />
+          <NostrNotificationsList separated={appNotifications.length > 0} onNavigate={onNavigate} />
         ) : (
           appNotifications.length === 0 && (
             <div className="px-6 py-12 text-center">
@@ -112,7 +119,7 @@ export function NotificationsPanel({
 }
 
 /** The signed-in account's Nostr interactions, from relays. */
-function NostrNotificationsList({ separated }: { separated: boolean }) {
+function NostrNotificationsList({ separated, onNavigate }: { separated: boolean; onNavigate: () => void }) {
   const { items, isLoading, hasFetched, hasNextPage, isFetchingNextPage, fetchNextPage, hasUnread, markAsRead } =
     useNotifications();
 
@@ -153,7 +160,7 @@ function NostrNotificationsList({ separated }: { separated: boolean }) {
         <ul className="divide-y divide-border/40">
           {items.map((item) => (
             <li key={item.event.id}>
-              <NotificationRow item={item} />
+              <NotificationRow item={item} hasUnread={hasUnread} onMarkAllRead={markAsRead} onNavigate={onNavigate} />
             </li>
           ))}
           {hasNextPage && (
@@ -175,8 +182,23 @@ function NostrNotificationsList({ separated }: { separated: boolean }) {
   );
 }
 
-/** A single notification row: actor avatar, action, and a content preview. */
-function NotificationRow({ item }: { item: NotificationItem }) {
+/**
+ * A single notification row: actor avatar, action, and a content preview.
+ * Right-clicking it offers the same open, plus the actor's profile and npub
+ * and the list's "Mark all read".
+ */
+function NotificationRow({
+  item,
+  hasUnread,
+  onMarkAllRead,
+  onNavigate,
+}: {
+  item: NotificationItem;
+  hasUnread: boolean;
+  onMarkAllRead: () => void;
+  /** Closes the panel. */
+  onNavigate: () => void;
+}) {
   const author = useAuthor(item.actor);
   const openUrl = useOpenUrl();
   const metadata = author.data?.metadata;
@@ -186,56 +208,99 @@ function NotificationRow({ item }: { item: NotificationItem }) {
   const Icon = meta.icon;
 
   const detail = useMemo(() => rowDetail(item), [item]);
+  // The actor can come from a zap request's JSON, so it may not be a valid key.
+  const npub = useMemo(() => {
+    try {
+      return nip19.npubEncode(item.actor);
+    } catch {
+      return null;
+    }
+  }, [item.actor]);
+
+  const openTarget = () =>
+    openUrl(
+      notificationTargetUrl({
+        type: item.type,
+        event: item.event,
+        actor: item.actor,
+        referencedEvent: item.referencedEvent,
+      }),
+    );
 
   return (
-    <PopoverClose asChild>
-      <button
-        type="button"
-        onClick={() =>
-          openUrl(
-            notificationTargetUrl({
-              type: item.type,
-              event: item.event,
-              actor: item.actor,
-              referencedEvent: item.referencedEvent,
-            }),
-          )
-        }
-        className={cn(
-          'flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:bg-accent',
-          item.isNew && 'bg-primary/5',
-        )}
-      >
-        <div className="relative shrink-0">
-          <Avatar className="size-9" shape={getAvatarShape(metadata)}>
-            <AvatarImage src={picture} alt="" />
-            <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
-          </Avatar>
-          <span
-            aria-hidden
-            className="absolute -bottom-0.5 -right-0.5 grid size-4.5 place-items-center rounded-full bg-background text-foreground ring-1 ring-border"
-          >
-            <Icon className="size-3" />
-          </span>
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <p className="text-sm text-foreground">
-            <span className="font-medium">{name}</span>{' '}
-            <span className="text-muted-foreground">{meta.verb}</span>
-            {item.isNew && (
-              <span className="ml-1.5 inline-block size-1.5 -translate-y-0.5 rounded-full bg-primary align-middle" aria-label="New" />
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <PopoverClose asChild>
+          <button
+            type="button"
+            onClick={openTarget}
+            className={cn(
+              'flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:bg-accent',
+              item.isNew && 'bg-primary/5',
             )}
-          </p>
-          {detail && (
-            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{detail}</p>
-          )}
-          <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-            {formatRelativeTime(item.event.created_at)}
-          </p>
-        </div>
-      </button>
-    </PopoverClose>
+          >
+            <div className="relative shrink-0">
+              <Avatar className="size-9" shape={getAvatarShape(metadata)}>
+                <AvatarImage src={picture} alt="" />
+                <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <span
+                aria-hidden
+                className="absolute -bottom-0.5 -right-0.5 grid size-4.5 place-items-center rounded-full bg-background text-foreground ring-1 ring-border"
+              >
+                <Icon className="size-3" />
+              </span>
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-foreground">
+                <span className="font-medium">{name}</span>{' '}
+                <span className="text-muted-foreground">{meta.verb}</span>
+                {item.isNew && (
+                  <span className="ml-1.5 inline-block size-1.5 -translate-y-0.5 rounded-full bg-primary align-middle" aria-label="New" />
+                )}
+              </p>
+              {detail && (
+                <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{detail}</p>
+              )}
+              <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                {formatRelativeTime(item.event.created_at)}
+              </p>
+            </div>
+          </button>
+        </PopoverClose>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52">
+        <ContextMenuItem
+          onSelect={() => {
+            onNavigate();
+            openTarget();
+          }}
+        >
+          Open
+        </ContextMenuItem>
+        {npub && (
+          <>
+            <ContextMenuItem
+              onSelect={() => {
+                onNavigate();
+                openUrl(`https://ditto.pub/${npub}`);
+              }}
+            >
+              View profile
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(npub).catch(() => {})}>
+              Copy npub
+            </ContextMenuItem>
+          </>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={!hasUnread} onSelect={onMarkAllRead}>
+          <CheckCheck />
+          Mark all read
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
