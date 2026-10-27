@@ -330,7 +330,9 @@ export function AirPlayPromptHost() {
         if (!open) disconnect.mutate(waiting.target);
       }}
     >
-      <DialogContent className="sm:max-w-sm">
+      {/* Only Cancel or Escape gives up: a stray click, or focus moving
+          when a display is added or removed, would end the session. */}
+      <DialogContent className="sm:max-w-sm" onInteractOutside={(e) => e.preventDefault()}>
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Share with {waiting.name}</DialogTitle>
