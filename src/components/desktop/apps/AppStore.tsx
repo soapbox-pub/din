@@ -19,6 +19,7 @@ import { useNsiteCatalog } from '@/hooks/useNsiteCatalog';
 import { useNsiteLookup } from '@/hooks/useNsiteLookup';
 import { useFeaturedApps } from '@/hooks/useFeaturedApps';
 import { useStoreAppDetails } from '@/hooks/useStoreAppDetails';
+import { useStoreAppListing } from '@/hooks/useStoreAppListing';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
@@ -28,6 +29,7 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -521,8 +523,9 @@ function StoreAppCard({ app }: { app: StoreApp }) {
 }
 
 /**
- * A site's detail page: the full blurb, who published it, its address, and
- * the publisher's other sites. Opening it in the browser previews the site
+ * A site's detail page: the screenshots and categories its web app manifest
+ * declares, the full blurb, who published it, its address, and the
+ * publisher's other sites. Opening it in the browser previews the site
  * without installing it.
  */
 function AppDetail({
@@ -533,8 +536,20 @@ function AppDetail({
   moreFromPublisher: StoreApp[];
 }) {
   const view = useStoreAppView(app);
+  const listing = useStoreAppListing(app);
   const openUrl = useOpenUrl();
   const [copied, setCopied] = useState(false);
+
+  // The publisher's hashtags, then the manifest's own categories.
+  const tags = useMemo(() => {
+    const seen = new Set<string>();
+    return [...app.hashtags, ...(listing.data?.categories ?? [])].filter((tag) => {
+      const key = tag.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [app.hashtags, listing.data]);
   const ref = useRef<HTMLDivElement>(null);
 
   const address = canonicalNsiteUrl(app.pubkey, app.dtag, '/');
@@ -608,15 +623,17 @@ function AppDetail({
       </div>
 
       <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+        <Screenshots app={app} name={view.name} />
+
         {view.about ? (
           <p className="max-w-prose whitespace-pre-line text-base leading-relaxed">{view.about}</p>
         ) : (
           <p className="text-muted-foreground">This site doesn’t describe itself.</p>
         )}
 
-        {app.hashtags.length > 0 && (
+        {tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {app.hashtags.map((tag) => (
+            {tags.map((tag) => (
               <span
                 key={tag}
                 className="rounded-md bg-secondary px-2 py-0.5 text-sm text-secondary-foreground"
@@ -666,6 +683,83 @@ function AppDetail({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The screenshots a site's web app manifest declares, in a scrolling shelf;
+ * clicking one shows it full size. Nothing shows for a site that has none.
+ */
+function Screenshots({ app, name }: { app: StoreApp; name: string }) {
+  const { data, isPending } = useStoreAppListing(app);
+  const [open, setOpen] = useState<number | null>(null);
+
+  if (isPending) {
+    return (
+      <div className="flex gap-4 overflow-hidden">
+        {Array.from({ length: 3 }, (_, i) => (
+          <Skeleton key={i} className="aspect-video h-56 shrink-0 rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+  const shots = data?.screenshots;
+  if (!shots?.length) return null;
+
+  const current = open === null ? null : shots[open];
+
+  return (
+    <section className="flex flex-col gap-4" aria-label="Screenshots">
+      <SectionHeader title="Screenshots" />
+      <div className="-mx-1 flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-2">
+        {shots.map((shot, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => setOpen(i)}
+            aria-label={`View screenshot ${i + 1} of ${name} full size`}
+            title={shot.label ?? undefined}
+            className="shrink-0 snap-start overflow-hidden rounded-xl border border-border bg-muted shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <img
+              src={shot.src}
+              alt={shot.label ?? `Screenshot ${i + 1} of ${name}`}
+              width={shot.width ?? undefined}
+              height={shot.height ?? undefined}
+              loading="lazy"
+              className={cn(
+                'block w-auto max-w-none object-contain',
+                shot.formFactor === 'narrow' ? 'h-80' : 'h-56',
+              )}
+            />
+          </button>
+        ))}
+      </div>
+
+      <Dialog open={current !== null} onOpenChange={(next) => !next && setOpen(null)}>
+        <DialogContent
+          className="max-h-[calc(100%-2rem)] gap-3 p-3 sm:max-w-[min(calc(100%-2rem),72rem)]"
+          // Escape closes this, not the detail page underneath.
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') e.stopPropagation();
+            if (open === null) return;
+            if (e.key === 'ArrowRight') setOpen((open + 1) % shots.length);
+            if (e.key === 'ArrowLeft') setOpen((open - 1 + shots.length) % shots.length);
+          }}
+        >
+          <DialogTitle className="pr-8 text-sm font-medium">
+            {current?.label ?? `${name}, screenshot ${(open ?? 0) + 1} of ${shots.length}`}
+          </DialogTitle>
+          {open !== null && (
+            <img
+              src={shots[open].src}
+              alt={current?.label ?? ''}
+              className="max-h-[calc(100vh-8rem)] w-full rounded-md object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </section>
   );
 }
 

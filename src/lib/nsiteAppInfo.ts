@@ -388,6 +388,115 @@ function pickDescription(doc: Document, webManifest: unknown): string | null {
   );
 }
 
+/** Path of the web app manifest the document links, if any. */
+function webManifestPath(doc: Document): string | null {
+  const href = doc.querySelector('link[rel~="manifest"][href]')?.getAttribute('href')?.trim();
+  return href ? toPathname(href, '/') : null;
+}
+
+/** A screenshot a site's web app manifest names, read from its own files. */
+export interface NsiteScreenshot {
+  /** The image as a data URL, so it needs no object URL kept alive and revoked. */
+  src: string;
+  label: string | null;
+  /** `wide` for a desktop screen, `narrow` for a phone, or null when unsaid. */
+  formFactor: 'wide' | 'narrow' | null;
+  width: number | null;
+  height: number | null;
+}
+
+/** What a site's web app manifest says beyond its name and icon, for its store page. */
+export interface NsiteListing {
+  screenshots: NsiteScreenshot[];
+  categories: string[];
+}
+
+/** At most this many screenshots are read, which is more than a store page shows at once. */
+const MAX_SCREENSHOTS = 10;
+
+function toDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** The first `WxH` in a `sizes` attribute. */
+function firstSize(sizes: unknown): { width: number; height: number } | null {
+  if (typeof sizes !== 'string') return null;
+  const match = sizes.trim().toLowerCase().match(/^(\d+)x(\d+)/);
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/**
+ * The screenshots and categories a site's web app manifest declares. Wide
+ * screenshots come first, since Din is a desktop. Like icons, only images the
+ * site ships are read: a hotlinked one would be a request to a third party on
+ * the site's behalf.
+ */
+export async function deriveNsiteListing(files: NsiteFileSource): Promise<NsiteListing> {
+  const listing: NsiteListing = { screenshots: [], categories: [] };
+  const { paths } = files;
+
+  const index = paths['/index.html'] ? await files.read('/index.html') : null;
+  if (!index) return listing;
+  const doc = new DOMParser().parseFromString(new TextDecoder().decode(index), 'text/html');
+  const manifestPath = webManifestPath(doc);
+  if (!manifestPath || !paths[manifestPath]) return listing;
+  const json = await readJson(files, manifestPath);
+  if (typeof json !== 'object' || json === null) return listing;
+  const manifest = json as Record<string, unknown>;
+  const base = manifestPath.replace(/[^/]*$/, '');
+
+  if (Array.isArray(manifest.categories)) {
+    const seen = new Set<string>();
+    for (const category of manifest.categories) {
+      const label = tidyLabel(category, 32)?.toLowerCase();
+      if (label && !seen.has(label)) {
+        seen.add(label);
+        listing.categories.push(label);
+      }
+    }
+  }
+
+  if (!Array.isArray(manifest.screenshots)) return listing;
+  const declared: Array<{ path: string; type: string } & Omit<NsiteScreenshot, 'src'>> = [];
+  for (const shot of manifest.screenshots) {
+    if (typeof shot !== 'object' || shot === null) continue;
+    const { src, sizes, label, form_factor } = shot as Record<string, unknown>;
+    if (typeof src !== 'string' || !src.trim()) continue;
+    const path = toPathname(src.trim(), base);
+    if (!path || !paths[path]) continue;
+    const type = MIME_BY_EXTENSION[path.slice(path.lastIndexOf('.') + 1).toLowerCase()];
+    if (!type || type === 'image/x-icon') continue;
+    const size = firstSize(sizes);
+    declared.push({
+      path,
+      type,
+      label: tidyLabel(label, 200),
+      formFactor: form_factor === 'wide' || form_factor === 'narrow' ? form_factor : null,
+      width: size?.width ?? null,
+      height: size?.height ?? null,
+    });
+  }
+  const order = { wide: 0, null: 1, narrow: 2 } as const;
+  declared.sort((a, b) => order[a.formFactor ?? 'null'] - order[b.formFactor ?? 'null']);
+
+  const read = await Promise.all(
+    declared.slice(0, MAX_SCREENSHOTS).map(async ({ path, type, ...shot }) => {
+      const bytes = await files.read(path);
+      return bytes ? { ...shot, src: await toDataUrl(new Blob([bytes as BlobPart], { type })) } : null;
+    }),
+  );
+  listing.screenshots = read.filter((shot) => shot !== null);
+  return listing;
+}
+
 /**
  * Derive how a site presents itself as an app from its files, as of the
  * manifest event `from`.
@@ -418,11 +527,7 @@ export async function deriveNsiteAppDetails(
   info.themeColor = pickThemeColor(doc);
   let webManifest: unknown = null;
 
-  const manifestHref = doc
-    .querySelector('link[rel~="manifest"][href]')
-    ?.getAttribute('href')
-    ?.trim();
-  const manifestPath = manifestHref ? toPathname(manifestHref, '/') : null;
+  const manifestPath = webManifestPath(doc);
   if (manifestPath && paths[manifestPath]) {
     webManifest = await readJson(files, manifestPath);
     const manifestBase = manifestPath.replace(/[^/]*$/, '');
