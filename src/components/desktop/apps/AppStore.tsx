@@ -382,8 +382,8 @@ function StoreAppCard({ app }: { app: StoreApp }) {
 }
 
 /**
- * The App Store-style pill button: "Get" installs the site, flipping to
- * "Open" once it's in the launcher. nsites install into the OS-level nsite
+ * The App Store-style pill button: "Get" installs the site and launches it,
+ * flipping to "Open" once it's in the launcher. nsites install into the OS-level nsite
  * store, so outside the Electron shell there is nothing to install into.
  */
 function GetPill({
@@ -405,6 +405,15 @@ function GetPill({
   const canInstall = Boolean(getNsiteStore());
 
   const installed = findNsiteApp(app.host);
+  // Set by "Get"; the app launches once it's in the registry, which is a
+  // render after installNsiteApp() (open() can't see it any sooner).
+  const launchOnInstall = useRef(false);
+
+  useEffect(() => {
+    if (!launchOnInstall.current || !installed) return;
+    launchOnInstall.current = false;
+    openApp(nsiteAppId(app.host));
+  }, [installed, openApp, app.host]);
 
   const install = () => {
     const entry = installNsiteApp(app.host);
@@ -416,6 +425,7 @@ function GetPill({
       });
       return;
     }
+    launchOnInstall.current = true;
     toast({
       title: `${name} installed`,
       description:
