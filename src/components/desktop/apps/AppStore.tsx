@@ -7,7 +7,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useQueries } from '@tanstack/react-query';
 import { Check, ChevronLeft, Copy, Globe, RefreshCw, Search, Store } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import type { StoreApp } from '@/lib/nsiteCatalog';
@@ -19,11 +18,7 @@ import { isWebviewAvailable } from '@/lib/isElectron';
 import { useNsiteCatalog } from '@/hooks/useNsiteCatalog';
 import { useNsiteLookup } from '@/hooks/useNsiteLookup';
 import { useFeaturedApps } from '@/hooks/useFeaturedApps';
-import {
-  isListedApp,
-  storeAppDetailsQuery,
-  useStoreAppDetails,
-} from '@/hooks/useStoreAppDetails';
+import { useStoreAppDetails } from '@/hooks/useStoreAppDetails';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
@@ -48,7 +43,8 @@ const SelectAppContext = createContext<(app: StoreApp) => void>(() => {});
  *
  * The catalog is Tenna's: the sites a known set of publishers put on Nostr
  * plus whatever the user and the people they follow publish
- * (useNsiteCatalog). The landing page leads with a featured rail, the
+ * (useNsiteCatalog), kept on disk so the store opens on it at once, and
+ * listing only sites already checked to be installable apps. The landing page leads with a featured rail, the
  * packaged apps of a curated follow pack's members (useFeaturedApps),
  * presented App Store-style: a hero card, a horizontally scrolling shelf,
  * then the full catalog grid. Typing in the search box filters the catalog;
@@ -80,7 +76,7 @@ export function AppStore(_props: AppComponentProps) {
     const q = rawQuery.toLowerCase();
     const seen = new Set<string>();
     const matches: StoreApp[] = [];
-    for (const app of [...(featured.data?.apps ?? []), ...(catalog.data ?? [])]) {
+    for (const app of [...(featured.data?.apps ?? []), ...catalog.allApps]) {
       if (seen.has(app.host)) continue;
       seen.add(app.host);
       const haystack = [app.name ?? '', app.about, app.dtag ?? '', ...app.hashtags]
@@ -89,16 +85,16 @@ export function AppStore(_props: AppComponentProps) {
       if (haystack.includes(q)) matches.push(app);
     }
     return matches;
-  }, [searching, rawQuery, lookup.isAddress, lookup.data, featured.data, catalog.data]);
+  }, [searching, rawQuery, lookup.isAddress, lookup.data, featured.data, catalog.allApps]);
 
   const searchPending = lookup.isAddress ? lookup.isLoading : catalog.isLoading;
 
   // Search and refresh go in the window's own title bar, so there is one bar
   // on top rather than two.
   const setTitlebar = useWindowTitlebar();
-  const refetchCatalog = catalog.refetch;
+  const refetchCatalog = catalog.refresh;
   const refetchFeatured = featured.refetch;
-  const refreshing = catalog.isRefetching || featured.isRefetching;
+  const refreshing = catalog.refreshing || featured.isRefetching;
   const refreshDisabled = catalog.isLoading || refreshing;
   useEffect(() => {
     setTitlebar(
@@ -163,13 +159,13 @@ export function AppStore(_props: AppComponentProps) {
     if (!selected) return [];
     const seen = new Set([selected.host]);
     const apps: StoreApp[] = [];
-    for (const app of [...(featured.data?.apps ?? []), ...(catalog.data ?? [])]) {
+    for (const app of [...(featured.data?.apps ?? []), ...catalog.allApps]) {
       if (app.pubkey !== selected.pubkey || seen.has(app.host)) continue;
       seen.add(app.host);
       apps.push(app);
     }
     return apps;
-  }, [selected, featured.data, catalog.data]);
+  }, [selected, featured.data, catalog.allApps]);
 
   return (
     <SelectAppContext.Provider value={setSelected}>
@@ -195,7 +191,7 @@ export function AppStore(_props: AppComponentProps) {
                 {searchMatches.length > 0 ? (
                   // A pasted address asks for that one site, so it shows
                   // whether or not the store would list it.
-                  <CatalogGrid apps={searchMatches} listedOnly={!lookup.isAddress} />
+                  <CatalogGrid apps={searchMatches} />
                 ) : searchPending ? (
                   <CatalogSkeleton />
                 ) : (
@@ -220,10 +216,18 @@ export function AppStore(_props: AppComponentProps) {
                     <CatalogSkeleton />
                   ) : catalog.isError ? (
                     <EmptyState message="Could not load the app catalog. Check your relay connections and try refreshing." />
-                  ) : !catalog.data || catalog.data.length === 0 ? (
+                  ) : catalog.apps.length === 0 && !catalog.hasMore ? (
                     <EmptyState message="No apps found on your relays yet. Try refreshing, or add more relays in Settings." />
                   ) : (
-                    <CatalogGrid apps={catalog.data} listedOnly />
+                    <>
+                      <CatalogGrid apps={catalog.apps} />
+                      {catalog.hasMore && (
+                        <MoreSentinel
+                          onReached={catalog.loadMore}
+                          paused={catalog.isLoadingMore}
+                        />
+                      )}
+                    </>
                   )}
                 </section>
               </>
@@ -257,6 +261,33 @@ function useSeen<T extends Element>() {
   return [ref, seen] as const;
 }
 
+/**
+ * The bottom of the list: loads the next page while it is on screen, once
+ * the last one has been fetched and checked.
+ */
+function MoreSentinel({ onReached, paused }: { onReached: () => void; paused: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => setVisible(entries.some((entry) => entry.isIntersecting)),
+      { rootMargin: '400px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (visible && !paused) onReached();
+  }, [visible, paused, onReached]);
+  return (
+    <div ref={ref} aria-hidden className="flex justify-center py-2">
+      {paused && <RefreshCw className="size-4 animate-spin text-muted-foreground" />}
+    </div>
+  );
+}
+
 /** Everything a card shows of a site, from its manifest, its files, and its author. */
 function useStoreAppView(app: StoreApp, enabled = true) {
   const details = useStoreAppDetails(app, enabled);
@@ -279,7 +310,6 @@ function useStoreAppView(app: StoreApp, enabled = true) {
     icon: details.data?.icon ?? null,
     iconPending: details.isPending,
     themeColor: details.data?.themeColor ?? null,
-    unlisted: !details.isPending && !isListedApp(details.data),
   };
 }
 
@@ -334,24 +364,11 @@ function StoreAppIcon({
 /** The curated landing rail: hero card + horizontally scrolling shelf. */
 function FeaturedSection() {
   const { data: featured, isLoading } = useFeaturedApps();
-  // The rail is short, so every app on it is checked up front: the hero has
-  // to be one the store lists, and is known only once those before it are.
-  const details = useQueries({
-    queries: (featured?.apps ?? []).map((app) => storeAppDetailsQuery(app)),
-  });
 
   if (isLoading) return <FeaturedSkeleton />;
   if (!featured) return null;
 
-  const firstUnsettled = details.findIndex((query) => query.isPending);
-  const listed = featured.apps.filter((_, i) => isListedApp(details[i]?.data));
-  const heroIndex = details.findIndex((query) => isListedApp(query.data));
-  if (firstUnsettled !== -1 && (heroIndex === -1 || firstUnsettled < heroIndex)) {
-    return <FeaturedSkeleton />;
-  }
-  if (listed.length === 0) return null;
-
-  const [hero, ...shelf] = listed;
+  const [hero, ...shelf] = featured.apps;
 
   return (
     <section className="flex flex-col gap-4" aria-label="Featured apps">
@@ -443,26 +460,21 @@ function ShelfCard({ app }: { app: StoreApp }) {
   );
 }
 
-/**
- * The catalog's cards. With `listedOnly`, a card drops out once its site
- * turns out not to be an installable web app (isListedApp).
- */
-function CatalogGrid({ apps, listedOnly = false }: { apps: StoreApp[]; listedOnly?: boolean }) {
+/** The catalog's cards. */
+function CatalogGrid({ apps }: { apps: StoreApp[] }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {apps.map((app) => (
-        <StoreAppCard key={app.host} app={app} listedOnly={listedOnly} />
+        <StoreAppCard key={app.host} app={app} />
       ))}
     </div>
   );
 }
 
 /** One catalog entry: icon, name, publisher, blurb, and the Get button. */
-function StoreAppCard({ app, listedOnly }: { app: StoreApp; listedOnly: boolean }) {
+function StoreAppCard({ app }: { app: StoreApp }) {
   const [ref, seen] = useSeen<HTMLDivElement>();
   const view = useStoreAppView(app, seen);
-
-  if (listedOnly && view.unlisted) return null;
 
   return (
     <div
@@ -649,7 +661,7 @@ function AppDetail({
             <SectionHeader
               title={view.publisher ? `More from ${view.publisher}` : 'More from this publisher'}
             />
-            <CatalogGrid apps={moreFromPublisher} listedOnly />
+            <CatalogGrid apps={moreFromPublisher} />
           </section>
         )}
       </div>

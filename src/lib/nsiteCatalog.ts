@@ -1,4 +1,5 @@
 import type { NostrEvent } from '@nostrify/nostrify';
+import type { NsiteAppDetails } from '@/lib/nsiteAppInfo';
 import {
   canonicalNsiteHost,
   isValidDtag,
@@ -10,11 +11,10 @@ import {
  * The App Store's catalog: nsites (NIP-5A static websites), the only kind of
  * app it offers. Like Tenna's "Add app" list, it is made of the sites a known
  * set of publishers put on Nostr plus whatever the people the user follows
- * publish, read straight from their signed manifests.
+ * publish, read straight from their signed manifests. Only named sites
+ * (kind 35128) are offered; a root site is someone's homepage, not an app.
+ * The catalog is kept on disk by nsiteCatalogCache.
  */
-
-/** The manifest kinds a site is published under. */
-export const NSITE_KINDS = [NSITE_ROOT_KIND, NSITE_NAMED_KIND];
 
 /** Team Soapbox (_@soapbox.pub), publisher of Din's own apps. */
 export const TEAM_SOAPBOX_PUBKEY =
@@ -153,6 +153,15 @@ export function buildCatalog(events: NostrEvent[]): StoreApp[] {
   }
 
   return [...latest.values()].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Whether the store lists a site: it has to be an installable web app by the
+ * browsers' standard, with an icon Din could draw. A site whose files can't
+ * be read can't be checked, so it isn't listed either.
+ */
+export function isListedApp(details: NsiteAppDetails | undefined): boolean {
+  return Boolean(details?.installable && details.icon);
 }
 
 /** True for the pinned hero site (FEATURED_HERO). */
