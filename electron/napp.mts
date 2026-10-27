@@ -398,11 +398,16 @@ function text(value: unknown, max: number): string {
   return typeof value === 'string' ? value.slice(0, max) : '';
 }
 
-/** A URL a notification names, resolved and kept only if it's usable. */
+/**
+ * A URL a notification names, resolved and kept only if it's usable. Never
+ * cut short: a truncated data: URL decodes as just the picture's top rows.
+ * Data URLs are bounded by MAX_NOTIFICATION_BYTES, checked before this.
+ */
 function pictureUrl(value: unknown, host: string): string {
-  const url = text(value, 4096);
-  if (!url) return '';
+  if (typeof value !== 'string' || !value) return '';
+  const url = value;
   if (/^data:image\//i.test(url)) return url;
+  if (url.length > 4096) return '';
   if (/^https:\/\//i.test(url)) return url;
   return hostOf(url) === host ? url : '';
 }

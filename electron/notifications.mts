@@ -222,12 +222,14 @@ function webText(value: unknown, max: number): string {
 /**
  * A page's icon as a data URL, fetched in its own session (its cookies,
  * its nsite:// handler). Images are scaled down; SVG stays SVG, which an
- * <img> never runs scripts in.
+ * <img> never runs scripts in. A data: URL is taken whole or not at all:
+ * cut short, it decodes as just the picture's top rows.
  */
 async function fetchIcon(s: Electron.Session, url: string, credentials: RequestCredentials = 'include'): Promise<string | null> {
   if (!/^(https?|nsite):/i.test(url)) {
     return /^data:image\/[a-z0-9.+-]+[;,]/i.test(url) && url.length <= MAX_IMAGE_BYTES ? url : null;
   }
+  if (url.length > 4096) return null;
   try {
     const response = await s.fetch(url, { credentials, signal: AbortSignal.timeout(ICON_FETCH_TIMEOUT_MS) });
     if (!response.ok || Number(response.headers.get('content-length') ?? 0) > MAX_FETCHED_ICON_BYTES) return null;
@@ -285,7 +287,7 @@ function registerWebHandlers(permission: (s: Electron.Session, origin: string) =
     if (!origin || permission(contents.session, origin) !== 'granted') return null;
     if ([...webNotifications.values()].filter((owner) => owner === contents).length >= MAX_WEB_PER_PAGE) return null;
     const opts = typeof options === 'object' && options !== null ? (options as Record<string, unknown>) : {};
-    const icon = await fetchIcon(contents.session, webText(opts.icon, 4096));
+    const icon = await fetchIcon(contents.session, typeof opts.icon === 'string' ? opts.icon : '');
     if (contents.isDestroyed()) return null;
 
     const id = ++lastWebId;
