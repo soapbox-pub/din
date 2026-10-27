@@ -12,6 +12,10 @@
 //   - dropped connections come back with backoff, and at once when the
 //     computer wakes or the network returns
 //
+// Connections, relay replies (CLOSED, NOTICE, AUTH) and deliveries go to the
+// system log through `log`, and `status()` is the whole picture at once (napp.mts
+// writes it to a file).
+//
 // No NIP-42: the pool holds no keys, so a relay that wants AUTH for a filter
 // (gift wraps, typically) never serves it.
 //
@@ -141,6 +145,38 @@ interface Wanted {
   filters: NostrFilter[];
 }
 
+/** What a relay last said about one subscription (for diagnosis). */
+export interface SubStatus {
+  site: string;
+  /** The `since` the last REQ carried, Unix seconds. */
+  since: number | null;
+  sentAt: number | null;
+  eose: boolean;
+  /** The relay's CLOSED reason, if it ended the subscription. */
+  closed: string | null;
+  events: number;
+}
+
+/** A relay connection as diagnosis sees it. Times are Unix ms. */
+export interface RelayStatus {
+  url: string;
+  open: boolean;
+  connectedAt: number | null;
+  disconnectedAt: number | null;
+  /** Connection attempts that failed since the last success. */
+  failures: number;
+  retryAt: number | null;
+  notice: string | null;
+  /** The relay sent an AUTH challenge (which the pool never answers). */
+  authChallenged: boolean;
+  subs: Record<string, SubStatus>;
+}
+
+function short(text: unknown, max = 200): string {
+  const s = typeof text === 'string' ? text : JSON.stringify(text);
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
 class Relay {
   readonly url: string;
   /** subscription id -> what it asks for. */
@@ -151,6 +187,15 @@ class Relay {
   #retry: NodeJS.Timeout | null = null;
   #closed = false;
   readonly #pool: PushPool;
+  readonly #status: Omit<RelayStatus, 'url' | 'open' | 'subs'> = {
+    connectedAt: null,
+    disconnectedAt: null,
+    failures: 0,
+    retryAt: null,
+    notice: null,
+    authChallenged: false,
+  };
+  readonly #subStatus = new Map<string, SubStatus>();
 
   constructor(url: string, pool: PushPool) {
     this.url = url;
@@ -158,12 +203,18 @@ class Relay {
     this.#connect();
   }
 
+  status(): RelayStatus {
+    return { url: this.url, open: this.#open, ...this.#status, subs: Object.fromEntries(this.#subStatus) };
+  }
+
   #connect(): void {
     if (this.#closed) return;
     let socket: WebSocket;
     try {
       socket = new WebSocket(this.url);
-    } catch {
+    } catch (error) {
+      this.#pool.log(`${this.url}: cannot connect: ${error instanceof Error ? error.message : error}`);
+      this.#status.failures++;
       this.#scheduleRetry();
       return;
     }
@@ -171,16 +222,28 @@ class Relay {
     socket.onopen = () => {
       this.#open = true;
       this.#backoff = BACKOFF_MIN_MS;
+      this.#status.connectedAt = Date.now();
+      this.#status.failures = 0;
+      this.#status.retryAt = null;
+      this.#status.authChallenged = false;
+      this.#pool.log(`${this.url}: connected, ${this.subs.size} subscription(s)`);
       for (const id of this.subs.keys()) this.#req(id);
+      this.#pool.changed();
     };
     socket.onmessage = (message) => {
       if (typeof message.data === 'string') this.#onMessage(message.data);
     };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (this.#socket !== socket) return;
+      const wasOpen = this.#open;
       this.#socket = null;
       this.#open = false;
+      this.#status.disconnectedAt = Date.now();
+      if (!wasOpen) this.#status.failures++;
+      const why = [event.code, event.reason].filter(Boolean).join(' ');
+      this.#pool.log(`${this.url}: ${wasOpen ? 'disconnected' : 'connection failed'}${why ? ` (${why})` : ''}`);
       this.#scheduleRetry();
+      this.#pool.changed();
     };
     socket.onerror = () => {
       // onclose follows.
@@ -191,6 +254,7 @@ class Relay {
     if (this.#closed || this.#retry) return;
     const delay = this.#backoff * (0.75 + Math.random() * 0.5);
     this.#backoff = Math.min(this.#backoff * 2, BACKOFF_MAX_MS);
+    this.#status.retryAt = Date.now() + delay;
     this.#retry = setTimeout(() => {
       this.#retry = null;
       this.#connect();
@@ -209,7 +273,16 @@ class Relay {
       ...f,
       since: Math.max(typeof f.since === 'number' ? f.since : 0, since),
     }));
+    if (!this.#open) return;
     this.#send(['REQ', id, ...filters]);
+    this.#subStatus.set(id, {
+      site: wanted.site,
+      since,
+      sentAt: Date.now(),
+      eose: false,
+      closed: null,
+      events: this.#subStatus.get(id)?.events ?? 0,
+    });
   }
 
   #onMessage(text: string): void {
@@ -219,9 +292,47 @@ class Relay {
     } catch {
       return;
     }
-    if (!Array.isArray(message) || message[0] !== 'EVENT' || typeof message[1] !== 'string') return;
-    const wanted = this.subs.get(message[1]);
-    if (wanted && isEvent(message[2])) this.#pool.received(wanted.site, message[2], this.url);
+    if (!Array.isArray(message)) return;
+    const [type, first, second] = message as unknown[];
+    switch (type) {
+      case 'EVENT': {
+        if (typeof first !== 'string') return;
+        const wanted = this.subs.get(first);
+        if (!wanted || !isEvent(second)) return;
+        const status = this.#subStatus.get(first);
+        if (status) status.events++;
+        this.#pool.received(wanted.site, second, this.url);
+        return;
+      }
+      case 'EOSE': {
+        const status = typeof first === 'string' ? this.#subStatus.get(first) : undefined;
+        if (status && !status.eose) {
+          status.eose = true;
+          this.#pool.changed();
+        }
+        return;
+      }
+      case 'CLOSED': {
+        if (typeof first !== 'string' || !this.subs.has(first)) return;
+        const reason = short(second ?? '');
+        const status = this.#subStatus.get(first);
+        if (status) status.closed = reason;
+        this.#pool.log(`${this.url}: closed ${first}: ${reason || '(no reason)'}`);
+        this.#pool.changed();
+        return;
+      }
+      case 'NOTICE':
+        this.#status.notice = short(first);
+        this.#pool.log(`${this.url}: NOTICE ${this.#status.notice}`);
+        this.#pool.changed();
+        return;
+      case 'AUTH':
+        if (this.#status.authChallenged) return;
+        this.#status.authChallenged = true;
+        this.#pool.log(`${this.url}: sent an AUTH challenge, which the pool doesn't answer`);
+        this.#pool.changed();
+        return;
+    }
   }
 
   set(id: string, wanted: Wanted): void {
@@ -231,6 +342,7 @@ class Relay {
   }
 
   remove(id: string): void {
+    this.#subStatus.delete(id);
     if (this.subs.delete(id)) this.#send(['CLOSE', id]);
   }
 
@@ -257,6 +369,18 @@ export interface PushPoolOptions {
   deliver: (site: string, event: NostrEvent, relay: string) => void;
   /** The site's newest delivered event moved `since` forward. */
   onSinceChanged: (site: string, since: number) => void;
+  /** A line for the system log. */
+  log: (line: string) => void;
+  /** Something {@link PushPool.status} reports changed. */
+  onStatusChanged: () => void;
+}
+
+/** What the pool has done for a site since Din started. */
+export interface SiteStats {
+  delivered: number;
+  duplicates: number;
+  badSignatures: number;
+  lastDelivered: { id: string; kind: number; created_at: number; relay: string; at: number } | null;
 }
 
 /** The relay connections behind every site's subscriptions. */
@@ -264,10 +388,36 @@ export class PushPool {
   readonly #relays = new Map<string, Relay>();
   readonly #sites = new Map<string, SitePush>();
   readonly #seen = new Map<string, Set<string>>();
+  readonly #stats = new Map<string, SiteStats>();
   readonly #options: PushPoolOptions;
 
   constructor(options: PushPoolOptions) {
     this.#options = options;
+  }
+
+  log(line: string): void {
+    this.#options.log(line);
+  }
+
+  changed(): void {
+    this.#options.onStatusChanged();
+  }
+
+  status(): { sites: Record<string, SiteStats & { since: number; subscriptions: number }>; relays: RelayStatus[] } {
+    const sites: Record<string, SiteStats & { since: number; subscriptions: number }> = {};
+    for (const [site, push] of this.#sites) {
+      sites[site] = { since: push.since, subscriptions: push.subscriptions.length, ...this.#siteStats(site) };
+    }
+    return { sites, relays: [...this.#relays.values()].map((relay) => relay.status()) };
+  }
+
+  #siteStats(site: string): SiteStats {
+    let stats = this.#stats.get(site);
+    if (!stats) {
+      stats = { delivered: 0, duplicates: 0, badSignatures: 0, lastDelivered: null };
+      this.#stats.set(site, stats);
+    }
+    return stats;
   }
 
   sinceFor(site: string): number {
@@ -280,8 +430,10 @@ export class PushPool {
     else {
       this.#sites.delete(site);
       this.#seen.delete(site);
+      this.#stats.delete(site);
     }
     this.#sync();
+    this.changed();
   }
 
   received(site: string, event: NostrEvent, relay: string): void {
@@ -292,14 +444,26 @@ export class PushPool {
       seen = new Set();
       this.#seen.set(site, seen);
     }
-    if (seen.has(event.id)) return;
-    if (!verifyEvent(event)) return;
+    const stats = this.#siteStats(site);
+    if (seen.has(event.id)) {
+      stats.duplicates++;
+      return;
+    }
+    if (!verifyEvent(event)) {
+      stats.badSignatures++;
+      this.log(`${relay}: bad signature on ${event.id} for ${site}`);
+      return;
+    }
     seen.add(event.id);
     if (seen.size > SEEN_LIMIT) seen.delete(seen.values().next().value as string);
     if (event.created_at > push.since && event.created_at <= Date.now() / 1000 + 600) {
       push.since = event.created_at;
       this.#options.onSinceChanged(site, push.since);
     }
+    stats.delivered++;
+    stats.lastDelivered = { id: event.id, kind: event.kind, created_at: event.created_at, relay, at: Date.now() };
+    this.log(`${site}: kind ${event.kind} ${event.id.slice(0, 12)} (created ${event.created_at}) from ${relay}`);
+    this.changed();
     this.#options.deliver(site, event, relay);
   }
 

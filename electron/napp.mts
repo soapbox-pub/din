@@ -27,6 +27,10 @@
 // PushEvent/NotificationEvent/PeriodicSyncEvent and waits on waitUntil().
 // One event at a time per site, five minutes at most each.
 //
+// For diagnosis, the push pool, worker wakes, notifications and the workers'
+// own consoles log `[napp]` lines to the system log, and the pool's live
+// state is written to $XDG_RUNTIME_DIR/din-napp.json.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
@@ -74,6 +78,73 @@ const MAX_ENV_VALUE = 4096;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 let options: NappOptions;
+
+// ---------------------------------------------------------------------------
+// Diagnosis: [napp] lines in the system log, and a status file
+// ---------------------------------------------------------------------------
+
+function log(line: string): void {
+  console.log(`[napp] ${line}`);
+}
+
+/** Per site, what its worker last did with an event. */
+const lastDispatch = new Map<string, { type: string; outcome: string; at: number; ms: number }>();
+let statusTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Where the push pool's state is written for whoever is diagnosing it
+ * (`jq . $XDG_RUNTIME_DIR/din-napp.json`): relays, what each said about each
+ * subscription, and what each site was handed. Readable by the user only.
+ */
+function statusFilePath(): string {
+  const runtime = process.env.XDG_RUNTIME_DIR;
+  return runtime ? path.join(runtime, 'din-napp.json') : path.join(app.getPath('userData'), 'napp-status.json');
+}
+
+function statusChanged(): void {
+  if (statusTimer) return;
+  statusTimer = setTimeout(() => {
+    statusTimer = null;
+    const { sites, relays } = pool.status();
+    const status = {
+      updated: new Date().toISOString(),
+      sites: Object.fromEntries(
+        Object.entries(sites).map(([host, site]) => [host, { ...site, lastDispatch: lastDispatch.get(host) ?? null }]),
+      ),
+      relays,
+    };
+    const file = statusFilePath();
+    try {
+      fs.writeFileSync(`${file}.tmp`, JSON.stringify(status, null, 2), { mode: 0o600 });
+      fs.renameSync(`${file}.tmp`, file);
+    } catch {
+      // Diagnosis only: the next change writes it again.
+    }
+  }, 2_000);
+}
+
+const WORKER_LOG_PER_MINUTE = 60;
+const workerLogBudget = new Map<string, { minute: number; lines: number; dropped: number }>();
+
+/** A site worker's console, into the system log; at most a minute's budget per site. */
+function logWorkerConsole(host: string, details: Electron.MessageDetails): void {
+  const minute = Math.floor(Date.now() / 60_000);
+  let budget = workerLogBudget.get(host);
+  if (!budget || budget.minute !== minute) {
+    if (budget?.dropped) log(`sw ${host}: ${budget.dropped} more console line(s) dropped`);
+    budget = { minute, lines: 0, dropped: 0 };
+    workerLogBudget.set(host, budget);
+  }
+  if (budget.lines >= WORKER_LOG_PER_MINUTE) {
+    budget.dropped++;
+    return;
+  }
+  budget.lines++;
+  const level = ['verbose', 'info', 'warning', 'error'][details.level] ?? String(details.level);
+  const where = details.sourceUrl ? ` (${details.sourceUrl.replace(/^nsite:\/\/[^/]+/, '')}:${details.lineNumber})` : '';
+  const message = details.message.length > 2000 ? `${details.message.slice(0, 2000)}…` : details.message;
+  log(`sw ${host} ${level}: ${message}${where}`);
+}
 
 // ---------------------------------------------------------------------------
 // Stored state: subscriptions, periodic sync tags and ENV, per site
@@ -194,6 +265,15 @@ function watchWorkers(s: Electron.Session): void {
     const worker = s.serviceWorkers.getWorkerFromVersionID(versionId);
     if (worker) attach(worker);
   });
+  s.serviceWorkers.on('console-message', (_event, details) => {
+    let host: string | null;
+    try {
+      host = hostOf(s.serviceWorkers.getInfoFromVersionID(details.versionId).scope);
+    } catch {
+      host = null;
+    }
+    if (host) logWorkerConsole(host, details);
+  });
 }
 
 /**
@@ -201,20 +281,28 @@ function watchWorkers(s: Electron.Session): void {
  * with whether it ran: false when the site has no worker.
  */
 async function dispatch(host: string, type: string, init: Record<string, unknown>): Promise<boolean> {
+  const started = Date.now();
+  const outcome = (what: string): void => {
+    const ms = Date.now() - started;
+    lastDispatch.set(host, { type, outcome: what, at: Date.now(), ms });
+    log(`${host}: ${type} ${what} (${ms} ms)`);
+    statusChanged();
+  };
   let worker: Electron.ServiceWorkerMain;
   try {
     worker = await options.session().serviceWorkers.startWorkerForScope(`${originOf(host)}/`);
-  } catch {
+  } catch (error) {
+    outcome(`not delivered, no worker: ${error instanceof Error ? error.message : error}`);
     return false;
   }
   attach(worker);
   const task = worker.startTask();
   const id = nextDispatchId++;
   try {
-    return await new Promise<boolean>((resolve) => {
+    const ok = await new Promise<boolean | 'timeout' | 'unsent'>((resolve) => {
       const timer = setTimeout(() => {
         pendingDispatches.delete(id);
-        resolve(false);
+        resolve('timeout');
       }, DISPATCH_TIMEOUT_MS);
       pendingDispatches.set(id, (ok) => {
         clearTimeout(timer);
@@ -225,9 +313,13 @@ async function dispatch(host: string, type: string, init: Record<string, unknown
       } catch {
         clearTimeout(timer);
         pendingDispatches.delete(id);
-        resolve(false);
+        resolve('unsent');
       }
     });
+    if (ok === 'timeout') outcome('timed out');
+    else if (ok === 'unsent') outcome('could not be sent to the worker');
+    else outcome(ok ? 'handled' : 'failed in the worker');
+    return ok === true;
   } finally {
     task.end();
   }
@@ -242,7 +334,10 @@ function enqueue(host: string, job: () => Promise<unknown>): void {
     queue = { tail: Promise.resolve(), length: 0 };
     queues.set(host, queue);
   }
-  if (queue.length >= MAX_QUEUED) return;
+  if (queue.length >= MAX_QUEUED) {
+    log(`${host}: ${MAX_QUEUED} events already waiting for the worker; dropped one`);
+    return;
+  }
   queue.length++;
   const q = queue;
   q.tail = q.tail
@@ -269,6 +364,9 @@ function deliverPush(host: string, event: NostrEvent, relay: string): void {
 }
 
 function setPush(host: string, subscriptions: NappSubscription[]): void {
+  if (subscriptions.length > 0 || stored.push[host]) {
+    log(`${host}: ${subscriptions.length} push subscription(s)`);
+  }
   if (subscriptions.length === 0) {
     delete stored.push[host];
     pool.setSite(host, null);
@@ -316,6 +414,7 @@ function snapshot(n: LiveNotification): Record<string, unknown> {
 
 async function showNotification(host: string, params: unknown): Promise<void> {
   if (options.permission(originOf(host), 'notifications') !== 'granted') {
+    log(`${host}: notification refused, no permission`);
     throw new NappError('No notification permission has been granted for this origin.', 'TypeError');
   }
   const { title, options: raw } = (params ?? {}) as { title?: unknown; options?: unknown };
@@ -374,6 +473,7 @@ async function showNotification(host: string, params: unknown): Promise<void> {
     closeSiteNotification(old.id);
   }
   live.set(notification.id, notification);
+  log(`${host}: notification ${notification.id}${tag ? ` tag=${tag}` : ''}${notification.options.silent ? ' (silent)' : ''}`);
   await showSiteNotification(options.session(), {
     id: notification.id,
     host,
@@ -620,6 +720,8 @@ export function registerNappHandlers(nappOptions: NappOptions): void {
   pool = new PushPool({
     deliver: deliverPush,
     onSinceChanged: () => save(),
+    log,
+    onStatusChanged: statusChanged,
   });
   for (const [host, push] of Object.entries(stored.push)) pool.setSite(host, push);
   powerMonitor.on('resume', () => pool.wake());
