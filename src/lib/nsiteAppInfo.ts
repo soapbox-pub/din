@@ -115,6 +115,48 @@ const CONVENTIONAL: Array<[path: string, score: number]> = [
   ['/favicon.ico', RANK.favicon + 0.5],
 ];
 
+/** Favicon files at the conventional names, in order of preference. */
+const CONVENTIONAL_FAVICONS = [
+  '/favicon.svg',
+  '/icon.svg',
+  '/favicon.png',
+  '/icon.png',
+  '/favicon.ico',
+];
+
+/**
+ * How well a favicon suits the title bar: vector art, then the smallest
+ * raster at least FAVICON_SIZE, then the largest of the rest. One that names
+ * no size is taken on trust over a smaller one.
+ */
+function faviconScore(href: string, sizes: string | null): number {
+  const size = parseSizes(sizes, href);
+  if (size >= 1024) return 3000;
+  if (size >= FAVICON_SIZE) return 2000 - size;
+  if (size === 0) return 1000;
+  return size;
+}
+
+/**
+ * The favicons a site has: what the document links as `rel=icon`, then the
+ * conventional files. Apple touch icons and manifest icons are launcher art,
+ * not favicons.
+ */
+function collectFavicons(doc: Document, paths: Record<string, string>): IconCandidate[] {
+  const candidates: IconCandidate[] = [];
+  for (const link of doc.querySelectorAll('link[rel][href]')) {
+    const href = link.getAttribute('href')?.trim();
+    if (!href) continue;
+    const rels = (link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/);
+    if (!rels.includes('icon')) continue;
+    candidates.push({ href, base: '/', score: faviconScore(href, link.getAttribute('sizes')) });
+  }
+  CONVENTIONAL_FAVICONS.forEach((path, i) => {
+    if (paths[path]) candidates.push({ href: path, base: '/', score: faviconScore(path, null) - 1 - i });
+  });
+  return candidates.sort((a, b) => b.score - a.score);
+}
+
 /** Collapse whitespace and refuse anything too long to sit under an icon. */
 function tidyLabel(value: unknown, limit: number): string | null {
   if (typeof value !== 'string') return null;
@@ -158,11 +200,15 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 /** Edge of the stored icon: a launcher tile's worth at 3x. */
 const ICON_SIZE = 256;
 
+/** Edge of the stored favicon: a 16px title-bar glyph at up to 4x. */
+const FAVICON_SIZE = 64;
+
 /**
  * Bumped whenever the derivation changes what it produces, so info stored by
- * an older Din is derived again (3: full-bleed icons are cut to a squircle).
+ * an older Din is derived again (3: full-bleed icons are cut to a squircle;
+ * 4: favicons are kept too).
  */
-export const NSITE_APP_INFO_VERSION = 3;
+export const NSITE_APP_INFO_VERSION = 4;
 
 /**
  * Margin left around a squircle-cut icon, so it sits at the same visual size
@@ -217,9 +263,14 @@ function isFullBleed(ctx: CanvasRenderingContext2D, size: number): boolean {
 /**
  * Rasterize icon bytes into a small data URL. SVG is drawn through an <img>,
  * which never runs its scripts, and the result is plain pixels either way.
- * Full-bleed artwork comes out cut to a squircle (see isFullBleed).
+ * A launcher icon's full-bleed artwork comes out cut to a squircle (see
+ * isFullBleed); a favicon is kept as drawn.
  */
-async function rasterize(bytes: Uint8Array, path: string): Promise<string | null> {
+async function rasterize(
+  bytes: Uint8Array,
+  path: string,
+  kind: 'icon' | 'favicon' = 'icon',
+): Promise<string | null> {
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
   const type = MIME_BY_EXTENSION[ext];
   if (!type) return null;
@@ -228,14 +279,15 @@ async function rasterize(bytes: Uint8Array, path: string): Promise<string | null
     const img = new Image();
     img.src = url;
     await img.decode();
+    const size = kind === 'favicon' ? FAVICON_SIZE : ICON_SIZE;
     const canvas = document.createElement('canvas');
-    canvas.width = ICON_SIZE;
-    canvas.height = ICON_SIZE;
+    canvas.width = size;
+    canvas.height = size;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, ICON_SIZE, ICON_SIZE);
-    if (isFullBleed(ctx, ICON_SIZE)) {
+    ctx.drawImage(img, 0, 0, size, size);
+    if (kind === 'icon' && isFullBleed(ctx, ICON_SIZE)) {
       const inner = ICON_SIZE - SQUIRCLE_INSET * 2;
       ctx.clearRect(0, 0, ICON_SIZE, ICON_SIZE);
       ctx.save();
@@ -279,6 +331,46 @@ async function readJson(files: NsiteFileSource, path: string): Promise<unknown> 
 export interface NsiteAppDetails extends NsiteAppInfo {
   /** The site's own description of itself, from its page or manifest. */
   description: string | null;
+  /** Whether it meets the browsers' bar for an installable web app (isInstallable). */
+  installable: boolean;
+}
+
+const INSTALLABLE_DISPLAY = new Set(['fullscreen', 'standalone', 'minimal-ui', 'window-controls-overlay']);
+
+/**
+ * Whether a web app manifest meets Chrome's install criteria, the bar other
+ * browsers hold web apps to as well: a name, a start URL, an app-like display
+ * mode, no redirect to a native app, and icons at 192px and 512px. The icons
+ * have to be files the site ships, and a scalable one covers both sizes.
+ */
+function isInstallable(json: unknown, base: string, paths: Record<string, string>): boolean {
+  if (typeof json !== 'object' || json === null) return false;
+  const manifest = json as Record<string, unknown>;
+  const named = [manifest.name, manifest.short_name].some(
+    (value) => typeof value === 'string' && value.trim() !== '',
+  );
+  if (!named) return false;
+  if (typeof manifest.start_url !== 'string') return false;
+  if (typeof manifest.display !== 'string' || !INSTALLABLE_DISPLAY.has(manifest.display)) return false;
+  if (manifest.prefer_related_applications === true) return false;
+  if (!Array.isArray(manifest.icons)) return false;
+
+  let has192 = false;
+  let has512 = false;
+  for (const icon of manifest.icons) {
+    if (typeof icon !== 'object' || icon === null) continue;
+    const { src, sizes, purpose } = icon as Record<string, unknown>;
+    if (typeof src !== 'string' || !src.trim()) continue;
+    // Chrome only counts icons meant to be shown as they are.
+    const purposes = typeof purpose === 'string' ? purpose.toLowerCase().split(/\s+/) : ['any'];
+    if (!purposes.includes('any')) continue;
+    const path = toPathname(src.trim(), base);
+    if (!path || !paths[path]) continue;
+    const size = parseSizes(typeof sizes === 'string' ? sizes : null, src);
+    if (size >= 192) has192 = true;
+    if (size >= 512) has512 = true;
+  }
+  return has192 && has512;
 }
 
 /** What the site says it is, for a site whose manifest has no `description`. */
@@ -310,8 +402,10 @@ export async function deriveNsiteAppDetails(
     version: NSITE_APP_INFO_VERSION,
     name: null,
     icon: null,
+    favicon: null,
     themeColor: null,
     description: null,
+    installable: false,
   };
 
   const index = paths['/index.html'] ? await files.read('/index.html') : null;
@@ -331,7 +425,9 @@ export async function deriveNsiteAppDetails(
   const manifestPath = manifestHref ? toPathname(manifestHref, '/') : null;
   if (manifestPath && paths[manifestPath]) {
     webManifest = await readJson(files, manifestPath);
-    candidates.push(...collectFromWebManifest(webManifest, manifestPath.replace(/[^/]*$/, '')));
+    const manifestBase = manifestPath.replace(/[^/]*$/, '');
+    candidates.push(...collectFromWebManifest(webManifest, manifestBase));
+    info.installable = isInstallable(webManifest, manifestBase, paths);
     // Only if the document named no color of its own.
     if (!info.themeColor && typeof webManifest === 'object' && webManifest !== null) {
       const { theme_color } = webManifest as { theme_color?: unknown };
@@ -349,17 +445,26 @@ export async function deriveNsiteAppDetails(
 
   // Only icons shipped with the site: a hotlinked one would be a request to a
   // third party on the site's behalf, made by the OS.
-  for (const candidate of candidates) {
-    const path = toPathname(candidate.href, candidate.base);
-    if (!path || !paths[path]) continue;
-    const bytes = await files.read(path);
-    if (!bytes) continue;
-    const icon = await rasterize(bytes, path);
-    if (icon) {
-      info.icon = icon;
-      break;
+  const firstRasterized = async (
+    list: IconCandidate[],
+    kind: 'icon' | 'favicon',
+  ): Promise<{ path: string; data: string } | null> => {
+    for (const candidate of list) {
+      const path = toPathname(candidate.href, candidate.base);
+      if (!path || !paths[path]) continue;
+      const bytes = await files.read(path);
+      if (!bytes) continue;
+      const data = await rasterize(bytes, path, kind);
+      if (data) return { path, data };
     }
-  }
+    return null;
+  };
+
+  const icon = await firstRasterized(candidates, 'icon');
+  info.icon = icon?.data ?? null;
+  // A favicon that is the icon's own file adds nothing the icon doesn't.
+  const favicon = await firstRasterized(collectFavicons(doc, paths), 'favicon');
+  info.favicon = favicon && favicon.path !== icon?.path ? favicon.data : null;
 
   return info;
 }
@@ -372,7 +477,7 @@ export async function deriveNsiteAppInfo(
   store: NsiteStore,
   summary: NsiteSummary,
 ): Promise<NsiteAppInfo> {
-  const { description: _description, ...info } = await deriveNsiteAppDetails(
+  const { description: _description, installable: _installable, ...info } = await deriveNsiteAppDetails(
     { paths: summary.paths, read: (path) => store.read(summary.host, path) },
     summary.eventId,
   );

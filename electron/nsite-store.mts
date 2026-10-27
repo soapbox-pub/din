@@ -84,6 +84,8 @@ export interface NsiteAppInfo {
   name: string | null;
   /** A small raster data URL (`data:image/webp` or `data:image/png`). */
   icon: string | null;
+  /** The site's favicon, for small places like the title bar; same format as `icon`. */
+  favicon?: string | null;
   /** `#rrggbb`. */
   themeColor: string | null;
 }
@@ -394,12 +396,8 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
   if (typeof value.from !== 'string' || !HASH_RE.test(value.from)) return null;
   const name =
     typeof value.name === 'string' ? value.name.replace(/\s+/g, ' ').trim().slice(0, 64) || null : null;
-  const icon =
-    typeof value.icon === 'string' &&
-    value.icon.length <= MAX_ICON_LENGTH &&
-    /^data:image\/(?:webp|png);base64,[a-z0-9+/]+=*$/i.test(value.icon)
-      ? value.icon
-      : null;
+  const icon = parseIconData(value.icon);
+  const favicon = parseIconData(value.favicon);
   const themeColor =
     typeof value.themeColor === 'string' && /^#[0-9a-f]{6}$/i.test(value.themeColor)
       ? value.themeColor.toLowerCase()
@@ -408,7 +406,15 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
     typeof value.version === 'number' && Number.isInteger(value.version) && value.version > 0
       ? value.version
       : undefined;
-  return { from: value.from, ...(version ? { version } : {}), name, icon, themeColor };
+  return { from: value.from, ...(version ? { version } : {}), name, icon, favicon, themeColor };
+}
+
+function parseIconData(value: unknown): string | null {
+  return typeof value === 'string' &&
+    value.length <= MAX_ICON_LENGTH &&
+    /^data:image\/(?:webp|png);base64,[a-z0-9+/]+=*$/i.test(value)
+    ? value
+    : null;
 }
 
 async function loadRecords(): Promise<void> {

@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useQueries } from '@tanstack/react-query';
 import { Check, ChevronLeft, Copy, Globe, RefreshCw, Search, Store } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import type { StoreApp } from '@/lib/nsiteCatalog';
@@ -18,7 +19,11 @@ import { isWebviewAvailable } from '@/lib/isElectron';
 import { useNsiteCatalog } from '@/hooks/useNsiteCatalog';
 import { useNsiteLookup } from '@/hooks/useNsiteLookup';
 import { useFeaturedApps } from '@/hooks/useFeaturedApps';
-import { useStoreAppDetails } from '@/hooks/useStoreAppDetails';
+import {
+  isListedApp,
+  storeAppDetailsQuery,
+  useStoreAppDetails,
+} from '@/hooks/useStoreAppDetails';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
@@ -188,7 +193,9 @@ export function AppStore(_props: AppComponentProps) {
                   title={lookup.isAddress ? 'Site at this address' : `Results for “${rawQuery}”`}
                 />
                 {searchMatches.length > 0 ? (
-                  <CatalogGrid apps={searchMatches} />
+                  // A pasted address asks for that one site, so it shows
+                  // whether or not the store would list it.
+                  <CatalogGrid apps={searchMatches} listedOnly={!lookup.isAddress} />
                 ) : searchPending ? (
                   <CatalogSkeleton />
                 ) : (
@@ -216,7 +223,7 @@ export function AppStore(_props: AppComponentProps) {
                   ) : !catalog.data || catalog.data.length === 0 ? (
                     <EmptyState message="No apps found on your relays yet. Try refreshing, or add more relays in Settings." />
                   ) : (
-                    <CatalogGrid apps={catalog.data} />
+                    <CatalogGrid apps={catalog.data} listedOnly />
                   )}
                 </section>
               </>
@@ -272,6 +279,7 @@ function useStoreAppView(app: StoreApp, enabled = true) {
     icon: details.data?.icon ?? null,
     iconPending: details.isPending,
     themeColor: details.data?.themeColor ?? null,
+    unlisted: !details.isPending && !isListedApp(details.data),
   };
 }
 
@@ -326,11 +334,24 @@ function StoreAppIcon({
 /** The curated landing rail: hero card + horizontally scrolling shelf. */
 function FeaturedSection() {
   const { data: featured, isLoading } = useFeaturedApps();
+  // The rail is short, so every app on it is checked up front: the hero has
+  // to be one the store lists, and is known only once those before it are.
+  const details = useQueries({
+    queries: (featured?.apps ?? []).map((app) => storeAppDetailsQuery(app)),
+  });
 
   if (isLoading) return <FeaturedSkeleton />;
-  if (!featured || featured.apps.length === 0) return null;
+  if (!featured) return null;
 
-  const [hero, ...shelf] = featured.apps;
+  const firstUnsettled = details.findIndex((query) => query.isPending);
+  const listed = featured.apps.filter((_, i) => isListedApp(details[i]?.data));
+  const heroIndex = details.findIndex((query) => isListedApp(query.data));
+  if (firstUnsettled !== -1 && (heroIndex === -1 || firstUnsettled < heroIndex)) {
+    return <FeaturedSkeleton />;
+  }
+  if (listed.length === 0) return null;
+
+  const [hero, ...shelf] = listed;
 
   return (
     <section className="flex flex-col gap-4" aria-label="Featured apps">
@@ -422,20 +443,26 @@ function ShelfCard({ app }: { app: StoreApp }) {
   );
 }
 
-function CatalogGrid({ apps }: { apps: StoreApp[] }) {
+/**
+ * The catalog's cards. With `listedOnly`, a card drops out once its site
+ * turns out not to be an installable web app (isListedApp).
+ */
+function CatalogGrid({ apps, listedOnly = false }: { apps: StoreApp[]; listedOnly?: boolean }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {apps.map((app) => (
-        <StoreAppCard key={app.host} app={app} />
+        <StoreAppCard key={app.host} app={app} listedOnly={listedOnly} />
       ))}
     </div>
   );
 }
 
 /** One catalog entry: icon, name, publisher, blurb, and the Get button. */
-function StoreAppCard({ app }: { app: StoreApp }) {
+function StoreAppCard({ app, listedOnly }: { app: StoreApp; listedOnly: boolean }) {
   const [ref, seen] = useSeen<HTMLDivElement>();
   const view = useStoreAppView(app, seen);
+
+  if (listedOnly && view.unlisted) return null;
 
   return (
     <div
@@ -622,7 +649,7 @@ function AppDetail({
             <SectionHeader
               title={view.publisher ? `More from ${view.publisher}` : 'More from this publisher'}
             />
-            <CatalogGrid apps={moreFromPublisher} />
+            <CatalogGrid apps={moreFromPublisher} listedOnly />
           </section>
         )}
       </div>

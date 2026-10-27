@@ -2565,7 +2565,7 @@ contextBridge.exposeInMainWorld('nsiteStore', {
   /**
    * Store how a site presents itself as an app.
    * @param {string} host
-   * @param {{ from: string, name: string | null, icon: string | null, themeColor: string | null }} info
+   * @param {{ from: string, name: string | null, icon: string | null, favicon?: string | null, themeColor: string | null }} info
    */
   setAppInfo: (host, info) => ipcRenderer.invoke('nsite:setAppInfo', host, info),
   /**

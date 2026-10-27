@@ -36,12 +36,15 @@ export function WebAppFrame({
   initialUrl,
   name,
   icon,
+  favicon,
   themeColor,
 }: {
   url: string;
   initialUrl?: string;
   name: string;
   icon: LucideIcon | string;
+  /** Drawn in the title bar instead of the icon, when the site has one. */
+  favicon?: string;
   themeColor?: string;
 }) {
   // A web app always opens by loading `src`, so start in the loading state to
@@ -118,7 +121,7 @@ export function WebAppFrame({
 
     setTitlebar(
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <AppIcon icon={icon} className={cn('size-4 shrink-0', muted)} />
+        <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', muted)} />
         <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', text)}>
           {name}
         </span>
@@ -145,7 +148,7 @@ export function WebAppFrame({
       </div>,
     );
     return () => setTitlebar(null);
-  }, [src, name, icon, pageColor, nav.canBack, nav.canForward, setTitlebar]);
+  }, [src, name, icon, favicon, pageColor, nav.canBack, nav.canForward, setTitlebar]);
 
   if (!src) {
     return (

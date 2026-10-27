@@ -19,6 +19,11 @@ export interface NsiteAppInfo {
   name: string | null;
   /** A small raster data URL. */
   icon: string | null;
+  /**
+   * The site's favicon, a small raster data URL, for places too small for the
+   * icon (the title bar). Null when it has none, or it is the icon's own file.
+   */
+  favicon?: string | null;
   /** `#rrggbb`. */
   themeColor: string | null;
 }
