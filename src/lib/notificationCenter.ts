@@ -6,12 +6,11 @@ import type { LucideIcon } from 'lucide-react';
  * whatever sent it - Din's own apps (`new Notification()` in the shell, see
  * webNotification.ts), Linux apps (org.freedesktop.Notifications, see
  * electron/notifications.mts), web pages in browser tabs and installed web
- * apps, and the Nostr watcher (NostrNotifications.tsx).
+ * apps, and installed nsites (window.napp, see electron/napp.mts).
  *
  * A notification pops up in the corner (NotificationPopups) and stays in the
  * notification center (NotificationsIndicator) until it's dismissed or acted on. The
- * list lasts for the session; Nostr's own history comes from relays, so
- * Nostr popups skip it (`history: false`).
+ * list lasts for the session.
  */
 
 /** Why a notification went away, in org.freedesktop.Notifications' terms. */
@@ -32,6 +31,11 @@ export interface NotificationSource {
   name: string;
   /** Image URL / data URL, or a Lucide icon. */
   icon?: LucideIcon | string | null;
+  /**
+   * The site whose notifications permission lets it notify (`https://…`,
+   * `nsite://…`), so the user can turn it off from here.
+   */
+  origin?: string;
 }
 
 export interface DesktopNotification {
@@ -177,6 +181,11 @@ export function activateNotification(id: string, action = 'default'): void {
   } else {
     remove(id, 'dismissed');
   }
+}
+
+/** Take down every notification from a site (it may no longer notify). */
+export function closeNotificationsFrom(origin: string): void {
+  for (const n of [...state.notifications]) if (n.source.origin === origin) remove(n.id, 'closed');
 }
 
 /** Dismiss everything in the list. */

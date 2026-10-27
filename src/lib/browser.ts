@@ -139,6 +139,10 @@ export interface BrowserBridge {
     allow: boolean | null,
     isPrivate: boolean,
   ): Promise<void>;
+  /** Every site with a remembered answer for a capability (not private windows'). */
+  listSitePermissions(capability: SiteCapability): Promise<{ origin: string; allow: boolean }[]>;
+  /** A remembered answer changed. Returns an unsubscribe fn. */
+  onSitePermissionsChanged(callback: () => void): () => void;
 }
 
 /** What the address bar's site info shows about a site. */

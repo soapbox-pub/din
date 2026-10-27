@@ -14,7 +14,6 @@
  * add its own grammar:
  *   - NsitePermissionPrompt: "Sign: Short text note"
  *   - CommentContext:         "a short text note"
- *   - NotificationsPage:      "reacted to your short text note"
  *   - signerWithNudge:        "Approve post in signer" (uses its own override)
  */
 

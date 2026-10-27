@@ -5,8 +5,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 /**
  * The set of pubkeys the logged-in user follows, read from their latest kind 3
- * contact list. Used to gate notifications to "people I follow" (see the
- * `onlyFollowing` preference). Returns an empty array while logged out or
+ * contact list. Returns an empty array while logged out or
  * before the contact list loads.
  *
  * Filtered by `authors: [user.pubkey]` so a malicious relay can't inject a

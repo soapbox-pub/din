@@ -54,8 +54,11 @@ export interface SystemNotification {
   resident: boolean;
   /** Not kept in the list once it's gone from the screen. */
   transient: boolean;
-  /** For a web page's: the guest it came from. */
-  guest: { webContentsId: number; origin: string } | null;
+  /**
+   * For a web page's: the guest it came from, and whether its permission is
+   * the one Settings shows (not a private window's or Tor's).
+   */
+  guest: { webContentsId: number; origin: string; remembered: boolean } | null;
   /** A web page's tag: one with the same tag and origin replaces it. */
   tag: string;
   /**
@@ -275,7 +278,10 @@ function guestOrigin(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent)
   return frame.origin && frame.origin !== 'null' ? frame.origin : null;
 }
 
-function registerWebHandlers(permission: (s: Electron.Session, origin: string) => NotificationPermission): void {
+function registerWebHandlers(
+  permission: (s: Electron.Session, origin: string) => NotificationPermission,
+  remembered: (s: Electron.Session) => boolean,
+): void {
   ipcMain.on('notifications:web-permission', (event) => {
     const origin = guestOrigin(event);
     event.returnValue = origin ? permission(event.sender.session, origin) : 'denied';
@@ -310,7 +316,7 @@ function registerWebHandlers(permission: (s: Electron.Session, origin: string) =
       timeout: opts.requireInteraction === true ? 0 : -1,
       resident: false,
       transient: false,
-      guest: { webContentsId: contents.id, origin },
+      guest: { webContentsId: contents.id, origin, remembered: remembered(contents.session) },
       tag: webText(opts.tag, 256),
       site: null,
     };
@@ -400,6 +406,8 @@ export function registerNotificationHandlers(options: {
   sendToShell: (channel: string, payload?: unknown) => void;
   /** Whether a site may show notifications, as the user answered. */
   webPermission: (s: Electron.Session, origin: string) => NotificationPermission;
+  /** Whether a session's answers are the remembered ones. */
+  remembersPermission: (s: Electron.Session) => boolean;
 }): void {
   const { isShellSender } = options;
   sendToShell = options.sendToShell;
@@ -419,6 +427,6 @@ export function registerNotificationHandlers(options: {
     else webEvent(target.id, 'close');
   });
 
-  registerWebHandlers(options.webPermission);
+  registerWebHandlers(options.webPermission, options.remembersPermission);
   void startServer();
 }

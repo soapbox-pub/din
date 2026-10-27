@@ -12,7 +12,6 @@ import { WorkspaceOsd } from './WorkspacesIndicator';
 import { DictationOverlay } from './DictationOverlay';
 import { BrightnessOsd } from './BrightnessOsd';
 import { ScreenDimmer } from './ScreenDimmer';
-import { NostrNotifications } from './NostrNotifications';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
 import { GuestInputHost } from './GuestInputHost';
@@ -255,7 +254,6 @@ function DesktopSession() {
                 <AirPlayOsd />
                 <DictationOverlay />
                 <ScreenDimmer />
-                <NostrNotifications />
                 <NotificationPopups />
                 <NativeDisplayHost />
               </Wallpaper>

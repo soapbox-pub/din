@@ -96,10 +96,9 @@ function writeCache<T>(storageKey: string, record: AppDataRecord<T>): void {
 // Cross-instance write propagation
 //
 // Each `useAppData` call keeps its own React state, so without this a write in
-// one component (e.g. the notifications panel advancing the read cursor) would
-// not reach another mounted instance of the same key (e.g. the menu-bar clock's
-// unread check) until the encrypted relay round-trip completed — making shared
-// state feel laggy. Broadcasting every local write lets sibling instances of
+// one component (e.g. pinning an app to the Dock) would not reach another
+// mounted instance of the same key until the encrypted relay round-trip
+// completed — making shared state feel laggy. Broadcasting every local write lets sibling instances of
 // the same key adopt it immediately (last-write-wins by `updatedAt`), matching
 // a shared-store model.
 // ---------------------------------------------------------------------------
@@ -219,7 +218,7 @@ export function useAppData<T>(
   });
 
   // Adopt fresher writes broadcast from sibling instances of the same key, so
-  // shared state (e.g. the notifications read cursor) propagates instantly
+  // shared state (e.g. the Dock's pinned apps) propagates instantly
   // instead of waiting for the encrypted relay round-trip.
   useEffect(() => {
     return subscribeValue(storageKey, (rec) => {

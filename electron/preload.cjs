@@ -2068,6 +2068,22 @@ contextBridge.exposeInMainWorld('browser', {
    */
   setSitePermission: (origin, capability, allow, isPrivate) =>
     ipcRenderer.invoke('site-permissions:set', origin, capability, allow, isPrivate),
+
+  /**
+   * Every site that has a remembered answer for a capability.
+   * @param {string} capability
+   */
+  listSitePermissions: (capability) => ipcRenderer.invoke('site-permissions:list', capability),
+
+  /**
+   * A remembered answer changed (asked, switched or forgotten).
+   * @param {() => void} callback
+   */
+  onSitePermissionsChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('site-permissions:changed', listener);
+    return () => ipcRenderer.removeListener('site-permissions:changed', listener);
+  },
 });
 
 /**

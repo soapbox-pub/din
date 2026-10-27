@@ -30,8 +30,11 @@ export interface SystemNotification {
   resident: boolean;
   /** Not kept in the list once it's gone from the screen. */
   transient: boolean;
-  /** For a web page's: the <webview> it came from. */
-  guest: { webContentsId: number; origin: string } | null;
+  /**
+   * For a web page's: the <webview> it came from, and whether its site's
+   * permission is the remembered one (not a private window's or Tor's).
+   */
+  guest: { webContentsId: number; origin: string; remembered: boolean } | null;
   /** A web page's tag: one with the same tag and origin replaces it. */
   tag: string;
   /**

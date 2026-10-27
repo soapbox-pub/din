@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bell, X } from 'lucide-react';
+import { Bell, BellOff, X } from 'lucide-react';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import {
   ContextMenu,
@@ -16,6 +16,7 @@ import {
   closeNotification,
   type DesktopNotification,
 } from '@/lib/notificationCenter';
+import { getBrowserBridge } from '@/lib/browser';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 
@@ -23,7 +24,8 @@ import { cn } from '@/lib/utils';
  * One notification, as a popup or a row of the notification center's list: who sent it,
  * when, its title and text, a picture, and its actions. A click on the body
  * activates it. Everything shown is plain text: notifications come from web
- * pages and Linux apps, and none of it is trusted.
+ * pages and Linux apps, and none of it is trusted. A site's can be turned off
+ * from its right-click menu.
  */
 export function NotificationCard({
   notification,
@@ -44,6 +46,8 @@ export function NotificationCard({
   const app = source.appId ? getApp(source.appId) : undefined;
   const sourceName = app?.name ?? source.name;
   const sourceIcon = app?.icon ?? source.icon ?? Bell;
+  const browser = getBrowserBridge();
+  const blockable = browser && source.origin ? { browser, origin: source.origin } : null;
 
   const activate = (action?: string) => {
     activateNotification(notification.id, action);
@@ -123,6 +127,14 @@ export function NotificationCard({
         ))}
         <ContextMenuItem onSelect={() => closeNotification(notification.id)}>Dismiss</ContextMenuItem>
         <ContextMenuSeparator />
+        {blockable && (
+          <ContextMenuItem
+            onSelect={() => void blockable.browser.setSitePermission(blockable.origin, 'notifications', false, false)}
+          >
+            <BellOff />
+            <span className="truncate">Turn off notifications from {sourceName}</span>
+          </ContextMenuItem>
+        )}
         <ContextMenuItem
           onSelect={() => {
             onActivated?.();

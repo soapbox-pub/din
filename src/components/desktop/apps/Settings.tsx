@@ -140,9 +140,8 @@ import { Slider } from '@/components/ui/slider';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
-import { useNotificationSettings } from '@/hooks/useNotificationSettings';
 import { setDoNotDisturb, useNotificationCenter } from '@/lib/notificationCenter';
-import { NOTIFICATION_CATEGORY_META, type NotificationPreferences } from '@/lib/notifications';
+import { NotificationSitesList } from '@/components/desktop/apps/NotificationSitesList';
 import { useToast } from '@/hooks/useToast';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { getFsBridge } from '@/lib/fs';
@@ -247,7 +246,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     group: 'Personal',
     name: 'Notifications',
     icon: Bell,
-    search: ['Do Not Disturb', 'Keep notifications in the list without popping them up. Urgent ones still show.', 'On-screen alerts', 'Pop up new mentions, reactions, reposts, comments and zaps in the corner.', 'Only from people you follow', "Ignore interactions from accounts you don't follow.", 'Notify me about', 'alerts', 'quiet', 'silence'],
+    search: ['Do Not Disturb', 'Keep notifications in the list without popping them up. Urgent ones still show.', 'Apps and sites', 'Installed nsites and websites that asked to show notifications.', 'Turn off notifications', 'Block', 'Forget', 'permissions', 'alerts', 'quiet', 'silence'],
   },
   {
     id: 'assistant',
@@ -3258,85 +3257,24 @@ function ClockOptions() {
 // ---------------------------------------------------------------------------
 
 /**
- * Notification preferences. Do Not Disturb applies to every notification and
- * stays on this computer. The rest is about Nostr: which interactions
- * (mentions, comments, reposts, reactions, zaps) surface as notifications,
- * whether to gate them to people you follow, and whether they pop up. Those
- * are stored through Din's encrypted app-data layer, so they roam across
- * devices. The notification center and the popups read the same settings.
+ * Do Not Disturb, which applies to every notification and stays on this
+ * computer, and the apps and sites allowed to notify (NotificationSitesList).
  */
 function NotificationsSection() {
-  const { user } = useCurrentUser();
-  const { preferences, setPreferences } = useNotificationSettings();
   const { doNotDisturb } = useNotificationCenter();
-
-  const dndRow = (
-    <SettingSwitchRow
-      id="notif-dnd"
-      icon={BellOff}
-      label="Do Not Disturb"
-      description="Keep notifications in the list without popping them up. Urgent ones still show."
-      checked={doNotDisturb}
-      onCheckedChange={setDoNotDisturb}
-    />
-  );
-
-  if (!user) {
-    return (
-      <SectionShell title="Notifications">
-        <div className="flex flex-col gap-4">
-          {dndRow}
-          <FallbackCard icon={Bell}>
-            Log in with your Nostr account to also be notified when people
-            mention, react to, repost, comment on, or zap you.
-          </FallbackCard>
-        </div>
-      </SectionShell>
-    );
-  }
 
   return (
     <SectionShell title="Notifications">
       <div className="flex flex-col gap-4">
-        {dndRow}
-        <div className="border-t border-border/60 pt-4">
-          <h3 className="mb-2 text-sm font-medium text-foreground">Nostr</h3>
-          <div className="flex flex-col gap-2">
-            <SettingSwitchRow
-              id="notif-osd"
-              label="On-screen alerts"
-              description="Pop up new mentions, reactions, reposts, comments and zaps in the corner."
-              checked={preferences.osd}
-              onCheckedChange={(checked) => setPreferences({ osd: checked })}
-            />
-            <SettingSwitchRow
-              id="notif-only-following"
-              label="Only from people you follow"
-              description="Ignore interactions from accounts you don't follow."
-              checked={preferences.onlyFollowing}
-              onCheckedChange={(checked) => setPreferences({ onlyFollowing: checked })}
-            />
-          </div>
-        </div>
-
-        <div className="border-t border-border/60 pt-4">
-          <h3 className="mb-2 text-sm font-medium text-foreground">Notify me about</h3>
-          <div className="flex flex-col gap-2">
-            {NOTIFICATION_CATEGORY_META.map((category) => (
-              <SettingSwitchRow
-                key={category.id}
-                id={`notif-${category.id}`}
-                icon={category.icon}
-                label={category.label}
-                description={category.description}
-                checked={preferences[category.id]}
-                onCheckedChange={(checked) =>
-                  setPreferences({ [category.id]: checked } as Partial<NotificationPreferences>)
-                }
-              />
-            ))}
-          </div>
-        </div>
+        <SettingSwitchRow
+          id="notif-dnd"
+          icon={BellOff}
+          label="Do Not Disturb"
+          description="Keep notifications in the list without popping them up. Urgent ones still show."
+          checked={doNotDisturb}
+          onCheckedChange={setDoNotDisturb}
+        />
+        <NotificationSitesList />
       </div>
     </SectionShell>
   );

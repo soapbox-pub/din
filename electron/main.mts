@@ -3953,8 +3953,10 @@ function decide(s: Electron.Session, origin: string, capability: SiteCapability,
   const decisions = decisionsFor(s);
   if (allow === null) decisions.delete(decisionKey(origin, capability));
   else decisions.set(decisionKey(origin, capability), allow);
-  if (remembersDecisions(s)) saveDecisions(decisions);
-  if (remembersDecisions(s)) nappPermissionChanged(origin, capability, allow);
+  if (!remembersDecisions(s)) return;
+  saveDecisions(decisions);
+  nappPermissionChanged(origin, capability, allow);
+  sendToShell('site-permissions:changed');
 }
 
 /** The askable capabilities a permission request needs, or null if not askable. */
@@ -4130,6 +4132,18 @@ function registerSitePermissionHandlers(): void {
     if (!SITE_CAPABILITIES.includes(capability)) throw new Error('Invalid capability');
     if (typeof allow !== 'boolean' && allow !== null) throw new Error('Invalid decision');
     decide(s, origin, capability, allow);
+  });
+
+  // Every site answered for one capability, for Settings (remembered answers only).
+  ipcMain.handle('site-permissions:list', (event, capability) => {
+    assertShellSender(event);
+    if (!SITE_CAPABILITIES.includes(capability)) throw new Error('Invalid capability');
+    const sites: { origin: string; allow: boolean }[] = [];
+    for (const [k, allow] of persistedDecisions()) {
+      const [origin, answered] = k.split('\u0000');
+      if (answered === capability) sites.push({ origin, allow });
+    }
+    return sites;
   });
 }
 
@@ -5137,7 +5151,12 @@ app.whenReady().then(() => {
   registerInddHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerOpenUri({ sendToShell });
-  registerNotificationHandlers({ isShellSender, sendToShell, webPermission: siteNotificationPermission });
+  registerNotificationHandlers({
+    isShellSender,
+    sendToShell,
+    webPermission: siteNotificationPermission,
+    remembersPermission: remembersDecisions,
+  });
   registerNappHandlers({
     session: appSession,
     sendToShell,

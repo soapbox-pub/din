@@ -4,7 +4,15 @@ import { useWindowManager } from '@/contexts/WindowManagerContext';
 import type { WindowState } from '@/hooks/useWindows';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { getNappHost } from '@/lib/napp';
-import { closeNotification, DEFAULT_POPUP_MS, notify, type NotificationSource } from '@/lib/notificationCenter';
+import { getBrowserBridge } from '@/lib/browser';
+import {
+  closeNotification,
+  closeNotificationsFrom,
+  DEFAULT_POPUP_MS,
+  notify,
+  useNotificationCenter,
+  type NotificationSource,
+} from '@/lib/notificationCenter';
 import { nsiteAppId } from '@/lib/nsiteApps';
 import { getSystemNotificationsBridge, type SystemNotification } from '@/lib/systemNotifications';
 
@@ -70,8 +78,9 @@ export function SystemNotificationsHost() {
       const windowId = guestWindowId(webContentsId);
       const appId = windowsRef.current.find((w) => w.id === windowId)?.appId;
       const app = appId ? getAppRef.current(appId) : undefined;
-      if (app && app.id !== 'web-browser') return { appId: app.id, name: app.name };
-      return { name: n.appName, icon: getAppRef.current('web-browser')?.icon };
+      const origin = n.guest?.remembered ? n.guest.origin : undefined;
+      if (app && app.id !== 'web-browser') return { appId: app.id, name: app.name, origin };
+      return { name: n.appName, icon: getAppRef.current('web-browser')?.icon, origin };
     };
 
     /** Open an installed nsite, at a page of its own or where it was. */
@@ -91,7 +100,7 @@ export function SystemNotificationsHost() {
         source: guest
           ? guestSource(n, guest.webContentsId)
           : site
-            ? { appId: siteApp?.id, name: siteApp?.name ?? `${site.host.slice(0, 12)}…` }
+            ? { appId: siteApp?.id, name: siteApp?.name ?? `${site.host.slice(0, 12)}…`, origin: `nsite://${site.host}` }
             : { appId: n.appId, name: n.appName || 'Notification', icon: n.icon },
         title: n.title,
         body: n.body,
@@ -137,5 +146,32 @@ export function SystemNotificationsHost() {
     };
   }, [focus, open]);
 
+  useCloseBlockedSites();
+
   return null;
+}
+
+/**
+ * A site whose notifications were turned off (in Settings, its site info or
+ * a notification's menu) takes its notifications with it.
+ */
+function useCloseBlockedSites() {
+  const { notifications } = useNotificationCenter();
+  const hasSiteNotifications = notifications.some((n) => n.source.origin);
+  const notificationsRef = useRef(notifications);
+  useLayoutEffect(() => {
+    notificationsRef.current = notifications;
+  });
+
+  useEffect(() => {
+    const browser = getBrowserBridge();
+    if (!browser || !hasSiteNotifications) return;
+    return browser.onSitePermissionsChanged(() => {
+      void browser.listSitePermissions('notifications').then((sites) => {
+        const allowed = new Set(sites.filter((s) => s.allow).map((s) => s.origin));
+        const origins = new Set(notificationsRef.current.map((n) => n.source.origin));
+        for (const origin of origins) if (origin && !allowed.has(origin)) closeNotificationsFrom(origin);
+      }, () => {});
+    });
+  }, [hasSiteNotifications]);
 }
