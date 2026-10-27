@@ -564,6 +564,22 @@ contextBridge.exposeInMainWorld('tor', {
     ipcRenderer.on('tor:onion-location', listener);
     return () => ipcRenderer.removeListener('tor:onion-location', listener);
   },
+
+  /**
+   * Subscribe to browser tabs going to or from an onion site, which the
+   * main process stopped so the tab can load it in the other session.
+   * Returns an unsubscribe fn.
+   * @param {(move: { wcId: number, url: string }) => void} callback
+   */
+  onMoveTab: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, url: string }} move
+     */
+    const listener = (_event, move) => callback(move);
+    ipcRenderer.on('tor:move-tab', listener);
+    return () => ipcRenderer.removeListener('tor:move-tab', listener);
+  },
 });
 
 // Display bridge (window.display), backed by the display:* handlers in

@@ -56,6 +56,8 @@ import { registerDateTimeHandlers } from './datetime.mts';
 import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
 import {
   attachOnionLocation,
+  isOnionUrl,
+  keepTorSession,
   onionLocationHeader,
   onionLocationResponse,
   registerTorHandlers,
@@ -2977,6 +2979,14 @@ const WEBAPP_PARTITION = 'persist:din-apps';
 // WEBBROWSER_PRIVATE_PARTITION in src/components/desktop/apps/BrowserView.tsx.
 const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
 
+// Browser tabs on onion services, from normal and private windows alike, run
+// in this partition, whose every request goes through Tor (network.mts). A
+// tab moves in and out of it as it goes to and from .onion addresses (see
+// keepTorSession). Kept in memory and treated like the private session: no
+// extensions, NIP-07 or saved certificate exceptions. Must match
+// WEBBROWSER_TOR_PARTITION in src/components/desktop/apps/BrowserView.tsx.
+const WEBBROWSER_TOR_PARTITION = 'din-webbrowser-tor';
+
 /**
  * Absolute path to the session preload that gives web pages a NIP-07
  * window.nostr backed by Din's signer (see registerNostrBridge): browser tabs
@@ -3070,9 +3080,19 @@ function privateBrowserSession(): Electron.Session {
   return session.fromPartition(WEBBROWSER_PRIVATE_PARTITION);
 }
 
-/** Whether a session is one of the two the browser runs tabs in. */
+/** The in-memory session browser tabs on onion services run in, through Tor. */
+function torBrowserSession(): Electron.Session {
+  return session.fromPartition(WEBBROWSER_TOR_PARTITION);
+}
+
+/** Whether a session is one the browser runs tabs in. */
 function isBrowserTabSession(s: Electron.Session): boolean {
-  return s === browserSession() || s === privateBrowserSession();
+  return s === browserSession() || isEphemeralBrowserSession(s);
+}
+
+/** Whether a session is a browser one that keeps nothing: the private one, or Tor's. */
+function isEphemeralBrowserSession(s: Electron.Session): boolean {
+  return s === privateBrowserSession() || s === torBrowserSession();
 }
 
 /** Send an event to the shell renderer, if it's still alive. */
@@ -4010,7 +4030,7 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     if (
       permission === 'openExternal' &&
       prompts &&
-      s !== privateBrowserSession() &&
+      !isEphemeralBrowserSession(s) &&
       'externalURL' in details &&
       typeof details.externalURL === 'string' &&
       /^nostrconnect:/i.test(details.externalURL)
@@ -4082,11 +4102,12 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
 /**
  * What the Web Browser's site info (the address bar's lock) shows and
  * changes: a site's answers, in the persistent browser session or, for a
- * private window, the private one.
+ * private window, the private one. An onion site's are always Tor's.
  */
 function registerSitePermissionHandlers(): void {
   const resolve = (origin: unknown, isPrivate: unknown): { origin: string; s: Electron.Session } => {
     if (typeof origin !== 'string' || siteOriginOf(origin) !== origin) throw new Error('Invalid site');
+    if (isOnionUrl(origin)) return { origin, s: torBrowserSession() };
     return { origin, s: isPrivate === true ? privateBrowserSession() : browserSession() };
   };
 
@@ -4100,7 +4121,7 @@ function registerSitePermissionHandlers(): void {
       if (allow !== undefined) permissions[capability] = allow;
     }
     const host = hostOf(origin);
-    const pinned = s === privateBrowserSession() ? privateTrustedCerts : trustedCerts;
+    const pinned = isEphemeralBrowserSession(s) ? privateTrustedCerts : trustedCerts;
     const certificateException = !!host && [...pinned].some((k) => k.startsWith(`${host}\u0000`));
     return { permissions, certificateException };
   });
@@ -4319,6 +4340,7 @@ function registerCertificateHandling(): void {
   };
   installVerifyProc(browserSession(), trustedCerts);
   installVerifyProc(privateBrowserSession(), privateTrustedCerts);
+  installVerifyProc(torBrowserSession(), privateTrustedCerts);
 
   // A cert Chromium rejected (unpinned self-signed / private-CA host) fires
   // this on a browser session. Reject the load and, for the top-level frame,
@@ -4335,12 +4357,9 @@ function registerCertificateHandling(): void {
         // strict verification in place by not overriding it.
         return;
       }
-      // Private tabs check the in-memory exception set; persistent tabs the
-      // saved one.
-      const pinned =
-        contents.session === privateBrowserSession()
-          ? privateTrustedCerts
-          : trustedCerts;
+      // Private and onion tabs check the in-memory exception set; persistent
+      // tabs the saved one.
+      const pinned = isEphemeralBrowserSession(contents.session) ? privateTrustedCerts : trustedCerts;
       const host = hostOf(url);
       const fingerprint = certificate.fingerprint || '';
       if (host && fingerprint && pinned.has(certKey(host, fingerprint))) {
@@ -4383,8 +4402,8 @@ function registerCertificateHandling(): void {
         throw new Error('Invalid certificate exception');
       }
       const tab = anyBrowserTabFromId(wcId);
-      if (tab && tab.session === privateBrowserSession()) {
-        // Private window: pin in memory only, so the exception is discarded
+      if (tab && isEphemeralBrowserSession(tab.session)) {
+        // Private window or onion site: pin in memory only, so the exception is discarded
         // with the ephemeral session and never touches disk.
         privateTrustedCerts.add(certKey(host, fingerprint));
       } else {
@@ -4481,6 +4500,7 @@ function registerBrowserDownloadHandlers(): void {
   };
   browserSession().on('will-download', onWillDownload);
   privateBrowserSession().on('will-download', onWillDownload);
+  torBrowserSession().on('will-download', onWillDownload);
 
   // Run a downloaded setup.exe, the way it would on Windows. Everything else
   // opens in Din's own apps from the renderer; the OS default handler isn't
@@ -4690,6 +4710,7 @@ const DEVTOOLS_PARTITION = 'persist:devtools';
 const GUEST_PARTITIONS = new Set([
   WEBBROWSER_PARTITION,
   WEBBROWSER_PRIVATE_PARTITION,
+  WEBBROWSER_TOR_PARTITION,
   WEBAPP_PARTITION,
   DEVTOOLS_PARTITION,
 ]);
@@ -5030,10 +5051,11 @@ app.whenReady().then(() => {
   registerSitePermissionHandlers();
   hardenGuestSession(browserSession(), { prompts: true });
   hardenGuestSession(privateBrowserSession(), { prompts: true });
+  hardenGuestSession(torBrowserSession(), { prompts: true });
   hardenGuestSession(appSession(), { prompts: true });
   hardenGuestSession(devtoolsSession(), { prompts: false });
   // Web pages' notifications go to Din's notification center.
-  for (const s of [browserSession(), privateBrowserSession(), appSession()]) {
+  for (const s of [browserSession(), privateBrowserSession(), torBrowserSession(), appSession()]) {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-geolocation', type: 'frame', filePath: GEOLOCATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
@@ -5049,7 +5071,7 @@ app.whenReady().then(() => {
     isShareableGuest: (contents) =>
       shellGuestFromId(contents.id) !== null &&
       (isBrowserTabSession(contents.session) || contents.session === appSession()),
-    isPrivate: (s) => s === privateBrowserSession(),
+    isPrivate: isEphemeralBrowserSession,
     undim: undimCapture,
   });
   registerMediaHandlers({
@@ -5080,6 +5102,7 @@ app.whenReady().then(() => {
   registerWifiHandlers({
     assertShellSender,
     proxySessions: () => [browserSession(), privateBrowserSession(), appSession()],
+    torSession: torBrowserSession(),
   });
   registerVpnHandlers({ assertShellSender });
   registerTorHandlers({ assertShellSender, sendToShell });
@@ -5147,7 +5170,7 @@ app.whenReady().then(() => {
     pageKind: (contents) => {
       if (contents.getType() !== 'webview') return 'page';
       if (contents.session === browserSession()) return 'browser-tab';
-      if (contents.session === privateBrowserSession()) return 'private-tab';
+      if (isEphemeralBrowserSession(contents.session)) return 'private-tab';
       if (contents.session === appSession()) return 'web-app';
       if (contents.session === devtoolsSession()) return 'devtools';
       return 'page';
@@ -5178,6 +5201,7 @@ app.whenReady().then(() => {
     sessions: [
       { session: browserSession(), persist: true },
       { session: privateBrowserSession(), persist: false },
+      { session: torBrowserSession(), persist: false },
       { session: appSession(), persist: true },
     ],
     sendToShell,
@@ -5193,7 +5217,7 @@ app.whenReady().then(() => {
   // <webview>: its extension and preloads must be in place for the first tab.
   setupAdblock({
     browserSession: browserSession(),
-    privateSession: privateBrowserSession(),
+    privateSessions: [privateBrowserSession(), torBrowserSession()],
     isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents,
     assertShellSender,
     sendToShell,
@@ -5206,7 +5230,7 @@ app.whenReady().then(() => {
   // The pop-up blocker, and window.opener for windows pages open
   // (electron/popups.mts). Also before the first <webview>, for its preload.
   setupPopups({
-    sessions: [browserSession(), privateBrowserSession(), appSession()],
+    sessions: [browserSession(), privateBrowserSession(), torBrowserSession(), appSession()],
     extensionSessions: [browserSession()],
     isWebGuest: (contents) =>
       contents.getType() === 'webview' &&
@@ -5314,14 +5338,16 @@ app.whenReady().then(() => {
       webPreferences.transparent = false;
     }
     // The ad blocker's engine, before the tab's first request.
-    if (params.partition === WEBBROWSER_PARTITION || params.partition === WEBBROWSER_PRIVATE_PARTITION) {
+    const ephemeralTab =
+      params.partition === WEBBROWSER_PRIVATE_PARTITION || params.partition === WEBBROWSER_TOR_PARTITION;
+    if (params.partition === WEBBROWSER_PARTITION || ephemeralTab) {
       ensureAdblockEngine();
     }
     // Every frame of a web page needs PRINT_PRELOAD: a frame from another
     // origin calling its own print() would otherwise open Chromium's GTK
     // print dialog, which takes over the whole screen under cage. The other
     // session preloads guard themselves to the top document.
-    if (params.partition === WEBAPP_PARTITION || params.partition === WEBBROWSER_PRIVATE_PARTITION) {
+    if (params.partition === WEBAPP_PARTITION || ephemeralTab) {
       webPreferences.nodeIntegrationInSubFrames = true;
     }
     if (params.partition === WEBBROWSER_PARTITION) {
@@ -5641,8 +5667,10 @@ app.on('web-contents-created', (_event, contents) => {
   // The ad blocker's per-page blocked count (electron/adblock.mts).
   if (isBrowserTabSession(contents.session) && !isExtensionPageGuest) {
     attachAdblock(contents);
-    // The onion service the page names, for the address bar (electron/tor.mts).
+    // The onion service the page names, for the address bar, and onion sites
+    // in Tor's session and nothing else there (electron/tor.mts).
     attachOnionLocation(contents);
+    keepTorSession(contents, contents.session === torBrowserSession());
   }
 
   if (isBrowserTab && !isExtensionPageGuest) {
@@ -5659,12 +5687,14 @@ app.on('web-contents-created', (_event, contents) => {
     // A window.open that asked for a pop-up gets a small window of its own.
     // A web page's only: extension pages open theirs as tabs, as before.
     const popup = isWebPage
-      ? popupFeatures(disposition, features, contents.session === privateBrowserSession())
+      ? popupFeatures(disposition, features, isEphemeralBrowserSession(contents.session))
       : null;
     if (isBrowserTab && isUserscriptInstallUrl(url)) {
       sendToShell('userscripts:installRequested', { url, wcId: contents.id });
     } else if (
       /^(https|nsite):\/\//i.test(url) ||
+      // Onion services are mostly plain http, and Tor encrypts them anyway.
+      (/^http:\/\//i.test(url) && isOnionUrl(url)) ||
       // Extension pages may open their own kind; a web page may not, since the
       // shell's fresh tab would skip Chromium's web_accessible_resources check.
       (/^chrome-extension:\/\//i.test(url) && contents.getURL().startsWith('chrome-extension://'))

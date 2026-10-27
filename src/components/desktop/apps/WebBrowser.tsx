@@ -28,7 +28,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { isOnionUrl, torState, type TorStatus } from '@/lib/tor';
+import { getTorBridge, isOnionUrl, torState, type TorStatus } from '@/lib/tor';
 import { useOnionLocation, useTorStatus } from '@/hooks/useTor';
 import { OnionIcon } from '@/components/icons/OnionIcon';
 import {
@@ -116,6 +116,7 @@ import {
 import {
   BrowserView,
   WEBBROWSER_PRIVATE_PARTITION,
+  WEBBROWSER_TOR_PARTITION,
   type BrowserViewHandle,
   type LoadErrorInfo,
 } from '@/components/desktop/apps/BrowserView';
@@ -200,6 +201,11 @@ interface Tab {
   parentId: string | null;
   /** URL the surface was mounted with (fixed for the surface's lifetime). */
   initialSrc: string;
+  /**
+   * Whether the surface runs in Tor's session (WEBBROWSER_TOR_PARTITION):
+   * the tab is on an onion site. Going to or from one mounts a new surface.
+   */
+  tor: boolean;
   /** Address bar text (user-editable). */
   address: string;
   /** Last committed URL. */
@@ -251,6 +257,7 @@ function createTab(
     id: newTabId(),
     parentId,
     initialSrc: blank || internal ? NEW_TAB_URL : url,
+    tor: isOnionUrl(url),
     address: blank ? '' : url,
     url: blank ? '' : url,
     title: null,
@@ -1393,6 +1400,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         promptUserscriptInstall(resolved);
         return;
       }
+      // A surface's session is fixed, so going to or from an onion site
+      // mounts a new one in the other session, with a history of its own.
+      const tor = isOnionUrl(resolved);
+      const moving = tabsRef.current.find((t) => t.id === id)?.tor !== tor;
       updateTab(id, (tab) => {
         const trimmed = tab.history.slice(0, tab.cursor + 1);
         return {
@@ -1403,15 +1414,28 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           themeColor: null,
           history: [...trimmed, resolved],
           cursor: trimmed.length,
+          ...(moving
+            ? { tor, initialSrc: surfaceUrl(resolved), wcId: null, canBack: false, canForward: false }
+            : {}),
         };
       });
-      views.current.get(id)?.loadURL(surfaceUrl(resolved));
+      if (moving) clearLoadError(id);
+      else views.current.get(id)?.loadURL(surfaceUrl(resolved));
       // The iframe fallback emits no navigate events, so record here (never
       // in a private window).
       if (!webviewMode && !isPrivate) recordVisit(resolved);
     },
-    [updateTab, webviewMode, recordVisit, userscriptsBridge, promptUserscriptInstall, isPrivate],
+    [updateTab, clearLoadError, webviewMode, recordVisit, userscriptsBridge, promptUserscriptInstall, isPrivate],
   );
+
+  // A page went to or from an onion site, which the main process stopped so
+  // the tab can load it in the other session.
+  useEffect(() => {
+    return getTorBridge()?.onMoveTab(({ wcId, url }) => {
+      const tab = tabsRef.current.find((t) => t.wcId === wcId);
+      if (tab) navigateTab(tab.id, url);
+    });
+  }, [navigateTab]);
 
   const navigate = useCallback(
     (raw: string) => navigateTab(activeId, raw),
@@ -1963,11 +1987,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         <div className="relative min-w-0 flex-1 overflow-hidden bg-white">
         {surfaceTabs.filter((tab) => !tab.dormant || tab.id === activeId).map((tab) => (
           <TabSurface
-            key={tab.id}
+            key={tab.tor ? `${tab.id}:tor` : tab.id}
             id={tab.id}
             initialSrc={tab.initialSrc}
             zoom={tab.zoom}
-            partition={tabPartition}
+            partition={tab.tor ? WEBBROWSER_TOR_PARTITION : tabPartition}
             isPrivate={isPrivate}
             active={tab.id === activeId}
             // A blank tab (empty url) shows the custom new-tab page overlaid

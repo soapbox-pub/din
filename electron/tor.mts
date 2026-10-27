@@ -4,8 +4,9 @@
 //
 // DinOS runs Tor from boot (os/configuration.nix). Elsewhere Din uses one
 // that's running already: a system Tor on 9050, or Tor Browser's on 9150.
-// Either way it's found by speaking SOCKS5 to it, and while it's there
-// network.mts sends .onion addresses to it - only those, so far. Tor's
+// Either way it's found by speaking SOCKS5 to it, and network.mts points the
+// browser's Tor session at it. Browser tabs on .onion addresses, and only
+// those, run in that session (keepTorSession). Tor's
 // control socket, where Din may use it, says how far Tor has got
 // connecting; without one, a Tor that answers counts as connected.
 //
@@ -351,6 +352,35 @@ export function attachOnionLocation(contents: Electron.WebContents): void {
   contents.once('destroyed', () => {
     tabs.delete(contents);
     onionLocations.delete(contents.id);
+  });
+}
+
+/** Whether a URL is on an onion service. */
+export function isOnionUrl(url: string): boolean {
+  try {
+    return isOnionHost(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Keep a browser tab's pages in the session that fits them: onion sites in
+ * Tor's, everything else out of it. A link, script or redirect that crosses
+ * over is stopped, and the shell loads it again in a surface in the other
+ * session (the Web Browser's tor:move-tab listener).
+ */
+export function keepTorSession(contents: Electron.WebContents, inTor: boolean): void {
+  // WebRTC would otherwise go around the proxy, and give away the address.
+  if (inTor) contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+  const guard = (event: Electron.Event, url: string) => {
+    if (!/^(https?|nsite):/i.test(url) || isOnionUrl(url) === inTor) return;
+    event.preventDefault();
+    sendToShell('tor:move-tab', { wcId: contents.id, url });
+  };
+  contents.on('will-navigate', (event) => guard(event, event.url));
+  contents.on('will-redirect', (event) => {
+    if (event.isMainFrame) guard(event, event.url);
   });
 }
 

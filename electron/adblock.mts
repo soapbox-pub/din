@@ -368,8 +368,8 @@ export function isAdblockExtension(id: string): boolean {
 export function setupAdblock(options: {
   /** The persistent session, where the extension blocks. */
   browserSession: Electron.Session;
-  /** The private session, blocked here in the main process. */
-  privateSession: Electron.Session;
+  /** The sessions without extensions (private, Tor), blocked here in the main process. */
+  privateSessions: Electron.Session[];
   isBrowserTab: (contents: Electron.WebContents) => boolean;
   assertShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;
@@ -432,11 +432,11 @@ export function setupAdblock(options: {
     console.error('adblock: failed to load the extension:', error);
   });
 
-  blockInSession(options.privateSession);
+  for (const s of options.privateSessions) blockInSession(s);
 
   // Cosmetic filtering in both sessions.
   const cosmeticPreload = require.resolve('@ghostery/adblocker-electron-preload');
-  for (const s of [options.browserSession, options.privateSession]) {
+  for (const s of [options.browserSession, ...options.privateSessions]) {
     s.registerPreloadScript({ id: 'din-adblock-scriptlets', type: 'frame', filePath: SCRIPTLETS_PRELOAD });
     s.registerPreloadScript({ id: 'din-adblock-cosmetics', type: 'frame', filePath: cosmeticPreload });
   }

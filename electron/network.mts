@@ -14,8 +14,8 @@
 // proxy and whose PAC setting nothing here reads. It's kept per connection
 // UUID in wifi-proxy.json and applied to every Electron session while that
 // network is up - the browser, installed apps and the shell itself. Native
-// apps don't see it (Android has the same caveat). Whatever the proxy,
-// .onion addresses go to Tor while there is one (electron/tor.mts).
+// apps don't see it (Android has the same caveat), and nor does the
+// browser's Tor session, which goes through Tor alone (electron/tor.mts).
 //
 // Threat model: same boundaries as the other bridges (strict CSP, the
 // sender guard, arguments re-validated here). All nmcli invocations use an
@@ -458,125 +458,58 @@ function electronProxyConfig(proxy: ProxySettings): Electron.ProxyConfig {
   return { mode: 'system' };
 }
 
-// .onion addresses go to Tor while there is one (electron/tor.mts), through a
-// PAC script wrapped around the network's own proxy: Chromium hands SOCKS5
-// the hostname, so the network never sees an onion address, and with a
-// single entry there is nothing to fall back to if Tor goes away. Without a
-// network proxy, everything else goes direct, in place of the system's
-// proxy settings (which DinOS doesn't have).
+// Browser tabs on onion services run in a session of their own whose every
+// request goes to Tor's SOCKS port (electron/tor.mts), and no other session
+// sends anything there. Chromium hands SOCKS5 the hostname, so nothing
+// resolves an onion address, or the clearnet hosts an onion site loads from,
+// outside Tor. The network's proxy doesn't apply to that session: Tor is on
+// this machine, and makes its own way out.
+//
+// (A PAC script sending only .onion hosts to Tor would have kept one session,
+// but Electron rejects every PAC lookup for a request from a page on a
+// standard custom scheme, nsite:// included: electron/electron#53887.)
+
+/** Where Tor is looked for when Din hasn't found one, so onion sites fail rather than go anywhere else. */
+const DEFAULT_TOR_SOCKS_PORT = 9050;
 
 /** Tor's SOCKS port, while there's a Tor. */
 let torSocksPort: number | null = null;
+let torSession: Electron.Session | null = null;
 
-const ONION_PAC = `
-function dinIsOnion(host) {
-  host = host.toLowerCase().replace(/\\.$/, '');
-  return host === 'onion' || /\\.onion$/.test(host);
-}`;
-
-/** A PAC script's data: URL, which Chromium loads like any other. */
-function pacDataUrl(script: string): string {
-  return `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(script).toString('base64')}`;
+async function applyTorProxy(): Promise<void> {
+  if (!torSession) return;
+  await torSession.setProxy({
+    mode: 'fixed_servers',
+    proxyRules: `socks5://127.0.0.1:${torSocksPort ?? DEFAULT_TOR_SOCKS_PORT}`,
+    // Even loopback: an onion site has no business with this machine's servers.
+    proxyBypassRules: '<-loopback>',
+  });
+  await torSession.closeAllConnections();
 }
 
-/** A PAC script taking a manual proxy's bypass list as Chromium's bypass rules would, near enough. */
-function manualPac(proxy: ProxySettings): string {
-  const bypass = proxy.bypass.split(',').map((s) => s.trim().replace(/^[a-z]+:\/\//i, '')).filter(Boolean);
-  return `
-var dinBypass = ${JSON.stringify(bypass)};
-function dinBypassed(host) {
-  if (isPlainHostName(host) || host === 'localhost' || /^127\\./.test(host) || host === '::1' || host === '[::1]') {
-    return true;
-  }
-  for (var i = 0; i < dinBypass.length; i++) {
-    var rule = dinBypass[i].toLowerCase();
-    var cidr = /^(\\d+\\.\\d+\\.\\d+\\.\\d+)\\/(\\d+)$/.exec(rule);
-    if (cidr) {
-      if (!/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(host)) continue;
-      var bits = Number(cidr[2]), mask = [];
-      for (var j = 0; j < 4; j++) mask.push(256 - Math.pow(2, 8 - Math.max(0, Math.min(8, bits - 8 * j))));
-      if (isInNet(host, cidr[1], mask.join('.'))) return true;
-      continue;
-    }
-    if (!/^\\[/.test(rule)) rule = rule.replace(/:\\d+$/, '');
-    if (rule.charAt(0) === '.' ? dnsDomainIs(host, rule) || host === rule.slice(1) : shExpMatch(host, rule)) {
-      return true;
-    }
-  }
-  return false;
-}
-function dinNetworkProxy(url, host) {
-  return dinBypassed(host.toLowerCase()) ? 'DIRECT' : ${JSON.stringify(`PROXY ${proxy.host}:${proxy.port}`)};
-}`;
-}
-
-/** The network's own PAC script, made to answer as dinNetworkProxy; null when it can't be had. */
-async function networkPac(pacUrl: string): Promise<string | null> {
-  try {
-    const response = await fetch(pacUrl, { signal: AbortSignal.timeout(10_000) });
-    if (!response.ok) return null;
-    const script = await response.text();
-    // Its own scope, so its FindProxyForURL doesn't meet the one below.
-    return `var dinNetworkProxy = (function () {\n${script}\nreturn FindProxyForURL;\n})();`;
-  } catch {
-    return null;
-  }
-}
-
-async function proxyConfig(proxy: ProxySettings): Promise<Electron.ProxyConfig> {
-  if (torSocksPort === null) return electronProxyConfig(proxy);
-  const network =
-    proxy.mode === 'manual'
-      ? manualPac(proxy)
-      : proxy.mode === 'pac'
-        ? await networkPac(proxy.pacUrl)
-        : `function dinNetworkProxy() { return 'DIRECT'; }`;
-  // A PAC that can't be fetched leaves onion addresses unrouted, not the network.
-  if (network === null) return electronProxyConfig(proxy);
-  return {
-    mode: 'pac_script',
-    pacScript: pacDataUrl(`${ONION_PAC}
-${network}
-function FindProxyForURL(url, host) {
-  return dinIsOnion(host) ? 'SOCKS5 127.0.0.1:${torSocksPort}' : dinNetworkProxy(url, host);
-}`),
-  };
+/** Point the browser's Tor session at Tor's SOCKS port (null: none found). */
+export function setTorSocksPort(port: number | null): void {
+  if (port === torSocksPort) return;
+  torSocksPort = port;
+  void applyTorProxy().catch(() => {});
 }
 
 /** Every session the proxy goes to: the ones named by main, plus all created since. */
 const proxySessions = new Set<Electron.Session>();
 let proxySessionSource: () => Electron.Session[] = () => [];
-/** The network proxy and Tor port last applied, and what new sessions get (null: nothing). */
-let currentProxy = NO_PROXY;
-let appliedKey = JSON.stringify([NO_PROXY, null]);
-let appliedConfig: Electron.ProxyConfig | null = null;
+let appliedProxy = JSON.stringify(NO_PROXY);
 
-async function applyProxy(proxy: ProxySettings): Promise<void> {
-  const key = JSON.stringify([proxy, torSocksPort]);
-  if (key === appliedKey) return;
-  // Tor coming and going moves only onion addresses, which nothing reaches
-  // without it: the connections that are open can stay.
-  const networkChanged = JSON.stringify(proxy) !== JSON.stringify(currentProxy);
-  appliedKey = key;
-  currentProxy = proxy;
-  const config = await proxyConfig(proxy);
-  if (key !== appliedKey) return;
-  appliedConfig = proxy.mode === 'none' && torSocksPort === null ? null : config;
-  const targets = new Set([session.defaultSession, ...proxySessionSource(), ...proxySessions]);
+async function applyProxy(proxy: ProxySettings, only?: Electron.Session): Promise<void> {
+  const config = electronProxyConfig(proxy);
+  const targets = only ? [only] : new Set([session.defaultSession, ...proxySessionSource(), ...proxySessions]);
   await Promise.all(
     [...targets].map(async (s) => {
+      if (s === torSession) return;
       await s.setProxy(config);
       // Sockets opened under the old proxy would otherwise linger.
-      if (networkChanged) await s.closeAllConnections();
+      if (!only) await s.closeAllConnections();
     }),
   );
-}
-
-/** Send .onion addresses to Tor's SOCKS port, or (null) stop. */
-export function setTorSocksPort(port: number | null): void {
-  if (port === torSocksPort) return;
-  torSocksPort = port;
-  void applyProxy(currentProxy).catch(() => {});
 }
 
 /** UUIDs of the active WiFi connections. */
@@ -598,6 +531,9 @@ export async function refreshWifiProxy(): Promise<void> {
   }
   const proxies = readProxies();
   const proxy = uuids.map((uuid) => proxies[uuid]).find((p) => p !== undefined) ?? NO_PROXY;
+  const key = JSON.stringify(proxy);
+  if (key === appliedProxy) return;
+  appliedProxy = key;
   await applyProxy(proxy);
 }
 
@@ -947,13 +883,19 @@ export function registerWifiHandlers(options: {
   assertShellSender: AssertSender;
   /** Sessions the network proxy applies to, besides the default one and those created later. */
   proxySessions: () => Electron.Session[];
+  /** The browser's session for onion sites, which goes through Tor instead. */
+  torSession: Electron.Session;
 }): void {
   const { assertShellSender } = options;
   proxySessionSource = options.proxySessions;
+  torSession = options.torSession;
   app.on('session-created', (s) => {
     proxySessions.add(s);
-    if (appliedConfig) void s.setProxy(appliedConfig).catch(() => {});
+    if (appliedProxy !== JSON.stringify(NO_PROXY)) {
+      void applyProxy(JSON.parse(appliedProxy) as ProxySettings, s).catch(() => {});
+    }
   });
+  void applyTorProxy().catch(() => {});
   void refreshWifiProxy().catch(() => {});
 
   ipcMain.handle('wifi:status', async (event) => {

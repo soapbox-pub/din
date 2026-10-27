@@ -5,6 +5,7 @@ import {
   BrowserView,
   WEBBROWSER_PARTITION,
   WEBBROWSER_PRIVATE_PARTITION,
+  WEBBROWSER_TOR_PARTITION,
   type BrowserViewHandle,
   type LoadErrorInfo,
 } from '@/components/desktop/apps/BrowserView';
@@ -140,7 +141,13 @@ export function WebPopup({ windowId, params }: AppComponentProps) {
         <BrowserView
           ref={viewRef}
           src={initialUrl}
-          partition={isPrivate ? WEBBROWSER_PRIVATE_PARTITION : WEBBROWSER_PARTITION}
+          partition={
+            isOnionUrl(initialUrl)
+              ? WEBBROWSER_TOR_PARTITION
+              : isPrivate
+                ? WEBBROWSER_PRIVATE_PARTITION
+                : WEBBROWSER_PARTITION
+          }
           onNavigate={onNavigate}
           onTitleChange={onTitleChange}
           onLoadError={onLoadError}

@@ -34,6 +34,15 @@ export const WEBBROWSER_PARTITION = 'persist:webbrowser';
 export const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
 
 /**
+ * The session partition for browser tabs on onion services, from normal and
+ * private windows alike. Every request in it goes through Tor, and a tab
+ * moves into it, and out again, as it goes to and from .onion addresses.
+ * In memory only, like the private one. Must match WEBBROWSER_TOR_PARTITION
+ * in electron/main.mts.
+ */
+export const WEBBROWSER_TOR_PARTITION = 'din-webbrowser-tor';
+
+/**
  * The session partition for installed web apps (WebAppFrame). Guests here get
  * the NIP-07 identity bridge already connected, so they inherit Din's login;
  * browser tabs get it too, but have to ask to connect.

@@ -2,8 +2,8 @@
  * Tor, through the `window.tor` bridge (electron/preload.cjs, backed by
  * electron/tor.mts): whether Din has found a Tor and how far it has got
  * connecting, turning it on and off on DinOS, and the onion services browser
- * tabs' pages name (Onion-Location). While there's a Tor, the main process
- * sends every .onion address to it.
+ * tabs' pages name (Onion-Location). Browser tabs on onion sites run in a
+ * session of their own (WEBBROWSER_TOR_PARTITION) that goes through Tor.
  *
  * In a plain browser (`npm run dev:browser`) the bridge is absent; callers
  * feature-detect via `getTorBridge()`.
@@ -29,6 +29,8 @@ export interface TorBridge {
   onionLocation(wcId: number): Promise<string | null>;
   onStatus(callback: (status: TorStatus) => void): () => void;
   onOnionLocation(callback: (update: { wcId: number; url: string | null }) => void): () => void;
+  /** A browser tab's page went to or from an onion site, to be loaded in the other session. */
+  onMoveTab(callback: (move: { wcId: number; url: string }) => void): () => void;
 }
 
 declare global {
