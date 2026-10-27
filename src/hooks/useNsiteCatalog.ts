@@ -47,7 +47,7 @@ export async function queryManifests(
  * (NSITE_CATALOG_PUBKEYS), the signed-in user, and everyone they follow. The
  * web a person already keeps up with is a better guess at the apps they want
  * than anything a publisher could pick, and it is a list nobody has to curate.
- * Sorted by name, nameless sites last (see buildCatalog).
+ * Most recently updated first (see buildCatalog).
  */
 export function useNsiteCatalog() {
   const relays = useManifestRelays();

@@ -140,9 +140,8 @@ export function parseStoreApp(event: NostrEvent): StoreApp | null {
 }
 
 /**
- * Reduce manifests to the newest per site, parsed into StoreApps and sorted by
- * name, the only order a person scanning for one app can follow. Sites that
- * don't name themselves go last.
+ * Reduce manifests to the newest per site, parsed into StoreApps and sorted
+ * most recently updated first.
  */
 export function buildCatalog(events: NostrEvent[]): StoreApp[] {
   const latest = new Map<string, StoreApp>();
@@ -153,10 +152,7 @@ export function buildCatalog(events: NostrEvent[]): StoreApp[] {
     if (!seen || seen.createdAt < app.createdAt) latest.set(app.host, app);
   }
 
-  return [...latest.values()].sort((a, b) => {
-    if (!a.name || !b.name) return a.name ? -1 : b.name ? 1 : 0;
-    return a.name.localeCompare(b.name);
-  });
+  return [...latest.values()].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** True for the pinned hero site (FEATURED_HERO). */

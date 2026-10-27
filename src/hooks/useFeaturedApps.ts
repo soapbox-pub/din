@@ -72,9 +72,7 @@ export function useFeaturedApps() {
       );
 
       const hero = sites.find(isFeaturedHero);
-      const shelf = sites
-        .filter((app) => !isFeaturedHero(app) && app.name && app.about)
-        .sort((a, b) => b.createdAt - a.createdAt);
+      const shelf = sites.filter((app) => !isFeaturedHero(app) && app.name && app.about);
       const apps = hero ? [hero, ...shelf] : shelf;
 
       if (apps.length === 0) return null;
