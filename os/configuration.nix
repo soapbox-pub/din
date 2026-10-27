@@ -1145,37 +1145,6 @@ in
     '';
   };
 
-  # Plymouth draws on the firmware's framebuffer until the GPU's driver turns
-  # up, then moves to the driver, which switches the panel off and on (where
-  # it can't take over the firmware's picture as is: on AMD, any panel with
-  # VSC SDP colorimetry). That put a second of black in the middle of the
-  # boot screen. Waiting for the driver (5s at most) puts it before the boot
-  # screen instead, while the firmware's logo is up.
-  boot.initrd.systemd.services.dinos-wait-for-gpu = {
-    description = "Wait for the GPU's driver before the boot screen";
-    unitConfig.DefaultDependencies = false;
-    wantedBy = [ "sysinit.target" ];
-    after = [ "systemd-udevd.service" "systemd-udev-trigger.service" ];
-    before = [ "plymouth-start.service" "sysinit.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = ''
-      for _ in $(seq 50); do
-        for card in /sys/class/drm/card*; do
-          [[ $card == *-* ]] && continue
-          driver=$(readlink -e "$card/device/driver") || continue
-          case ''${driver##*/} in
-            "" | simple-framebuffer | efi-framebuffer | vesa-framebuffer) ;;
-            *) exit 0 ;;
-          esac
-        done
-        sleep 0.1
-      done
-    '';
-  };
-
   # The boot screen's clock: Plymouth scripts can't tell the time, so it's
   # sent to them as a message every minute until the initrd is done.
   boot.initrd.systemd.services.dinos-boot-clock = {
