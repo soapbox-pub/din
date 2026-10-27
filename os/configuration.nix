@@ -1053,21 +1053,33 @@ in
   # password is typed through the console's US keymap.
   boot.initrd.systemd.storePaths = [ pkgs.xkeyboard_config ];
   boot.initrd.kernelModules = [ "evdev" ];
-  # `plymouth quit` returns before plymouthd has let go of the GPU, and cage,
-  # which starts next, finds it busy and exits, leaving the screen black
-  # until it's restarted. So this waits for plymouthd to be gone (2s at most).
+  # Handing the screen to cage. When plymouthd exits, the kernel takes its
+  # last frame off the screen, and it's black until cage lights it. So, as
+  # GDM does, Plymouth is only deactivated before cage starts: it gives up
+  # the GPU but stays, and its frame stays up. It quits once cage has the
+  # screen, which is when cage starts Din's launcher, and the launcher moves
+  # cage's socket to din-shell; or after 20 seconds, if that never happens.
   systemd.services.plymouth-quit.serviceConfig.ExecStart = [
     ""
-    (pkgs.writeShellScript "plymouth-quit" ''
-      pid=$(cat /run/plymouth/pid 2>/dev/null || true)
-      ${config.boot.plymouth.package}/bin/plymouth quit --retain-splash
-      [[ $pid =~ ^[0-9]+$ ]] || exit 0
-      for _ in $(${pkgs.coreutils}/bin/seq 200); do
-        [ -e /proc/$pid ] || break
-        ${pkgs.coreutils}/bin/sleep 0.01
-      done
-    '')
+    "${config.boot.plymouth.package}/bin/plymouth deactivate"
   ];
+  systemd.services.dinos-boot-screen-quit = {
+    description = "Close the boot screen once Din's compositor has the screen";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "plymouth-quit.service" "cage-tty1.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      # Once a boot: later, Plymouth may be the lock screen (os/din-lock.py).
+      RemainAfterExit = true;
+    };
+    script = ''
+      for _ in $(seq 200); do
+        [ -S /run/user/${toString config.users.users.din.uid}/din-shell ] && break
+        sleep 0.1
+      done
+      ${config.boot.plymouth.package}/bin/plymouth quit --retain-splash || true
+    '';
+  };
 
   # Before Plymouth starts: its images into its ImageDir, then from the boot
   # partition, when it turns up within a few seconds, the wallpaper, the
