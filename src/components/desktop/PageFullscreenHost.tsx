@@ -36,12 +36,17 @@ const STYLE_ID = 'din-page-fullscreen';
  *
  * A native app in full screen is the same, with its window's canvas host
  * (NativeWindowView.tsx) as the frame; the app sizes itself to the monitor.
+ *
+ * Monitors can come and go while a page is fullscreen (an AirPlay receiver
+ * taken over by another device), so the fit is redone whenever they change.
  */
 export function PageFullscreenHost() {
   const { monitors } = useMonitors();
   const monitorsRef = useRef(monitors);
+  const refitRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     monitorsRef.current = monitors;
+    refitRef.current?.();
   }, [monitors]);
 
   useEffect(() => {
@@ -50,6 +55,9 @@ export function PageFullscreenHost() {
     const shell = document.getElementById('shell');
     const layer = shell instanceof HTMLDialogElement ? shell : null;
     let fitted: HTMLElement | null = null;
+    // Whether the fullscreen page is laid out at a monitor's size, which only
+    // leaving fullscreen undoes in the main process.
+    let emulated = false;
 
     // Escape belongs to the fullscreen page, not to the desktop's layer.
     const onCancel = (event: Event) => event.preventDefault();
@@ -66,11 +74,29 @@ export function PageFullscreenHost() {
       }
     };
 
+    const fit = (pageId: number, width: number, height: number) => {
+      emulated = true;
+      const zoom = getMonitorsBridge()?.zoomFactor() ?? 1;
+      void bridge
+        .fit(pageId, width * zoom, height * zoom)
+        .catch((error: unknown) => console.warn('page fullscreen: fitting failed:', error));
+    };
+
     const onChange = () => {
       unfit();
       const host = document.fullscreenElement;
-      if (!(host instanceof HTMLElement) || monitorsRef.current.length < 2) return;
+      if (!(host instanceof HTMLElement)) {
+        emulated = false;
+        return;
+      }
       const page = host.tagName === 'WEBVIEW';
+      const getId = (host as HTMLElement & { getWebContentsId?: () => number }).getWebContentsId;
+      if (monitorsRef.current.length < 2) {
+        // Down to one monitor under a page fitted to another: it fills the
+        // whole window again.
+        if (page && getId && emulated) fit(getId.call(host), window.innerWidth, window.innerHeight);
+        return;
+      }
       if (!page && host.dataset.nativeWindow === undefined) return;
       const frame = page ? host.shadowRoot?.querySelector('iframe') : host;
       if (!frame) return;
@@ -121,17 +147,13 @@ export function PageFullscreenHost() {
         });
       }
 
-      const getId = (host as HTMLElement & { getWebContentsId?: () => number }).getWebContentsId;
-      const zoom = getMonitorsBridge()?.zoomFactor() ?? 1;
-      if (page && getId) {
-        void bridge
-          .fit(getId.call(host), monitor.width * zoom, monitor.height * zoom)
-          .catch((error: unknown) => console.warn('page fullscreen: fitting failed:', error));
-      }
+      if (page && getId) fit(getId.call(host), monitor.width, monitor.height);
     };
 
     document.addEventListener('fullscreenchange', onChange);
+    refitRef.current = onChange;
     return () => {
+      refitRef.current = null;
       document.removeEventListener('fullscreenchange', onChange);
       layer?.removeEventListener('cancel', onCancel);
       unfit();
