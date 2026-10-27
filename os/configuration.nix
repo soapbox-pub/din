@@ -1489,9 +1489,11 @@ in
     "vfat" "nls_cp437" "nls_iso8859_1"
     # The GPU's driver, which udev loads for the hardware there is. Loaded
     # after root, it takes the screen from the firmware's framebuffer and
-    # switches the panel off until cage lights it again; in the initrd it
-    # does that under the firmware's logo, and the boot screen draws on it
-    # from the start. Its firmware comes along, about 40MB per initrd.
+    # leaves the panel off until cage lights it again; here it's up early
+    # and the boot screen moves onto it. On AMD the panel still goes off for
+    # about a second then, wherever it supports VSC SDP colorimetry: amdgpu
+    # won't keep the firmware's picture for those (dc_validate_boot_timing).
+    # Its firmware comes along, about 40MB per initrd.
     "amdgpu" "i915" "xe"
   ];
 
