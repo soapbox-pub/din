@@ -71,6 +71,7 @@ export const Icons = {
   zoomWindow: ({ className }: P) => svg(<><rect x={3} y={3} width={11} height={11} strokeDasharray="2 2" stroke={BLUE} /><circle cx={14} cy={14} r={4} /><path d="m21 21-4-4" strokeWidth={2} /></>, className),
   zoomPrevious: ({ className }: P) => svg(<><circle cx={12} cy={12} r={6.5} /><path d="M19 19 17 17" strokeWidth={2} /><path d="m10 12 4-3v6z" fill={BLUE} stroke={BLUE} /></>, className),
   pan: ({ className }: P) => svg(<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12m0-7.5a1.5 1.5 0 0 1 3 0V12m0-6a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7 6 6 0 0 1-5-3l-2.6-4.5a1.5 1.5 0 0 1 2.6-1.5L8 15" />, className),
+  assistant: ({ className }: P) => svg(<><path d="M10 3.5 11.6 8.4 16.5 10l-4.9 1.6L10 16.5l-1.6-4.9L3.5 10l4.9-1.6z" stroke={BLUE} /><path d="M17.5 14v6M14.5 17h6" stroke={YEL} /></>, className),
   properties: ({ className }: P) => svg(<><rect x={4} y={3} width={16} height={18} rx={1.5} /><path d="M8 8h8M8 12h8M8 16h5" stroke={BLUE} /></>, className),
   units: ({ className }: P) => svg(<><path d="M3 17h18M5 17v-3M9 17v-5M13 17v-3M17 17v-5" /><path d="M5 7h14" stroke={BLUE} /></>, className),
   layerOff: ({ className }: P) => svg(<><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z" /><path d="M4 4l16 16" stroke={RED} /></>, className),

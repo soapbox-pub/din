@@ -35,8 +35,8 @@ export interface RibbonProps {
   hatch: HatchSettings;
   setHatch: (h: HatchSettings) => void;
   finishHatch: () => void;
-  palettes: { properties: boolean; layers: boolean };
-  togglePalette: (p: 'properties' | 'layers') => void;
+  palettes: { properties: boolean; layers: boolean; assistant: boolean };
+  togglePalette: (p: 'properties' | 'layers' | 'assistant') => void;
   dark: boolean;
   toggleDark: () => void;
 }
@@ -401,6 +401,9 @@ export function Ribbon(p: RibbonProps) {
           }
         />
       </Panel>
+      <Panel title="Assistant">
+        <BigButton icon={<Icons.assistant />} label="Ask AI" title="Assistant (Ctrl+Shift+A)" onClick={() => p.togglePalette('assistant')} active={p.palettes.assistant} />
+      </Panel>
     </>
   );
 
@@ -483,6 +486,7 @@ export function Ribbon(p: RibbonProps) {
       <Panel title="Palettes">
         <BigButton icon={<Icons.properties />} label="Properties" title="Properties (Ctrl+1)" onClick={() => p.togglePalette('properties')} active={p.palettes.properties} />
         <BigButton icon={<Icons.layers />} label="Layer Properties" title="Layer Properties (LA)" onClick={() => p.togglePalette('layers')} active={p.palettes.layers} />
+        <BigButton icon={<Icons.assistant />} label="Assistant" title="Assistant (Ctrl+Shift+A)" onClick={() => p.togglePalette('assistant')} active={p.palettes.assistant} />
       </Panel>
       <Panel title="Interface">
         <BigButton icon={<span className={cn('size-6 rounded-[3px] border-2', p.dark ? 'border-[#c4ccd7] bg-[#212830]' : 'border-[#555] bg-white')} />} label={p.dark ? 'Dark' : 'Light'} title="Model space background" onClick={p.toggleDark} />

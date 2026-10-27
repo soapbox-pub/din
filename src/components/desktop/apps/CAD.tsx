@@ -67,6 +67,9 @@ import { DropdownMenu as Menu } from 'radix-ui';
 import { Button, Dialog, MenuContent, MenuItem, MenuSeparator } from './cad/ui/chrome';
 import { FOCUS, keepFocus } from './cad/ui/style';
 import { Icons } from './cad/ui/icons';
+import { AssistantPalette } from './cad/ui/assistant';
+import { useCadAssistant } from './cad/useCadAssistant';
+import { unitsName } from './cad/assistant';
 
 const SETTINGS_KEY = 'din:cad:settings';
 const RECENT_KEY = 'din:cad:recent';
@@ -97,6 +100,7 @@ interface Settings extends DraftSettings {
   lwt: boolean;
   dark: boolean;
   properties: boolean;
+  assistant: boolean;
   ribbonCollapsed: boolean;
   tab: RibbonTabId;
 }
@@ -115,6 +119,7 @@ const DEFAULTS: Settings = {
   lwt: false,
   dark: true,
   properties: false,
+  assistant: false,
   ribbonCollapsed: false,
   tab: 'home',
 };
@@ -242,6 +247,8 @@ export function CAD({ windowId, params }: AppComponentProps) {
   const [menuAt, setMenuAt] = useState<Vec | null>(null);
   const [viewTick, setViewTick] = useState(0);
   const [fontsReady, setFontsReady] = useState(false);
+  /** Counts drawings opened in this window, so the assistant starts over with each. */
+  const [docSerial, setDocSerial] = useState(0);
 
   const title = doc ? `${dirty ? '• ' : ''}${docName}` : 'CAD';
   const noDoc = doc === null;
@@ -553,15 +560,15 @@ export function CAD({ windowId, params }: AppComponentProps) {
   // ---- History ----------------------------------------------------------------------------------
 
   const commit = useCallback(
-    (label: string, d: Drawing) => {
+    (label: string, d: Drawing, turn?: number) => {
       docRef.current = d;
-      const run = runRef.current;
+      const run = turn ?? runRef.current;
       setHist((h) => {
         if (!h) return { entries: [{ d, label, run }], index: 0 };
         const top = h.entries[h.index];
         const entries = h.entries.slice(0, h.index + 1);
-        // One command, one undo step.
-        if (runningRef.current && top.run === run && h.index > 0) entries[entries.length - 1] = { d, label: top.label, run };
+        // One command, one undo step; the same for each of the assistant's turns.
+        if ((turn !== undefined || runningRef.current) && top.run === run && h.index > 0) entries[entries.length - 1] = { d, label: top.label, run };
         else entries.push({ d, label, run });
         while (entries.length > MAX_UNDO) entries.shift();
         const next = { entries, index: entries.length - 1 };
@@ -639,6 +646,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
       setLayerIso(null);
       setError(null);
       setHistoryLines([]);
+      setDocSerial((n) => n + 1);
       fitPending.current = true;
       requestAnimationFrame(() => {
         const s = sizeRef.current;
@@ -1581,6 +1589,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
         v: () => run('PASTECLIP'),
         a: () => run('SELECTALL'),
         '1': () => set({ properties: !settingsRef.current.properties }),
+        ...(e.shiftKey ? { a: () => set({ assistant: !settingsRef.current.assistant }) } : {}),
         '0': () => set({ ribbonCollapsed: !settingsRef.current.ribbonCollapsed }),
       };
       if (map[lower]) {
@@ -1712,6 +1721,54 @@ export function CAD({ windowId, params }: AppComponentProps) {
     return () => setAccent(null);
   }, [setAccent]);
 
+  // ---- The assistant ------------------------------------------------------------------------------
+
+  const assistant = useCadAssistant(
+    {
+      name: docName,
+      drawing: () => docRef.current,
+      view: () => {
+        const d = docRef.current!;
+        const v = viewRef.current;
+        const s = sizeRef.current;
+        const tl = toWorld(v, s, { x: 0, y: 0 });
+        const br = toWorld(v, s, { x: s.w, y: s.h });
+        const n = (x: number) => String(Number(x.toPrecision(6)));
+        const sel = d.entities.filter((e) => selRef.current.has(e.id));
+        return [
+          '# What the user sees',
+          '',
+          `- Drawing: ${docName}, in ${unitsName(d)}.`,
+          `- Visible area: x from ${n(tl.x)} to ${n(br.x)}, y from ${n(br.y)} to ${n(tl.y)}.`,
+          `- Current layer: ${d.header.clayer}.`,
+          sel.length
+            ? `- Selected (${sel.length}): ${sel
+                .slice(0, 100)
+                .map((e) => `id ${e.id} (${e.type} on ${e.layer})`)
+                .join(', ')}${sel.length > 100 ? ', …' : ''}.`
+            : '- Nothing is selected.',
+          '',
+        ].join('\n');
+      },
+      capture: async () => {
+        const base = baseRef.current;
+        if (!base) return null;
+        const k = Math.min(1, 1600 / base.width);
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(base.width * k));
+        c.height = Math.max(1, Math.round(base.height * k));
+        const ctx = c.getContext('2d');
+        if (!ctx) return null;
+        ctx.drawImage(base, 0, 0, c.width, c.height);
+        if (overRef.current) ctx.drawImage(overRef.current, 0, 0, c.width, c.height);
+        const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/png'));
+        return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+      },
+      apply: (d, turn) => commit('Assistant', d, turn),
+    },
+    docSerial,
+  );
+
   // ---- Ribbon state ---------------------------------------------------------------------------------
 
   const selList = useMemo(() => (doc ? doc.entities.filter((e) => selection.has(e.id)) : []), [doc, selection]);
@@ -1791,8 +1848,8 @@ export function CAD({ windowId, params }: AppComponentProps) {
             scheduleOver();
           }}
           finishHatch={() => submitText('')}
-          palettes={{ properties: settings.properties, layers: layersOpen }}
-          togglePalette={(p) => (p === 'properties' ? set({ properties: !settings.properties }) : setLayersOpen((v) => !v))}
+          palettes={{ properties: settings.properties, layers: layersOpen, assistant: settings.assistant }}
+          togglePalette={(p) => (p === 'properties' ? set({ properties: !settings.properties }) : p === 'assistant' ? set({ assistant: !settings.assistant }) : setLayersOpen((v) => !v))}
           dark={settings.dark}
           toggleDark={() => set({ dark: !settings.dark })}
         />
@@ -1961,6 +2018,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
             metric={doc.header.measurement === 1}
           />
         )}
+        {settings.assistant && doc && <AssistantPalette assistant={assistant} onClose={() => set({ assistant: false })} />}
       </div>
 
       {/* Layout tabs and the status bar. */}
@@ -1997,6 +2055,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
               {['', 'Scientific', 'Decimal', 'Engineering', 'Architectural', 'Fractional'][doc.header.lunits] ?? 'Decimal'}
             </button>
             <StatusToggle on={settings.properties} label="Properties (Ctrl+1)" onClick={() => set({ properties: !settings.properties })} icon={<Icons.properties />} />
+            <StatusToggle on={settings.assistant} label="Assistant (Ctrl+Shift+A)" onClick={() => set({ assistant: !settings.assistant })} icon={<Icons.assistant />} />
           </>
         )}
       </div>
