@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Lightbulb, LightbulbOff, Lock, LockOpen, Plus, Printer, Snowflake, Sun, Trash2, X } from 'lucide-react';
+import { Check, Focus, Lightbulb, LightbulbOff, Lock, LockOpen, Plus, Printer, Snowflake, Sun, Trash2, X } from 'lucide-react';
 import { DropdownMenu as Menu } from 'radix-ui';
 import { colorName } from '../aci';
 import {
@@ -506,14 +506,72 @@ function ColorPick({ value, layerColor, onPick }: { value: number | undefined; l
 
 // ---- Layer Properties Manager --------------------------------------------------------------
 
-export function LayerManager({ drawing: d, commit, onClose, inUse }: { drawing: Drawing; commit: (label: string, d: Drawing) => void; onClose: () => void; inUse: (name: string) => boolean }) {
+/** Which layers were on before the Layer Properties Manager isolated one, for Unisolate. */
+export type LayerIsolation = { layer: string; on: Record<string, boolean> } | null;
+
+interface LayerManagerProps {
+  drawing: Drawing;
+  commit: (label: string, d: Drawing) => void;
+  onClose: () => void;
+  inUse: (name: string) => boolean;
+  /** Where the user dragged the panel to, relative to the drawing area; null for the default corner. */
+  pos: Vec | null;
+  onMove: (p: Vec) => void;
+  isolation: LayerIsolation;
+  setIsolation: (iso: LayerIsolation) => void;
+}
+
+export function LayerManager({ drawing: d, commit, onClose, inUse, pos, onMove, isolation, setIsolation }: LayerManagerProps) {
   const [sel, setSel] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  // Undo, or turning layers back on by hand, ends the isolation.
+  const isolated = isolation && d.layers.some((l) => l.name === isolation.layer && l.on) && d.layers.every((l) => l.name === isolation.layer || !l.on) ? isolation : null;
+  const isolate = (name: string) => {
+    commit('Isolate Layer', {
+      ...d,
+      header: { ...d.header, clayer: name },
+      layers: d.layers.map((l) => (l.name === name ? { ...l, on: true, frozen: false } : { ...l, on: false })),
+    });
+    // Isolating another layer while one is isolated keeps the original states to go back to.
+    setIsolation({ layer: name, on: isolated?.on ?? Object.fromEntries(d.layers.map((l) => [l.name, l.on])) });
+    setMsg(null);
+  };
+  const unisolate = () => {
+    if (!isolated) return;
+    commit('Unisolate Layer', { ...d, layers: d.layers.map((l) => ({ ...l, on: isolated.on[l.name] ?? true })) });
+    setIsolation(null);
+  };
+  const startDrag = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+    const panel = e.currentTarget.parentElement!;
+    const area = panel.offsetParent as HTMLElement | null;
+    if (!area) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const x0 = e.clientX - panel.offsetLeft;
+    const y0 = e.clientY - panel.offsetTop;
+    const move = (ev: PointerEvent) => {
+      // Keep the title bar inside the drawing area so the panel can always be dragged back.
+      const x = Math.min(Math.max(ev.clientX - x0, 0), Math.max(0, area.clientWidth - panel.offsetWidth));
+      const y = Math.min(Math.max(ev.clientY - y0, 0), Math.max(0, area.clientHeight - handle.offsetHeight));
+      onMove({ x, y });
+    };
+    const end = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  };
   const setLayer = (name: string, patch: Partial<Layer>, label = 'Layer Properties') => {
     let header = d.header;
     if (patch.name && d.header.clayer === name) header = { ...header, clayer: patch.name };
     const rename = (l: string) => (patch.name && l === name ? patch.name : l);
+    if (patch.name && isolated) setIsolation({ layer: rename(isolated.layer), on: Object.fromEntries(Object.entries(isolated.on).map(([k, v]) => [rename(k), v])) });
     commit(label, {
       ...d,
       header,
@@ -550,8 +608,12 @@ export function LayerManager({ drawing: d, commit, onClose, inUse }: { drawing: 
   };
   const ICON_BTN = cn('grid size-6 place-items-center rounded-[2px] hover:bg-white/10', FOCUS);
   return (
-    <section aria-label="Layer Properties Manager" className="absolute top-2 left-2 z-30 flex max-h-[calc(100%-16px)] w-[min(760px,calc(100%-16px))] flex-col overflow-hidden rounded-[4px] border border-[#15191e] bg-[#333a45] text-[#e3e8ef] shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
-      <div className="flex h-7 shrink-0 items-center justify-between bg-[#272d36] pr-1 pl-2.5 text-[12px] font-semibold tracking-wide uppercase">
+    <section
+      aria-label="Layer Properties Manager"
+      style={pos ? { left: pos.x, top: pos.y, maxHeight: `calc(100% - ${pos.y + 8}px)` } : undefined}
+      className="absolute top-2 left-2 z-30 flex max-h-[calc(100%-16px)] w-[min(760px,calc(100%-16px))] flex-col overflow-hidden rounded-[4px] border border-[#15191e] bg-[#333a45] text-[#e3e8ef] shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
+    >
+      <div onPointerDown={startDrag} className="flex h-7 shrink-0 cursor-move items-center justify-between bg-[#272d36] pr-1 pl-2.5 text-[12px] font-semibold tracking-wide uppercase select-none">
         Layer Properties Manager
         <button type="button" aria-label="Close Layer Properties Manager" onClick={onClose} className={cn('grid size-5 place-items-center rounded-[2px] text-[#c4ccd7] hover:bg-white/10', FOCUS)}>
           <X className="size-3.5" />
@@ -567,6 +629,16 @@ export function LayerManager({ drawing: d, commit, onClose, inUse }: { drawing: 
         <button type="button" onClick={current} className={ICON_BTN} title="Set Current" aria-label="Set Current" disabled={!sel}>
           <Check className="size-4 text-[#6fdc8c]" />
         </button>
+        <button
+          type="button"
+          onClick={() => (isolated ? unisolate() : sel && isolate(sel))}
+          disabled={!isolated && !sel}
+          className={cn('flex h-6 items-center gap-1.5 rounded-[2px] px-1.5 hover:bg-white/10 disabled:opacity-50 disabled:hover:bg-transparent', FOCUS)}
+          title={isolated ? `Unisolate “${isolated.layer}”: turn the other layers back on` : 'Isolate: show only the selected layer'}
+        >
+          <Focus className={cn('size-4', isolated ? 'text-[#f5c542]' : 'text-[#7cc4ff]')} />
+          {isolated ? 'Unisolate' : 'Isolate'}
+        </button>
         <span className="ml-3 text-[#a9b2bf]">Current layer: {d.header.clayer}</span>
         {msg && <span role="status" className="ml-auto text-[#ffb4a6]">{msg}</span>}
       </div>
@@ -574,7 +646,7 @@ export function LayerManager({ drawing: d, commit, onClose, inUse }: { drawing: 
         <table className="w-full border-collapse text-[11.5px]">
           <thead className="sticky top-0 bg-[#2a3039] text-left text-[#b8c0cb]">
             <tr>
-              {['S…', 'Name', 'On', 'Freeze', 'Lock', 'Plot', 'Color', 'Linetype', 'Lineweight', 'Description'].map((h) => (
+              {['S…', 'Name', 'Isolate', 'On', 'Freeze', 'Lock', 'Plot', 'Color', 'Linetype', 'Lineweight', 'Description'].map((h) => (
                 <th key={h} className="h-6 border-r border-[#20252c] px-2 font-normal whitespace-nowrap">
                   {h}
                 </th>
@@ -629,6 +701,7 @@ export function LayerManager({ drawing: d, commit, onClose, inUse }: { drawing: 
                       <span onDoubleClick={(e) => (e.stopPropagation(), setRenaming(l.name))}>{l.name}</span>
                     )}
                   </td>
+                  <td className={cell}>{tog(isolated?.layer !== l.name, <Focus className="size-3.5 text-[#6c7480]" />, <Focus className="size-3.5 text-[#f5c542]" />, isolated?.layer === l.name ? 'Unisolate' : `Isolate ${l.name}`, () => (isolated?.layer === l.name ? unisolate() : isolate(l.name)))}</td>
                   <td className={cell}>{tog(l.on, <Lightbulb className="size-3.5 text-[#f5c542]" />, <LightbulbOff className="size-3.5 text-[#6c7480]" />, l.on ? 'Turn off' : 'Turn on', () => setLayer(l.name, { on: !l.on }))}</td>
                   <td className={cell}>{tog(!l.frozen, <Sun className="size-3.5 text-[#f5c542]" />, <Snowflake className="size-3.5 text-[#7cc4ff]" />, l.frozen ? 'Thaw' : 'Freeze', () => (l.name === d.header.clayer ? setMsg('The current layer can’t be frozen.') : setLayer(l.name, { frozen: !l.frozen })))}</td>
                   <td className={cell}>{tog(!l.locked, <LockOpen className="size-3.5" />, <Lock className="size-3.5 text-[#f5c542]" />, l.locked ? 'Unlock' : 'Lock', () => setLayer(l.name, { locked: !l.locked }))}</td>
@@ -703,7 +776,7 @@ export function LayerManager({ drawing: d, commit, onClose, inUse }: { drawing: 
         </table>
       </div>
       <div className="shrink-0 border-t border-[#262c34] px-2 py-1 text-[11px] text-[#a9b2bf]">
-        All: {d.layers.length} layers displayed of {d.layers.length} total layers · Double-click a layer to make it current, its name to rename it.
+        All: {d.layers.length} layers displayed of {d.layers.length} total layers · Double-click a layer to make it current, its name to rename it. Drag the title bar to move this panel.
       </div>
     </section>
   );

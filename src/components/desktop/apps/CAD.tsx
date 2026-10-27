@@ -61,7 +61,7 @@ import { writeDxf } from './cad/dxf/write';
 import { CAP, ensureFonts, fontFamily } from './cad/text';
 import { findTextStyle } from './cad/model';
 import { Ribbon, type RibbonTabId } from './cad/ui/ribbon';
-import { LayerManager, PropertiesPalette } from './cad/ui/palettes';
+import { LayerManager, PropertiesPalette, type LayerIsolation } from './cad/ui/palettes';
 import { DimStyleDialog, DraftingDialog, InsertDialog, TextStyleDialog, UnitsDialog, type DraftSettings } from './cad/ui/dialogs';
 import { DropdownMenu as Menu } from 'radix-ui';
 import { Button, Dialog, MenuContent, MenuItem, MenuSeparator } from './cad/ui/chrome';
@@ -234,6 +234,8 @@ export function CAD({ windowId, params }: AppComponentProps) {
   const [textEdit, setTextEdit] = useState<TextEdit | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [layersPos, setLayersPos] = useState<Vec | null>(null);
+  const [layerIso, setLayerIso] = useState<LayerIsolation>(null);
   const [hatchActive, setHatchActive] = useState(false);
   const [hatch, setHatch] = useState<HatchSettings>({ pattern: 'ANSI31', scale: 1, angle: 0 });
   const [current, setCurrent] = useState({ color: BYLAYER, linetype: 'ByLayer', lineweight: LW_BYLAYER });
@@ -634,6 +636,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
       setPath(p);
       setDocName(name);
       setSelection([]);
+      setLayerIso(null);
       setError(null);
       setHistoryLines([]);
       fitPending.current = true;
@@ -1930,7 +1933,18 @@ export function CAD({ windowId, params }: AppComponentProps) {
               </div>
             </div>
           )}
-          {layersOpen && doc && <LayerManager drawing={doc} commit={commit} onClose={() => setLayersOpen(false)} inUse={(n) => doc.entities.some((e) => e.layer === n) || Object.values(doc.blocks).some((b) => b.entities.some((e) => e.layer === n))} />}
+          {layersOpen && doc && (
+            <LayerManager
+              drawing={doc}
+              commit={commit}
+              onClose={() => setLayersOpen(false)}
+              inUse={(n) => doc.entities.some((e) => e.layer === n) || Object.values(doc.blocks).some((b) => b.entities.some((e) => e.layer === n))}
+              pos={layersPos}
+              onMove={setLayersPos}
+              isolation={layerIso}
+              setIsolation={setLayerIso}
+            />
+          )}
         </div>
         {settings.properties && doc && (
           <PropertiesPalette
