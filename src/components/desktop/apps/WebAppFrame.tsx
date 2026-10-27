@@ -32,8 +32,8 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
  * is honored only when it shares the app's origin, so a stray param can never
  * point the app's logged-in session at a foreign site.
  *
- * An installed nsite (`nsiteHost`) also gets an info button in the title bar:
- * its permissions, window.ENV and data (see NappInfoButton).
+ * In an installed nsite (`nsiteHost`) the title bar's favicon is a button
+ * that opens its permissions, window.ENV and data (see NappInfoButton).
  */
 export function WebAppFrame({
   url,
@@ -128,7 +128,19 @@ export function WebAppFrame({
 
     setTitlebar(
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', muted)} />
+        {nsiteHost ? (
+          <NappInfoButton
+            host={nsiteHost}
+            name={name}
+            icon={icon}
+            favicon={favicon}
+            onReload={() => viewRef.current?.reload()}
+            className={hover}
+            iconClassName={muted}
+          />
+        ) : (
+          <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', muted)} />
+        )}
         <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', text)}>
           {name}
         </span>
@@ -151,14 +163,6 @@ export function WebAppFrame({
           >
             <ChevronRight className="size-4" />
           </NavButton>
-        )}
-        {nsiteHost && (
-          <NappInfoButton
-            host={nsiteHost}
-            name={name}
-            onReload={() => viewRef.current?.reload()}
-            className={cn(muted, hover)}
-          />
         )}
       </div>,
     );

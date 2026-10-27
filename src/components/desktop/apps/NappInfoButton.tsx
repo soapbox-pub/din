@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react';
-import { Info, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Plus, Trash2, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { AppIcon } from '@/components/desktop/AppIcon';
 import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
 import { ENV_NAME_RE, getNappHost, MAX_ENV_VALUE, MAX_ENV_VARS, type NappStatus } from '@/lib/napp';
 import type { SiteCapability } from '@/lib/promptBridge';
@@ -40,22 +42,30 @@ function envProblem(rows: EnvRow[]): string | null {
 }
 
 /**
- * The info button in an installed nsite's title bar: what the app may do on
- * this computer (notifications, which its push subscriptions need, and
+ * The favicon in an installed nsite's title bar, which opens what the app may
+ * do on this computer (notifications, which its push subscriptions need, and
  * background refresh), its window.ENV variables, and clearing everything it
- * keeps outside its files. Renders nothing outside the Electron shell.
+ * keeps outside its files. Outside the Electron shell it is just the favicon.
  */
 export function NappInfoButton({
   host,
   name,
+  icon,
+  favicon,
   onReload,
   className,
+  iconClassName,
 }: {
   host: string;
   name: string;
+  /** The app's own icon, shown in the popover. */
+  icon: LucideIcon | string;
+  /** Drawn on the button instead of the icon, when the site has one. */
+  favicon?: string;
   /** Reload the app's page (ENV is read when it loads). */
   onReload: () => void;
   className?: string;
+  iconClassName?: string;
 }) {
   const napp = getNappHost();
   const browser = getBrowserBridge();
@@ -89,7 +99,7 @@ export function NappInfoButton({
     setConfirmClear(false);
   };
 
-  if (!napp) return null;
+  if (!napp) return <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', iconClassName)} />;
 
   const setPermission = (capability: SiteCapability, allow: boolean) => {
     if (!browser) return;
@@ -140,25 +150,18 @@ export function NappInfoButton({
           aria-label={`About ${name}`}
           title={`About ${name}`}
           className={cn(
-            'grid size-6 shrink-0 place-items-center rounded-md',
+            '-mx-1 grid size-6 shrink-0 place-items-center rounded-md',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             className,
           )}
         >
-          <Info className="size-4" aria-hidden />
+          <AppIcon icon={favicon ?? icon} className={cn('size-4', iconClassName)} />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-80 space-y-4">
-        <div className="flex items-start gap-3">
-          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground">
-            <ShieldCheck className="size-4" aria-hidden />
-          </span>
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate text-sm font-semibold">{name}</p>
-            <p className="text-xs text-muted-foreground">
-              Every file is checked against the app's signed manifest before it loads.
-            </p>
-          </div>
+      <PopoverContent align="start" sideOffset={8} className="w-80 space-y-4">
+        <div className="flex items-center gap-3">
+          <AppIcon icon={icon} className="size-8 shrink-0 rounded-md text-muted-foreground" />
+          <p className="min-w-0 truncate text-sm font-semibold">{name}</p>
         </div>
 
         {browser && (
