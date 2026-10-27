@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { CopyButton } from '@/components/desktop/assistant/CopyButton';
 import { Markdown } from '@/components/desktop/assistant/Markdown';
 import { tildify, type AssistantContent, type SessionMessage, type ToolState } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
@@ -62,19 +63,19 @@ export const Transcript = memo(function Transcript({
   const entries = group(messages);
   const last = entries[entries.length - 1];
   return (
-    <ol className="flex flex-col gap-5" aria-label="Conversation">
+    <ol className="flex flex-col gap-8" aria-label="Conversation">
       {entries.map((entry) => {
         if (entry.kind === 'user') {
           return (
-            <li key={entry.message.id} className="flex justify-end">
+            <li key={entry.message.id} className="group/user flex justify-end">
               <UserBubble message={entry.message} />
             </li>
           );
         }
         if (entry.kind === 'turn') {
           return (
-            <li key={entry.id}>
-              <Turn messages={entry.messages} working={running && entry === last} />
+            <li key={entry.id} className="group/turn">
+              <Turn messages={entry.messages} working={running && entry === last} latest={entry === last} />
             </li>
           );
         }
@@ -92,7 +93,7 @@ export const Transcript = memo(function Transcript({
 
 function UserBubble({ message }: { message: Extract<SessionMessage, { type: 'user' }> }) {
   return (
-    <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+    <div className="flex max-w-[80%] flex-col items-end gap-1.5">
       {(message.files ?? []).length > 0 && (
         <ul className="flex flex-wrap justify-end gap-1.5">
           {(message.files ?? []).map((file, index) => (
@@ -106,9 +107,16 @@ function UserBubble({ message }: { message: Extract<SessionMessage, { type: 'use
           ))}
         </ul>
       )}
-      <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+      <div className="whitespace-pre-wrap break-words rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground">
         {message.text}
       </div>
+      {message.text.trim() && (
+        <CopyButton
+          text={message.text}
+          label="Copy message"
+          className="-mt-0.5 opacity-0 focus-visible:opacity-100 group-hover/user:opacity-100"
+        />
+      )}
     </div>
   );
 }
@@ -165,7 +173,7 @@ function toolRunning(step: Step): boolean {
   return step.type === 'tool' && (step.state.status === 'streaming' || step.state.status === 'running');
 }
 
-function Turn({ messages, working }: { messages: AssistantMessage[]; working: boolean }) {
+function Turn({ messages, working, latest }: { messages: AssistantMessage[]; working: boolean; latest: boolean }) {
   const lastMessage = messages[messages.length - 1];
   const list = blocks(messages);
   const tail = list[list.length - 1];
@@ -173,27 +181,30 @@ function Turn({ messages, working }: { messages: AssistantMessage[]; working: bo
   const lastStep = tailSteps[tailSteps.length - 1];
   // The trailing group narrates the work while a step in it is still going.
   const live = working && (tailSteps.some(toolRunning) || (lastStep?.type === 'reasoning' && !lastStep.time?.completed));
+  const reply = list.flatMap((block) => (block.kind === 'text' ? [block.text.trim()] : [])).join('\n\n');
   return (
-    <div className="flex gap-3">
-      <div
-        aria-hidden
-        className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary/25 to-primary/5 text-primary ring-1 ring-primary/20"
-      >
-        <Bot className="size-4" />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-3 pt-1">
-        {list.map((block) => {
-          if (block.kind === 'text') return <Markdown key={block.key} text={block.text} />;
-          if (block.kind === 'error') return <ErrorBanner key={block.key} message={block.message} />;
-          return <Steps key={block.key} steps={block.steps} live={live && block === tail} />;
-        })}
-        {lastMessage?.retry && (
-          <p className="text-xs text-muted-foreground">
-            Retrying (attempt {lastMessage.retry.attempt})… {lastMessage.retry.error.message}
-          </p>
-        )}
-        {working && !live && <Working />}
-      </div>
+    <div className="flex min-w-0 flex-col gap-4">
+      {list.map((block) => {
+        if (block.kind === 'text') return <Markdown key={block.key} text={block.text} />;
+        if (block.kind === 'error') return <ErrorBanner key={block.key} message={block.message} />;
+        return <Steps key={block.key} steps={block.steps} live={live && block === tail} />;
+      })}
+      {lastMessage?.retry && (
+        <p className="text-xs text-muted-foreground">
+          Retrying (attempt {lastMessage.retry.attempt})… {lastMessage.retry.error.message}
+        </p>
+      )}
+      {working && !live && <Working />}
+      {!working && reply && (
+        <div
+          className={cn(
+            '-ml-2 -mt-2 flex',
+            !latest && 'opacity-0 focus-within:opacity-100 group-hover/turn:opacity-100',
+          )}
+        >
+          <CopyButton text={reply} label="Copy reply" />
+        </div>
+      )}
     </div>
   );
 }
@@ -245,7 +256,7 @@ function Reasoning({ step, live }: { step: ReasoningPart; live: boolean }) {
         <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <Markdown text={step.text} className="mt-2 border-l border-border pl-3 text-sm text-muted-foreground" />
+        <Markdown text={step.text} className="mt-2 border-l border-border pl-3 text-sm leading-6 text-muted-foreground" />
       </CollapsibleContent>
     </Collapsible>
   );
@@ -276,7 +287,7 @@ function ThoughtStep({ step }: { step: ReasoningPart }) {
         <RowChevron open={open} />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <Markdown text={step.text} className="mb-2 ml-7 mt-1 text-sm text-muted-foreground" />
+        <Markdown text={step.text} className="mb-2 ml-7 mt-1 text-sm leading-6 text-muted-foreground" />
       </CollapsibleContent>
     </Collapsible>
   );

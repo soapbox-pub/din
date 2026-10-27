@@ -523,17 +523,14 @@ function ListToggle({ onClick }: { onClick: () => void }) {
 
 function TranscriptSkeleton() {
   return (
-    <div className="space-y-6" aria-label="Loading the conversation">
+    <div className="space-y-8" aria-label="Loading the conversation">
       <div className="flex justify-end">
-        <Skeleton className="h-10 w-2/3 rounded-2xl" />
+        <Skeleton className="h-11 w-2/3 rounded-3xl" />
       </div>
-      <div className="flex gap-3">
-        <Skeleton className="size-7 shrink-0 rounded-full" />
-        <div className="flex-1 space-y-2">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-5/6" />
-          <Skeleton className="h-8 w-full rounded-lg" />
-        </div>
+      <div className="space-y-3">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-8 w-full rounded-lg" />
       </div>
     </div>
   );
