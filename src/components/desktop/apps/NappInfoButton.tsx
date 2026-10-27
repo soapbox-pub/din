@@ -42,10 +42,11 @@ function envProblem(rows: EnvRow[]): string | null {
 }
 
 /**
- * The favicon in an installed nsite's title bar, which opens what the app may
- * do on this computer (notifications, which its push subscriptions need, and
- * background refresh), its window.ENV variables, and clearing everything it
- * keeps outside its files. Outside the Electron shell it is just the favicon.
+ * The favicon and name in an installed nsite's title bar, which open what the
+ * app may do on this computer (notifications, which its push subscriptions
+ * need, and background refresh), its window.ENV variables, and clearing
+ * everything it keeps outside its files. Outside the Electron shell they are
+ * just the favicon and name.
  */
 export function NappInfoButton({
   host,
@@ -54,7 +55,9 @@ export function NappInfoButton({
   favicon,
   onReload,
   className,
+  hoverClassName,
   iconClassName,
+  textClassName,
 }: {
   host: string;
   name: string;
@@ -65,7 +68,10 @@ export function NappInfoButton({
   /** Reload the app's page (ENV is read when it loads). */
   onReload: () => void;
   className?: string;
+  /** Applied only when it is a button. */
+  hoverClassName?: string;
   iconClassName?: string;
+  textClassName?: string;
 }) {
   const napp = getNappHost();
   const browser = getBrowserBridge();
@@ -99,7 +105,14 @@ export function NappInfoButton({
     setConfirmClear(false);
   };
 
-  if (!napp) return <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', iconClassName)} />;
+  const label = (
+    <>
+      <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', iconClassName)} />
+      <span className={cn('min-w-0 truncate text-sm font-medium', textClassName)}>{name}</span>
+    </>
+  );
+
+  if (!napp) return <div className={cn('flex min-w-0 items-center gap-2', className)}>{label}</div>;
 
   const setPermission = (capability: SiteCapability, allow: boolean) => {
     if (!browser) return;
@@ -150,12 +163,13 @@ export function NappInfoButton({
           aria-label={`About ${name}`}
           title={`About ${name}`}
           className={cn(
-            '-mx-1 grid size-6 shrink-0 place-items-center rounded-md',
+            '-mx-1 flex h-6 min-w-0 items-center gap-2 rounded-md px-1',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             className,
+            hoverClassName,
           )}
         >
-          <AppIcon icon={favicon ?? icon} className={cn('size-4', iconClassName)} />
+          {label}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} className="w-80 space-y-4">

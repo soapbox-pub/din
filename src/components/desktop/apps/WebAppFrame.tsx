@@ -32,7 +32,7 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
  * is honored only when it shares the app's origin, so a stray param can never
  * point the app's logged-in session at a foreign site.
  *
- * In an installed nsite (`nsiteHost`) the title bar's favicon is a button
+ * In an installed nsite (`nsiteHost`) the title bar's favicon and name are a button
  * that opens its permissions, window.ENV and data (see NappInfoButton).
  */
 export function WebAppFrame({
@@ -135,15 +135,19 @@ export function WebAppFrame({
             icon={icon}
             favicon={favicon}
             onReload={() => viewRef.current?.reload()}
-            className={hover}
+            className="mr-auto"
+            hoverClassName={hover}
             iconClassName={muted}
+            textClassName={text}
           />
         ) : (
-          <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', muted)} />
+          <>
+            <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', muted)} />
+            <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', text)}>
+              {name}
+            </span>
+          </>
         )}
-        <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', text)}>
-          {name}
-        </span>
         {/* Carets to the right of the title, shown only when a move is
             available (webview only reports history depth). */}
         {nav.canBack && (
