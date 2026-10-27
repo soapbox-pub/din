@@ -8,17 +8,8 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,9 +18,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AssistantUnavailable } from '@/components/desktop/assistant/AssistantUnavailable';
+import { ConversationTitleInput, DeleteConversationDialog } from '@/components/desktop/assistant/ConversationActions';
 import { Composer } from '@/components/desktop/assistant/Composer';
 import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
 import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
@@ -44,12 +35,10 @@ import {
   useAssistantSession,
   useAssistantSessions,
   useCancelQueued,
-  useDeleteSession,
   useHomeDirectory,
   useInterruptSession,
   useMarkViewedSession,
   usePreferredModel,
-  useRenameSession,
   useSendPrompt,
   useSessionForms,
   useSessionInbox,
@@ -133,6 +122,7 @@ export function Assistant({ params }: AppComponentProps) {
         selected={sessionID}
         onSelect={choose}
         onNew={startNew}
+        onDeleted={(id) => id === sessionID && choose(null)}
         className={cn(
           listOpen ? 'flex' : 'hidden',
           'absolute inset-y-0 left-0 z-20 shadow-xl @2xl/assistant:static @2xl/assistant:flex @2xl/assistant:shadow-none',
@@ -290,61 +280,58 @@ function ConversationHeader({
   onShowList: () => void;
   onDeleted: () => void;
 }) {
-  const rename = useRenameSession();
-  const remove = useDeleteSession();
-  const { toast } = useToast();
   const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState('');
   const [confirming, setConfirming] = useState(false);
-  const cost = session ? formatCost(session.cost) : '';
-
-  const saveTitle = () => {
-    setEditing(false);
-    const next = title.trim();
-    if (!session || !next || next === session.title) return;
-    rename.mutate(
-      { sessionID: session.id, title: next },
-      { onError: (error) => toast({ title: 'Couldn’t rename', description: cleanAssistantError(error), variant: 'destructive' }) },
-    );
+  // Rename puts focus in the title field; the closing menu mustn't take it back.
+  const renaming = useRef(false);
+  const rename = () => {
+    renaming.current = true;
+    setEditing(true);
   };
+  const keepFocus = (e: Event) => {
+    if (renaming.current) e.preventDefault();
+    renaming.current = false;
+  };
+  const cost = session ? formatCost(session.cost) : '';
 
   return (
     <header className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
       <ListToggle onClick={onShowList} />
-      <div className="min-w-0 flex-1">
-        {editing ? (
-          <Input
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={saveTitle}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') saveTitle();
-              if (e.key === 'Escape') setEditing(false);
-            }}
-            aria-label="Conversation title"
-            className="h-7 text-sm"
-          />
-        ) : session ? (
-          <h2 className="truncate text-sm font-semibold">{sessionTitle(session)}</h2>
-        ) : (
-          <Skeleton className="h-4 w-48" />
-        )}
-        {session && (
-          <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-            <Folder className="size-3 shrink-0" aria-hidden />
-            <span className="truncate" title={session.location.directory}>
-              {tildify(session.location.directory, home)}
-            </span>
-            {cost && <span aria-label="Cost so far">· {cost}</span>}
-            {running && (
-              <span className="flex items-center gap-1 text-primary">
-                · <Loader2 className="size-3 animate-spin" aria-hidden /> Working
-              </span>
+      <ContextMenu>
+        <ContextMenuTrigger asChild disabled={!session || editing}>
+          <div className="min-w-0 flex-1">
+            {editing && session ? (
+              <ConversationTitleInput session={session} onDone={() => setEditing(false)} />
+            ) : session ? (
+              <h2 className="truncate text-sm font-semibold">{sessionTitle(session)}</h2>
+            ) : (
+              <Skeleton className="h-4 w-48" />
             )}
-          </p>
-        )}
-      </div>
+            {session && (
+              <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+                <Folder className="size-3 shrink-0" aria-hidden />
+                <span className="truncate" title={session.location.directory}>
+                  {tildify(session.location.directory, home)}
+                </span>
+                {cost && <span aria-label="Cost so far">· {cost}</span>}
+                {running && (
+                  <span className="flex items-center gap-1 text-primary">
+                    · <Loader2 className="size-3 animate-spin" aria-hidden /> Working
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent onCloseAutoFocus={keepFocus}>
+          <ContextMenuItem onSelect={rename}>
+            <Pencil aria-hidden /> Rename
+          </ContextMenuItem>
+          <ContextMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
+            <Trash2 aria-hidden /> Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {session && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -352,13 +339,8 @@ function ConversationHeader({
               <MoreHorizontal className="size-4" aria-hidden />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onSelect={() => {
-                setTitle(sessionTitle(session));
-                setEditing(true);
-              }}
-            >
+          <DropdownMenuContent align="end" onCloseAutoFocus={keepFocus}>
+            <DropdownMenuItem onSelect={rename}>
               <Pencil aria-hidden /> Rename
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
@@ -367,32 +349,7 @@ function ConversationHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this conversation?</AlertDialogTitle>
-            <AlertDialogDescription>
-              It’s removed from OpenCode too, for every app that shows it. Files the assistant changed stay as they are.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-white hover:bg-destructive/90"
-              onClick={() =>
-                session &&
-                remove.mutate(session.id, {
-                  onSuccess: onDeleted,
-                  onError: (error) =>
-                    toast({ title: 'Couldn’t delete', description: cleanAssistantError(error), variant: 'destructive' }),
-                })
-              }
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConversationDialog session={session} open={confirming} onOpenChange={setConfirming} onDeleted={onDeleted} />
     </header>
   );
 }

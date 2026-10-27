@@ -1,8 +1,16 @@
-import { useMemo, useState } from 'react';
-import { ChevronRight, GitBranch, Loader2, Plus, Search, SquarePen } from 'lucide-react';
+import { useMemo, useRef, useState, type ComponentProps } from 'react';
+import { ChevronRight, GitBranch, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ConversationTitleInput, DeleteConversationDialog } from '@/components/desktop/assistant/ConversationActions';
 import {
   useActiveSessions,
   useAssistantSessions,
@@ -63,18 +71,23 @@ function groupByProject(sessions: SessionInfo[], mains: Map<string, string>, hom
 /**
  * The conversation list: one line per conversation, under the project it
  * belongs to, with the ones waiting on the user pulled out on top so a
- * collapsed project can't hide them. Searching flattens it.
+ * collapsed project can't hide them. Searching flattens it. Right-clicking
+ * a conversation renames or deletes it; right-clicking a project starts a
+ * conversation there.
  */
 export function SessionList({
   selected,
   onSelect,
   onNew,
+  onDeleted,
   className,
 }: {
   selected: string | null;
   onSelect: (id: string) => void;
   /** Start a new conversation, in `directory` when given. */
   onNew: (directory?: string) => void;
+  /** A conversation was deleted from the list. */
+  onDeleted: (id: string) => void;
   className?: string;
 }) {
   const { data: sessions, isLoading } = useAssistantSessions();
@@ -84,6 +97,10 @@ export function SessionList({
   const [filter, setFilter] = useState('');
   const [collapsed, setCollapsed] = useLocalStorage<string[]>('din.assistant.collapsedProjects', []);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<SessionInfo | null>(null);
+  // Rename puts focus in the title field; the closing menu mustn't take it back.
+  const keepFocus = useRef(false);
 
   const listed = useMemo(() => (sessions ?? []).filter((s) => !s.time.archived), [sessions]);
   const directories = useMemo(() => [...new Set(listed.map((s) => s.location.directory))], [listed]);
@@ -109,16 +126,49 @@ export function SessionList({
 
   const row = (session: SessionInfo, tag?: string) => (
     <li key={session.id}>
-      <SessionRow
-        session={session}
-        tag={tag}
-        worktree={mains.has(session.location.directory)}
-        selected={session.id === selected}
-        running={active.includes(session.id)}
-        waiting={waiting.has(session.id)}
-        home={home}
-        onSelect={() => onSelect(session.id)}
-      />
+      {renaming === session.id ? (
+        <ConversationTitleInput session={session} onDone={() => setRenaming(null)} className="h-8" />
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <SessionRow
+              session={session}
+              tag={tag}
+              worktree={mains.has(session.location.directory)}
+              selected={session.id === selected}
+              running={active.includes(session.id)}
+              waiting={waiting.has(session.id)}
+              home={home}
+              onSelect={() => onSelect(session.id)}
+            />
+          </ContextMenuTrigger>
+          <ContextMenuContent
+            onCloseAutoFocus={(e) => {
+              if (keepFocus.current) e.preventDefault();
+              keepFocus.current = false;
+            }}
+          >
+            <ContextMenuItem onSelect={() => onSelect(session.id)}>
+              <MessageSquare aria-hidden /> Open
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onNew(session.location.directory)}>
+              <SquarePen aria-hidden /> New Conversation in This Folder
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onSelect={() => {
+                keepFocus.current = true;
+                setRenaming(session.id);
+              }}
+            >
+              <Pencil aria-hidden /> Rename
+            </ContextMenuItem>
+            <ContextMenuItem variant="destructive" onSelect={() => setDeleting(session)}>
+              <Trash2 aria-hidden /> Delete
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
     </li>
   );
 
@@ -194,19 +244,32 @@ export function SessionList({
               return (
                 <section key={project.key} aria-label={project.label}>
                   <div className="group flex items-center gap-1">
-                    <button
-                      type="button"
-                      aria-expanded={open}
-                      onClick={() => toggleCollapsed(project.key)}
-                      title={tildify(project.root, home)}
-                      className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <ChevronRight
-                        className={cn('size-3.5 shrink-0 motion-safe:transition-transform', open && 'rotate-90')}
-                        aria-hidden
-                      />
-                      <span className="truncate">{project.label}</span>
-                    </button>
+                    <ContextMenu>
+                      <ContextMenuTrigger asChild>
+                        <button
+                          type="button"
+                          aria-expanded={open}
+                          onClick={() => toggleCollapsed(project.key)}
+                          title={tildify(project.root, home)}
+                          className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <ChevronRight
+                            className={cn('size-3.5 shrink-0 motion-safe:transition-transform', open && 'rotate-90')}
+                            aria-hidden
+                          />
+                          <span className="truncate">{project.label}</span>
+                        </button>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem onSelect={() => onNew(project.root)}>
+                          <SquarePen aria-hidden /> New Conversation
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onSelect={() => toggleCollapsed(project.key)}>
+                          {open ? 'Collapse' : 'Expand'}
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -240,6 +303,12 @@ export function SessionList({
           </div>
         )}
       </div>
+      <DeleteConversationDialog
+        session={deleting ?? undefined}
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        onDeleted={() => deleting && onDeleted(deleting.id)}
+      />
     </nav>
   );
 }
@@ -253,7 +322,8 @@ function SessionRow({
   waiting,
   home,
   onSelect,
-}: {
+  ...props
+}: Omit<ComponentProps<'button'>, 'onSelect'> & {
   session: SessionInfo;
   /** The project's name, where the list doesn't already say it. */
   tag?: string;
@@ -268,6 +338,7 @@ function SessionRow({
   const where = tildify(session.location.directory, home);
   return (
     <button
+      {...props}
       type="button"
       onClick={onSelect}
       aria-current={selected ? 'page' : undefined}
