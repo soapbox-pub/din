@@ -43,6 +43,13 @@ function addRecent(app: OfficeApp, path: string): RecentFile[] {
   return list;
 }
 
+const RECENT_CHANGED = 'din:office:recent';
+
+export function removeRecent(app: OfficeApp, path: string) {
+  localStorage.setItem(recentKey(app), JSON.stringify(readRecent(app).filter((r) => r.path !== path)));
+  window.dispatchEvent(new CustomEvent(RECENT_CHANGED, { detail: app }));
+}
+
 export interface OfficeFileOptions {
   windowId: string;
   /** The app id in Din's registry, for opening files in a window of their own. */
@@ -91,6 +98,14 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   const [recent, setRecent] = useState(() => readRecent(app));
   const dirtyRef = useRef(false);
   const loadSeq = useRef(0);
+
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      if ((e as CustomEvent<OfficeApp>).detail === app) setRecent(readRecent(app));
+    };
+    window.addEventListener(RECENT_CHANGED, onChange);
+    return () => window.removeEventListener(RECENT_CHANGED, onChange);
+  }, [app]);
 
   const name = path ? basename(path) : untitledName;
   const docName = path ? stem(basename(path)) : untitledName;

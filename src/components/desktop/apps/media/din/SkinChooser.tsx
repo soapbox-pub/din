@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, ExternalLink, Palette, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { cleanFsError, getFsBridge, joinPath } from '@/lib/fs';
@@ -79,6 +80,18 @@ export function SkinChooser({ commands }: { commands: Commands }) {
   const list = skins.data ?? BUILT_IN;
   const selected = list.find((s) => s.id === selectedId) ?? list.find((s) => sameChoice(s.choice, current)) ?? list[0];
 
+  const remove = async (skin: SkinEntry) => {
+    if (skin.choice.kind === 'din') return;
+    try {
+      await getFsBridge()!.trash(skin.choice.path);
+      if (sameChoice(skin.choice, current)) setPrefs({ skin: { kind: 'din' } });
+      setSelectedId(null);
+      void queryClient.invalidateQueries({ queryKey: ['music', 'skins'] });
+    } catch (e) {
+      setError(cleanFsError(e));
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1">
       <div className="mp-pane flex w-64 shrink-0 flex-col border-y-0 border-l-0">
@@ -99,17 +112,7 @@ export function SkinChooser({ commands }: { commands: Commands }) {
               className="mp-icon-btn size-8"
               aria-label={`Delete ${selected.name}`}
               title="Delete skin"
-              onClick={async () => {
-                if (selected.choice.kind === 'din') return;
-                try {
-                  await getFsBridge()!.trash(selected.choice.path);
-                  if (sameChoice(selected.choice, current)) setPrefs({ skin: { kind: 'din' } });
-                  setSelectedId(null);
-                  void queryClient.invalidateQueries({ queryKey: ['music', 'skins'] });
-                } catch (e) {
-                  setError(cleanFsError(e));
-                }
-              }}
+              onClick={() => void remove(selected)}
             >
               <Trash2 className="size-4" />
             </button>
@@ -118,22 +121,40 @@ export function SkinChooser({ commands }: { commands: Commands }) {
         <ul role="listbox" aria-label="Skins" className="mp-scroll min-h-0 flex-1 overflow-y-auto p-1">
           {list.map((s) => (
             <li key={s.id}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={s.id === selected?.id}
-                onClick={() => setSelectedId(s.id)}
-                onDoubleClick={() => setPrefs({ skin: s.choice })}
-                className={cn(
-                  'mp-row flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]',
-                )}
-              >
-                <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                <span className="text-[10px] uppercase tracking-wide text-[var(--mp-ink-faint)]">
-                  {s.kind === 'din' ? 'Din' : s.kind === 'winamp' ? 'Winamp' : 'WMP'}
-                </span>
-                {sameChoice(s.choice, current) && <Check className="size-3.5 text-[var(--mp-accent)]" aria-label="In use" />}
-              </button>
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={s.id === selected?.id}
+                    onClick={() => setSelectedId(s.id)}
+                    onContextMenu={() => setSelectedId(s.id)}
+                    onDoubleClick={() => setPrefs({ skin: s.choice })}
+                    className={cn(
+                      'mp-row flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]',
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                    <span className="text-[10px] uppercase tracking-wide text-[var(--mp-ink-faint)]">
+                      {s.kind === 'din' ? 'Din' : s.kind === 'winamp' ? 'Winamp' : 'WMP'}
+                    </span>
+                    {sameChoice(s.choice, current) && <Check className="size-3.5 text-[var(--mp-accent)]" aria-label="In use" />}
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem disabled={sameChoice(s.choice, current)} onSelect={() => setPrefs({ skin: s.choice })}>
+                    <Check /> Apply Skin
+                  </ContextMenuItem>
+                  {s.removable && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem variant="destructive" onSelect={() => void remove(s)}>
+                        <Trash2 /> Delete Skin
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
             </li>
           ))}
         </ul>

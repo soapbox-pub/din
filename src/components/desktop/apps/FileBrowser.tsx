@@ -1412,11 +1412,17 @@ function FileBrowserTab({
             home={home.data}
             trash={trash.data}
             onNavigate={navigate}
-            onEdit={() => {
-              setAddressEdit(cwd ?? '');
+            onEdit={(path) => {
+              setAddressEdit(path ?? cwd ?? '');
               requestAnimationFrame(() => addressRef.current?.select());
             }}
             onDrop={transfer}
+            onNewTab={onNewTab}
+            onNewWindow={onNewWindow}
+            onOpenInTerminal={openInTerminal}
+            bookmarked={bookmarked}
+            onToggleBookmark={toggleBookmark}
+            onCopyPath={(path) => copyPaths([path])}
           />
         )}
 
@@ -1995,16 +2001,30 @@ function Breadcrumbs({
   onNavigate,
   onEdit,
   onDrop,
+  onNewTab,
+  onNewWindow,
+  onOpenInTerminal,
+  bookmarked,
+  onToggleBookmark,
+  onCopyPath,
 }: {
   cwd: string | null;
   home: string | undefined;
   trash: string | undefined;
   onNavigate: (path: string) => void;
-  onEdit: () => void;
+  /** Type a location, starting from `path` (the current folder by default). */
+  onEdit: (path?: string) => void;
   onDrop: (target: string, paths: string[], copy: boolean) => void;
+  onNewTab: (path: string) => void;
+  onNewWindow: (path: string) => void;
+  onOpenInTerminal: (path: string) => void;
+  bookmarked: ReadonlySet<string>;
+  onToggleBookmark: (path: string) => void;
+  onCopyPath: (path: string) => void;
 }) {
   const [over, setOver] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const editingRef = useRef(false);
 
   const crumbs = useMemo(() => {
     if (!cwd) return [];
@@ -2052,47 +2072,78 @@ function Breadcrumbs({
         return (
           <span key={c.path} className="flex shrink-0 items-center">
             {i > 0 && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden />}
-            <button
-              type="button"
-              onClick={() => onNavigate(c.path)}
-              aria-current={last ? 'location' : undefined}
-              onDragOver={(e) => {
-                if (last || !e.dataTransfer.types.includes('application/x-din-files')) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
-                setOver(c.path);
-              }}
-              onDragLeave={() => setOver((o) => (o === c.path ? null : o))}
-              onDrop={(e) => {
-                setOver(null);
-                const raw = e.dataTransfer.getData('application/x-din-files');
-                if (!raw) return;
-                e.preventDefault();
-                try {
-                  onDrop(c.path, JSON.parse(raw) as string[], e.ctrlKey);
-                } catch {
-                  // Not ours after all.
-                }
-              }}
-              className={cn(
-                'flex h-6 items-center gap-1.5 rounded px-1.5 text-sm',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                over === c.path
-                  ? 'bg-primary/20 ring-2 ring-primary'
-                  : last
-                    ? 'font-medium text-foreground'
-                    : 'text-foreground/70 hover:bg-foreground/10 hover:text-foreground',
-              )}
-            >
-              {c.icon === 'home' && <Home className="size-3.5" aria-hidden />}
-              {c.icon === 'root' && <HardDrive className="size-3.5" aria-hidden />}
-              {c.icon === 'trash' && <Trash2 className="size-3.5" aria-hidden />}
-              <span className="max-w-48 truncate">{c.label}</span>
-            </button>
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => onNavigate(c.path)}
+                  aria-current={last ? 'location' : undefined}
+                  onDragOver={(e) => {
+                    if (last || !e.dataTransfer.types.includes('application/x-din-files')) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+                    setOver(c.path);
+                  }}
+                  onDragLeave={() => setOver((o) => (o === c.path ? null : o))}
+                  onDrop={(e) => {
+                    setOver(null);
+                    const raw = e.dataTransfer.getData('application/x-din-files');
+                    if (!raw) return;
+                    e.preventDefault();
+                    try {
+                      onDrop(c.path, JSON.parse(raw) as string[], e.ctrlKey);
+                    } catch {
+                      // Not ours after all.
+                    }
+                  }}
+                  className={cn(
+                    'flex h-6 items-center gap-1.5 rounded px-1.5 text-sm',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    over === c.path
+                      ? 'bg-primary/20 ring-2 ring-primary'
+                      : last
+                        ? 'font-medium text-foreground'
+                        : 'text-foreground/70 hover:bg-foreground/10 hover:text-foreground',
+                  )}
+                >
+                  {c.icon === 'home' && <Home className="size-3.5" aria-hidden />}
+                  {c.icon === 'root' && <HardDrive className="size-3.5" aria-hidden />}
+                  {c.icon === 'trash' && <Trash2 className="size-3.5" aria-hidden />}
+                  <span className="max-w-48 truncate">{c.label}</span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent
+                className="w-60"
+                onCloseAutoFocus={(e) => {
+                  // Edit Location's field takes focus; don't hand it back here.
+                  if (editingRef.current) e.preventDefault();
+                  editingRef.current = false;
+                }}
+              >
+                <ContextMenuItem onSelect={() => onNavigate(c.path)}>Open</ContextMenuItem>
+                <ContextMenuItem onSelect={() => onNewTab(c.path)}>Open in New Tab</ContextMenuItem>
+                <ContextMenuItem onSelect={() => onNewWindow(c.path)}>Open in New Window</ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => onToggleBookmark(c.path)}>
+                  {bookmarked.has(c.path) ? 'Remove from Favorites' : 'Add to Favorites'}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => onOpenInTerminal(c.path)}>Open in Terminal</ContextMenuItem>
+                <ContextMenuItem onSelect={() => onCopyPath(c.path)}>Copy Path</ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() => {
+                    editingRef.current = true;
+                    onEdit(c.path);
+                  }}
+                >
+                  Edit Location <ContextMenuShortcut>Ctrl+L</ContextMenuShortcut>
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           </span>
         );
       })}
-      <span className="h-full min-w-8 flex-1" onClick={onEdit} />
+      <span className="h-full min-w-8 flex-1" onClick={() => onEdit()} />
     </div>
   );
 }

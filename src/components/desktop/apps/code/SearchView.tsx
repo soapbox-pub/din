@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Ellipsis, Loader2, Replace } from 'lucide-react';
-import { cleanFsError, getFsBridge, type FsSearchOptions, type FsSearchResult } from '@/lib/fs';
+import { cleanFsError, getFsBridge, parentPath, type FsSearchMatch, type FsSearchOptions, type FsSearchResult } from '@/lib/fs';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { cn } from '@/lib/utils';
 import { FileIcon } from '../files/FileIcon';
 import { FieldBox, IconButton, OptionToggle, TextButton, fieldInputClass } from './controls';
 import { searchRegExp, type SearchState } from './search';
+
+const copyText = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
 
 /**
  * Search across every file in the open folder (Ctrl+Shift+F), VS Code
@@ -30,6 +34,7 @@ export function SearchView({
   onReplaceAll: (result: FsSearchResult, options: FsSearchOptions, replacement: string) => Promise<void>;
 }) {
   const fs = getFsBridge();
+  const { open } = useWindowActions();
   const inputRef = useRef<HTMLInputElement>(null);
   const [outcome, setOutcome] = useState<{ key: string; result: FsSearchResult | null; error: string | null } | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -231,54 +236,77 @@ export function SearchView({
           const isCollapsed = collapsed.has(file.path);
           const slash = file.path.lastIndexOf('/');
           const name = file.path.slice(slash + 1);
+          const full = `${root}/${file.path}`;
+          const openAt = (m: FsSearchMatch) => onOpenMatch(full, m.line, m.column + 1, m.length);
+          const toggle = () =>
+            setCollapsed((c) => {
+              const next = new Set(c);
+              if (next.has(file.path)) next.delete(file.path);
+              else next.add(file.path);
+              return next;
+            });
           return (
             <div key={file.path} role="treeitem" aria-expanded={!isCollapsed} aria-selected={false}>
-              <button
-                type="button"
-                onClick={() =>
-                  setCollapsed((c) => {
-                    const next = new Set(c);
-                    if (next.has(file.path)) next.delete(file.path);
-                    else next.add(file.path);
-                    return next;
-                  })
-                }
-                title={file.path}
-                className="flex h-6 w-full items-center gap-1.5 px-2 text-left hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              >
-                <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none', !isCollapsed && 'rotate-90')} aria-hidden />
-                <FileIcon path="" name={name} kind="file" size={null} mtimeMs={null} px={16} thumbnail={false} />
-                <span className="shrink-0 truncate">{name}</span>
-                {slash > 0 && <span className="min-w-0 truncate text-xs text-muted-foreground">{file.path.slice(0, slash)}</span>}
-                <span className="ml-auto shrink-0 rounded-full bg-foreground/10 px-1.5 text-xs tabular-nums text-muted-foreground">
-                  {file.matches.length}
-                </span>
-              </button>
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    title={file.path}
+                    className="flex h-6 w-full items-center gap-1.5 px-2 text-left hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
+                    <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none', !isCollapsed && 'rotate-90')} aria-hidden />
+                    <FileIcon path="" name={name} kind="file" size={null} mtimeMs={null} px={16} thumbnail={false} />
+                    <span className="shrink-0 truncate">{name}</span>
+                    {slash > 0 && <span className="min-w-0 truncate text-xs text-muted-foreground">{file.path.slice(0, slash)}</span>}
+                    <span className="ml-auto shrink-0 rounded-full bg-foreground/10 px-1.5 text-xs tabular-nums text-muted-foreground">
+                      {file.matches.length}
+                    </span>
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-56">
+                  {file.matches[0] && <ContextMenuItem onSelect={() => openAt(file.matches[0])}>Open</ContextMenuItem>}
+                  <ContextMenuItem onSelect={toggle}>{isCollapsed ? 'Expand' : 'Collapse'}</ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => open('file-browser', { path: parentPath(full), select: name })}>Reveal in Files</ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => copyText(full)}>Copy Path</ContextMenuItem>
+                  <ContextMenuItem onSelect={() => copyText(file.path)}>Copy Relative Path</ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
               {!isCollapsed && (
                 <div role="group">
                   {file.matches.map((m, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      role="treeitem"
-                      aria-selected={false}
-                      title={`Line ${m.line}`}
-                      onClick={() => onOpenMatch(`${root}/${file.path}`, m.line, m.column + 1, m.length)}
-                      className="flex h-6 w-full items-center gap-2 pl-10 pr-2 text-left font-mono text-xs hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                    >
-                      <span className="min-w-0 truncate whitespace-pre text-foreground/80">
-                        {m.preview.slice(0, m.previewColumn)}
-                        {state.showReplace && state.replace !== '' ? (
-                          <>
-                            <del className="bg-destructive/20 text-foreground">{m.preview.slice(m.previewColumn, m.previewColumn + m.length)}</del>
-                            <ins className="bg-emerald-500/20 text-foreground no-underline">{state.replace}</ins>
-                          </>
-                        ) : (
-                          <mark className="rounded-sm bg-amber-400/40 text-foreground">{m.preview.slice(m.previewColumn, m.previewColumn + m.length)}</mark>
-                        )}
-                        {m.preview.slice(m.previewColumn + m.length)}
-                      </span>
-                    </button>
+                    <ContextMenu key={i}>
+                      <ContextMenuTrigger asChild>
+                        <button
+                          type="button"
+                          role="treeitem"
+                          aria-selected={false}
+                          title={`Line ${m.line}`}
+                          onClick={() => openAt(m)}
+                          className="flex h-6 w-full items-center gap-2 pl-10 pr-2 text-left font-mono text-xs hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        >
+                          <span className="min-w-0 truncate whitespace-pre text-foreground/80">
+                            {m.preview.slice(0, m.previewColumn)}
+                            {state.showReplace && state.replace !== '' ? (
+                              <>
+                                <del className="bg-destructive/20 text-foreground">{m.preview.slice(m.previewColumn, m.previewColumn + m.length)}</del>
+                                <ins className="bg-emerald-500/20 text-foreground no-underline">{state.replace}</ins>
+                              </>
+                            ) : (
+                              <mark className="rounded-sm bg-amber-400/40 text-foreground">{m.preview.slice(m.previewColumn, m.previewColumn + m.length)}</mark>
+                            )}
+                            {m.preview.slice(m.previewColumn + m.length)}
+                          </span>
+                        </button>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-56">
+                        <ContextMenuItem onSelect={() => openAt(m)}>Open</ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onSelect={() => copyText(m.preview.slice(m.previewColumn, m.previewColumn + m.length))}>Copy Match</ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   ))}
                 </div>
               )}

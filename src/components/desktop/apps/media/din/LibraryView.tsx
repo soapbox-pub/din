@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
 import {
   Clock, Disc3, FolderPlus, ListMusic, Mic2, Music2, Play, RefreshCw, Search, Star, Tag, CalendarDays, Film, X, ListPlus,
 } from 'lucide-react';
@@ -29,6 +29,8 @@ type View =
 const toTrack = (i: LibraryItem) => makeTrack(i.location, { title: i.title, artist: i.artist, album: i.album, duration: i.duration });
 const artistOf = (i: LibraryItem) => i.albumArtist || i.artist || 'Unknown Artist';
 const albumOf = (i: LibraryItem) => i.album || 'Unknown Album';
+const genreOf = (i: LibraryItem) => i.genre || 'Unknown Genre';
+const yearOf = (i: LibraryItem) => i.year || 'Unknown Year';
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 const byAlbumOrder = (a: LibraryItem, b: LibraryItem) =>
   collator.compare(albumOf(a), albumOf(b)) || (a.disc ?? 0) - (b.disc ?? 0) || (a.track ?? 0) - (b.track ?? 0) || collator.compare(a.title, b.title);
@@ -39,9 +41,22 @@ function play(items: LibraryItem[], start = 0) {
   setPrefs({ tab: 'now-playing' });
 }
 
-function NavItem({ icon, label, active, onClick, count }: { icon: ReactNode; label: string; active: boolean; onClick: () => void; count?: number }) {
+async function playPlaylist(path: string, how: 'play' | 'next' | 'enqueue') {
+  const tracks = await readPlaylistFile(path);
+  if (tracks.length === 0) return;
+  if (how !== 'play') return player.enqueue(tracks, { next: how === 'next' });
+  player.setQueue(tracks, 0, true);
+  setPrefs({ tab: 'now-playing' });
+}
+
+function showInFiles(open: ReturnType<typeof useWindowActions>['open'], path: string) {
+  open('file-browser', { path: parentPath(path), select: path.slice(path.lastIndexOf('/') + 1) });
+}
+
+function NavItem({ icon, label, active, onClick, count, ...props }: Omit<ComponentProps<'button'>, 'children' | 'onClick'> & { icon: ReactNode; label: string; active: boolean; onClick: () => void; count?: number }) {
   return (
     <button
+      {...props}
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
@@ -159,9 +174,7 @@ function SongTable({ items, ordered }: { items: LibraryItem[]; ordered?: boolean
                       ))}
                     </ContextMenuSubContent>
                   </ContextMenuSub>
-                  <ContextMenuItem onSelect={() => open('file-browser', { path: parentPath(item.location), select: item.location.slice(item.location.lastIndexOf('/') + 1) })}>
-                    Show in Files
-                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => showInFiles(open, item.location)}>Show in Files</ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem onSelect={() => library.forget(targets(item.location).map((t) => t.location))}>Remove from Library</ContextMenuItem>
                 </ContextMenuContent>
@@ -189,53 +202,78 @@ function AlbumGrid({ items, onOpen }: { items: LibraryItem[]; onOpen: (album: st
   return (
     <div className="mp-scroll min-h-0 flex-1 overflow-y-auto p-4">
       <div className="grid grid-cols-[repeat(auto-fill,minmax(136px,1fr))] gap-4">
-        {albums.map((a) => (
-          <div key={`${a.album}/${a.artist}`} className="group min-w-0">
-            <button
-              type="button"
-              onClick={() => onOpen(a.album, a.artist)}
-              onDoubleClick={() => play(a.items.slice().sort(byAlbumOrder))}
-              className="relative block w-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]"
-              aria-label={`${a.album} by ${a.artist}`}
-            >
-              <Cover location={a.items[0].location} className="aspect-square w-full shadow-lg ring-1 ring-foreground/10 transition-transform motion-safe:group-hover:-translate-y-0.5" />
-              <span
-                role="button"
-                tabIndex={-1}
-                aria-label={`Play ${a.album}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  play(a.items.slice().sort(byAlbumOrder));
-                }}
-                className="mp-orb absolute bottom-2 right-2 size-9 opacity-0 transition-opacity group-hover:opacity-100"
-              >
-                <Play className="size-4 translate-x-px fill-current" />
-              </span>
-            </button>
-            <p className="mt-2 truncate font-medium" title={a.album}>{a.album}</p>
-            <p className="truncate text-xs text-[var(--mp-ink-dim)]">{a.artist}{a.year && ` · ${a.year}`}</p>
-          </div>
-        ))}
+        {albums.map((a) => {
+          const tracks = () => a.items.slice().sort(byAlbumOrder);
+          return (
+            <ContextMenu key={`${a.album}/${a.artist}`}>
+              <ContextMenuTrigger asChild>
+                <div className="group min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => onOpen(a.album, a.artist)}
+                    onDoubleClick={() => play(tracks())}
+                    className="relative block w-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]"
+                    aria-label={`${a.album} by ${a.artist}`}
+                  >
+                    <Cover location={a.items[0].location} className="aspect-square w-full shadow-lg ring-1 ring-foreground/10 transition-transform motion-safe:group-hover:-translate-y-0.5" />
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      aria-label={`Play ${a.album}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        play(tracks());
+                      }}
+                      className="mp-orb absolute bottom-2 right-2 size-9 opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <Play className="size-4 translate-x-px fill-current" />
+                    </span>
+                  </button>
+                  <p className="mt-2 truncate font-medium" title={a.album}>{a.album}</p>
+                  <p className="truncate text-xs text-[var(--mp-ink-dim)]">{a.artist}{a.year && ` · ${a.year}`}</p>
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => play(tracks())}>Play</ContextMenuItem>
+                <ContextMenuItem onSelect={() => player.enqueue(tracks().map(toTrack), { next: true })}>Play Next</ContextMenuItem>
+                <ContextMenuItem onSelect={() => player.enqueue(tracks().map(toTrack))}>Add to Now Playing</ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => onOpen(a.album, a.artist)}>Open Album</ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function NameList({ names, onOpen, icon }: { names: [string, number][]; onOpen: (name: string) => void; icon: ReactNode }) {
+function NameList({ names, items, keyOf, onOpen, icon }: { names: [string, number][]; items: LibraryItem[]; keyOf: (i: LibraryItem) => string; onOpen: (name: string) => void; icon: ReactNode }) {
   if (names.length === 0) return <p className="grid flex-1 place-items-center p-8 text-[var(--mp-ink-faint)]">Nothing here yet.</p>;
+  const tracks = (name: string) => items.filter((i) => keyOf(i) === name).sort(byAlbumOrder);
   return (
     <div className="mp-scroll min-h-0 flex-1 overflow-y-auto p-2">
       {names.map(([name, count]) => (
-        <button
-          key={name}
-          type="button"
-          onClick={() => onOpen(name)}
-          className="mp-row flex w-full items-center gap-3 rounded-md px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]"
-        >
-          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[var(--mp-pane-2)] text-[var(--mp-ink-dim)]">{icon}</span>
-          <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-          <span className="text-xs tabular-nums text-[var(--mp-ink-faint)]">{count} song{count === 1 ? '' : 's'}</span>
-        </button>
+        <ContextMenu key={name}>
+          <ContextMenuTrigger asChild>
+            <button
+              type="button"
+              onClick={() => onOpen(name)}
+              className="mp-row flex w-full items-center gap-3 rounded-md px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mp-accent)]"
+            >
+              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[var(--mp-pane-2)] text-[var(--mp-ink-dim)]">{icon}</span>
+              <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+              <span className="text-xs tabular-nums text-[var(--mp-ink-faint)]">{count} song{count === 1 ? '' : 's'}</span>
+            </button>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onSelect={() => play(tracks(name))}>Play</ContextMenuItem>
+            <ContextMenuItem onSelect={() => player.enqueue(tracks(name).map(toTrack), { next: true })}>Play Next</ContextMenuItem>
+            <ContextMenuItem onSelect={() => player.enqueue(tracks(name).map(toTrack))}>Add to Now Playing</ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => onOpen(name)}>Open</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       ))}
     </div>
   );
@@ -265,6 +303,7 @@ function PlaylistView({ path }: { path: string }) {
 function FoldersView() {
   const folders = useLibrary((s) => s.folders);
   const { pickFiles } = useFilePicker();
+  const { open } = useWindowActions();
   return (
     <div className="mp-scroll min-h-0 flex-1 overflow-y-auto p-4">
       <p className="mb-3 max-w-prose text-[var(--mp-ink-dim)]">
@@ -272,12 +311,21 @@ function FoldersView() {
       </p>
       <ul className="mb-4 space-y-1">
         {folders.map((f) => (
-          <li key={f} className="mp-pane flex items-center gap-2 rounded-md px-3 py-2">
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">{f}</span>
-            <button type="button" className="mp-icon-btn size-6" aria-label={`Stop watching ${f}`} title="Remove" onClick={() => library.removeFolder(f)}>
-              <X className="size-4" />
-            </button>
-          </li>
+          <ContextMenu key={f}>
+            <ContextMenuTrigger asChild>
+              <li className="mp-pane flex items-center gap-2 rounded-md px-3 py-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-xs">{f}</span>
+                <button type="button" className="mp-icon-btn size-6" aria-label={`Stop watching ${f}`} title="Remove" onClick={() => library.removeFolder(f)}>
+                  <X className="size-4" />
+                </button>
+              </li>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onSelect={() => open('file-browser', { path: f })}>Show in Files</ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => library.removeFolder(f)}>Stop Watching</ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
       </ul>
       <button
@@ -307,6 +355,7 @@ export function LibraryView() {
   const loaded = useLibrary((s) => s.loaded);
   const [view, setView] = useState<View>({ kind: 'albums' });
   const [search, setSearch] = useState('');
+  const { open } = useWindowActions();
 
   useEffect(() => {
     void library.load();
@@ -343,11 +392,11 @@ export function LibraryView() {
       case 'albums':
         return { title: VIEW_TITLES.albums, items: music, node: <AlbumGrid items={music} onOpen={(name, artist) => setView({ kind: 'album', name, artist })} /> };
       case 'artists':
-        return { title: VIEW_TITLES.artists, items: music, node: <NameList icon={<Mic2 className="size-4" />} names={count(artistOf)} onOpen={(name) => setView({ kind: 'artist', name })} /> };
+        return { title: VIEW_TITLES.artists, items: music, node: <NameList icon={<Mic2 className="size-4" />} names={count(artistOf)} items={music} keyOf={artistOf} onOpen={(name) => setView({ kind: 'artist', name })} /> };
       case 'genres':
-        return { title: VIEW_TITLES.genres, items: music, node: <NameList icon={<Tag className="size-4" />} names={count((i) => i.genre || 'Unknown Genre')} onOpen={(name) => setView({ kind: 'genre', name })} /> };
+        return { title: VIEW_TITLES.genres, items: music, node: <NameList icon={<Tag className="size-4" />} names={count(genreOf)} items={music} keyOf={genreOf} onOpen={(name) => setView({ kind: 'genre', name })} /> };
       case 'years':
-        return { title: VIEW_TITLES.years, items: music, node: <NameList icon={<CalendarDays className="size-4" />} names={count((i) => i.year || 'Unknown Year')} onOpen={(name) => setView({ kind: 'year', name })} /> };
+        return { title: VIEW_TITLES.years, items: music, node: <NameList icon={<CalendarDays className="size-4" />} names={count(yearOf)} items={music} keyOf={yearOf} onOpen={(name) => setView({ kind: 'year', name })} /> };
       case 'artist': {
         const list = music.filter((i) => artistOf(i) === view.name).sort(byAlbumOrder);
         return { title: view.name, items: list, node: <AlbumGrid items={list} onOpen={(name, artist) => setView({ kind: 'album', name, artist })} /> };
@@ -376,11 +425,11 @@ export function LibraryView() {
         };
       }
       case 'genre': {
-        const list = music.filter((i) => (i.genre || 'Unknown Genre') === view.name).sort(byAlbumOrder);
+        const list = music.filter((i) => genreOf(i) === view.name).sort(byAlbumOrder);
         return { title: view.name, items: list, node: <SongTable items={list} /> };
       }
       case 'year': {
-        const list = music.filter((i) => (i.year || 'Unknown Year') === view.name).sort(byAlbumOrder);
+        const list = music.filter((i) => yearOf(i) === view.name).sort(byAlbumOrder);
         return { title: view.name, items: list, node: <SongTable items={list} /> };
       }
       case 'playlist':
@@ -420,7 +469,18 @@ export function LibraryView() {
         {nav({ kind: 'videos' }, <Film className={ic} />, 'Videos', items.length - music.length)}
         <p className="px-2 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-[var(--mp-ink-faint)]">Playlists</p>
         {playlists.length === 0 && <p className="px-2 text-xs text-[var(--mp-ink-faint)]">Save the Now Playing list to make one.</p>}
-        {playlists.map((p) => nav({ kind: 'playlist', path: p }, <ListMusic className={ic} />, p.slice(p.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '')))}
+        {playlists.map((p) => (
+          <ContextMenu key={p}>
+            <ContextMenuTrigger asChild>{nav({ kind: 'playlist', path: p }, <ListMusic className={ic} />, p.slice(p.lastIndexOf('/') + 1).replace(/\.[^.]+$/, ''))}</ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onSelect={() => void playPlaylist(p, 'play')}>Play</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void playPlaylist(p, 'next')}>Play Next</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void playPlaylist(p, 'enqueue')}>Add to Now Playing</ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => showInFiles(open, p)}>Show in Files</ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+        ))}
         <p className="px-2 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-[var(--mp-ink-faint)]">Folders</p>
         {nav({ kind: 'folders' }, <FolderPlus className={ic} />, 'Watched Folders')}
       </nav>

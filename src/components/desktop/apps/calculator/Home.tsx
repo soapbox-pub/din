@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ArrowDownToLine, Copy, CornerDownLeft, Loader2, Trash2, Undo2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { parse, ParseError, tryParse } from './expr';
 import { texText, toLatex, type NumberFormat } from './latex';
 import { resultLatex, shapeResult, tidy } from './present';
@@ -425,69 +426,103 @@ const HistoryRow = memo(function HistoryRow({
     }
   }, [decimal, format]);
 
+  const copy = (text: string) => void navigator.clipboard?.writeText(text);
+
   return (
-    <li className="group relative border-b border-border/40 px-4 py-2.5 hover:bg-foreground/[0.025]">
-      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-        <button
-          type="button"
-          onClick={() => onUseInput(entry.input)}
-          title="Edit this entry"
-          className="max-w-full overflow-x-auto overflow-y-hidden rounded-md px-1 py-1 text-left text-[1.05rem] hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <TeX tex={inputTex} label={entry.input} />
-          {entry.approx && <span className="ml-2 align-middle text-xs text-muted-foreground">≈</span>}
-        </button>
-        <div className="ml-auto flex max-w-full flex-col items-end">
-          {entry.error ? (
-            <p className="text-sm font-medium text-destructive" role="alert">
-              Error: {entry.error}
-            </p>
-          ) : resultTex !== undefined ? (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li className="group relative border-b border-border/40 px-4 py-2.5 hover:bg-foreground/[0.025]">
+          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
             <button
               type="button"
-              onClick={() => resultText && onInsert(resultText)}
-              title="Insert this answer into the entry line"
-              className="max-w-full overflow-x-auto overflow-y-hidden rounded-md px-1 py-1 text-right text-[1.15rem] hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => onUseInput(entry.input)}
+              title="Edit this entry"
+              className="max-w-full overflow-x-auto overflow-y-hidden rounded-md px-1 py-1 text-left text-[1.05rem] hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <TeX tex={resultTex} label={resultText} />
+              <TeX tex={inputTex} label={entry.input} />
+              {entry.approx && <span className="ml-2 align-middle text-xs text-muted-foreground">≈</span>}
             </button>
-          ) : null}
-          {decimalTex && (
-            <span className="px-1 text-sm text-muted-foreground">
-              ≈ <TeX tex={decimalTex} />
-            </span>
-          )}
-          {entry.notes?.map((note, i) => (
-            <span key={i} className="max-w-md px-1 text-right text-xs text-muted-foreground">
-              {note}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="pointer-events-none absolute right-2 top-1 flex gap-0.5 rounded-md border border-border/60 bg-popover p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-        <RowAction label="Edit entry" onClick={() => onUseInput(entry.input)}>
-          <Undo2 className="size-3.5" aria-hidden />
-        </RowAction>
+            <div className="ml-auto flex max-w-full flex-col items-end">
+              {entry.error ? (
+                <p className="text-sm font-medium text-destructive" role="alert">
+                  Error: {entry.error}
+                </p>
+              ) : resultTex !== undefined ? (
+                <button
+                  type="button"
+                  onClick={() => resultText && onInsert(resultText)}
+                  title="Insert this answer into the entry line"
+                  className="max-w-full overflow-x-auto overflow-y-hidden rounded-md px-1 py-1 text-right text-[1.15rem] hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <TeX tex={resultTex} label={resultText} />
+                </button>
+              ) : null}
+              {decimalTex && (
+                <span className="px-1 text-sm text-muted-foreground">
+                  ≈ <TeX tex={decimalTex} />
+                </span>
+              )}
+              {entry.notes?.map((note, i) => (
+                <span key={i} className="max-w-md px-1 text-right text-xs text-muted-foreground">
+                  {note}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="pointer-events-none absolute right-2 top-1 flex gap-0.5 rounded-md border border-border/60 bg-popover p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+            <RowAction label="Edit entry" onClick={() => onUseInput(entry.input)}>
+              <Undo2 className="size-3.5" aria-hidden />
+            </RowAction>
+            {resultText && (
+              <RowAction label="Insert answer" onClick={() => onInsert(resultText)}>
+                <ArrowDownToLine className="size-3.5" aria-hidden />
+              </RowAction>
+            )}
+            {resultText && (
+              <RowAction label="Copy answer" onClick={() => copy(resultText)}>
+                <Copy className="size-3.5" aria-hidden />
+              </RowAction>
+            )}
+            {!entry.approx && !entry.error && !entry.done && (
+              <RowAction label="Approximate (≈)" onClick={() => onApprox(entry.input)}>
+                <span className="text-xs font-semibold leading-none">≈</span>
+              </RowAction>
+            )}
+            <RowAction label="Remove" onClick={onRemove}>
+              {entry.error ? <X className="size-3.5" aria-hidden /> : <Trash2 className="size-3.5" aria-hidden />}
+            </RowAction>
+          </div>
+        </li>
+      </ContextMenuTrigger>
+      {/* Insert answer focuses the entry line; keep it there. */}
+      <ContextMenuContent onCloseAutoFocus={(e) => document.activeElement instanceof HTMLInputElement && e.preventDefault()}>
+        <ContextMenuItem onSelect={() => onUseInput(entry.input)}>
+          <Undo2 /> Edit entry
+        </ContextMenuItem>
         {resultText && (
-          <RowAction label="Insert answer" onClick={() => onInsert(resultText)}>
-            <ArrowDownToLine className="size-3.5" aria-hidden />
-          </RowAction>
+          <ContextMenuItem onSelect={() => onInsert(resultText)}>
+            <ArrowDownToLine /> Insert answer
+          </ContextMenuItem>
         )}
         {resultText && (
-          <RowAction label="Copy answer" onClick={() => void navigator.clipboard?.writeText(resultText)}>
-            <Copy className="size-3.5" aria-hidden />
-          </RowAction>
+          <ContextMenuItem onSelect={() => copy(resultText)}>
+            <Copy /> Copy answer
+          </ContextMenuItem>
         )}
+        <ContextMenuItem onSelect={() => copy(entry.input)}>
+          <Copy /> Copy input
+        </ContextMenuItem>
         {!entry.approx && !entry.error && !entry.done && (
-          <RowAction label="Approximate (≈)" onClick={() => onApprox(entry.input)}>
-            <span className="text-xs font-semibold leading-none">≈</span>
-          </RowAction>
+          <ContextMenuItem onSelect={() => onApprox(entry.input)}>
+            <span className="w-4 text-center text-xs font-semibold leading-none text-muted-foreground">≈</span> Approximate (≈)
+          </ContextMenuItem>
         )}
-        <RowAction label="Remove" onClick={onRemove}>
-          {entry.error ? <X className="size-3.5" aria-hidden /> : <Trash2 className="size-3.5" aria-hidden />}
-        </RowAction>
-      </div>
-    </li>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onSelect={onRemove}>
+          {entry.error ? <X /> : <Trash2 />} Remove
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 

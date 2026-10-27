@@ -7,9 +7,11 @@ import {
   ChevronRight,
   ChevronUp,
   Clock,
+  Copy,
   File,
   FileText,
   FolderOpen,
+  FolderSearch,
   Info,
   Minus,
   Plus,
@@ -21,12 +23,15 @@ import {
   X,
 } from 'lucide-react';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
 import { AERO_CSS } from './aero';
 import { ACCENTS, AppContext, FIELD, FOCUS, keepFocus, refocusFrame, useOfficeApp, type OfficeApp } from './accent';
 import { FONT_CHOICES, fontStack } from './fonts';
+import { removeRecent } from './useOfficeFile';
 import { PICKER_NAMES, PICKER_THEME_ORDER, pickerVariants, STANDARD_COLORS, tintColor, type Theme, type ThemeColorName } from './theme';
 
 /**
@@ -1298,6 +1303,8 @@ function TemplateRow({ templates }: { templates: Template[] }) {
 }
 
 function RecentList({ recent, onOpen }: { recent: RecentFile[]; onOpen: (path: string) => void }) {
+  const app = useOfficeApp();
+  const { open } = useWindowActions();
   return (
     <section>
       <h2 className="mb-2 flex items-center gap-2 border-b border-[#d5dfec] pb-2 text-[14px] font-semibold text-[#1e395b]">
@@ -1318,16 +1325,35 @@ function RecentList({ recent, onOpen }: { recent: RecentFile[]; onOpen: (path: s
             {recent.map((r) => {
               const slash = r.path.lastIndexOf('/');
               return (
-                <tr key={r.path} className="cursor-pointer hover:bg-[#e5f1fc]" onClick={() => onOpen(r.path)}>
-                  <td className="rounded-l-md py-2 pl-1">
-                    <button type="button" className={cn('flex items-center gap-2 text-left', FOCUS)} onClick={() => onOpen(r.path)}>
-                      <FileText className="size-4 shrink-0 text-[var(--office-accent)]" />
-                      {r.path.slice(slash + 1)}
-                    </button>
-                  </td>
-                  <td className="hidden max-w-[320px] truncate py-2 text-[#616161] md:table-cell">{r.path.slice(0, slash) || '/'}</td>
-                  <td className="rounded-r-md py-2 pr-2 text-right whitespace-nowrap text-[#616161]">{relativeTime(r.time)}</td>
-                </tr>
+                <ContextMenu key={r.path}>
+                  <ContextMenuTrigger asChild>
+                    <tr className="cursor-pointer hover:bg-[#e5f1fc]" onClick={() => onOpen(r.path)}>
+                      <td className="rounded-l-md py-2 pl-1">
+                        <button type="button" className={cn('flex items-center gap-2 text-left', FOCUS)} onClick={() => onOpen(r.path)}>
+                          <FileText className="size-4 shrink-0 text-[var(--office-accent)]" />
+                          {r.path.slice(slash + 1)}
+                        </button>
+                      </td>
+                      <td className="hidden max-w-[320px] truncate py-2 text-[#616161] md:table-cell">{r.path.slice(0, slash) || '/'}</td>
+                      <td className="rounded-r-md py-2 pr-2 text-right whitespace-nowrap text-[#616161]">{relativeTime(r.time)}</td>
+                    </tr>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => onOpen(r.path)}>
+                      <FolderOpen /> Open
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => open('file-browser', { path: r.path.slice(0, slash) || '/', select: r.path.slice(slash + 1) })}>
+                      <FolderSearch /> Show in Files
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(r.path).catch(() => {})}>
+                      <Copy /> Copy Path
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => removeRecent(app, r.path)}>
+                      <X /> Remove from List
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               );
             })}
           </tbody>

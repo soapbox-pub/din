@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Copy,
   Eye,
   EyeOff,
   Folder,
@@ -34,6 +35,13 @@ import type { FilePickerOptions, FilePickerResult } from '@/contexts/FilePickerC
 import { FileIcon } from '@/components/desktop/apps/files/FileIcon';
 import { USER_DIRS } from '@/components/desktop/apps/files/layout';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -325,6 +333,26 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
   }, []);
 
   const favorite = folder !== null && bookmarks.bookmarks.some((b) => b.path === folder);
+  const bookmarksRef = useRef(bookmarks);
+  useEffect(() => {
+    bookmarksRef.current = bookmarks;
+  });
+  const isFavorite = useCallback((path: string) => bookmarks.bookmarks.some((b) => b.path === path), [bookmarks.bookmarks]);
+  const toggleFavorite = useCallback((path: string, on: boolean) => {
+    if (on) bookmarksRef.current.add(path);
+    else bookmarksRef.current.remove(path);
+  }, []);
+  const chooseLabel = options.confirmLabel ?? (saving ? 'Save' : directory ? 'Select' : 'Open');
+  const rowMenu = useMemo<RowMenu>(
+    () => ({
+      chooseLabel,
+      canChoose: (entry) => (saving ? entry.kind === 'file' : choosable(entry)),
+      choose: (item) => (directory ? finish([item.path]) : openItem(item)),
+      isFavorite,
+      toggleFavorite,
+    }),
+    [chooseLabel, saving, choosable, directory, finish, openItem, isFavorite, toggleFavorite],
+  );
 
   const title =
     options.title ??
@@ -394,6 +422,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
         multiple={multiple}
         onClick={clickItem}
         onOpen={openItem}
+        menu={rowMenu}
       />
     );
   }
@@ -510,27 +539,48 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
                   </p>
                   {section.places.map((place) => {
                     const active = location === place.path;
+                    const real = place.path !== RECENT;
+                    const starred = real && isFavorite(place.path);
                     return (
-                      <button
-                        key={place.path}
-                        type="button"
-                        title={place.path === RECENT ? undefined : place.path}
-                        aria-current={active ? 'location' : undefined}
-                        onClick={() => navigate(place.path)}
-                        className={cn(
-                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                          active
-                            ? 'bg-primary/15 font-medium text-foreground'
-                            : 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
-                        )}
-                      >
-                        <place.icon
-                          className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')}
-                          aria-hidden
-                        />
-                        <span className="truncate">{place.name}</span>
-                      </button>
+                      <ContextMenu key={place.path}>
+                        <ContextMenuTrigger asChild>
+                          <button
+                            type="button"
+                            title={real ? place.path : undefined}
+                            aria-current={active ? 'location' : undefined}
+                            onClick={() => navigate(place.path)}
+                            className={cn(
+                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                              active
+                                ? 'bg-primary/15 font-medium text-foreground'
+                                : 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
+                            )}
+                          >
+                            <place.icon
+                              className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')}
+                              aria-hidden
+                            />
+                            <span className="truncate">{place.name}</span>
+                          </button>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent className="z-[1001]">
+                          <ContextMenuItem onSelect={() => navigate(place.path)}>
+                            <place.icon /> Open
+                          </ContextMenuItem>
+                          {real && (
+                            <>
+                              <ContextMenuSeparator />
+                              <ContextMenuItem onSelect={() => toggleFavorite(place.path, !starred)}>
+                                <Star /> {starred ? 'Remove from Favorites' : 'Add to Favorites'}
+                              </ContextMenuItem>
+                              <ContextMenuItem onSelect={() => copyPath(place.path)}>
+                                <Copy /> Copy Path
+                              </ContextMenuItem>
+                            </>
+                          )}
+                        </ContextMenuContent>
+                      </ContextMenu>
                     );
                   })}
                 </div>
@@ -665,6 +715,7 @@ const PickerList = memo(function PickerList({
   multiple,
   onClick,
   onOpen,
+  menu,
 }: {
   items: PickerItem[];
   home: string | undefined;
@@ -678,6 +729,7 @@ const PickerList = memo(function PickerList({
   multiple: boolean;
   onClick: (item: PickerItem, event: React.MouseEvent) => void;
   onOpen: (item: PickerItem) => void;
+  menu: RowMenu;
 }) {
   const { containerRef, onScroll, start, end, totalHeight } = useVirtualRows({
     count: items.length,
@@ -751,6 +803,7 @@ const PickerList = memo(function PickerList({
                 isSelected={selected.has(item.path) && choosable(item.entry)}
                 onClick={onClick}
                 onOpen={onOpen}
+                menu={menu}
               />
             ))}
           </ul>
@@ -759,6 +812,17 @@ const PickerList = memo(function PickerList({
     </div>
   );
 });
+
+/** What a row's right-click menu can do, shared by every row. */
+interface RowMenu {
+  chooseLabel: string;
+  canChoose: (entry: FsEntry) => boolean;
+  choose: (item: PickerItem) => void;
+  isFavorite: (path: string) => boolean;
+  toggleFavorite: (path: string, on: boolean) => void;
+}
+
+const copyPath = (path: string) => void navigator.clipboard?.writeText(path).catch(() => {});
 
 /** One row in the picker list, absolutely positioned within the virtual list. */
 const PickerRow = memo(function PickerRow({
@@ -769,6 +833,7 @@ const PickerRow = memo(function PickerRow({
   isSelected,
   onClick,
   onOpen,
+  menu,
 }: {
   item: PickerItem;
   /** The containing folder, shown in Recent. */
@@ -778,50 +843,70 @@ const PickerRow = memo(function PickerRow({
   isSelected: boolean;
   onClick: (item: PickerItem, event: React.MouseEvent) => void;
   onOpen: (item: PickerItem) => void;
+  menu: RowMenu;
 }) {
   const { entry, path } = item;
+  const folder = entry.kind === 'directory';
+  const starred = folder && menu.isFavorite(path);
   return (
-    <li className="absolute inset-x-0" style={{ top, height: ROW_HEIGHT }} role="option" aria-selected={isSelected}>
-      <button
-        type="button"
-        disabled={dim}
-        title={location !== null ? path : undefined}
-        onClick={(e) => onClick(item, e)}
-        onDoubleClick={() => onOpen(item)}
-        className={cn(
-          'flex h-full w-full items-center gap-3 rounded-md px-3 text-left text-sm',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          isSelected
-            ? 'bg-primary/15 text-foreground'
-            : 'text-foreground hover:bg-foreground/5',
-          dim && 'opacity-40',
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li className="absolute inset-x-0" style={{ top, height: ROW_HEIGHT }} role="option" aria-selected={isSelected}>
+          <button
+            type="button"
+            disabled={dim}
+            title={location !== null ? path : undefined}
+            onClick={(e) => onClick(item, e)}
+            onDoubleClick={() => onOpen(item)}
+            className={cn(
+              'flex h-full w-full items-center gap-3 rounded-md px-3 text-left text-sm',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              isSelected
+                ? 'bg-primary/15 text-foreground'
+                : 'text-foreground hover:bg-foreground/5',
+              dim && 'opacity-40',
+            )}
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <FileIcon
+                path={path}
+                name={entry.name}
+                kind={entry.kind}
+                size={entry.size}
+                mtimeMs={entry.mtimeMs}
+                symlink={entry.symlink}
+                px={20}
+              />
+              <span className="truncate">{entry.name}</span>
+            </span>
+            {location !== null && (
+              <span className="hidden w-40 shrink-0 truncate text-xs text-muted-foreground @2xl:block">
+                {location}
+              </span>
+            )}
+            <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+              {entry.kind === 'file' && entry.size !== null ? formatBytes(entry.size) : ''}
+            </span>
+            <span className="hidden w-36 shrink-0 truncate text-xs tabular-nums text-muted-foreground @md:block">
+              {item.when !== null ? formatWhen(item.when) : ''}
+            </span>
+          </button>
+        </li>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="z-[1001]">
+        {folder && <ContextMenuItem onSelect={() => onOpen(item)}>Open</ContextMenuItem>}
+        {menu.canChoose(entry) && <ContextMenuItem onSelect={() => menu.choose(item)}>{menu.chooseLabel}</ContextMenuItem>}
+        {(folder || menu.canChoose(entry)) && <ContextMenuSeparator />}
+        {folder && (
+          <ContextMenuItem onSelect={() => menu.toggleFavorite(path, !starred)}>
+            <Star /> {starred ? 'Remove from Favorites' : 'Add to Favorites'}
+          </ContextMenuItem>
         )}
-      >
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          <FileIcon
-            path={path}
-            name={entry.name}
-            kind={entry.kind}
-            size={entry.size}
-            mtimeMs={entry.mtimeMs}
-            symlink={entry.symlink}
-            px={20}
-          />
-          <span className="truncate">{entry.name}</span>
-        </span>
-        {location !== null && (
-          <span className="hidden w-40 shrink-0 truncate text-xs text-muted-foreground @2xl:block">
-            {location}
-          </span>
-        )}
-        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-          {entry.kind === 'file' && entry.size !== null ? formatBytes(entry.size) : ''}
-        </span>
-        <span className="hidden w-36 shrink-0 truncate text-xs tabular-nums text-muted-foreground @md:block">
-          {item.when !== null ? formatWhen(item.when) : ''}
-        </span>
-      </button>
-    </li>
+        <ContextMenuItem onSelect={() => copyPath(path)}>
+          <Copy /> Copy Path
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 

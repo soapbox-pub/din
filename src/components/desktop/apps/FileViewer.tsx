@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer, Wallpaper } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cleanFsError, extractionWarning, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
 import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } from '@/lib/printing';
@@ -95,6 +96,15 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
     }
   }, [path, dir, open, queryClient]);
 
+  const image = isViewableImage(name);
+  const tools: { label: string; icon: React.ReactNode; run: () => void }[] = path ? [
+    ...(image ? [{ label: 'Edit in Paint', icon: <Paintbrush className="size-4" />, run: () => open('paint', { path }) }] : []),
+    ...(isPhotoEditable(name) ? [{ label: 'Edit in Photo Editor', icon: <Layers className="size-4" />, run: () => open('photo-editor', { path }) }] : []),
+    ...(image ? [{ label: 'Set as Desktop Background', icon: <Wallpaper className="size-4" />, run: () => void setBackground({ path }) }] : []),
+    ...(printable ? [{ label: 'Print…', icon: <Printer className="size-4" />, run: print }] : []),
+    { label: 'Show in Files', icon: <FolderOpen className="size-4" />, run: () => dir && open('file-browser', { path: dir, select: name }) },
+  ] : [];
+
   if (!getFsBridge()) {
     return (
       <p className="grid h-full place-items-center p-6 text-sm text-muted-foreground">
@@ -155,43 +165,44 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
           {siblings.length > 1 && index !== -1 && `${index + 1} of ${siblings.length} · `}
           {entry?.size != null && formatBytes(entry.size)}
         </span>
-        {path && isViewableImage(name) && (
-          <BarButton label="Edit in Paint" onClick={() => open('paint', { path })}>
-            <Paintbrush className="size-4" />
+        {tools.map((t) => (
+          <BarButton key={t.label} label={t.label} onClick={t.run}>
+            {t.icon}
           </BarButton>
-        )}
-        {path && isPhotoEditable(name) && (
-          <BarButton label="Edit in Photo Editor" onClick={() => open('photo-editor', { path })}>
-            <Layers className="size-4" />
-          </BarButton>
-        )}
-        {path && isViewableImage(name) && (
-          <BarButton label="Set as Desktop Background" onClick={() => void setBackground({ path })}>
-            <Wallpaper className="size-4" />
-          </BarButton>
-        )}
-        {printable && (
-          <BarButton label="Print…" onClick={print}>
-            <Printer className="size-4" />
-          </BarButton>
-        )}
-        <BarButton
-          label="Show in Files"
-          onClick={() => dir && open('file-browser', { path: dir, select: name })}
-        >
-          <FolderOpen className="size-4" />
-        </BarButton>
+        ))}
       </div>
-      <div className="min-h-0 flex-1">
-        <FileViewerBody
-          path={path}
-          size={entry?.size}
-          mtimeMs={entry?.mtimeMs}
-          editable
-          onDirtyChange={setDirty}
-          onExtract={() => void extract()}
-        />
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild disabled={!image}>
+          <div className="min-h-0 flex-1">
+            <FileViewerBody
+              path={path}
+              size={entry?.size}
+              mtimeMs={entry?.mtimeMs}
+              editable
+              onDirtyChange={setDirty}
+              onExtract={() => void extract()}
+            />
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {siblings.length > 1 && (
+            <>
+              <ContextMenuItem onSelect={() => step(-1)}>
+                <ChevronLeft /> Previous
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => step(1)}>
+                <ChevronRight /> Next
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
+          {tools.map((t) => (
+            <ContextMenuItem key={t.label} onSelect={t.run}>
+              {t.icon} {t.label}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuContent>
+      </ContextMenu>
       {extractError !== null && (
         <p role="alert" className="shrink-0 border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
           {extractError}

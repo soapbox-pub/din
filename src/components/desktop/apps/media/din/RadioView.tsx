@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Play, Plus, Radio, Trash2 } from 'lucide-react';
+import { Copy, Play, Plus, Radio, Trash2 } from 'lucide-react';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { makeTrack, player, usePlayer } from '../engine';
 import { setPrefs, usePrefs } from '../prefs';
 
@@ -34,30 +35,52 @@ export function RadioView() {
   const [name, setName] = useState('');
   const valid = /^https?:\/\/\S+$/i.test(url.trim());
 
+  const remove = (url: string) => setPrefs((p) => ({ stations: p.stations.filter((x) => x.url !== url) }));
+
   const row = (s: { name: string; url: string; genre?: string }, mine: boolean) => (
-    <li key={s.url} className="mp-row group flex items-center gap-3 rounded-md px-3 py-2" data-current={playing === s.url}>
-      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--mp-pane-2)] text-[var(--mp-ink-dim)]">
-        <Radio className="size-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{s.name}</span>
-        <span className="block truncate text-xs text-[var(--mp-ink-faint)]">{s.genre ?? s.url}</span>
-      </span>
-      {mine && (
-        <button
-          type="button"
-          className="mp-icon-btn size-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-          aria-label={`Remove ${s.name}`}
-          title="Remove"
-          onClick={() => setPrefs((p) => ({ stations: p.stations.filter((x) => x.url !== s.url) }))}
-        >
-          <Trash2 className="size-4" />
-        </button>
-      )}
-      <button type="button" className="mp-btn" data-primary={playing === s.url} onClick={() => tune(s.name, s.url)}>
-        <Play className="size-3.5 fill-current" /> {playing === s.url ? 'Playing' : 'Listen'}
-      </button>
-    </li>
+    <ContextMenu key={s.url}>
+      <ContextMenuTrigger asChild>
+        <li className="mp-row group flex items-center gap-3 rounded-md px-3 py-2" data-current={playing === s.url}>
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--mp-pane-2)] text-[var(--mp-ink-dim)]">
+            <Radio className="size-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">{s.name}</span>
+            <span className="block truncate text-xs text-[var(--mp-ink-faint)]">{s.genre ?? s.url}</span>
+          </span>
+          {mine && (
+            <button
+              type="button"
+              className="mp-icon-btn size-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              aria-label={`Remove ${s.name}`}
+              title="Remove"
+              onClick={() => remove(s.url)}
+            >
+              <Trash2 className="size-4" />
+            </button>
+          )}
+          <button type="button" className="mp-btn" data-primary={playing === s.url} onClick={() => tune(s.name, s.url)}>
+            <Play className="size-3.5 fill-current" /> {playing === s.url ? 'Playing' : 'Listen'}
+          </button>
+        </li>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => tune(s.name, s.url)}>
+          <Play /> Listen
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(s.url).catch(() => {})}>
+          <Copy /> Copy Stream URL
+        </ContextMenuItem>
+        {mine && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem variant="destructive" onSelect={() => remove(s.url)}>
+              <Trash2 /> Remove
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 
   return (
