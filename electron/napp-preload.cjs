@@ -12,6 +12,8 @@
 //   - registration.periodicSync, and its permission in navigator.permissions
 // In every frame of the site's own origin: window.ENV, when the user has set
 // variables for the site.
+// In every frame and the service worker: the Cache API, keying the site's own
+// nsite:// URLs.
 //
 // In the service worker:
 //   - self.napp.fetch
@@ -260,6 +262,161 @@ function installNapp(bridge) {
       });
       getter(proto, 'pushManager', () => pushManager);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // The Cache API
+  // -------------------------------------------------------------------------
+
+  // Chromium's Cache API keys only http(s) URLs: `cache.put('/x', response)`
+  // on nsite:// throws "Request scheme 'nsite' is unsupported", and so does
+  // every `add`/`addAll` precache. A site's own URL is kept under a stand-in of
+  // the same host, `https://<host>/x`, and turned back on the way out; anybody
+  // else's URL is left alone. As Tenna does on iOS (tenna/src/lib/idb/caches.ts).
+  const CacheCtor = /** @type {typeof Cache | undefined} */ (scope.Cache);
+  const StorageCtor = /** @type {typeof CacheStorage | undefined} */ (scope.CacheStorage);
+  if (CacheCtor && StorageCtor) {
+    const CacheProto = CacheCtor.prototype;
+    const StorageProto = StorageCtor.prototype;
+    const NativeRequest = Request;
+    const nativeFetch = fetch;
+    const own = { protocol: location.protocol, host: location.host };
+    const standIn = `https://${own.host}`;
+    const native = {
+      match: CacheProto.match,
+      matchAll: CacheProto.matchAll,
+      addAll: CacheProto.addAll,
+      put: CacheProto.put,
+      delete: CacheProto.delete,
+      keys: CacheProto.keys,
+      storageMatch: StorageProto.match,
+    };
+
+    /** @param {string} href */
+    const toKey = (href) => {
+      let url;
+      try {
+        url = new URL(href, location.href);
+      } catch {
+        return null;
+      }
+      if (url.protocol !== own.protocol || url.host !== own.host) return null;
+      return standIn + url.pathname + url.search + url.hash;
+    };
+
+    /** @param {string} href */
+    const fromKey = (href) =>
+      href.startsWith(`${standIn}/`) ? `${own.protocol}//${own.host}${href.slice(standIn.length)}` : null;
+
+    /**
+     * A request like `request`, at another URL: only what matching reads, and
+     * keys() hands back, comes along.
+     * @param {Request} request
+     * @param {string} url
+     */
+    const moved = (request, url) =>
+      new NativeRequest(url, {
+        method: request.method,
+        headers: request.headers,
+        mode: request.mode === 'navigate' ? 'same-origin' : request.mode,
+        credentials: request.credentials,
+        cache: request.cache === 'only-if-cached' ? 'default' : request.cache,
+        redirect: request.redirect,
+        integrity: request.integrity,
+        referrerPolicy: request.referrerPolicy,
+      });
+
+    /**
+     * What a native method is given in place of a site's `request`.
+     * @param {unknown} request
+     * @returns {any}
+     */
+    const inward = (request) => {
+      if (request instanceof NativeRequest) {
+        const key = toKey(request.url);
+        return key ? moved(request, key) : request;
+      }
+      if (typeof request === 'string' || request instanceof URL) return toKey(String(request)) ?? request;
+      return request;
+    };
+
+    /** @param {Request} request */
+    const outward = (request) => {
+      const url = fromKey(request.url);
+      return url ? moved(request, url) : request;
+    };
+
+    // Fetches for itself: the native addAll would fetch the stand-in.
+    /**
+     * @param {Cache} cache
+     * @param {Iterable<RequestInfo | URL>} requests
+     */
+    const addAll = async (cache, requests) => {
+      const list = Array.from(requests, (request) => new NativeRequest(request));
+      for (const request of list) {
+        if (request.method !== 'GET') throw new TypeError('Cache.addAll: only GET requests can be cached.');
+      }
+      const responses = await Promise.all(list.map((request) => nativeFetch(request)));
+      for (const response of responses) {
+        if (!response.ok) throw new TypeError(`Cache.addAll: a response had status ${response.status}.`);
+        if (response.headers.get('Vary')?.split(',').some((field) => field.trim() === '*')) {
+          throw new TypeError("Cache.addAll: a response had 'Vary: *'.");
+        }
+      }
+      await Promise.all(list.map((request, i) => native.put.call(cache, inward(request), responses[i])));
+    };
+
+    /** @type {Record<string, (this: any, ...args: any[]) => unknown>} */
+    const cacheMethods = {
+      match(request, options) {
+        return native.match.call(this, inward(request), options);
+      },
+      matchAll(...args) {
+        if (args.length && args[0] !== undefined) args[0] = inward(args[0]);
+        return native.matchAll.apply(this, /** @type {[]} */ (args));
+      },
+      add(request) {
+        return cacheMethods.addAll.call(this, [request]);
+      },
+      addAll(requests) {
+        // A brand check before anything is fetched, as the platform's does.
+        if (!(this instanceof CacheCtor)) return native.addAll.call(this, requests);
+        return addAll(this, requests);
+      },
+      put(request, response) {
+        return native.put.call(this, inward(request), response);
+      },
+      delete(request, options) {
+        return native.delete.call(this, inward(request), options);
+      },
+      async keys(...args) {
+        if (args.length && args[0] !== undefined) args[0] = inward(args[0]);
+        const requests = await native.keys.apply(this, /** @type {[]} */ (args));
+        return requests.map(outward);
+      },
+    };
+    /** @type {Record<string, (this: any, ...args: any[]) => unknown>} */
+    const storageMethods = {
+      match(request, options) {
+        return native.storageMatch.call(this, inward(request), options);
+      },
+    };
+
+    /** @type {Record<string, number>} */
+    const lengths = { match: 1, matchAll: 0, add: 1, addAll: 1, put: 2, delete: 1, keys: 0 };
+    /**
+     * @param {object} proto
+     * @param {Record<string, Function>} methods
+     */
+    const patch = (proto, methods) => {
+      for (const [name, method] of Object.entries(methods)) {
+        Object.defineProperty(method, 'name', { value: name });
+        Object.defineProperty(method, 'length', { value: lengths[name] });
+        Object.defineProperty(proto, name, { value: method, writable: true, configurable: true, enumerable: true });
+      }
+    };
+    patch(CacheProto, cacheMethods);
+    patch(StorageProto, storageMethods);
   }
 
   // -------------------------------------------------------------------------
