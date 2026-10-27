@@ -163,6 +163,20 @@ export type SessionMessage =
   | (MessageBase & { type: 'compaction'; status: 'running' | 'completed' | 'failed'; summary?: string })
   | (MessageBase & { type: 'idle'; outcome: 'succeeded' | 'failed' | 'interrupted'; error?: StructuredError });
 
+/**
+ * A message sent while the agent works, waiting in the session's inbox until
+ * the agent takes it (`steer`: at its next step; `queue`: once it's done).
+ * Only the user's own are typed; the inbox also holds the server's.
+ */
+export interface QueuedMessage {
+  id: string;
+  sessionID: string;
+  type: 'user';
+  delivery: 'steer' | 'queue';
+  time: { created: number };
+  payload: { text: string; files?: { mime: string; name?: string }[] };
+}
+
 export interface PermissionRequest {
   id: string;
   sessionID: string;
@@ -351,6 +365,16 @@ export const assistantApi = {
       text,
       ...(files.length > 0 ? { files } : {}),
     }),
+
+  /** The user's messages the agent hasn't taken yet, oldest first. */
+  inbox: async (sessionID: string) =>
+    (await call<{ data: { type: string }[] }>('GET', `/api/session/${id(sessionID)}/inbox`)).data.filter(
+      (item): item is QueuedMessage => item.type === 'user',
+    ),
+
+  /** Take back a queued message. One already taken is left alone. */
+  cancelQueued: (sessionID: string, inboxID: string) =>
+    call<unknown>('DELETE', `/api/session/${id(sessionID)}/inbox/${id(inboxID)}`),
 
   interrupt: (sessionID: string) => call<unknown>('POST', `/api/session/${id(sessionID)}/interrupt`),
 

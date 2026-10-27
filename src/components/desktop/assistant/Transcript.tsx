@@ -5,6 +5,7 @@ import {
   Brain,
   ChevronRight,
   CircleAlert,
+  Clock,
   FilePen,
   FileText,
   FolderSearch,
@@ -22,7 +23,13 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { CopyButton } from '@/components/desktop/assistant/CopyButton';
 import { Markdown } from '@/components/desktop/assistant/Markdown';
-import { tildify, type AssistantContent, type SessionMessage, type ToolState } from '@/lib/assistant';
+import {
+  tildify,
+  type AssistantContent,
+  type QueuedMessage,
+  type SessionMessage,
+  type ToolState,
+} from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 
 /** Tool output shown in full up to this many characters. */
@@ -52,16 +59,24 @@ function group(messages: SessionMessage[]): Entry[] {
 /** A conversation's messages, oldest first. */
 export const Transcript = memo(function Transcript({
   messages,
+  queued = [],
   running,
   home,
+  onCancelQueued,
 }: {
   messages: SessionMessage[];
+  /** Messages sent while it works that the agent hasn't taken yet. */
+  queued?: QueuedMessage[];
   /** The agent is working: the last turn shows it. */
   running: boolean;
   home?: string;
+  onCancelQueued?: (message: QueuedMessage) => void;
 }) {
   const entries = group(messages);
   const last = entries[entries.length - 1];
+  // One the agent has just taken can show up in both until the inbox refetches.
+  const taken = new Set(messages.map((m) => m.id));
+  const waiting = queued.filter((q) => !taken.has(q.id));
   return (
     <ol className="flex flex-col gap-8" aria-label="Conversation">
       {entries.map((entry) => {
@@ -87,26 +102,62 @@ export const Transcript = memo(function Transcript({
           <Working />
         </li>
       )}
+      {waiting.map((message) => (
+        <li key={message.id} className="group/user flex justify-end">
+          <QueuedBubble message={message} onCancel={onCancelQueued && (() => onCancelQueued(message))} />
+        </li>
+      ))}
     </ol>
   );
 });
 
+function QueuedBubble({ message, onCancel }: { message: QueuedMessage; onCancel?: () => void }) {
+  return (
+    <div className="flex max-w-[80%] flex-col items-end gap-1.5">
+      <Attachments files={message.payload.files} />
+      <div className="whitespace-pre-wrap break-words rounded-3xl border border-dashed border-border px-5 py-2.5 leading-7 text-muted-foreground">
+        {message.payload.text}
+      </div>
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Clock className="size-3" aria-hidden />
+        {message.delivery === 'steer' ? 'Sending at its next step' : 'Queued until it’s done'}
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Cancel this message"
+            title="Cancel"
+            className="ml-1 grid size-6 place-items-center rounded-md hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <X className="size-3.5" aria-hidden />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Attachments({ files = [] }: { files?: { mime: string; name?: string }[] }) {
+  if (files.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap justify-end gap-1.5">
+      {files.map((file, index) => (
+        <li
+          key={index}
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
+        >
+          <FileText className="size-3.5" aria-hidden />
+          {file.name ?? file.mime}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function UserBubble({ message }: { message: Extract<SessionMessage, { type: 'user' }> }) {
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
-      {(message.files ?? []).length > 0 && (
-        <ul className="flex flex-wrap justify-end gap-1.5">
-          {(message.files ?? []).map((file, index) => (
-            <li
-              key={index}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
-            >
-              <FileText className="size-3.5" aria-hidden />
-              {file.name ?? file.mime}
-            </li>
-          ))}
-        </ul>
-      )}
+      <Attachments files={message.files} />
       <div className="whitespace-pre-wrap break-words rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground">
         {message.text}
       </div>

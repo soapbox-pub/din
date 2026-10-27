@@ -44,6 +44,7 @@ import {
   useAssistantReady,
   useAssistantSession,
   useAssistantSessions,
+  useCancelQueued,
   useDeleteSession,
   useHomeDirectory,
   useInterruptSession,
@@ -53,6 +54,7 @@ import {
   useRenameSession,
   useSendPrompt,
   useSessionForms,
+  useSessionInbox,
   useSessionMessages,
   useSessionPermissions,
   useStartConversation,
@@ -299,12 +301,14 @@ function Conversation({
   const { data: transcript, isLoading } = useSessionMessages(sessionID);
   const { data: permissions = [] } = useSessionPermissions(sessionID);
   const { data: forms = [] } = useSessionForms(sessionID);
+  const { data: queued } = useSessionInbox(sessionID);
   const { data: active = [] } = useActiveSessions();
   const { models, setModel } = usePreferredModel();
   const { data: recentData } = useRecentModelKeys();
   const home = useHomeDirectory();
   const send = useSendPrompt(sessionID);
   const interrupt = useInterruptSession();
+  const cancelQueued = useCancelQueued();
   const switchModel = useSwitchModel();
   const switchAgent = useSwitchAgent();
   const { toast } = useToast();
@@ -318,7 +322,7 @@ function Conversation({
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [messages, permissions.length, forms.length, running]);
+  }, [messages, queued, permissions.length, forms.length, running]);
 
   const fail = (title: string) => (error: unknown) =>
     toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
@@ -342,7 +346,15 @@ function Conversation({
               {transcript?.more && (
                 <p className="mb-6 text-center text-xs text-muted-foreground">Earlier messages aren’t shown.</p>
               )}
-              <Transcript messages={messages ?? []} running={running} home={home} />
+              <Transcript
+                messages={messages ?? []}
+                queued={queued}
+                running={running}
+                home={home}
+                onCancelQueued={(message) =>
+                  cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
+                }
+              />
             </>
           )}
         </div>

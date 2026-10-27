@@ -28,6 +28,7 @@ export const assistantKeys = {
   messages: (id: string) => ['assistant', 'messages', id] as const,
   permissions: (id: string) => ['assistant', 'permissions', id] as const,
   forms: (id: string) => ['assistant', 'forms', id] as const,
+  inbox: (id: string) => ['assistant', 'inbox', id] as const,
   models: ['assistant', 'models'] as const,
   agents: ['assistant', 'agents'] as const,
   integrations: ['assistant', 'integrations'] as const,
@@ -139,7 +140,10 @@ export function useAssistantEventSync() {
         }
         return;
       }
-      if (sessionID) refresh(assistantKeys.messages(sessionID));
+      if (sessionID) {
+        refresh(assistantKeys.messages(sessionID));
+        if (event.type.startsWith('session.inbox.')) refresh(assistantKeys.inbox(sessionID));
+      }
       if (SESSION_LIST_EVENTS.test(event.type)) {
         refresh(assistantKeys.sessions);
         refresh(assistantKeys.active);
@@ -149,6 +153,7 @@ export function useAssistantEventSync() {
           if (event.type.startsWith('session.execution.')) {
             refresh(assistantKeys.permissions(sessionID));
             refresh(assistantKeys.forms(sessionID));
+            refresh(assistantKeys.inbox(sessionID));
           }
         }
       }
@@ -224,6 +229,17 @@ export function useSessionForms(sessionID: string | null) {
   return useQuery({
     queryKey: assistantKeys.forms(sessionID ?? ''),
     queryFn: () => assistantApi.forms(sessionID!),
+    enabled: ready && sessionID !== null,
+    staleTime: 30_000,
+  });
+}
+
+/** Messages sent while the agent works that it hasn't taken yet. */
+export function useSessionInbox(sessionID: string | null) {
+  const ready = useAssistantReady();
+  return useQuery({
+    queryKey: assistantKeys.inbox(sessionID ?? ''),
+    queryFn: () => assistantApi.inbox(sessionID!),
     enabled: ready && sessionID !== null,
     staleTime: 30_000,
   });
@@ -421,6 +437,7 @@ export function useMarkViewedSession(sessionID: string): void {
 
 function invalidateSession(queryClient: QueryClient, sessionID: string) {
   void queryClient.invalidateQueries({ queryKey: assistantKeys.messages(sessionID) });
+  void queryClient.invalidateQueries({ queryKey: assistantKeys.inbox(sessionID) });
   void queryClient.invalidateQueries({ queryKey: assistantKeys.session(sessionID) });
   void queryClient.invalidateQueries({ queryKey: assistantKeys.sessions });
   void queryClient.invalidateQueries({ queryKey: assistantKeys.active });
@@ -464,6 +481,14 @@ export function useInterruptSession() {
   return useMutation({
     mutationFn: (sessionID: string) => assistantApi.interrupt(sessionID),
     onSuccess: (_data, sessionID) => invalidateSession(queryClient, sessionID),
+  });
+}
+
+export function useCancelQueued() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionID, id }: { sessionID: string; id: string }) => assistantApi.cancelQueued(sessionID, id),
+    onSuccess: (_data, { sessionID }) => void queryClient.invalidateQueries({ queryKey: assistantKeys.inbox(sessionID) }),
   });
 }
 
