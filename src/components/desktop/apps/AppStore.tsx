@@ -12,11 +12,14 @@ import { useAuthor } from '@/hooks/useAuthor';
 import { useToast } from '@/hooks/useToast';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+
+const APP_STORE_ICON = '/icons/apps/app-store.png';
 
 /**
  * The App Store: browses nsites (NIP-5A static websites), the only kind of
@@ -66,17 +69,27 @@ export function AppStore(_props: AppComponentProps) {
 
   const searchPending = lookup.isAddress ? lookup.isLoading : catalog.isLoading;
 
-  return (
-    <div className="flex h-full w-full flex-col bg-background text-foreground">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
-        <div className="mr-auto flex items-center gap-2 font-medium">
-          <Store className="size-5 text-muted-foreground" aria-hidden />
-          <span>App Store</span>
-        </div>
-        <div className="relative w-full max-w-64">
+  // Search and refresh go in the window's own title bar, so there is one bar
+  // on top rather than two.
+  const setTitlebar = useWindowTitlebar();
+  const refetchCatalog = catalog.refetch;
+  const refetchFeatured = featured.refetch;
+  const refreshing = catalog.isRefetching || featured.isRefetching;
+  const refreshDisabled = catalog.isLoading || refreshing;
+  useEffect(() => {
+    setTitlebar(
+      <div className="flex min-w-0 flex-1 items-center gap-2 pl-1">
+        <AppIcon icon={APP_STORE_ICON} className="size-4 shrink-0 text-muted-foreground" />
+        <span className="mr-auto truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
+          App Store
+        </span>
+        <div
+          data-window-no-drag
+          className="relative w-full max-w-64 min-w-0"
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
           <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
             aria-hidden
           />
           <Input
@@ -86,28 +99,29 @@ export function AppStore(_props: AppComponentProps) {
             aria-label="Search apps, or paste an address"
             autoComplete="off"
             spellCheck={false}
-            className="h-8 pl-8"
+            className="h-7 pl-7 text-sm md:text-sm"
           />
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8"
+        <button
+          type="button"
           onClick={() => {
-            catalog.refetch();
-            featured.refetch();
+            refetchCatalog();
+            refetchFeatured();
           }}
-          disabled={catalog.isLoading || catalog.isRefetching || featured.isRefetching}
+          disabled={refreshDisabled}
           aria-label="Refresh catalog"
           title="Refresh catalog"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
         >
-          <RefreshCw
-            className={catalog.isRefetching || featured.isRefetching ? 'size-4 animate-spin' : 'size-4'}
-            aria-hidden
-          />
-        </Button>
-      </div>
+          <RefreshCw className={cn('size-4', refreshing && 'animate-spin')} aria-hidden />
+        </button>
+      </div>,
+    );
+  }, [setTitlebar, search, refetchCatalog, refetchFeatured, refreshing, refreshDisabled]);
+  useEffect(() => () => setTitlebar(null), [setTitlebar]);
 
+  return (
+    <div className="flex h-full w-full flex-col bg-background text-foreground">
       {/* Content */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
