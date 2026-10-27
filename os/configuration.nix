@@ -1022,7 +1022,11 @@ in
 
   # A quiet boot: no boot menu (holding Space while it starts brings it
   # back, for older systems), no kernel or systemd chatter, and no cursor.
-  # Plymouth covers the rest with the boot screen.
+  # Plymouth covers the rest with the boot screen. And no text console on
+  # tty1, where the boot screen and Din are: it took the screen whenever
+  # something printed while neither had it, like between the boot screen
+  # and cage, or "reboot: Restarting system", which `quiet` doesn't stop.
+  # The other terminals (Ctrl+Alt+F2) still have one.
   boot.loader.timeout = 0;
   boot.consoleLogLevel = 3;
   boot.initrd.verbose = false;
@@ -1033,6 +1037,7 @@ in
     "systemd.show_status=auto"
     "rd.systemd.show_status=auto"
     "vt.global_cursor_default=0"
+    "fbcon=vc:2-63"
   ];
 
   # The boot screen, which is also where the disk's password is typed. It
