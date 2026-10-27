@@ -103,6 +103,13 @@ import {
   type SavedWindow,
 } from '@/lib/browserSession';
 import { TabContextMenu } from '@/components/desktop/TabContextMenu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
   historyDisplayUrl,
@@ -627,6 +634,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         copy.delete(id);
         return copy;
       });
+      // Closing several at once each sees the ones before gone.
+      tabsRef.current = next;
       setTabs(next);
       if (id === activeIdRef.current) focusOnActivate.current = true;
       setActiveId((current) =>
@@ -641,6 +650,50 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     const url = closedTabs.current.pop();
     if (url) openTab(url);
   }, [openTab]);
+
+  /** Open a copy of a tab's page just after it. */
+  const duplicateTab = useCallback((id: string) => {
+    const original = tabsRef.current.find((t) => t.id === id);
+    if (!original) return;
+    const tab = createTab(original.url || NEW_TAB_URL, null, original.parentId);
+    setTabs((ts) => {
+      const index = ts.findIndex((t) => t.id === id);
+      return pinnedFirst([...ts.slice(0, index + 1), tab, ...ts.slice(index + 1)]);
+    });
+    focusOnActivate.current = true;
+    setActiveId(tab.id);
+  }, []);
+
+  // A new-tab tile's right-click menu opens its site in a background tab, or
+  // in a window of its own.
+  const openTabInBackground = useCallback((url: string) => void openTab(url, false), [openTab]);
+  const openInNewWindow = useCallback(
+    (url: string) =>
+      openWindow('web-browser', {
+        restoreSession: { tabs: [{ url, title: null, favicon: null, pinned: false, parent: null }], active: 0 },
+      }),
+    [openWindow],
+  );
+
+  // What a tab's right-click menu offers beyond pinning, moving and closing.
+  // Closing the others (or those after it) spares pinned tabs, like Chrome.
+  const tabMenu = useMemo<BrowserTabMenu>(
+    () => ({
+      newTab: openNewTab,
+      reopen: reopenTab,
+      reload: (id) => views.current.get(id)?.reload(),
+      duplicate: duplicateTab,
+      closeOthers: (id) =>
+        tabsRef.current.filter((t) => t.id !== id && !t.pinned).forEach((t) => closeTab(t.id)),
+      closeToRight: (id) => {
+        const ts = tabsRef.current;
+        ts.slice(ts.findIndex((t) => t.id === id) + 1)
+          .filter((t) => !t.pinned)
+          .forEach((t) => closeTab(t.id));
+      },
+    }),
+    [openNewTab, reopenTab, duplicateTab, closeTab],
+  );
 
   /** Hand a tab to another window, which loads its page again. */
   const takeTab = useCallback(
@@ -700,10 +753,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         onNewTab={openNewTab}
         onMoveTab={(id, to) => setTabs((ts) => pinnedFirst(moveItem(ts, id, to)))}
         transfer={transfer}
+        menu={tabMenu}
       />,
     );
     return () => setTitlebar(null);
-  }, [treeTabs, tabs, activeId, selectTab, closeTab, togglePin, openNewTab, transfer, setTitlebar]);
+  }, [treeTabs, tabs, activeId, selectTab, closeTab, togglePin, openNewTab, transfer, tabMenu, setTitlebar]);
 
   /** Collapse/expand a subtree in the tree sidebar. */
   const toggleCollapsed = useCallback((id: string) => {
@@ -1978,6 +2032,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onMoveTab={moveTab}
             onMoveTabToEnd={moveTabToEnd}
             transfer={transfer}
+            menu={tabMenu}
           />
         )}
 
@@ -2004,6 +2059,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             // about:preferences overlay and supplies what it renders.
             preferences={tab.url === PREFERENCES_URL ? preferences : null}
             onNavigate={navigateTab}
+            onOpenTab={openTabInBackground}
+            onOpenWindow={isPrivate ? undefined : openInNewWindow}
             // Only render a docked pane for bottom/right; 'window' hosts its
             // own pane in a separate desktop window.
             dock={tab.dock === 'bottom' || tab.dock === 'right' ? tab.dock : null}
@@ -2449,6 +2506,7 @@ function TabStrip({
   onNewTab,
   onMoveTab,
   transfer,
+  menu,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -2460,6 +2518,7 @@ function TabStrip({
   onMoveTab: (id: string, toIndex: number) => void;
   /** Let tabs move between browser windows (see useTabTransfer). */
   transfer: TabTransferOptions;
+  menu: BrowserTabMenu;
 }) {
   const tabTransfer = useTabTransfer(transfer, tabs.length);
   const chrome = useWindowChrome();
@@ -2487,52 +2546,110 @@ function TabStrip({
     else if (end > list.scrollLeft + list.clientWidth) list.scrollLeft = end - list.clientWidth;
   }, [activeId, tabs.length]);
   return (
-    <div
-      ref={(el) => {
-        listRef.current = el;
-        tabTransfer.setList(el);
-      }}
-      role="tablist"
-      aria-label="Browser tabs"
-      onPointerLeave={() => setLockedWidth(null)}
-      onWheel={(e) => {
-        // There's no scrollbar, so the wheel scrolls the tabs sideways.
-        if (e.deltaY !== 0 && e.deltaX === 0) e.currentTarget.scrollLeft += e.deltaY;
-      }}
-      className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
-    >
-      {tabs.map((tab) => (
-        <TabButton
-          key={tab.id}
-          tab={tab}
-          active={tab.id === activeId}
-          dragging={reorder.draggingId === tab.id}
-          transfer={tabTransfer}
-          lockedWidth={lockedWidth}
-          ref={(el) => reorder.register(tab.id, el)}
-          onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
-          onActivate={() => onActivate(tab.id)}
-          onClose={(width) => {
-            if (width !== undefined) setLockedWidth(width);
-            onCloseTab(tab.id);
-          }}
-          onTogglePin={() => onTogglePin(tab.id)}
-        />
-      ))}
-      <button
-        type="button"
-        aria-label="New tab"
-        title="New tab"
-        onClick={onNewTab}
-        className={cn(
-          'grid size-7 shrink-0 place-items-center rounded-md text-foreground/70',
-          'hover:bg-foreground/10 hover:text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        )}
+    <StripContextMenu menu={menu}>
+      <div
+        ref={(el) => {
+          listRef.current = el;
+          tabTransfer.setList(el);
+        }}
+        role="tablist"
+        aria-label="Browser tabs"
+        onPointerLeave={() => setLockedWidth(null)}
+        onWheel={(e) => {
+          // There's no scrollbar, so the wheel scrolls the tabs sideways.
+          if (e.deltaY !== 0 && e.deltaX === 0) e.currentTarget.scrollLeft += e.deltaY;
+        }}
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
       >
-        <Plus className="size-4" />
-      </button>
-    </div>
+        {tabs.map((tab) => (
+          <TabButton
+            key={tab.id}
+            tab={tab}
+            active={tab.id === activeId}
+            dragging={reorder.draggingId === tab.id}
+            transfer={tabTransfer}
+            menu={tabMenuProps(menu, tab, tabs, true)}
+            lockedWidth={lockedWidth}
+            ref={(el) => reorder.register(tab.id, el)}
+            onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
+            onActivate={() => onActivate(tab.id)}
+            onClose={(width) => {
+              if (width !== undefined) setLockedWidth(width);
+              onCloseTab(tab.id);
+            }}
+            onTogglePin={() => onTogglePin(tab.id)}
+          />
+        ))}
+        <button
+          type="button"
+          aria-label="New tab"
+          title="New tab"
+          onClick={onNewTab}
+          className={cn(
+            'grid size-7 shrink-0 place-items-center rounded-md text-foreground/70',
+            'hover:bg-foreground/10 hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
+    </StripContextMenu>
+  );
+}
+
+/** What a browser tab's right-click menu can do, beyond pinning, moving and closing it. */
+interface BrowserTabMenu {
+  newTab: () => void;
+  reopen: () => void;
+  reload: (id: string) => void;
+  duplicate: (id: string) => void;
+  closeOthers: (id: string) => void;
+  closeToRight: (id: string) => void;
+}
+
+type TabMenuExtras = Pick<
+  React.ComponentProps<typeof TabContextMenu>,
+  'onNew' | 'onReopen' | 'items' | 'onCloseOthers' | 'canCloseOthers' | 'onCloseToRight' | 'canCloseToRight'
+>;
+
+/**
+ * The browser's items in a tab's right-click menu. `toRight` offers "Close
+ * tabs to the right", which only reads as such in the horizontal strip.
+ */
+function tabMenuProps(menu: BrowserTabMenu, tab: Tab, tabs: Tab[], toRight: boolean): TabMenuExtras {
+  const index = tabs.findIndex((t) => t.id === tab.id);
+  return {
+    onNew: menu.newTab,
+    onReopen: menu.reopen,
+    items: (
+      <>
+        <ContextMenuItem onSelect={() => menu.reload(tab.id)}>Reload</ContextMenuItem>
+        <ContextMenuItem onSelect={() => menu.duplicate(tab.id)}>Duplicate</ContextMenuItem>
+      </>
+    ),
+    onCloseOthers: () => menu.closeOthers(tab.id),
+    canCloseOthers: tabs.some((t) => t.id !== tab.id && !t.pinned),
+    onCloseToRight: toRight ? () => menu.closeToRight(tab.id) : undefined,
+    canCloseToRight: tabs.slice(index + 1).some((t) => !t.pinned),
+  };
+}
+
+/**
+ * The right-click menu for a tab strip's empty space. The strip sits in the
+ * window's title bar, which has a menu of its own; this one wins.
+ */
+function StripContextMenu({ menu, children }: { menu: BrowserTabMenu; children: React.ReactNode }) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild onContextMenu={(e) => e.stopPropagation()}>
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52">
+        <ContextMenuItem onSelect={menu.newTab}>New tab</ContextMenuItem>
+        <ContextMenuItem onSelect={menu.reopen}>Reopen closed tab</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -2548,6 +2665,7 @@ function TabButton({
   active,
   dragging,
   transfer,
+  menu,
   lockedWidth = null,
   ref,
   onPointerDown,
@@ -2559,6 +2677,7 @@ function TabButton({
   active: boolean;
   dragging: boolean;
   transfer: TabTransfer;
+  menu: TabMenuExtras;
   /** Hold an unpinned tab at this width instead of fitting it to the strip. */
   lockedWidth?: number | null;
   ref?: React.Ref<HTMLDivElement>;
@@ -2579,6 +2698,7 @@ function TabButton({
       onClose={() => onClose()}
       pinned={tab.pinned}
       onTogglePin={onTogglePin}
+      {...menu}
     >
       <div
         ref={ref}
@@ -2714,6 +2834,7 @@ function TreeTabStrip({
   onMoveTab,
   onMoveTabToEnd,
   transfer,
+  menu,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -2730,6 +2851,7 @@ function TreeTabStrip({
    * the sidebar's drag and drop stays within the window.
    */
   transfer: TabTransferOptions;
+  menu: BrowserTabMenu;
 }) {
   const tabTransfer = useTabTransfer(transfer, tabs.length);
   // Pinned tabs sit in a row of icons above the tree, outside it.
@@ -2744,94 +2866,98 @@ function TreeTabStrip({
   // A drag is hovering the trailing (move-to-top-level) drop zone.
   const [endHover, setEndHover] = useState(false);
   return (
-    <div
-      role="tablist"
-      aria-label="Browser tabs"
-      aria-orientation="vertical"
-      className="flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/60 bg-background/40 p-1.5"
-    >
-      {pinned.length > 0 && (
-        <div className="flex shrink-0 flex-wrap gap-1 pb-1">
-          {pinned.map((tab) => (
-            <TabButton
-              key={tab.id}
-              tab={tab}
-              active={tab.id === activeId}
-              dragging={false}
-              transfer={tabTransfer}
-              onActivate={() => onActivate(tab.id)}
-              onClose={() => onCloseTab(tab.id)}
-              onTogglePin={() => onTogglePin(tab.id)}
-            />
-          ))}
-        </div>
-      )}
-      {rows.map(({ tab, depth, hasChildren }) => (
-        <TreeTabRow
-          key={tab.id}
-          tab={tab}
-          depth={depth}
-          hasChildren={hasChildren}
-          collapsed={collapsed.has(tab.id)}
-          active={tab.id === activeId}
-          dragging={dragId === tab.id}
-          dragActive={dragId !== null}
-          transfer={tabTransfer}
-          onActivate={() => onActivate(tab.id)}
-          onClose={() => onCloseTab(tab.id)}
-          onPin={() => onTogglePin(tab.id)}
-          onToggleCollapsed={() => onToggleCollapsed(tab.id)}
-          onDragStart={() => setDragId(tab.id)}
-          onDragEnd={() => setDragId(null)}
-          onDrop={(position) => {
-            if (dragId) onMoveTab(dragId, tab.id, position);
-            setDragId(null);
-          }}
-        />
-      ))}
-      {/* The new-tab button sits at the bottom of the tab list (Firefox-style). */}
-      <button
-        type="button"
-        aria-label="New tab"
-        title="New tab"
-        onClick={onNewTab}
-        className={cn(
-          'flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border/60 px-2 text-xs text-muted-foreground',
-          'hover:border-border hover:bg-foreground/5 hover:text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        )}
+    <StripContextMenu menu={menu}>
+      <div
+        role="tablist"
+        aria-label="Browser tabs"
+        aria-orientation="vertical"
+        className="flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/60 bg-background/40 p-1.5"
       >
-        <Plus className="size-4 shrink-0" />
-        <span className="truncate">New tab</span>
-      </button>
-      {/* Trailing drop zone (only during a drag): dropping in the empty space
-          below the list moves the tab back to the top level, at the end - the
-          way out of a group when there's no row left to drop 'before'. */}
-      {dragId !== null && (
-        <div
-          className="relative min-h-8 flex-1"
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            setEndHover(true);
-          }}
-          onDragLeave={() => setEndHover(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setEndHover(false);
-            if (dragId) onMoveTabToEnd(dragId);
-            setDragId(null);
-          }}
-        >
-          {endHover && (
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-x-1 top-0 h-0.5 rounded-full bg-primary"
-            />
+        {pinned.length > 0 && (
+          <div className="flex shrink-0 flex-wrap gap-1 pb-1">
+            {pinned.map((tab) => (
+              <TabButton
+                key={tab.id}
+                tab={tab}
+                active={tab.id === activeId}
+                dragging={false}
+                transfer={tabTransfer}
+                menu={tabMenuProps(menu, tab, tabs, false)}
+                onActivate={() => onActivate(tab.id)}
+                onClose={() => onCloseTab(tab.id)}
+                onTogglePin={() => onTogglePin(tab.id)}
+              />
+            ))}
+          </div>
+        )}
+        {rows.map(({ tab, depth, hasChildren }) => (
+          <TreeTabRow
+            key={tab.id}
+            tab={tab}
+            depth={depth}
+            hasChildren={hasChildren}
+            collapsed={collapsed.has(tab.id)}
+            active={tab.id === activeId}
+            dragging={dragId === tab.id}
+            dragActive={dragId !== null}
+            transfer={tabTransfer}
+            menu={tabMenuProps(menu, tab, tabs, false)}
+            onActivate={() => onActivate(tab.id)}
+            onClose={() => onCloseTab(tab.id)}
+            onPin={() => onTogglePin(tab.id)}
+            onToggleCollapsed={() => onToggleCollapsed(tab.id)}
+            onDragStart={() => setDragId(tab.id)}
+            onDragEnd={() => setDragId(null)}
+            onDrop={(position) => {
+              if (dragId) onMoveTab(dragId, tab.id, position);
+              setDragId(null);
+            }}
+          />
+        ))}
+        {/* The new-tab button sits at the bottom of the tab list (Firefox-style). */}
+        <button
+          type="button"
+          aria-label="New tab"
+          title="New tab"
+          onClick={onNewTab}
+          className={cn(
+            'flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border/60 px-2 text-xs text-muted-foreground',
+            'hover:border-border hover:bg-foreground/5 hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}
-        </div>
-      )}
-    </div>
+        >
+          <Plus className="size-4 shrink-0" />
+          <span className="truncate">New tab</span>
+        </button>
+        {/* Trailing drop zone (only during a drag): dropping in the empty space
+            below the list moves the tab back to the top level, at the end - the
+            way out of a group when there's no row left to drop 'before'. */}
+        {dragId !== null && (
+          <div
+            className="relative min-h-8 flex-1"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setEndHover(true);
+            }}
+            onDragLeave={() => setEndHover(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setEndHover(false);
+              if (dragId) onMoveTabToEnd(dragId);
+              setDragId(null);
+            }}
+          >
+            {endHover && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-1 top-0 h-0.5 rounded-full bg-primary"
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </StripContextMenu>
   );
 }
 
@@ -2845,6 +2971,7 @@ function TreeTabRow({
   dragging,
   dragActive,
   transfer,
+  menu,
   onActivate,
   onClose,
   onPin,
@@ -2863,6 +2990,7 @@ function TreeTabRow({
   /** Some row (this one or another) is being dragged. */
   dragActive: boolean;
   transfer: TabTransfer;
+  menu: TabMenuExtras;
   onActivate: () => void;
   onClose: () => void;
   onPin: () => void;
@@ -2912,6 +3040,7 @@ function TreeTabRow({
       onClose={onClose}
       pinned={false}
       onTogglePin={onPin}
+      {...menu}
     >
       <div
         role="tab"
@@ -3306,6 +3435,7 @@ function DownloadShelf({
             download={d}
             bridge={bridge}
             onDismiss={() => onDismiss(d.id)}
+            onClearAll={onClearAll}
           />
         ))}
       </div>
@@ -3326,10 +3456,12 @@ function DownloadChip({
   download,
   bridge,
   onDismiss,
+  onClearAll,
 }: {
   download: DownloadInfo;
   bridge: BrowserBridge | undefined;
   onDismiss: () => void;
+  onClearAll: () => void;
 }) {
   const { open } = useWindowActions();
   const { state, filename, receivedBytes, totalBytes, savePath } = download;
@@ -3340,6 +3472,7 @@ function DownloadChip({
     if (isWindowsProgram(filename)) bridge?.openDownload(savePath).catch(() => {});
     else open(appForFile(filename), { path: savePath });
   };
+  const showInFolder = () => open('file-browser', { path: parentPath(savePath), select: filename });
   const failed = state === 'cancelled' || state === 'interrupted';
   const pct =
     totalBytes > 0 ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100)) : null;
@@ -3353,54 +3486,68 @@ function DownloadChip({
         ? `${pct}% of ${formatBytes(totalBytes)}`
         : formatBytes(receivedBytes);
   return (
-    <div className="flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border bg-card px-2.5 py-1">
-      <div
-        className={cn(
-          'flex size-8 shrink-0 items-center justify-center rounded-md',
-          failed ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary',
-        )}
-      >
-        <Download className="size-4" />
-      </div>
-      <button
-        type="button"
-        className="min-w-0 flex-1 text-left disabled:cursor-default"
-        disabled={!done}
-        onClick={() => {
-          if (done) openFile();
-        }}
-        title={done ? `Open ${filename}` : filename}
-      >
-        <div className="truncate text-xs font-medium">{filename}</div>
-        <div className="truncate text-[11px] text-muted-foreground">{subtitle}</div>
-        {!done && !failed && pct !== null && (
-          <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full bg-primary transition-[width]"
-              style={{ width: `${pct}%` }}
-            />
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border bg-card px-2.5 py-1">
+          <div
+            className={cn(
+              'flex size-8 shrink-0 items-center justify-center rounded-md',
+              failed ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary',
+            )}
+          >
+            <Download className="size-4" />
           </div>
-        )}
-      </button>
-      {done && (
-        <button
-          type="button"
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          title="Show in folder"
-          onClick={() => open('file-browser', { path: parentPath(savePath), select: filename })}
-        >
-          <FolderOpen className="size-3.5" />
-        </button>
-      )}
-      <button
-        type="button"
-        className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-        title="Dismiss"
-        onClick={onDismiss}
-      >
-        <X className="size-3.5" />
-      </button>
-    </div>
+          <button
+            type="button"
+            className="min-w-0 flex-1 text-left disabled:cursor-default"
+            disabled={!done}
+            onClick={() => {
+              if (done) openFile();
+            }}
+            title={done ? `Open ${filename}` : filename}
+          >
+            <div className="truncate text-xs font-medium">{filename}</div>
+            <div className="truncate text-[11px] text-muted-foreground">{subtitle}</div>
+            {!done && !failed && pct !== null && (
+              <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-[width]"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            )}
+          </button>
+          {done && (
+            <button
+              type="button"
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              title="Show in folder"
+              onClick={showInFolder}
+            >
+              <FolderOpen className="size-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="Dismiss"
+            onClick={onDismiss}
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        {done && <ContextMenuItem onSelect={openFile}>Open</ContextMenuItem>}
+        {done && <ContextMenuItem onSelect={showInFolder}>Show in folder</ContextMenuItem>}
+        <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(download.url).catch(() => {})}>
+          Copy link
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={onDismiss}>Dismiss</ContextMenuItem>
+        <ContextMenuItem onSelect={onClearAll}>Clear all</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -3415,6 +3562,8 @@ const TabSurface = memo(function TabSurface({
   topSites: sites,
   preferences,
   onNavigate: onNavigateToUrl,
+  onOpenTab,
+  onOpenWindow,
   dock,
   deviceId,
   devtoolsWcId,
@@ -3451,6 +3600,9 @@ const TabSurface = memo(function TabSurface({
   preferences: PreferencesProps | null;
   /** Navigate this tab to a URL/search (from the new-tab page). */
   onNavigate: (id: string, raw: string) => void;
+  /** Open a URL in a new background tab / a new window (from the new-tab page). */
+  onOpenTab: (url: string) => void;
+  onOpenWindow?: (url: string) => void;
   /** Docked pane position, or null when not docked in this surface. */
   dock: 'bottom' | 'right' | null;
   /** Selected device preset id, or null. */
@@ -3596,6 +3748,8 @@ const TabSurface = memo(function TabSurface({
           isPrivate={isPrivate}
           sites={sites}
           onNavigate={(raw) => onNavigateToUrl(id, raw)}
+          onOpenTab={onOpenTab}
+          onOpenWindow={onOpenWindow}
         />
       )}
       {/* about:preferences, over the same kind of parked blank surface. */}
@@ -3753,9 +3907,13 @@ function monogramColor(label: string): string {
 function NewTabTile({
   link,
   onNavigate,
+  onOpenTab,
+  onOpenWindow,
 }: {
   link: TopSite;
   onNavigate: (url: string) => void;
+  onOpenTab: (url: string) => void;
+  onOpenWindow?: (url: string) => void;
 }) {
   const [failed, setFailed] = useState(false);
   // An nsite's icon is the one Din read from its own files.
@@ -3764,47 +3922,62 @@ function NewTabTile({
   const icon = raw ? sanitizeImageUrl(raw) : null;
 
   return (
-    <button
-      type="button"
-      title={link.url}
-      onClick={() => onNavigate(link.url)}
-      className="group flex min-w-0 flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      {failed || !icon ? (
-        <span
-          aria-hidden
-          className="grid size-12 place-items-center rounded-2xl text-lg font-semibold uppercase text-white shadow-sm transition-transform group-hover:scale-105"
-          style={{ backgroundColor: link.color ?? monogramColor(link.label) }}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          type="button"
+          title={link.url}
+          onClick={() => onNavigate(link.url)}
+          className="group flex min-w-0 flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {link.label[0]}
-        </span>
-      ) : link.appIcon ? (
-        <img
-          src={icon}
-          alt=""
-          aria-hidden
-          draggable={false}
-          onError={() => setFailed(true)}
-          className="size-12 rounded-2xl object-cover shadow-sm transition-transform group-hover:scale-105"
-        />
-      ) : (
-        <span
-          aria-hidden
-          className="grid size-12 place-items-center rounded-2xl bg-card shadow-sm ring-1 ring-border/60 transition-transform group-hover:scale-105"
-        >
-          <img
-            src={icon}
-            alt=""
-            draggable={false}
-            onError={() => setFailed(true)}
-            className="size-7 object-contain"
-          />
-        </span>
-      )}
-      <span className="w-full truncate text-center text-xs text-muted-foreground">
-        {link.label}
-      </span>
-    </button>
+          {failed || !icon ? (
+            <span
+              aria-hidden
+              className="grid size-12 place-items-center rounded-2xl text-lg font-semibold uppercase text-white shadow-sm transition-transform group-hover:scale-105"
+              style={{ backgroundColor: link.color ?? monogramColor(link.label) }}
+            >
+              {link.label[0]}
+            </span>
+          ) : link.appIcon ? (
+            <img
+              src={icon}
+              alt=""
+              aria-hidden
+              draggable={false}
+              onError={() => setFailed(true)}
+              className="size-12 rounded-2xl object-cover shadow-sm transition-transform group-hover:scale-105"
+            />
+          ) : (
+            <span
+              aria-hidden
+              className="grid size-12 place-items-center rounded-2xl bg-card shadow-sm ring-1 ring-border/60 transition-transform group-hover:scale-105"
+            >
+              <img
+                src={icon}
+                alt=""
+                draggable={false}
+                onError={() => setFailed(true)}
+                className="size-7 object-contain"
+              />
+            </span>
+          )}
+          <span className="w-full truncate text-center text-xs text-muted-foreground">
+            {link.label}
+          </span>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onSelect={() => onNavigate(link.url)}>Open</ContextMenuItem>
+        <ContextMenuItem onSelect={() => onOpenTab(link.url)}>Open in new tab</ContextMenuItem>
+        {onOpenWindow && (
+          <ContextMenuItem onSelect={() => onOpenWindow(link.url)}>Open in new window</ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(link.url).catch(() => {})}>
+          Copy link
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -3819,11 +3992,15 @@ function NewTabPage({
   isPrivate,
   sites,
   onNavigate,
+  onOpenTab,
+  onOpenWindow,
 }: {
   isPrivate: boolean;
   /** Most-visited sites, defaults included (see `topSites`). */
   sites: TopSite[];
   onNavigate: (raw: string) => void;
+  onOpenTab: (url: string) => void;
+  onOpenWindow?: (url: string) => void;
 }) {
   const [query, setQuery] = useState('');
 
@@ -3889,7 +4066,13 @@ function NewTabPage({
         {!isPrivate && (
           <div className="mt-10 grid w-full grid-cols-3 gap-4 sm:grid-cols-6">
             {sites.map((link) => (
-              <NewTabTile key={link.url} link={link} onNavigate={onNavigate} />
+              <NewTabTile
+                key={link.url}
+                link={link}
+                onNavigate={onNavigate}
+                onOpenTab={onOpenTab}
+                onOpenWindow={onOpenWindow}
+              />
             ))}
           </div>
         )}

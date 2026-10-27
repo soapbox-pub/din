@@ -9,6 +9,12 @@ import { getPopupsBridge } from '@/lib/popups';
 import { usePopupSettings } from '@/hooks/usePopups';
 import { useToast } from '@/hooks/useToast';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { UserscriptsSection } from '@/components/desktop/apps/UserscriptManager';
@@ -152,21 +158,15 @@ function AdblockSection() {
           <p className="text-sm font-medium">Allowed on these sites</p>
           <ul className="divide-y divide-border/60 rounded-lg border border-border/60">
             {[...settings.allowlist].sort().map((site) => (
-              <li key={site} className="flex items-center justify-between gap-4 px-3 py-2">
-                <span className="min-w-0 truncate text-sm">{site}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0"
-                  aria-label={`Block ads on ${site} again`}
-                  title="Block ads here again"
-                  onClick={() => {
-                    bridge.setSiteAllowed(site, false).catch(() => {});
-                  }}
-                >
-                  <X className="size-4" aria-hidden />
-                </Button>
-              </li>
+              <AllowlistRow
+                key={site}
+                site={site}
+                ariaLabel={`Block ads on ${site} again`}
+                action="Block ads here again"
+                onRemove={() => {
+                  bridge.setSiteAllowed(site, false).catch(() => {});
+                }}
+              />
             ))}
           </ul>
         </div>
@@ -192,24 +192,54 @@ function PopupsSection() {
     >
       <ul className="divide-y divide-border/60 rounded-lg border border-border/60">
         {[...settings.allowlist].sort().map((site) => (
-          <li key={site} className="flex items-center justify-between gap-4 px-3 py-2">
-            <span className="min-w-0 truncate text-sm">{site}</span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 shrink-0"
-              aria-label={`Block pop-ups on ${site} again`}
-              title="Block pop-ups here again"
-              onClick={() => {
-                bridge.setSiteAllowed(site, false).catch(() => {});
-              }}
-            >
-              <X className="size-4" aria-hidden />
-            </Button>
-          </li>
+          <AllowlistRow
+            key={site}
+            site={site}
+            ariaLabel={`Block pop-ups on ${site} again`}
+            action="Block pop-ups here again"
+            onRemove={() => {
+              bridge.setSiteAllowed(site, false).catch(() => {});
+            }}
+          />
         ))}
       </ul>
     </PreferencesSection>
+  );
+}
+
+/** A site on an allowlist, with a button (and right-click item) to take it off. */
+function AllowlistRow({
+  site,
+  ariaLabel,
+  action,
+  onRemove,
+}: {
+  site: string;
+  ariaLabel: string;
+  action: string;
+  onRemove: () => void;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li className="flex items-center justify-between gap-4 px-3 py-2">
+          <span className="min-w-0 truncate text-sm">{site}</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0"
+            aria-label={ariaLabel}
+            title={action}
+            onClick={onRemove}
+          >
+            <X className="size-4" aria-hidden />
+          </Button>
+        </li>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52">
+        <ContextMenuItem onSelect={onRemove}>{action}</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -325,31 +355,40 @@ function ExtensionsSection({
         ) : (
           <ul className="space-y-1">
             {extensions.map((extension) => (
-              <li
-                key={extension.id}
-                className="flex items-center gap-3 rounded-md px-1 py-1.5"
-              >
-                <ExtensionIcon id={extension.id} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{extension.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {extension.version}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  aria-label={`Remove ${extension.name}`}
-                  title={`Remove ${extension.name}`}
-                  onClick={() => uninstall(extension)}
-                  className={cn(
-                    'grid size-8 shrink-0 place-items-center rounded-md text-foreground/60',
-                    'hover:bg-destructive/10 hover:text-destructive',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  )}
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              </li>
+              <ContextMenu key={extension.id}>
+                <ContextMenuTrigger asChild>
+                  <li
+                    className="flex items-center gap-3 rounded-md px-1 py-1.5"
+                  >
+                    <ExtensionIcon id={extension.id} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">{extension.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {extension.version}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${extension.name}`}
+                      title={`Remove ${extension.name}`}
+                      onClick={() => uninstall(extension)}
+                      className={cn(
+                        'grid size-8 shrink-0 place-items-center rounded-md text-foreground/60',
+                        'hover:bg-destructive/10 hover:text-destructive',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      )}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </li>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48">
+                  <ContextMenuItem variant="destructive" onSelect={() => uninstall(extension)}>
+                    <Trash2 />
+                    Remove
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             ))}
           </ul>
         ))}

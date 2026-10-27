@@ -41,6 +41,7 @@ import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { TabStrip } from '@/components/desktop/TabStrip';
 import { DialogButton, Overlay } from './files/Dialogs';
 import { FileIcon } from './files/FileIcon';
@@ -1016,6 +1017,24 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
         onActivate={setActiveId}
         onClose={requestCloseTab}
         onNew={newFile}
+        newTabMenuLabel="New file"
+        tabMenuItems={(id) => {
+          const path = tabs.find((t) => t.id === id)?.path;
+          if (!path) return null;
+          return (
+            <>
+              <ContextMenuItem onSelect={() => treeActions.revealInFiles(path)}>Reveal in Files</ContextMenuItem>
+              <ContextMenuItem onSelect={() => treeActions.openTerminal(parentPath(path))}>Open in Terminal</ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => treeActions.copyText(path)}>Copy Path</ContextMenuItem>
+              {folder && path.startsWith(`${folder}/`) && (
+                <ContextMenuItem onSelect={() => treeActions.copyText(path.slice(folder.length + 1))}>
+                  Copy Relative Path
+                </ContextMenuItem>
+              )}
+            </>
+          );
+        }}
         onMove={(id, to) =>
           setTabs((ts) => {
             const from = ts.findIndex((t) => t.id === id);
@@ -1028,7 +1047,7 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
         }
       />,
     );
-  }, [tabs, activeId, setTitlebar, requestCloseTab, newFile]);
+  }, [tabs, activeId, setTitlebar, requestCloseTab, newFile, treeActions, folder]);
   useEffect(() => () => setTitlebar(null), [setTitlebar]);
 
   // -------------------------------------------------------------------------

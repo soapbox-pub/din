@@ -6,6 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -69,46 +76,60 @@ export function UserscriptsSection({
       ) : (
         <ul className="max-h-64 space-y-1 overflow-y-auto">
           {scripts.map((script) => (
-            <li key={script.id} className="flex items-center gap-2 rounded-md px-1 py-1">
-              <span className="grid size-6 shrink-0 place-items-center rounded-md bg-secondary">
-                <FileCode2 className="size-3.5 text-muted-foreground" aria-hidden />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p
-                  className={cn(
-                    'truncate text-sm',
-                    !script.enabled && 'text-muted-foreground',
-                  )}
-                >
-                  {script.name}
-                </p>
-                <p
-                  className="truncate text-xs text-muted-foreground"
-                  title={describeTargets(script.matches, script.includes)}
-                >
-                  {script.version ? `v${script.version} · ` : ''}
-                  {describeTargets(script.matches, script.includes)}
-                </p>
-              </div>
-              <Switch
-                aria-label={`Enable ${script.name}`}
-                checked={script.enabled}
-                onCheckedChange={(enabled) => onSetEnabled(script.id, enabled)}
-              />
-              <button
-                type="button"
-                aria-label={`Remove ${script.name}`}
-                title={`Remove ${script.name}`}
-                onClick={() => onRemove(script)}
-                className={cn(
-                  'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60',
-                  'hover:bg-destructive/10 hover:text-destructive',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                )}
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </li>
+            <ContextMenu key={script.id}>
+              <ContextMenuTrigger asChild>
+                <li className="flex items-center gap-2 rounded-md px-1 py-1">
+                  <span className="grid size-6 shrink-0 place-items-center rounded-md bg-secondary">
+                    <FileCode2 className="size-3.5 text-muted-foreground" aria-hidden />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={cn(
+                        'truncate text-sm',
+                        !script.enabled && 'text-muted-foreground',
+                      )}
+                    >
+                      {script.name}
+                    </p>
+                    <p
+                      className="truncate text-xs text-muted-foreground"
+                      title={describeTargets(script.matches, script.includes)}
+                    >
+                      {script.version ? `v${script.version} · ` : ''}
+                      {describeTargets(script.matches, script.includes)}
+                    </p>
+                  </div>
+                  <Switch
+                    aria-label={`Enable ${script.name}`}
+                    checked={script.enabled}
+                    onCheckedChange={(enabled) => onSetEnabled(script.id, enabled)}
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Remove ${script.name}`}
+                    title={`Remove ${script.name}`}
+                    onClick={() => onRemove(script)}
+                    className={cn(
+                      'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60',
+                      'hover:bg-destructive/10 hover:text-destructive',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    )}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </li>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-48">
+                <ContextMenuItem onSelect={() => onSetEnabled(script.id, !script.enabled)}>
+                  {script.enabled ? 'Disable' : 'Enable'}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem variant="destructive" onSelect={() => onRemove(script)}>
+                  <Trash2 />
+                  Remove
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </ul>
       )}
