@@ -23,6 +23,23 @@ import {
 } from './model';
 import { BUILTIN_FORMATS, INDEXED_COLORS } from './numfmt';
 import { errOf, type Scalar } from './values';
+import type { ScanReply } from './xlsxRead.worker';
+import {
+  CELL_FIELDS,
+  F_ARRAY,
+  F_DATA_TABLE,
+  F_SHARED,
+  K_BOOL,
+  K_ERR,
+  K_NUM,
+  K_SHARED,
+  K_STR,
+  ROW_CUSTOM_FORMAT,
+  ROW_CUSTOM_HEIGHT,
+  ROW_FIELDS,
+  ROW_HIDDEN,
+  type ScannedSheet,
+} from './xlsxScan';
 
 /**
  * Reading .xlsx: the workbook's sheets, cells (shared strings, shared
@@ -154,23 +171,104 @@ function readStyles(doc: Document | null, theme: Theme): { table: StyleTable; xf
   return { table, xfs };
 }
 
-function readSharedStrings(doc: Document | null): string[] {
-  if (!doc) return [];
-  return kids(doc.documentElement, 'si').map(stringItem);
+/** Cells and row properties from a scanned <sheetData>, a slice at a time so the desktop keeps running. */
+async function buildCells(scan: ScannedSheet | null, strings: string[], xfs: number[], defaultRowHeight: number, lost: Set<string>) {
+  const rows = new Map<number, RowInfo>();
+  const cells = new Map<number, Cell>();
+  if (!scan) return { rows, cells };
+  const R = scan.rows;
+  for (let i = 0; i < R.length; i += ROW_FIELDS) {
+    const r = R[i];
+    const ht = R[i + 1];
+    const flags = R[i + 2];
+    const s = R[i + 3];
+    const info: RowInfo = {};
+    const custom = (flags & ROW_CUSTOM_HEIGHT) !== 0;
+    if (!Number.isNaN(ht) && (custom || ptToPx(ht) !== defaultRowHeight)) info.h = ptToPx(ht);
+    if (custom) info.custom = true;
+    if (flags & ROW_HIDDEN) info.hidden = true;
+    if (flags & ROW_CUSTOM_FORMAT && s) info.s = xfs[s] ?? 0;
+    if (info.h !== undefined || info.hidden || info.s) rows.set(r, info);
+  }
+  const shared = new Map<string, { f: string; r: number; c: number }>();
+  const pendingShared: { key: number; si: string; r: number; c: number }[] = [];
+  const C = scan.cells;
+  const n = C.length / CELL_FIELDS;
+  let fi = 0;
+  let sliceStart = performance.now();
+  for (let i = 0; i < n; i++) {
+    if ((i & 4095) === 0 && performance.now() - sliceStart > SLICE_MS) {
+      await nextTask();
+      sliceStart = performance.now();
+    }
+    const o = i * CELL_FIELDS;
+    const r = C[o];
+    const col = C[o + 1];
+    const sIdx = C[o + 2];
+    const kind = C[o + 3];
+    const val = C[o + 4];
+    let v: Scalar = null;
+    if (kind === K_NUM) v = scan.nums[val];
+    else if (kind === K_STR) v = scan.strs[val];
+    else if (kind === K_SHARED) v = strings[val] ?? '';
+    else if (kind === K_BOOL) v = val === 1;
+    else if (kind === K_ERR) v = errOf(scan.strs[val]) ?? errOf('#N/A');
+    const cell: Cell = { v };
+    if (sIdx > 0) cell.s = xfs[sIdx] ?? 0;
+    if (scan.fCell[fi] === i) {
+      const ft = scan.fType[fi];
+      const text = scan.fText[fi];
+      const key = cellKey(r, col);
+      if (ft === F_SHARED) {
+        const si = scan.fSi[fi];
+        if (text) {
+          shared.set(si, { f: stripPrefixes(text), r, c: col });
+          cell.f = stripPrefixes(text);
+        } else pendingShared.push({ key, si, r, c: col });
+      } else if (ft === F_DATA_TABLE) {
+        // What-if data tables keep their values.
+      } else if (text) {
+        cell.f = stripPrefixes(text);
+        if (ft === F_ARRAY) lost.add('array formulas (they’re kept as ordinary formulas)');
+      }
+      fi++;
+    }
+    if (cell.v === null && cell.f === undefined && !cell.s) continue;
+    cells.set(cellKey(r, col), cell);
+  }
+  for (const p of pendingShared) {
+    const m = shared.get(p.si);
+    const cell = cells.get(p.key);
+    if (m && cell) cell.f = translateFormula(m.f, p.r - m.r, p.c - m.c);
+  }
+  return { rows, cells };
 }
 
-/** The text of an <si> or <is>: plain <t>, or rich-text runs (their formatting isn't kept). */
-function stringItem(si: Element): string {
-  const t = kid(si, 't');
-  if (t) return unescapeX(t.textContent ?? '');
-  let s = '';
-  for (const r of kids(si, 'r')) s += kid(r, 't')?.textContent ?? '';
-  return unescapeX(s);
-}
+const SLICE_MS = 12;
 
-/** _x000D_-style escapes Excel writes for control characters. */
-function unescapeX(s: string): string {
-  return s.includes('_x') ? s.replace(/_x([0-9A-Fa-f]{4})_/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16))) : s;
+const nextTask = () =>
+  new Promise<void>((resolve) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => resolve();
+    ch.port2.postMessage(null);
+  });
+
+/** Unzip the package and scan its cells in a worker of its own. */
+function scanPackage(bytes: Uint8Array): Promise<Extract<ScanReply, { ok: true }>> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./xlsxRead.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (e: MessageEvent<ScanReply>) => {
+      worker.terminate();
+      if (e.data.ok) resolve(e.data);
+      else reject(new Error(e.data.error));
+    };
+    worker.onerror = (e) => {
+      worker.terminate();
+      reject(new Error(e.message || 'The workbook couldn’t be read.'));
+    };
+    const copy = bytes.slice().buffer;
+    worker.postMessage({ bytes: copy }, [copy]);
+  });
 }
 
 const LOST_ELEMENTS: Record<string, string> = {
@@ -182,7 +280,7 @@ const LOST_ELEMENTS: Record<string, string> = {
   sortState: 'sort settings',
 };
 
-function readSheet(doc: Document, name: string, strings: string[], xfs: number[], theme: Theme, lost: Set<string>): Sheet {
+async function readSheet(doc: Document, scan: ScannedSheet | null, name: string, strings: string[], xfs: number[], theme: Theme, lost: Set<string>): Promise<Sheet> {
   const root = doc.documentElement;
   const sheet = newSheet(name);
   // Sheet properties: tab color.
@@ -237,76 +335,7 @@ function readSheet(doc: Document, name: string, strings: string[], xfs: number[]
     for (let c = min; c <= max; c++) cols.set(c, info);
   }
   sheet.cols = cols;
-  // Rows and cells.
-  const rows = new Map<number, RowInfo>();
-  const cells = new Map<number, Cell>();
-  const shared = new Map<string, { f: string; r: number; c: number }>();
-  const pendingShared: { key: number; si: string; r: number; c: number }[] = [];
-  let nextRow = 0;
-  for (const row of kids(kid(root, 'sheetData'), 'row')) {
-    const r = (numAttr(row, 'r') ?? nextRow + 1) - 1;
-    nextRow = r + 1;
-    const ht = numAttr(row, 'ht');
-    const info: RowInfo = {};
-    const custom = attr(row, 'customHeight') === '1' || attr(row, 'customHeight') === 'true';
-    if (ht !== null && (custom || ptToPx(ht) !== sheet.defaultRowHeight)) info.h = ptToPx(ht);
-    if (custom) info.custom = true;
-    if (attr(row, 'hidden') === '1' || attr(row, 'hidden') === 'true') info.hidden = true;
-    if (attr(row, 'customFormat') === '1' && numAttr(row, 's')) info.s = xfs[numAttr(row, 's')!] ?? 0;
-    if (info.h !== undefined || info.hidden || info.s) rows.set(r, info);
-    let nextCol = 0;
-    for (const c of kids(row, 'c')) {
-      const ref = parseCell(attr(c, 'r') ?? '');
-      const col = ref ? ref.c : nextCol;
-      nextCol = col + 1;
-      const t = attr(c, 't') ?? 'n';
-      const sIdx = numAttr(c, 's');
-      const vEl = kid(c, 'v');
-      const raw = vEl?.textContent ?? null;
-      let v: Scalar = null;
-      if (t === 's') v = raw !== null ? (strings[parseInt(raw, 10)] ?? '') : null;
-      else if (t === 'inlineStr') {
-        const is = kid(c, 'is');
-        v = is ? stringItem(is) : '';
-      } else if (t === 'str') v = raw !== null ? unescapeX(raw) : '';
-      else if (t === 'b') v = raw === '1' || raw === 'true';
-      else if (t === 'e') v = errOf(raw ?? '') ?? errOf('#N/A');
-      else if (t === 'd') {
-        const d = raw ? Date.parse(raw) : NaN;
-        v = Number.isFinite(d) ? d / 86400000 + 25569 : null;
-      } else if (raw !== null && raw !== '') {
-        const n = Number(raw);
-        v = Number.isFinite(n) ? n : raw;
-      }
-      const cell: Cell = { v };
-      if (sIdx) cell.s = xfs[sIdx] ?? 0;
-      const fEl = kid(c, 'f');
-      if (fEl) {
-        const ft = attr(fEl, 't');
-        const text = fEl.textContent ?? '';
-        const key = cellKey(r, col);
-        if (ft === 'shared') {
-          const si = attr(fEl, 'si') ?? '';
-          if (text) {
-            shared.set(si, { f: stripPrefixes(text), r, c: col });
-            cell.f = stripPrefixes(text);
-          } else pendingShared.push({ key, si, r, c: col });
-        } else if (ft === 'dataTable') {
-          // What-if data tables keep their values.
-        } else if (text) {
-          cell.f = stripPrefixes(text);
-          if (ft === 'array') lost.add('array formulas (they’re kept as ordinary formulas)');
-        }
-      }
-      if (cell.v === null && cell.f === undefined && !cell.s) continue;
-      cells.set(cellKey(r, col), cell);
-    }
-  }
-  for (const p of pendingShared) {
-    const m = shared.get(p.si);
-    const cell = cells.get(p.key);
-    if (m && cell) cell.f = translateFormula(m.f, p.r - m.r, p.c - m.c);
-  }
+  const { rows, cells } = await buildCells(scan, strings, xfs, sheet.defaultRowHeight, lost);
   sheet.rows = rows;
   sheet.cells = cells;
   sheet.merges = kids(kid(root, 'mergeCells'), 'mergeCell')
@@ -334,10 +363,12 @@ function readSheet(doc: Document, name: string, strings: string[], xfs: number[]
   return sheet;
 }
 
-export function readXlsx(bytes: Uint8Array): Loaded {
+export async function readXlsx(bytes: Uint8Array): Promise<Loaded> {
   if (isOle(bytes)) throw new Error('This is an Excel 97–2003 workbook (.xls). Open it in Excel or LibreOffice and save it as .xlsx first.');
   if (!isZip(bytes)) throw new Error('It isn’t an Excel workbook.');
-  const pkg = OpcPackage.read(bytes);
+  const scanned = await scanPackage(bytes);
+  const pkg = new OpcPackage();
+  pkg.files = scanned.files;
   const main = pkg.mainPart();
   if (!main) throw new Error('It isn’t an Excel workbook (there’s no workbook part).');
   const wbDoc = pkg.xml(main);
@@ -348,7 +379,7 @@ export function readXlsx(bytes: Uint8Array): Loaded {
   const stylesRel = rels.find((r) => r.type === REL.styles);
   const { table, xfs } = readStyles(stylesRel ? pkg.xml(stylesRel.target) : null, theme);
   const ssRel = rels.find((r) => r.type === REL.sharedStrings);
-  const strings = readSharedStrings(ssRel ? pkg.xml(ssRel.target) : null);
+  const strings = (ssRel && scanned.strings[ssRel.target]) || [];
   const root = wbDoc.documentElement;
   const date1904 = ['1', 'true'].includes(attr(kid(root, 'workbookPr'), 'date1904') ?? '');
   const lost = new Set<string>();
@@ -366,7 +397,7 @@ export function readXlsx(bytes: Uint8Array): Loaded {
     }
     const doc = pkg.xml(rel.target);
     if (!doc) continue;
-    const sheet = readSheet(doc, name, strings, xfs, theme, lost);
+    const sheet = await readSheet(doc, scanned.sheets[rel.target] ?? null, name, strings, xfs, theme, lost);
     const sheetRels = pkg.rels(rel.target);
     for (const h of kids(kid(doc.documentElement, 'hyperlinks'), 'hyperlink')) {
       const g = parseRange(attr(h, 'ref') ?? '');

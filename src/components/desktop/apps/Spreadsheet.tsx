@@ -259,7 +259,7 @@ export function Spreadsheet({ windowId, params }: AppComponentProps) {
     initialPath,
     openExtensions: OPEN_EXTENSIONS,
     saveTypes: SAVE_TYPES,
-    onLoad: (bytes, path) => {
+    onLoad: async (bytes, path) => {
       const ext = extOf(path);
       if (ext === 'csv' || ext === 'tsv' || ext === 'txt') {
         const text = new TextDecoder('utf-8').decode(bytes);
@@ -268,7 +268,7 @@ export function Spreadsheet({ windowId, params }: AppComponentProps) {
         setLost([]);
         return;
       }
-      const loaded = ODF_EXTENSIONS.has(ext) ? readOds(bytes) : readXlsx(bytes);
+      const loaded = ODF_EXTENSIONS.has(ext) ? readOds(bytes) : await readXlsx(bytes);
       resetTo(fitRowsOnLoad(loaded.wb));
       setLost(loaded.lost);
       setKeptDismissed(!loaded.wb.sheets.some((sh) => sh.kept?.dv));
