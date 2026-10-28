@@ -421,12 +421,17 @@ let
   # GSettings Din's Settings writes, electron/cursor.mts), so the pointer is
   # the same from the first frame. Din inherits them too. Until Din's window
   # maps it shows the boot screen's background and no pointer, so there's no
-  # black screen with a cursor between the boot screen and Din.
+  # black screen with a cursor between the boot screen and Din. And cage shows
+  # its newest window fullscreen with all the input, so a second window from
+  # Din (Chromium's own detached DevTools, a native dialog) would take its
+  # place with no way back; patched, only the first window is ever shown, and
+  # any other is asked to close.
   cage-patched = pkgs.cage.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./patches/cage-gamma-control.patch
       ./patches/cage-xcursor-env.patch
       ./patches/cage-boot-handover.patch
+      ./patches/cage-single-window.patch
     ];
   });
   cage-launcher = pkgs.writeShellScriptBin "cage" ''
