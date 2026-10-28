@@ -8,14 +8,19 @@
 // relays and never sends a REQ). Chromium can't be told otherwise without
 // patching it, so Din gives such a page an https origin instead:
 //
-//   - tor.mts sends http://x.onion requests to https://x.onion, and marks
-//     the host plain (markPlainOnionHost).
-//   - Chromium asks this proxy for x.onion:443. For a plain host, this proxy
-//     answers the TLS itself, with a key made at launch that never leaves
-//     this process, and passes what's inside to x.onion:80 through Tor. The
-//     site sees the same plain HTTP it always did. A site with TLS of its own
-//     redirects that plain visit to https, and from then on its connections
-//     go to its 443 untouched (markTlsOnionHost).
+//   - tor.mts sends http://x.onion requests to https://x.onion.
+//   - Chromium asks this proxy for x.onion:443, and this proxy answers the
+//     TLS itself, with a key made at launch that never leaves this process,
+//     and passes what's inside to x.onion:80 through Tor. The site sees the
+//     same plain HTTP it always did.
+//   - A site with TLS of its own redirects that plain visit to https, and
+//     from then on its connections go to its 443 untouched
+//     (markTlsOnionHost). So does one with nothing on 80.
+//
+// 443 is never tried first: asking an onion service for a port it doesn't
+// serve makes it close the whole circuit, and Tor takes seconds to build
+// another, longer than Chromium waits for a proxy when it opens several
+// connections at once.
 //   - The Tor session accepts that certificate for .onion hosts and nothing
 //     else (isOnionProxyCertificate).
 //
@@ -40,8 +45,8 @@ const REPLY_COMMAND_NOT_SUPPORTED = 7;
 let torPort = 9050;
 let server: Promise<number> | null = null;
 
-/** How each onion host was last reached on 443: its own TLS, or plain HTTP behind ours. */
-const onionModes = new Map<string, 'tls' | 'plain'>();
+/** Onion hosts with TLS of their own, reached on their 443; the rest are plain HTTP behind ours. */
+const tlsHosts = new Set<string>();
 
 function isOnionHost(host: string): boolean {
   return /(^|\.)[a-z2-7]{56}\.onion$/i.test(host);
@@ -124,20 +129,11 @@ export function isOnionProxyCertificate(hostname: string, fingerprint: string): 
 
 /** Whether an onion host is served as plain HTTP behind this proxy's TLS (as far as is known yet). */
 export function isPlainOnionHost(hostname: string): boolean {
-  return onionModes.get(hostname.toLowerCase()) === 'plain';
+  return isOnionHost(hostname) && !tlsHosts.has(hostname.toLowerCase());
 }
 
 /** Open connections to plain onion hosts, by host, for when one turns out to have TLS. */
 const plainConnections = new Map<string, Set<net.Socket>>();
-
-/**
- * An http:// address for this onion host was sent to https://: serve it as
- * plain HTTP, unless it's known to have TLS of its own.
- */
-export function markPlainOnionHost(hostname: string): void {
-  const key = hostname.toLowerCase();
-  if (!onionModes.has(key)) onionModes.set(key, 'plain');
-}
 
 /**
  * This onion host sent its plain-HTTP visitor to https:// on itself, as a
@@ -146,7 +142,7 @@ export function markPlainOnionHost(hostname: string): void {
  */
 export function markTlsOnionHost(hostname: string): void {
   const key = hostname.toLowerCase();
-  onionModes.set(key, 'tls');
+  tlsHosts.add(key);
   for (const socket of plainConnections.get(key) ?? []) socket.destroy();
   plainConnections.delete(key);
 }
@@ -269,41 +265,29 @@ function join(a: net.Socket | tls.TLSSocket, b: net.Socket): void {
 
 /** Tor's reply for a port the onion service doesn't serve. */
 const REPLY_REFUSED = 5;
-/** Waits before asking again for port 80, after a refused 443 took the service's circuit down. */
-const PLAIN_RETRY_MS = [1_000, 2_000, 4_000, 8_000];
+/** Waits before asking for 443, after a refused 80 took the service's circuit down. */
+const TLS_RETRY_MS = [1_000, 2_000, 4_000];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Connect an onion host's 443: its own TLS, or its 80 behind ours. Hosts
- * whose http:// addresses were upgraded (markPlainOnionHost) go straight to
- * 80. Asking for a port a service doesn't serve makes it close the whole
- * circuit, and an immediate retry on 80 fails, so 443 is only tried for a
- * host Din knows nothing about (an https:// address typed, or a tab
- * restored), and 80 after it only once Tor has rebuilt the way there.
- */
+/** Connect an onion host's 443: its 80 behind this proxy's TLS, or its own TLS once it's known to have one. */
 async function connectOnion443(host: string): Promise<{ upstream: Upstream; plain: boolean }> {
   const key = host.toLowerCase();
-  const mode = onionModes.get(key);
-  if (mode === 'plain') {
-    const upstream = await connectThroughTor(host, 80);
+  if (tlsHosts.has(key)) return { upstream: await connectThroughTor(host, 443), plain: false };
+  const upstream = await connectThroughTor(host, 80);
+  if (upstream.socket || upstream.reply !== REPLY_REFUSED) {
     return { upstream, plain: upstream.socket !== null };
   }
-  const upstream = await connectThroughTor(host, 443);
-  if (upstream.socket || mode === 'tls' || upstream.reply !== REPLY_REFUSED) {
-    if (upstream.socket) onionModes.set(key, 'tls');
-    return { upstream, plain: false };
-  }
-  let plain = upstream;
-  for (const wait of PLAIN_RETRY_MS) {
+  // Nothing on 80: an https-only service. It closed the circuit refusing,
+  // so 443 waits for Tor to build another.
+  tlsHosts.add(key);
+  let secure = upstream;
+  for (const wait of TLS_RETRY_MS) {
     await sleep(wait);
-    plain = await connectThroughTor(host, 80);
-    if (plain.socket) {
-      onionModes.set(key, 'plain');
-      return { upstream: plain, plain: true };
-    }
+    secure = await connectThroughTor(host, 443);
+    if (secure.socket) break;
   }
-  return { upstream: plain, plain: false };
+  return { upstream: secure, plain: false };
 }
 
 async function serve(client: net.Socket): Promise<void> {
@@ -365,9 +349,7 @@ async function serve(client: net.Socket): Promise<void> {
 
 /** Point the proxy at Tor's SOCKS port. */
 export function setOnionProxyTorPort(port: number): void {
-  if (port === torPort) return;
   torPort = port;
-  onionModes.clear();
 }
 
 /** Start the proxy (once), and resolve to the loopback port it listens on. */

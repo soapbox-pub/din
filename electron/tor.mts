@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { ipcMain } from 'electron';
 import { setTorSocksPort } from './network.mts';
-import { isPlainOnionHost, markPlainOnionHost, markTlsOnionHost } from './onion-proxy.mts';
+import { isPlainOnionHost, markTlsOnionHost } from './onion-proxy.mts';
 import { CommandError, runCommand } from './system.mts';
 
 const HELPER = process.env.DIN_TOR;
@@ -283,7 +283,6 @@ export function onionRequest(details: Electron.OnBeforeRequestListenerDetails): 
   if (onion && url.port) return null;
   // A clearnet page leaves the session (keepTorSession).
   if (!onion && details.resourceType === 'mainFrame') return null;
-  if (onion) markPlainOnionHost(url.hostname);
   url.protocol = 'https:';
   return { redirectURL: url.href };
 }
