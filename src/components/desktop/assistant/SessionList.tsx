@@ -112,7 +112,7 @@ export function SessionList({
   onFork: (id: string) => void;
   /** A conversation was deleted from the list. */
   onDeleted: (id: string) => void;
-  /** The search field, for Ctrl+F. */
+  /** The search field, for Ctrl+K. */
   searchRef?: Ref<HTMLInputElement>;
   className?: string;
   style?: CSSProperties;
@@ -284,7 +284,7 @@ export function SessionList({
           }}
           placeholder="Search"
           aria-label="Search conversations"
-          title="Search conversations (Ctrl+F)"
+          title="Search conversations (Ctrl+K)"
           className="h-8 pl-8 text-sm"
         />
       </div>

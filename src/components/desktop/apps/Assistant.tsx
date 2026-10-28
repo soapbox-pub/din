@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, SquarePen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
@@ -18,6 +18,7 @@ import { ConversationTitleInput, DeleteConversationDialog } from '@/components/d
 import { Composer, type SlashCommand } from '@/components/desktop/assistant/Composer';
 import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
 import { FileLinkBaseContext } from '@/components/desktop/assistant/fileLinks';
+import { FindBar, type FindBarHandle } from '@/components/desktop/assistant/FindBar';
 import { ForkDialog, type UserMessage } from '@/components/desktop/assistant/ForkDialog';
 import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
 import { SessionList } from '@/components/desktop/assistant/SessionList';
@@ -213,6 +214,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const conversationRef = useRef<ConversationHandle>(null);
   const [listWidth, setListWidth] = useState(loadListWidth);
   useEffect(() => localStorage.setItem(LIST_WIDTH_KEY, String(listWidth)), [listWidth]);
 
@@ -399,8 +401,10 @@ export function Assistant({ windowId, params }: AppComponentProps) {
     } else if (key === 'w' && !e.shiftKey) closeTab(activeTab.id);
     else if (key === 'Tab') cycle(e.shiftKey ? -1 : 1);
     else if ((key === 'PageUp' || key === 'PageDown') && !e.shiftKey) cycle(key === 'PageUp' ? -1 : 1);
+    else if (key === 'f' && !e.shiftKey && conversationRef.current) conversationRef.current.find();
     else if ((key === 'f' || key === 'k') && !e.shiftKey) {
-      // Search the list, sliding it out first in a narrow window.
+      // Search the list, sliding it out first in a narrow window. Ctrl+F
+      // does too in a new conversation, which has nothing to find in.
       setListOpen(true);
       requestAnimationFrame(() => searchRef.current?.select());
     } else if (/^[1-9]$/.test(key) && !e.shiftKey) select(tabs[key === '9' ? tabs.length - 1 : Math.min(Number(key), tabs.length) - 1].id);
@@ -530,6 +534,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
         {activeTab.sessionID ? (
           <Conversation
             key={activeTab.sessionID}
+            ref={conversationRef}
             sessionID={activeTab.sessionID}
             onRename={() => setRenaming(activeTab.sessionID)}
             onNew={startNew}
@@ -580,12 +585,19 @@ function TabIcon({ state, favicon }: { state: TabInfo['state']; favicon?: string
 // One conversation
 // ---------------------------------------------------------------------------
 
+interface ConversationHandle {
+  /** Open the find bar, or focus it if it's open. */
+  find(): void;
+}
+
 function Conversation({
+  ref,
   sessionID,
   onRename,
   onNew,
   onFork,
 }: {
+  ref?: Ref<ConversationHandle>;
   sessionID: string;
   /** Edit its title in its tab (/rename on its own). */
   onRename: () => void;
@@ -613,6 +625,8 @@ function Conversation({
   const rename = useRenameSession();
   const { toast } = useToast();
   const [forking, setForking] = useState(false);
+  const [finding, setFinding] = useState(false);
+  const findBarRef = useRef<FindBarHandle>(null);
   const running = active.includes(sessionID);
   const messages = transcript?.messages;
   const commands = useSlashCommands(session?.location.directory, CONVERSATION_COMMANDS);
@@ -649,6 +663,18 @@ function Conversation({
       restoreTop.current = null;
     }
   }, [messages, queued, permissions.length, forms.length, running]);
+
+  useImperativeHandle(ref, () => ({
+    find: () => {
+      setFinding(true);
+      findBarRef.current?.focus();
+    },
+  }));
+
+  const closeFind = () => {
+    setFinding(false);
+    scrollRef.current?.focus({ preventScroll: true });
+  };
 
   const fail = (title: string) => (error: unknown) =>
     toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
@@ -740,6 +766,7 @@ function Conversation({
             )}
           </div>
         </div>
+        {finding && <FindBar ref={findBarRef} scrollRef={scrollRef} onClose={closeFind} />}
         {!stuck && (
           <Button
             variant="outline"

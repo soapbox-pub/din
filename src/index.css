@@ -330,6 +330,17 @@
   color: inherit;
 }
 
+/* Find in an Assistant conversation (assistant/FindBar.tsx). */
+::highlight(assistant-find) {
+  background-color: rgb(250 204 21 / 0.45);
+  color: inherit;
+}
+
+::highlight(assistant-find-current) {
+  background-color: rgb(249 115 22 / 0.7);
+  color: inherit;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
