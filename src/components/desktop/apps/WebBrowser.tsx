@@ -18,7 +18,6 @@ import {
   Search,
   Settings,
   ShieldAlert,
-  ShieldCheck,
   SquarePlus,
   Trash2,
   VenetianMask,
@@ -32,6 +31,7 @@ import { cn } from '@/lib/utils';
 import { getTorBridge, isOnionUrl, torState, type TorStatus } from '@/lib/tor';
 import { useTorStatus } from '@/hooks/useTor';
 import { useSiteLocations } from '@/hooks/useSiteLocations';
+import { NsiteIcon } from '@/components/icons/NsiteIcon';
 import { OnionIcon } from '@/components/icons/OnionIcon';
 import {
   resolveNavigation,
@@ -2278,7 +2278,7 @@ function AddressBar({
   const showOnion = !!onionLocation && !open;
   const showNsite = !!nsiteLocation && !open;
   const badgeClass = cn(
-    'flex h-6 items-center gap-1 rounded-full px-2 text-xs font-medium text-white shadow-sm',
+    'flex h-6 items-center gap-1 rounded-full px-2 text-xs font-medium transition-colors',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95',
   );
@@ -2333,7 +2333,7 @@ function AddressBar({
         autoComplete="off"
         className={cn(
           'h-8 w-full rounded-full border border-border/60 bg-secondary/80 pl-8 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-          showOnion && showNsite ? 'pr-68' : showOnion || showNsite ? 'pr-36' : 'pr-3',
+          showOnion && showNsite ? 'pr-36' : showOnion || showNsite ? 'pr-20' : 'pr-3',
         )}
       />
       {(showOnion || showNsite) && (
@@ -2348,10 +2348,13 @@ function AddressBar({
               onClick={() => onNavigate(nsiteLocation)}
               title={`Open this site's nsite: ${nsiteLocation}`}
               aria-label="Open this site's nsite"
-              className={cn(badgeClass, 'bg-emerald-700 hover:bg-emerald-800')}
+              className={cn(
+                badgeClass,
+                'text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-400',
+              )}
             >
-              <ShieldCheck className="size-3.5" aria-hidden />
-              nsite available
+              <NsiteIcon className="size-3.5" />
+              nsite
             </button>
           )}
           {showOnion && (
@@ -2360,10 +2363,13 @@ function AddressBar({
               onClick={() => onNavigate(onionLocation)}
               title={`Open this site's onion service: ${hostnameOf(onionLocation) ?? onionLocation}`}
               aria-label="Open this site's onion service"
-              className={cn(badgeClass, 'bg-violet-600 hover:bg-violet-700')}
+              className={cn(
+                badgeClass,
+                'text-violet-700 hover:bg-violet-500/15 dark:text-violet-400',
+              )}
             >
               <OnionIcon className="size-3.5" />
-              .onion available
+              onion
             </button>
           )}
         </div>
