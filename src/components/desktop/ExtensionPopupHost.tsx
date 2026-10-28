@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -10,10 +9,10 @@ import {
   type CrxActionPopupCommand,
   type CrxPopupAnchorRect,
 } from '@/lib/crx';
-import { useAppContext } from '@/hooks/useAppContext';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { contains } from '@/lib/monitors';
 import { ScreenLayer } from './MonitorsProvider';
+import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 
 /**
  * Hosts Chrome-extension action popups (e.g. Bitwarden's unlock bubble)
@@ -159,73 +158,41 @@ function PopupWebview({
   src: string;
   onMeasure: (size: { width: number; height: number }) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const webviewRef = useRef<ElectronWebviewElement | null>(null);
+  const surface = useRef<GuestSurfaceHandle>(null);
   const onMeasureRef = useRef(onMeasure);
   useEffect(() => {
     onMeasureRef.current = onMeasure;
   }, [onMeasure]);
 
-  // The shell's interface zoom, applied to the guest so its content scales
-  // (and its hit-testing stays aligned) like every other surface.
-  const { config } = useAppContext();
-  const zoomFactor = config.zoomLevel / 100;
-
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container || webviewRef.current) return;
-    const el = document.createElement('webview') as unknown as ElectronWebviewElement;
-    el.setAttribute('partition', 'persist:webbrowser');
-    el.setAttribute('allowpopups', 'true');
-    el.setAttribute('src', src);
-    el.className = 'h-full w-full bg-white';
-    el.style.display = 'flex';
-    webviewRef.current = el;
-    container.appendChild(el);
-
-    const measure = () => {
-      el.executeJavaScript(
+  const measure = useCallback(() => {
+    surface.current
+      ?.executeJavaScript(
         '(() => { const b = document.body; if (!b) return null; const r = b.getBoundingClientRect(); return { width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()',
       )
-        .then((rect) => {
-          if (!rect || typeof rect !== 'object') return;
-          const { width, height } = rect as { width: number; height: number };
-          if (width <= 0 || height <= 0) return;
-          onMeasureRef.current({
-            width: Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width)),
-            height: Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, height)),
-          });
-        })
-        .catch(() => {});
-    };
-    const applyZoom = () => {
-      try {
-        el.setZoomFactor(zoomFactor);
-      } catch {
-        // Guest not attached yet; dom-ready retries.
-      }
-    };
-    const onDomReady = () => {
-      applyZoom();
-      measure();
-      // Some popups settle into their final size asynchronously; re-measure.
-      setTimeout(measure, 300);
-    };
-    el.addEventListener('dom-ready', onDomReady);
-    return () => {
-      el.removeEventListener('dom-ready', onDomReady);
-      el.remove();
-      webviewRef.current = null;
-    };
-    // The src is fixed for the element's lifetime (keyed on it by the parent).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoomFactor]);
+      .then((rect) => {
+        if (!rect || typeof rect !== 'object') return;
+        const { width, height } = rect as { width: number; height: number };
+        if (width <= 0 || height <= 0) return;
+        onMeasureRef.current({
+          width: Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width)),
+          height: Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, height)),
+        });
+      })
+      .catch(() => {});
+  }, []);
 
-  return <div ref={containerRef} className="h-full w-full" />;
-}
-
-/** Minimal typing for the Electron <webview> element methods we use. */
-interface ElectronWebviewElement extends HTMLElement {
-  setZoomFactor(factor: number): void;
-  executeJavaScript(code: string): Promise<unknown>;
+  return (
+    <GuestSurface
+      ref={surface}
+      src={src}
+      partition="persist:webbrowser"
+      allowPopups
+      guestClassName="h-full w-full bg-white"
+      onDomReady={() => {
+        measure();
+        // Some popups settle into their final size asynchronously; re-measure.
+        setTimeout(measure, 300);
+      }}
+    />
+  );
 }

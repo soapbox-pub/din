@@ -19,6 +19,7 @@
  * their element with registerDictationTarget.
  */
 import { getAudioBridge } from '@/lib/audio';
+import { guestId, isGuestElement } from '@/platform/guest';
 
 export interface DictationBridge {
   available(): Promise<boolean>;
@@ -168,10 +169,6 @@ export function elementTarget(element: TextField | HTMLElement): DictationTarget
   };
 }
 
-interface WebviewElement extends HTMLElement {
-  getWebContentsId(): number;
-}
-
 /** Where the keyboard is now, or null when nothing there takes text. */
 export function focusedDictationTarget(): DictationTarget | null {
   const active = document.activeElement;
@@ -180,15 +177,10 @@ export function focusedDictationTarget(): DictationTarget | null {
     const insert = registered.get(el);
     if (insert) return { owner: el, insert };
   }
-  if (active.tagName === 'WEBVIEW') {
+  if (isGuestElement(active)) {
     const api = bridge();
-    let wcId: number;
-    try {
-      wcId = (active as WebviewElement).getWebContentsId();
-    } catch {
-      return null;
-    }
-    if (!api) return null;
+    const wcId = guestId(active);
+    if (wcId === null || !api) return null;
     return {
       owner: active,
       insert: async (text) => {

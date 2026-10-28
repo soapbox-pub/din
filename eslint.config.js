@@ -40,6 +40,15 @@ export default defineConfig(
       ],
       "custom/no-placeholder-comments": "error",
       "no-warning-comments": ["error", { terms: ["fixme"] }],
+      "custom/no-guest-engine": "error",
+    },
+  },
+  {
+    // The one place that knows the guest engine (docs/guest-surfaces.md).
+    name: "app/platform",
+    files: ["src/platform/**/*.{ts,tsx}"],
+    rules: {
+      "custom/no-guest-engine": "off",
     },
   },
   {

@@ -1,22 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getGuestInput } from '@/lib/guestInput';
+import { findGuest } from '@/platform/guest';
 
-interface GuestElement extends HTMLElement {
-  getWebContentsId(): number;
-}
-
-/** The <webview> element hosting a guest, by the guest's WebContents id. */
-function guestElement(webContentsId: number): GuestElement | null {
-  for (const element of document.querySelectorAll<GuestElement>('webview')) {
-    try {
-      if (element.getWebContentsId() === webContentsId) return element;
-    } catch {
-      // Not attached yet.
-    }
-  }
-  return null;
-}
 
 const BUTTONS = { left: 0, middle: 1, right: 2 } as const;
 const BUTTON_MASKS = { left: 1, middle: 4, right: 2 } as const;
@@ -50,7 +36,7 @@ export function GuestInputHost() {
     const bridge = getGuestInput();
     if (!bridge) return;
     return bridge.onInput((input) => {
-      const el = guestElement(input.wcId);
+      const el = findGuest(input.wcId);
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const init: PointerEventInit = {

@@ -1,17 +1,7 @@
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { RotateCw, Unplug } from 'lucide-react';
-import { activeFileDrag, fileDragActive, subscribeFileDrag } from '@/components/desktop/apps/files/dnd';
 import { Button } from '@/components/ui/button';
 import { isWebviewAvailable } from '@/lib/isElectron';
-import { useAppContext } from '@/hooks/useAppContext';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
 import {
   COLLECT_PROTOCOL_HANDLERS_JS,
@@ -19,7 +9,7 @@ import {
   type NostrHandler,
 } from '@/lib/nostrUri';
 import { shownUrl } from '@/lib/tor';
-import { useWindowVisible } from '@/contexts/WindowVisibleContext';
+import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 
 /**
  * The Electron session partition for the Web Browser app's tabs and for
@@ -167,23 +157,6 @@ export interface BrowserViewProps {
   hidden?: boolean;
 }
 
-interface GuestVisibilityBridge {
-  set(webContentsId: number, hidden: boolean): void;
-}
-
-interface GuestFileDropBridge {
-  send(webContentsId: number, type: 'over' | 'drop' | 'cancel', x: number, y: number, paths: string[]): void;
-}
-
-declare global {
-  interface Dinos {
-    /** Present only inside the Electron shell. */
-    guestVisibility?: GuestVisibilityBridge;
-    /** Present only inside the Electron shell. */
-    guestFileDrop?: GuestFileDropBridge;
-  }
-}
-
 /**
  * A web-content rendering surface.
  *
@@ -301,86 +274,27 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     },
     ref,
   ) {
-    const windowVisible = useWindowVisible();
-    const pageHidden = hidden || !windowVisible;
-    // The partition is fixed for the element's lifetime (like the initial src),
-    // and so is whether it's an installed app's window.
-    const partitionRef = useRef(partition);
-    const installedAppRef = useRef(installedApp);
-    // The <webview> is created imperatively (see the mount effect below), so
-    // this starts null and is filled in before any listener effect runs.
-    const webviewRef = useRef<ElectronWebviewElement | null>(null);
-    // Host for the imperatively-created guest.
-    const containerRef = useRef<HTMLDivElement>(null);
-    // The initial src is fixed for the element's lifetime; navigations go
-    // through loadURL so the guest keeps its own history.
-    const initialSrc = useRef(src);
-    // The shell's interface zoom, applied to the guest so its content scales
-    // in lockstep with the rest of the desktop (see the zoom-sync effect).
-    const { config } = useAppContext();
-    const zoomFactor = (config.zoomLevel / 100) * pageZoom;
-
-    // Create the <webview> imperatively and configure it *before* inserting it
-    // into the DOM. Electron reads a guest's attributes when the element is
-    // connected and the guest attaches; several - notably `allowpopups` - are
-    // silently ignored if set afterwards. React (both its own attribute
-    // handling and ref callbacks) only sets attributes after the element is
-    // already in the document, so a JSX `<webview allowpopups>` never takes
-    // effect: the guest attaches with popups disabled, every target=_blank /
-    // window.open dies inside the guest, and the main process's
-    // setWindowOpenHandler (which re-routes those URLs to a browser tab or
-    // installed app) never even fires. Building the element off-DOM and
-    // appending it fully-configured is the only reliable order. Runs once;
-    // the guest's own history/navigation is driven through the ref handle.
-    useLayoutEffect(() => {
-      const container = containerRef.current;
-      if (!container || webviewRef.current) return;
-      const el = document.createElement('webview') as unknown as ElectronWebviewElement;
-      // A partition isolates cookies/storage from the shell's own origin. The
-      // Web Browser's partition, which installed apps share, is where the
-      // Chrome extension system and the Nostr identity bridge are attached
-      // (see electron/main.mts).
-      el.setAttribute('partition', partitionRef.current);
-      if (installedAppRef.current) el.setAttribute('webpreferences', APP_GUEST_MARK);
-      // Enable guest-initiated popups (see the note above).
-      el.setAttribute('allowpopups', 'true');
-      el.setAttribute('src', initialSrc.current);
-      el.className = 'h-full w-full bg-white';
-      el.style.display = 'flex';
-      webviewRef.current = el;
-      container.appendChild(el);
-      return () => {
-        el.remove();
-        webviewRef.current = null;
-      };
-    }, []);
+    const surface = useRef<GuestSurfaceHandle>(null);
 
     useImperativeHandle(ref, () => ({
-      reload: () => webviewRef.current?.reload(),
-      reloadIgnoringCache: () => webviewRef.current?.reloadIgnoringCache(),
-      loadURL: (url: string) => {
-        webviewRef.current?.loadURL(url).catch(() => {
-          // Aborted/failed loads reject; the did-fail-load path handles UI.
-        });
-      },
-      goBack: () => webviewRef.current?.goBack(),
-      goForward: () => webviewRef.current?.goForward(),
-      focus: () => webviewRef.current?.focus(),
+      reload: () => surface.current?.reload(),
+      reloadIgnoringCache: () => surface.current?.reloadIgnoringCache(),
+      loadURL: (url: string) => surface.current?.loadURL(url),
+      goBack: () => surface.current?.goBack(),
+      goForward: () => surface.current?.goForward(),
+      focus: () => surface.current?.focus(),
       collectIcons: async () => {
-        const el = webviewRef.current;
-        if (!el) return [];
         try {
-          const result = await el.executeJavaScript(COLLECT_ICONS_JS);
+          const result = await surface.current?.executeJavaScript(COLLECT_ICONS_JS);
           return Array.isArray(result) ? (result as IconCandidate[]) : [];
         } catch {
           return [];
         }
       },
       collectNostrHandler: async () => {
-        const el = webviewRef.current;
-        if (!el) return null;
+        if (!surface.current) return null;
         try {
-          const result: unknown = await el.executeJavaScript(COLLECT_PROTOCOL_HANDLERS_JS);
+          const result: unknown = await surface.current.executeJavaScript(COLLECT_PROTOCOL_HANDLERS_JS);
           if (typeof result !== 'object' || result === null) return null;
           const { base, manifest } = result as { base?: unknown; manifest?: unknown };
           return typeof base === 'string' ? parseNostrProtocolHandler(manifest, base) : null;
@@ -389,10 +303,8 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         }
       },
       getSelectionText: async () => {
-        const el = webviewRef.current;
-        if (!el) return '';
         try {
-          const result = await el.executeJavaScript(
+          const result = await surface.current?.executeJavaScript(
             'window.getSelection ? String(window.getSelection()) : ""',
           );
           return typeof result === 'string' ? result : '';
@@ -402,258 +314,51 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       },
     }), []);
 
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      const start = () => onLoadStart?.();
-      const stop = () => onLoadEnd?.();
-      el.addEventListener('did-start-loading', start);
-      el.addEventListener('did-stop-loading', stop);
-      return () => {
-        el.removeEventListener('did-start-loading', start);
-        el.removeEventListener('did-stop-loading', stop);
-      };
-    }, [onLoadStart, onLoadEnd]);
-
-    // Network-level load failures (DNS, connection refused, timeout, ...).
-    // Chromium would otherwise swap in its own generic error page; the browser
-    // app renders a branded interstitial over the surface instead. Subframe
-    // failures and aborts (errorCode -3 / ERR_ABORTED - e.g. a load cancelled
-    // because the user navigated again, or because the response turned into a
-    // download) are ignored: they aren't page-level errors worth surfacing.
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      const failed = (e: Event) => {
-        const {
-          errorCode,
-          errorDescription,
-          validatedURL,
-          isMainFrame,
-        } = e as Event & {
-          errorCode?: number;
-          errorDescription?: string;
-          validatedURL?: string;
-          isMainFrame?: boolean;
-        };
-        if (isMainFrame === false || errorCode === -3) return;
-        onLoadError?.({
-          url: typeof validatedURL === 'string' ? shownUrl(validatedURL) : '',
-          errorCode: typeof errorCode === 'number' ? errorCode : 0,
-          errorDescription:
-            typeof errorDescription === 'string' ? errorDescription : '',
-        });
-      };
-      el.addEventListener('did-fail-load', failed);
-      return () => el.removeEventListener('did-fail-load', failed);
-    }, [onLoadError]);
-
-    // Page metadata (title / favicon), reported only by the Electron webview.
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      const title = (e: Event) => {
-        const { title } = e as Event & { title?: string };
-        if (typeof title === 'string') onTitleChange?.(title);
-      };
-      const favicon = (e: Event) => {
-        const { favicons } = e as Event & { favicons?: string[] };
-        if (Array.isArray(favicons)) onFaviconChange?.(favicons);
-      };
-      const themeColor = (e: Event) => {
-        const { themeColor } = e as Event & { themeColor?: string | null };
-        onThemeColorChange?.(typeof themeColor === 'string' ? themeColor : null);
-      };
-      el.addEventListener('page-title-updated', title);
-      el.addEventListener('page-favicon-updated', favicon);
-      el.addEventListener('did-change-theme-color', themeColor);
-      return () => {
-        el.removeEventListener('page-title-updated', title);
-        el.removeEventListener('page-favicon-updated', favicon);
-        el.removeEventListener('did-change-theme-color', themeColor);
-      };
-    }, [onTitleChange, onFaviconChange, onThemeColorChange]);
-
-    // Committed navigations (link clicks, redirects, back/forward) keep the
-    // address bar and back/forward buttons in sync with the guest.
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      const report = (url: unknown) => {
-        if (typeof url !== 'string') return;
-        // A page-source view commits its inner URL; only getURL() has the
-        // `view-source:` prefix the tab must keep.
-        const current = el.getURL();
-        onNavigate?.(
-          current === `view-source:${url}` ? `view-source:${shownUrl(url)}` : shownUrl(url),
-          el.canGoBack(),
-          el.canGoForward(),
-        );
-      };
-      const navigate = (e: Event) => {
-        report((e as Event & { url?: string }).url);
-      };
-      const navigateInPage = (e: Event) => {
-        const { url, isMainFrame } = e as Event & { url?: string; isMainFrame?: boolean };
-        if (isMainFrame) report(url);
-      };
-      el.addEventListener('did-navigate', navigate);
-      el.addEventListener('did-navigate-in-page', navigateInPage);
-      return () => {
-        el.removeEventListener('did-navigate', navigate);
-        el.removeEventListener('did-navigate-in-page', navigateInPage);
-      };
-    }, [onNavigate]);
-
-    // Keep the guest's page zoom in lockstep with the shell's interface zoom.
-    // The interface zoom is applied to the shell frame via
-    // webFrame.setZoomFactor (see AppProvider), which - per Electron - only
-    // scales the shell frame and does NOT propagate to <webview> guests.
-    // Beyond the visual mismatch, a shell frame zoomed to anything other than
-    // 1 offsets the guest's mouse hit-testing, so links stop being clickable;
-    // matching the guest's own zoom factor keeps its content scaled *and* its
-    // clicks aligned. Chromium resets a guest's zoom on navigation, so it is
-    // reapplied on every dom-ready as well as when the interface zoom (or the
-    // tab's own page zoom) changes.
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      const apply = () => {
-        try {
-          el.setZoomFactor(zoomFactor);
-        } catch {
-          // Guest not attached yet; the dom-ready listener retries.
-        }
-      };
-      apply();
-      el.addEventListener('dom-ready', apply);
-      return () => el.removeEventListener('dom-ready', apply);
-    }, [zoomFactor]);
-
     // The page's renderer went away: it crashed, ran out of memory, or was
-    // ended from the System Monitor. Chromium leaves the guest blank, so say
+    // ended from the System Monitor. The engine leaves the guest blank, so say
     // what happened and offer a reload (which starts a fresh renderer).
     const [gone, setGone] = useState(false);
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      const crashed = () => {
-        setGone(true);
-        onLoadEnd?.();
-      };
-      const loading = () => setGone(false);
-      el.addEventListener('render-process-gone', crashed);
-      el.addEventListener('did-start-loading', loading);
-      return () => {
-        el.removeEventListener('render-process-gone', crashed);
-        el.removeEventListener('did-start-loading', loading);
-      };
-    }, [onLoadEnd]);
 
-    // Report the guest's WebContents id once it attaches (used to register
-    // the tab with the Chrome extension system).
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (!el) return;
-      const attached = () => {
-        try {
-          onWebContentsId?.(el.getWebContentsId());
-        } catch {
-          // Guest not attached yet; dom-ready below retries.
-        }
-      };
-      el.addEventListener('did-attach', attached);
-      el.addEventListener('dom-ready', attached);
-      return () => {
-        el.removeEventListener('did-attach', attached);
-        el.removeEventListener('dom-ready', attached);
-      };
-    }, [onWebContentsId]);
-
-    // Tell the page whether it's showing. Electron hands a guest its window's
-    // visibility, so a background tab or a minimized window's page would
-    // otherwise think it's visible and keep its videos and loops running
-    // (see guestVisibility in electron/main.mts). Restated once the guest
-    // attaches, since there's no WebContents to address before then; the
-    // main process ignores repeats.
-    useEffect(() => {
-      const el = webviewRef.current;
-      const bridge = window.dinos?.guestVisibility;
-      if (!el || !bridge) return;
-      const report = () => {
-        try {
-          bridge.set(el.getWebContentsId(), pageHidden);
-        } catch {
-          // Guest not attached yet; did-attach retries.
-        }
-      };
-      report();
-      el.addEventListener('did-attach', report);
-      el.addEventListener('dom-ready', report);
-      return () => {
-        el.removeEventListener('did-attach', report);
-        el.removeEventListener('dom-ready', report);
-      };
-    }, [pageHidden]);
-
-    // Files dragged from Files: a drag over the guest would go to the page,
-    // as paths it can't open, so the shell takes it and has the page dropped
-    // on with the files themselves (see guestFileDrop in electron/main.mts).
-    const fileDrag = useSyncExternalStore(subscribeFileDrag, fileDragActive);
-    const sendFileDrag = (type: 'over' | 'drop' | 'cancel', event: React.DragEvent<HTMLElement>) => {
-      const el = webviewRef.current;
-      const bridge = window.dinos?.guestFileDrop;
-      if (!el || !bridge) return;
-      // The page's CSS pixels: the shell's, through any transform on the
-      // window, then the page's own zoom on top of the interface zoom.
-      const rect = event.currentTarget.getBoundingClientRect();
-      const scaleX = rect.width > 0 ? event.currentTarget.clientWidth / rect.width : 1;
-      const scaleY = rect.height > 0 ? event.currentTarget.clientHeight / rect.height : 1;
-      const x = ((event.clientX - rect.left) * scaleX) / pageZoom;
-      const y = ((event.clientY - rect.top) * scaleY) / pageZoom;
-      try {
-        bridge.send(el.getWebContentsId(), type, x, y, activeFileDrag(event)?.paths ?? []);
-      } catch {
-        // Guest not attached yet.
-      }
-    };
-    // A drag that ended without leaving the page (dropped elsewhere by a key,
-    // say) still lets go of it; one already dropped or left is ignored.
-    useEffect(() => {
-      const el = webviewRef.current;
-      if (fileDrag || !el || !window.dinos?.guestFileDrop) return;
-      try {
-        window.dinos?.guestFileDrop.send(el.getWebContentsId(), 'cancel', 0, 0, []);
-      } catch {
-        // Guest not attached yet.
-      }
-    }, [fileDrag]);
-
-    // Host for the guest built in the mount effect above. The <webview> itself
-    // is not rendered by React so its attributes can be set before insertion.
     return (
       <div className="relative h-full w-full" style={{ display: 'flex' }}>
-        <div ref={containerRef} className="h-full w-full" style={{ display: 'flex' }} />
-        {fileDrag && window.dinos?.guestFileDrop && (
-          <div
-            className="absolute inset-0 z-10"
-            onDragOver={(event) => {
-              if (!activeFileDrag(event)) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = 'copy';
-              sendFileDrag('over', event);
-            }}
-            onDragLeave={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) sendFileDrag('cancel', event);
-            }}
-            onDrop={(event) => {
-              if (!activeFileDrag(event)) return;
-              event.preventDefault();
-              sendFileDrag('drop', event);
-            }}
-          />
-        )}
-        {gone && <PageGone onReload={() => webviewRef.current?.reload()} />}
+        <GuestSurface
+          ref={surface}
+          src={src}
+          partition={partition}
+          webpreferences={installedApp ? APP_GUEST_MARK : undefined}
+          // Guest-initiated popups, which main routes into tabs and apps.
+          allowPopups
+          guestClassName="h-full w-full bg-white"
+          pageZoom={pageZoom}
+          hidden={hidden}
+          acceptFileDrops
+          onAttach={onWebContentsId}
+          onLoadStart={() => {
+            setGone(false);
+            onLoadStart?.();
+          }}
+          onLoadEnd={onLoadEnd}
+          onLoadError={onLoadError && ((error) => onLoadError({ ...error, url: shownUrl(error.url) }))}
+          onTitle={onTitleChange}
+          onFavicons={onFaviconChange}
+          onThemeColor={onThemeColorChange}
+          onNavigate={
+            onNavigate &&
+            ((url, current, canBack, canForward) =>
+              // A page-source view commits its inner URL; only the current URL
+              // has the `view-source:` prefix the tab must keep.
+              onNavigate(
+                current === `view-source:${url}` ? `view-source:${shownUrl(url)}` : shownUrl(url),
+                canBack,
+                canForward,
+              ))
+          }
+          onGone={() => {
+            setGone(true);
+            onLoadEnd?.();
+          }}
+        />
+        {gone && <PageGone onReload={() => surface.current?.reload()} />}
       </div>
     );
   },
@@ -680,19 +385,4 @@ function PageGone({ onReload }: { onReload: () => void }) {
       </div>
     </div>
   );
-}
-
-/** Minimal typing for the Electron <webview> element methods we use. */
-interface ElectronWebviewElement extends HTMLElement {
-  reload(): void;
-  reloadIgnoringCache(): void;
-  loadURL(url: string): Promise<void>;
-  goBack(): void;
-  goForward(): void;
-  setZoomFactor(factor: number): void;
-  canGoBack(): boolean;
-  canGoForward(): boolean;
-  getURL(): string;
-  getWebContentsId(): number;
-  executeJavaScript(code: string): Promise<unknown>;
 }

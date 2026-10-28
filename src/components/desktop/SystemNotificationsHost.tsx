@@ -16,27 +16,11 @@ import {
 import { nsiteAppId } from '@/lib/nsiteApps';
 import { getSystemNotificationsBridge, type SystemNotification } from '@/lib/systemNotifications';
 import { getWebPushHost } from '@/lib/webPush';
+import { guestWindowId } from '@/platform/guest';
 
 /** The shortest time an app may ask a popup to stay. */
 const MIN_POPUP_MS = 2000;
 
-interface GuestElement extends HTMLElement {
-  getWebContentsId(): number;
-}
-
-/** The Din window hosting a <webview> guest, by the guest's WebContents id. */
-function guestWindowId(webContentsId: number): string | null {
-  for (const element of document.querySelectorAll<GuestElement>('webview')) {
-    let id: number;
-    try {
-      id = element.getWebContentsId();
-    } catch {
-      continue; // not attached yet
-    }
-    if (id === webContentsId) return element.closest('[data-window-id]')?.getAttribute('data-window-id') ?? null;
-  }
-  return null;
-}
 
 /**
  * Puts Linux apps' and web pages' notifications (see

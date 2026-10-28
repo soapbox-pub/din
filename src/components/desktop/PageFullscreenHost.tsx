@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { contains, getMonitorsBridge, type Monitor } from '@/lib/monitors';
+import { guestFrame, guestId, isGuestElement } from '@/platform/guest';
 
 interface PageFullscreenBridge {
   fit(webContentsId: number, width: number, height: number): Promise<void>;
@@ -89,16 +90,16 @@ export function PageFullscreenHost() {
         emulated = false;
         return;
       }
-      const page = host.tagName === 'WEBVIEW';
-      const getId = (host as HTMLElement & { getWebContentsId?: () => number }).getWebContentsId;
+      const page = isGuestElement(host);
+      const pageId = page ? guestId(host) : null;
       if (monitorsRef.current.length < 2) {
         // Down to one monitor under a page fitted to another: it fills the
         // whole window again.
-        if (page && getId && emulated) fit(getId.call(host), window.innerWidth, window.innerHeight);
+        if (pageId !== null && emulated) fit(pageId, window.innerWidth, window.innerHeight);
         return;
       }
       if (!page && host.dataset.nativeWindow === undefined) return;
-      const frame = page ? host.shadowRoot?.querySelector('iframe') : host;
+      const frame = page ? guestFrame(host) : host;
       if (!frame) return;
 
       // The window's monitor: the one under the middle of the webview, which
@@ -147,7 +148,7 @@ export function PageFullscreenHost() {
         });
       }
 
-      if (page && getId) fit(getId.call(host), monitor.width, monitor.height);
+      if (pageId !== null) fit(pageId, monitor.width, monitor.height);
     };
 
     document.addEventListener('fullscreenchange', onChange);

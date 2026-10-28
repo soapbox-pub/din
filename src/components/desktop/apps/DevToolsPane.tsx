@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
+import { GuestSurface } from '@/platform/GuestSurface';
 import { getDevtoolsBridge } from '@/lib/devtools';
 
 /**
@@ -24,68 +25,37 @@ export function DevToolsPane({
   /** Called once the tab's devtools are open inside this pane. */
   onReady?: () => void;
 }) {
-  const webviewRef = useRef<DevtoolsWebviewElement>(null);
+  const [hostId, setHostId] = useState<number | null>(null);
 
   useEffect(() => {
-    const el = webviewRef.current;
     const devtools = getDevtoolsBridge();
-    if (!el || !devtools) return;
-
-    let opened = false;
+    if (hostId === null || !devtools) return;
     let disposed = false;
-
-    // The guest attaches asynchronously after mount; getWebContentsId()
-    // throws until then, so retry across the attachment events.
-    const attach = () => {
-      if (opened || disposed) return;
-      let hostId: number;
-      try {
-        hostId = el.getWebContentsId();
-      } catch {
-        return; // not attached yet; a later event retries
-      }
-      opened = true;
-      devtools
-        .open(targetWcId, hostId)
-        .then(() => {
-          if (!disposed) onReady?.();
-        })
-        .catch(() => {
-          opened = false; // e.g. the tab died mid-flight
-        });
-    };
-
-    el.addEventListener('did-attach', attach);
-    el.addEventListener('dom-ready', attach);
-    attach();
-
+    devtools
+      .open(targetWcId, hostId)
+      .then(() => {
+        if (!disposed) onReady?.();
+      })
+      .catch(() => {
+        // The tab died mid-flight.
+      });
     return () => {
       disposed = true;
-      el.removeEventListener('did-attach', attach);
-      el.removeEventListener('dom-ready', attach);
       // Unmounting destroys the host; close the target's devtools first so
       // it detaches cleanly. No-op if the tab is already gone.
       devtools.close(targetWcId).catch(() => {});
     };
-  }, [targetWcId, onReady]);
+  }, [targetWcId, hostId, onReady]);
 
   return (
-    <div className="relative h-full w-full" style={{ display: 'flex' }}>
-      <webview
-        ref={webviewRef}
-        // A blank start page; the main process navigates the guest to the
-        // devtools frontend once devtools.open() wires the session up.
-        src="about:blank"
-        // See DEVTOOLS_PARTITION in electron/main.cjs.
-        partition="persist:devtools"
-        className="h-full w-full bg-white"
-        style={{ display: 'flex' }}
-      />
-    </div>
+    <GuestSurface
+      // A blank start page; the main process navigates the guest to the
+      // devtools frontend once devtools.open() wires the session up.
+      src="about:blank"
+      // See DEVTOOLS_PARTITION in electron/main.mts.
+      partition="persist:devtools"
+      guestClassName="h-full w-full bg-white"
+      onAttach={setHostId}
+    />
   );
-}
-
-/** Minimal typing for the Electron <webview> element methods we use. */
-interface DevtoolsWebviewElement extends HTMLElement {
-  getWebContentsId(): number;
 }

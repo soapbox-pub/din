@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isGuestElement } from '@/platform/guest';
 import { Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
 import { z } from 'zod';
 import {
@@ -455,8 +456,8 @@ export function Dock({
       setRevealed(false);
     };
     const onFocusIn = (e: FocusEvent) => {
-      const into = e.target instanceof Element ? e.target.tagName : null;
-      if (into === 'WEBVIEW' || into === 'IFRAME') setRevealed(false);
+      const into = e.target instanceof Element ? e.target : null;
+      if (isGuestElement(into) || into?.tagName === 'IFRAME') setRevealed(false);
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('focusin', onFocusIn);
@@ -561,8 +562,8 @@ export function Dock({
           // pointermove will ever arrive from over a <webview>/<iframe>, so
           // the coordinate-based retraction above can't fire. Other exits
           // (menus, slack zone, plain DOM) keep the pointermove semantics.
-          const into = e.relatedTarget instanceof Element ? e.relatedTarget.tagName : null;
-          if (into === 'WEBVIEW' || into === 'IFRAME') setRevealed(false);
+          const into = e.relatedTarget instanceof Element ? e.relatedTarget : null;
+          if (isGuestElement(into) || into?.tagName === 'IFRAME') setRevealed(false);
         }}
       >
         <div
