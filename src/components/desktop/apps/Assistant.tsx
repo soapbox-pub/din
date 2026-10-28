@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowDown,
   ChevronDown,
   Folder,
   FolderOpen,
@@ -612,7 +613,21 @@ function Conversation({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [left] = useState(() => scrollPositions.get(sessionID));
   const stick = useRef(left?.stuck ?? true);
+  const [stuck, setStuck] = useState(left?.stuck ?? true);
   const restoreTop = useRef(left && !left.stuck ? left.top : null);
+  // Set during a smooth jump to the bottom, so the scrolls on the way don't
+  // bring the button back.
+  const jumping = useRef(false);
+  const jumpToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stick.current = true;
+    setStuck(true);
+    jumping.current = true;
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' });
+    el.focus({ preventScroll: true });
+  };
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -674,38 +689,66 @@ function Conversation({
         onFork={() => onFork()}
       />
       <ForkDialog messages={messages ?? []} open={forking} onOpenChange={setForking} onFork={onFork} />
-      <div
-        ref={scrollRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
-          scrollPositions.set(sessionID, { top: el.scrollTop, stuck: stick.current });
-        }}
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
-        <div className="mx-auto w-full max-w-3xl px-4 py-6 @2xl/assistant:px-6">
-          {isLoading && !messages ? (
-            <TranscriptSkeleton />
-          ) : (
-            <>
-              {transcript?.more && (
-                <p className="mb-6 text-center text-xs text-muted-foreground">Earlier messages aren’t shown.</p>
-              )}
-              <FileLinkBaseContext value={fileLinkBase}>
-                <Transcript
-                  messages={messages ?? []}
-                  queued={queued}
-                  running={running}
-                  home={home}
-                  onCancelQueued={(message) =>
-                    cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
-                  }
-                  onFork={onFork}
-                />
-              </FileLinkBaseContext>
-            </>
-          )}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* Focusable so arrow keys, Page Up/Down, Home and End scroll it after a click. */}
+        <div
+          ref={scrollRef}
+          tabIndex={-1}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+            if (jumping.current && !bottom) return;
+            jumping.current = false;
+            stick.current = bottom;
+            setStuck(bottom);
+            scrollPositions.set(sessionID, { top: el.scrollTop, stuck: bottom });
+          }}
+          onScrollEnd={(e) => {
+            if (!jumping.current) return;
+            // Cut short, by a wheel or a key.
+            jumping.current = false;
+            const el = e.currentTarget;
+            stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+            setStuck(stick.current);
+          }}
+          className="min-h-0 flex-1 overflow-y-auto outline-none"
+        >
+          <div className="mx-auto w-full max-w-3xl px-4 py-6 @2xl/assistant:px-6">
+            {isLoading && !messages ? (
+              <TranscriptSkeleton />
+            ) : (
+              <>
+                {transcript?.more && (
+                  <p className="mb-6 text-center text-xs text-muted-foreground">Earlier messages aren’t shown.</p>
+                )}
+                <FileLinkBaseContext value={fileLinkBase}>
+                  <Transcript
+                    messages={messages ?? []}
+                    queued={queued}
+                    running={running}
+                    home={home}
+                    onCancelQueued={(message) =>
+                      cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
+                    }
+                    onFork={onFork}
+                  />
+                </FileLinkBaseContext>
+              </>
+            )}
+          </div>
         </div>
+        {!stuck && (
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Jump to the bottom"
+            title="Jump to the bottom"
+            onClick={jumpToBottom}
+            className="absolute bottom-3 left-1/2 size-9 -translate-x-1/2 rounded-full bg-background shadow-md motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90"
+          >
+            <ArrowDown />
+          </Button>
+        )}
       </div>
       <div className="mx-auto w-full max-w-3xl space-y-3 px-4 pb-4 @2xl/assistant:px-6">
         {permissions.map((request) => (
