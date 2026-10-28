@@ -101,7 +101,7 @@ function useAssistantNotifications() {
   const queryClient = useQueryClient();
   const isWatching = useIsWatching();
 
-  const show = (sessionID: string) => open(ASSISTANT_APP_ID, { sessionID, nonce: Date.now() });
+  const show = (sessionID: string) => open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce: Date.now() });
   // The latest of each for callbacks that outlive a render.
   const latest = useRef({ show, reply: reply.mutate, isWatching });
   useEffect(() => {
@@ -253,7 +253,7 @@ const QuickPrompt = memo(function QuickPrompt() {
       {
         onSuccess: (session) => {
           setOpen(false);
-          openApp(ASSISTANT_APP_ID, { sessionID: session.id, nonce: Date.now() });
+          openApp(ASSISTANT_APP_ID, { sessionID: session.id, directory: undefined, nonce: Date.now() });
         },
         onError: (error) =>
           toast({ title: 'Couldn’t ask the assistant', description: cleanAssistantError(error), variant: 'destructive' }),

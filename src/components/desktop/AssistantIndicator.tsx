@@ -84,7 +84,7 @@ function AssistantPanel({ onDone }: { onDone: () => void }) {
   const ready = useAssistantReady();
   const { open } = useWindowActions();
   const show = (sessionID?: string) => {
-    open(ASSISTANT_APP_ID, { ...(sessionID ? { sessionID } : {}), nonce: Date.now() });
+    open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce: Date.now() });
     onDone();
   };
 

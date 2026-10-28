@@ -117,16 +117,21 @@ export function Assistant({ params }: AppComponentProps) {
   const [sessionID, setSessionID] = useState<string | null>(requested);
   const [listOpen, setListOpen] = useState(false);
   // A new conversation from the list, in a project's folder when it says so.
-  const [draft, setDraft] = useState<{ directory: string | null; count: number }>({ directory: null, count: 0 });
+  const [draft, setDraft] = useState<{ directory: string | null; count: number }>({
+    directory: requestedDirectory,
+    count: 0,
+  });
 
   // Single-instance: a relaunch (a notification, the menu bar) brings new
   // params without remounting. One with no session asks for a new one.
+  // Launch params are merged into the window's old ones, so launchers name
+  // both `sessionID` and `directory`, clearing whichever they don't use.
   const nonce = params?.nonce;
   const [launch, setLaunch] = useState({ requested, nonce });
   if (launch.requested !== requested || launch.nonce !== nonce) {
     setLaunch({ requested, nonce });
     setSessionID(requested);
-    setDraft((prev) => ({ directory: null, count: prev.count }));
+    setDraft((prev) => ({ directory: requestedDirectory, count: prev.count }));
   }
 
   if (!ready) {
@@ -179,7 +184,7 @@ export function Assistant({ params }: AppComponentProps) {
         ) : (
           <NewConversation
             key={`${String(launch.nonce)}:${draft.count}`}
-            initialDirectory={draft.directory ?? (draft.count === 0 ? requestedDirectory : null)}
+            initialDirectory={draft.directory}
             onStarted={choose}
             onShowList={() => setListOpen(true)}
           />

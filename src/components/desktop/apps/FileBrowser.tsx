@@ -960,7 +960,7 @@ function FileBrowserTab({
   const { config } = useAppContext();
   const hasAssistant = !!getAssistantBridge() && config.assistantEnabled;
   const openInAssistant = useCallback(
-    (path: string) => open('assistant', { directory: path, nonce: Date.now() }),
+    (path: string) => open('assistant', { sessionID: undefined, directory: path, nonce: Date.now() }),
     [open],
   );
 
