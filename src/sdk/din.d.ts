@@ -525,8 +525,10 @@ export class DinPermissionError extends Error {
 
 /**
  * The desktop's own bridges (`window.dinos` namespaces), for the few apps
- * whose job they are. Each is present only with its permission. Functions
- * that take callbacks work as on the desktop; the SDK proxies them.
+ * whose job they are. Each is present only with its permission, and talks
+ * to Electron main over a port of its own that the desktop had main make
+ * for this app, so it's as fast as the desktop's own. Functions that take
+ * callbacks work as on the desktop.
  */
 export interface DinSystem {
   fs?: FsBridge;

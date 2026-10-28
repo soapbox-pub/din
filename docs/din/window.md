@@ -3,8 +3,9 @@
 > **Status: design.** Today's equivalents are the per-window React
 > contexts in `src/contexts/` (`WindowTitleContext`,
 > `WindowFrameContext`, `WindowChromeContext`, …) and `setFrameless` in
-> `src/hooks/useWindows.ts`. Parts marked *spike* depend on what the
-> spike finds.
+> `src/hooks/useWindows.ts`. Transparency, shapes and moving from inside
+> the app were tried in a standalone spike (Electron 43, webviews on
+> `din://`); notes below say what it showed.
 
 Every app window is a Din window: the desktop places it, tiles it,
 snaps it, minimizes it into the Dock, lists it in the switcher. The app
@@ -133,12 +134,21 @@ din.window.setShape([
 
 - **`background: 'transparent'`**: wherever the page doesn't paint, the
   desktop (and windows behind) shows through. The page's own `html` and
-  `body` must be transparent and its `color-scheme` must match the
-  theme's, which the SDK sets. *spike*
+  `body` must be transparent. App webviews are created transparent (Din
+  forces web pages opaque, apps not); in the spike the desktop showed
+  through in every light/dark combination of desktop and app, with none
+  of the opaque-canvas trouble iframes have. A `standard` or `custom`
+  window's opaque background is painted by the desktop behind the
+  webview, so those windows need do nothing. Scrollbar tracks are still
+  drawn opaque.
 - **`setShape(rects)`**: the window exists only inside these rectangles.
   Outside them it neither draws nor takes clicks: a click there goes to
   whatever's behind. Without a shape, transparent pixels still take
-  clicks, which is right for soft shadows and wrong for odd shapes. *spike*
+  clicks, which is right for soft shadows and wrong for odd shapes. The
+  desktop applies the shape as `clip-path` on the window's **outermost**
+  element: on the `<webview>` alone it clips the app's clicks, but the
+  window's container still swallows them. `mask-image` clips drawing but
+  not clicks, so it isn't used.
 - Moving and resizing are the app's job: `beginMove` from its own grab
   areas, `beginResize(edge, e)` from its own grips, or `setBounds`.
 
@@ -162,9 +172,20 @@ din.window.setBounds({ width: 380, height: 620 });   // Calculator switching mod
 
 - `beginMove` and `beginResize` hand the gesture to the desktop, which
   runs it exactly as its own title bar does: snapping to edges, tearing a
-  maximized window off, workspaces, wobble. The app gets nothing more
-  until the button is released, and then a `state` change. *spike: how
-  the pointer is followed once it's over the app's own process.*
+  maximized window off, workspaces, wobble. The app gets no more pointer
+  events for the gesture (not even its `pointerup`); the SDK resolves the
+  gesture when the desktop says it ended, and the window's `state`
+  changes.
+
+  How the desktop follows a pointer that's over another process: main
+  already forwards a webview's mouse moves to the desktop
+  (`forwardGuestInput`, within a millisecond), so the window moves from
+  the first event. Those stop once the pointer leaves the app, even with
+  pointer capture, so `beginMove` also puts a cover over the whole
+  desktop, which takes the pointer over while the button is still down
+  (a frame or two later; 120–160 ms headless) and follows it anywhere.
+  After a move, clicks can land at the webview's old spot for about a
+  frame.
 - `setBounds` is clamped to the monitor's work area and the min/max
   size. A tiled or maximized window ignores it until restored.
 - `minimize()`, `maximize()`, `restore()`, `toggleMaximize()`, `focus()`

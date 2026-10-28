@@ -74,13 +74,15 @@ stops at the first that's kept open.
 Each app window is its own renderer process, so a stuck app stalls only
 itself. The desktop treats it as not responding when either:
 
-- main reports the webview `unresponsive` (its main thread hasn't
-  answered for several seconds), or
+- main reports its webContents `unresponsive` (`dinos.apps.onUnresponsive`).
+  Chromium only notices once input waits on the stuck page, about 16 s
+  after it in the spike, so this alone is slow; or
 - a request the desktop sent (a close request) goes unanswered for 5 s.
 
 Its window then dims, the title says "(Not Responding)", and the desktop
-offers **Wait** or **Force Quit**. Force quit kills the renderer
-(`dinos.apps.kill`). A window whose renderer is gone, killed or crashed,
-shows "Paint stopped" with **Reopen**, which reloads it with the same
-launch context. System Monitor lists app windows by their processes and
+offers **Wait** or **Force Quit**. Force quit has main kill the renderer
+process (`dinos.apps.kill`), and `render-process-gone` follows within
+about 50 ms. A window whose renderer is gone, killed or crashed, shows
+"Paint stopped" with **Reopen**, which reloads the webview: a new process,
+the same webContents, a fresh port, and the same launch context. System Monitor lists app windows by their processes and
 can end them the same way.

@@ -56,7 +56,9 @@ each app that:
   Tailwind classes and shadcn/ui components look as they do on the
   desktop;
 - installs `window.nostr` if the app has the `nostr` permission;
-- proxies `din.system` bridges, including their callbacks.
+- wraps `din.system` bridges, which talk to Electron main over ports of
+  their own ([permissions.md](permissions.md#dinsystem)), including their
+  callbacks.
 
 For React apps, `src/sdk/react` adds:
 
@@ -83,6 +85,8 @@ its own header (Assistant, Settings) should move over by changing imports.
  din.files.open(…)         ──port──▶  checks grants, shows the picker
                            ◀──port──  { id: 12, result: [handle] }
                            ◀──port──  { push: 'window', state }   (focus changed)
+
+ din.system.fs.readdir(p)  ──port──▶  Electron main, directly (granted bridges only)
 ```
 
 - Messages are structured-cloned objects: requests `{ id, method,

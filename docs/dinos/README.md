@@ -21,13 +21,100 @@ does with today's globals.
 ```ts
 interface Dinos {
   readonly version: 1;
-  fs: FsBridge;        // src/lib/fs.ts
-  pty: PtyBridge;      // src/lib/pty.ts
-  wifi: WifiBridge;    // src/lib/wifi.ts
-  // … one member per namespace below
+
+  // Session and boot
+  boot: BootBridge;
+  session: SessionBridge;
+  bootScreen: BootScreenBridge;
+  lock: LockBridge;
+  power: PowerBridge;
+  installer: InstallerBridge;
+  updater: UpdaterBridge;
+  firmware: FirmwareBridge;
+
+  // Files and terminals
+  fs: FsBridge;
+  volumes: VolumesBridge;
+  pty: PtyBridge;
+  indd: InddBridge;
+
+  // Network
+  wifi: WifiBridge;
+  vpn: VpnBridge;
+  tor: TorBridge;
+  siteLocations: SiteLocationsBridge;
+  bluetooth: BluetoothBridge;
+  bluetoothLogin: BluetoothLoginBridge;
+  airplay: AirPlayBridge;
+
+  // Displays and input
+  display: DisplayBridge;
+  monitors: MonitorsBridge;
+  zoom: ZoomBridge;
+  brightness: BrightnessBridge;
+  keyboard: KeyboardBridge;
+  cursor: SystemCursorBridge;
+  screenshot: ScreenshotBridge;
+  dictation: DictationBridge;
+  shellShortcuts: ShellShortcutsBridge;
+
+  // Sound and media
+  audio: AudioBridge;
+  media: MediaBridge;
+
+  // System
+  datetime: DateTimeBridge;
+  theme: ColorSchemeBridge;
+  systemEvents: SystemEventsBridge;   // typed inline in SystemEventsHost.tsx today
+  systemMonitor: SystemMonitorBridge;
+  systemNotifications: SystemNotificationsBridge;
+  tray: TrayBridge;
+  printing: PrintingBridge;
+
+  // Native apps
+  nativeApps: NativeAppsBridge;
+  nativeDisplay: NativeDisplayBridge;
+
+  // Nostr
+  nostrd: NostrdBridge;
+  nostrHost: NostrHostBridge;
+  bunkerHost: BunkerBridge;
+
+  // The browser
+  browser: BrowserBridge;
+  crx: CrxBridge;
+  userscripts: UserscriptsBridge;
+  adblock: AdblockBridge;
+  popups: PopupsBridge;
+  devtools: DevtoolsBridge;
+  screenShare: ScreenShareBridge;
+
+  // nsites and napps
+  nsiteHost: NsiteHostBridge;
+  nsiteStore: NsiteStore;
+  nappHost: NappHostBridge;
+  webPushHost: WebPushHostBridge;
+
+  // Guest plumbing (used only inside src/platform/)
+  pageFullscreen: PageFullscreenBridge;
+  guestVisibility: GuestVisibilityBridge;
+  guestFileDrop: GuestFileDropBridge;
+  guestInput: GuestInputBridge;
+  highlightHost: HighlightHostBridge;
+  filePickerHost: FilePickerHostBridge;
+  promptHost: PromptHostBridge;
+
+  // The Assistant
+  assistant: AssistantBridge;
+
+  // New: hosting din:// apps
+  apps: AppsBridge;
 }
 declare global { interface Window { dinos?: Dinos } }
 ```
+
+Each type is the existing interface in the `src/lib/` (or component)
+file that wraps that global today; none of them change.
 
 The types stay where they are; `src/lib/dinos.ts` gathers them into
 `Dinos` and exports `dinos()` (the object, or undefined outside Electron),
@@ -67,7 +154,10 @@ One namespace is new: `dinos.apps`, the desktop's side of hosting apps.
 | Method | Does |
 |---|---|
 | `onPort(cb: (e: { webContentsId, appId, port: MessagePort }) => void)` | A `din://` app's webview finished the handshake ([../security-model.md](../security-model.md)) |
-| `kill(webContentsId)` | Force quit a hung app's renderer |
+| `grant(webContentsId, permission)` | Have main open a port from that app straight to a system bridge (`fs`, `pty`, `printing`), bound to the app and permission ([../din/permissions.md](../din/permissions.md#dinsystem)) |
+| `revoke(webContentsId, permission)` | Close that port |
+| `onUnresponsive(cb)`, `onResponsive(cb)` | Main's `unresponsive`/`responsive` for an app's webContents, which the `<webview>` element never sees |
+| `kill(webContentsId)` | Force quit a hung app: main kills its renderer process (about 50 ms to `render-process-gone`; `forcefullyCrashRenderer` took seconds on a hung page) |
 | `migrateStorage(appId, entries)` | Seed a new app origin's `localStorage` before its first load ([../din/manifest.md](../din/manifest.md)) |
 
 ## Conventions for adding to it

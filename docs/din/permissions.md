@@ -49,12 +49,32 @@ const off = fs?.onChange((path) => refresh(path));
 ```
 
 These are the same interfaces the desktop uses (`FsBridge`,
-`PtyBridge`, `PrintingBridge`), so code moves over unchanged. The SDK
-proxies each call to the desktop, which forwards it to `window.dinos`;
-callbacks (`onChange`, a pty's data) come back as pushes on the port.
+`PtyBridge`, `PrintingBridge`), so code moves over unchanged.
 
-A few things stay desktop-only even with `fs`: `din.system.fs` can't
-reach Din's own configuration (`~/.config/din`) or nostrd's keys.
+They don't go through the desktop. When the app connects, the desktop
+checks its grants and asks main for a port from the app straight to each
+granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made)):
+
+```
+Terminal ──port──▶ Electron main (pty)      one hop, as window.pty is today
+Terminal ──port──▶ desktop                  window, menus, files, drag
+```
+
+So a `cat` of a big log streams at the speed it does today, and a busy or
+hung desktop doesn't make the terminal stutter. Calls cost the same as
+`ipcRenderer.invoke`: the same Chromium pipe and structured clone, plus
+the one copy `contextBridge` already makes for today's globals. Callbacks
+(`onChange`, a pty's data) come back on the same port.
+
+Main binds each port to the app and permission it was made for and
+enforces the limits itself: `din.system.fs` can't reach Din's own
+configuration (`~/.config/din`) or nostrd's keys, even for Files. The
+desktop can revoke a grant, which closes the port.
+
+Files' contents are better read through handles than through
+`fs.readFile`: a handle's `getFile()` streams from the local-file scheme
+(as Preview and thumbnails do today) rather than sending a 200 MB file as
+one message.
 
 New system pieces are added as the apps that need them move over
 (Settings needs most of `window.dinos`, and moves last). Each one gets a

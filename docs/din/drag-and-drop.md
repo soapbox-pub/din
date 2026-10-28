@@ -6,7 +6,7 @@
 > variable that targets read while hovering. Tabs move between windows
 > through `src/lib/tabTransfer.ts`, the same way. Neither survives apps in
 > separate processes, and raw paths would let any app make Files move
-> anything. Parts marked *spike* depend on what the spike finds.
+> anything.
 
 ## The idea
 
@@ -103,21 +103,16 @@ If the tab is dropped outside every window, the source gets
 | Web page → app | An ordinary web drag: `accept` returns null, read `e.dataTransfer` |
 | Desktop (Screenshot's thumbnail) → app | The desktop starts a Din drag itself; targets can't tell the difference |
 
-## How the drag crosses processes *(spike)*
+## How the drag crosses processes
 
 Each app is its own webview, so the drag starts in one renderer and is
-dropped in another. Two ways to carry it:
+dropped in another. Chromium carries it: in the spike, a real mouse drag
+under Din's compositor from one `din://` webview reached another webview
+and the desktop page as ordinary drag events. The custom type
+`application/x-din-drag` was in `dataTransfer.types` from `dragenter` on
+(so targets can decide early), and the token and the `text/plain`
+fallback were readable on `drop`. No covering or relaying is needed.
 
-1. **Chromium does it.** If a drag that starts in one webview arrives in
-   another (and in the desktop) with its custom types intact, targets get
-   normal `dragover`/`drop` events and read the token from the
-   DataTransfer. Nothing extra.
-2. **The desktop relays it.** If not, while a Din drag is registered the
-   desktop covers every window but the source with a transparent overlay,
-   takes the drag events itself, and sends `dragenter`/`dragover`/`drop`
-   to the app under the pointer over its port; the SDK replays them in the
-   app as synthetic events with a DataTransfer carrying the token. This is
-   the cover-and-forward approach `BrowserView` already uses for web
-   pages.
-
-Either way, the API above doesn't change.
+The source's own `dragend` fires with a `dropEffect`, but that doesn't
+say which app took the drop, so the desktop still reports the outcome
+through `onEnd`.

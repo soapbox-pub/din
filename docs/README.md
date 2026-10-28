@@ -71,7 +71,7 @@ Where a page and the types disagree, the types win and the page is a bug.
 |---|---|
 | `electron/main.mts` | Schemes (`app:`, `din:`, `nsite:`), sessions, webview attach policy |
 | `electron/preload.cjs` | The desktop's preload: `window.dinos` |
-| `electron/din-app-preload.cjs` | Apps' preload: receives the port, nothing else (planned) |
+| `electron/din-app-preload.cjs` | Apps' preload: holds the ports and exposes them as functions, nothing else (planned) |
 | `src/sdk/` | The `window.din` client and its React pieces, bundled into every app (planned; types exist) |
 | `src/platform/` | `GuestSurface` and its backends (planned) |
 | `src/components/desktop/DinHost.tsx` | The desktop's end of every app's port (planned) |
@@ -80,8 +80,9 @@ Where a page and the types disagree, the types win and the page is a bug.
 ## The plan
 
 1. Write the API down (these pages and `src/sdk/din.d.ts`).
-2. Spike the risky parts: transparency, shapes, dragging a window from
-   inside an app, drag and drop across webviews, hung apps.
+2. ~~Spike the risky parts~~ (done): transparency, shapes, moving a
+   window from inside an app, drag and drop across webviews, keyboard
+   input, hung apps and `din://` isolation all work; the pages say how.
 3. Groundwork: collect the desktop's globals into `window.dinos`; put
    `<webview>` behind `GuestSurface`; make `WindowFrame` plain data.
 4. The app host: the `din:` scheme and session, `DinHost`, the SDK, a
