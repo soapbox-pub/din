@@ -45,6 +45,10 @@ Runtime instrumentation exists only in profiling builds, gated on the compile-ti
 
 **Always read an existing file before modifying it.** Never write over `App.tsx`, `AppRouter.tsx`, or `NostrProvider` without first reading their contents.
 
+## The App Platform
+
+Built-in apps are moving out of the desktop's React tree into their own origins (`din://<id>/`), each in its own webview and process, talking to the desktop only through `window.din`; the desktop alone reaches Electron, through `window.dinos`. **Read `docs/README.md` before working on app hosting, window chrome, `<webview>`, the preload bridges, or any built-in app**, and the `docs/din/` page for the area you're touching. The API's types are `src/sdk/din.d.ts`; keep the docs and types in step with each other and with the code, and flip a page's "Status" note when what it describes lands.
+
 ## UI Components
 
 Components in `@/components/ui` are unstyled, accessible primitives styled with Tailwind. They follow a consistent React 19 pattern: plain function components that type props via `React.ComponentProps<...>` and forward `ref` as a normal prop (no `React.forwardRef`), tag their root with a `data-slot` attribute, merge classes with the `cn()` utility, and define variants with `class-variance-authority`. Components built on Radix import from the unified `radix-ui` package (e.g. `import { Dialog as DialogPrimitive } from "radix-ui"`), not individual `@radix-ui/react-*` packages. When you need a specific component, list the directory (`ls src/components/ui/`) or import from `@/components/ui/<name>` — all common primitives are present (buttons, inputs, dialogs, dropdowns, forms, tables, etc.).

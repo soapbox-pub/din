@@ -1,0 +1,77 @@
+# Theme, account and notifications
+
+> **Status: design.** Today apps read the theme from the desktop's CSS
+> variables (they're in the same document), the account from
+> `useCurrentUser` and `useAppContext`, and notify through `useToast` /
+> `notify()` in `src/lib/notificationCenter.ts`.
+
+## `din.theme`
+
+An app should look like part of the desktop. The SDK takes care of it:
+on connect and on every change it writes the desktop's design tokens onto
+the app's `:root` as the same CSS custom properties Din uses
+(`--background`, `--foreground`, `--primary`, `--radius`, …), sets
+`color-scheme` and the `dark` class, and loads the fonts. Tailwind classes
+and shadcn/ui components then match without any code.
+
+For anything drawn by hand (canvases, terminals, charts):
+
+```ts
+const { scheme, tokens, fonts, zoom, reducedMotion } = din.theme.current;
+din.theme.onChange((t) => terminal.setTheme(xtermThemeFrom(t.tokens)));
+```
+
+| Field | |
+|---|---|
+| `scheme` | `light` or `dark` |
+| `tokens` | Every design token, without the `--` |
+| `fonts` | `{ sans, mono }` font stacks |
+| `zoom` | The interface zoom. The desktop already scales the webview; canvas apps use it for crisp pixels |
+| `reducedMotion` | Also reflected in `prefers-reduced-motion` |
+
+A profile theme (the signed-in user's colors) arrives as tokens like any
+other; apps don't need to know.
+
+## `din.account` (permission `account`)
+
+```ts
+din.account.pubkey;    // hex, or null when signed out
+din.account.relays;    // NIP-65: [{ url, read, write }]
+din.account.blossom;   // Blossom server URLs
+din.account.onChange(() => reload());
+```
+
+Without the permission, `pubkey` is null and the lists are empty.
+
+### Signing (permission `nostr`)
+
+`din.account.nostr` is a NIP-07 signer backed by Din's: `getPublicKey`,
+`signEvent`, `nip04` and `nip44`. The SDK also installs it as
+`window.nostr`, so Nostrify and other NIP-07 libraries work unchanged.
+Requests go through Din's signer prompts, attributed to the app by name
+and icon, with the same per-kind remembered grants as websites get.
+
+Apps query relays themselves (`@nostrify/nostrify`'s pool, from the app's
+own origin). The desktop's NostrProvider connection isn't shared; a
+small app opening a few sockets is fine, and keeps a hung relay query in
+one app from affecting another.
+
+## `din.notifications`
+
+Toasts (`transient: true`) need no permission; notifications that go to
+the notification center, and the Dock badge, need `notifications`.
+
+```ts
+await din.notifications.show('Export finished', {
+  body: 'holiday.pdf is in Documents.',
+  tag: 'export',
+  actions: [{ id: 'open', label: 'Open' }],
+});
+din.notifications.onAction(({ tag, action }) => { if (action === 'open') openExport(); });
+
+din.notifications.show('Saved', { transient: true });   // a toast, not kept in the center
+din.notifications.setBadge(unread);                       // a number on the Dock tile
+```
+
+Notifications carry the app's name and icon, respect Do Not Disturb, and
+clicking one focuses the app's window before `onAction`.
