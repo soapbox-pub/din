@@ -5830,20 +5830,16 @@ app.on('web-contents-created', (_event, contents) => {
   // Shell-level shortcuts inside a page: F12 / Ctrl+Shift+I toggles the
   // tab's docked devtools; Ctrl+T / Ctrl+W manage browser tabs; Alt+Tab
   // switches desktop windows. Keyboard focus lives in the guest then, so
-  // the shell can't see the keys itself - forward them. The devtools toggle
-  // goes for private and Tor tabs too: left to Chromium, it opens DevTools in
-  // a window of its own, which cage can't show next to Din.
+  // the shell can't see the keys itself - forward them. Private and Tor tabs
+  // too: left to Chromium, the devtools toggle opens DevTools in a window of
+  // its own, which cage can't show next to Din.
   if (isAnyBrowserTab) {
     contents.on('before-input-event', (event, input) => {
       if (isDevtoolsToggleInput(input)) {
         claimGuestKey(contents, event, input);
         sendToShell('devtools:toggleRequested', { wcId: contents.id });
+        return;
       }
-    });
-  }
-  if (isBrowserTab) {
-    contents.on('before-input-event', (event, input) => {
-      if (isDevtoolsToggleInput(input)) return;
       if (isPrintInput(input)) {
         claimGuestKey(contents, event, input);
         requestPagePrint(contents);
