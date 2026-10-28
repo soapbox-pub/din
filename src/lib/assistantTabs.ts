@@ -60,6 +60,11 @@ export function draftStorageKey(key: string): string {
   return `din.assistant.draft.${key}`;
 }
 
+/** Where a question's unsent answers are kept, by the question's id. */
+export function formDraftStorageKey(formID: string): string {
+  return `din.assistant.form.${formID}`;
+}
+
 /** The composer's key for a tab's new conversation; conversations use their session's id. */
 export function newConversationDraftKey(tabId: string): string {
   return `new:${tabId}`;

@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { type ComponentProps, useEffect, useId, useRef, useState } from 'react';
+import { z } from 'zod';
 import {
   Check,
   ChevronLeft,
@@ -14,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { useReplyForm, useReplyPermission } from '@/hooks/useAssistant';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
@@ -27,6 +29,7 @@ import {
   type PermissionDecision,
   type PermissionRequest,
 } from '@/lib/assistant';
+import { formDraftStorageKey } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
 
 /** The agent asking before it does something its rules say to ask about. */
@@ -108,6 +111,48 @@ function initialAnswers(fields: FormField[]): Record<string, FormValue | undefin
   return answers;
 }
 
+const formDraftSchema = z.object({
+  answers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])),
+  step: z.number().int().nonnegative(),
+});
+
+/**
+ * A form's answers and where the user is in it, kept in localStorage like
+ * the composer's draft so they outlast switching tabs and a restart. Sending
+ * or dismissing the form forgets them.
+ */
+function useFormDraft(form: FormInfo) {
+  const storageKey = formDraftStorageKey(form.id);
+  const [draft, setDraft] = useState(() => {
+    const answers = initialAnswers(form.fields);
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const parsed = raw ? formDraftSchema.safeParse(JSON.parse(raw)) : null;
+      if (parsed?.success) return { answers: { ...answers, ...parsed.data.answers }, step: parsed.data.step };
+    } catch {
+      // Unreadable: start over.
+    }
+    return { answers, step: 0 };
+  });
+  const untouched = useRef(draft);
+  useEffect(() => {
+    if (draft === untouched.current) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(draft));
+    } catch {
+      // Full or unavailable: the form still works, just without keeping the answers.
+    }
+  }, [storageKey, draft]);
+  const forget = () => {
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      // Nothing to forget.
+    }
+  };
+  return [draft, setDraft, forget] as const;
+}
+
 function isEmpty(value: FormValue | undefined): boolean {
   return value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
 }
@@ -124,8 +169,7 @@ function isMissing(field: FormField, answers: Record<string, FormValue | undefin
 export function FormCard({ form, className }: { form: FormInfo; className?: string }) {
   const reply = useReplyForm();
   const { toast } = useToast();
-  const [answers, setAnswers] = useState(() => initialAnswers(form.fields));
-  const [step, setStep] = useState(0);
+  const [{ answers, step }, setDraft, forgetDraft] = useFormDraft(form);
   const stepRef = useRef<HTMLDivElement>(null);
   const moved = useRef(false);
   const visible = form.fields.filter((field) => fieldVisible(field, answers));
@@ -143,15 +187,18 @@ export function FormCard({ form, className }: { form: FormInfo; className?: stri
 
   const go = (to: number) => {
     moved.current = true;
-    setStep(Math.max(0, Math.min(to, visible.length - 1)));
+    const step = Math.max(0, Math.min(to, visible.length - 1));
+    setDraft((current) => ({ ...current, step }));
   };
 
-  const set = (key: string, value: FormValue | undefined) => setAnswers((current) => ({ ...current, [key]: value }));
+  const set = (key: string, value: FormValue | undefined) =>
+    setDraft((current) => ({ ...current, answers: { ...current.answers, [key]: value } }));
 
   const send = (answer: Record<string, FormValue> | null) =>
     reply.mutate(
       { form, answer },
       {
+        onSuccess: forgetDraft,
         onError: (error) =>
           toast({ title: 'Couldn’t answer', description: cleanAssistantError(error), variant: 'destructive' }),
       },
@@ -361,7 +408,7 @@ function FormFieldInput({
           )}
         </RadioGroup>
         {other && (
-          <Input
+          <GrowingInput
             aria-label={`${label}: something else`}
             value={value}
             onChange={(e) => onChange(e.target.value)}
@@ -372,29 +419,69 @@ function FormFieldInput({
     );
   }
 
-  const numeric = field.type === 'number' || field.type === 'integer';
+  const labelled = (
+    <Label htmlFor={id}>
+      {label}
+      {field.required && <span className="text-destructive"> *</span>}
+    </Label>
+  );
+  const describedBy = field.description ? `${id}-description` : undefined;
+
+  if (field.type === 'string') {
+    return (
+      <div className="space-y-1.5">
+        {labelled}
+        {description}
+        <GrowingInput
+          id={id}
+          placeholder={field.placeholder}
+          value={typeof value === 'string' ? value : ''}
+          aria-describedby={describedBy}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>
-        {label}
-        {field.required && <span className="text-destructive"> *</span>}
-      </Label>
+      {labelled}
       {description}
       <Input
         id={id}
-        type={numeric ? 'number' : 'text'}
+        type="number"
         step={field.type === 'integer' ? 1 : undefined}
-        min={numeric ? field.minimum : undefined}
-        max={numeric ? field.maximum : undefined}
-        placeholder={field.type === 'string' ? field.placeholder : undefined}
+        min={field.minimum}
+        max={field.maximum}
         value={value === undefined ? '' : String(value)}
-        aria-describedby={field.description ? `${id}-description` : undefined}
+        aria-describedby={describedBy}
         onChange={(event) => {
           const raw = event.target.value;
-          if (!numeric) onChange(raw);
-          else onChange(raw === '' ? undefined : Number(raw));
+          onChange(raw === '' ? undefined : Number(raw));
         }}
       />
     </div>
+  );
+}
+
+/**
+ * A text answer: one line to start with, growing as it's written, like the
+ * composer. Enter goes on as it would in a one-line field, and Shift+Enter
+ * starts a new line.
+ */
+function GrowingInput({ className, onKeyDown, ...props }: ComponentProps<'textarea'>) {
+  return (
+    <Textarea
+      rows={1}
+      className={cn('max-h-60 min-h-9 resize-none py-1.5', className)}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          event.currentTarget.form?.requestSubmit();
+        }
+      }}
+      {...props}
+    />
   );
 }
