@@ -483,6 +483,42 @@ export function worktreeMainCheckout(gitFile: string): string | null {
   return match ? match[1] : null;
 }
 
+/** Where web projects usually keep a favicon, best first. */
+export const PROJECT_ICON_PATHS = [
+  'public/favicon.svg',
+  'public/favicon.png',
+  'public/favicon.ico',
+  'public/favicon/favicon.ico',
+  'public/icon.svg',
+  'static/favicon.svg',
+  'static/favicon.png',
+  'static/favicon.ico',
+  'src/app/favicon.ico',
+  'app/favicon.ico',
+  'favicon.svg',
+  'favicon.ico',
+];
+
+/**
+ * The local icons an `index.html` links (`<link rel="icon" href="/x.svg">`),
+ * as paths relative to the project: each is looked up in `public/`, where
+ * Vite serves it from, and then beside the page. Remote
+ * icons are left out; the list never goes to the network.
+ */
+export function linkedIconPaths(html: string): string[] {
+  const paths: string[] = [];
+  for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
+    const rel = /\brel\s*=\s*["']?([^"'>]+)/i.exec(tag)?.[1].toLowerCase().split(/\s+/);
+    if (!rel?.includes('icon')) continue;
+    const href = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+    const url = (href?.[1] ?? href?.[2] ?? href?.[3] ?? '').trim().replace(/[?#].*$/, '');
+    if (!url || /^[a-z][a-z\d+.-]*:|^\/\//i.test(url) || url.split('/').includes('..')) continue;
+    const path = url.replace(/^\.?\/+/, '');
+    if (path) paths.push(`public/${path}`, path);
+  }
+  return paths;
+}
+
 /** What a session is called before the server has titled it. */
 export function sessionTitle(session: Pick<SessionInfo, 'title'>): string {
   return session.title?.trim() || 'New conversation';

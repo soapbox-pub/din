@@ -13,9 +13,11 @@ import {
   type PermissionDecision,
   type PermissionRequest,
   type PromptAttachment,
+  linkedIconPaths,
+  PROJECT_ICON_PATHS,
   worktreeMainCheckout,
 } from '@/lib/assistant';
-import { getFsBridge } from '@/lib/fs';
+import { getFsBridge, localFileUrl } from '@/lib/fs';
 import { useAppContext } from '@/hooks/useAppContext';
 
 const STATUS_KEY = ['assistant', 'status'] as const;
@@ -350,6 +352,34 @@ export function useMainCheckouts(directories: string[]): Map<string, string> {
     })),
     combine: (results) =>
       new Map(directories.flatMap((directory, i) => (results[i].data ? [[directory, results[i].data] as const] : []))),
+  });
+}
+
+/**
+ * For each project folder with a favicon, a URL for it: the icon its
+ * `index.html` links, else the first of the usual places that has one.
+ * Folders without one are left out.
+ */
+export function useProjectIcons(roots: string[]): Map<string, string> {
+  const fs = getFsBridge();
+  return useQueries({
+    queries: roots.map((root) => ({
+      queryKey: ['fs', 'project-icon', root],
+      queryFn: async () => {
+        const dir = root.replace(/\/+$/, '');
+        const page = await fs!.readFile(`${dir}/index.html`, 65536).catch(() => null);
+        const linked = page ? linkedIconPaths(new TextDecoder().decode(page.data)) : [];
+        for (const path of [...new Set([...linked, ...PROJECT_ICON_PATHS])]) {
+          const stat = await fs!.stat(`${dir}/${path}`).catch(() => null);
+          if (stat?.kind === 'file' && stat.size > 0) return localFileUrl(`${dir}/${path}`);
+        }
+        return null;
+      },
+      enabled: fs !== undefined,
+      staleTime: Infinity,
+    })),
+    combine: (results) =>
+      new Map(roots.flatMap((root, i) => (results[i].data ? [[root, results[i].data] as const] : []))),
   });
 }
 

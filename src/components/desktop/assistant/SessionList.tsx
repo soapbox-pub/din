@@ -17,6 +17,7 @@ import {
   useHomeDirectory,
   useMainCheckouts,
   usePendingRequests,
+  useProjectIcons,
 } from '@/hooks/useAssistant';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { directoryName, relativeTime, sessionTitle, tildify, type SessionInfo } from '@/lib/assistant';
@@ -111,6 +112,7 @@ export function SessionList({
   );
 
   const projects = groupByProject(listed, mains, home);
+  const icons = useProjectIcons([...new Set(projects.map((p) => p.root))]);
   const projectOf = new Map(projects.flatMap((p) => p.sessions.map((s) => [s.id, p] as const)));
   const needsYou = listed.filter((s) => waiting.has(s.id));
 
@@ -257,6 +259,7 @@ export function SessionList({
                             className={cn('size-3.5 shrink-0 motion-safe:transition-transform', open && 'rotate-90')}
                             aria-hidden
                           />
+                          {icons.has(project.root) && <ProjectIcon src={icons.get(project.root)!} />}
                           <span className="truncate">{project.label}</span>
                         </button>
                       </ContextMenuTrigger>
@@ -310,6 +313,22 @@ export function SessionList({
         onDeleted={() => deleting && onDeleted(deleting.id)}
       />
     </nav>
+  );
+}
+
+/** A project's favicon, small enough to sit in the header's line; gone if it doesn't load. */
+function ProjectIcon({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden
+      draggable={false}
+      onError={() => setFailed(true)}
+      className="size-3.5 shrink-0 rounded-sm object-contain"
+    />
   );
 }
 
