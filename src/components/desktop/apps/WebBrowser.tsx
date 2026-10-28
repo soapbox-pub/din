@@ -2768,6 +2768,10 @@ function TabButton({
           // which is pinned so it doesn't go away by accident.
           if (e.button === 1 && !tab.pinned) onClose(widthOf(e.currentTarget));
         }}
+        onMouseUp={(e) => {
+          // No primary-selection paste into whatever takes focus next.
+          if (e.button === 1) e.preventDefault();
+        }}
         title={label}
         style={!tab.pinned && lockedWidth !== null ? { flex: `0 0 ${lockedWidth}px` } : undefined}
         className={cn(
@@ -3107,6 +3111,10 @@ function TreeTabRow({
         onAuxClick={(e) => {
           // Middle-click closes, like every browser.
           if (e.button === 1) onClose();
+        }}
+        onMouseUp={(e) => {
+          // No primary-selection paste into whatever takes focus next.
+          if (e.button === 1) e.preventDefault();
         }}
         onDragStart={(e) => {
           e.dataTransfer.effectAllowed = 'move';

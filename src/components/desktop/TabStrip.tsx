@@ -211,6 +211,12 @@ function TabButton({
         // Middle-click closes, like every browser.
         if (e.button === 1) onClose(widthOf(e.currentTarget));
       }}
+      onMouseUp={(e) => {
+        // Linux pastes the primary selection on middle-button release, into
+        // whatever has focus by then - the next tab's composer, once this one
+        // has closed.
+        if (e.button === 1) e.preventDefault();
+      }}
       title={tab.title}
       style={lockedWidth !== null ? { flex: `0 0 ${lockedWidth}px` } : undefined}
       className={cn(
