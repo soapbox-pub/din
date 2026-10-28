@@ -105,7 +105,7 @@ import {
   saveBrowserWindow,
   type SavedWindow,
 } from '@/lib/browserSession';
-import { TabContextMenu } from '@/components/desktop/TabContextMenu';
+import { TabContextMenu } from '@/shared/TabContextMenu';
 import {
   ContextMenu,
   ContextMenuContent,

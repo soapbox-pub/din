@@ -9,7 +9,26 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import type { TabTransfer } from '@/hooks/useTabTransfer';
+import type { DragPoint, TearOff } from '@/hooks/useDragReorder';
+
+/**
+ * Moving a strip's tabs to other windows of its app: what the desktop's
+ * useTabTransfer gives its tab strips. The strip passes `tearOff` to
+ * useDragReorder and puts `setList` (a callback ref) on its tablist; the
+ * context menu offers the moves.
+ */
+export interface TabTransfer {
+  setList: (el: HTMLDivElement | null) => void;
+  tearOff: TearOff;
+  /** Whether tabs can move at all. */
+  enabled: boolean;
+  /** Whether a tab can leave for a new window (not a window's only tab). */
+  canDetach: boolean;
+  moveToNewWindow: (id: string, point?: DragPoint) => void;
+  moveToWindow: (id: string, windowId: string, index?: number) => void;
+  /** The app's other windows a tab could move to. */
+  otherWindows: () => { windowId: string; title: string }[];
+}
 
 /**
  * A tab's right-click menu: open a new tab or reopen a closed one, app-specific
@@ -36,7 +55,8 @@ export function TabContextMenu({
   children,
 }: {
   tabId: string;
-  transfer: TabTransfer;
+  /** Offer moving the tab to other windows. */
+  transfer?: TabTransfer;
   onClose: () => void;
   onNew?: () => void;
   newLabel?: string;
@@ -79,7 +99,7 @@ export function TabContextMenu({
             <ContextMenuSeparator />
           </>
         )}
-        {transfer.enabled && (
+        {transfer?.enabled && (
           <>
             <ContextMenuItem
               disabled={!transfer.canDetach}

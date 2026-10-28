@@ -121,7 +121,7 @@ Designs should be polished and production-ready. Concrete rules:
 
 Din is a desktop, and desktop users right-click. **Don't neglect the context menu.** Anything a user can act on (list rows, sidebar entries, cards, tiles, tabs, files, conversations, items in a playlist or history) should open a right-click menu with the same actions its ⋯ button, toolbar, or hover buttons offer. If you add a ⋯ (`MoreHorizontal`) menu or hover-only actions to an item, add the matching right-click menu in the same change, and when building a new list or app, look for the places a user would right-click and give them something there.
 
-- Use `ContextMenu` from `@/components/ui/context-menu` with `<ContextMenuTrigger asChild>` around the existing element (`src/components/desktop/TabContextMenu.tsx` and `src/components/desktop/apps/files/Sidebar.tsx` are good models). A component used as the trigger must spread its extra props and accept `ref` onto its root.
+- Use `ContextMenu` from `@/components/ui/context-menu` with `<ContextMenuTrigger asChild>` around the existing element (`src/shared/TabContextMenu.tsx` and `src/components/desktop/apps/files/Sidebar.tsx` are good models). A component used as the trigger must spread its extra props and accept `ref` onto its root.
 - Mirror the ⋯ menu's items, labels, icons, and order, and destructive items keep `variant="destructive"` and their confirmation. Share the action code between both menus instead of duplicating it.
 - Right-click on a row acts on that row, not on whatever is selected, unless the row is part of a multi-selection.
 - An item that starts inline editing (Rename) must stop the closing menu from returning focus to the trigger (`onCloseAutoFocus` → `preventDefault()`), or the field blurs and saves immediately.

@@ -1,5 +1,4 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import type { WindowChrome } from '@/contexts/WindowChromeContext';
 
 /** Pointer travel before a press turns into a drag, in CSS pixels. */
 const DRAG_THRESHOLD = 5;
@@ -56,8 +55,8 @@ interface Drag {
   lastX: number;
   lastY: number;
   active: boolean;
-  /** The drag is moving the window through its chrome (see `moveWindow`). */
-  window: WindowChrome | null;
+  /** The drag is moving the window (see `moveWindow`). */
+  window: WindowMoveGesture | null;
   /** A copy of the item following the pointer while it's torn off the row. */
   ghost: HTMLElement | null;
   /**
@@ -72,6 +71,18 @@ interface Drag {
 export interface DragPoint {
   x: number;
   y: number;
+}
+
+/**
+ * Moving the item's window instead of the item: the desktop's window chrome,
+ * or an app's `din.window.beginMove`. `beginMove` gets the press point and the
+ * pointer event that crossed the drag threshold, and says whether the window
+ * took the gesture; `gestureMove` and `gestureEnd` follow it from then on.
+ */
+export interface WindowMoveGesture {
+  beginMove(point: { clientX: number; clientY: number }, event: PointerEvent): boolean;
+  gestureMove(point: { clientX: number; clientY: number }): void;
+  gestureEnd(): void;
 }
 
 /** Dragging items off the row (tabs into other windows). */
@@ -158,7 +169,7 @@ export function useDragReorder({
   relayout?: () => void;
   tearOff?: TearOff;
   /** Drags move this window instead of the item. */
-  moveWindow?: WindowChrome;
+  moveWindow?: WindowMoveGesture;
 }) {
   const elements = useRef(new Map<string, HTMLElement>());
   const drag = useRef<Drag | null>(null);
@@ -316,7 +327,7 @@ export function useDragReorder({
         if (travel < DRAG_THRESHOLD) return;
         d.active = true;
         target.setPointerCapture(d.pointerId);
-        if (moveWindow?.beginMove({ clientX: d.startX, clientY: d.startY })) {
+        if (moveWindow?.beginMove({ clientX: d.startX, clientY: d.startY }, ev)) {
           d.window = moveWindow;
         } else {
           el.dataset.reorderDragging = '';

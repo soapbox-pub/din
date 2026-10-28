@@ -12,6 +12,9 @@ import {
   tabDropTargetFor,
   tabDropTargets,
 } from '@/lib/tabTransfer';
+import type { TabTransfer } from '@/shared/TabContextMenu';
+
+export type { TabTransfer };
 
 /** What an app tells its tab strip so tabs can move between its windows. */
 export interface TabTransferOptions {
@@ -48,7 +51,7 @@ function workspaceRect(list: HTMLElement | null): DOMRect | undefined {
  * context menu. The strip passes `tearOff` to useDragReorder and puts
  * `setList` (a callback ref) on its tablist.
  */
-export function useTabTransfer(options: TabTransferOptions | undefined, tabCount: number) {
+export function useTabTransfer(options: TabTransferOptions | undefined, tabCount: number): TabTransfer {
   const { open, move, focus } = useWindowActions();
   // The tablist, set through the returned callback ref.
   const [list, setList] = useState<HTMLDivElement | null>(null);
@@ -130,5 +133,3 @@ export function useTabTransfer(options: TabTransferOptions | undefined, tabCount
 
   return { setList, tearOff, enabled, canDetach: tabCount > 1, moveToNewWindow, moveToWindow, otherWindows };
 }
-
-export type TabTransfer = ReturnType<typeof useTabTransfer>;
