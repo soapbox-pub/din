@@ -53,6 +53,8 @@ import { cn } from '@/lib/utils';
 import { findMatches, matchesAll, parseQuery } from '@/lib/settingsSearch';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { AppComponentProps } from '@/lib/apps';
+import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
+import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
 import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
 import {
   cleanBluetoothBridgeError,
@@ -397,10 +399,25 @@ function paramSection(params: AppComponentProps['params']): SectionId | undefine
   return typeof s === 'string' && SECTION_IDS.has(s) ? (s as SectionId) : undefined;
 }
 
+const SIDEBAR_WIDTH_KEY = 'din.settings.sidebar-width';
+const DEFAULT_SIDEBAR_WIDTH = 208;
+const MIN_SIDEBAR_WIDTH = 160;
+const MAX_SIDEBAR_WIDTH = 360;
+
+const clampSidebarWidth = (width: number) => Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
+
+function loadSidebarWidth(): number {
+  const width = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  return width ? clampSidebarWidth(width) : DEFAULT_SIDEBAR_WIDTH;
+}
+
 export function Settings({ params }: AppComponentProps) {
+  useOwnWindowHeader();
   const [section, setSection] = useState<SectionId>(
     () => paramSection(params) ?? 'wifi',
   );
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  useEffect(() => localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth)), [sidebarWidth]);
   // Search: once the query has two letters or digits, the pane shows every
   // matching section, one after the other, with the matches highlighted.
   // Only matching sections mount, since opening one can start work (a
@@ -483,10 +500,38 @@ export function Settings({ params }: AppComponentProps) {
       <AboutSection />
     );
 
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => setSidebarWidth(clampSidebarWidth(startWidth + ev.clientX - startX));
+    const up = () => {
+      target.removeEventListener('pointermove', move);
+      target.removeEventListener('pointerup', up);
+      target.removeEventListener('pointercancel', up);
+    };
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', up);
+    target.addEventListener('pointercancel', up);
+  };
+
   return (
     <div className="flex h-full w-full" onKeyDownCapture={onKeyDownCapture}>
       {/* Section sidebar */}
-      <div className="flex w-44 shrink-0 flex-col gap-2 border-r border-border/60 bg-background/30 p-2">
+      <div
+        style={{ width: sidebarWidth }}
+        className="flex shrink-0 flex-col gap-2 border-r border-border/60 bg-muted/30 px-2 pb-2"
+      >
+        {/* The window's title bar runs across the sidebar's top, so it drags the window too. */}
+        <WindowDragRegion className="-mx-2 -mb-2 flex h-9 shrink-0 items-center gap-2 px-3">
+          <img src="/icons/apps/settings.png" alt="" aria-hidden draggable={false} className="size-4 shrink-0 object-contain" />
+          <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
+            Settings
+          </span>
+        </WindowDragRegion>
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -547,22 +592,46 @@ export function Settings({ params }: AppComponentProps) {
           })}
         </nav>
       </div>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the sidebar"
+        aria-valuenow={sidebarWidth}
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_SIDEBAR_WIDTH}
+        tabIndex={0}
+        title="Drag to resize, double-click to reset"
+        onPointerDown={startResize}
+        onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft') setSidebarWidth((w) => clampSidebarWidth(w - 16));
+          else if (e.key === 'ArrowRight') setSidebarWidth((w) => clampSidebarWidth(w + 16));
+          else return;
+          e.preventDefault();
+        }}
+        className="z-30 -mx-1 w-2 shrink-0 cursor-col-resize touch-none hover:bg-ring/40 focus-visible:bg-ring/60 focus-visible:outline-none"
+      />
 
-      <div ref={paneRef} className="min-w-0 flex-1 overflow-y-auto">
-        {!searching ? (
-          renderSection(section)
-        ) : results.length > 0 ? (
-          results.map((s) => (
-            <div key={s.id} className="border-b border-border/40 last:border-b-0">
-              {renderSection(s.id)}
+      <main className="flex min-w-0 flex-1 flex-col">
+        <WindowDragRegion className="flex h-9 shrink-0 items-center justify-end pl-2 pr-3">
+          <WindowControls />
+        </WindowDragRegion>
+        <div ref={paneRef} className="min-h-0 flex-1 overflow-y-auto">
+          {!searching ? (
+            renderSection(section)
+          ) : results.length > 0 ? (
+            results.map((s) => (
+              <div key={s.id} className="border-b border-border/40 last:border-b-0">
+                {renderSection(s.id)}
+              </div>
+            ))
+          ) : (
+            <div className="mx-auto max-w-2xl p-4">
+              <FallbackCard icon={Search}>No settings match “{query.trim()}”.</FallbackCard>
             </div>
-          ))
-        ) : (
-          <div className="mx-auto max-w-2xl p-4">
-            <FallbackCard icon={Search}>No settings match “{query.trim()}”.</FallbackCard>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
