@@ -4072,6 +4072,20 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
       callback(false);
       return;
     }
+    // A nostr: link (NIP-21) opens in the app the user chose for its kind,
+    // or as a preview in a tab beside the page (src/hooks/useNostrLinks.ts).
+    if (
+      permission === 'openExternal' &&
+      prompts &&
+      'externalURL' in details &&
+      typeof details.externalURL === 'string' &&
+      details.externalURL.length <= 8192 &&
+      /^nostr:/i.test(details.externalURL)
+    ) {
+      sendToShell('crx:openTab', { url: details.externalURL, openerWcId: _contents.id });
+      callback(false);
+      return;
+    }
     if (ALWAYS_ALLOWED_PERMISSIONS.has(permission)) {
       callback(true);
       return;

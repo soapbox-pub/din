@@ -55,6 +55,8 @@ export interface NativeApp {
   keywords: string[];
   /** Whether it runs in a terminal (Terminal=true), i.e. in Din's Terminal. */
   terminal: boolean;
+  /** URL schemes it opens (MimeType=x-scheme-handler/…), e.g. ["nostr"]. */
+  schemes: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +80,14 @@ interface DesktopEntry {
   cwd: string | null;
   /** Variables set by an `env NAME=value ...` Exec prefix (Wine's entries). */
   env: Record<string, string>;
+  /** Where in argv a URL goes (Exec's %u or %U), or null when it takes none. */
+  urlIndex: number | null;
+  /** URL schemes it opens, from MimeType; empty unless it takes a URL. */
+  schemes: string[];
 }
+
+/** Stands in argv for Exec's %u / %U until a URL is given. */
+const URL_ARG = '\u0000url';
 
 /** `$XDG_DATA_HOME`, per the base-directory spec. */
 function dataHome(): string {
@@ -142,7 +151,9 @@ function unescapeValue(value: string): string {
  * field codes (%f, %U, ...).
  *
  * Field codes stand for files or URLs to open; Din launches apps with no
- * arguments, so they're simply removed - except %% which is a literal '%'.
+ * files, so they're simply removed - except %% which is a literal '%', and
+ * a %u or %U argument of its own, which becomes URL_ARG so a link can be
+ * passed there.
  */
 function parseExec(exec: string): string[] {
   const argv: string[] = [];
@@ -187,7 +198,11 @@ function parseExec(exec: string): string[] {
   if (started) argv.push(current);
 
   return argv
-    .map((arg) => arg.replace(/%(.)/g, (_match, code: string) => (code === '%' ? '%' : '')))
+    .map((arg) =>
+      arg === '%u' || arg === '%U'
+        ? URL_ARG
+        : arg.replace(/%(.)/g, (_match, code: string) => (code === '%' ? '%' : '')),
+    )
     .filter((arg, index) => arg.length > 0 || index === 0);
 }
 
@@ -255,13 +270,23 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
     }
     argv = argv.slice(i);
   }
+  const urlAt = argv.indexOf(URL_ARG);
+  argv = argv.filter((arg) => arg !== URL_ARG);
   if (argv.length === 0 || !argv[0]) return null;
+  const urlIndex = urlAt > 0 ? urlAt : null;
 
   const list = (key: string): string[] =>
     (get(key) ?? '')
       .split(';')
       .map((item) => item.trim())
       .filter(Boolean);
+  const schemes =
+    urlIndex === null
+      ? []
+      : list('MimeType')
+          .filter((type) => type.toLowerCase().startsWith('x-scheme-handler/'))
+          .map((type) => type.slice('x-scheme-handler/'.length).toLowerCase())
+          .filter((scheme) => /^[a-z][a-z0-9+.-]*$/.test(scheme));
 
   return {
     id,
@@ -275,6 +300,8 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
     startupWmClass: values.get('StartupWMClass') ?? null,
     cwd: values.get('Path') ?? null,
     env,
+    urlIndex,
+    schemes,
   };
 }
 
@@ -720,6 +747,7 @@ async function listApps(): Promise<NativeApp[]> {
       categories: entry.categories,
       keywords: entry.keywords,
       terminal: entry.terminal,
+      schemes: entry.schemes,
     });
     if (apps.length % BATCH === 0) await breathe();
   }
@@ -754,15 +782,23 @@ function entryCwd(entry: DesktopEntry): string {
  * Launch an app by registry id onto Din's embedded display. Throws when the
  * id is unknown, so the shell can surface a real error instead of a silently
  * dead click. Terminal apps aren't launched here: the shell opens them in
- * its Terminal (see terminalAppCommand).
+ * its Terminal (see terminalAppCommand). A `uri` is passed where the entry's
+ * Exec takes one, and only for a scheme the entry says it opens.
  */
-async function launch(appId: string): Promise<void> {
+async function launch(appId: string, uri?: string): Promise<void> {
   const entry = await entryFor(appId);
   if (entry.terminal) throw new Error(`${entry.name} runs in the Terminal`);
+  const scheme = uri?.slice(0, uri.indexOf(':')).toLowerCase();
+  if (uri !== undefined && (entry.urlIndex === null || !scheme || !entry.schemes.includes(scheme))) {
+    throw new Error(`${entry.name} doesn't open ${scheme ?? ''}: links`);
+  }
   const display = await embeddedDisplay();
   if (!display) throw new Error('The embedded display is unavailable');
 
-  const argv = entry.argv;
+  const argv =
+    uri !== undefined && entry.urlIndex !== null
+      ? [...entry.argv.slice(0, entry.urlIndex), uri, ...entry.argv.slice(entry.urlIndex)]
+      : entry.argv;
   const env = await appEnvironment(display);
   if (isWineCommand(argv[0])) Object.assign(env, wineEnvironment());
   Object.assign(env, entry.env);
@@ -978,10 +1014,16 @@ export function registerNativeAppHandlers(options: {
     return { available, apps: available ? await listApps() : [] };
   });
 
-  ipcMain.handle('native-apps:launch', async (event, appId) => {
+  ipcMain.handle('native-apps:launch', async (event, appId, uri) => {
     assertShellSender(event);
     if (typeof appId !== 'string') throw new Error('An app id is required');
-    await launch(appId);
+    if (
+      uri !== undefined &&
+      (typeof uri !== 'string' || uri.length > 8192 || !/^[a-z][a-z0-9+.-]*:[\x21-\x7e]+$/i.test(uri))
+    ) {
+      throw new Error('Not a link');
+    }
+    await launch(appId, uri);
   });
 
   ipcMain.handle('native-apps:run-windows-program', async (event, file) => {

@@ -13,6 +13,11 @@ import { Button } from '@/components/ui/button';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { useAppContext } from '@/hooks/useAppContext';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
+import {
+  COLLECT_PROTOCOL_HANDLERS_JS,
+  parseNostrProtocolHandler,
+  type NostrHandler,
+} from '@/lib/nostrUri';
 import { shownUrl } from '@/lib/tor';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
 
@@ -81,6 +86,11 @@ export interface BrowserViewHandle {
    * Webview only; the iframe fallback resolves to an empty list.
    */
   collectIcons: () => Promise<IconCandidate[]>;
+  /**
+   * How the page's web app manifest says the site opens `nostr:` links, or
+   * null. Not yet checked against the site's origin. Webview only.
+   */
+  collectNostrHandler: () => Promise<NostrHandler | null>;
   /**
    * The page's current selection text (for pre-filling the find bar).
    * Webview only; the iframe fallback resolves to an empty string.
@@ -243,6 +253,7 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       focus: () => iframeRef.current?.focus(),
       // The iframe fallback can't reach into cross-origin guest DOM.
       collectIcons: () => Promise.resolve([]),
+      collectNostrHandler: () => Promise.resolve(null),
       getSelectionText: () => Promise.resolve(''),
     }), [onLoadStart]);
 
@@ -363,6 +374,18 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           return Array.isArray(result) ? (result as IconCandidate[]) : [];
         } catch {
           return [];
+        }
+      },
+      collectNostrHandler: async () => {
+        const el = webviewRef.current;
+        if (!el) return null;
+        try {
+          const result: unknown = await el.executeJavaScript(COLLECT_PROTOCOL_HANDLERS_JS);
+          if (typeof result !== 'object' || result === null) return null;
+          const { base, manifest } = result as { base?: unknown; manifest?: unknown };
+          return typeof base === 'string' ? parseNostrProtocolHandler(manifest, base) : null;
+        } catch {
+          return null;
         }
       },
       getSelectionText: async () => {

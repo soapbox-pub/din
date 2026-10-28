@@ -17,6 +17,7 @@ import {
 } from '@/lib/webApps';
 import { sanitizeImageUrl, sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
+import { normalizeNostrHandler } from '@/lib/nostrUri';
 import { useAppData } from '@/hooks/useAppData';
 import {
   canonicalHostOfUrl,
@@ -92,6 +93,8 @@ function webAppToDefinition(webApp: WebApp, favicon?: string, nsiteHost?: string
     // of spawning a duplicate. See WebAppFrame for the deep-link handling.
     singleInstance: true,
     web: true,
+    // Only a handler on the app's own origin: the window is pinned to it.
+    ...(webApp.nostr && sameOrigin(webApp.nostr.url, webApp.url) ? { nostr: webApp.nostr } : {}),
   };
 }
 
@@ -112,7 +115,14 @@ function nsiteAppToDefinition(entry: NsiteAppEntry, summary: NsiteSummary | unde
     icon: summary?.app?.icon ?? undefined,
     themeColor: summary?.app?.themeColor ?? undefined,
   }, summary?.app?.favicon ?? undefined, entry.host);
-  return { ...definition, web: false };
+  const handler = summary?.app?.nostr;
+  return {
+    ...definition,
+    web: false,
+    ...(handler
+      ? { nostr: { url: `${nsiteAppUrl(entry.host).slice(0, -1)}${handler.path}`, kinds: handler.kinds } }
+      : {}),
+  };
 }
 
 /** Hosts this session has already asked the store to install. */
@@ -145,6 +155,8 @@ function nativeAppToDefinition(app: NativeApp): AppDefinition {
     native: true,
     terminal: app.terminal,
     keywords: [...app.keywords, ...app.categories],
+    // Desktop entries can't say which kinds they show.
+    ...(app.schemes?.includes('nostr') && !app.terminal ? { nostr: { kinds: null } } : {}),
   };
 }
 
@@ -244,17 +256,19 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         requestInstall(host);
         return entry;
       },
-      installWebApp: ({ name, url, icon, themeColor }) => {
+      installWebApp: ({ name, url, icon, themeColor, nostr }) => {
         const safeUrl = sanitizeUrl(url);
         if (!safeUrl) return null;
         const safeIcon = icon ? (sanitizeImageUrl(icon) ?? undefined) : undefined;
         const safeThemeColor = normalizeThemeColor(themeColor) ?? undefined;
         const trimmedName = name.trim() || new URL(safeUrl).hostname;
+        const handler = normalizeNostrHandler(nostr);
         const webApp = createWebApp({
           name: trimmedName,
           url: safeUrl,
           icon: safeIcon,
           themeColor: safeThemeColor,
+          ...(handler && sameOrigin(handler.url, safeUrl) ? { nostr: handler } : {}),
         });
         setWebApps((prev) => [...prev, webApp]);
         return webApp;

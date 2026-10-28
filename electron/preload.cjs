@@ -714,10 +714,12 @@ expose('nativeApps', {
   list: () => ipcRenderer.invoke('native-apps:list'),
 
   /**
-   * Start an app by its registry id ("native:org.gnome.Calculator").
+   * Start an app by its registry id ("native:org.gnome.Calculator"),
+   * optionally with a link for it to open (one of its `schemes`).
    * @param {string} appId
+   * @param {string} [uri]
    */
-  launch: (appId) => ipcRenderer.invoke('native-apps:launch', appId),
+  launch: (appId, uri) => ipcRenderer.invoke('native-apps:launch', appId, uri),
 
   /**
    * The installed app a window belongs to, by owner pid and WM_CLASS.
@@ -2711,7 +2713,7 @@ expose('nsiteStore', {
   /**
    * Store how a site presents itself as an app.
    * @param {string} host
-   * @param {{ from: string, name: string | null, icon: string | null, favicon?: string | null, themeColor: string | null }} info
+   * @param {{ from: string, name: string | null, icon: string | null, favicon?: string | null, themeColor: string | null, nostr?: { path: string, kinds: number[] | null } | null }} info
    */
   setAppInfo: (host, info) => ipcRenderer.invoke('nsite:setAppInfo', host, info),
   /**

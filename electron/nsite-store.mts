@@ -88,6 +88,8 @@ export interface NsiteAppInfo {
   favicon?: string | null;
   /** `#rrggbb`. */
   themeColor: string | null;
+  /** How the site opens `nostr:` links: a path with `%s` for the URI, and the kinds it shows. */
+  nostr?: { path: string; kinds: number[] | null } | null;
 }
 
 interface SiteRecord {
@@ -406,7 +408,19 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
     typeof value.version === 'number' && Number.isInteger(value.version) && value.version > 0
       ? value.version
       : undefined;
-  return { from: value.from, ...(version ? { version } : {}), name, icon, favicon, themeColor };
+  const nostr = parseNostrHandler(value.nostr);
+  return { from: value.from, ...(version ? { version } : {}), name, icon, favicon, themeColor, nostr };
+}
+
+function parseNostrHandler(raw: unknown): NsiteAppInfo['nostr'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const { path, kinds } = raw as Record<string, unknown>;
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) return null;
+  if (path.length > 2048 || !path.includes('%s') || /[\s\\]/.test(path)) return null;
+  const valid = Array.isArray(kinds)
+    ? kinds.filter((k): k is number => Number.isInteger(k) && k >= 0 && k <= 65535).slice(0, 256)
+    : [];
+  return { path, kinds: valid.length > 0 ? valid : null };
 }
 
 function parseIconData(value: unknown): string | null {

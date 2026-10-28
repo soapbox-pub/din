@@ -162,6 +162,14 @@ export interface AppDefinition {
    * installed nsites, whose files Din holds, wear none.
    */
   web?: boolean;
+  /**
+   * The `nostr:` links the app opens (src/lib/nostrUri.ts): from its web app
+   * manifest's `protocol_handlers` for an installed web app or nsite, whose
+   * `url` (with `%s` for the URI) the app's window opens at, or from its
+   * desktop entry's `x-scheme-handler/nostr` for a native app, which is
+   * started with the URI and has no `url`.
+   */
+  nostr?: { url?: string; kinds: number[] | null };
 }
 
 /** All apps installed on the desktop, in launcher order. */

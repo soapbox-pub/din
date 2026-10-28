@@ -1,8 +1,10 @@
 import { useCallback } from 'react';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
+import { useNostrLinks } from '@/hooks/useNostrLinks';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { isNsiteUrl } from '@/lib/nsite';
+import { isNostrUri } from '@/lib/nostrUri';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
 
@@ -14,6 +16,9 @@ import { isWebviewAvailable } from '@/lib/isElectron';
  * it as a tab in the Web Browser app, launching a browser window first when
  * none is open.
  *
+ * A `nostr:` link opens in the default app for its kind, or else as a
+ * preview in the Web Browser, with buttons to open it in an app.
+ *
  * Outside the Electron shell (plain-browser build) the in-app browser can't
  * host webviews, so the link defers to the host browser via `window.open`.
  *
@@ -23,9 +28,19 @@ import { isWebviewAvailable } from '@/lib/isElectron';
 export function useOpenUrl(): (url: string) => void {
   const { open } = useWindowActions();
   const { findAppIdForUrl } = useInstalledApps();
+  const { openNostrUri } = useNostrLinks();
 
   return useCallback(
     (rawUrl: string) => {
+      // The preview is the browser's own page, so it works without webviews.
+      if (isNostrUri(rawUrl)) {
+        void openNostrUri(rawUrl, (uri) => {
+          if (!hasTabConsumer()) open('web-browser');
+          publishTabCommand({ type: 'open', url: uri });
+        });
+        return;
+      }
+
       const url = sanitizeNavigationUrl(rawUrl);
       if (!url) return;
 
@@ -53,6 +68,6 @@ export function useOpenUrl(): (url: string) => void {
       if (!hasTabConsumer()) open('web-browser');
       publishTabCommand({ type: 'open', url });
     },
-    [open, findAppIdForUrl],
+    [open, findAppIdForUrl, openNostrUri],
   );
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizeNostrHandler, type NostrHandler } from '@/lib/nostrUri';
 
 /**
  * User-installed web apps ("install this website as an app", like a PWA
@@ -23,6 +24,11 @@ export interface WebApp {
    * live page reports its own color.
    */
   themeColor?: string;
+  /**
+   * How the site opens `nostr:` links, from its manifest's
+   * `protocol_handlers` at install time. The URL is on the app's own origin.
+   */
+  nostr?: NostrHandler;
 }
 
 /** Zod schema for the stored `web-apps` list. */
@@ -33,6 +39,10 @@ export const WebAppsSchema: z.ZodType<WebApp[]> = z.array(
     url: z.string().url(),
     icon: z.string().url().optional(),
     themeColor: z.string().regex(/^#[0-9a-f]{6}$/).optional(),
+    nostr: z
+      .unknown()
+      .transform((value) => normalizeNostrHandler(value) ?? undefined)
+      .optional(),
   }),
 );
 

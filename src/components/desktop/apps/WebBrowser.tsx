@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  AtSign,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -147,6 +148,8 @@ import {
   InspectorToolbar,
   type DockMode,
 } from '@/components/desktop/apps/InspectorToolbar';
+import { NostrPage } from '@/components/desktop/apps/NostrPage';
+import { isNostrUri, type NostrHandler } from '@/lib/nostrUri';
 import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
 import { cleanPrintingError, printPage } from '@/lib/printing';
 
@@ -590,7 +593,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     const tab = tabsRef.current.find((t) => t.id === activeId);
     if (!tab) return;
     if (tab.url === '') focusAddress();
-    else if (tab.url !== PREFERENCES_URL) views.current.get(tab.id)?.focus();
+    else if (!isInternalUrl(tab.url)) views.current.get(tab.id)?.focus();
   }, [activeId, focusAddress]);
 
   /**
@@ -1203,7 +1206,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           break;
         }
         case 'open': {
-          if (!isAllowedTabUrl(command.url)) break;
+          // A nostr: link's preview is an internal page, but one a page may
+          // open: it only shows what the link names.
+          if (!isAllowedTabUrl(command.url) && !isNostrUri(command.url)) break;
           const existing = tabsRef.current;
           // When a page spawns the link (middle-click, target=_blank,
           // window.open) the command carries its opener's WebContents id;
@@ -1998,6 +2003,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           collectIcons={() =>
             views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
           }
+          collectNostrHandler={() =>
+            views.current.get(activeTab.id)?.collectNostrHandler() ?? Promise.resolve(null)
+          }
         />
 
         {/* One overflow menu gathers the browser's less-frequent *actions*:
@@ -2076,6 +2084,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             // Non-null only for the settings tab, where it both selects the
             // about:preferences overlay and supplies what it renders.
             preferences={tab.url === PREFERENCES_URL ? preferences : null}
+            nostrUri={isNostrUri(tab.url) ? tab.url : null}
             onNavigate={navigateTab}
             onOpenTab={openTabInBackground}
             onOpenWindow={isPrivate ? undefined : openInNewWindow}
@@ -3618,6 +3627,7 @@ const TabSurface = memo(function TabSurface({
   isNewTab,
   topSites: sites,
   preferences,
+  nostrUri,
   onNavigate: onNavigateToUrl,
   onOpenTab,
   onOpenWindow,
@@ -3655,6 +3665,8 @@ const TabSurface = memo(function TabSurface({
   topSites: TopSite[];
   /** Settings to render over the surface, or null for a non-settings tab. */
   preferences: PreferencesProps | null;
+  /** The nostr: link this tab previews, or null. */
+  nostrUri: string | null;
   /** Navigate this tab to a URL/search (from the new-tab page). */
   onNavigate: (id: string, raw: string) => void;
   /** Open a URL in a new background tab / a new window (from the new-tab page). */
@@ -3811,6 +3823,8 @@ const TabSurface = memo(function TabSurface({
       )}
       {/* about:preferences, over the same kind of parked blank surface. */}
       {preferences && <PreferencesPage {...preferences} />}
+      {/* A nostr: link's preview, the same way. */}
+      {nostrUri && <NostrPage uri={nostrUri} />}
       {/* Untrusted-TLS warning, over the failed page until the user decides. */}
       {certError && (
         <CertificateWarning
@@ -4162,7 +4176,7 @@ function tabLabel(tab: Tab): string {
  * one (nothing loads), so they wear the icon of the thing they are.
  */
 function TabGlyph({ tab, className }: { tab: Tab; className?: string }) {
-  const Icon = tab.url === PREFERENCES_URL ? Settings : Globe;
+  const Icon = tab.url === PREFERENCES_URL ? Settings : isNostrUri(tab.url) ? AtSign : Globe;
   return <Icon className={className} aria-hidden />;
 }
 
@@ -4527,12 +4541,14 @@ function InstallSiteButton({
   favicon,
   themeColor,
   collectIcons,
+  collectNostrHandler,
 }: {
   url: string;
   pageTitle: string | null;
   favicon: string | null;
   themeColor: string | null;
   collectIcons: () => Promise<IconCandidate[]>;
+  collectNostrHandler: () => Promise<NostrHandler | null>;
 }) {
   const { installWebApp, findWebAppByUrl, installNsiteApp, findNsiteApp, getApp } =
     useInstalledApps();
@@ -4550,6 +4566,8 @@ function InstallSiteButton({
   // filled in asynchronously when the popover opens. Null until resolved, so
   // the preview shows the reported-favicon baseline in the meantime.
   const [resolvedIcon, setResolvedIcon] = useState<string | null>(null);
+  // How the site opens nostr: links, read from its manifest with the icons.
+  const [nostrHandler, setNostrHandler] = useState<NostrHandler | null>(null);
 
   const site = useMemo(() => {
     if (nsiteHost) {
@@ -4611,6 +4629,12 @@ function InstallSiteButton({
         .catch(() => {
           /* Leave the baseline icon in place. */
         });
+      setNostrHandler(null);
+      collectNostrHandler()
+        .then(setNostrHandler)
+        .catch(() => {
+          /* Installed without one. */
+        });
     }
   };
 
@@ -4637,6 +4661,7 @@ function InstallSiteButton({
       url: site.url,
       icon: effectiveIcon,
       themeColor: normalizeThemeColor(themeColor) ?? undefined,
+      nostr: nostrHandler ?? undefined,
     });
     if (!webApp) return;
     setOpen(false);

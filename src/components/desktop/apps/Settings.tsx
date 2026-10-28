@@ -160,6 +160,7 @@ import {
 } from '@/hooks/useSystemCursor';
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
+import { NostrLinkSettings } from '@/components/desktop/NostrLinkSettings';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -320,7 +321,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     group: 'Account',
     name: 'Nostr & Storage',
     icon: Cloud,
-    search: ['Encrypted sync', 'Relays', 'Blossom servers', 'sync', 'backup', 'cloud', 'media', 'uploads', 'NIP-65'],
+    search: ['Encrypted sync', 'Relays', 'Blossom servers', 'Nostr links', 'Ask every time', 'sync', 'backup', 'cloud', 'media', 'uploads', 'NIP-65', 'NIP-21', 'default apps', 'open with'],
   },
   {
     id: 'connected',
@@ -3429,6 +3430,10 @@ function NostrStorageSection() {
           </p>
         </div>
         <BlossomServerManager />
+      </div>
+
+      <div className="border-t border-border/60 pt-4">
+        <NostrLinkSettings />
       </div>
     </SectionShell>
   );

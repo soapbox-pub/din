@@ -38,6 +38,8 @@ export interface NativeApp {
   keywords: string[];
   /** Whether it runs in a terminal (htop): it opens in Din's Terminal. */
   terminal?: boolean;
+  /** URL schemes it opens (its desktop entry's x-scheme-handler types), e.g. ["nostr"]. */
+  schemes?: string[];
 }
 
 /** What `list()` reports. */
@@ -50,8 +52,8 @@ export interface NativeAppList {
 export interface NativeAppsBridge {
   /** Installed desktop entries, with icons inlined as data URLs. */
   list(): Promise<NativeAppList>;
-  /** Start an app by its registry id. */
-  launch(appId: string): Promise<void>;
+  /** Start an app by its registry id, with a link for it to open (one of its `schemes`). */
+  launch(appId: string, uri?: string): Promise<void>;
   /**
    * The installed app a window belongs to, by its owner's pid and WM_CLASS,
    * or null when it can't be matched.
@@ -101,9 +103,9 @@ export function getNativeAppsBridge(): NativeAppsBridge | undefined {
  * (uninstalled since the last scan) shouldn't take down the click handler
  * that asked for it.
  */
-export function launchNativeApp(appId: string): void {
+export function launchNativeApp(appId: string, uri?: string): void {
   const bridge = getNativeAppsBridge();
   if (!bridge) return;
   startLaunching(appId);
-  void bridge.launch(appId).catch(() => endLaunching(appId));
+  void bridge.launch(appId, uri).catch(() => endLaunching(appId));
 }

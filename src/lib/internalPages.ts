@@ -10,15 +10,24 @@
  * web page or extension must not be able to steer a tab into the browser's
  * own settings. Only the chrome's own
  * navigation path — the address bar and the browser menu — can open one.
+ *
+ * A `nostr:` URI (src/lib/nostrUri.ts) is one too: a preview of what it names,
+ * with buttons to open it in an app. Pages may open those, since they show
+ * nothing but what the link points at.
  */
+
+import { parseNostrUri } from '@/lib/nostrUri';
 
 /** The settings page. */
 export const PREFERENCES_URL = 'about:preferences';
 
-/** Every internal page, by URL. */
+/** Every fixed internal page, by URL. */
 const INTERNAL_PAGES: Record<string, { title: string }> = {
   [PREFERENCES_URL]: { title: 'Settings' },
 };
+
+/** Tab labels for a `nostr:` page, by what it names. */
+const NOSTR_TITLES = { profile: 'Nostr profile', event: 'Nostr event', address: 'Nostr event' } as const;
 
 /**
  * Canonicalize user-typed input into an internal page URL, or `null` if it
@@ -26,13 +35,15 @@ const INTERNAL_PAGES: Record<string, { title: string }> = {
  * trailing slash, since that's what an address bar tends to produce.
  */
 export function normalizeInternalUrl(input: string): string | null {
+  const nostr = parseNostrUri(input);
+  if (nostr) return nostr.uri;
   const candidate = input.trim().toLowerCase().replace(/\/+$/, '');
   return candidate in INTERNAL_PAGES ? candidate : null;
 }
 
 /** Whether a committed tab URL is an internal page. */
 export function isInternalUrl(url: string): boolean {
-  return url in INTERNAL_PAGES;
+  return url in INTERNAL_PAGES || parseNostrUri(url) !== null;
 }
 
 /**
@@ -41,5 +52,7 @@ export function isInternalUrl(url: string): boolean {
  * fall through to the generic "New tab".
  */
 export function internalPageTitle(url: string): string | null {
+  const nostr = parseNostrUri(url);
+  if (nostr) return NOSTR_TITLES[nostr.target.type];
   return INTERNAL_PAGES[url]?.title ?? null;
 }

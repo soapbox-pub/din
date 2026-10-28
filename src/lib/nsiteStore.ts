@@ -26,6 +26,11 @@ export interface NsiteAppInfo {
   favicon?: string | null;
   /** `#rrggbb`. */
   themeColor: string | null;
+  /**
+   * How the site opens `nostr:` links (its manifest's `protocol_handlers`):
+   * a path on the site, with `%s` where the URI goes. Null when it doesn't.
+   */
+  nostr?: { path: string; kinds: number[] | null } | null;
 }
 
 /** What the shell sees of a stored site. */

@@ -970,7 +970,7 @@ in
         Type=Application
         Name=Din Web Browser
         Exec=din-open %U
-        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;
+        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;
         NoDisplay=true
       '')
     ];
@@ -1009,7 +1009,8 @@ in
     };
   };
 
-  # Links native apps open go to Din's Web Browser (electron/open-uri.mts).
+  # Links native apps open go to Din's Web Browser (electron/open-uri.mts),
+  # nostr: links too, which Din opens in the app chosen for them.
   # Electron and Chromium apps (Signal) run xdg-open, and Flatpaks ask the
   # portal's OpenURI; both start the default handler, din-open, which hands
   # the links to Din over the session bus.
@@ -1017,6 +1018,7 @@ in
     "x-scheme-handler/http" = "din-open.desktop";
     "x-scheme-handler/https" = "din-open.desktop";
     "x-scheme-handler/nsite" = "din-open.desktop";
+    "x-scheme-handler/nostr" = "din-open.desktop";
   };
 
   systemd.services.flathub = {

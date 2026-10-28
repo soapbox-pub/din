@@ -562,6 +562,12 @@ export interface DinManifest {
   }[];
   /** File types Files opens in this app. */
   file_handlers?: { action: string; accept: Record<string, string[]>; din?: { default?: boolean } }[];
+  /**
+   * `nostr:` links this app opens: `url` has `%s` for the link, and `kinds`
+   * (Din's addition) lists the event kinds it shows, every kind when absent.
+   * Only `protocol: "nostr"` counts.
+   */
+  protocol_handlers?: { protocol: string; url: string; kinds?: number[] }[];
   /** `focus-existing` makes the app single-instance. */
   launch_handler?: { client_mode: 'navigate-new' | 'focus-existing' };
   din: {

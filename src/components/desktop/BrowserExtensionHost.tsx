@@ -4,6 +4,8 @@ import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WEB_POPUP_APP_ID, popupWindowSize } from '@/lib/webPopup';
+import { useNostrLinks } from '@/hooks/useNostrLinks';
+import { isNostrUri } from '@/lib/nostrUri';
 
 /**
  * Desktop-lifetime listener for Chrome-extension tab commands (window.dinos.crx).
@@ -25,6 +27,7 @@ import { WEB_POPUP_APP_ID, popupWindowSize } from '@/lib/webPopup';
 export function BrowserExtensionHost() {
   const { open } = useWindowActions();
   const { findAppIdForUrl } = useInstalledApps();
+  const { openNostrUri } = useNostrLinks();
 
   useEffect(() => {
     const crx = getCrxBridge();
@@ -45,6 +48,15 @@ export function BrowserExtensionHost() {
       // A page opened a link in a new window (target=_blank / window.open).
       // If the URL belongs to an installed web app, open it in that app's own
       // window (at the deep link) instead of a browser tab.
+      // A nostr: link a page clicked opens in the default app for its kind,
+      // or else as a preview tab beside the page.
+      if (command.type === 'open' && isNostrUri(command.url)) {
+        void openNostrUri(command.url, (uri) => {
+          if (!hasTabConsumer()) open('web-browser');
+          publishTabCommand({ ...command, url: uri });
+        });
+        return;
+      }
       if (command.type === 'open') {
         const appId = findAppIdForUrl(command.url);
         if (appId) {
@@ -59,7 +71,7 @@ export function BrowserExtensionHost() {
       }
       publishTabCommand(command);
     });
-  }, [open, findAppIdForUrl]);
+  }, [open, findAppIdForUrl, openNostrUri]);
 
   return null;
 }

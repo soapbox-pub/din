@@ -1,5 +1,6 @@
 import { normalizeInternalUrl } from '@/lib/internalPages';
 import { normalizeNsiteInput, NSITE_PROTOCOL, parseCanonicalNsiteHost } from '@/lib/nsite';
+import { parseNostrUri } from '@/lib/nostrUri';
 
 /**
  * Sanitize a user-entered URL for safe use as an iframe `src`.
@@ -167,7 +168,7 @@ export function resolveNavigation(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  // The browser's own pages (about:preferences). Returned verbatim: the
+  // The browser's own pages (about:preferences, nostr: links). Returned verbatim: the
   // caller paints them as chrome UI rather than loading them, so they skip
   // sanitizeNavigationUrl's http/nsite allowlist entirely — and, having no
   // `://`, they would otherwise fall through to a web search below.
@@ -185,6 +186,11 @@ export function resolveNavigation(input: string): string | null {
   // a search term.
   const nsite = normalizeNsiteInput(trimmed);
   if (nsite) return nsite;
+
+  // Any other NIP-19 identifier (`nevent1…`, `note1…`, an article's
+  // `naddr1…`) is a nostr: link without its scheme.
+  const nostr = parseNostrUri(`nostr:${trimmed}`);
+  if (nostr) return nostr.uri;
 
   const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
   const isLoopback =

@@ -51,6 +51,36 @@ when the app is published as an nsite, and Din reads ordinary members
 | `launch_handler.client_mode` | `singleInstance` | `focus-existing`: one window, re-launches go to `onLaunch` |
 | `shortcuts` | `actions` | Dock and launcher jump lists; `din.id` and `din.params` reach the app as `launch.shortcut` and `launch.params` |
 | `file_handlers` | `appForFile` | Which files Files opens here; `din.default: true` makes it the default over other handlers of the same type |
+| `protocol_handlers` | | Which `nostr:` links open here, and which event kinds; see below |
+
+## Opening `nostr:` links
+
+> **Status: works for installed nsites and web apps** (read when they're
+> installed, `src/lib/nostrUri.ts`). Built-in apps will read it the same
+> way once they have manifests.
+
+An app that shows Nostr events says so with a `protocol_handlers` entry
+for `nostr` ([NIP-21](https://github.com/nostr-protocol/nips/blob/master/21.md)),
+plus one key Din adds, `kinds`: the event kinds it shows. Without `kinds`
+it's offered for every kind. Only `nostr` counts; `web+nostr` is ignored.
+
+```json
+"protocol_handlers": [
+  { "protocol": "nostr", "url": "/open?uri=%s", "kinds": [0, 1, 6, 30023] }
+]
+```
+
+`url` is resolved against the manifest and must stay on the app's own
+origin. `%s` becomes the whole link, percent-encoded
+(`nostr%3Anevent1…`), as `registerProtocolHandler` does it. A profile is
+kind 0.
+
+Clicking a `nostr:` link anywhere (a web page, an app, a native app's
+`xdg-open`) opens it in the app the user chose for its kind with "Always",
+or else as a preview in the Web Browser with **Open in…** and **Open
+with…** buttons. Native apps whose desktop entry lists
+`x-scheme-handler/nostr` and takes a `%u` are offered for every kind.
+Defaults are listed, and reset, in Settings > Nostr & Storage.
 
 ## The `din` member
 

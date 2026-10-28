@@ -11,6 +11,7 @@
 
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
+import { parseNostrProtocolHandler } from '@/lib/nostrUri';
 import type { NsiteAppInfo, NsiteStore, NsiteSummary } from '@/lib/nsiteStore';
 
 /**
@@ -207,9 +208,9 @@ const FAVICON_SIZE = 64;
 /**
  * Bumped whenever the derivation changes what it produces, so info stored by
  * an older Din is derived again (3: full-bleed icons are cut to a squircle;
- * 4: favicons are kept too).
+ * 4: favicons are kept too; 5: and how it opens nostr: links).
  */
-export const NSITE_APP_INFO_VERSION = 4;
+export const NSITE_APP_INFO_VERSION = 5;
 
 /**
  * Margin left around a squircle-cut icon, so it sits at the same visual size
@@ -391,6 +392,18 @@ function pickDescription(doc: Document, webManifest: unknown): string | null {
   );
 }
 
+/**
+ * How the site opens `nostr:` links, from its manifest's `protocol_handlers`:
+ * a path on the site itself, since the site's origin is its canonical host.
+ */
+function pickNostrHandler(webManifest: unknown, manifestPath: string): NsiteAppInfo['nostr'] {
+  const handler = parseNostrProtocolHandler(webManifest, `https://nsite.invalid${manifestPath}`);
+  if (!handler) return null;
+  const url = new URL(handler.url);
+  if (url.origin !== 'https://nsite.invalid') return null;
+  return { path: `${url.pathname}${url.search}${url.hash}`, kinds: handler.kinds };
+}
+
 /** Path of the web app manifest the document links, if any. */
 function webManifestPath(doc: Document): string | null {
   const href = doc.querySelector('link[rel~="manifest"][href]')?.getAttribute('href')?.trim();
@@ -546,6 +559,7 @@ export async function deriveNsiteAppDetails(
     icon: null,
     favicon: null,
     themeColor: null,
+    nostr: null,
     description: null,
     installable: false,
   };
@@ -566,6 +580,7 @@ export async function deriveNsiteAppDetails(
     const manifestBase = manifestPath.replace(/[^/]*$/, '');
     candidates.push(...collectFromWebManifest(webManifest, manifestBase));
     info.installable = isInstallable(webManifest, manifestBase, paths);
+    info.nostr = pickNostrHandler(webManifest, manifestPath);
     // Only if the document named no color of its own.
     if (!info.themeColor && typeof webManifest === 'object' && webManifest !== null) {
       const { theme_color } = webManifest as { theme_color?: unknown };

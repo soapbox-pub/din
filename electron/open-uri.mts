@@ -6,7 +6,8 @@
 // din-open (os/configuration.nix), which calls Open on this
 // org.freedesktop.Application. The shell then opens the link the way its
 // own links open (useOpenUrl): in an installed web app that owns the
-// origin, or as a tab in the Web Browser.
+// origin, or as a tab in the Web Browser. A nostr: link opens in the app
+// chosen for its kind, or as a preview with an "Open with" choice.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -83,7 +84,7 @@ function answer(call: MethodCall): [string, unknown[]] | void {
   }
   const [uris] = call.body as [unknown[]];
   for (const uri of uris.slice(0, MAX_URIS)) {
-    if (typeof uri === 'string' && uri.length <= MAX_URI_LENGTH && /^(https?|nsite):/i.test(uri)) {
+    if (typeof uri === 'string' && uri.length <= MAX_URI_LENGTH && /^(https?|nsite|nostr):/i.test(uri)) {
       sendToShell('open-uri:open', uri);
     }
   }
