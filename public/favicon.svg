@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="197 61 192 192">
+<defs>
+  <linearGradient id="gold" x1="0" y1="60" x2="0" y2="250" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFEDBA"/><stop offset="0.5" stop-color="#F7C865"/><stop offset="1" stop-color="#E39D3A"/>
+  </linearGradient>
+  <radialGradient id="flame" cx="293" cy="132" r="42" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFF8DC"/><stop offset="0.55" stop-color="#FFCF6A"/><stop offset="1" stop-color="#FF9238"/>
+  </radialGradient>
+  <radialGradient id="halo" cx="293" cy="124" r="70" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFD27A" stop-opacity="0.45"/><stop offset="1" stop-color="#FFD27A" stop-opacity="0"/>
+  </radialGradient>
+</defs>
+<rect x="197" y="61" width="192" height="192" rx="44" fill="#0b0f14"/>
+<circle cx="293" cy="124" r="70" fill="url(#halo)"/>
+<g fill="url(#gold)">
+  <path d="M281 166 Q281 154 293 154 Q305 154 305 166 L306 228 Q306 238 296 238 H290 Q280 238 280 228 Z"/>
+  <path d="M336 92 C338.4 101.6 338.4 101.6 348 104 C338.4 106.4 338.4 106.4 336 116 C333.6 106.4 333.6 106.4 324 104 C333.6 101.6 333.6 101.6 336 92Z M252 112 C253.8 119.2 253.8 119.2 261 121 C253.8 122.8 253.8 122.8 252 130 C250.2 122.8 250.2 122.8 243 121 C250.2 119.2 250.2 119.2 252 112Z" fill="#FFE7A6"/>
+</g>
+<path d="M293 146 C277 146 275 128 282 116 C287 107 291 100 291.5 91 C292 84 296 79 302 77 C298 81 295.5 86 295.5 93 C296 101 299 108 304 116 C311 128 309 146 293 146Z" fill="url(#flame)"/>
+<path d="M293 141 C285 141 284 131 288 124 C290 120 292 116 293 110 C294 116 296 120 298 124 C302 131 301 141 293 141Z" fill="#FFFDF2" opacity="0.85"/>
+</svg>
