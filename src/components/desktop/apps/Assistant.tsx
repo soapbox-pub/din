@@ -1133,9 +1133,9 @@ function FolderPicker({
             <DropdownMenuRadioGroup value={value ?? ''} onValueChange={onChange}>
               {folders.map((folder) => (
                 <DropdownMenuRadioItem key={folder} value={folder} title={folder}>
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">{directoryName(folder, home)}</span>
-                    <span className="block truncate text-xs text-muted-foreground">{tildify(folder, home)}</span>
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="max-w-full shrink-0 truncate font-medium">{directoryName(folder, home)}</span>
+                    <span className="min-w-0 truncate text-xs text-muted-foreground">{tildify(folder, home)}</span>
                   </span>
                 </DropdownMenuRadioItem>
               ))}
