@@ -435,7 +435,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
           else return;
           e.preventDefault();
         }}
-        className="z-10 -ml-1 hidden w-1 shrink-0 cursor-col-resize touch-none hover:bg-ring/40 focus-visible:bg-ring/60 focus-visible:outline-none @2xl/assistant:block"
+        className="z-30 -mx-1 hidden w-2 shrink-0 cursor-col-resize touch-none hover:bg-ring/40 focus-visible:bg-ring/60 focus-visible:outline-none @2xl/assistant:block"
       />
       {listOpen && (
         <button
