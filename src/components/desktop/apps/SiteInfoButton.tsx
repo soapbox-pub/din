@@ -4,7 +4,9 @@ import { cn } from '@/lib/utils';
 import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
 import { getPopupsBridge } from '@/lib/popups';
 import { isOnionUrl } from '@/lib/tor';
+import { AppIcon } from '@/components/desktop/AppIcon';
 import { NsiteIcon } from '@/components/icons/NsiteIcon';
+import { useSiteIdentity } from '@/hooks/useSiteIdentity';
 import { OnionIcon } from '@/components/icons/OnionIcon';
 import type { SiteCapability } from '@/lib/promptBridge';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
@@ -84,6 +86,7 @@ export function SiteInfoButton({
 
   const origin = siteOriginOf(url);
   const scheme = origin?.slice(0, origin.indexOf(':'));
+  const identity = useSiteIdentity(origin ?? '');
 
   useEffect(() => {
     if (!bridge || !origin) return;
@@ -128,7 +131,8 @@ export function SiteInfoButton({
       : security === 'onion'
         ? 'text-violet-700 dark:text-violet-400'
         : null;
-  const site = siteName(url);
+  // An nsite's host is a key; it goes by the name and icon its files give it.
+  const site = identity.nsite ? identity.name : siteName(url);
   const hostname = new URL(url).hostname;
   const popupsAllowed = !!popupSettings?.allowlist.includes(hostname);
 
@@ -178,7 +182,14 @@ export function SiteInfoButton({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} className="w-80 space-y-4">
-        <p className="truncate text-sm font-semibold">{site}</p>
+        {identity.nsite && identity.icon ? (
+          <div className="flex items-center gap-3">
+            <AppIcon icon={identity.icon} className="size-8 shrink-0 rounded-md" />
+            <p className="min-w-0 truncate text-sm font-semibold">{site}</p>
+          </div>
+        ) : (
+          <p className="truncate text-sm font-semibold">{site}</p>
+        )}
 
         <div className="flex items-start gap-3">
           <span

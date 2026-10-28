@@ -608,7 +608,9 @@ function EncryptedBody({ event }: { event: DraftEvent }) {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Din cannot read this, and neither can anyone but its recipients.
+        {recipients.length > 0
+          ? 'Din cannot read this, and neither can anyone but its recipients.'
+          : 'Its contents are encrypted, so there is nothing to show of them.'}
       </p>
     </>
   );
@@ -931,6 +933,19 @@ function GenericBody({ event }: { event: DraftEvent }) {
 /** Kinds whose content is ciphertext: seals, wraps, DMs, wallet traffic. */
 const ENCRYPTED_KINDS = new Set([4, 13, 1059, 1060, 17375, 7375, 7376, 23194, 23195, 24133]);
 
+/** NIP-04's `<base64>?iv=<base64>`. */
+const NIP04_PAYLOAD = /^[A-Za-z0-9+/]+={0,2}\?iv=[A-Za-z0-9+/]{22}==$/;
+
+/**
+ * Whether content is NIP-04 or NIP-44 ciphertext, whatever the kind: apps keep
+ * private data in kinds nobody has heard of. A NIP-44 v2 payload is base64 of
+ * at least 99 bytes whose first is the version, 2, so it starts with "Ag".
+ */
+function isCiphertext(content: string): boolean {
+  if (NIP04_PAYLOAD.test(content)) return true;
+  return content.length >= 132 && content.length % 4 === 0 && /^A[g-v][A-Za-z0-9+/]+={0,2}$/.test(content);
+}
+
 /** NIP-51 lists and sets — the ones whose substance is a pile of tags. */
 const LIST_KINDS = new Set([
   10000, 10001, 10003, 10004, 10005, 10006, 10007, 10009, 10012, 10015, 10020, 10030, 10050,
@@ -1032,7 +1047,7 @@ function EventBody({ event }: { event: DraftEvent }) {
     default:
       // Ciphertext first, because two of the kinds that carry it — the Cashu
       // wallet's — sit inside the job range below and are not jobs.
-      if (ENCRYPTED_KINDS.has(event.kind)) return <EncryptedBody event={event} />;
+      if (ENCRYPTED_KINDS.has(event.kind) || isCiphertext(event.content)) return <EncryptedBody event={event} />;
 
       // Ranges, which a switch cannot say. NIP-90's job kinds run 5000–7999,
       // and NIP-51's lists are scattered across two replaceable ranges.

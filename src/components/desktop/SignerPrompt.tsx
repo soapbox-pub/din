@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { NostrSigner } from '@nostrify/nostrify';
 import { AppWindow, ChevronRight, Globe, Loader2, Smartphone } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
+import { AppIcon } from '@/components/desktop/AppIcon';
 import { EmbeddedEvent, UnreadableEvent } from '@/components/EmbeddedEvent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useSiteIdentity, type SiteIdentity } from '@/hooks/useSiteIdentity';
 import { getKindLabel } from '@/lib/kindLabels';
 import { formatEventJson, parseDraftEvent } from '@/lib/draftEvent';
 import type { NostrBridgeRequest } from '@/lib/nostrBridge';
@@ -30,7 +32,7 @@ export interface SignerPromptItem {
   question: SignerQuestion;
   /** The event kind, for signEvent. */
   kind?: number;
-  /** What to call the asker (never its own claim for a web page). */
+  /** What to call the asker in a notice; the prompt names a page or app itself (useSiteIdentity). */
   name: string;
   /** The account that would sign. */
   account: string;
@@ -56,16 +58,21 @@ function shortNpub(pubkey: string): string {
   }
 }
 
-/** The asker's tile. A web page or installed app is named by its origin, which it can't choose. */
-function Artwork({ request }: { request: NostrBridgeRequest }) {
+/**
+ * The asker's tile. A web page or installed app is drawn as the launcher draws
+ * it, an nsite with the icon its own files ship, and any other site as a globe.
+ */
+function Artwork({ request, identity }: { request: NostrBridgeRequest; identity: SiteIdentity }) {
   const tile = (icon: ReactNode) => (
     <span className="grid size-14 place-items-center rounded-2xl bg-secondary text-muted-foreground">{icon}</span>
   );
   switch (request.source) {
     case 'tab':
-      return tile(<Globe className="size-7" aria-hidden />);
     case 'app':
-      return tile(<AppWindow className="size-7" aria-hidden />);
+      if (identity.icon) return <AppIcon icon={identity.icon} className="size-14 rounded-2xl object-contain" />;
+      return tile(
+        request.source === 'tab' ? <Globe className="size-7" aria-hidden /> : <AppWindow className="size-7" aria-hidden />,
+      );
     case 'bunker': {
       const image = request.client?.image;
       if (!image) return tile(<Smartphone className="size-7" aria-hidden />);
@@ -82,8 +89,8 @@ function Artwork({ request }: { request: NostrBridgeRequest }) {
 }
 
 /** The question as one sentence, plus a quiet line under it only when there is something to add. */
-function headline(item: SignerPromptItem, isConnect: boolean): { title: string; detail?: string } {
-  const who = `“${item.name}”`;
+function headline(item: SignerPromptItem, name: string, isConnect: boolean): { title: string; detail?: string } {
+  const who = `“${name}”`;
   if (isConnect) {
     return item.question === 'connect'
       ? { title: `Connect ${who}?`, detail: 'It can ask to sign as you from wherever it runs, until you disconnect it.' }
@@ -177,7 +184,10 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
   const isConnect = item.question === 'connect' || item.question === 'getPublicKey' || item.question === 'getRelays';
   const draft = item.question === 'signEvent' ? parseDraftEvent(params.event) : null;
   const eventJson = item.question === 'signEvent' ? formatEventJson(params.event) : null;
-  const { title, detail } = headline(item, isConnect);
+  // A bunker client's name is all there is of it; a page or app is named by
+  // where it runs, not by what it claims.
+  const identity = useSiteIdentity(item.request.origin);
+  const { title, detail } = headline(item, item.request.source === 'bunker' ? item.name : identity.name, isConnect);
 
   const answer = (choice: PromptAnswer['choice'], remember = false) =>
     onAnswer({ choice, remember, preview: choice === 'allow' ? preview : undefined });
@@ -202,7 +212,7 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
       >
         <DialogHeader className="items-center gap-0 px-6 pt-6 text-center sm:text-center">
           <span aria-hidden>
-            <Artwork request={item.request} />
+            <Artwork request={item.request} identity={identity} />
           </span>
           <DialogTitle className="mt-4 text-base leading-snug text-balance">{title}</DialogTitle>
           <DialogDescription className={detail ? 'mt-1 text-balance' : 'sr-only'}>

@@ -13,8 +13,10 @@ import {
   type BunkerConnection,
   type NostrConnectLink,
 } from '@/lib/bunkerBridge';
-import { grantRules, type GuardedMethod, type Decision } from '@/lib/signerPermissions';
-import { originLabel, ruleLabel } from '@/lib/signerLabels';
+import { useSiteIdentity } from '@/hooks/useSiteIdentity';
+import { grantRules, type GuardedMethod, type Decision, type SiteGrant } from '@/lib/signerPermissions';
+import { ruleLabel } from '@/lib/signerLabels';
+import { AppIcon } from '@/components/desktop/AppIcon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -160,6 +162,50 @@ function Row({
 
 function Tile({ children }: { children: React.ReactNode }) {
   return <span className="grid size-9 place-items-center rounded-lg bg-secondary text-muted-foreground">{children}</span>;
+}
+
+/** A site or installed app, under the name and icon it has on the desktop. */
+function SiteRow({
+  origin,
+  grant,
+  onDisconnect,
+  onRevoke,
+}: {
+  origin: string;
+  grant: SiteGrant;
+  onDisconnect: (origin: string) => void;
+  onRevoke: (origin: string, method: GuardedMethod, kind?: number) => void;
+}) {
+  const identity = useSiteIdentity(origin);
+  const rules = grantRules(grant);
+  const blocked = grant.status === 'blocked';
+  return (
+    <Row
+      icon={
+        blocked ? (
+          <Tile><Ban className="size-4" /></Tile>
+        ) : identity.icon ? (
+          <AppIcon icon={identity.icon} className="size-9 rounded-lg" />
+        ) : (
+          <Tile><Globe className="size-4" /></Tile>
+        )
+      }
+      title={identity.name}
+      subtitle={`${blocked ? 'Blocked' : summary(rules)} · ${ago(grant.lastUsed)}`}
+      menu={
+        <ContextMenuItem variant={blocked ? 'default' : 'destructive'} onSelect={() => onDisconnect(origin)}>
+          {blocked ? <Ban aria-hidden /> : <Unplug aria-hidden />}
+          {blocked ? 'Unblock' : 'Disconnect'}
+        </ContextMenuItem>
+      }
+    >
+      <p className="break-all text-xs text-muted-foreground">{origin}</p>
+      {!blocked && <RuleList rules={rules} onRevoke={(r) => onRevoke(origin, r.method, r.kind)} />}
+      <Button variant="outline" size="sm" onClick={() => onDisconnect(origin)}>
+        {blocked ? 'Unblock' : 'Disconnect'}
+      </Button>
+    </Row>
+  );
 }
 
 function useCopyLink() {
@@ -417,33 +463,9 @@ export function ConnectedAppsSection({ nostrconnect, nonce }: { nostrconnect?: s
                 <p className="mx-auto max-w-sm text-sm text-muted-foreground">No site has connected to your account yet.</p>
               </div>
             ) : (
-              sites.map(([origin, grant]) => {
-                const rules = grantRules(grant);
-                const blocked = grant.status === 'blocked';
-                return (
-                  <Row
-                    key={origin}
-                    icon={<Tile>{blocked ? <Ban className="size-4" /> : <Globe className="size-4" />}</Tile>}
-                    title={originLabel(origin)}
-                    subtitle={`${blocked ? 'Blocked' : summary(rules)} · ${ago(grant.lastUsed)}`}
-                    menu={
-                      <ContextMenuItem
-                        variant={blocked ? 'default' : 'destructive'}
-                        onSelect={() => disconnect(origin)}
-                      >
-                        {blocked ? <Ban aria-hidden /> : <Unplug aria-hidden />}
-                        {blocked ? 'Unblock' : 'Disconnect'}
-                      </ContextMenuItem>
-                    }
-                  >
-                    <p className="break-all text-xs text-muted-foreground">{origin}</p>
-                    {!blocked && <RuleList rules={rules} onRevoke={(r) => revoke(origin, r.method, r.kind)} />}
-                    <Button variant="outline" size="sm" onClick={() => disconnect(origin)}>
-                      {blocked ? 'Unblock' : 'Disconnect'}
-                    </Button>
-                  </Row>
-                );
-              })
+              sites.map(([origin, grant]) => (
+                <SiteRow key={origin} origin={origin} grant={grant} onDisconnect={disconnect} onRevoke={revoke} />
+              ))
             )}
           </div>
 

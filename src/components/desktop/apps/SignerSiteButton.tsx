@@ -4,7 +4,8 @@ import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSignerGrants } from '@/hooks/useSignerGrants';
 import { grantRules, signerOriginOf } from '@/lib/signerPermissions';
-import { originLabel, ruleLabel } from '@/lib/signerLabels';
+import { ruleLabel } from '@/lib/signerLabels';
+import { useSiteIdentity } from '@/hooks/useSiteIdentity';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -20,11 +21,11 @@ export function SignerSiteButton({ url }: { url: string }) {
 
   const origin = signerOriginOf(url);
   const grant = origin ? grants[origin] : undefined;
+  const site = useSiteIdentity(origin ?? '').name;
   if (!user || !origin || !grant) return null;
 
   const blocked = grant.status === 'blocked';
   const rules = grantRules(grant);
-  const site = originLabel(origin);
   const label = blocked ? `${site} is blocked from your Nostr account` : `${site} is connected to your Nostr account`;
   const account = metadata?.display_name?.trim() || metadata?.name?.trim() || 'your account';
 
