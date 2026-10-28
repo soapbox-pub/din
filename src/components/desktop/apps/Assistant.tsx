@@ -78,7 +78,9 @@ import { useToast } from '@/hooks/useToast';
 import type { AppComponentProps } from '@/lib/apps';
 import {
   cleanAssistantError,
+  contextUsage,
   directoryName,
+  formatContextUsage,
   formatCost,
   modelKey,
   sessionTitle,
@@ -683,6 +685,7 @@ function Conversation({
         session={session}
         home={home}
         running={running}
+        context={messages ? contextUsage(messages, models) : null}
         editing={editingTitle}
         onEditingChange={setEditingTitle}
         onDeleted={onDeleted}
@@ -797,6 +800,7 @@ function ConversationHeader({
   session,
   home,
   running,
+  context,
   editing,
   onEditingChange: setEditing,
   onDeleted,
@@ -805,6 +809,8 @@ function ConversationHeader({
   session: SessionInfo | undefined;
   home?: string;
   running: boolean;
+  /** How full the model's context window is, as a fraction. */
+  context: number | null;
   /** The title is being edited (Rename, or /rename). */
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
@@ -843,6 +849,14 @@ function ConversationHeader({
                   {tildify(session.location.directory, home)}
                 </span>
                 {cost && <span aria-label="Cost so far">· {cost}</span>}
+                {context !== null && (
+                  <span
+                    className={cn('shrink-0', context >= 0.8 && 'text-amber-600 dark:text-amber-400')}
+                    title="How much of the model’s context window the conversation fills"
+                  >
+                    · {formatContextUsage(context)} context
+                  </span>
+                )}
                 {running && (
                   <span className="flex items-center gap-1 text-primary">
                     · <Loader2 className="size-3 animate-spin" aria-hidden /> Working

@@ -154,6 +154,8 @@ export type SessionMessage =
       finish?: string;
       error?: StructuredError;
       retry?: { attempt: number; at: number; error: StructuredError };
+      /** What its last step used, once that step is done. */
+      tokens?: TokenUsage;
       time: { created: number; streamed?: number; completed?: number };
     })
   | (MessageBase & { type: 'synthetic' | 'system'; text: string; description?: string })
@@ -586,6 +588,31 @@ export function sessionTitle(session: Pick<SessionInfo, 'title'>): string {
 export function formatCost(cost: number): string {
   if (cost <= 0) return '';
   return cost < 0.01 ? '<$0.01' : `$${cost.toFixed(2)}`;
+}
+
+/**
+ * How much of its model's context window the conversation fills, as a
+ * fraction, from the latest reply's token counts: everything the model read
+ * and wrote on its last step. Null before the first reply, after a
+ * compaction until the next one, or when the model's window isn't known.
+ */
+export function contextUsage(messages: SessionMessage[], models: ModelInfo[]): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.type === 'compaction' && message.status === 'completed') return null;
+    if (message.type !== 'assistant' || !message.tokens) continue;
+    const { input, output, reasoning, cache } = message.tokens;
+    const used = input + output + reasoning + cache.read + cache.write;
+    if (used <= 0) continue;
+    const window = models.find((m) => modelKey(m) === modelKey(message.model))?.limit.context;
+    return window ? used / window : null;
+  }
+  return null;
+}
+
+export function formatContextUsage(fraction: number): string {
+  const percent = fraction * 100;
+  return percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
 }
 
 /** Compact relative time: "now", "5m", "3h", "2d", or a date. */
