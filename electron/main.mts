@@ -78,7 +78,7 @@ import { registerOpenUri } from './open-uri.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { registerGeolocationHandlers } from './geolocation.mts';
 import { forgetNappSite, nappPermissionChanged, registerNappHandlers } from './napp.mts';
-import { forgetWebPushPartition, registerWebPushHandlers, webPushPermissionChanged } from './web-push.mts';
+import { forgetWebPushSubscriptions, registerWebPushHandlers, webPushPermissionChanged } from './web-push.mts';
 import { watchLiveStick } from './live-stick.mts';
 import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
@@ -2944,13 +2944,17 @@ function watchEvdevKeys(): void {
 // electron-chrome-web-store lets users install extensions by browsing the
 // Chrome Web Store inside the browser app. Everything is scoped to the
 // browser's session partition (persist:webbrowser):
-//   - extensions run against browsed sites only; they can never see the
-//     shell's origin (where app data lives) or its privileged bridges
+//   - extensions run against web pages only, browser tabs and installed apps'
+//     windows (which share the session, as Chrome's installed apps share its
+//     profile); they can never see the shell's origin (where app data lives)
+//     or its privileged bridges
 //   - the shell's own session (defaultSession) never loads extensions
 //
 // Tab model: the shell renders browser tabs as <webview> elements, so each
 // tab is a guest WebContents owned by the shell window. Guests are registered
 // with the extension system as they're created (web-contents-created below).
+// An installed app's window isn't a tab: it never becomes chrome.tabs' active
+// tab or gets the browser's toolbar actions.
 // Extension-initiated tab operations (chrome.tabs.create/update/remove and
 // window.open) are bridged to the shell renderer over IPC (window.crx in
 // preload.cjs), which creates/activates/closes the corresponding tab UI.
@@ -2960,14 +2964,11 @@ function watchEvdevKeys(): void {
 // (which content blockers like uBlock Origin depend on).
 // ---------------------------------------------------------------------------
 
+// The browser's profile: its tabs, and installed web apps' windows
+// (WebAppFrame), which are the same sites and so share their storage, logins
+// and permissions, as Chrome's installed apps do. What makes a guest an app
+// window is the shell saying so when it attaches (see isAppGuest).
 const WEBBROWSER_PARTITION = 'persist:webbrowser';
-
-// Installed web apps (WebAppFrame) render in their own session, separate from
-// both the shell and the ad-hoc Web Browser's tabs. This partition is the
-// trust boundary for the Nostr identity bridge: only guests in this session
-// get the NIP-07 preload (see registerNostrBridge / will-attach-webview). Must
-// match APP_WEBVIEW_PARTITION in src/components/desktop/apps/BrowserView.tsx.
-const WEBAPP_PARTITION = 'persist:din-apps';
 
 // Private ("incognito") browser windows run their tabs in this partition.
 // Deliberately NOT prefixed with `persist:`, so Electron keeps it in memory
@@ -3040,7 +3041,8 @@ const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
  * Absolute path to the session preload that gives installed nsites the napp
  * runtime (see electron/napp.mts): window.napp, notifications and periodic
  * sync from the page and the service worker, and window.ENV. Registered on
- * the apps session for frames and for service workers alike.
+ * the browser session for frames and for service workers alike, where it
+ * works for an installed nsite in its app window and in a tab.
  */
 const NAPP_PRELOAD = path.join(import.meta.dirname, 'napp-preload.cjs');
 
@@ -3068,6 +3070,17 @@ let chromeExtensions: ElectronChromeExtensions | null = null;
  * isExtensionPageGuest).
  */
 let attachingGuestSrc = '';
+
+/**
+ * Whether the <webview> guest currently being attached is an installed app's
+ * window, handed to web-contents-created like attachingGuestSrc. The shell
+ * says so in the element's `webpreferences` (APP_GUEST_MARK); only the shell
+ * creates <webview>s, so a page can't claim it.
+ */
+let attachingGuestIsApp = false;
+
+/** What the shell puts in an installed app's <webview> `webpreferences`. */
+const APP_GUEST_MARK = 'dinInstalledApp=yes';
 
 /** Where Chrome Web Store installs / unpacked extensions live on disk. */
 function extensionsPath(): string {
@@ -3158,15 +3171,16 @@ function forwardGuestInput(contents: Electron.WebContents): void {
 
 /**
  * Resolve a renderer-supplied WebContents id to a browser-tab guest, or null.
- * Only <webview> guests inside the browser partition qualify; anything else
- * (the shell itself, popups, stale ids) is rejected.
+ * Only <webview> guests inside the browser partition qualify, and installed
+ * apps' windows, which share it, don't; anything else (the shell itself,
+ * popups, stale ids) is rejected.
  */
 function browserTabFromId(wcId: unknown): Electron.WebContents | null {
   if (typeof wcId !== 'number') return null;
   const contents = webContents.fromId(wcId);
   if (!contents || contents.isDestroyed()) return null;
   if (contents.getType() !== 'webview') return null;
-  if (contents.session !== browserSession()) return null;
+  if (contents.session !== browserSession() || isAppGuest(contents)) return null;
   return contents;
 }
 
@@ -3181,35 +3195,36 @@ function anyBrowserTabFromId(wcId: unknown): Electron.WebContents | null {
   const contents = webContents.fromId(wcId);
   if (!contents || contents.isDestroyed()) return null;
   if (contents.getType() !== 'webview') return null;
-  if (!isBrowserTabSession(contents.session)) return null;
+  if (!isBrowserTabSession(contents.session) || isAppGuest(contents)) return null;
   return contents;
 }
 
-/** The session all installed web-app <webview>s run in. */
-function appSession(): Electron.Session {
-  return session.fromPartition(WEBAPP_PARTITION);
-}
+/**
+ * Installed apps' windows, by WebContents id: guests the shell attached with
+ * APP_GUEST_MARK, in the browser session (recorded in web-contents-created).
+ */
+const appGuests = new Set<number>();
 
 /**
- * Whether a WebContents is an installed web-app guest (the only guests the
- * Nostr identity bridge answers). Different origins inside this one session
- * stay storage-isolated by the same-origin policy, so a shared partition is
- * safe; what matters is that browser tabs and the shell are excluded.
+ * Whether a WebContents is an installed web app's window: connected to the
+ * user's Nostr account by being installed, pinned to its origin, and not a
+ * browser tab, though it shares the browser's session.
  */
 function isAppGuest(contents: Electron.WebContents | null | undefined): boolean {
   return (
     !!contents &&
     !contents.isDestroyed() &&
     contents.getType() === 'webview' &&
-    contents.session === appSession()
+    contents.session === browserSession() &&
+    appGuests.has(contents.id)
   );
 }
 
 /**
- * The origin each installed web-app guest was opened on, keyed by WebContents
- * id (recorded in web-contents-created from the guest's initial src). An app
- * guest is pinned to this origin: navigations away from it are handed to the
- * Web Browser, and only this origin may use the Nostr identity bridge.
+ * The origin each installed app's window is pinned to, keyed by WebContents
+ * id (recorded in web-contents-created from its first committed load).
+ * Navigations away from it are handed to the Web Browser, and only this
+ * origin may use the Nostr identity bridge as the app.
  */
 const appGuestOrigins = new Map<number, string>();
 
@@ -3369,7 +3384,7 @@ function registerNostrBridge(): void {
     if (!isShellSender(event)) return;
     for (const contents of webContents.getAllWebContents()) {
       if (contents.isDestroyed() || contents.getType() !== 'webview') continue;
-      if (contents.session !== browserSession() && contents.session !== appSession()) continue;
+      if (contents.session !== browserSession()) continue;
       contents.send('nostr-bridge:account-changed');
     }
   });
@@ -3883,10 +3898,9 @@ function sitePermissionsPath(): string {
 }
 
 /**
- * Answers that outlive a restart, keyed like decisionsFor's. The persistent
- * browser session and the installed apps' share them: a site's tab and its
- * installed app are the same site, and asking twice would only teach the user
- * to press Allow without reading.
+ * Answers that outlive a restart: the persistent browser session's, keyed
+ * like decisionsFor's. Installed apps' windows are in that session, so a
+ * site's tab and its app share them.
  */
 let savedDecisions: Map<string, boolean> | null = null;
 
@@ -3927,7 +3941,7 @@ function saveDecisions(decisions: Map<string, boolean>): void {
 const sessionDecisions = new WeakMap<Electron.Session, Map<string, boolean>>();
 
 function remembersDecisions(s: Electron.Session): boolean {
-  return s === browserSession() || s === appSession();
+  return s === browserSession();
 }
 
 /** A session's answers, keyed `origin\0capability`. */
@@ -4374,7 +4388,8 @@ function registerCertificateHandling(): void {
       if (
         !contents ||
         contents.isDestroyed() ||
-        !isBrowserTabSession(contents.session)
+        !isBrowserTabSession(contents.session) ||
+        isAppGuest(contents)
       ) {
         // Not a browser tab (shell, installed web app, ...): leave Chromium's
         // strict verification in place by not overriding it.
@@ -4568,7 +4583,7 @@ function registerBrowserDataHandlers(): void {
       // No `storages` filter: clear every storage type (cookies included).
       await s.clearStorageData();
       // Service workers went too, and push subscriptions belong to them.
-      forgetWebPushPartition('browser');
+      forgetWebPushSubscriptions();
     }
   });
 }
@@ -4736,7 +4751,6 @@ const GUEST_PARTITIONS = new Set([
   WEBBROWSER_PARTITION,
   WEBBROWSER_PRIVATE_PARTITION,
   WEBBROWSER_TOR_PARTITION,
-  WEBAPP_PARTITION,
   DEVTOOLS_PARTITION,
 ]);
 
@@ -5067,8 +5081,7 @@ app.whenReady().then(() => {
     item.setSavePath(uniqueDownloadPath(item.getFilename()));
   };
   session.defaultSession.on('will-download', downloadToHome);
-  // Installed apps and devtools would otherwise fall back to the native dialog.
-  appSession().on('will-download', downloadToHome);
+  // Devtools would otherwise fall back to the native dialog.
   devtoolsSession().on('will-download', downloadToHome);
   registerBrowserDownloadHandlers();
 
@@ -5077,10 +5090,9 @@ app.whenReady().then(() => {
   hardenGuestSession(browserSession(), { prompts: true });
   hardenGuestSession(privateBrowserSession(), { prompts: true });
   hardenGuestSession(torBrowserSession(), { prompts: true });
-  hardenGuestSession(appSession(), { prompts: true });
   hardenGuestSession(devtoolsSession(), { prompts: false });
   // Web pages' notifications go to Din's notification center.
-  for (const s of [browserSession(), privateBrowserSession(), torBrowserSession(), appSession()]) {
+  for (const s of [browserSession(), privateBrowserSession(), torBrowserSession()]) {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-geolocation', type: 'frame', filePath: GEOLOCATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
@@ -5094,8 +5106,7 @@ app.whenReady().then(() => {
     sendToShell,
     shellContents: () => (shellWindow && !shellWindow.webContents.isDestroyed() ? shellWindow.webContents : null),
     isShareableGuest: (contents) =>
-      shellGuestFromId(contents.id) !== null &&
-      (isBrowserTabSession(contents.session) || contents.session === appSession()),
+      shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
     isPrivate: isEphemeralBrowserSession,
     undim: undimCapture,
   });
@@ -5103,21 +5114,17 @@ app.whenReady().then(() => {
     assertShellSender,
     sendToShell,
     isMediaGuest: (contents) =>
-      shellGuestFromId(contents.id) !== null &&
-      (isBrowserTabSession(contents.session) || contents.session === appSession()),
+      shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
   });
-  // And a window.nostr backed by Din's signer; private tabs get none.
-  for (const s of [browserSession(), appSession()]) {
-    s.registerPreloadScript({ id: 'din-nostr', type: 'frame', filePath: NOSTR_PRELOAD });
-  }
+  // And a window.nostr backed by Din's signer, for tabs and installed apps;
+  // private tabs get none.
+  browserSession().registerPreloadScript({ id: 'din-nostr', type: 'frame', filePath: NOSTR_PRELOAD });
   // Installed nsites are napps: their pages and their service workers.
-  appSession().registerPreloadScript({ id: 'din-napp', type: 'frame', filePath: NAPP_PRELOAD });
-  appSession().registerPreloadScript({ id: 'din-napp-worker', type: 'service-worker', filePath: NAPP_PRELOAD });
+  browserSession().registerPreloadScript({ id: 'din-napp', type: 'frame', filePath: NAPP_PRELOAD });
+  browserSession().registerPreloadScript({ id: 'din-napp-worker', type: 'service-worker', filePath: NAPP_PRELOAD });
   // Websites get Web Push, in tabs and as installed apps; private ones none.
-  for (const s of [browserSession(), appSession()]) {
-    s.registerPreloadScript({ id: 'din-web-push', type: 'frame', filePath: WEB_PUSH_PRELOAD });
-    s.registerPreloadScript({ id: 'din-web-push-worker', type: 'service-worker', filePath: WEB_PUSH_PRELOAD });
-  }
+  browserSession().registerPreloadScript({ id: 'din-web-push', type: 'frame', filePath: WEB_PUSH_PRELOAD });
+  browserSession().registerPreloadScript({ id: 'din-web-push-worker', type: 'service-worker', filePath: WEB_PUSH_PRELOAD });
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
@@ -5131,7 +5138,7 @@ app.whenReady().then(() => {
   registerPtyHandlers();
   registerWifiHandlers({
     assertShellSender,
-    proxySessions: () => [browserSession(), privateBrowserSession(), appSession()],
+    proxySessions: () => [browserSession(), privateBrowserSession()],
     torSession: torBrowserSession(),
   });
   registerVpnHandlers({ assertShellSender });
@@ -5176,25 +5183,25 @@ app.whenReady().then(() => {
     remembersPermission: remembersDecisions,
   });
   registerNappHandlers({
-    session: appSession,
+    session: browserSession,
     sendToShell,
     assertShellSender,
-    appOrigin: (contents) => (isAppGuest(contents) ? appGuestOrigins.get(contents.id) ?? null : null),
+    isSiteGuest: (contents) => contents.getType() === 'webview' && contents.session === browserSession(),
     permission: (origin, capability) => {
-      const allowed = decisionsFor(appSession()).get(decisionKey(origin, capability));
+      const allowed = decisionsFor(browserSession()).get(decisionKey(origin, capability));
       return allowed === undefined ? 'default' : allowed ? 'granted' : 'denied';
     },
-    requestPermission: (origin, capability) => requestSiteCapability(appSession(), origin, capability),
+    requestPermission: (origin, capability) => requestSiteCapability(browserSession(), origin, capability),
     forgetPermissions: (origin) => {
-      for (const capability of SITE_CAPABILITIES) decide(appSession(), origin, capability, null);
+      for (const capability of SITE_CAPABILITIES) decide(browserSession(), origin, capability, null);
     },
   });
   registerWebPushHandlers({
-    sessions: { browser: browserSession, apps: appSession },
+    session: browserSession,
     sendToShell,
     assertShellSender,
     permission: (origin) => siteNotificationPermission(browserSession(), origin),
-    requestPermission: (s, origin) => requestSiteCapability(s, origin, 'notifications'),
+    requestPermission: (origin) => requestSiteCapability(browserSession(), origin, 'notifications'),
   });
   registerGeolocationHandlers({
     request: (s, origin) => requestSiteCapability(s, origin, 'geolocation'),
@@ -5212,9 +5219,9 @@ app.whenReady().then(() => {
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
     pageKind: (contents) => {
       if (contents.getType() !== 'webview') return 'page';
+      if (isAppGuest(contents)) return 'web-app';
       if (contents.session === browserSession()) return 'browser-tab';
       if (isEphemeralBrowserSession(contents.session)) return 'private-tab';
-      if (contents.session === appSession()) return 'web-app';
       if (contents.session === devtoolsSession()) return 'devtools';
       return 'page';
     },
@@ -5236,20 +5243,19 @@ app.whenReady().then(() => {
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
   });
 
-  // nsite:// in both browser sessions and for installed apps. This process
-  // has no Nostr client, so manifest lookups are relayed to the shell renderer
-  // (NsiteBridgeHost), which owns Nostrify, the relay list, and the query
-  // cache. Private windows never write the nsite store.
+  // nsite:// in every browser session, installed apps' windows included. This
+  // process has no Nostr client, so manifest lookups are relayed to the shell
+  // renderer (NsiteBridgeHost), which owns Nostrify, the relay list, and the
+  // query cache. Private windows never write the nsite store.
   registerNsiteProtocol({
     sessions: [
       { session: browserSession(), persist: true },
       { session: privateBrowserSession(), persist: false },
       { session: torBrowserSession(), persist: false },
-      { session: appSession(), persist: true },
     ],
     sendToShell,
     isShellSender,
-    onUninstall: (host) => void forgetNappSite(host),
+    onUninstall: forgetNappSite,
   });
 
   // Must run before any <webview> is created so the extension system's
@@ -5261,7 +5267,7 @@ app.whenReady().then(() => {
   setupAdblock({
     browserSession: browserSession(),
     privateSessions: [privateBrowserSession(), torBrowserSession()],
-    isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents,
+    isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents || isAppGuest(contents),
     assertShellSender,
     sendToShell,
     onTopLevelResponse: (url, coop, onionLocation, nsiteLocation) => {
@@ -5273,17 +5279,13 @@ app.whenReady().then(() => {
   // The pop-up blocker, and window.opener for windows pages open
   // (electron/popups.mts). Also before the first <webview>, for its preload.
   setupPopups({
-    sessions: [browserSession(), privateBrowserSession(), torBrowserSession(), appSession()],
+    sessions: [browserSession(), privateBrowserSession(), torBrowserSession()],
     extensionSessions: [browserSession()],
-    isWebGuest: (contents) =>
-      contents.getType() === 'webview' &&
-      (isBrowserTabSession(contents.session) || contents.session === appSession()),
+    isWebGuest: (contents) => contents.getType() === 'webview' && isBrowserTabSession(contents.session),
     assertShellSender,
     sendToShell,
-    onTopLevelResponse: (s, url, headers) => {
-      if (isBrowserTabSession(s)) {
-        siteLocationResponse(url, responseHeader(headers, 'onion-location'), responseHeader(headers, 'nsite-location'));
-      }
+    onTopLevelResponse: (_s, url, headers) => {
+      siteLocationResponse(url, responseHeader(headers, 'onion-location'), responseHeader(headers, 'nsite-location'));
     },
   });
 
@@ -5368,8 +5370,19 @@ app.whenReady().then(() => {
       event.preventDefault();
       return;
     }
+    // Electron spreads the element's `webpreferences` into these, so the
+    // shell's mark would reach the guest's own preferences: take it out.
+    const isApp = typeof params.webpreferences === 'string' &&
+      params.webpreferences.split(',').some((entry) => entry.trim() === APP_GUEST_MARK);
+    delete (webPreferences as Record<string, unknown>)[APP_GUEST_MARK.split('=')[0]];
+    // An installed app's window is a page in the browser's profile, nowhere else.
+    if (isApp && params.partition !== WEBBROWSER_PARTITION) {
+      event.preventDefault();
+      return;
+    }
     // Handed to the web-contents-created hook, which Electron runs next.
     attachingGuestSrc = typeof params.src === 'string' ? params.src : '';
+    attachingGuestIsApp = isApp;
     popupAttaching(attachingGuestSrc);
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
@@ -5392,7 +5405,7 @@ app.whenReady().then(() => {
     // origin calling its own print() would otherwise open Chromium's GTK
     // print dialog, which takes over the whole screen under cage. The other
     // session preloads guard themselves to the top document.
-    if (params.partition === WEBAPP_PARTITION || ephemeralTab) {
+    if (ephemeralTab) {
       webPreferences.nodeIntegrationInSubFrames = true;
     }
     if (params.partition === WEBBROWSER_PARTITION) {
@@ -5406,12 +5419,13 @@ app.whenReady().then(() => {
       // The NIP-07 preload (NOSTR_PRELOAD) stays inert in iframes, and main
       // refuses calls from anything but a top document either way.
       webPreferences.nodeIntegrationInSubFrames = true;
-      if (!attachingGuestSrc.startsWith('chrome-extension://')) {
+      if (!isApp && !attachingGuestSrc.startsWith('chrome-extension://')) {
         // Ad-hoc browser tabs get the highlight preload (no signer surface,
         // just the NIP-84 highlight affordance; see HIGHLIGHT_PRELOAD).
-        // Extension pages in this session (the action popup) are not web
-        // content. The preload now loads in sub-frames too, but guards itself
-        // to the top frame (it would otherwise duplicate in every iframe).
+        // Extension pages in this session (the action popup) and installed
+        // apps' windows don't. The preload now loads in sub-frames too, but
+        // guards itself to the top frame (it would otherwise duplicate in
+        // every iframe).
         webPreferences.preload = HIGHLIGHT_PRELOAD;
       }
     }
@@ -5622,7 +5636,15 @@ app.on('web-contents-created', (_event, contents) => {
   forwardGuestInput(contents);
   watchMediaGuest(contents);
 
-  const isBrowserTab = contents.session === browserSession();
+  // An installed app's window, as the shell said in will-attach-webview
+  // above. It shares the browser's session but is no browser tab.
+  const isAppWindow = attachingGuestIsApp && contents.session === browserSession();
+  attachingGuestIsApp = false;
+  if (isAppWindow) {
+    appGuests.add(contents.id);
+    contents.once('destroyed', () => appGuests.delete(contents.id));
+  }
+  const isBrowserTab = contents.session === browserSession() && !isAppWindow;
 
   // Guests that start on a chrome-extension:// URL are extension pages, not
   // web content: the in-shell action popup (ExtensionPopupHost) and any
@@ -5645,8 +5667,9 @@ app.on('web-contents-created', (_event, contents) => {
   // The pin is taken from the first committed load rather than the raw src,
   // so an app whose home URL redirects (example.com -> www.example.com) still
   // opens; the src itself was vetted when the app was installed. An nsite app
-  // is pinned to its canonical, key-derived host, never to a name.
-  if (contents.session === appSession()) {
+  // is pinned to its canonical, key-derived host, never to a name: the same
+  // origin the site has in a browser tab, so the two share its storage.
+  if (isAppWindow) {
     let appOrigin: string | null = null;
     contents.on('did-navigate', (_event, url) => {
       // First real commit only (an offline first load commits an error page,
@@ -5674,9 +5697,7 @@ app.on('web-contents-created', (_event, contents) => {
   // the host OS dialog. Real web content only - browser tabs (persistent and
   // private) and installed web-app guests; extension pages and devtools hosts
   // are left with their default behavior.
-  const isWebPage =
-    !isExtensionPageGuest &&
-    (isBrowserTabSession(contents.session) || contents.session === appSession());
+  const isWebPage = !isExtensionPageGuest && isBrowserTabSession(contents.session);
   if (isWebPage) {
     // A page's pending window.nostr requests die with it, and the prompts the
     // user hasn't answered yet go away.
@@ -5710,8 +5731,12 @@ app.on('web-contents-created', (_event, contents) => {
   // turn navigations to *.user.js files into install prompts in the shell
   // instead of pages of raw source. Extension pages are off limits.
   // The ad blocker's per-page blocked count (electron/adblock.mts).
+  // Installed apps' windows are blocked in as well: the extension half of the
+  // blocker sees every request in the browser's session anyway.
   if (isBrowserTabSession(contents.session) && !isExtensionPageGuest) {
     attachAdblock(contents);
+  }
+  if (isBrowserTabSession(contents.session) && !isAppWindow && !isExtensionPageGuest) {
     // The onion service and nsite the page names, for the address bar
     // (electron/site-locations.mts), and onion sites in Tor's session and
     // nothing else there (electron/tor.mts).
@@ -5833,10 +5858,10 @@ app.on('web-contents-created', (_event, contents) => {
     });
   }
 
-  // Installed web-app guests aren't browser tabs, but focus still lands inside
+  // Installed apps' windows aren't browser tabs, but focus still lands inside
   // them, so the shell's window-cycling, apps-menu, assistant, System Monitor
   // and screenshot shortcuts must be forwarded too.
-  if (isAppGuest(contents)) {
+  if (isAppWindow) {
     contents.on('before-input-event', (event, input) => {
       if (isPrintInput(input)) {
         claimGuestKey(contents, event, input);

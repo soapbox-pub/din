@@ -88,9 +88,9 @@ export function SystemNotificationsHost() {
       return { name: n.appName, icon: getAppRef.current('web-browser')?.icon, origin };
     };
 
-    /** A website's worker's notification is from its installed web app, or from the site in the Web Browser. */
-    const workerSource = (n: SystemNotification, worker: { origin: string; installed: boolean }): NotificationSource => {
-      const appId = worker.installed ? findAppIdForUrlRef.current(`${worker.origin}/`) : undefined;
+    /** A website's worker's notification is from its installed web app, if it has one, or from the Web Browser. */
+    const workerSource = (n: SystemNotification, worker: { origin: string }): NotificationSource => {
+      const appId = findAppIdForUrlRef.current(`${worker.origin}/`);
       const app = appId ? getAppRef.current(appId) : undefined;
       if (app) return { appId: app.id, name: app.name, origin: worker.origin };
       return { name: n.appName, icon: getAppRef.current('web-browser')?.icon, origin: worker.origin };
@@ -103,9 +103,9 @@ export function SystemNotificationsHost() {
       open(appId, url ? { url } : undefined);
     };
 
-    /** Where a website's worker opens a window: its installed app, or a browser tab. */
-    const openForWorker = (url: string, installed: boolean) => {
-      const appId = installed ? findAppIdForUrlRef.current(url) : undefined;
+    /** Where a website's worker opens a window: the installed app the URL belongs to, or a browser tab. */
+    const openForWorker = (url: string) => {
+      const appId = findAppIdForUrlRef.current(url);
       if (appId) {
         open(appId, { url });
         return;
@@ -173,7 +173,7 @@ export function SystemNotificationsHost() {
     const offClose = bridge.onClose((id) => closeNotification(id, 'closed'));
     const offOpen = getNappHost()?.onOpen(({ host, url }) => openSite(host, url));
     const webPush = getWebPushHost();
-    const offWorkerOpen = webPush?.onOpen(({ url, installed }) => openForWorker(url, installed));
+    const offWorkerOpen = webPush?.onOpen(({ url }) => openForWorker(url));
     const offWorkerFocus = webPush?.onFocus(({ webContentsId }) => raiseGuest(webContentsId));
     return () => {
       offShow();

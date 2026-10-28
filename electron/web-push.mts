@@ -19,8 +19,8 @@
 //     `notificationclose`; the worker may then use clients.openWindow or
 //     WindowClient.focus for a minute.
 //
-// Websites in the Web Browser's own session and installed web apps get it,
-// each session with its own subscriptions, as Chrome profiles would have.
+// Websites in the Web Browser's session get it, in tabs and in installed web
+// apps' windows, which share it (and so a site's worker and subscription).
 // Private windows and Tor get none, as an incognito window has none. Installed
 // nsites have their own push in napp.mts. The page and worker side is
 // web-push-preload.cjs; it only asks, and every answer is decided here, with
@@ -50,17 +50,15 @@ import {
 import { DEFAULT_PUSH_SERVER, PushService, type AckCode, type UnregisterCode } from './push-service.mts';
 import { WorkerEvents } from './worker-events.mts';
 
-/** The sessions sites run in, by the name their subscriptions are stored under. */
-export type Partition = 'browser' | 'apps';
-
 export interface WebPushOptions {
-  sessions: Record<Partition, () => Electron.Session>;
+  /** The browser's session, which installed apps share. */
+  session: () => Electron.Session;
   sendToShell: (channel: string, payload?: unknown) => void;
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
   /** What the user answered for a site's notifications, without asking. */
   permission: (origin: string) => NotificationPermission;
   /** Ask the user (if they haven't answered); resolves with whether it's allowed. */
-  requestPermission: (s: Electron.Session, origin: string) => Promise<boolean>;
+  requestPermission: (origin: string) => Promise<boolean>;
 }
 
 /** How long after a click on its notification a worker may open or focus a window. */
@@ -82,7 +80,6 @@ function log(line: string): void {
 // ---------------------------------------------------------------------------
 
 interface StoredSubscription {
-  partition: Partition;
   /** The service worker registration's scope. */
   scope: string;
   endpoint: string;
@@ -140,9 +137,9 @@ function writeState(): void {
 }
 
 /** The subscription for a registration, with its channel ID. */
-function findSubscription(partition: Partition, scope: string): [string, StoredSubscription] | null {
+function findSubscription(scope: string): [string, StoredSubscription] | null {
   for (const entry of Object.entries(stored.subscriptions)) {
-    if (entry[1].partition === partition && entry[1].scope === scope) return entry;
+    if (entry[1].scope === scope) return entry;
   }
   return null;
 }
@@ -166,27 +163,14 @@ function originOf(url: string): string | null {
   }
 }
 
-/** The key a registration's events queue under, and its name in the log. */
-function siteKey(partition: Partition, scope: string): string {
-  return `${partition} ${scope}`;
-}
-
 // ---------------------------------------------------------------------------
 // Who is asking
 // ---------------------------------------------------------------------------
 
 interface Caller {
-  partition: Partition;
-  session: Electron.Session;
   origin: string;
   /** The registration a worker belongs to; a page names one per call. */
   scope: string | null;
-}
-
-function partitionOf(s: Electron.Session): Partition | null {
-  if (s === options.sessions.browser()) return 'browser';
-  if (s === options.sessions.apps()) return 'apps';
-  return null;
 }
 
 /**
@@ -197,19 +181,17 @@ function partitionOf(s: Electron.Session): Partition | null {
 function pageCaller(event: Electron.IpcMainInvokeEvent): Caller | null {
   const contents = event.sender;
   const frame = event.senderFrame;
-  if (!frame || contents.getType() !== 'webview') return null;
-  const partition = partitionOf(contents.session);
+  if (!frame || contents.getType() !== 'webview' || contents.session !== options.session()) return null;
   const origin = frame.origin;
-  if (!partition || !originOf(frame.url) || contents.mainFrame.origin !== origin) return null;
-  return { partition, session: contents.session, origin, scope: null };
+  if (!originOf(frame.url) || contents.mainFrame.origin !== origin) return null;
+  return { origin, scope: null };
 }
 
 function workerCaller(event: Electron.IpcMainServiceWorkerInvokeEvent): Caller | null {
-  const partition = partitionOf(event.session);
   const scope = event.serviceWorker.scope;
   const origin = originOf(scope);
-  if (!partition || !origin) return null;
-  return { partition, session: event.session, origin, scope };
+  if (event.session !== options.session() || !origin) return null;
+  return { origin, scope };
 }
 
 /** The registration a call is about: a worker's own, or one of the page's origin. */
@@ -253,8 +235,9 @@ function watchWorkers(s: Electron.Session): void {
   });
 }
 
-function dispatch(partition: Partition, scope: string, type: string, init: Record<string, unknown>) {
-  return events.dispatch(options.sessions[partition](), scope, siteKey(partition, scope), type, init);
+/** Raise an event in a registration's worker. Its events queue under its scope, its name in the log too. */
+function dispatch(scope: string, type: string, init: Record<string, unknown>) {
+  return events.dispatch(options.session(), scope, scope, type, init);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,8 +279,8 @@ function dropAll(why: string): void {
   recentVersions.clear();
   save();
   for (const [, sub] of all) {
-    events.enqueue(siteKey(sub.partition, sub.scope), () =>
-      dispatch(sub.partition, sub.scope, 'pushsubscriptionchange', {
+    events.enqueue(sub.scope, () =>
+      dispatch(sub.scope, 'pushsubscriptionchange', {
         oldSubscription: subscriptionJson(sub),
         newSubscription: null,
       }),
@@ -310,7 +293,7 @@ function dropAll(why: string): void {
 function unsubscribe(channelID: string, code: UnregisterCode, why: string): void {
   const sub = stored.subscriptions[channelID];
   if (!sub) return;
-  log(`${siteKey(sub.partition, sub.scope)}: unsubscribed (${why})`);
+  log(`${sub.scope}: unsubscribed (${why})`);
   delete stored.subscriptions[channelID];
   recentVersions.delete(channelID);
   save();
@@ -326,7 +309,7 @@ function receive(channelID: string, version: string, data: Buffer | null, header
     service.unregister(channelID, 200);
     return Promise.resolve(102);
   }
-  const site = siteKey(sub.partition, sub.scope);
+  const site = sub.scope;
   const recent = recentVersions.get(channelID) ?? [];
   if (recent.includes(version)) {
     log(`${site}: a message came again; already delivered`);
@@ -347,7 +330,7 @@ function receive(channelID: string, version: string, data: Buffer | null, header
   log(`${site}: message, ${plaintext?.length ?? 0} byte(s)`);
   return new Promise((resolve) => {
     const queued = events.enqueue(site, async () => {
-      const result = await dispatch(sub.partition, sub.scope, 'push', {
+      const result = await dispatch(sub.scope, 'push', {
         data: plaintext ? new Uint8Array(plaintext) : null,
       });
       if (result === 'no-worker') unsubscribe(channelID, 200, 'its service worker is gone');
@@ -374,10 +357,10 @@ async function subscribe(caller: Caller, scope: string, params: unknown, worker:
   // Asked from the page; a worker only gets what's already allowed.
   const allowed = worker
     ? options.permission(caller.origin) === 'granted'
-    : await options.requestPermission(caller.session, caller.origin);
+    : await options.requestPermission(caller.origin);
   if (!allowed) throw new WebPushError('Registration failed - permission denied', 'NotAllowedError');
 
-  const existing = findSubscription(caller.partition, scope);
+  const existing = findSubscription(scope);
   if (existing) {
     if (existing[1].serverKey === serverKey) return subscriptionJson(existing[1]);
     throw new WebPushError(
@@ -387,7 +370,7 @@ async function subscribe(caller: Caller, scope: string, params: unknown, worker:
   }
 
   try {
-    await caller.session.serviceWorkers.startWorkerForScope(scope);
+    await options.session().serviceWorkers.startWorkerForScope(scope);
   } catch {
     throw new WebPushError('Subscription failed - no active Service Worker', 'AbortError');
   }
@@ -397,18 +380,17 @@ async function subscribe(caller: Caller, scope: string, params: unknown, worker:
   try {
     endpoint = await service.register(channelID, serverKey && paddedBase64url(serverKey));
   } catch (error) {
-    log(`${siteKey(caller.partition, scope)}: subscribing failed: ${error instanceof Error ? error.message : error}`);
+    log(`${scope}: subscribing failed: ${error instanceof Error ? error.message : error}`);
     throw new WebPushError('Registration failed - push service error', 'AbortError');
   }
   // Two calls at once: the first one wins, the second's channel goes back.
-  const raced = findSubscription(caller.partition, scope);
+  const raced = findSubscription(scope);
   if (raced) {
     service.unregister(channelID, 200);
     if (raced[1].serverKey === serverKey) return subscriptionJson(raced[1]);
     throw new WebPushError('Registration failed - a subscription already exists', 'InvalidStateError');
   }
   const sub: StoredSubscription = {
-    partition: caller.partition,
     scope,
     endpoint,
     serverKey,
@@ -418,7 +400,7 @@ async function subscribe(caller: Caller, scope: string, params: unknown, worker:
   };
   stored.subscriptions[channelID] = sub;
   save();
-  log(`${siteKey(caller.partition, scope)}: subscribed`);
+  log(`${scope}: subscribed`);
   options.sendToShell('web-push:changed');
   return subscriptionJson(sub);
 }
@@ -440,7 +422,6 @@ function permissionState(origin: string): PermissionState {
 
 interface LiveNotification {
   id: number;
-  partition: Partition;
   scope: string;
   origin: string;
   title: string;
@@ -488,7 +469,6 @@ async function showNotification(caller: Caller, scope: string, params: unknown):
   const tag = text(opts.tag, 256);
   const notification: LiveNotification = {
     id: nextNotificationId++,
-    partition: caller.partition,
     scope,
     origin: caller.origin,
     title: title.slice(0, 256),
@@ -509,7 +489,7 @@ async function showNotification(caller: Caller, scope: string, params: unknown):
     },
   };
   // A tag replaces its namesake from the same site; past the cap, the oldest goes.
-  const mine = [...live.values()].filter((n) => n.partition === caller.partition && n.origin === caller.origin);
+  const mine = [...live.values()].filter((n) => n.origin === caller.origin);
   for (const old of mine) {
     if (tag && old.options.tag === tag) live.delete(old.id);
   }
@@ -519,10 +499,9 @@ async function showNotification(caller: Caller, scope: string, params: unknown):
     closeWorkerNotification(old.id);
   }
   live.set(notification.id, notification);
-  await showWorkerNotification(caller.session, {
+  await showWorkerNotification(options.session(), {
     id: notification.id,
     origin: caller.origin,
-    installed: caller.partition === 'apps',
     title: notification.title,
     body: notification.options.body as string,
     icon: notification.options.icon as string,
@@ -536,14 +515,14 @@ async function showNotification(caller: Caller, scope: string, params: unknown):
 function listNotifications(caller: Caller, scope: string, params: unknown): Record<string, unknown>[] {
   const tag = params && typeof params === 'object' ? (params as Record<string, unknown>).tag : undefined;
   return [...live.values()]
-    .filter((n) => n.partition === caller.partition && n.scope === scope)
+    .filter((n) => n.scope === scope)
     .filter((n) => typeof tag !== 'string' || !tag || n.options.tag === tag)
     .map(snapshot);
 }
 
 function closeNotification(caller: Caller, id: unknown): void {
   const notification = typeof id === 'number' ? live.get(id) : undefined;
-  if (!notification || notification.partition !== caller.partition || notification.origin !== caller.origin) return;
+  if (!notification || notification.origin !== caller.origin) return;
   live.delete(notification.id);
   closeWorkerNotification(notification.id);
 }
@@ -553,19 +532,19 @@ function closeNotification(caller: Caller, id: unknown): void {
 // ---------------------------------------------------------------------------
 
 function assertInteraction(caller: Caller, scope: string): void {
-  const since = lastInteraction.get(siteKey(caller.partition, scope)) ?? 0;
+  const since = lastInteraction.get(scope) ?? 0;
   if (Date.now() - since > INTERACTION_WINDOW_MS) {
     throw new WebPushError('Not allowed to open a window.', 'InvalidAccessError');
   }
 }
 
-/** clients.openWindow: a browser tab, or the installed app the URL belongs to. */
+/** clients.openWindow: the installed app the URL belongs to, or a browser tab. */
 function openWindow(caller: Caller, scope: string, url: unknown): void {
   assertInteraction(caller, scope);
   if (typeof url !== 'string' || url.length > 8192 || !originOf(url)) {
     throw new WebPushError('Only http and https URLs can be opened', 'TypeError');
   }
-  options.sendToShell('web-push:open', { url, installed: caller.partition === 'apps' });
+  options.sendToShell('web-push:open', { url });
 }
 
 /** WindowClient.focus: bring forward the tab or app window showing the client. */
@@ -576,7 +555,7 @@ function focusWindow(caller: Caller, scope: string, url: unknown): void {
   }
   const target = webContents
     .getAllWebContents()
-    .find((c) => !c.isDestroyed() && c.getType() === 'webview' && c.session === caller.session && c.getURL() === url);
+    .find((c) => !c.isDestroyed() && c.getType() === 'webview' && c.session === options.session() && c.getURL() === url);
   if (target) options.sendToShell('web-push:focus', { webContentsId: target.id });
 }
 
@@ -610,7 +589,7 @@ async function call(caller: Caller, method: unknown, params: unknown): Promise<R
         result = await subscribe(caller, scope, args.options, worker);
         break;
       case 'push.get': {
-        const found = findSubscription(caller.partition, scope);
+        const found = findSubscription(scope);
         result = found ? subscriptionJson(found[1]) : null;
         break;
       }
@@ -618,14 +597,14 @@ async function call(caller: Caller, method: unknown, params: unknown): Promise<R
         result = permissionState(caller.origin);
         break;
       case 'push.unsubscribe': {
-        const found = findSubscription(caller.partition, scope);
+        const found = findSubscription(scope);
         if (found) unsubscribe(found[0], 200, 'the site asked');
         result = !!found;
         break;
       }
       case 'registration.unregistered': {
         // The worker's registration is gone, and with it its subscription.
-        const found = findSubscription(caller.partition, scope);
+        const found = findSubscription(scope);
         if (found) unsubscribe(found[0], 200, 'its service worker was unregistered');
         break;
       }
@@ -683,11 +662,11 @@ export function webPushPermissionChanged(origin: string, capability: string, all
   closeNotificationsWhere((n) => n.origin === origin);
 }
 
-/** A session's site data was cleared: its service workers, and their subscriptions, went with it. */
-export function forgetWebPushPartition(partition: Partition): void {
+/** The browser's site data was cleared: its service workers, and their subscriptions, went with it. */
+export function forgetWebPushSubscriptions(): void {
   if (!options) return;
-  forgetWhere((sub) => sub.partition === partition, 200, 'site data cleared');
-  closeNotificationsWhere((n) => n.partition === partition);
+  forgetWhere(() => true, 200, 'site data cleared');
+  closeNotificationsWhere(() => true);
 }
 
 // ---------------------------------------------------------------------------
@@ -724,8 +703,7 @@ export function registerWebPushHandlers(webPushOptions: WebPushOptions): void {
     if (saveTimer) writeState();
   });
 
-  watchWorkers(options.sessions.browser());
-  watchWorkers(options.sessions.apps());
+  watchWorkers(options.session());
 
   setWorkerNotificationHandlers({
     activate: (id, action) => {
@@ -734,10 +712,10 @@ export function registerWebPushHandlers(webPushOptions: WebPushOptions): void {
       // A click takes it off the screen, but it's the site's to close: a
       // click isn't a dismissal, so no notificationclose follows.
       live.delete(id);
-      const site = siteKey(notification.partition, notification.scope);
-      lastInteraction.set(site, Date.now());
-      events.enqueue(site, () =>
-        dispatch(notification.partition, notification.scope, 'notificationclick', {
+      const { scope } = notification;
+      lastInteraction.set(scope, Date.now());
+      events.enqueue(scope, () =>
+        dispatch(scope, 'notificationclick', {
           notification: snapshot(notification),
           action: action === 'default' ? '' : action,
         }),
@@ -748,8 +726,8 @@ export function registerWebPushHandlers(webPushOptions: WebPushOptions): void {
       if (!notification) return;
       live.delete(id);
       if (reason !== 'dismissed') return;
-      events.enqueue(siteKey(notification.partition, notification.scope), () =>
-        dispatch(notification.partition, notification.scope, 'notificationclose', {
+      events.enqueue(notification.scope, () =>
+        dispatch(notification.scope, 'notificationclose', {
           notification: snapshot(notification),
         }),
       );

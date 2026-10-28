@@ -2750,12 +2750,12 @@ contextBridge.exposeInMainWorld('webPushHost', {
     return () => ipcRenderer.removeListener('web-push:changed', listener);
   },
   /**
-   * A worker opened a window (clients.openWindow): an installed web app's
-   * worker, or a browser tab's. Returns an unsubscribe fn.
-   * @param {(request: { url: string, installed: boolean }) => void} callback
+   * A worker opened a window (clients.openWindow), in the installed app the
+   * URL belongs to or a browser tab. Returns an unsubscribe fn.
+   * @param {(request: { url: string }) => void} callback
    */
   onOpen: (callback) => {
-    /** @type {(event: Electron.IpcRendererEvent, payload: { url: string, installed: boolean }) => void} */
+    /** @type {(event: Electron.IpcRendererEvent, payload: { url: string }) => void} */
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('web-push:open', listener);
     return () => ipcRenderer.removeListener('web-push:open', listener);

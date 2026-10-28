@@ -301,8 +301,8 @@ export function NappInfoButton({
           {confirmClear ? (
             <>
               <p className="text-xs text-muted-foreground">
-                This deletes what {name} stored here, its notifications and subscriptions, its environment and its
-                permissions. The app stays installed.
+                This deletes what {name} stored on this computer, in the browser too, along with its notifications and
+                subscriptions, its environment and its permissions. The app stays installed.
               </p>
               <div className="flex gap-2">
                 <Button type="button" size="sm" variant="outline" className="flex-1" onClick={() => setConfirmClear(false)}>

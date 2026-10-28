@@ -4,11 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { sanitizeAppUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
-import {
-  APP_WEBVIEW_PARTITION,
-  BrowserView,
-  type BrowserViewHandle,
-} from '@/components/desktop/apps/BrowserView';
+import { BrowserView, type BrowserViewHandle } from '@/components/desktop/apps/BrowserView';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { NappInfoButton } from '@/components/desktop/apps/NappInfoButton';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
@@ -193,10 +189,11 @@ export function WebAppFrame({
       <BrowserView
         ref={viewRef}
         src={src}
-        // Installed apps run in their own session, pinned to their origin, and
-        // are connected to the user's Nostr account (window.nostr) by being
+        // An installed app shares the browser's profile, so it's signed in
+        // wherever the site is in a tab. Its window is pinned to its origin,
+        // and connected to the user's Nostr account (window.nostr) by being
         // installed; browser tabs have to ask to connect.
-        partition={APP_WEBVIEW_PARTITION}
+        installedApp
         onLoadStart={() => setLoading(true)}
         onLoadEnd={() => {
           setLoading(false);

@@ -16,8 +16,10 @@ import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
 
 /**
- * The Electron session partition for the ad-hoc Web Browser app's tabs. The
- * Chrome extension system is attached to it (see electron/main.cjs).
+ * The Electron session partition for the Web Browser app's tabs and for
+ * installed web apps, which share the browser's profile as Chrome's installed
+ * apps do. The Chrome extension system is attached to it (see
+ * electron/main.mts).
  */
 export const WEBBROWSER_PARTITION = 'persist:webbrowser';
 
@@ -43,12 +45,11 @@ export const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
 export const WEBBROWSER_TOR_PARTITION = 'din-webbrowser-tor';
 
 /**
- * The session partition for installed web apps (WebAppFrame). Guests here get
- * the NIP-07 identity bridge already connected, so they inherit Din's login;
- * browser tabs get it too, but have to ask to connect.
- * Must match WEBAPP_PARTITION in electron/main.cjs.
+ * What an installed app's <webview> carries in its `webpreferences`, telling
+ * the main process it's the app's window and not a browser tab. Must match
+ * APP_GUEST_MARK in electron/main.mts.
  */
-export const APP_WEBVIEW_PARTITION = 'persist:din-apps';
+const APP_GUEST_MARK = 'dinInstalledApp=yes';
 
 /** A failed navigation reported by the surface (network-level load error). */
 export interface LoadErrorInfo {
@@ -91,10 +92,15 @@ export interface BrowserViewProps {
   src: string;
   /**
    * Electron session partition for the guest (webview surface only). Defaults
-   * to the Web Browser's shared partition; installed apps pass
-   * APP_WEBVIEW_PARTITION so they receive the Nostr identity bridge.
+   * to the Web Browser's shared partition.
    */
   partition?: string;
+  /**
+   * The guest is an installed app's window (webview surface only): in the
+   * browser's partition, but pinned to its origin and connected to the user's
+   * Nostr account, and not a browser tab.
+   */
+  installedApp?: boolean;
   /** Called when the surface starts loading a page. */
   onLoadStart?: () => void;
   /** Called when the surface finishes loading (success or failure). */
@@ -269,6 +275,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     {
       src,
       partition = WEBBROWSER_PARTITION,
+      installedApp = false,
       onLoadStart,
       onLoadEnd,
       onLoadError,
@@ -284,8 +291,10 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   ) {
     const windowVisible = useWindowVisible();
     const pageHidden = hidden || !windowVisible;
-    // The partition is fixed for the element's lifetime (like the initial src).
+    // The partition is fixed for the element's lifetime (like the initial src),
+    // and so is whether it's an installed app's window.
     const partitionRef = useRef(partition);
+    const installedAppRef = useRef(installedApp);
     // The <webview> is created imperatively (see the mount effect below), so
     // this starts null and is filled in before any listener effect runs.
     const webviewRef = useRef<ElectronWebviewElement | null>(null);
@@ -316,10 +325,11 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       if (!container || webviewRef.current) return;
       const el = document.createElement('webview') as unknown as ElectronWebviewElement;
       // A partition isolates cookies/storage from the shell's own origin. The
-      // Web Browser's partition is where the Chrome extension system is
-      // attached (see electron/main.cjs); installed apps use their own
-      // partition, which is where the Nostr identity bridge is attached.
+      // Web Browser's partition, which installed apps share, is where the
+      // Chrome extension system and the Nostr identity bridge are attached
+      // (see electron/main.mts).
       el.setAttribute('partition', partitionRef.current);
+      if (installedAppRef.current) el.setAttribute('webpreferences', APP_GUEST_MARK);
       // Enable guest-initiated popups (see the note above).
       el.setAttribute('allowpopups', 'true');
       el.setAttribute('src', initialSrc.current);

@@ -589,6 +589,11 @@ export async function installedSites(): Promise<NsiteSummary[]> {
   return [...records.values()].filter((r) => r.installed).map(summaryOf);
 }
 
+/** Whether a site is installed as an app. False until the store has loaded. */
+export function isInstalledSite(host: string): boolean {
+  return records.get(host)?.installed === true;
+}
+
 /** The stored summary of any site, installed or visited. */
 export async function siteSummary(host: string): Promise<NsiteSummary | null> {
   await ready;

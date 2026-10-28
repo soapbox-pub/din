@@ -370,6 +370,7 @@ export function setupAdblock(options: {
   browserSession: Electron.Session;
   /** The sessions without extensions (private, Tor), blocked here in the main process. */
   privateSessions: Electron.Session[];
+  /** The pages it blocks in: browser tabs, and installed apps' windows. */
   isBrowserTab: (contents: Electron.WebContents) => boolean;
   assertShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;

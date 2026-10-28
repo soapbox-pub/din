@@ -15,7 +15,7 @@ export interface WebPushStatus {
   connectedAt: number | null;
   lastError: string | null;
   retryAt: number | null;
-  /** Subscriptions sites hold, across the Web Browser and installed apps. */
+  /** Subscriptions sites hold, in the Web Browser and installed apps alike. */
   subscriptions: number;
 }
 
@@ -24,7 +24,7 @@ export interface WebPushHostBridge {
   /** null: back to the default. Every subscription is dropped. */
   setServer(url: string | null): Promise<void>;
   onChanged(callback: () => void): () => void;
-  onOpen(callback: (request: { url: string; installed: boolean }) => void): () => void;
+  onOpen(callback: (request: { url: string }) => void): () => void;
   onFocus(callback: (request: { webContentsId: number }) => void): () => void;
 }
 

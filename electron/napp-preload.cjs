@@ -1,21 +1,24 @@
 // @ts-check
-// Session preload for installed nsites: what napp.mts gives them, in the
+// Session preload for nsites: what napp.mts gives installed ones, in the
 // shape Tenna's NAPP.md gives it, so a site written for Tenna runs unchanged.
-// Registered in main.mts on the apps session twice, as a frame preload and as
-// a service-worker preload; it works out which it is and does nothing outside
-// an nsite.
+// Registered in main.mts on the browser's session twice, as a frame preload
+// and as a service-worker preload; it works out which it is and does nothing
+// outside an nsite. An installed site gets the same in its app's window and
+// in a browser tab.
 //
-// In the page (top document):
+// In the page (top document), when the site is installed:
 //   - window.napp.push.set/get and window.napp.fetch
 //   - registration.showNotification / getNotifications, into Din's
 //     notification center (Chromium's would go to libnotify)
 //   - registration.periodicSync, and its permission in navigator.permissions
 // In every frame of the site's own origin: window.ENV, when the user has set
 // variables for the site.
-// In every frame and the service worker: the Cache API, keying the site's own
-// nsite:// URLs.
+// In every frame and the service worker, installed or not: the Cache API,
+// keying the site's own nsite:// URLs.
 //
-// In the service worker:
+// In the service worker (which can't ask whether its site is installed before
+// its script runs, so napp.mts refuses calls from one that isn't, and
+// notifications then go to Chromium's own):
 //   - self.napp.fetch
 //   - registration.showNotification / getNotifications, pushManager (read
 //     only: a site subscribes from its page, with napp.push.set) and
@@ -39,6 +42,7 @@ const { contextBridge, ipcRenderer } = require('electron');
  *   listen: (callback: (id: number, type: string, init: Record<string, unknown>) => void) => void,
  *   done: (id: number, ok: boolean) => void,
  *   env: Record<string, string> | null,
+ *   installed: boolean,
  *   top: boolean,
  * }} Bridge
  */
@@ -186,16 +190,34 @@ function installNapp(bridge) {
     return notification;
   };
 
+  /** @param {unknown} error */
+  const notInstalled = (error) => error instanceof DOMException && error.name === 'NotInstalledError';
+
   const Registration = scope.ServiceWorkerRegistration;
-  if (typeof Registration === 'function' && (inWorker || bridge.top)) {
+  if (typeof Registration === 'function' && bridge.installed && (inWorker || bridge.top)) {
     const proto = Registration.prototype;
+    const native = { showNotification: proto.showNotification, getNotifications: proto.getNotifications };
 
     /**
+     * @this {ServiceWorkerRegistration}
      * @param {string} title
      * @param {NotificationOptions & { actions?: { action: string, title: string, icon?: string }[], image?: string, renotify?: boolean, timestamp?: number }} [options]
      */
     async function showNotification(title, options = {}) {
       if (arguments.length === 0) throw new TypeError("Failed to execute 'showNotification': 1 argument required.");
+      try {
+        await sendNotification(title, options);
+      } catch (error) {
+        if (!notInstalled(error)) throw error;
+        await native.showNotification.call(this, title, options);
+      }
+    }
+
+    /**
+     * @param {string} title
+     * @param {NotificationOptions & { actions?: { action: string, title: string, icon?: string }[], image?: string, renotify?: boolean, timestamp?: number }} options
+     */
+    async function sendNotification(title, options) {
       await call('notification.show', {
         title: String(title),
         options: {
@@ -216,10 +238,18 @@ function installNapp(bridge) {
       });
     }
 
-    /** @param {GetNotificationOptions} [filter] */
+    /**
+     * @this {ServiceWorkerRegistration}
+     * @param {GetNotificationOptions} [filter]
+     */
     async function getNotifications(filter = {}) {
-      const list = /** @type {Record<string, unknown>[]} */ (await call('notification.list', { tag: filter.tag ?? '' }));
-      return list.map(toNotification);
+      try {
+        const list = /** @type {Record<string, unknown>[]} */ (await call('notification.list', { tag: filter.tag ?? '' }));
+        return list.map(toNotification);
+      } catch (error) {
+        if (!notInstalled(error)) throw error;
+        return native.getNotifications.call(this, filter);
+      }
     }
 
     define(proto, 'showNotification', showNotification);
@@ -427,7 +457,7 @@ function installNapp(bridge) {
     if (bridge.env) {
       Object.defineProperty(window, 'ENV', { value: Object.freeze({ ...bridge.env }), enumerable: false });
     }
-    if (!bridge.top) return true;
+    if (!bridge.top || !bridge.installed) return true;
 
     const push = Object.freeze({
       /** @param {unknown} subscriptions */
@@ -581,6 +611,9 @@ if (isWorker || location.protocol === 'nsite:') {
         .catch(() => ({ ok: false, error: 'Din is unavailable', name: 'Error' }));
     });
 
+  /** @type {{ installed: boolean, env: Record<string, string> | null } | null} */
+  const frame = isWorker ? null : ipcRenderer.sendSync('napp:frame');
+
   contextBridge.executeInMainWorld({
     func: installNapp,
     args: [
@@ -590,7 +623,9 @@ if (isWorker || location.protocol === 'nsite:') {
           listener = callback;
         },
         done: (/** @type {number} */ id, /** @type {boolean} */ ok) => ipcRenderer.send('napp:dispatched', id, ok),
-        env: isWorker ? null : ipcRenderer.sendSync('napp:env'),
+        env: frame?.env ?? null,
+        // A worker is taken as installed; napp.mts answers for it per call.
+        installed: isWorker || frame?.installed === true,
         top: !isWorker && window.top === window.self,
       },
     ],

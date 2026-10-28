@@ -14,12 +14,13 @@
 //     15 minutes, after the user allows "Refresh in the background".
 //   - window.ENV: per-device variables the user sets in the app's info.
 //
-// Only installed nsites get any of it: their pages are <webview>s in the apps
-// session pinned to a canonical nsite origin, and their service workers are
-// that session's nsite-scoped ones. The page side is napp-preload.cjs, the
-// worker side napp-sw-preload.cjs; both only ever ask, and every answer is
-// decided here, with the site read from the calling frame or worker - never
-// from what the site says.
+// Only installed nsites get any of it, in their app's window and in a browser
+// tab alike: both are the same site, in the browser's session, sharing one
+// service worker. Whether a site is installed is the nsite store's record
+// (nsite-store.mts), keyed by its canonical host. The page and worker side is
+// napp-preload.cjs; it only ever asks, and every answer is decided here, with
+// the site read from the calling frame or worker - never from what the site
+// says.
 //
 // Events reach a worker through worker-events.mts: started for its scope and
 // handed the event over IPC, which its preload raises as a real
@@ -40,7 +41,7 @@ import v8 from 'node:v8';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 import { fetchAbort, fetchAbortAll, fetchRead, fetchStart, type NappFetchRequest } from './napp-fetch.mts';
 import { normalizeSubscriptions, PushPool, type NappSubscription, type SitePush } from './napp-push.mts';
-import { parseCanonicalHost } from './nsite-store.mts';
+import { isInstalledSite, nsiteStoreReady, parseCanonicalHost } from './nsite-store.mts';
 import { closeSiteNotification, setSiteNotificationHandlers, showSiteNotification } from './notifications.mts';
 import { WorkerEvents, type DispatchResult } from './worker-events.mts';
 
@@ -48,12 +49,12 @@ import { WorkerEvents, type DispatchResult } from './worker-events.mts';
 export type NappCapability = 'notifications' | 'background-sync';
 
 export interface NappOptions {
-  /** The session installed apps (and their workers) run in. */
+  /** The browser's session, which installed apps (and their workers) share. */
   session: () => Electron.Session;
   sendToShell: (channel: string, payload?: unknown) => void;
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
-  /** The canonical origin an installed app's <webview> is pinned to, if it is one. */
-  appOrigin: (contents: Electron.WebContents) => string | null;
+  /** Whether a WebContents is a page in that session: a browser tab or an installed app's window. */
+  isSiteGuest: (contents: Electron.WebContents) => boolean;
   /** What the user answered for a site, without asking. */
   permission: (origin: string, capability: NappCapability) => NotificationPermission;
   /** Ask the user (if they haven't answered); resolves with whether it's allowed. */
@@ -214,13 +215,29 @@ function hostOf(url: string): string | null {
   return parseCanonicalHost(host) ? host : null;
 }
 
-/** The installed app a page call comes from: its top document, on its pinned origin. */
-function pageCaller(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): string | null {
+/** The name of the error a site that isn't installed gets for every call. */
+const NOT_INSTALLED = 'NotInstalledError';
+
+/**
+ * The installed nsite a frame belongs to, by the origin Chromium gave it: in a
+ * browser tab or the app's window, never a private one. Null for anything else.
+ */
+function installedFrameHost(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): string | null {
   const frame = event.senderFrame;
-  if (!frame || frame !== event.sender.mainFrame) return null;
-  const origin = options.appOrigin(event.sender);
-  if (!origin || frame.origin !== origin) return null;
-  return hostOf(origin);
+  if (!frame || !options.isSiteGuest(event.sender)) return null;
+  const host = hostOf(frame.origin);
+  return host && isInstalledSite(host) ? host : null;
+}
+
+/** The installed nsite a page call comes from: its top document. */
+function pageCaller(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): string | null {
+  return event.senderFrame === event.sender.mainFrame ? installedFrameHost(event) : null;
+}
+
+/** Whether a site is installed, once the store has loaded (workers can start before it has). */
+async function isInstalled(host: string): Promise<boolean> {
+  await nsiteStoreReady();
+  return isInstalledSite(host);
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +255,10 @@ const events = new WorkerEvents({
   onWorker: (worker) => attach(worker),
 });
 
-/** Wire up a running worker's IPC, if it's an installed nsite's. */
+/**
+ * Wire up a running nsite worker's IPC. Every nsite's worker has the preload,
+ * so this answers them all; only an installed site's calls get anywhere.
+ */
 function attach(worker: Electron.ServiceWorkerMain): void {
   if (attached.has(worker)) return;
   const host = hostOf(worker.scope);
@@ -246,10 +266,11 @@ function attach(worker: Electron.ServiceWorkerMain): void {
   attached.add(worker);
   events.attach(worker);
   try {
-    worker.ipc.handle('napp:call', (event, method, params) => {
+    worker.ipc.handle('napp:call', async (event, method, params) => {
       if (event.session !== options.session()) return failure('Not available here');
       const scopeHost = hostOf(event.serviceWorker.scope);
       if (!scopeHost) return failure('Not available here');
+      if (!(await isInstalled(scopeHost))) return failure('Only installed apps can do this', NOT_INSTALLED);
       return call({ host: scopeHost, worker: true }, method, params);
     });
   } catch {
@@ -619,12 +640,12 @@ async function call(caller: { host: string; worker: boolean }, method: unknown, 
 // ---------------------------------------------------------------------------
 
 /**
- * Everything a site has on this computer outside its files: its storage
- * (cookies, IndexedDB, caches, service workers), subscriptions, schedule,
- * notifications, ENV and permissions. Called when it's uninstalled, or the
- * user clears its data.
+ * What a site has as an app: its subscriptions, schedule, notifications and
+ * ENV. Called when it's uninstalled, which leaves it a site like any other,
+ * still signed in wherever it was: its storage and permissions are the
+ * browser's as much as the app's, as in Chrome.
  */
-export async function forgetNappSite(host: string): Promise<void> {
+export function forgetNappSite(host: string): void {
   if (!parseCanonicalHost(host)) return;
   setPush(host, []);
   delete stored.sync[host];
@@ -634,6 +655,16 @@ export async function forgetNappSite(host: string): Promise<void> {
   fetchAbortAll(host);
   events.forget(host);
   lastInteraction.delete(host);
+}
+
+/**
+ * Everything a site has on this computer outside its files: what it has as an
+ * app, its permissions, and its storage (cookies, IndexedDB, caches, service
+ * workers) in the browser's session, which its app window shares. For the
+ * user clearing an app's data.
+ */
+async function clearNappSite(host: string): Promise<void> {
+  forgetNappSite(host);
   options.forgetPermissions(originOf(host));
   await options.session().clearStorageData({ origin: originOf(host) }).catch(() => {});
 }
@@ -700,20 +731,23 @@ export function registerNappHandlers(nappOptions: NappOptions): void {
     },
   });
 
-  // From an installed app's page (napp-preload.cjs).
+  // From an installed nsite's page (napp-preload.cjs).
   ipcMain.handle('napp:call', (event, method, params) => {
     const host = pageCaller(event);
     if (!host) return failure('Not available here');
     return call({ host, worker: false }, method, params);
   });
 
-  // window.ENV, read synchronously before the page's own scripts run. Any
-  // frame of the site's own origin in the apps session gets it.
-  ipcMain.on('napp:env', (event) => {
-    const frame = event.senderFrame;
-    const host = frame && event.sender.session === options.session() ? hostOf(frame.origin) : null;
+  // Read synchronously by every nsite frame before the page's own scripts
+  // run: whether its site is installed (so the page gets the napp runtime at
+  // all), and its window.ENV. Any frame of the site's own origin gets ENV.
+  ipcMain.on('napp:frame', (event) => {
+    const host = installedFrameHost(event);
     const env = host ? stored.env[host] : undefined;
-    event.returnValue = env && Object.keys(env).length > 0 ? env : null;
+    event.returnValue = {
+      installed: host !== null,
+      env: env && Object.keys(env).length > 0 ? env : null,
+    };
   });
 
   // The app's info in the shell (window.nappHost in preload.cjs).
@@ -740,6 +774,6 @@ export function registerNappHandlers(nappOptions: NappOptions): void {
   });
   ipcMain.handle('napp:clearData', (event, rawHost) => {
     options.assertShellSender(event);
-    return forgetNappSite(hostArg(rawHost));
+    return clearNappSite(hostArg(rawHost));
   });
 }

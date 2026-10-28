@@ -355,6 +355,8 @@ files — `git add` new source files before `npm run os:build`.
   install them by browsing the Chrome Web Store inside the browser, or drop
   unpacked extensions into the app's `Extensions/` data directory. Extensions
   run only in the browser's session partition — never against the shell.
+  Installed web apps share that partition, like installed apps in Chrome: a
+  site signed in in a tab is signed in in its app window, and the reverse.
   Manifest V2 is allowed (Electron lacks `declarativeNetRequest`, so classic
   content blockers like uBlock Origin need it); `chrome.*` API coverage is
   broad but not complete.

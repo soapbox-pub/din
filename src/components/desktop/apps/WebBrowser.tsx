@@ -4424,7 +4424,7 @@ function ClearBrowsingDataDialog({
           <ClearDataOption
             id="clear-cookies"
             label="Cookies and site data"
-            description="Signs you out of most sites and clears their stored data."
+            description="Signs you out of most sites, installed apps too, and clears their stored data."
             checked={cookies}
             onCheckedChange={setCookies}
             disabled={!bridge}

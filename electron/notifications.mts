@@ -70,10 +70,10 @@ export interface SystemNotification {
    */
   site: { host: string; url: string | null } | null;
   /**
-   * For a website's service worker's (web-push.mts): its origin, and
-   * whether it's an installed web app's rather than the Web Browser's.
+   * For a website's service worker's (web-push.mts): its origin. The site's
+   * tabs and its installed app share the worker.
    */
-  worker: { origin: string; installed: boolean } | null;
+  worker: { origin: string } | null;
 }
 
 type CloseReason = 'expired' | 'dismissed' | 'closed';
@@ -423,7 +423,6 @@ export async function showWorkerNotification(
   notification: {
     id: number;
     origin: string;
-    installed: boolean;
     title: string;
     body: string;
     icon: string;
@@ -450,7 +449,7 @@ export async function showWorkerNotification(
     guest: null,
     tag: notification.tag,
     site: null,
-    worker: { origin: notification.origin, installed: notification.installed },
+    worker: { origin: notification.origin },
   };
   sendToShell('notifications:show', shown);
 }
