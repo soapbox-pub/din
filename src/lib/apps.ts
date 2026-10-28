@@ -338,7 +338,7 @@ export const APPS: readonly AppDefinition[] = [
     name: 'Settings',
     icon: '/icons/apps/settings.png',
     component: Settings,
-    defaultSize: { width: 720, height: 520 },
+    defaultSize: { width: 960, height: 680 },
     singleInstance: true,
   },
   {
