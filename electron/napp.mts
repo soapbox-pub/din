@@ -40,7 +40,14 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 import { fetchAbort, fetchAbortAll, fetchRead, fetchStart, type NappFetchRequest } from './napp-fetch.mts';
-import { normalizeSubscriptions, PushPool, type NappSubscription, type SitePush } from './napp-push.mts';
+import {
+  normalizeSubscriptions,
+  PushPool,
+  restoreSitePush,
+  resubscribe,
+  type NappSubscription,
+  type SitePush,
+} from './napp-push.mts';
 import { isInstalledSite, nsiteStoreReady, parseCanonicalHost } from './nsite-store.mts';
 import { closeSiteNotification, setSiteNotificationHandlers, showSiteNotification } from './notifications.mts';
 import { WorkerEvents, type DispatchResult } from './worker-events.mts';
@@ -178,7 +185,7 @@ function load(): void {
   }
   for (const host of Object.keys(stored.push)) {
     try {
-      stored.push[host].subscriptions = normalizeSubscriptions(stored.push[host].subscriptions);
+      stored.push[host] = restoreSitePush(stored.push[host]);
     } catch {
       delete stored.push[host];
     }
@@ -327,9 +334,7 @@ function setPush(host: string, subscriptions: NappSubscription[]): void {
     delete stored.push[host];
     pool.setSite(host, null);
   } else {
-    // Nothing from before the site asked; a later own `since` still counts.
-    const since = stored.push[host]?.since ?? Math.floor(Date.now() / 1000);
-    stored.push[host] = { subscriptions, since };
+    stored.push[host] = resubscribe(stored.push[host], subscriptions);
     pool.setSite(host, stored.push[host]);
   }
   save();
@@ -690,7 +695,7 @@ export function registerNappHandlers(nappOptions: NappOptions): void {
 
   pool = new PushPool({
     deliver: deliverPush,
-    onSinceChanged: () => save(),
+    onStored: () => save(),
     log,
     onStatusChanged: statusChanged,
   });

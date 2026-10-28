@@ -12,10 +12,14 @@
 //     much: relays hold live events to `since` too, so without the margin
 //     they'd send almost none (measured: a DM backdated 22 hours reached a
 //     `since: now` REQ on no relay, and a wider one on all of them).
-//     What a REQ turns up before EOSE that is older than `since` is history,
-//     not news, and isn't delivered
-//   - events are signature-checked and deduplicated per site, then handed to
-//     `deliver` (the site's service worker)
+//     What a REQ turns up before EOSE from before its subscription began is
+//     history, not news, and isn't delivered
+//   - every REQ goes out under a fresh id, so a late EOSE (or EVENT) from the
+//     one it replaced can't make its stored events look live
+//   - events are signature-checked and deduplicated per site by the ids
+//     already delivered, which are stored (so a restart doesn't deliver them
+//     again, and a gift wrap that arrived while Din was off still does), then
+//     handed to `deliver` (the site's service worker)
 //   - dropped connections come back with backoff, and at once when the
 //     computer wakes or the network returns
 //
@@ -38,6 +42,8 @@ const MAX_RELAYS = 10;
 const MAX_LIST = 500;
 /** Ids remembered per site, to deliver each event once. */
 const SEEN_LIMIT = 2_000;
+/** How long a dropped subscription keeps its start, for sites that rebuild their list as they load (ms). */
+const DROPPED_KEEP_MS = 60 * 60_000;
 const BACKOFF_MIN_MS = 2_000;
 const BACKOFF_MAX_MS = 5 * 60_000;
 /** How far back NIP-59 lets a gift wrap's created_at be set, in seconds. */
@@ -69,6 +75,64 @@ export interface SitePush {
   subscriptions: NappSubscription[];
   /** Unix seconds: nothing older than this is asked for. */
   since: number;
+  /**
+   * When each subscription (by its filters' JSON) began, Unix seconds: what
+   * it turns up from before then is history. `dropped` (Unix ms) is when the
+   * site stopped asking for it.
+   */
+  starts: Record<string, { at: number; dropped?: number }>;
+  /** The ids delivered, and their created_at. */
+  seen: Record<string, number>;
+  /** The newest created_at `seen` has forgotten: stored events from then or before are history. */
+  floor: number;
+}
+
+function subscriptionKey(sub: NappSubscription): string {
+  return JSON.stringify(sub.filters);
+}
+
+/** A site's push state from napp.json; throws if its subscriptions are refused. */
+export function restoreSitePush(raw: unknown): SitePush {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const subscriptions = normalizeSubscriptions(r.subscriptions);
+  const since = Number.isInteger(r.since) ? (r.since as number) : Math.floor(Date.now() / 1000);
+  // Stored before `seen` was: nothing from before `since` is news.
+  const floor = Number.isInteger(r.floor) ? (r.floor as number) : since;
+  const seen: Record<string, number> = {};
+  if (r.seen && typeof r.seen === 'object') {
+    for (const [id, at] of Object.entries(r.seen)) if (HEX64.test(id) && Number.isInteger(at)) seen[id] = at as number;
+  }
+  const starts: SitePush['starts'] = {};
+  if (r.starts && typeof r.starts === 'object') {
+    for (const [key, value] of Object.entries(r.starts as Record<string, unknown>)) {
+      const { at, dropped } = (value ?? {}) as Record<string, unknown>;
+      if (!Number.isInteger(at)) continue;
+      starts[key] = Number.isInteger(dropped) ? { at: at as number, dropped: dropped as number } : { at: at as number };
+    }
+  }
+  for (const sub of subscriptions) starts[subscriptionKey(sub)] ??= { at: floor };
+  return { subscriptions, since, starts, seen, floor };
+}
+
+/** A site's push state once it asks for `subscriptions` instead. */
+export function resubscribe(before: SitePush | undefined, subscriptions: NappSubscription[]): SitePush {
+  const nowMs = Date.now();
+  const now = Math.floor(nowMs / 1000);
+  const keys = new Set(subscriptions.map(subscriptionKey));
+  const starts: SitePush['starts'] = {};
+  for (const [key, start] of Object.entries(before?.starts ?? {})) {
+    if (start.dropped !== undefined && nowMs - start.dropped > DROPPED_KEEP_MS) continue;
+    starts[key] = keys.has(key) ? { at: start.at } : { at: start.at, dropped: start.dropped ?? nowMs };
+  }
+  // Nothing from before the site asked; a later own `since` still counts.
+  for (const key of keys) starts[key] ??= { at: now };
+  return {
+    subscriptions,
+    since: before?.since ?? now,
+    starts,
+    seen: before?.seen ?? {},
+    floor: before?.floor ?? 0,
+  };
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -166,6 +230,8 @@ function isEvent(value: unknown): value is NostrEvent {
 interface Wanted {
   site: string;
   filters: NostrFilter[];
+  /** The subscription's key in {@link SitePush.starts}. */
+  key: string;
 }
 
 /** What a relay last said about one subscription (for diagnosis). */
@@ -204,6 +270,10 @@ class Relay {
   readonly url: string;
   /** subscription id -> what it asks for. */
   readonly subs = new Map<string, Wanted>();
+  /** subscription id -> the id its current REQ went out under, and back. */
+  readonly #wire = new Map<string, string>();
+  readonly #byWire = new Map<string, string>();
+  #generation = 0;
   #socket: WebSocket | null = null;
   #open = false;
   #backoff = BACKOFF_MIN_MS;
@@ -261,6 +331,8 @@ class Relay {
       const wasOpen = this.#open;
       this.#socket = null;
       this.#open = false;
+      this.#wire.clear();
+      this.#byWire.clear();
       this.#status.disconnectedAt = Date.now();
       if (!wasOpen) this.#status.failures++;
       const why = [event.code, event.reason].filter(Boolean).join(' ');
@@ -300,7 +372,15 @@ class Relay {
       ),
     }));
     if (!this.#open) return;
-    this.#send(['REQ', id, ...filters]);
+    const old = this.#wire.get(id);
+    if (old) {
+      this.#byWire.delete(old);
+      this.#send(['CLOSE', old]);
+    }
+    const wire = `${id}:${(this.#generation++).toString(36)}`;
+    this.#wire.set(id, wire);
+    this.#byWire.set(wire, id);
+    this.#send(['REQ', wire, ...filters]);
     this.#subStatus.set(id, {
       site: wanted.site,
       since,
@@ -320,18 +400,19 @@ class Relay {
     }
     if (!Array.isArray(message)) return;
     const [type, first, second] = message as unknown[];
+    // Replies to a replaced REQ have no id here, and are dropped.
+    const id = typeof first === 'string' ? this.#byWire.get(first) : undefined;
     switch (type) {
       case 'EVENT': {
-        if (typeof first !== 'string') return;
-        const wanted = this.subs.get(first);
-        if (!wanted || !isEvent(second)) return;
-        const status = this.#subStatus.get(first);
+        const wanted = id ? this.subs.get(id) : undefined;
+        if (!id || !wanted || !isEvent(second)) return;
+        const status = this.#subStatus.get(id);
         if (status) status.events++;
-        this.#pool.received(wanted.site, second, this.url, !status?.eose);
+        this.#pool.received(wanted, second, this.url, !status?.eose);
         return;
       }
       case 'EOSE': {
-        const status = typeof first === 'string' ? this.#subStatus.get(first) : undefined;
+        const status = id ? this.#subStatus.get(id) : undefined;
         if (status && !status.eose) {
           status.eose = true;
           this.#pool.changed();
@@ -339,11 +420,11 @@ class Relay {
         return;
       }
       case 'CLOSED': {
-        if (typeof first !== 'string' || !this.subs.has(first)) return;
+        if (!id || !this.subs.has(id)) return;
         const reason = short(second ?? '');
-        const status = this.#subStatus.get(first);
+        const status = this.#subStatus.get(id);
         if (status) status.closed = reason;
-        this.#pool.log(`${this.url}: closed ${first}: ${reason || '(no reason)'}`);
+        this.#pool.log(`${this.url}: closed ${id}: ${reason || '(no reason)'}`);
         this.#pool.changed();
         return;
       }
@@ -364,12 +445,17 @@ class Relay {
   set(id: string, wanted: Wanted): void {
     const before = this.subs.get(id);
     this.subs.set(id, wanted);
-    if (!before || JSON.stringify(before.filters) !== JSON.stringify(wanted.filters)) this.#req(id);
+    if (!before || before.key !== wanted.key) this.#req(id);
   }
 
   remove(id: string): void {
     this.#subStatus.delete(id);
-    if (this.subs.delete(id)) this.#send(['CLOSE', id]);
+    this.subs.delete(id);
+    const wire = this.#wire.get(id);
+    if (!wire) return;
+    this.#wire.delete(id);
+    this.#byWire.delete(wire);
+    this.#send(['CLOSE', wire]);
   }
 
   /** Reconnect now if down (the computer woke, or the network came back). */
@@ -393,8 +479,8 @@ class Relay {
 export interface PushPoolOptions {
   /** Hand an event to a site's service worker. */
   deliver: (site: string, event: NostrEvent, relay: string) => void;
-  /** The site's newest delivered event moved `since` forward. */
-  onSinceChanged: (site: string, since: number) => void;
+  /** A delivery changed the site's stored state (`since`, `seen`, `floor`). */
+  onStored: (site: string) => void;
   /** A line for the system log. */
   log: (line: string) => void;
   /** Something {@link PushPool.status} reports changed. */
@@ -405,7 +491,7 @@ export interface PushPoolOptions {
 export interface SiteStats {
   delivered: number;
   duplicates: number;
-  /** Stored events older than `since`, skipped. */
+  /** Stored events from before their subscription began, skipped. */
   history: number;
   badSignatures: number;
   lastDelivered: { id: string; kind: number; created_at: number; relay: string; at: number } | null;
@@ -415,7 +501,6 @@ export interface SiteStats {
 export class PushPool {
   readonly #relays = new Map<string, Relay>();
   readonly #sites = new Map<string, SitePush>();
-  readonly #seen = new Map<string, Set<string>>();
   readonly #stats = new Map<string, SiteStats>();
   readonly #options: PushPoolOptions;
 
@@ -457,7 +542,6 @@ export class PushPool {
     if (push && push.subscriptions.length > 0) this.#sites.set(site, push);
     else {
       this.#sites.delete(site);
-      this.#seen.delete(site);
       this.#stats.delete(site);
     }
     this.#sync();
@@ -465,22 +549,19 @@ export class PushPool {
   }
 
   /** An event a relay sent; `stored` when it came before the REQ's EOSE. */
-  received(site: string, event: NostrEvent, relay: string, stored: boolean): void {
+  received(wanted: Wanted, event: NostrEvent, relay: string, stored: boolean): void {
+    const { site } = wanted;
     const push = this.#sites.get(site);
     if (!push) return;
     const stats = this.#siteStats(site);
-    // History the gift-wrap margin turned up. Not marked seen: a copy of it
-    // that some other relay sends live is still news.
-    if (stored && event.created_at <= push.since) {
+    // History: from before the subscription began, or older than `seen`
+    // reaches back. Not marked seen: a copy of it that some other relay sends
+    // live is still news.
+    if (stored && event.created_at <= Math.max(push.floor, push.starts[wanted.key]?.at ?? push.since)) {
       stats.history++;
       return;
     }
-    let seen = this.#seen.get(site);
-    if (!seen) {
-      seen = new Set();
-      this.#seen.set(site, seen);
-    }
-    if (seen.has(event.id)) {
+    if (Object.hasOwn(push.seen, event.id)) {
       stats.duplicates++;
       return;
     }
@@ -489,17 +570,37 @@ export class PushPool {
       this.log(`${relay}: bad signature on ${event.id} for ${site}`);
       return;
     }
-    seen.add(event.id);
-    if (seen.size > SEEN_LIMIT) seen.delete(seen.values().next().value as string);
     if (event.created_at > push.since && event.created_at <= Date.now() / 1000 + 600) {
       push.since = event.created_at;
-      this.#options.onSinceChanged(site, push.since);
     }
+    this.#remember(push, event);
+    this.#options.onStored(site);
     stats.delivered++;
     stats.lastDelivered = { id: event.id, kind: event.kind, created_at: event.created_at, relay, at: Date.now() };
     this.log(`${site}: kind ${event.kind} ${event.id.slice(0, 12)} (created ${event.created_at}) from ${relay}`);
     this.changed();
     this.#options.deliver(site, event, relay);
+  }
+
+  /**
+   * Mark an event delivered. Ids no REQ asks back for anymore (older than the
+   * gift-wrap margin before `since`) are forgotten, and the oldest past
+   * SEEN_LIMIT; `floor` rises past whatever is forgotten.
+   */
+  #remember(push: SitePush, event: NostrEvent): void {
+    const seen = push.seen;
+    seen[event.id] = event.created_at;
+    const cutoff = push.since - GIFT_WRAP_BACKDATE;
+    const entries = Object.entries(seen).sort((a, b) => a[1] - b[1]);
+    let forget = 0;
+    while (
+      forget < entries.length &&
+      (entries[forget][1] < cutoff || entries.length - forget > SEEN_LIMIT)
+    ) {
+      const [id, at] = entries[forget++];
+      delete seen[id];
+      push.floor = Math.max(push.floor, at);
+    }
   }
 
   wake(): void {
@@ -523,7 +624,7 @@ export class PushPool {
             subs = new Map();
             wanted.set(url, subs);
           }
-          subs.set(`napp:${prefix}:${index}`, { site, filters: sub.filters });
+          subs.set(`napp:${prefix}:${index}`, { site, filters: sub.filters, key: subscriptionKey(sub) });
         }
       });
     }
