@@ -69,6 +69,20 @@ function groupByProject(sessions: SessionInfo[], mains: Map<string, string>, hom
   return projects.sort((a, b) => b.sessions[0].time.updated - a.sessions[0].time.updated);
 }
 
+/** The list's order when the pointer came in, kept until it leaves. */
+interface HeldOrder {
+  projects: string[];
+  sessions: string[];
+  needsYou: string[];
+}
+
+/** `items` in `order`, the ones it doesn't know after the rest. */
+function inOrder<T>(items: T[], order: string[], id: (item: T) => string): T[] {
+  const rank = new Map(order.map((key, i) => [key, i]));
+  const at = (item: T) => rank.get(id(item)) ?? order.length;
+  return [...items].sort((a, b) => at(a) - at(b));
+}
+
 /**
  * The conversation list: one line per conversation, under the project it
  * belongs to, with the ones waiting on the user pulled out on top so a
@@ -106,15 +120,38 @@ export function SessionList({
   const listed = useMemo(() => (sessions ?? []).filter((s) => !s.time.archived), [sessions]);
   const directories = useMemo(() => [...new Set(listed.map((s) => s.location.directory))], [listed]);
   const mains = useMainCheckouts(directories);
-  const waiting = useMemo(
+  const waitingNow = useMemo(
     () => new Set([...pending.permissions.map((p) => p.sessionID), ...pending.forms.map((f) => f.sessionID)]),
     [pending],
   );
 
-  const projects = groupByProject(listed, mains, home);
+  // Running agents re-sort the list several times a second. Under the
+  // pointer that moves rows between press and release, and the click is
+  // lost or lands on another project, so the order holds while it's there.
+  const [held, setHeld] = useState<HeldOrder | null>(null);
+  const grouped = groupByProject(listed, mains, home);
+  const waiting = held ? new Set(held.needsYou) : waitingNow;
+  const projects = held
+    ? inOrder(grouped, held.projects, (p) => p.key).map((p) => ({
+        ...p,
+        sessions: inOrder(p.sessions, held.sessions, (s) => s.id),
+      }))
+    : grouped;
   const icons = useProjectIcons([...new Set(projects.map((p) => p.root))]);
   const projectOf = new Map(projects.flatMap((p) => p.sessions.map((s) => [s.id, p] as const)));
-  const needsYou = listed.filter((s) => waiting.has(s.id));
+  const needsYou = held
+    ? inOrder(
+        listed.filter((s) => waiting.has(s.id)),
+        held.needsYou,
+        (s) => s.id,
+      )
+    : listed.filter((s) => waiting.has(s.id));
+  const hold = () =>
+    setHeld({
+      projects: grouped.map((p) => p.key),
+      sessions: grouped.flatMap((p) => p.sessions.map((s) => s.id)),
+      needsYou: listed.filter((s) => waitingNow.has(s.id)).map((s) => s.id),
+    });
 
   const needle = filter.trim().toLowerCase();
   const matches = needle
@@ -139,7 +176,7 @@ export function SessionList({
               worktree={mains.has(session.location.directory)}
               selected={session.id === selected}
               running={active.includes(session.id)}
-              waiting={waiting.has(session.id)}
+              waiting={waitingNow.has(session.id)}
               home={home}
               onSelect={() => onSelect(session.id)}
             />
@@ -184,7 +221,11 @@ export function SessionList({
     });
 
   return (
-    <nav aria-label="Conversations" className={cn('w-64 shrink-0 flex-col border-r border-border/60 bg-muted/30', className)}>
+    <nav
+      aria-label="Conversations"
+      onPointerEnter={hold}
+      onPointerLeave={() => setHeld(null)}
+      className={cn('w-64 shrink-0 flex-col border-r border-border/60 bg-muted/30', className)}>
       <div className="flex items-center gap-2 p-2">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
