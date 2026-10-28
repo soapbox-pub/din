@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS-level nsite store exposed by the Electron preload
- * (`window.nsiteStore`, see electron/preload.cjs and electron/nsite-store.mts).
+ * (`window.dinos.nsiteStore`, see electron/preload.cjs and electron/nsite-store.mts).
  *
  * Main keeps the signed manifest of every site Din has opened, and for an
  * installed site every file it names, for good. Hosts are always canonical
@@ -61,7 +61,7 @@ export interface NsiteStore {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     nsiteStore?: NsiteStore;
   }
@@ -70,5 +70,5 @@ declare global {
 /** The nsite store, or undefined outside the Electron shell. */
 export function getNsiteStore(): NsiteStore | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.nsiteStore;
+  return window.dinos?.nsiteStore;
 }

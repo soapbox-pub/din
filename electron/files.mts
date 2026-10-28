@@ -6,7 +6,7 @@
 // Same threat model as the fs bridge (see main.mts): every request is
 // re-validated against the shell's main frame, and authority is bounded by
 // the unprivileged OS user Din runs as. Nothing here can do more than
-// window.fs already can; it just does it in fewer round trips.
+// window.dinos.fs already can; it just does it in fewer round trips.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.

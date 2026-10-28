@@ -1,5 +1,5 @@
 /**
- * Typed access to the napp runtime's shell bridge (`window.nappHost`, see
+ * Typed access to the napp runtime's shell bridge (`window.dinos.nappHost`, see
  * electron/preload.cjs + electron/napp.mts): what an installed nsite has set
  * up on this computer beyond its files - push subscriptions, periodic sync,
  * ENV - and its service worker asking to open its window. Absent outside the
@@ -23,7 +23,7 @@ export interface NappHostBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     nappHost?: NappHostBridge;
   }
@@ -32,7 +32,7 @@ declare global {
 /** The napp bridge, or undefined outside the Electron shell. */
 export function getNappHost(): NappHostBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.nappHost;
+  return window.dinos?.nappHost;
 }
 
 /** Variable names window.ENV accepts (as electron/napp.mts checks them). */

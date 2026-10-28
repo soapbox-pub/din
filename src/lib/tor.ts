@@ -1,5 +1,5 @@
 /**
- * Tor, through the `window.tor` bridge (electron/preload.cjs, backed by
+ * Tor, through the `window.dinos.tor` bridge (electron/preload.cjs, backed by
  * electron/tor.mts): whether Din has found a Tor and how far it has got
  * connecting, and turning it on and off on DinOS. Browser tabs on onion sites
  * run in a session of their own (WEBBROWSER_TOR_PARTITION) that goes through
@@ -35,7 +35,7 @@ export interface TorBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     tor?: TorBridge;
   }
@@ -44,7 +44,7 @@ declare global {
 /** The Tor bridge, or undefined outside the Electron shell. */
 export function getTorBridge(): TorBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.tor;
+  return window.dinos?.tor;
 }
 
 /** Where Tor stands, for the UI. */

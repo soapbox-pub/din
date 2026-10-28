@@ -1,6 +1,6 @@
 /**
  * Typed access to the shell-shortcut bridge exposed by the Electron preload
- * (`window.shellShortcuts`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.shellShortcuts`, see electron/preload.cjs + electron/main.cjs).
  *
  * Keyboard focus often lives inside Electron <webview> guests (browser
  * tabs, devtools panes), where the shell can't observe keydown events. The
@@ -189,7 +189,7 @@ export interface ShellShortcutsBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     shellShortcuts?: ShellShortcutsBridge;
   }
@@ -198,5 +198,5 @@ declare global {
 /** The shell-shortcut bridge, or undefined outside the Electron shell. */
 export function getShellShortcuts(): ShellShortcutsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.shellShortcuts;
+  return window.dinos?.shellShortcuts;
 }

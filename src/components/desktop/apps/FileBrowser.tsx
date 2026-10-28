@@ -151,7 +151,7 @@ function isFilesTabTransfer(value: unknown): value is { path: string } {
  * selection, drag and drop, cut/copy/paste, the Trash, undo, archives,
  * thumbnails, and a keyboard shortcut for nearly everything.
  *
- * Backed by `window.fs` (Electron preload + IPC into the main process, see
+ * Backed by `window.dinos.fs` (Electron preload + IPC into the main process, see
  * electron/files.mts for the heavier operations). Each tab is an
  * independent navigation context, all kept mounted so background tabs keep
  * their state; the tab strip is published into the window title bar.

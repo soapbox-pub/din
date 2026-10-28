@@ -1,4 +1,4 @@
-// Tor (window.tor - see preload.cjs, Settings → Wi-Fi and the Web
+// Tor (window.dinos.tor - see preload.cjs, Settings → Wi-Fi and the Web
 // Browser): finding it, and how far it has got connecting.
 //
 // DinOS runs Tor from boot (os/configuration.nix). Elsewhere Din uses one

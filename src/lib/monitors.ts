@@ -10,7 +10,7 @@
  * windows to the monitor they're on, and keep them out of the dead areas
  * between monitors of different sizes.
  *
- * The host reports displays through `window.monitors` (electron/preload.cjs,
+ * The host reports displays through `window.dinos.monitors` (electron/preload.cjs,
  * backed by the monitors:* handlers in electron/main.mts). Where it's absent
  * (a plain browser, or the windowed dev shell) the viewport is one monitor.
  */
@@ -54,7 +54,7 @@ export interface MonitorsBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     monitors?: MonitorsBridge;
   }
@@ -63,7 +63,7 @@ declare global {
 /** The monitors bridge, or undefined when running outside the Electron shell. */
 export function getMonitorsBridge(): MonitorsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.monitors;
+  return window.dinos?.monitors;
 }
 
 /** The whole viewport as a single primary monitor. */

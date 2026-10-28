@@ -1,6 +1,6 @@
 /**
  * Typed access to the boot bridge exposed by the Electron preload
- * (`window.boot`, see electron/preload.cjs).
+ * (`window.dinos.boot`, see electron/preload.cjs).
  *
  * The shell window starts hidden (see electron/main.mts) and is shown only
  * after the renderer reports its first frame is on the way, so the window
@@ -14,7 +14,7 @@ export interface BootBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     boot?: BootBridge;
   }
@@ -23,5 +23,5 @@ declare global {
 /** The boot bridge, or undefined when running outside the Electron shell. */
 export function getBootBridge(): BootBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.boot;
+  return window.dinos?.boot;
 }

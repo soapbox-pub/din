@@ -1,6 +1,6 @@
 /**
  * Typed access to the installer bridge exposed by the Electron preload
- * (`window.installer`, see electron/preload.cjs + electron/installer.mts).
+ * (`window.dinos.installer`, see electron/preload.cjs + electron/installer.mts).
  *
  * DinOS written to a USB stick boots as a live system; the Installer app
  * copies it onto the computer's own disk. The bridge is absent outside the
@@ -81,7 +81,7 @@ export interface InstallerBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     installer?: InstallerBridge;
   }
@@ -90,7 +90,7 @@ declare global {
 /** The installer bridge, or undefined outside the Electron shell. */
 export function getInstallerBridge(): InstallerBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.installer;
+  return window.dinos?.installer;
 }
 
 /** Shortest passphrase the Installer accepts. */

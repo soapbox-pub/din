@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS terminal bridge exposed by the Electron preload
- * (`window.pty`, see electron/preload.cjs + electron/main.cjs + pty-host.py).
+ * (`window.dinos.pty`, see electron/preload.cjs + electron/main.cjs + pty-host.py).
  *
  * Each session is a real login shell attached to a pseudo-terminal, running
  * as the unprivileged OS user. Output arrives as raw bytes (Uint8Array) and
@@ -54,7 +54,7 @@ export interface PtyBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     pty?: PtyBridge;
   }
@@ -63,5 +63,5 @@ declare global {
 /** The pty bridge, or undefined when running outside the Electron shell. */
 export function getPtyBridge(): PtyBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.pty;
+  return window.dinos?.pty;
 }

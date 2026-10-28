@@ -1,4 +1,4 @@
-// The lock bridge (window.lock, for the shell's Lock menu item and
+// The lock bridge (window.dinos.lock, for the shell's Lock menu item and
 // Settings → Password).
 //
 // DinOS's lock screen is os/din-lock.py, which runs as root on a terminal of

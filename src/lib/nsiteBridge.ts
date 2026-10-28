@@ -1,6 +1,6 @@
 /**
  * Typed access to the nsite resolution host exposed by the Electron preload
- * (`window.nsiteHost`, see electron/preload.cjs).
+ * (`window.dinos.nsiteHost`, see electron/preload.cjs).
  *
  * The nsite:// protocol handler runs in the main process (electron/nsite.mts),
  * which has no Nostr client. Turning a URL into a site means NIP-19 decoding
@@ -56,7 +56,7 @@ export interface NsiteHostBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     nsiteHost?: NsiteHostBridge;
   }
@@ -65,5 +65,5 @@ declare global {
 /** The nsite host bridge, or undefined outside the Electron shell. */
 export function getNsiteHostBridge(): NsiteHostBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.nsiteHost;
+  return window.dinos?.nsiteHost;
 }

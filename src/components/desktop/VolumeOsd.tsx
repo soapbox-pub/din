@@ -14,7 +14,7 @@ const OSD_VISIBLE_MS = 1500;
 
 /**
  * On-screen volume display. Listens for media-key volume changes pushed from
- * the main process (window.audio.onOsd) and shows a transient overlay with the
+ * the main process (window.dinos.audio.onOsd) and shows a transient overlay with the
  * new level, GNOME/macOS style; the mic-mute key shows the microphone's state
  * the same way. Also primes the audio status cache so the menu-bar control
  * and Settings reflect the change immediately.

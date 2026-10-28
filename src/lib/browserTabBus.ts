@@ -1,7 +1,7 @@
 import type { CrxTabCommand } from '@/lib/crx';
 
 /**
- * Singleton bus routing extension-initiated tab commands (see `window.crx`)
+ * Singleton bus routing extension-initiated tab commands (see `window.dinos.crx`)
  * to the mounted Web Browser app.
  *
  * The extension system can ask for tabs at any time - including while no

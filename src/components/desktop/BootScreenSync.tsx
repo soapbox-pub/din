@@ -8,7 +8,7 @@ interface BootScreenBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     bootScreen?: BootScreenBridge;
   }
@@ -33,7 +33,7 @@ export function BootScreenSync() {
   const hour12 = usesHour12(config.clockFormat);
 
   useEffect(() => {
-    const bridge = window.bootScreen;
+    const bridge = window.dinos?.bootScreen;
     if (!bridge) return;
     const timer = setTimeout(() => {
       bridge.update(wallpaper, hour12).catch((error: unknown) => {

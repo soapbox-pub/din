@@ -1,4 +1,4 @@
-// The dictation bridge (window.dictation): speech to text, on this computer.
+// The dictation bridge (window.dinos.dictation): speech to text, on this computer.
 //
 // The shell records the microphone itself (src/lib/dictation.ts) and hands
 // 16 kHz mono PCM here; whisper.cpp's server turns it into text. DinOS's

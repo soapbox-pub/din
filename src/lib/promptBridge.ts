@@ -1,6 +1,6 @@
 /**
  * Typed access to the prompt host exposed by the Electron preload
- * (`window.promptHost`, see electron/preload.cjs + electron/main.mts).
+ * (`window.dinos.promptHost`, see electron/preload.cjs + electron/main.mts).
  *
  * The main process asks the user yes/no questions through it: a web page
  * requesting the camera, microphone, location, or notifications, and the
@@ -49,7 +49,7 @@ export interface PromptHostBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     promptHost?: PromptHostBridge;
   }
@@ -58,5 +58,5 @@ declare global {
 /** The prompt host bridge, or undefined when running outside the shell. */
 export function getPromptHostBridge(): PromptHostBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.promptHost;
+  return window.dinos?.promptHost;
 }

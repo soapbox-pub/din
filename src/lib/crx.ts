@@ -1,6 +1,6 @@
 /**
  * Typed access to the Chrome extension bridge exposed by the Electron preload
- * (`window.crx`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.crx`, see electron/preload.cjs + electron/main.cjs).
  *
  * The bridge lets the Web Browser app coordinate its tab UI with the Chrome
  * extension system running in the main process (electron-chrome-extensions):
@@ -119,7 +119,7 @@ export interface CrxBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     crx?: CrxBridge;
   }
@@ -128,7 +128,7 @@ declare global {
 /** The crx bridge, or undefined when running outside the Electron shell. */
 export function getCrxBridge(): CrxBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.crx;
+  return window.dinos?.crx;
 }
 
 /**

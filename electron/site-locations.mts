@@ -1,4 +1,4 @@
-// Onion-Location and Nsite-Location (window.siteLocations - see preload.cjs
+// Onion-Location and Nsite-Location (window.dinos.siteLocations - see preload.cjs
 // and the Web Browser's address bar): an https site can name its onion
 // service, and the nsite it's also published as, in a response header or a
 // <meta http-equiv>, and the address bar offers to go there, as Tor Browser

@@ -166,7 +166,7 @@ interface GuestFileDropBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     guestVisibility?: GuestVisibilityBridge;
     /** Present only inside the Electron shell. */
@@ -555,7 +555,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // main process ignores repeats.
     useEffect(() => {
       const el = webviewRef.current;
-      const bridge = window.guestVisibility;
+      const bridge = window.dinos?.guestVisibility;
       if (!el || !bridge) return;
       const report = () => {
         try {
@@ -579,7 +579,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     const fileDrag = useSyncExternalStore(subscribeFileDrag, fileDragActive);
     const sendFileDrag = (type: 'over' | 'drop' | 'cancel', event: React.DragEvent<HTMLElement>) => {
       const el = webviewRef.current;
-      const bridge = window.guestFileDrop;
+      const bridge = window.dinos?.guestFileDrop;
       if (!el || !bridge) return;
       // The page's CSS pixels: the shell's, through any transform on the
       // window, then the page's own zoom on top of the interface zoom.
@@ -598,9 +598,9 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // say) still lets go of it; one already dropped or left is ignored.
     useEffect(() => {
       const el = webviewRef.current;
-      if (fileDrag || !el || !window.guestFileDrop) return;
+      if (fileDrag || !el || !window.dinos?.guestFileDrop) return;
       try {
-        window.guestFileDrop.send(el.getWebContentsId(), 'cancel', 0, 0, []);
+        window.dinos?.guestFileDrop.send(el.getWebContentsId(), 'cancel', 0, 0, []);
       } catch {
         // Guest not attached yet.
       }
@@ -611,7 +611,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     return (
       <div className="relative h-full w-full" style={{ display: 'flex' }}>
         <div ref={containerRef} className="h-full w-full" style={{ display: 'flex' }} />
-        {fileDrag && window.guestFileDrop && (
+        {fileDrag && window.dinos?.guestFileDrop && (
           <div
             className="absolute inset-0 z-10"
             onDragOver={(event) => {

@@ -1,6 +1,6 @@
 /**
  * Typed access to the screen-sharing bridge exposed by the Electron preload
- * (`window.screenShare`, see electron/preload.cjs + electron/screen-share.mts).
+ * (`window.dinos.screenShare`, see electron/preload.cjs + electron/screen-share.mts).
  *
  * A web page's getDisplayMedia() arrives as a pick: the page's origin and
  * what it may share (the entire screen, or one of the open web windows).
@@ -50,7 +50,7 @@ export interface ScreenShareBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     screenShare?: ScreenShareBridge;
   }
@@ -59,7 +59,7 @@ declare global {
 /** The screen-sharing bridge, or undefined when running outside the shell. */
 export function getScreenShareBridge(): ScreenShareBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.screenShare;
+  return window.dinos?.screenShare;
 }
 
 /** An origin as a readable host (`meet.example`), falling back to the raw string. */

@@ -1,6 +1,6 @@
 /**
  * Typed access to the updater bridge exposed by the Electron preload
- * (`window.updater`, see electron/preload.cjs + electron/updater.mts).
+ * (`window.dinos.updater`, see electron/preload.cjs + electron/updater.mts).
  *
  * An installed DinOS looks for newer releases on its own and stages them for
  * the next boot; Settings shows where that's got to and offers the restart.
@@ -38,7 +38,7 @@ export interface UpdaterBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     updater?: UpdaterBridge;
   }
@@ -47,7 +47,7 @@ declare global {
 /** The updater bridge, or undefined outside the Electron shell. */
 export function getUpdaterBridge(): UpdaterBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.updater;
+  return window.dinos?.updater;
 }
 
 export const UPDATE_STEP_LABELS: Record<UpdateStep, string> = {

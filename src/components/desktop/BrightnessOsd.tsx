@@ -12,7 +12,7 @@ const OSD_VISIBLE_MS = 1500;
 
 /**
  * On-screen brightness display. Listens for media-key brightness changes
- * pushed from the main process (window.brightness.onOsd) and shows a transient
+ * pushed from the main process (window.dinos.brightness.onOsd) and shows a transient
  * overlay with the new level, GNOME/macOS style. Also primes the brightness
  * status cache so the menu-bar control reflects the change immediately.
  *

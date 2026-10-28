@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getDateTimeBridge } from '@/lib/datetime';
 import type { DateTimeStatus } from '@/lib/datetime';
 
-/** TanStack Query hooks over the date & time bridge (window.datetime). */
+/** TanStack Query hooks over the date & time bridge (window.dinos.datetime). */
 
 function requireBridge() {
   const datetime = getDateTimeBridge();

@@ -1,4 +1,4 @@
-// The printing bridge (window.printing, for Din's print dialog and Settings →
+// The printing bridge (window.dinos.printing, for Din's print dialog and Settings →
 // Printers): CUPS, through its command-line tools.
 //
 // Printers need no setup. DinOS runs CUPS with Avahi and ipp-usb

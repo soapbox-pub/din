@@ -1,6 +1,6 @@
 /**
  * Typed access to the session bridge exposed by the Electron preload
- * (`window.session`, see electron/preload.cjs).
+ * (`window.dinos.session`, see electron/preload.cjs).
  *
  * Ending the session quits the shell; under din-session.sh that ends the
  * login session and returns to the display manager. Saved Nostr accounts are
@@ -13,7 +13,7 @@ export interface SessionBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     session?: SessionBridge;
   }
@@ -22,5 +22,5 @@ declare global {
 /** The session bridge, or undefined when running outside the Electron shell. */
 export function getSessionBridge(): SessionBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.session;
+  return window.dinos?.session;
 }

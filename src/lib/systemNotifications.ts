@@ -1,6 +1,6 @@
 /**
  * Typed access to the system notifications bridge exposed by the Electron
- * preload (`window.systemNotifications`, see electron/preload.cjs +
+ * preload (`window.dinos.systemNotifications`, see electron/preload.cjs +
  * electron/notifications.mts): notifications from Linux apps, which Din
  * receives as the desktop's org.freedesktop.Notifications server, and from
  * web pages in browser tabs and installed web apps. Absent outside the
@@ -59,7 +59,7 @@ export interface SystemNotificationsBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     systemNotifications?: SystemNotificationsBridge;
   }
@@ -68,5 +68,5 @@ declare global {
 /** The system notifications bridge, or undefined outside the Electron shell. */
 export function getSystemNotificationsBridge(): SystemNotificationsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.systemNotifications;
+  return window.dinos?.systemNotifications;
 }

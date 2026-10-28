@@ -1,6 +1,6 @@
 /**
  * Typed access to the Nostr identity bridge host exposed by the Electron
- * preload (`window.nostrHost`, see electron/preload.cjs + electron/main.mts).
+ * preload (`window.dinos.nostrHost`, see electron/preload.cjs + electron/main.mts).
  *
  * Browser tabs and installed web apps get a NIP-07 `window.nostr`
  * (electron/nostr-preload.cjs), and apps connected to Din as a remote signer
@@ -88,7 +88,7 @@ export interface NostrHostBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     nostrHost?: NostrHostBridge;
   }
@@ -97,5 +97,5 @@ declare global {
 /** The Nostr host bridge, or undefined when running outside the Electron shell. */
 export function getNostrHostBridge(): NostrHostBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.nostrHost;
+  return window.dinos?.nostrHost;
 }

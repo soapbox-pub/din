@@ -3,7 +3,7 @@ import { getAudioBridge } from '@/lib/audio';
 import type { AudioDevices, AudioStatus, AudioStreams } from '@/lib/audio';
 
 /**
- * TanStack Query hooks over the OS audio bridge (window.audio).
+ * TanStack Query hooks over the OS audio bridge (window.dinos.audio).
  *
  * Status refreshes on PipeWire change events (SystemEventsHost), so the
  * menu-bar control and Settings panel track volume changes made elsewhere

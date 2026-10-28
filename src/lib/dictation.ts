@@ -4,7 +4,7 @@
  * One session at a time, started by Super+H (into whatever has focus), by
  * holding Super+A (into the assistant's prompt) or by a mic button (into
  * its own field). The shell records the microphone, and whisper.cpp turns
- * it into text in the main process (`window.dictation`, see
+ * it into text in the main process (`window.dinos.dictation`, see
  * electron/dictation.mts). While you speak, what's been heard so far is
  * shown as a preview (DictationOverlay); when you stop, the final text goes
  * to the session's target.
@@ -28,7 +28,7 @@ export interface DictationBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     dictation?: DictationBridge;
   }
@@ -92,7 +92,7 @@ export function subscribeDictation(listener: () => void): () => void {
 
 function bridge(): DictationBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.dictation;
+  return window.dinos?.dictation;
 }
 
 /** Whether there's a place to send the audio at all (the Electron shell). */

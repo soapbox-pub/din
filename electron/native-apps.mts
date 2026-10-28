@@ -959,7 +959,7 @@ async function appIdForWindow(pid: number | null, wmClass: string[]): Promise<st
 }
 
 /**
- * Register the native-app IPC surface (window.nativeApps in the preload).
+ * Register the native-app IPC surface (window.dinos.nativeApps in the preload).
  *
  * The embedded display starts with the first app launched, so the cost isn't
  * paid during boot, and a machine without Xvfb never tries.

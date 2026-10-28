@@ -1,6 +1,6 @@
 /**
  * Typed access to the cursor bridge exposed by the Electron preload
- * (`window.cursor`, see electron/preload.cjs + electron/cursor.mts).
+ * (`window.dinos.cursor`, see electron/preload.cjs + electron/cursor.mts).
  *
  * The pointer's theme and size are the system's (XCursor themes, named in
  * GSettings): they apply to Din's own windows, web pages and native apps
@@ -52,7 +52,7 @@ export interface SystemCursorBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     cursor?: SystemCursorBridge;
   }
@@ -61,7 +61,7 @@ declare global {
 /** The cursor bridge, or undefined when running outside the Electron shell. */
 export function getSystemCursorBridge(): SystemCursorBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.cursor;
+  return window.dinos?.cursor;
 }
 
 /** A preview as a PNG data URL, for an <img>. */

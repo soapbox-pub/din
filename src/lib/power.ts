@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS power bridge exposed by the Electron preload
- * (`window.power`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.power`, see electron/preload.cjs + electron/main.cjs).
  *
  * Backed by /sys/class/power_supply in the main process, so it works on any
  * Linux session (cage/Wayland or bare X11) with no external dependency. On
@@ -76,7 +76,7 @@ export function cleanPowerError(error: unknown): string {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     power?: PowerBridge;
   }
@@ -85,7 +85,7 @@ declare global {
 /** The power bridge, or undefined when running outside the Electron shell. */
 export function getPowerBridge(): PowerBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.power;
+  return window.dinos?.power;
 }
 
 export interface PowerSummary {

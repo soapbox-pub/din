@@ -1,5 +1,5 @@
 /**
- * Typed access to Din's NIP-46 remote signer (`window.bunkerHost`, see
+ * Typed access to Din's NIP-46 remote signer (`window.dinos.bunkerHost`, see
  * electron/bunker.mts). Apps connect to the user's account with a bunker://
  * link Din makes, or a nostrconnect:// link they make; their requests then
  * arrive through the same bridge as window.nostr's (see nostrBridge.ts).
@@ -55,14 +55,14 @@ export interface BunkerBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     bunkerHost?: BunkerBridge;
   }
 }
 
 export function getBunkerBridge(): BunkerBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.bunkerHost;
+  return window.dinos?.bunkerHost;
 }
 
 /** Electron prefixes errors from main ("Error invoking remote method …: Error: …"); keep the message. */

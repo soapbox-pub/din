@@ -7,7 +7,7 @@ interface PageFullscreenBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     pageFullscreen?: PageFullscreenBridge;
   }
@@ -50,7 +50,7 @@ export function PageFullscreenHost() {
   }, [monitors]);
 
   useEffect(() => {
-    const bridge = window.pageFullscreen;
+    const bridge = window.dinos?.pageFullscreen;
     if (!bridge) return;
     const shell = document.getElementById('shell');
     const layer = shell instanceof HTMLDialogElement ? shell : null;

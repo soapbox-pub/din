@@ -1,6 +1,6 @@
 /**
  * Typed access to the assistant bridge exposed by the Electron preload
- * (`window.assistant`, see electron/preload.cjs + electron/assistant.mts),
+ * (`window.dinos.assistant`, see electron/preload.cjs + electron/assistant.mts),
  * and the slice of OpenCode's v2 server API that Din uses.
  *
  * OpenCode is the agent: it keeps sessions, runs their tools, and asks
@@ -47,7 +47,7 @@ export interface AssistantBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     assistant?: AssistantBridge;
   }
@@ -56,7 +56,7 @@ declare global {
 /** The assistant bridge, or undefined outside the Electron shell. */
 export function getAssistantBridge(): AssistantBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.assistant;
+  return window.dinos?.assistant;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

@@ -4,7 +4,7 @@ import { getBrightnessBridge } from '@/lib/brightness';
 import type { BrightnessBridge, BrightnessStatus } from '@/lib/brightness';
 
 /**
- * TanStack Query hooks over the OS brightness bridge (window.brightness).
+ * TanStack Query hooks over the OS brightness bridge (window.dinos.brightness).
  *
  * Status polls on a short interval so the menu-bar control and Settings panel
  * track changes made elsewhere (media keys, brightnessctl in the Terminal).

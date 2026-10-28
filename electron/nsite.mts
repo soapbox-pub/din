@@ -710,7 +710,7 @@ export function registerNsiteProtocol({
     pending.resolve(payload.resolution as NsiteResolution);
   });
 
-  // The store, for the shell only (window.nsiteStore in preload.cjs). Guests
+  // The store, for the shell only (window.dinos.nsiteStore in preload.cjs). Guests
   // never reach these: an nsite app learns nothing about other sites.
   ipcMain.handle('nsite:installed', (event) => {
     assertShell(event);

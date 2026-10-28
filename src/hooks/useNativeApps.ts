@@ -7,7 +7,7 @@ import {
 } from '@/lib/nativeApps';
 
 /**
- * TanStack Query hook over the native-app bridge (window.nativeApps).
+ * TanStack Query hook over the native-app bridge (window.dinos.nativeApps).
  *
  * The installed-app list is expensive to produce (a scan of every XDG
  * desktop entry plus icon-theme lookups, with icons inlined as data URLs) and

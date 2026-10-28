@@ -755,7 +755,7 @@ export function registerNappHandlers(nappOptions: NappOptions): void {
     };
   });
 
-  // The app's info in the shell (window.nappHost in preload.cjs).
+  // The app's info in the shell (window.dinos.nappHost in preload.cjs).
   const hostArg = (host: unknown): string => {
     if (typeof host !== 'string' || !parseCanonicalHost(host)) throw new Error('napp: expected a canonical nsite host');
     return host;

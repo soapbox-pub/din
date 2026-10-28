@@ -1,6 +1,6 @@
 /**
  * Typed access to the highlight bridge host exposed by the Electron preload
- * (`window.highlightHost`, see electron/preload.cjs + electron/main.mts).
+ * (`window.dinos.highlightHost`, see electron/preload.cjs + electron/main.mts).
  *
  * The ad-hoc Web Browser's tabs get a NIP-84 "Highlight" affordance
  * (electron/browser-highlight-preload.cjs): selecting text on any page shows a
@@ -9,7 +9,7 @@
  * 9802 Highlight referencing the page URL. The renderer subscribes with
  * `onRequest` and answers each request with `respond`.
  *
- * Unlike the Nostr identity bridge (`window.nostrHost`), this carries no general
+ * Unlike the Nostr identity bridge (`window.dinos.nostrHost`), this carries no general
  * signing surface: a request is only ever `{ url, text, context }` for a fixed
  * highlight kind. In a plain browser (`npm run dev:browser`) the bridge is
  * absent - there are no <webview> tabs to serve - so callers feature-detect via
@@ -46,7 +46,7 @@ export interface HighlightHostBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     highlightHost?: HighlightHostBridge;
   }
@@ -55,5 +55,5 @@ declare global {
 /** The highlight host bridge, or undefined when running outside the Electron shell. */
 export function getHighlightHostBridge(): HighlightHostBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.highlightHost;
+  return window.dinos?.highlightHost;
 }

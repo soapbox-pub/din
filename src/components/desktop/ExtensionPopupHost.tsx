@@ -23,7 +23,7 @@ import { ScreenLayer } from './MonitorsProvider';
  * frameless windows - fine on a windowing desktop, but Din is a
  * single-window kiosk where a popup toplevel detaches from the shell window
  * (under a kiosk compositor it can't even be positioned). Instead, the main
- * process routes popup requests here (window.crx; see the activateClick
+ * process routes popup requests here (window.dinos.crx; see the activateClick
  * override in electron/main.mts) and the popup page is hosted in an overlay
  * <webview> anchored to the toolbar action that opened it. The anchor rect
  * arrives in shell-viewport CSS pixels (the action element's

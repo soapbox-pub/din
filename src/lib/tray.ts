@@ -1,6 +1,6 @@
 /**
  * Typed access to the tray bridge exposed by the Electron preload
- * (`window.tray`, see electron/preload.cjs + electron/tray.mts).
+ * (`window.dinos.tray`, see electron/preload.cjs + electron/tray.mts).
  *
  * Apps that live in a system tray (chat and sync clients, Steam) publish a
  * StatusNotifierItem on the session bus; Din hosts them, and the menu bar
@@ -57,7 +57,7 @@ export interface TrayBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     tray?: TrayBridge;
   }
@@ -66,5 +66,5 @@ declare global {
 /** The tray bridge, or undefined outside the Electron shell. */
 export function getTrayBridge(): TrayBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.tray;
+  return window.dinos?.tray;
 }

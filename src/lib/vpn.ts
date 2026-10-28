@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS VPN bridge exposed by the Electron preload
- * (`window.vpn`, see electron/preload.cjs + electron/main.mts).
+ * (`window.dinos.vpn`, see electron/preload.cjs + electron/main.mts).
  *
  * Backed by nmcli/NetworkManager in the main process, scoped to VPN and
  * WireGuard connection profiles. The network selector can toggle profiles that
@@ -31,7 +31,7 @@ export interface VpnBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     vpn?: VpnBridge;
   }
@@ -40,7 +40,7 @@ declare global {
 /** The vpn bridge, or undefined when running outside the Electron shell. */
 export function getVpnBridge(): VpnBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.vpn;
+  return window.dinos?.vpn;
 }
 
 /**

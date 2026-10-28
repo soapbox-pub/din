@@ -741,7 +741,7 @@ export function registerWebPushHandlers(webPushOptions: WebPushOptions): void {
     return call(caller, method, params);
   });
 
-  // Settings (window.webPushHost in preload.cjs).
+  // Settings (window.dinos.webPushHost in preload.cjs).
   ipcMain.handle('web-push:status', (event) => {
     options.assertShellSender(event);
     return {

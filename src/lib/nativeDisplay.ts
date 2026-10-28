@@ -134,7 +134,7 @@ interface NativeDisplayBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     nativeDisplay?: NativeDisplayBridge;
   }
@@ -162,7 +162,7 @@ let started = false;
 
 /** Whether the embedded display can exist here at all. */
 export function nativeDisplaySupported(): boolean {
-  return typeof window !== 'undefined' && window.nativeDisplay !== undefined;
+  return typeof window !== 'undefined' && window.dinos?.nativeDisplay !== undefined;
 }
 
 /**
@@ -186,8 +186,8 @@ export function startNativeDisplay(): void {
     port.onmessage = (e: MessageEvent<WorkerMessage>) => onMessage(e.data);
   });
   // GPU frames are drawn by the preload; acking them is what paces the apps.
-  window.nativeDisplay?.onPresented(() => ackOnNextFrame('wayland'));
-  window.nativeDisplay?.connect();
+  window.dinos?.nativeDisplay?.onPresented(() => ackOnNextFrame('wayland'));
+  window.dinos?.nativeDisplay?.connect();
 }
 
 /** Subscribe to window lifecycle events. Returns an unsubscribe fn. */
@@ -295,7 +295,7 @@ function onMessage(message: WorkerMessage): void {
         drawUpdate(surface.id, early.x, early.y, early.width, early.height, early.pixels);
       }
       earlyUpdates.delete(surface.id);
-      window.nativeDisplay?.attachCanvas(surface.id, surface.canvas);
+      window.dinos?.nativeDisplay?.attachCanvas(surface.id, surface.canvas);
       // A re-announce (after a shell reload) of a window that already has a
       // Din window must not open a second one.
       if (!existing) emit({ type: message.type, surface });
@@ -306,7 +306,7 @@ function onMessage(message: WorkerMessage): void {
       if (!surface) return;
       surfaces.delete(message.id);
       closeRequests.delete(message.id);
-      window.nativeDisplay?.detachCanvas(message.id);
+      window.dinos?.nativeDisplay?.detachCanvas(message.id);
       emit({ type: 'close', surface });
       return;
     }

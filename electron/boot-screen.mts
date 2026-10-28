@@ -1,4 +1,4 @@
-// The boot screen bridge (window.bootScreen, for the shell): gives DinOS's
+// The boot screen bridge (window.dinos.bootScreen, for the shell): gives DinOS's
 // boot and unlock screen the wallpaper Din is showing.
 //
 // The boot screen asks for the disk's password before anything on the disk

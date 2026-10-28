@@ -1,6 +1,6 @@
 /**
  * Typed access to the native-app bridge exposed by the Electron preload
- * (`window.nativeApps`, see electron/preload.cjs + electron/native-apps.mts).
+ * (`window.dinos.nativeApps`, see electron/preload.cjs + electron/native-apps.mts).
  *
  * Installed Linux apps run on Din's embedded display - a private X server
  * whose windows Din composites into its own (see src/lib/nativeDisplay.ts) -
@@ -81,7 +81,7 @@ export function isWindowsProgram(name: string): boolean {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     nativeApps?: NativeAppsBridge;
   }
@@ -90,7 +90,7 @@ declare global {
 /** The native-app bridge, or undefined outside the Electron shell. */
 export function getNativeAppsBridge(): NativeAppsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.nativeApps;
+  return window.dinos?.nativeApps;
 }
 
 /**

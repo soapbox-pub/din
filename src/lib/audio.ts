@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS audio bridge exposed by the Electron preload
- * (`window.audio`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.audio`, see electron/preload.cjs + electron/main.cjs).
  *
  * Backed by wpctl (WirePlumber/PipeWire) in the main process, controlling the
  * default sink. Where wpctl is absent (no PipeWire) or in a plain browser the
@@ -120,7 +120,7 @@ export interface AudioBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     audio?: AudioBridge;
   }
@@ -129,7 +129,7 @@ declare global {
 /** The audio bridge, or undefined when running outside the Electron shell. */
 export function getAudioBridge(): AudioBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.audio;
+  return window.dinos?.audio;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

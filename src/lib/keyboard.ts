@@ -1,6 +1,6 @@
 /**
  * Typed access to the keyboard layout bridge exposed by the Electron preload
- * (`window.keyboard`, see electron/preload.cjs + electron/keyboard.mts).
+ * (`window.dinos.keyboard`, see electron/preload.cjs + electron/keyboard.mts).
  *
  * The layout here is the system's: Din's own windows and the native Linux
  * apps it runs both type with it. Din can change it on DinOS and on GNOME;
@@ -39,7 +39,7 @@ export interface KeyboardBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     keyboard?: KeyboardBridge;
   }
@@ -48,7 +48,7 @@ declare global {
 /** The keyboard bridge, or undefined when running outside the Electron shell. */
 export function getKeyboardBridge(): KeyboardBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.keyboard;
+  return window.dinos?.keyboard;
 }
 
 /** Stable key for a layout choice. */

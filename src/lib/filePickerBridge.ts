@@ -1,6 +1,6 @@
 /**
  * Typed access to the file-picker bridge host exposed by the Electron preload
- * (`window.filePickerHost`, see electron/preload.cjs + electron/main.mts).
+ * (`window.dinos.filePickerHost`, see electron/preload.cjs + electron/main.mts).
  *
  * A native `<input type=file>` click inside a browser tab or installed web-app
  * guest is intercepted over CDP in the main process and relayed here, to the
@@ -69,7 +69,7 @@ export interface FilePickerHostBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     filePickerHost?: FilePickerHostBridge;
   }
@@ -78,5 +78,5 @@ declare global {
 /** The file-picker host bridge, or undefined when running outside the shell. */
 export function getFilePickerHostBridge(): FilePickerHostBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.filePickerHost;
+  return window.dinos?.filePickerHost;
 }

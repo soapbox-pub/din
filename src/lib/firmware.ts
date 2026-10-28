@@ -1,6 +1,6 @@
 /**
  * Typed access to the firmware bridge exposed by the Electron preload
- * (`window.firmware`, see electron/preload.cjs + electron/firmware.mts).
+ * (`window.dinos.firmware`, see electron/preload.cjs + electron/firmware.mts).
  *
  * DinOS looks for firmware updates through fwupd, and Settings lists them
  * and installs the ones the user picks. The bridge is absent outside the
@@ -47,7 +47,7 @@ export interface FirmwareBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     firmware?: FirmwareBridge;
   }
@@ -56,5 +56,5 @@ declare global {
 /** The firmware bridge, or undefined outside the Electron shell. */
 export function getFirmwareBridge(): FirmwareBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.firmware;
+  return window.dinos?.firmware;
 }

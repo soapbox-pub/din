@@ -1,5 +1,5 @@
 /**
- * The Web Browser's built-in ad blocker, through the `window.adblock` bridge
+ * The Web Browser's built-in ad blocker, through the `window.dinos.adblock` bridge
  * (electron/preload.cjs, backed by electron/adblock.mts). The main process
  * owns the settings and does the blocking; the shell only shows and changes
  * them.
@@ -25,7 +25,7 @@ export interface AdblockBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     adblock?: AdblockBridge;
   }
@@ -34,5 +34,5 @@ declare global {
 /** The ad blocker bridge, or undefined outside the Electron shell. */
 export function getAdblockBridge(): AdblockBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.adblock;
+  return window.dinos?.adblock;
 }

@@ -24,7 +24,7 @@ let lastRequestId = 0;
  *
  * This deliberately does NOT go through the host OS file dialog — the whole
  * point of the desktop shell is that file selection happens inside Din, using
- * the same `window.fs` bridge the Files app uses.
+ * the same `window.dinos.fs` bridge the Files app uses.
  */
 export function FilePickerProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingRequest | null>(null);

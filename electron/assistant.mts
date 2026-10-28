@@ -1,4 +1,4 @@
-// The assistant bridge (window.assistant, for the Assistant app, its menu-bar
+// The assistant bridge (window.dinos.assistant, for the Assistant app, its menu-bar
 // item, the Super+A prompt and Settings → Assistant): Din's connection to
 // OpenCode, the coding agent, running as the user's background server.
 //
@@ -20,7 +20,7 @@
 // a shell as this user: the agent runs commands. It stays in this process.
 // The shell sends requests here (paths under /api/ only) and gets the
 // answers back; this side adds the credentials. That's no more than the
-// shell already holds - window.pty is a shell - and nothing reaches the
+// shell already holds - window.dinos.pty is a shell - and nothing reaches the
 // <webview>s, which have no preload for it. One event stream (/api/event)
 // is held open here and passed to the shell, slimmed to what it acts on,
 // reopened when the server restarts.

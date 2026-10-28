@@ -1,6 +1,6 @@
 /**
  * Typed access to the color scheme bridge exposed by the Electron preload
- * (`window.theme`, see electron/preload.cjs).
+ * (`window.dinos.theme`, see electron/preload.cjs).
  *
  * Sets Chromium's own light/dark mode (`nativeTheme.themeSource`), which is
  * what `prefers-color-scheme` reports in every page: browser tabs, installed
@@ -18,7 +18,7 @@ export interface ColorSchemeBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     theme?: ColorSchemeBridge;
   }
@@ -27,5 +27,5 @@ declare global {
 /** The color scheme bridge, or undefined when running outside the Electron shell. */
 export function getColorSchemeBridge(): ColorSchemeBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.theme;
+  return window.dinos?.theme;
 }

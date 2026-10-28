@@ -1,6 +1,6 @@
 /**
  * Typed access to the InDesign bridge exposed by the Electron preload
- * (`window.indd`, see electron/preload.cjs + electron/indd.mts), which reads
+ * (`window.dinos.indd`, see electron/preload.cjs + electron/indd.mts), which reads
  * an INDD file into an IDML package. In a plain browser it is absent.
  */
 
@@ -18,7 +18,7 @@ export interface InddBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     indd?: InddBridge;
   }
@@ -27,5 +27,5 @@ declare global {
 /** The InDesign bridge, or undefined when running outside the Electron shell. */
 export function getInddBridge(): InddBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.indd;
+  return window.dinos?.indd;
 }

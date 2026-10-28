@@ -1,20 +1,18 @@
 # `window.dinos`: the desktop's bridge to the OS
 
-> **Status: design.** Today these are 61 separate globals (`window.fs`,
-> `window.pty`, `window.wifi`, …), each exposed by `electron/preload.cjs`
-> with `contextBridge.exposeInMainWorld` and typed in the `src/lib/` file
-> that wraps it (`FsBridge` in `src/lib/fs.ts`). Collecting them under one
-> object is a rename with no change in behavior.
+> **Status: in place**, apart from `dinos.apps` (planned with the app
+> host). The 61 namespaces used to be separate globals (`window.fs`,
+> `window.pty`, …); they moved under one object with no change in
+> behavior.
 
 `window.dinos` exists only in the desktop's main frame at `app://din`.
 Apps never see it; the few that need a piece of it (Files needs `fs`,
-Terminal needs `pty`) get that piece through `din.system`, proxied and
-checked by the desktop ([../din/permissions.md](../din/permissions.md)).
+Terminal needs `pty`) get that piece through `din.system`, over a port
+to main that the desktop grants ([../din/permissions.md](../din/permissions.md)).
 
 Every method is answered by a handler in `electron/` that first checks
 `assertShellSender`. Outside Electron (`npm run dev:browser`)
-`window.dinos` is undefined, and code reaching for it must cope, as it
-does with today's globals.
+`window.dinos` is undefined, and code reaching for it must cope.
 
 ## Shape
 
@@ -107,19 +105,29 @@ interface Dinos {
   // The Assistant
   assistant: AssistantBridge;
 
-  // New: hosting din:// apps
+  // Planned: hosting din:// apps (below)
   apps: AppsBridge;
 }
-declare global { interface Window { dinos?: Dinos } }
 ```
 
-Each type is the existing interface in the `src/lib/` (or component)
-file that wraps that global today; none of them change.
+`src/lib/dinos.ts` declares the global `Dinos` interface and
+`window.dinos`. Each namespace's type stays in the `src/lib/` (or
+component) file that wraps it, which adds its member to `Dinos`:
 
-The types stay where they are; `src/lib/dinos.ts` gathers them into
-`Dinos` and exports `dinos()` (the object, or undefined outside Electron),
-the way each `src/lib/*.ts` exports its bridge today. The migration keeps
-the old globals as aliases for one release, then a lint rule forbids them.
+```ts
+declare global {
+  interface Dinos {
+    fs?: FsBridge;
+  }
+}
+```
+
+Members are optional, as the old globals were, so code reads
+`window.dinos?.fs` and copes with its absence outside Electron. In
+`electron/preload.cjs`, `expose(name, api)` adds a namespace, and one
+`contextBridge.exposeInMainWorld('dinos', dinos)` at the end publishes
+them all. There are no old globals left to alias: the desktop and its
+preload ship together.
 
 ## Namespaces
 

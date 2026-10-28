@@ -1,6 +1,6 @@
 /**
  * Typed access to the guest-input bridge exposed by the Electron preload
- * (`window.guestInput`, see electron/preload.cjs + electron/main.mts).
+ * (`window.dinos.guestInput`, see electron/preload.cjs + electron/main.mts).
  *
  * Pointer input inside Electron <webview> guests (browser tabs, web apps,
  * devtools panes) goes to the guest's document and never reaches the shell's.
@@ -39,7 +39,7 @@ export interface GuestInputBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     guestInput?: GuestInputBridge;
   }
@@ -48,5 +48,5 @@ declare global {
 /** The guest-input bridge, or undefined outside the Electron shell. */
 export function getGuestInput(): GuestInputBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.guestInput;
+  return window.dinos?.guestInput;
 }

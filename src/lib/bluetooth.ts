@@ -1,6 +1,6 @@
 /**
  * Typed access to the Bluetooth bridge exposed by the Electron preload
- * (`window.bluetooth`, see electron/preload.cjs + electron/bluetooth.mts).
+ * (`window.dinos.bluetooth`, see electron/preload.cjs + electron/bluetooth.mts).
  *
  * Backed by BlueZ over the system bus. The main process pushes the whole
  * state whenever it changes; `available: false` where bluetoothd isn't
@@ -78,7 +78,7 @@ export interface BluetoothBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     bluetooth?: BluetoothBridge;
   }
@@ -87,7 +87,7 @@ declare global {
 /** The Bluetooth bridge, or undefined outside the Electron shell. */
 export function getBluetoothBridge(): BluetoothBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.bluetooth;
+  return window.dinos?.bluetooth;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

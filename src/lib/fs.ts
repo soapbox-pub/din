@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS filesystem bridge exposed by the Electron preload
- * (`window.fs`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.fs`, see electron/preload.cjs + electron/main.cjs).
  *
  * The API is Node-flavored but deliberately not Node's fs module: it is
  * promise-only, `readdir` returns rich entries in one batched IPC call, and
@@ -224,7 +224,7 @@ export function localFileUrl(path: string): string {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     fs?: FsBridge;
   }
@@ -233,7 +233,7 @@ declare global {
 /** The fs bridge, or undefined when running outside the Electron shell. */
 export function getFsBridge(): FsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.fs;
+  return window.dinos?.fs;
 }
 
 /**

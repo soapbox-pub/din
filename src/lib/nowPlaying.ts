@@ -5,7 +5,7 @@ import { localFileUrl } from '@/lib/fs';
  * Everything playing on the computer, for the media controls in the volume
  * menu: the Media Player (which registers itself once it's loaded, see
  * registerMediaSource), the shell's own <audio>/<video> elements (Preview,
- * Quick Look), and, from the Electron preload (`window.media`, see
+ * Quick Look), and, from the Electron preload (`window.dinos.media`, see
  * electron/media.mts), web pages and native apps.
  *
  * Pause works on all of them. Play, Next and Previous depend on the source:
@@ -36,7 +36,7 @@ export interface MediaSource {
   since: number;
 }
 
-/** What the Electron preload exposes as `window.media`. */
+/** What the Electron preload exposes as `window.dinos.media`. */
 export interface MediaBridge {
   list(): Promise<MediaSource[]>;
   onChange(callback: (sources: MediaSource[]) => void): () => void;
@@ -45,7 +45,7 @@ export interface MediaBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     media?: MediaBridge;
   }
@@ -128,7 +128,7 @@ function start(): void {
   for (const type of ['play', 'pause', 'ended', 'emptied']) {
     document.addEventListener(type, onMediaEvent, true);
   }
-  const bridge = window.media;
+  const bridge = window.dinos?.media;
   if (!bridge) return;
   const receive = (sources: MediaSource[]) => {
     external = Array.isArray(sources) ? sources : [];
@@ -203,7 +203,7 @@ export function controlMedia(id: string, action: MediaAction): void {
     else if (action === 'play') void el.play().catch(() => {});
     return;
   }
-  void window.media?.control(id, action).catch(() => {});
+  void window.dinos?.media?.control(id, action).catch(() => {});
 }
 
 /** An artwork URL the shell can load: native apps' file:// art goes through din-file. */

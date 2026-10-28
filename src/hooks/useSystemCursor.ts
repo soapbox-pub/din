@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getSystemCursorBridge, previewToDataUrl } from '@/lib/systemCursor';
 import type { SystemCursorStatus, SystemCursorTheme } from '@/lib/systemCursor';
 
-/** TanStack Query hooks over the cursor bridge (window.cursor). */
+/** TanStack Query hooks over the cursor bridge (window.dinos.cursor). */
 
 function requireBridge() {
   const cursor = getSystemCursorBridge();

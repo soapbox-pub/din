@@ -236,7 +236,7 @@ const DEV_URL = process.env.DIN_DEV_URL;
 const SHELL_ORIGIN = DEV_URL ? new URL(DEV_URL).origin : 'app://din';
 
 // ---------------------------------------------------------------------------
-// Filesystem bridge (window.fs - see preload.cjs / the Files app).
+// Filesystem bridge (window.dinos.fs - see preload.cjs / the Files app).
 //
 // Threat model: everything registered here is callable by any script running
 // in the shell's origin, so an XSS in the shell gets this entire API. Since
@@ -422,7 +422,7 @@ function registerFsHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// PTY bridge (window.pty - see preload.cjs / the Terminal app).
+// PTY bridge (window.dinos.pty - see preload.cjs / the Terminal app).
 //
 // Gives the shell a real interactive terminal. Instead of node-pty (a native
 // module we'd have to rebuild against Electron's ABI inside the Nix build),
@@ -432,7 +432,7 @@ function registerFsHandlers(): void {
 //
 // Threat model: this is deliberately an arbitrary-command-execution API for
 // the shell's origin, so it adds nothing beyond what the fs bridge already
-// concedes (window.fs can write ~/.bashrc, which is code execution on the
+// concedes (window.dinos.fs can write ~/.bashrc, which is code execution on the
 // next login). The same boundaries apply: strict CSP, the sender guard, and
 // the unprivileged OS user. The preload is never attached to <webview>s, so
 // remote web content can't see it.
@@ -599,7 +599,7 @@ async function tool(
 }
 
 // ---------------------------------------------------------------------------
-// Display bridge (window.display): the arrangement of the outputs Din's one
+// Display bridge (window.dinos.display): the arrangement of the outputs Din's one
 // window spans - resolution, position, on/off and which output is primary -
 // applied as a whole desired layout at once. Two backends:
 //   - wlr-randr on Wayland (cage on DinOS), through the compositor's
@@ -1102,7 +1102,7 @@ function registerDisplayHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Page fullscreen bridge (window.pageFullscreen). A page in a <webview> that
+// Page fullscreen bridge (window.dinos.pageFullscreen). A page in a <webview> that
 // goes fullscreen (a video's fullscreen button) makes its frame fullscreen in
 // the shell's page, which spans every monitor; Chromium sizes that frame to
 // the whole page and won't let it be resized. With several monitors, the
@@ -1153,7 +1153,7 @@ function registerPageFullscreenHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Guest visibility bridge (window.guestVisibility). Electron overrides a
+// Guest visibility bridge (window.dinos.guestVisibility). Electron overrides a
 // <webview> page's document.visibilityState with its embedder window's, so a
 // background tab or a minimized window's page is told it's visible and never
 // gets a visibilitychange: video players, canvas loops and polling that
@@ -1229,7 +1229,7 @@ function registerGuestVisibilityHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Guest file drop bridge (window.guestFileDrop). Files dragged out of the
+// Guest file drop bridge (window.dinos.guestFileDrop). Files dragged out of the
 // Files app are an in-page drag of paths, with no File objects a page could
 // read, and a drag over a <webview> goes to the guest instead of the shell.
 // So while one is on, the shell covers its guests and forwards the drag
@@ -1311,7 +1311,7 @@ function dispatchGuestDrag(
 }
 
 // ---------------------------------------------------------------------------
-// Monitors bridge (window.monitors): where each display sits inside the shell
+// Monitors bridge (window.dinos.monitors): where each display sits inside the shell
 // window, for the desktop's layout (src/lib/monitors.ts). The production
 // window spans every display - cage stretches it over all outputs, and on bare
 // X11 it's sized to their union below - so positions are relative to the
@@ -1519,7 +1519,7 @@ function registerLidWatch(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Power bridge (window.power), backed by /sys/class/power_supply. Read-only
+// Power bridge (window.dinos.power), backed by /sys/class/power_supply. Read-only
 // sysfs, so it needs no external binary and works on any Linux session (cage
 // on DinOS or the bare-X11 standalone launcher). Reports `available: false`
 // where there's no battery (desktops, the QEMU VM) so the menu-bar indicator
@@ -1764,7 +1764,7 @@ function registerPowerHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Audio bridge (window.audio), backed by wpctl (WirePlumber/PipeWire). Drives
+// Audio bridge (window.dinos.audio), backed by wpctl (WirePlumber/PipeWire). Drives
 // the default sink's volume and mute for the menu-bar control, the media-key
 // OSD, and - for the Settings sound panel - output/input device enumeration
 // and selection, per-application (stream) volume, and a test tone played to a
@@ -2477,7 +2477,7 @@ const MEDIA_KEYS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Brightness bridge (window.brightness). Two independent halves:
+// Brightness bridge (window.dinos.brightness). Two independent halves:
 //   - Screen backlight (/sys/class/backlight), via brightnessctl where
 //     installed (DinOS ships it with udev rules that grant the `video`
 //     group write access; see os/configuration.nix). Where it's absent (e.g.
@@ -2773,7 +2773,7 @@ function registerBrightnessHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Screenshot bridge (window.screenshot), backed by the screenshot:* handler
+// Screenshot bridge (window.dinos.screenshot), backed by the screenshot:* handler
 // below. Captures the shell window's rendered contents - the whole Din desktop
 // (wallpaper, open windows, menu bar, dock) - as a PNG via Electron's
 // compositor (webContents.capturePage). No display-server capture API, so it
@@ -2964,7 +2964,7 @@ function watchEvdevKeys(): void {
 // An installed app's window isn't a tab: it never becomes chrome.tabs' active
 // tab or gets the browser's toolbar actions.
 // Extension-initiated tab operations (chrome.tabs.create/update/remove and
-// window.open) are bridged to the shell renderer over IPC (window.crx in
+// window.open) are bridged to the shell renderer over IPC (window.dinos.crx in
 // preload.cjs), which creates/activates/closes the corresponding tab UI.
 //
 // IMPORTANT: never attach session.webRequest listeners to the browser
@@ -4738,7 +4738,7 @@ function registerCrxHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// DevTools for the web browser app (window.devtools - see preload.cjs).
+// DevTools for the web browser app (window.dinos.devtools - see preload.cjs).
 //
 // Din runs fullscreen with a single native window (cage shows exactly one
 // surface), so Electron's default detached-devtools window is unusable.
@@ -4836,7 +4836,7 @@ function claimGuestKey(
   }, 0);
 }
 
-/** A shell-level shortcut forwarded from a guest (see window.shellShortcuts). */
+/** A shell-level shortcut forwarded from a guest (see window.dinos.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
   | {
@@ -5312,7 +5312,7 @@ app.whenReady().then(() => {
   // the window would sit at its default size letterboxed on a black screen.
   // Size it to cover every display explicitly and drop the frame;
   // fullscreen/kiosk still apply where a compositor does honor them. The
-  // desktop itself works out where each monitor is (window.monitors).
+  // desktop itself works out where each monitor is (window.dinos.monitors).
   const production = !DEV_URL;
   // Bare X11 fullscreens a window onto one display; across several, the
   // explicit bounds have to do.
@@ -5339,7 +5339,7 @@ app.whenReady().then(() => {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      // Expose the fs bridge (window.fs) to the shell.
+      // Expose the fs bridge (window.dinos.fs) to the shell.
       preload: path.join(import.meta.dirname, 'preload.cjs'),
       // Enable <webview> so the in-shell web browser app can load arbitrary
       // sites (a real embedder, unlike an <iframe> which remote sites block
@@ -5354,7 +5354,7 @@ app.whenReady().then(() => {
 
   // The shell preload follows its window across navigations, so the shell must
   // never leave its own origin: a remote page loaded here would inherit
-  // window.fs, window.pty and every other bridge. External-app handoffs
+  // window.dinos.fs, window.dinos.pty and every other bridge. External-app handoffs
   // (nostrconnect: for remote signers) are the one exception - they never
   // replace the document. Web links go to the Web Browser instead.
   const keepShellHome = (event: Electron.Event, url: string) => {

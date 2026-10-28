@@ -1,6 +1,6 @@
 /**
  * Typed access to the printing bridge exposed by the Electron preload
- * (`window.printing`, see electron/preload.cjs + electron/printing.mts).
+ * (`window.dinos.printing`, see electron/preload.cjs + electron/printing.mts).
  *
  * Backed by CUPS: the printers it knows (network ones it found on its own
  * included), Din's print dialog's previews and jobs, and the print queue.
@@ -120,7 +120,7 @@ export interface PrintingBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     printing?: PrintingBridge;
   }
@@ -129,7 +129,7 @@ declare global {
 /** The printing bridge, or undefined outside the Electron shell. */
 export function getPrintingBridge(): PrintingBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.printing;
+  return window.dinos?.printing;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

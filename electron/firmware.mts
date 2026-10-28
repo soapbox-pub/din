@@ -1,4 +1,4 @@
-// The firmware bridge (window.firmware, for Settings): firmware updates
+// The firmware bridge (window.dinos.firmware, for Settings): firmware updates
 // through fwupd.
 //
 // fwupd knows which of the computer's devices it can update (its own UEFI

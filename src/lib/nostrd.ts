@@ -1,6 +1,6 @@
 /**
  * Typed access to nostrd, the signer daemon that holds the account keys
- * (`window.nostrd`, see electron/preload.cjs + electron/nostrd.mts).
+ * (`window.dinos.nostrd`, see electron/preload.cjs + electron/nostrd.mts).
  *
  * An account kept in nostrd is a login of type `x-nostrd`: just a pubkey. Its
  * signer asks nostrd for every signature, naming the account, so the key never
@@ -48,7 +48,7 @@ export interface NostrdBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     nostrd?: NostrdBridge;
   }
@@ -64,7 +64,7 @@ export class NostrdError extends Error {
 /** The bridge, or undefined outside the Electron shell. */
 export function getNostrdBridge(): NostrdBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.nostrd;
+  return window.dinos?.nostrd;
 }
 
 /** Call a nostrd method; throws NostrdError with nostrd's code on failure. */

@@ -1,6 +1,6 @@
 /**
  * Where else browser tabs' pages say they can be found, through the
- * `window.siteLocations` bridge (electron/preload.cjs, backed by
+ * `window.dinos.siteLocations` bridge (electron/preload.cjs, backed by
  * electron/site-locations.mts): an onion service (Onion-Location) and an
  * nsite (Nsite-Location), each from a response header or a
  * `<meta http-equiv>`.
@@ -22,7 +22,7 @@ export interface SiteLocationsBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     siteLocations?: SiteLocationsBridge;
   }
@@ -31,5 +31,5 @@ declare global {
 /** The site locations bridge, or undefined outside the Electron shell. */
 export function getSiteLocationsBridge(): SiteLocationsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.siteLocations;
+  return window.dinos?.siteLocations;
 }

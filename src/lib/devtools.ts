@@ -1,6 +1,6 @@
 /**
  * Typed access to the devtools bridge exposed by the Electron preload
- * (`window.devtools`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.devtools`, see electron/preload.cjs + electron/main.cjs).
  *
  * The bridge lets the Web Browser app dock Chrome DevTools inside a tab.
  * Din runs as a single native window (fullscreen kiosk under cage), so the
@@ -68,7 +68,7 @@ export interface DevtoolsBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     devtools?: DevtoolsBridge;
   }
@@ -77,5 +77,5 @@ declare global {
 /** The devtools bridge, or undefined outside the Electron shell. */
 export function getDevtoolsBridge(): DevtoolsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.devtools;
+  return window.dinos?.devtools;
 }

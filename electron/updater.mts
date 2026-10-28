@@ -1,4 +1,4 @@
-// The updater bridge (window.updater, for Settings): keeps DinOS current.
+// The updater bridge (window.dinos.updater, for Settings): keeps DinOS current.
 //
 // Releases are found, checked and staged for the next boot as root by
 // os/din-update.sh, which DinOS's launcher names in DIN_UPDATER and the

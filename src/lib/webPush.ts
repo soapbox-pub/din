@@ -1,5 +1,5 @@
 /**
- * Typed access to websites' Web Push (`window.webPushHost`, see
+ * Typed access to websites' Web Push (`window.dinos.webPushHost`, see
  * electron/preload.cjs + electron/web-push.mts): the push service sites'
  * subscriptions are made with, and their service workers asking for a
  * window after a click on one of their notifications. Absent outside the
@@ -29,7 +29,7 @@ export interface WebPushHostBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     webPushHost?: WebPushHostBridge;
   }
@@ -38,5 +38,5 @@ declare global {
 /** The Web Push bridge, or undefined outside the Electron shell. */
 export function getWebPushHost(): WebPushHostBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.webPushHost;
+  return window.dinos?.webPushHost;
 }

@@ -3,7 +3,7 @@ import { getDisplayBridge } from '@/lib/display';
 import type { DisplayPlacement, DisplayStatus } from '@/lib/display';
 
 /**
- * TanStack Query hooks over the OS display bridge (window.display).
+ * TanStack Query hooks over the OS display bridge (window.dinos.display).
  *
  * Status polls on a short interval so the Settings panel tracks changes made
  * elsewhere (e.g. wlr-randr or xrandr in the Terminal app, or the automatic

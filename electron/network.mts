@@ -1,4 +1,4 @@
-// The WiFi and VPN bridges (window.wifi, window.vpn - see preload.cjs, the
+// The WiFi and VPN bridges (window.dinos.wifi, window.dinos.vpn - see preload.cjs, the
 // Settings app and the network menu).
 //
 // Thin wrappers around `nmcli` (NetworkManager). The shell's OS user is in
@@ -1171,7 +1171,7 @@ export function registerWifiHandlers(options: {
 }
 
 // ---------------------------------------------------------------------------
-// VPN bridge (window.vpn - see preload.cjs / the network selector).
+// VPN bridge (window.dinos.vpn - see preload.cjs / the network selector).
 //
 // Same nmcli/NetworkManager substrate as the WiFi bridge, scoped to VPN and
 // WireGuard connection profiles. The menu can only toggle profiles that

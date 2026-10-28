@@ -1,4 +1,4 @@
-// The AirPlay bridge (window.airplay, for the menu bar and Settings →
+// The AirPlay bridge (window.dinos.airplay, for the menu bar and Settings →
 // Display): sharing the screen with Apple TVs, AirPlay TVs, Rokus and other
 // receivers on the network.
 //

@@ -468,7 +468,7 @@ function parseId(id: unknown): { kind: NotificationKind; id: number } | null {
   return match ? { kind: match[1] as NotificationKind, id: Number(match[2]) } : null;
 }
 
-/** Register the notifications IPC surface (window.systemNotifications) and start the server. */
+/** Register the notifications IPC surface (window.dinos.systemNotifications) and start the server. */
 export function registerNotificationHandlers(options: {
   isShellSender: (event: Electron.IpcMainEvent) => boolean;
   sendToShell: (channel: string, payload?: unknown) => void;

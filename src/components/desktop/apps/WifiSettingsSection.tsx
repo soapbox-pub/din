@@ -34,7 +34,7 @@ import type { SavedWifiNetwork, WifiNetwork, WifiSecurity } from '@/lib/wifi';
 type View = { kind: 'list' } | { kind: 'saved' } | { kind: 'details'; uuid: string; from: 'list' | 'saved' };
 
 /**
- * Settings → Wi-Fi, through NetworkManager (`window.wifi`; see
+ * Settings → Wi-Fi, through NetworkManager (`window.dinos.wifi`; see
  * electron/network.mts). The list of networks nearby to join, Add network for
  * hidden ones and enterprise sign-in, Saved networks, and each saved
  * network's own page (WifiNetworkDetails) to change how it connects.

@@ -1,4 +1,4 @@
-// The System Monitor bridge (window.systemMonitor, for the System Monitor
+// The System Monitor bridge (window.dinos.systemMonitor, for the System Monitor
 // app): what's running, what it costs, and a way to stop it.
 //
 // Sampling: /proc is read (proc-stats.mts) every SAMPLE_MS while the app is

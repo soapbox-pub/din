@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getKeyboardBridge } from '@/lib/keyboard';
 import type { KeyboardLayout, KeyboardLayoutChoice, KeyboardStatus } from '@/lib/keyboard';
 
-/** TanStack Query hooks over the keyboard layout bridge (window.keyboard). */
+/** TanStack Query hooks over the keyboard layout bridge (window.dinos.keyboard). */
 
 function requireBridge() {
   const keyboard = getKeyboardBridge();

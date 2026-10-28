@@ -1,4 +1,4 @@
-// The volumes bridge (window.volumes, for the Files sidebar and the desktop's
+// The volumes bridge (window.dinos.volumes, for the Files sidebar and the desktop's
 // notifications): USB sticks, SD cards and other removable disks, mounted
 // the moment they're plugged in and ejected with one click, the way a Mac
 // does it.

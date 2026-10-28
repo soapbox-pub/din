@@ -1,6 +1,6 @@
 /**
  * Typed access to the Web Browser bridge exposed by the Electron preload
- * (`window.browser`, see electron/preload.cjs + electron/main.mts).
+ * (`window.dinos.browser`, see electron/preload.cjs + electron/main.mts).
  *
  * A browser tab that navigates to a host with an untrusted TLS certificate
  * (self-signed, or issued by a private/internal CA) has its load rejected by
@@ -154,7 +154,7 @@ export interface SiteInfo {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     browser?: BrowserBridge;
   }
@@ -163,5 +163,5 @@ declare global {
 /** The browser bridge, or undefined when running outside the Electron shell. */
 export function getBrowserBridge(): BrowserBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.browser;
+  return window.dinos?.browser;
 }

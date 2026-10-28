@@ -1,5 +1,5 @@
 /**
- * Typed access to DinOS's lock screen (`window.lock`, see
+ * Typed access to DinOS's lock screen (`window.dinos.lock`, see
  * electron/preload.cjs + electron/lock.mts). Absent in a plain browser.
  */
 
@@ -10,7 +10,7 @@ export interface LockBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     lock?: LockBridge;
   }
@@ -25,5 +25,5 @@ export function cleanLockError(error: unknown): string {
 /** The bridge, or undefined outside the Electron shell. */
 export function getLockBridge(): LockBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.lock;
+  return window.dinos?.lock;
 }

@@ -1,4 +1,4 @@
-// The Bluetooth bridge (window.bluetooth, for the menu bar and Settings →
+// The Bluetooth bridge (window.dinos.bluetooth, for the menu bar and Settings →
 // Bluetooth): turning the adapter on and off, finding devices nearby, and
 // pairing, connecting, disconnecting and forgetting them.
 //

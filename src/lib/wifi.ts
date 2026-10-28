@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS WiFi bridge exposed by the Electron preload
- * (`window.wifi`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.wifi`, see electron/preload.cjs + electron/main.cjs).
  *
  * Backed by nmcli/NetworkManager in the main process; the shell's OS user is
  * in the `networkmanager` group so no polkit prompts appear. On systems
@@ -213,7 +213,7 @@ export interface WifiBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     wifi?: WifiBridge;
   }
@@ -222,7 +222,7 @@ declare global {
 /** The wifi bridge, or undefined when running outside the Electron shell. */
 export function getWifiBridge(): WifiBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.wifi;
+  return window.dinos?.wifi;
 }
 
 /**

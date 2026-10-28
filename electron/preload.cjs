@@ -2,89 +2,89 @@
 // Preload for the Din renderer.
 //
 // Exposes bridges backed by IPC handlers in main.mts:
-//   - window.boot: first-frame readiness for the hidden-until-ready shell window
-//   - window.session: end the desktop session (log out to the display manager)
-//   - window.fs: filesystem access for the Files app
-//   - window.pty: interactive shell sessions for the Terminal app
-//   - window.wifi: NetworkManager (nmcli) control for the Settings app
-//   - window.vpn: VPN/WireGuard profile toggles for the network selector
-//   - window.tor: Tor's status and on/off switch for Settings, and the
+//   - window.dinos.boot: first-frame readiness for the hidden-until-ready shell window
+//   - window.dinos.session: end the desktop session (log out to the display manager)
+//   - window.dinos.fs: filesystem access for the Files app
+//   - window.dinos.pty: interactive shell sessions for the Terminal app
+//   - window.dinos.wifi: NetworkManager (nmcli) control for the Settings app
+//   - window.dinos.vpn: VPN/WireGuard profile toggles for the network selector
+//   - window.dinos.tor: Tor's status and on/off switch for Settings, and the
 //     onion services pages name, for the Web Browser
-//   - window.display: multi-output arrangement (wlr-randr/xrandr) for the
+//   - window.dinos.display: multi-output arrangement (wlr-randr/xrandr) for the
 //     Settings app
-//   - window.pageFullscreen: fits a fullscreen web page to its monitor
-//   - window.monitors: where each display sits in the shell window, for the
+//   - window.dinos.pageFullscreen: fits a fullscreen web page to its monitor
+//   - window.dinos.monitors: where each display sits in the shell window, for the
 //     desktop's layout
-//   - window.zoom: Chromium page zoom (interface scale) for the Settings app
-//   - window.theme: the light/dark mode pages see through prefers-color-scheme
-//   - window.keyboard: the system's keyboard layout, for Settings
-//   - window.datetime: the system's time zone and clock, for Settings
-//   - window.cursor: the pointer's theme and size, for Settings
-//   - window.tray: apps' status icons and their menus, for the menu bar
-//   - window.systemNotifications: Linux apps' and web pages' notifications,
+//   - window.dinos.zoom: Chromium page zoom (interface scale) for the Settings app
+//   - window.dinos.theme: the light/dark mode pages see through prefers-color-scheme
+//   - window.dinos.keyboard: the system's keyboard layout, for Settings
+//   - window.dinos.datetime: the system's time zone and clock, for Settings
+//   - window.dinos.cursor: the pointer's theme and size, for Settings
+//   - window.dinos.tray: apps' status icons and their menus, for the menu bar
+//   - window.dinos.systemNotifications: Linux apps' and web pages' notifications,
 //     for the notification center
-//   - window.installer: put DinOS on this computer's disk, for the
+//   - window.dinos.installer: put DinOS on this computer's disk, for the
 //     Installer app (live USB boots only)
-//   - window.updater: DinOS system updates, for the Settings app
-//   - window.firmware: firmware updates through fwupd, for the Settings app
-//   - window.airplay: sharing the screen with AirPlay receivers, for the menu
+//   - window.dinos.updater: DinOS system updates, for the Settings app
+//   - window.dinos.firmware: firmware updates through fwupd, for the Settings app
+//   - window.dinos.airplay: sharing the screen with AirPlay receivers, for the menu
 //     bar and Settings
-//   - window.assistant: OpenCode, the coding agent, through its background
+//   - window.dinos.assistant: OpenCode, the coding agent, through its background
 //     server, for the Assistant app, its menu-bar item and Settings
-//   - window.dictation: speech to text with whisper.cpp, for Super+H, the
+//   - window.dinos.dictation: speech to text with whisper.cpp, for Super+H, the
 //     assistant's mic button and holding Super+A
-//   - window.bluetooth: BlueZ adapter and devices (pairing, connecting), for
+//   - window.dinos.bluetooth: BlueZ adapter and devices (pairing, connecting), for
 //     the menu bar and Settings
-//   - window.printing: printers, the print dialog's previews and jobs, and
+//   - window.dinos.printing: printers, the print dialog's previews and jobs, and
 //     the print queue, for the print dialog and Settings
-//   - window.indd: InDesign documents read into IDML, for Publisher
-//   - window.volumes: USB sticks and SD cards, mounted as they're plugged in
+//   - window.dinos.indd: InDesign documents read into IDML, for Publisher
+//   - window.dinos.volumes: USB sticks and SD cards, mounted as they're plugged in
 //     and ejected from the Files sidebar
-//   - window.systemMonitor: running processes, CPU and memory, and ending
+//   - window.dinos.systemMonitor: running processes, CPU and memory, and ending
 //     them, for the System Monitor app
-//   - window.bluetoothLogin: receive the account key from a phone over
+//   - window.dinos.bluetoothLogin: receive the account key from a phone over
 //     Bluetooth LE, for the login screen
-//   - window.nostrd: the signer daemon that holds the account keys, for the
+//   - window.dinos.nostrd: the signer daemon that holds the account keys, for the
 //     shell's signer and account menu
-//   - window.bootScreen: the wallpaper and clock format DinOS's boot and
+//   - window.dinos.bootScreen: the wallpaper and clock format DinOS's boot and
 //     unlock screen shows
-//   - window.lock: DinOS's lock screen, for the Lock menu item
-//   - window.power: battery/AC status + system power profiles for the menu
+//   - window.dinos.lock: DinOS's lock screen, for the Lock menu item
+//   - window.dinos.power: battery/AC status + system power profiles for the menu
 //     bar and Settings app, and restart/shut down for the account menu
-//   - window.audio: wpctl volume/mute for the menu bar, Settings, and OSD
-//   - window.brightness: backlight + night light for the menu bar, Settings, OSD
-//   - window.screenshot: capture the desktop as a PNG for the Screenshot app
-//   - window.browser: TLS certificate exceptions, browsing-data clearing,
+//   - window.dinos.audio: wpctl volume/mute for the menu bar, Settings, and OSD
+//   - window.dinos.brightness: backlight + night light for the menu bar, Settings, OSD
+//   - window.dinos.screenshot: capture the desktop as a PNG for the Screenshot app
+//   - window.dinos.browser: TLS certificate exceptions, browsing-data clearing,
 //     find-in-page, and download progress for the Web Browser app
-//   - window.crx: Chrome extension coordination for the Web Browser app
-//   - window.userscripts: userscript library sync and install
+//   - window.dinos.crx: Chrome extension coordination for the Web Browser app
+//   - window.dinos.userscripts: userscript library sync and install
 //     requests for the Web Browser app
-//   - window.adblock: the Web Browser's built-in ad blocker
-//   - window.popups: the pop-up blocker's blocked windows and allowed sites
-//   - window.devtools: docked devtools control for the Web Browser app
-//   - window.nostrHost: relays NIP-07 requests from browser tabs and installed
+//   - window.dinos.adblock: the Web Browser's built-in ad blocker
+//   - window.dinos.popups: the pop-up blocker's blocked windows and allowed sites
+//   - window.dinos.devtools: docked devtools control for the Web Browser app
+//   - window.dinos.nostrHost: relays NIP-07 requests from browser tabs and installed
 //     web apps to the signed-in account's signer (see NostrBridgeHost /
 //     nostr-preload.cjs)
-//   - window.bunkerHost: Din's NIP-46 remote-signer connections (see
+//   - window.dinos.bunkerHost: Din's NIP-46 remote-signer connections (see
 //     electron/bunker.mts)
-//   - window.highlightHost: relays NIP-84 highlight clicks from browser tabs to
+//   - window.dinos.highlightHost: relays NIP-84 highlight clicks from browser tabs to
 //     the signer (see HighlightBridgeHost / browser-highlight-preload.cjs)
-//   - window.filePickerHost: relays <input type=file> clicks from guests, and
+//   - window.dinos.filePickerHost: relays <input type=file> clicks from guests, and
 //     native apps' file dialogs, to the in-Din file picker (see
 //     FilePickerBridgeHost)
-//   - window.nsiteHost: relays nsite:// manifest lookups to the renderer's
+//   - window.dinos.nsiteHost: relays nsite:// manifest lookups to the renderer's
 //     Nostr client (see NsiteBridgeHost / electron/nsite.mts)
-//   - window.nsiteStore: the OS-level store of nsites, and which are
+//   - window.dinos.nsiteStore: the OS-level store of nsites, and which are
 //     installed as apps (see src/lib/nsiteStore.ts / electron/nsite-store.mts)
-//   - window.nappHost: installed nsites' napp runtime - their ENV, clearing
+//   - window.dinos.nappHost: installed nsites' napp runtime - their ENV, clearing
 //     their data, opening their windows (see src/lib/napp.ts / electron/napp.mts)
-//   - window.webPushHost: websites' Web Push - the push service, and their
+//   - window.dinos.webPushHost: websites' Web Push - the push service, and their
 //     workers opening windows (see src/lib/webPush.ts / electron/web-push.mts)
-//   - window.promptHost: yes/no questions for the user - site permissions and
+//   - window.dinos.promptHost: yes/no questions for the user - site permissions and
 //     extension installs (see PromptHost)
-//   - window.screenShare: pages asking to share the screen, and the shares
+//   - window.dinos.screenShare: pages asking to share the screen, and the shares
 //     running (see ScreenShareHost.tsx / electron/screen-share.mts)
-//   - window.media: what web pages and native apps are playing, and their
+//   - window.dinos.media: what web pages and native apps are playing, and their
 //     play/pause/next/previous (see src/lib/nowPlaying.ts / electron/media.mts)
 //
 // The fs API is Node-flavored (homedir/readdir/readFile/writeFile/...)
@@ -106,11 +106,25 @@
 
 const { contextBridge, ipcRenderer, sharedTexture, webFrame } = require('electron');
 
-// Boot bridge (window.boot): the renderer reports that the app has mounted
+// Every bridge below is a namespace of one global, window.dinos, exposed at
+// the end of this file (docs/dinos/README.md).
+/** @type {Record<string, unknown>} */
+const dinos = { version: 1 };
+
+/**
+ * Add a namespace to window.dinos.
+ * @param {string} name
+ * @param {object} api
+ */
+function expose(name, api) {
+  dinos[name] = api;
+}
+
+// Boot bridge (window.dinos.boot): the renderer reports that the app has mounted
 // beneath the black boot veil; main.mts keeps the shell window hidden until
 // this arrives so the window never maps onto an unpainted (white/garbage)
 // surface.
-contextBridge.exposeInMainWorld('boot', {
+expose('boot', {
   /**
    * Signal that the shell's first frame is ready to be shown. Resolves once
    * the window is on screen.
@@ -119,15 +133,15 @@ contextBridge.exposeInMainWorld('boot', {
   ready: () => ipcRenderer.invoke('shell:bootReady'),
 });
 
-// Session bridge (window.session): "Log out" quits the shell cleanly. Under
+// Session bridge (window.dinos.session): "Log out" quits the shell cleanly. Under
 // din-session.sh a clean exit ends the login session and hands control back
 // to the display manager (GDM etc.); the saved Nostr accounts are untouched.
-contextBridge.exposeInMainWorld('session', {
+expose('session', {
   /** End the desktop session (quits Din). */
   end: () => ipcRenderer.send('shell:endSession'),
 });
 
-contextBridge.exposeInMainWorld('fs', {
+expose('fs', {
   /** Absolute path of the shell user's home directory. */
   homedir: () => ipcRenderer.invoke('fs:homedir'),
 
@@ -325,10 +339,10 @@ contextBridge.exposeInMainWorld('fs', {
   },
 });
 
-// Terminal bridge (window.pty), backed by the pty:* handlers in main.mts.
+// Terminal bridge (window.dinos.pty), backed by the pty:* handlers in main.mts.
 // Each session is a real login shell on a pseudo-terminal; data flows as
 // raw bytes (Uint8Array out, string in - what xterm.js produces/consumes).
-contextBridge.exposeInMainWorld('pty', {
+expose('pty', {
   /**
    * Start a shell session; resolves to its session id.
    * @param {{ rows: number, cols: number }} size
@@ -421,9 +435,9 @@ contextBridge.exposeInMainWorld('pty', {
   },
 });
 
-// WiFi bridge (window.wifi), backed by the wifi:* handlers in main.mts
+// WiFi bridge (window.dinos.wifi), backed by the wifi:* handlers in main.mts
 // (nmcli / NetworkManager). Used by the Settings app.
-contextBridge.exposeInMainWorld('wifi', {
+expose('wifi', {
   /** Adapter/radio state. `available: false` when NetworkManager is absent. */
   status: () => ipcRenderer.invoke('wifi:status'),
 
@@ -490,10 +504,10 @@ contextBridge.exposeInMainWorld('wifi', {
   setRadio: (enabled) => ipcRenderer.invoke('wifi:setRadio', enabled),
 });
 
-// VPN bridge (window.vpn), backed by the vpn:* handlers in main.mts (nmcli /
+// VPN bridge (window.dinos.vpn), backed by the vpn:* handlers in main.mts (nmcli /
 // NetworkManager). Toggles existing VPN/WireGuard profiles from the network
 // selector; profiles are created out of band (imported config / Terminal).
-contextBridge.exposeInMainWorld('vpn', {
+expose('vpn', {
   /** Saved VPN/WireGuard profiles with their active state. `[]` when NetworkManager is absent. */
   list: () => ipcRenderer.invoke('vpn:list'),
 
@@ -515,10 +529,10 @@ contextBridge.exposeInMainWorld('vpn', {
  *   progress: number | null, summary: string | null }} TorStatus
  */
 
-// Tor bridge (window.tor), backed by the tor:* handlers in electron/tor.mts:
+// Tor bridge (window.dinos.tor), backed by the tor:* handlers in electron/tor.mts:
 // whether there's a Tor and how far it has got connecting, turning it on and
 // off on DinOS.
-contextBridge.exposeInMainWorld('tor', {
+expose('tor', {
   /** @returns {Promise<TorStatus>} */
   status: () => ipcRenderer.invoke('tor:status'),
 
@@ -581,10 +595,10 @@ contextBridge.exposeInMainWorld('tor', {
   },
 });
 
-// Site locations bridge (window.siteLocations), backed by
+// Site locations bridge (window.dinos.siteLocations), backed by
 // electron/site-locations.mts: the onion service (Onion-Location) and nsite
 // (Nsite-Location) browser tabs' pages name.
-contextBridge.exposeInMainWorld('siteLocations', {
+expose('siteLocations', {
   /**
    * What a browser tab's page names.
    * @param {number} wcId
@@ -607,12 +621,12 @@ contextBridge.exposeInMainWorld('siteLocations', {
   },
 });
 
-// Display bridge (window.display), backed by the display:* handlers in
+// Display bridge (window.dinos.display), backed by the display:* handlers in
 // main.mts (wlr-randr under cage, xrandr on bare X11). Used by the Settings
 // app to arrange the outputs: resolution, position, on/off and which one is
 // primary. `available: false` where the outputs can't be managed, so the
 // panel can render a fallback.
-contextBridge.exposeInMainWorld('display', {
+expose('display', {
   /** Connected outputs with their available modes/positions. `available: false` = unmanageable. */
   status: () => ipcRenderer.invoke('display:status'),
 
@@ -625,10 +639,10 @@ contextBridge.exposeInMainWorld('display', {
   applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
 });
 
-// Page fullscreen bridge (window.pageFullscreen), backed by the
+// Page fullscreen bridge (window.dinos.pageFullscreen), backed by the
 // pageFullscreen:* handler in main.mts: lays a fullscreen <webview> page out
 // at its monitor's size, until it leaves fullscreen.
-contextBridge.exposeInMainWorld('pageFullscreen', {
+expose('pageFullscreen', {
   /**
    * @param {number} webContentsId the <webview>'s guest
    * @param {number} width device-independent pixels
@@ -638,10 +652,10 @@ contextBridge.exposeInMainWorld('pageFullscreen', {
     ipcRenderer.invoke('pageFullscreen:fit', webContentsId, width, height),
 });
 
-// Guest visibility bridge (window.guestVisibility), backed by the
+// Guest visibility bridge (window.dinos.guestVisibility), backed by the
 // guestVisibility:* handler in main.mts: tells a <webview> page it's hidden
 // (a background tab, a minimized window) or visible again.
-contextBridge.exposeInMainWorld('guestVisibility', {
+expose('guestVisibility', {
   /**
    * @param {number} webContentsId the <webview>'s guest
    * @param {boolean} hidden
@@ -649,10 +663,10 @@ contextBridge.exposeInMainWorld('guestVisibility', {
   set: (webContentsId, hidden) => ipcRenderer.send('guestVisibility:set', webContentsId, hidden),
 });
 
-// Guest file drop bridge (window.guestFileDrop), backed by the
+// Guest file drop bridge (window.dinos.guestFileDrop), backed by the
 // guestFileDrop:* handler in main.mts: replays a drag of files from Files
 // into a <webview> page, so the page can take them as files.
-contextBridge.exposeInMainWorld('guestFileDrop', {
+expose('guestFileDrop', {
   /**
    * @param {number} webContentsId the <webview>'s guest
    * @param {'over' | 'drop' | 'cancel'} type
@@ -664,11 +678,11 @@ contextBridge.exposeInMainWorld('guestFileDrop', {
     ipcRenderer.send('guestFileDrop:send', webContentsId, type, x, y, paths),
 });
 
-// Monitors bridge (window.monitors), backed by the monitors:* handler in
+// Monitors bridge (window.dinos.monitors), backed by the monitors:* handler in
 // main.mts: each display's rectangle within the shell window (null when the
 // window covers just one), so the desktop can keep its menu bar and Dock on
 // the primary monitor and maximize windows to the monitor they're on.
-contextBridge.exposeInMainWorld('monitors', {
+expose('monitors', {
   /** The displays, in DIPs relative to the window's top-left, or null. */
   get: () => ipcRenderer.invoke('monitors:get'),
 
@@ -690,12 +704,12 @@ contextBridge.exposeInMainWorld('monitors', {
   zoomFactor: () => webFrame.getZoomFactor(),
 });
 
-// Native-app bridge (window.nativeApps), backed by the native-apps:* handlers
+// Native-app bridge (window.dinos.nativeApps), backed by the native-apps:* handlers
 // in electron/native-apps.mts: lists installed XDG desktop entries and
 // launches them onto Din's embedded display, whose windows Din composites
 // into its own. `available: false` where that display can't run, so the Dock
 // and launcher can simply leave native apps out.
-contextBridge.exposeInMainWorld('nativeApps', {
+expose('nativeApps', {
   /** Installed desktop entries, with icons inlined as data URLs. */
   list: () => ipcRenderer.invoke('native-apps:list'),
 
@@ -820,7 +834,7 @@ ipcRenderer.on(
   },
 );
 
-contextBridge.exposeInMainWorld('nativeDisplay', {
+expose('nativeDisplay', {
   /** Request a port; it arrives as a 'din:native-display-port' message. */
   connect: () => ipcRenderer.send('native-display:connect'),
 
@@ -851,10 +865,10 @@ contextBridge.exposeInMainWorld('nativeDisplay', {
   },
 });
 
-// Keyboard bridge (window.keyboard), backed by the keyboard:* handlers in
+// Keyboard bridge (window.dinos.keyboard), backed by the keyboard:* handlers in
 // electron/keyboard.mts: the system's keyboard layout, which Settings shows
 // and, where Din knows how, changes to one from xkeyboard-config's list.
-contextBridge.exposeInMainWorld('keyboard', {
+expose('keyboard', {
   /** The system's layout ({ layout, variant, name }), whether it can be changed, and whether Din needs a restart for it. */
   status: () => ipcRenderer.invoke('keyboard:status'),
 
@@ -871,10 +885,10 @@ contextBridge.exposeInMainWorld('keyboard', {
   restart: () => ipcRenderer.invoke('keyboard:restart'),
 });
 
-// Date & time bridge (window.datetime), backed by the datetime:* handlers in
+// Date & time bridge (window.dinos.datetime), backed by the datetime:* handlers in
 // electron/datetime.mts: the system's time zone and clock, which Settings
 // shows and, on DinOS, changes.
-contextBridge.exposeInMainWorld('datetime', {
+expose('datetime', {
   /** { timeZone, automatic, synchronized, canChange, canAutomatic }. */
   status: () => ipcRenderer.invoke('datetime:status'),
 
@@ -900,10 +914,10 @@ contextBridge.exposeInMainWorld('datetime', {
   setTime: (time) => ipcRenderer.invoke('datetime:set-time', time),
 });
 
-// Cursor bridge (window.cursor), backed by the cursor:* handlers in
+// Cursor bridge (window.dinos.cursor), backed by the cursor:* handlers in
 // electron/cursor.mts: the pointer's XCursor theme and size, which Settings
 // shows and, on DinOS, changes, and the themes the user imports.
-contextBridge.exposeInMainWorld('cursor', {
+expose('cursor', {
   /** { theme, size, sizes, canChange }. */
   status: () => ipcRenderer.invoke('cursor:status'),
 
@@ -937,10 +951,10 @@ contextBridge.exposeInMainWorld('cursor', {
   removeTheme: (id) => ipcRenderer.invoke('cursor:remove', id),
 });
 
-// InDesign bridge (window.indd), backed by the indd:* handler in
+// InDesign bridge (window.dinos.indd), backed by the indd:* handler in
 // electron/indd.mts: reads an InDesign document into the IDML package Page
 // Layout edits.
-contextBridge.exposeInMainWorld('indd', {
+expose('indd', {
   /**
    * { idml, previews: { graphics, data }[], warnings }; rejects with a
    * sentence when it can't be read.
@@ -950,11 +964,11 @@ contextBridge.exposeInMainWorld('indd', {
   convert: (bytes, name) => ipcRenderer.invoke('indd:convert', bytes, name),
 });
 
-// Tray bridge (window.tray), backed by the tray:* handlers in
+// Tray bridge (window.dinos.tray), backed by the tray:* handlers in
 // electron/tray.mts: apps' status icons (StatusNotifierItems) for the menu
 // bar, their menus, and the clicks that go back to them. Coordinates are
 // viewport pixels, which are screen pixels to native apps.
-contextBridge.exposeInMainWorld('tray', {
+expose('tray', {
   /** The current items. */
   list: () => ipcRenderer.invoke('tray:list'),
 
@@ -1033,10 +1047,10 @@ contextBridge.exposeInMainWorld('tray', {
   },
 });
 
-// System notifications bridge (window.systemNotifications), backed by
+// System notifications bridge (window.dinos.systemNotifications), backed by
 // electron/notifications.mts: notifications from Linux apps (over D-Bus) and
 // web pages, for the notification center, and what the user did with them.
-contextBridge.exposeInMainWorld('systemNotifications', {
+expose('systemNotifications', {
   /**
    * Subscribe to new (or replaced) notifications. Returns an unsubscribe fn.
    * @param {(notification: unknown) => void} callback
@@ -1081,12 +1095,12 @@ contextBridge.exposeInMainWorld('systemNotifications', {
   closed: (id, reason) => ipcRenderer.send('notifications:closed', id, reason),
 });
 
-// Zoom bridge (window.zoom). Sets Chromium's page zoom for the shell window -
+// Zoom bridge (window.dinos.zoom). Sets Chromium's page zoom for the shell window -
 // true DPI-style scaling: the layout viewport shrinks/grows so innerWidth,
 // viewport units and canvas measurements all stay consistent (unlike CSS
 // `zoom`, which scales rendering but not layout). Renderer-local via webFrame;
 // no IPC or main-process handler involved.
-contextBridge.exposeInMainWorld('zoom', {
+expose('zoom', {
   /**
    * Set the interface zoom factor (1 = native size). Clamped to 0.5-2.
    * @param {number} factor
@@ -1097,10 +1111,10 @@ contextBridge.exposeInMainWorld('zoom', {
   },
 });
 
-// Theme bridge (window.theme), backed by the theme:set handler in main.mts:
+// Theme bridge (window.dinos.theme), backed by the theme:set handler in main.mts:
 // the shell's light/dark mode becomes Chromium's, so `prefers-color-scheme`
 // in browser tabs and web apps follows it.
-contextBridge.exposeInMainWorld('theme', {
+expose('theme', {
   /**
    * Set the color scheme pages see.
    * @param {'light' | 'dark' | 'system'} source
@@ -1122,14 +1136,14 @@ contextBridge.exposeInMainWorld('theme', {
   },
 });
 
-// Power bridge (window.power), backed by the power:* handlers in main.mts.
+// Power bridge (window.dinos.power), backed by the power:* handlers in main.mts.
 // `status` reads battery/AC state from /sys/class/power_supply (menu-bar
 // indicator + Settings battery panel; `available: false` with no battery).
 // `profiles`/`setProfile` drive the system power profile through the
 // net.hadess.PowerProfiles D-Bus API (power-profiles-daemon / tuned-ppd);
 // `available: false` when no such daemon is running. `reboot`/`powerOff`
 // go through logind, and `actions` says which of them it allows.
-contextBridge.exposeInMainWorld('power', {
+expose('power', {
   /** Battery/AC state. `available: false` when no battery is present. */
   status: () => ipcRenderer.invoke('power:status'),
 
@@ -1152,9 +1166,9 @@ contextBridge.exposeInMainWorld('power', {
   powerOff: () => ipcRenderer.invoke('power:powerOff'),
 });
 
-// Installer bridge (window.installer), backed by electron/installer.mts:
+// Installer bridge (window.dinos.installer), backed by electron/installer.mts:
 // copies a live USB boot of DinOS onto the computer's own disk.
-contextBridge.exposeInMainWorld('installer', {
+expose('installer', {
   /** Whether this is a live boot, the space an install needs, and the disks. */
   status: () => ipcRenderer.invoke('installer:status'),
 
@@ -1192,9 +1206,9 @@ contextBridge.exposeInMainWorld('installer', {
   },
 });
 
-// Bluetooth bridge (window.bluetooth), backed by electron/bluetooth.mts:
+// Bluetooth bridge (window.dinos.bluetooth), backed by electron/bluetooth.mts:
 // BlueZ's adapter and devices, and the prompts pairing needs.
-contextBridge.exposeInMainWorld('bluetooth', {
+expose('bluetooth', {
   /** The adapter, the devices it knows or sees, and any pairing prompt. */
   state: () => ipcRenderer.invoke('bluetooth:state'),
 
@@ -1264,9 +1278,9 @@ contextBridge.exposeInMainWorld('bluetooth', {
   },
 });
 
-// Printing bridge (window.printing), backed by electron/printing.mts: the
+// Printing bridge (window.dinos.printing), backed by electron/printing.mts: the
 // printers CUPS knows, Din's print dialog, and the print queue.
-contextBridge.exposeInMainWorld('printing', {
+expose('printing', {
   /** Printers and waiting jobs. */
   state: () => ipcRenderer.invoke('printing:state'),
 
@@ -1379,9 +1393,9 @@ contextBridge.exposeInMainWorld('printing', {
   },
 });
 
-// Volumes bridge (window.volumes), backed by electron/volumes.mts: removable
+// Volumes bridge (window.dinos.volumes), backed by electron/volumes.mts: removable
 // disks, mounted as they're plugged in, and ejecting them.
-contextBridge.exposeInMainWorld('volumes', {
+expose('volumes', {
   /** The removable filesystems, mounted or not. */
   state: () => ipcRenderer.invoke('volumes:state'),
 
@@ -1427,11 +1441,11 @@ contextBridge.exposeInMainWorld('volumes', {
   },
 });
 
-// System Monitor bridge (window.systemMonitor), backed by
+// System Monitor bridge (window.dinos.systemMonitor), backed by
 // electron/system-monitor.mts: snapshots of what's running, pushed every few
 // seconds while someone is subscribed, and SIGTERM/SIGKILL for Din's user's
 // own processes.
-contextBridge.exposeInMainWorld('systemMonitor', {
+expose('systemMonitor', {
   /**
    * Receive a snapshot every few seconds; sampling runs only while someone
    * is subscribed. Returns an unsubscribe fn.
@@ -1464,10 +1478,10 @@ contextBridge.exposeInMainWorld('systemMonitor', {
   forceQuit: (pid) => ipcRenderer.invoke('system-monitor:force-quit', pid),
 });
 
-// Bluetooth login bridge (window.bluetoothLogin), backed by
+// Bluetooth login bridge (window.dinos.bluetoothLogin), backed by
 // electron/bluetooth-login.mts: advertises a GATT service a phone (Tenna)
 // sends the account key to, encrypted to the renderer's ephemeral key.
-contextBridge.exposeInMainWorld('bluetoothLogin', {
+expose('bluetoothLogin', {
   /** Whether this computer has a Bluetooth adapter that can do it. */
   available: () => ipcRenderer.invoke('bluetooth-login:available'),
 
@@ -1495,10 +1509,10 @@ contextBridge.exposeInMainWorld('bluetoothLogin', {
   },
 });
 
-// Signer bridge (window.nostrd), backed by electron/nostrd.mts: nostrd, the
+// Signer bridge (window.dinos.nostrd), backed by electron/nostrd.mts: nostrd, the
 // signer daemon that holds the account keys, signs for the shell and manages
 // its accounts.
-contextBridge.exposeInMainWorld('nostrd', {
+expose('nostrd', {
   /** Whether to keep accounts in nostrd ({ use, connected, managed }). */
   info: () => ipcRenderer.invoke('nostrd:info'),
 
@@ -1524,9 +1538,9 @@ contextBridge.exposeInMainWorld('nostrd', {
   },
 });
 
-// Boot screen bridge (window.bootScreen), backed by electron/boot-screen.mts:
+// Boot screen bridge (window.dinos.bootScreen), backed by electron/boot-screen.mts:
 // copies the wallpaper to the boot partition, for DinOS's unlock screen.
-contextBridge.exposeInMainWorld('bootScreen', {
+expose('bootScreen', {
   /**
    * Show this wallpaper on the boot screen, with a 12- or 24-hour clock.
    * @param {string | null} wallpaper A URL, or null for none.
@@ -1535,9 +1549,9 @@ contextBridge.exposeInMainWorld('bootScreen', {
   update: (wallpaper, hour12) => ipcRenderer.invoke('boot-screen:update', wallpaper, hour12),
 });
 
-// Lock bridge (window.lock), backed by electron/lock.mts: DinOS's lock
+// Lock bridge (window.dinos.lock), backed by electron/lock.mts: DinOS's lock
 // screen, which runs outside Din.
-contextBridge.exposeInMainWorld('lock', {
+expose('lock', {
   /** Whether this computer can be locked (it has a password). */
   available: () => ipcRenderer.invoke('lock:available'),
 
@@ -1554,9 +1568,9 @@ contextBridge.exposeInMainWorld('lock', {
     ipcRenderer.invoke('lock:change-password', oldPassword, newPassword),
 });
 
-// Updater bridge (window.updater), backed by electron/updater.mts: stages
+// Updater bridge (window.dinos.updater), backed by electron/updater.mts: stages
 // newer DinOS releases for the next boot.
-contextBridge.exposeInMainWorld('updater', {
+expose('updater', {
   /** Versions, and the check or update in progress (or the failed one). */
   state: () => ipcRenderer.invoke('updater:state'),
 
@@ -1581,9 +1595,9 @@ contextBridge.exposeInMainWorld('updater', {
   },
 });
 
-// Firmware bridge (window.firmware), backed by electron/firmware.mts:
+// Firmware bridge (window.dinos.firmware), backed by electron/firmware.mts:
 // updates for the computer's firmware and its devices', through fwupd.
-contextBridge.exposeInMainWorld('firmware', {
+expose('firmware', {
   /** The updates found, and the check or install in progress (or the failed one). */
   state: () => ipcRenderer.invoke('firmware:state'),
 
@@ -1615,9 +1629,9 @@ contextBridge.exposeInMainWorld('firmware', {
   },
 });
 
-// AirPlay bridge (window.airplay), backed by electron/airplay.mts: mirrors
+// AirPlay bridge (window.dinos.airplay), backed by electron/airplay.mts: mirrors
 // or extends the screen to AirPlay receivers through deckmon.
-contextBridge.exposeInMainWorld('airplay', {
+expose('airplay', {
   /** Receivers found nearby and the sessions in progress. */
   state: () => ipcRenderer.invoke('airplay:state'),
 
@@ -1682,9 +1696,9 @@ contextBridge.exposeInMainWorld('airplay', {
   },
 });
 
-// Dictation bridge (window.dictation), backed by electron/dictation.mts:
+// Dictation bridge (window.dinos.dictation), backed by electron/dictation.mts:
 // whisper.cpp's server, which turns the shell's recordings into text.
-contextBridge.exposeInMainWorld('dictation', {
+expose('dictation', {
   /** Whether a speech recognizer and its model are installed. */
   available: () => ipcRenderer.invoke('dictation:available'),
 
@@ -1705,9 +1719,9 @@ contextBridge.exposeInMainWorld('dictation', {
   insertIntoGuest: (wcId, text) => ipcRenderer.invoke('dictation:insert-guest', wcId, text),
 });
 
-// Assistant bridge (window.assistant), backed by electron/assistant.mts:
+// Assistant bridge (window.dinos.assistant), backed by electron/assistant.mts:
 // OpenCode's background server, whose credentials stay in the main process.
-contextBridge.exposeInMainWorld('assistant', {
+expose('assistant', {
   /** Whether it's installed, running and connected. */
   status: () => ipcRenderer.invoke('assistant:status'),
 
@@ -1763,11 +1777,11 @@ contextBridge.exposeInMainWorld('assistant', {
   },
 });
 
-// System change events (window.systemEvents): the main process watches
+// System change events (window.dinos.systemEvents): the main process watches
 // NetworkManager and PipeWire for changes (`nmcli monitor`, `pactl
 // subscribe`) and says which area changed, so the menu bar and Settings
 // refresh on events instead of polling every few seconds.
-contextBridge.exposeInMainWorld('systemEvents', {
+expose('systemEvents', {
   /**
    * Subscribe to change notices ('network' | 'audio'). Returns an
    * unsubscribe fn.
@@ -1784,13 +1798,13 @@ contextBridge.exposeInMainWorld('systemEvents', {
   },
 });
 
-// Audio bridge (window.audio), backed by the audio:* handlers in main.mts
+// Audio bridge (window.dinos.audio), backed by the audio:* handlers in main.mts
 // (wpctl / PipeWire). Drives the default sink for the menu-bar control and the
 // media-key OSD (status/setVolume/setMuted resolve to { available, volume,
 // muted }), plus the Settings sound panel: device enumeration/selection
 // (devices/setDefault), per-app and per-device control (streams/setNodeVolume/
 // setNodeMuted) and a test tone (test). `available: false` when wpctl is absent.
-contextBridge.exposeInMainWorld('audio', {
+expose('audio', {
   /** Default sink volume/mute. `available: false` when wpctl is absent. */
   status: () => ipcRenderer.invoke('audio:status'),
 
@@ -1896,14 +1910,14 @@ contextBridge.exposeInMainWorld('audio', {
   },
 });
 
-// Brightness bridge (window.brightness), backed by the brightness:* handlers in
+// Brightness bridge (window.dinos.brightness), backed by the brightness:* handlers in
 // main.mts. Two independent halves: the screen backlight (brightnessctl /
 // /sys/class/backlight) and night light / red shift (a warm color temperature
 // held by a Wayland/X11 gamma tool, gammastep or wlsunset). Drives the menu-bar
 // control, the Settings brightness panel, and the media-key OSD. Mutations
 // resolve to the new { available, brightness, nightLight } state; each half
 // reports available:false where its tool/device is absent.
-contextBridge.exposeInMainWorld('brightness', {
+expose('brightness', {
   /** Backlight level + night-light state. See per-field `available` flags. */
   status: () => ipcRenderer.invoke('brightness:status'),
 
@@ -1950,10 +1964,10 @@ contextBridge.exposeInMainWorld('brightness', {
   },
 });
 
-// Screenshot bridge (window.screenshot), backed by the screenshot:* handler in
+// Screenshot bridge (window.dinos.screenshot), backed by the screenshot:* handler in
 // main.mts (webContents.capturePage). Snapshots the Din desktop as a PNG for
 // the Screenshot app. Absent in a plain browser, where the app falls back.
-contextBridge.exposeInMainWorld('screenshot', {
+expose('screenshot', {
   /** Capture the desktop; resolves to { dataUrl, width, height } (PNG). */
   capture: () => ipcRenderer.invoke('screenshot:capture'),
 
@@ -1977,13 +1991,13 @@ contextBridge.exposeInMainWorld('screenshot', {
  * @typedef {{ wcId: number, url: string, host: string, error: string, fingerprint: string }} CertificateErrorInfo
  */
 
-// Browser bridge (window.browser), backed by the browser:* handlers in
+// Browser bridge (window.dinos.browser), backed by the browser:* handlers in
 // main.mts. A browser tab that hits an untrusted TLS certificate (self-signed
 // or private-CA host) has its load rejected; the details arrive here so the
 // Web Browser app can show a "proceed anyway" warning. Accepting pins that
 // exact (host, fingerprint) pair in the main process (persisted) so the
 // following reload is trusted. Scoped to the browser session only.
-contextBridge.exposeInMainWorld('browser', {
+expose('browser', {
   /**
    * Subscribe to rejected-certificate reports for browser tabs. The callback
    * receives { wcId, url, host, error, fingerprint }. Returns an unsubscribe
@@ -2134,12 +2148,12 @@ contextBridge.exposeInMainWorld('browser', {
  * @typedef {{ width: number, height: number, private: boolean }} CrxPopupFeatures
  */
 
-// Chrome extension bridge (window.crx), backed by the crx:* handlers in
+// Chrome extension bridge (window.dinos.crx), backed by the crx:* handlers in
 // main.mts (electron-chrome-extensions). Used by the web browser app to
 // coordinate its tab UI with the extension system: extensions can ask for
 // tabs to be created/activated/closed, and the shell reports which tab is
 // active plus the WebContents id of each newly attached <webview> guest.
-contextBridge.exposeInMainWorld('crx', {
+expose('crx', {
   /**
    * Report the active browser tab's webContents id.
    * @param {number} wcId
@@ -2243,13 +2257,13 @@ contextBridge.exposeInMainWorld('crx', {
   actionPopupClosed: () => ipcRenderer.send('crx:actionPopupClosed'),
 });
 
-// Userscript bridge (window.userscripts), backed by the userscripts:*
+// Userscript bridge (window.dinos.userscripts), backed by the userscripts:*
 // handlers in main.mts (electron/userscripts.mts). The shell renderer owns
 // the script library (localStorage, see src/hooks/useUserscripts.ts) and
 // syncs the full list here so the main process can inject matching scripts
 // into browser-tab guests as pages load. Navigations to *.user.js files are
 // intercepted in main and surfaced back as install requests.
-contextBridge.exposeInMainWorld('userscripts', {
+expose('userscripts', {
   /**
    * Replace the main process's script list (the renderer is authoritative).
    * @param {object[]} scripts
@@ -2277,10 +2291,10 @@ contextBridge.exposeInMainWorld('userscripts', {
   },
 });
 
-// Ad blocker bridge (window.adblock), backed by the adblock:* handlers in
+// Ad blocker bridge (window.dinos.adblock), backed by the adblock:* handlers in
 // electron/adblock.mts: on/off, the sites ads are allowed on, and how much
 // each browser tab has had blocked.
-contextBridge.exposeInMainWorld('adblock', {
+expose('adblock', {
   /** @returns {Promise<{ enabled: boolean, allowlist: string[] }>} */
   getSettings: () => ipcRenderer.invoke('adblock:getSettings'),
 
@@ -2325,10 +2339,10 @@ contextBridge.exposeInMainWorld('adblock', {
   },
 });
 
-// Pop-up blocker bridge (window.popups), backed by the popups:* handlers in
+// Pop-up blocker bridge (window.dinos.popups), backed by the popups:* handlers in
 // electron/popups.mts: the windows each tab was stopped from opening, and the
 // sites allowed to open them without a click.
-contextBridge.exposeInMainWorld('popups', {
+expose('popups', {
   /** @returns {Promise<{ allowlist: string[] }>} */
   getSettings: () => ipcRenderer.invoke('popups:getSettings'),
 
@@ -2387,12 +2401,12 @@ contextBridge.exposeInMainWorld('popups', {
  * )} DevtoolsCommand
  */
 
-// DevTools bridge (window.devtools), backed by the devtools:* handlers in
+// DevTools bridge (window.dinos.devtools), backed by the devtools:* handlers in
 // main.mts. The web browser app docks Chrome DevTools inside a tab: it
 // renders a devtools host <webview> and asks main to open the tab's
 // devtools in it (the host loads the bundled DevTools frontend, connected
 // to the tab over a loopback CDP bridge - see devtools-bridge.mts).
-contextBridge.exposeInMainWorld('devtools', {
+expose('devtools', {
   /**
    * Dock a tab's devtools into a devtools host <webview> and open them.
    * @param {number} targetWcId
@@ -2466,7 +2480,7 @@ contextBridge.exposeInMainWorld('devtools', {
 // where the shell can't observe keydown events - main.mts intercepts shell
 // shortcuts there via before-input-event and forwards them here. See
 // src/lib/shellShortcuts.ts for the typed renderer-side accessor.
-contextBridge.exposeInMainWorld('shellShortcuts', {
+expose('shellShortcuts', {
   /**
    * Subscribe to forwarded shortcuts. Returns an unsubscribe fn. Payloads:
    *   { action: 'cycle-windows', backward }   (Alt+Tab / Alt+Shift+Tab)
@@ -2503,7 +2517,7 @@ contextBridge.exposeInMainWorld('shellShortcuts', {
 // Pointer input inside <webview> guests, forwarded from the main process
 // (forwardGuestInput in main.mts) because it never reaches the shell's
 // document. See src/lib/guestInput.ts for the typed renderer-side accessor.
-contextBridge.exposeInMainWorld('guestInput', {
+expose('guestInput', {
   /**
    * Subscribe to forwarded guest input. Returns an unsubscribe fn. Payloads:
    *   { wcId, type: 'move', x, y, meta }
@@ -2521,7 +2535,7 @@ contextBridge.exposeInMainWorld('guestInput', {
   },
 });
 
-// Nostr identity bridge host (window.nostrHost), backed by the
+// Nostr identity bridge host (window.dinos.nostrHost), backed by the
 // nostr-bridge:* handlers in main.mts. Browser tabs and installed web apps get
 // a NIP-07 window.nostr (see nostr-preload.cjs), and apps connected over
 // NIP-46 (electron/bunker.mts) ask the same questions; their calls are relayed
@@ -2529,7 +2543,7 @@ contextBridge.exposeInMainWorld('guestInput', {
 // signed-in account's signer. This is the ONLY bridge that serves the user's
 // signer, so it must never be attached to a <webview> - only the shell (see
 // the header note above).
-contextBridge.exposeInMainWorld('nostrHost', {
+expose('nostrHost', {
   /**
    * Subscribe to requests. Returns an unsubscribe fn.
    * @param {(request: unknown) => void} callback
@@ -2573,9 +2587,9 @@ contextBridge.exposeInMainWorld('nostrHost', {
   accountChanged: () => ipcRenderer.send('nostr-bridge:account-changed'),
 });
 
-// Din as a remote signer (window.bunkerHost), backed by electron/bunker.mts:
+// Din as a remote signer (window.dinos.bunkerHost), backed by electron/bunker.mts:
 // the connections apps make to the user's account over NIP-46.
-contextBridge.exposeInMainWorld('bunkerHost', {
+expose('bunkerHost', {
   list: () => ipcRenderer.invoke('bunker:list'),
   /** @param {{ account: string, relays: string[] }} options */
   create: (options) => ipcRenderer.invoke('bunker:create', options),
@@ -2609,13 +2623,13 @@ contextBridge.exposeInMainWorld('bunkerHost', {
   },
 });
 
-// Highlight bridge host (window.highlightHost), backed by the din-highlight:*
+// Highlight bridge host (window.dinos.highlightHost), backed by the din-highlight:*
 // handlers in main.mts. A browser tab's NIP-84 highlight click (see
 // browser-highlight-preload.cjs) is relayed here, to the shell renderer, where
 // HighlightBridgeHost builds and publishes a kind 9802 event with the signed-in
 // account's signer. Unlike nostrHost this carries no arbitrary signing surface -
 // only { url, text, context } for a fixed highlight kind.
-contextBridge.exposeInMainWorld('highlightHost', {
+expose('highlightHost', {
   /**
    * Subscribe to highlight-publish requests relayed from browser tabs. The
    * callback receives { requestId, url, text, context }. Returns an
@@ -2639,14 +2653,14 @@ contextBridge.exposeInMainWorld('highlightHost', {
   respond: (response) => ipcRenderer.send('din-highlight:response', response),
 });
 
-// nsite resolution host (window.nsiteHost), backed by the nsite:* handlers in
+// nsite resolution host (window.dinos.nsiteHost), backed by the nsite:* handlers in
 // main.mts. The nsite:// protocol handler needs Nostr lookups - NIP-19
 // decoding and a relay query for the NIP-5A manifest - and
 // the main process has no Nostr client, so each lookup is relayed here, to the
 // shell renderer, where Nostrify and the user's relay list live (see
 // NsiteBridgeHost). This carries no signing surface: it only turns a URL into
 // a manifest or a redirect.
-contextBridge.exposeInMainWorld('nsiteHost', {
+expose('nsiteHost', {
   /**
    * Subscribe to nsite resolution requests. The callback receives
    * { requestId, url }. Returns an unsubscribe fn.
@@ -2669,11 +2683,11 @@ contextBridge.exposeInMainWorld('nsiteHost', {
   respond: (response) => ipcRenderer.send('nsite:response', response),
 });
 
-// The OS-level nsite store (window.nsiteStore), backed by the nsite:* handlers
+// The OS-level nsite store (window.dinos.nsiteStore), backed by the nsite:* handlers
 // in electron/nsite.mts: the signed manifests of the sites Din has opened, and
 // which of them are installed as apps. Hosts are always canonical
 // (`npub1…` or `<pubkeyB36><dtag>`); main rejects anything else.
-contextBridge.exposeInMainWorld('nsiteStore', {
+expose('nsiteStore', {
   /** Summaries of every installed site. */
   installed: () => ipcRenderer.invoke('nsite:installed'),
   /**
@@ -2723,11 +2737,11 @@ contextBridge.exposeInMainWorld('nsiteStore', {
   },
 });
 
-// The napp runtime's side of installed nsites (window.nappHost), backed by
+// The napp runtime's side of installed nsites (window.dinos.nappHost), backed by
 // the napp:* handlers in electron/napp.mts: what an app has set up on this
 // computer, its ENV, clearing its data, and its service worker asking for its
 // window. Hosts are canonical; main rejects anything else.
-contextBridge.exposeInMainWorld('nappHost', {
+expose('nappHost', {
   /**
    * An app's ENV, how many push subscriptions it holds, and its periodic sync tags.
    * @param {string} host
@@ -2758,11 +2772,11 @@ contextBridge.exposeInMainWorld('nappHost', {
   },
 });
 
-// Websites' Web Push (window.webPushHost), backed by the web-push:* handlers
+// Websites' Web Push (window.dinos.webPushHost), backed by the web-push:* handlers
 // in electron/web-push.mts: the push service and its state for Settings, and
 // a site's service worker asking for a window after a click on one of its
 // notifications.
-contextBridge.exposeInMainWorld('webPushHost', {
+expose('webPushHost', {
   /** The push service: its URL, the default's, whether it's connected, and how many subscriptions it holds. */
   status: () => ipcRenderer.invoke('web-push:status'),
   /**
@@ -2803,14 +2817,14 @@ contextBridge.exposeInMainWorld('webPushHost', {
   },
 });
 
-// File-picker bridge host (window.filePickerHost), backed by the filepicker:*
+// File-picker bridge host (window.dinos.filePickerHost), backed by the filepicker:*
 // handlers in main.mts. A native <input type=file> click inside a browser or
 // web-app guest is intercepted over CDP and relayed here, to the shell
 // renderer, where FilePickerBridgeHost opens the in-Din FilePickerDialog and
 // answers with the chosen absolute path (or null on cancel). The page never
 // supplies the path - it only triggers the request. Native apps' Open and
 // Save dialogs come the same way, from the desktop portal (file-chooser.mts).
-contextBridge.exposeInMainWorld('filePickerHost', {
+expose('filePickerHost', {
   /**
    * Subscribe to relayed file-chooser requests. The callback receives
    * { requestId, origin, multiple?, options? } - `options` for a native
@@ -2862,12 +2876,12 @@ contextBridge.exposeInMainWorld('filePickerHost', {
  * )} ShellPromptRequest
  */
 
-// Prompt host (window.promptHost), backed by the prompt:* handlers in main.mts.
+// Prompt host (window.dinos.promptHost), backed by the prompt:* handlers in main.mts.
 // A site asking for the camera/microphone/location/notifications, or the Chrome
 // Web Store asking to install an extension, is surfaced here so PromptHost can
 // ask the user. Unanswered prompts time out in main (and arrive here as a
 // cancel) as "no".
-contextBridge.exposeInMainWorld('promptHost', {
+expose('promptHost', {
   /**
    * Subscribe to prompts. Returns an unsubscribe fn.
    * @param {(request: ShellPromptRequest) => void} callback
@@ -2905,10 +2919,10 @@ contextBridge.exposeInMainWorld('promptHost', {
   respond: (response) => ipcRenderer.send('prompt:response', response),
 });
 
-// Screen sharing (window.screenShare), backed by electron/screen-share.mts.
+// Screen sharing (window.dinos.screenShare), backed by electron/screen-share.mts.
 // A page's getDisplayMedia() arrives as a pick for ScreenSharePicker, and the
 // shares running are listed for the menu bar, which can stop them.
-contextBridge.exposeInMainWorld('screenShare', {
+expose('screenShare', {
   /**
    * Subscribe to picks. Returns an unsubscribe fn.
    * @param {(request: unknown) => void} callback
@@ -2959,9 +2973,9 @@ contextBridge.exposeInMainWorld('screenShare', {
   stop: (id) => ipcRenderer.invoke('screen-share:stop', id),
 });
 
-// Media playing in web pages and native apps (window.media), backed by
+// Media playing in web pages and native apps (window.dinos.media), backed by
 // electron/media.mts, for the volume menu's media controls.
-contextBridge.exposeInMainWorld('media', {
+expose('media', {
   /** What's playing (or paused) now. */
   list: () => ipcRenderer.invoke('media:list'),
 
@@ -2995,3 +3009,5 @@ contextBridge.exposeInMainWorld('media', {
     return () => ipcRenderer.removeListener('media:key', listener);
   },
 });
+
+contextBridge.exposeInMainWorld('dinos', dinos);

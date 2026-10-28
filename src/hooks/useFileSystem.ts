@@ -6,7 +6,7 @@ import type { FsDetails, FsDiskUsage, FsListing, FsReadResult, FsRecentFile } fr
 import { readPickedFiles } from '@/lib/pickedFiles';
 
 /**
- * TanStack Query hooks over the OS filesystem bridge (window.fs).
+ * TanStack Query hooks over the OS filesystem bridge (window.dinos.fs).
  *
  * Listings are cached per path so revisiting a directory is instant, while a
  * short staleTime keeps contents reasonably fresh; the Files app also exposes

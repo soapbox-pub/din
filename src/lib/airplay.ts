@@ -1,6 +1,6 @@
 /**
  * Typed access to the AirPlay bridge exposed by the Electron preload
- * (`window.airplay`, see electron/preload.cjs + electron/airplay.mts).
+ * (`window.dinos.airplay`, see electron/preload.cjs + electron/airplay.mts).
  *
  * Shares the screen with AirPlay receivers (Apple TVs, AirPlay TVs, Rokus)
  * through deckmon: mirroring the primary display, or extending the desktop
@@ -55,7 +55,7 @@ export interface AirPlayBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     airplay?: AirPlayBridge;
   }
@@ -64,7 +64,7 @@ declare global {
 /** The AirPlay bridge, or undefined outside the Electron shell. */
 export function getAirPlayBridge(): AirPlayBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.airplay;
+  return window.dinos?.airplay;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

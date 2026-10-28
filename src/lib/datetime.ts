@@ -1,6 +1,6 @@
 /**
  * Typed access to the date & time bridge exposed by the Electron preload
- * (`window.datetime`, see electron/preload.cjs + electron/datetime.mts), and
+ * (`window.dinos.datetime`, see electron/preload.cjs + electron/datetime.mts), and
  * helpers for the clock's format.
  *
  * The time zone and clock are the system's. Din can change them on DinOS;
@@ -35,7 +35,7 @@ export interface DateTimeBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     datetime?: DateTimeBridge;
   }
@@ -44,7 +44,7 @@ declare global {
 /** The date & time bridge, or undefined when running outside the Electron shell. */
 export function getDateTimeBridge(): DateTimeBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.datetime;
+  return window.dinos?.datetime;
 }
 
 /** Whether a clock in this format shows 12-hour time; 'auto' follows the locale. */

@@ -1,6 +1,6 @@
 /**
  * Typed access to the System Monitor bridge exposed by the Electron preload
- * (`window.systemMonitor`, see electron/preload.cjs +
+ * (`window.dinos.systemMonitor`, see electron/preload.cjs +
  * electron/system-monitor.mts).
  *
  * The main process reads /proc every couple of seconds while someone is
@@ -87,7 +87,7 @@ export interface SystemMonitorBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     systemMonitor?: SystemMonitorBridge;
   }
@@ -96,7 +96,7 @@ declare global {
 /** The System Monitor bridge, or undefined outside the Electron shell. */
 export function getSystemMonitorBridge(): SystemMonitorBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.systemMonitor;
+  return window.dinos?.systemMonitor;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

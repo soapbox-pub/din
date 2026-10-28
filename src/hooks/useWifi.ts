@@ -10,7 +10,7 @@ import type {
 } from '@/lib/wifi';
 
 /**
- * TanStack Query hooks over the OS WiFi bridge (window.wifi).
+ * TanStack Query hooks over the OS WiFi bridge (window.dinos.wifi).
  *
  * Status and scan results poll on a short interval so the Settings panel
  * tracks connection changes made elsewhere (e.g. nmcli in the Terminal app).

@@ -1,4 +1,4 @@
-// Log in with a phone (window.bluetoothLogin, for the login screen).
+// Log in with a phone (window.dinos.bluetoothLogin, for the login screen).
 //
 // Typing an nsec on a computer that just booted is the worst part of a first
 // login. This lets a phone that already holds the key (Tenna, on Android)

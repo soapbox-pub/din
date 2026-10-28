@@ -1,6 +1,6 @@
 /**
  * Typed access to the phone login bridge exposed by the Electron preload
- * (`window.bluetoothLogin`, see electron/preload.cjs +
+ * (`window.dinos.bluetoothLogin`, see electron/preload.cjs +
  * electron/bluetooth-login.mts).
  *
  * The main process advertises a Bluetooth LE service and runs the handshake;
@@ -27,7 +27,7 @@ export interface BluetoothLoginBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     bluetoothLogin?: BluetoothLoginBridge;
   }
@@ -36,7 +36,7 @@ declare global {
 /** The bridge, or undefined outside the Electron shell. */
 export function getBluetoothLoginBridge(): BluetoothLoginBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.bluetoothLogin;
+  return window.dinos?.bluetoothLogin;
 }
 
 /**

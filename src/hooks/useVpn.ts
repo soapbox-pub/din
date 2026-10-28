@@ -3,7 +3,7 @@ import { getVpnBridge } from '@/lib/vpn';
 import type { VpnConnection } from '@/lib/vpn';
 
 /**
- * TanStack Query hooks over the OS VPN bridge (window.vpn).
+ * TanStack Query hooks over the OS VPN bridge (window.dinos.vpn).
  *
  * The profile list polls on a short interval so the network selector tracks
  * tunnels brought up or down elsewhere (e.g. nmcli in the Terminal). Mutations

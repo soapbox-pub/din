@@ -90,7 +90,7 @@ interface PickerItem {
 }
 
 /**
- * In-Din modal file picker. Reuses the `window.fs` bridge (via the same
+ * In-Din modal file picker. Reuses the `window.dinos.fs` bridge (via the same
  * TanStack Query hooks as the Files app) to browse the real filesystem, but
  * renders entirely inside Din — no host OS dialog. It opens one file or
  * several, chooses folders, or asks where to save a new file, as the

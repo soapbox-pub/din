@@ -377,7 +377,7 @@ function flattenLayout(
 /**
  * Terminal - a real interactive shell on the underlying OS.
  *
- * Rendered with xterm.js; each pane owns one pty session over the `window.pty`
+ * Rendered with xterm.js; each pane owns one pty session over the `window.dinos.pty`
  * bridge (see src/lib/pty.ts). Sessions run as the unprivileged OS user and
  * die with the window. Multiple tabs share one window: all sessions stay
  * mounted (their xterm state survives) and only the active tab is visible.

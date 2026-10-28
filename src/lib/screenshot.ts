@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS screenshot bridge exposed by the Electron preload
- * (`window.screenshot`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.screenshot`, see electron/preload.cjs + electron/main.cjs).
  *
  * Backed by webContents.capturePage() in the main process, which snapshots the
  * shell window's rendered contents - the whole Din desktop. It works on any
@@ -44,7 +44,7 @@ export interface ScreenshotBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     screenshot?: ScreenshotBridge;
   }
@@ -53,7 +53,7 @@ declare global {
 /** The screenshot bridge, or undefined when running outside the Electron shell. */
 export function getScreenshotBridge(): ScreenshotBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.screenshot;
+  return window.dinos?.screenshot;
 }
 
 /**

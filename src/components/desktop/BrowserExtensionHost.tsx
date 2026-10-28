@@ -6,7 +6,7 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WEB_POPUP_APP_ID, popupWindowSize } from '@/lib/webPopup';
 
 /**
- * Desktop-lifetime listener for Chrome-extension tab commands (window.crx).
+ * Desktop-lifetime listener for Chrome-extension tab commands (window.dinos.crx).
  *
  * Extensions can request tabs while no browser window exists (e.g. a
  * background script calls chrome.tabs.create, or an extension opens its

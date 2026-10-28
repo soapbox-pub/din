@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell (see electron/preload.cjs). */
     systemEvents?: {
       onChanged(callback: (topic: string) => void): () => void;
@@ -27,7 +27,7 @@ export function SystemEventsHost() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    return window.systemEvents?.onChanged((topic) => {
+    return window.dinos?.systemEvents?.onChanged((topic) => {
       for (const queryKey of QUERIES_BY_TOPIC[topic] ?? []) {
         void queryClient.invalidateQueries({ queryKey });
       }

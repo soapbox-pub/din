@@ -1,6 +1,6 @@
 /**
  * Typed access to the volumes bridge exposed by the Electron preload
- * (`window.volumes`, see electron/preload.cjs + electron/volumes.mts).
+ * (`window.dinos.volumes`, see electron/preload.cjs + electron/volumes.mts).
  *
  * Backed by UDisks2 over the system bus: removable disks are mounted as
  * they're plugged in, and the main process pushes the whole state whenever
@@ -50,7 +50,7 @@ export interface VolumesBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     volumes?: VolumesBridge;
   }
@@ -59,7 +59,7 @@ declare global {
 /** The volumes bridge, or undefined outside the Electron shell. */
 export function getVolumesBridge(): VolumesBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.volumes;
+  return window.dinos?.volumes;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

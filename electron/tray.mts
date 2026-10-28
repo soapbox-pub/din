@@ -596,7 +596,7 @@ function int(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 0;
 }
 
-/** Register the tray IPC surface (window.tray in the preload) and start it. */
+/** Register the tray IPC surface (window.dinos.tray in the preload) and start it. */
 export function registerTrayHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;

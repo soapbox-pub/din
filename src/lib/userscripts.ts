@@ -3,7 +3,7 @@
  *
  * The shell renderer owns the script library (persisted per-device in
  * localStorage, see useUserscripts) and syncs it to the main process over the
- * `window.userscripts` bridge (electron/preload.cjs). The main process
+ * `window.dinos.userscripts` bridge (electron/preload.cjs). The main process
  * (electron/userscripts.cjs) matches scripts against page URLs and injects
  * them into browser-tab <webview> guests as pages load — so scripts behave
  * like extensions: installed once, running automatically on matching sites.
@@ -159,7 +159,7 @@ export interface UserscriptsBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     userscripts?: UserscriptsBridge;
   }
@@ -168,5 +168,5 @@ declare global {
 /** The userscripts bridge, or undefined outside the Electron shell. */
 export function getUserscriptsBridge(): UserscriptsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.userscripts;
+  return window.dinos?.userscripts;
 }

@@ -1,5 +1,5 @@
 /**
- * The pop-up blocker, through the `window.popups` bridge (electron/preload.cjs,
+ * The pop-up blocker, through the `window.dinos.popups` bridge (electron/preload.cjs,
  * backed by electron/popups.mts). The main process decides what opens; the
  * shell shows what was blocked and the sites allowed to open pop-ups.
  *
@@ -22,7 +22,7 @@ export interface PopupsBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     popups?: PopupsBridge;
   }
@@ -31,5 +31,5 @@ declare global {
 /** The pop-up blocker bridge, or undefined outside the Electron shell. */
 export function getPopupsBridge(): PopupsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.popups;
+  return window.dinos?.popups;
 }

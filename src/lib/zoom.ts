@@ -1,6 +1,6 @@
 /**
  * Typed access to the interface zoom bridge exposed by the Electron preload
- * (`window.zoom`, see electron/preload.cjs).
+ * (`window.dinos.zoom`, see electron/preload.cjs).
  *
  * Backed by Chromium's page zoom (`webFrame.setZoomFactor`), which scales the
  * layout viewport itself - like a DPI change - so `window.innerWidth`,
@@ -17,7 +17,7 @@ export interface ZoomBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     zoom?: ZoomBridge;
   }
@@ -26,5 +26,5 @@ declare global {
 /** The zoom bridge, or undefined when running outside the Electron shell. */
 export function getZoomBridge(): ZoomBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.zoom;
+  return window.dinos?.zoom;
 }

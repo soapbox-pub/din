@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS display bridge exposed by the Electron preload
- * (`window.display`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.display`, see electron/preload.cjs + electron/main.cjs).
  *
  * Backed by wlr-randr under cage (DinOS) and by xrandr on a bare X11 session
  * (the os/x11 standalone launcher) - wherever Din is the whole desktop and
@@ -77,7 +77,7 @@ export interface DisplayBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     display?: DisplayBridge;
   }
@@ -86,7 +86,7 @@ declare global {
 /** The display bridge, or undefined when running outside the Electron shell. */
 export function getDisplayBridge(): DisplayBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.display;
+  return window.dinos?.display;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

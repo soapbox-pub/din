@@ -355,24 +355,24 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
 /**
  * Settings - system preferences for the shell.
  *
- * The Wi-Fi section drives NetworkManager through `window.wifi` (Electron
+ * The Wi-Fi section drives NetworkManager through `window.dinos.wifi` (Electron
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
  * explanatory fallback. The Bluetooth section pairs, connects and forgets
- * devices through `window.bluetooth` (BlueZ over D-Bus). The Display section arranges the monitors through
- * `window.display` (wlr-randr under cage, xrandr on bare X11), falling back
+ * devices through `window.dinos.bluetooth` (BlueZ over D-Bus). The Display section arranges the monitors through
+ * `window.dinos.display` (wlr-randr under cage, xrandr on bare X11), falling back
  * where neither can manage them. Battery & Power reads the battery through
- * `window.power` (/sys/class/power_supply), leaving it out on machines with
+ * `window.dinos.power` (/sys/class/power_supply), leaving it out on machines with
  * no battery, and switches the system power profile through the same bridge
  * (net.hadess.PowerProfiles over D-Bus: power-profiles-daemon / tuned-ppd),
  * falling back where no such daemon runs. The Sound
- * section drives the default sink's volume/mute through `window.audio`
+ * section drives the default sink's volume/mute through `window.dinos.audio`
  * (wpctl/PipeWire), including outputs on a sound card's inactive profile.
  * Keyboard picks the layout native Linux apps type with
- * through `window.keyboard`. Printers lists the printers CUPS can reach, sets
+ * through `window.dinos.keyboard`. Printers lists the printers CUPS can reach, sets
  * the default, and shows the queue (PrintersSettingsSection). Date & Time sets the time zone and clock
- * through `window.datetime`, and how Din's clocks show the time. Password changes the computer's one password
- * (disk, lock screen, Nostr keys) through `window.lock`. Nostr & Storage manages Din's encrypted app-data
+ * through `window.dinos.datetime`, and how Din's clocks show the time. Password changes the computer's one password
+ * (disk, lock screen, Nostr keys) through `window.dinos.lock`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Connected apps lists the
  * sites and apps that may use the account through Din's signer
  * (ConnectedAppsSection). Assistant turns OpenCode, the AI agent, on or off
@@ -384,8 +384,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
  * Super-key shortcuts for windows and workspaces (src/lib/wmBindings.ts).
  * Developers holds debug utilities such as intentionally crashing the shell
  * to test the error boundary. About shows Din's logo and DinOS's version, and
- * the update it's staging through `window.updater`, and offers the restart
- * that finishes one, and firmware updates through `window.firmware`.
+ * the update it's staging through `window.dinos.updater`, and offers the restart
+ * that finishes one, and firmware updates through `window.dinos.firmware`.
  */
 const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
 
@@ -716,7 +716,7 @@ function NetworkListSkeleton() {
 
 /**
  * The adapter's on/off switch, the paired devices, and the ones nearby to
- * pair with, via the Bluetooth bridge (window.bluetooth -> BlueZ). Looks for
+ * pair with, via the Bluetooth bridge (window.dinos.bluetooth -> BlueZ). Looks for
  * devices while it's open and Bluetooth is on. Prompts that pairing needs
  * appear from BluetoothPromptHost, wherever the pairing started.
  */
@@ -1013,7 +1013,7 @@ function clampZoom(percent: number): number {
 
 /**
  * Interface zoom - DPI-style scaling of the whole desktop through Chromium
- * page zoom (window.zoom preload bridge). Lives in AppConfig (persisted
+ * page zoom (window.dinos.zoom preload bridge). Lives in AppConfig (persisted
  * locally) and works in every Electron session, including ones where the
  * arrangement below is unavailable. In a plain browser there is no
  * bridge, so the control points at the browser's own zoom instead.
@@ -1075,7 +1075,7 @@ function DisplayZoomControl({
 }
 
 /**
- * The whole multi-output arrangement, via the display bridge (window.display:
+ * The whole multi-output arrangement, via the display bridge (window.dinos.display:
  * wlr-randr under cage, xrandr on bare X11), where Din is the whole desktop:
  * drag displays to position them, pick a resolution, choose the primary (the
  * one with the menu bar and Dock), and switch any output on or off; "Apply"
@@ -1566,7 +1566,7 @@ function DisplayListSkeleton() {
 
 /**
  * Battery state and the system power profile, both via the power bridge
- * (window.power). The battery comes from /sys/class/power_supply and is left
+ * (window.dinos.power). The battery comes from /sys/class/power_supply and is left
  * out on machines with none (desktops, the VM). The profile (power-saver /
  * balanced / performance) goes through net.hadess.PowerProfiles over D-Bus,
  * served by power-profiles-daemon or tuned-ppd, and falls back where no such
@@ -1880,7 +1880,7 @@ function PowerSkeleton() {
 
 /**
  * Screen backlight and night light (red shift), via the brightness bridge
- * (window.brightness). Backlight rides on brightnessctl (/sys/class/backlight);
+ * (window.dinos.brightness). Backlight rides on brightnessctl (/sys/class/backlight);
  * night light on a Wayland/X11 gamma tool (gammastep/wlsunset). Each half falls
  * back independently, and the whole section falls back in a plain browser.
  * Media keys drive the backlight and show the brightness OSD.
@@ -2510,7 +2510,7 @@ function MicTest() {
 
 /**
  * Sound: the default sink's volume/mute plus, when the audio bridge
- * (window.audio, wpctl/PipeWire) is present, output/input device selection, a
+ * (window.dinos.audio, wpctl/PipeWire) is present, output/input device selection, a
  * per-output test tone, microphone volume/mute and a level test, and
  * per-application volume.
  * Falls back where PipeWire/wpctl is absent or in a plain browser. Media keys
@@ -2767,7 +2767,7 @@ function revealInList(row: HTMLElement | null) {
 // ---------------------------------------------------------------------------
 
 /**
- * The system's keyboard layout (window.keyboard), which Din's own windows and
+ * The system's keyboard layout (window.dinos.keyboard), which Din's own windows and
  * the native Linux apps it runs both type with. Picking one from
  * xkeyboard-config's list changes the system's, where Din can (DinOS, GNOME).
  */
@@ -2963,7 +2963,7 @@ function KeyboardSection() {
 // ---------------------------------------------------------------------------
 
 /**
- * The system's time zone and clock, through `window.datetime` (changed on
+ * The system's time zone and clock, through `window.dinos.datetime` (changed on
  * DinOS, shown elsewhere), and how Din's clocks show the time. The latter is
  * this computer's own (AppConfig, kept local) and works in a plain browser
  * too; the boot and lock screens follow its 12/24-hour choice
@@ -3907,7 +3907,7 @@ function DevelopersSection() {
 // ---------------------------------------------------------------------------
 
 /**
- * The computer's password (window.lock): one password that unlocks the disk
+ * The computer's password (window.dinos.lock): one password that unlocks the disk
  * at boot, the lock screen, sudo, and the Nostr keys in nostrd, so it changes
  * everywhere at once. Only a computer that has one (an encrypted DinOS
  * install) shows the form.
@@ -4038,7 +4038,7 @@ function PasswordSection() {
 // ---------------------------------------------------------------------------
 
 /**
- * Din's logo and DinOS's version, and its updates (window.updater). The
+ * Din's logo and DinOS's version, and its updates (window.dinos.updater). The
  * system looks for them by itself and stages what it finds for the next boot,
  * so this mostly reports, and offers the restart.
  */
@@ -4091,7 +4091,7 @@ function AboutSection() {
 }
 
 /**
- * Firmware updates for the computer and its devices (window.firmware). Unlike
+ * Firmware updates for the computer and its devices (window.dinos.firmware). Unlike
  * DinOS's, they're never installed by themselves: each waits for its Update
  * button.
  */

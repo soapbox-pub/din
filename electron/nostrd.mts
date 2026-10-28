@@ -1,4 +1,4 @@
-// The signer bridge (window.nostrd, for the shell): Din's connection to
+// The signer bridge (window.dinos.nostrd, for the shell): Din's connection to
 // nostrd, the system's Nostr signer daemon.
 //
 // nostrd holds the account keys and signs over a local socket (NIP-5F, the

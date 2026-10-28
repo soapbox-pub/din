@@ -1,4 +1,4 @@
-// The Installer bridge (window.installer, for the Installer app): puts
+// The Installer bridge (window.dinos.installer, for the Installer app): puts
 // DinOS on a computer's own disk from a live USB boot.
 //
 // The disk work is done as root by os/din-install.sh, which DinOS's

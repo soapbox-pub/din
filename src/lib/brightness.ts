@@ -1,6 +1,6 @@
 /**
  * Typed access to the OS brightness bridge exposed by the Electron preload
- * (`window.brightness`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.brightness`, see electron/preload.cjs + electron/main.cjs).
  *
  * Covers two independent display-light controls:
  *   - Screen backlight (/sys/class/backlight), via brightnessctl where
@@ -73,7 +73,7 @@ export interface BrightnessBridge {
 }
 
 declare global {
-  interface Window {
+  interface Dinos {
     /** Present only inside the Electron shell. */
     brightness?: BrightnessBridge;
   }
@@ -119,5 +119,5 @@ export function nightLightCaption(
 /** The brightness bridge, or undefined when running outside the Electron shell. */
 export function getBrightnessBridge(): BrightnessBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.brightness;
+  return window.dinos?.brightness;
 }
