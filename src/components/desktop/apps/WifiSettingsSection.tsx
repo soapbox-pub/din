@@ -128,7 +128,9 @@ function NetworkListView({
   const hasAdapter = status.data?.device != null;
   const ethernet = isEthernetConnected(status.data);
   const networks = useWifiNetworks(radioEnabled && hasAdapter);
-  const { connect, disconnect, forget, setRadio } = useWifiMutations();
+  const { connect, disconnect, forget, setRadio, rescan } = useWifiMutations();
+  const canReset = status.data?.canReset ?? false;
+  const resetting = canReset && setRadio.isPending && setRadio.variables === true;
 
   // SSID whose inline password form is open, if any.
   const [joining, setJoining] = useState<string | null>(null);
@@ -175,20 +177,35 @@ function NetworkListView({
             size="icon"
             aria-label="Rescan for networks"
             title="Rescan for networks"
-            disabled={!radioEnabled || !hasAdapter}
-            onClick={() => networks.refetch()}
+            disabled={!radioEnabled || !hasAdapter || rescan.isPending || setRadio.isPending}
+            onClick={() => rescan.mutate()}
           >
-            <RotateCw className={cn('size-4', networks.isFetching && 'animate-spin')} />
+            <RotateCw className={cn('size-4', (rescan.isPending || networks.isFetching) && 'animate-spin')} />
           </Button>
           <Switch
             aria-label="Wi-Fi radio"
             checked={radioEnabled}
-            disabled={!available || setRadio.isPending}
-            onCheckedChange={(checked) => setRadio.mutate(checked)}
+            disabled={!available || setRadio.isPending || rescan.isPending}
+            onCheckedChange={(checked) => {
+              rescan.reset();
+              setRadio.mutate(checked);
+            }}
           />
         </>
       }
     >
+      {setRadio.isError && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {setRadio.variables && canReset
+            ? `Couldn't reset the Wi-Fi adapter: ${cleanWifiError(setRadio.error)}`
+            : cleanWifiError(setRadio.error)}
+        </p>
+      )}
+      {rescan.isError && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Couldn't refresh: {cleanWifiError(rescan.error)}. The networks below may be out of date.
+        </p>
+      )}
       {ethernet && (
         <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-accent/40 px-3 py-2.5">
           <EthernetPort className="size-5 shrink-0 text-primary" aria-hidden />
@@ -210,8 +227,15 @@ function NetworkListView({
         <Fallback>Could not read Wi-Fi state: {cleanWifiError(status.error)}</Fallback>
       ) : !available ? (
         <Fallback>NetworkManager is not available on this system, so Wi-Fi cannot be managed here.</Fallback>
+      ) : resetting ? (
+        <Fallback icon={Loader2} spin>
+          Resetting the Wi-Fi adapter…
+        </Fallback>
       ) : !hasAdapter ? (
-        <Fallback icon={WifiOff}>No Wi-Fi adapter was found on this system.</Fallback>
+        <Fallback icon={WifiOff}>
+          No Wi-Fi adapter was found on this system.
+          {canReset && ' If this computer has one, turn Wi-Fi off and on again to reset it.'}
+        </Fallback>
       ) : !radioEnabled ? (
         <Fallback icon={WifiOff}>Wi-Fi is turned off.</Fallback>
       ) : networks.isLoading ? (
@@ -623,10 +647,10 @@ function Shell({
   );
 }
 
-function Fallback({ icon: Icon, children }: { icon?: LucideIcon; children: React.ReactNode }) {
+function Fallback({ icon: Icon, spin, children }: { icon?: LucideIcon; spin?: boolean; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
-      {Icon && <Icon className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />}
+      {Icon && <Icon className={cn('mx-auto mb-4 size-8 text-muted-foreground/80', spin && 'animate-spin')} aria-hidden />}
       <p className="mx-auto max-w-sm text-sm text-muted-foreground">{children}</p>
     </div>
   );

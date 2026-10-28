@@ -81,6 +81,12 @@ export function WifiPopoverBody() {
         />
       </header>
 
+      {setRadio.isError && (
+        <p role="alert" className="border-b border-border/60 px-3 py-2 text-xs text-destructive">
+          {cleanWifiError(setRadio.error)}
+        </p>
+      )}
+
       {ethernet && (
         <div className="flex items-center gap-2.5 border-b border-border/60 px-3 py-2">
           <EthernetPort className="size-4.5 shrink-0 text-primary" aria-hidden />

@@ -24,6 +24,11 @@ export interface WifiStatus {
   available: boolean;
   /** Whether the WiFi radio (rfkill soft switch) is on. */
   radioEnabled: boolean;
+  /**
+   * Whether turning the radio on resets the adapter first (DinOS), which also
+   * brings back one whose driver failed to start.
+   */
+  canReset: boolean;
   /** The first WiFi adapter, or null when none exists. */
   device: WifiDeviceStatus | null;
   /** The first wired (ethernet) adapter, or null when none exists. */
@@ -180,7 +185,10 @@ export interface WifiAddResult {
 export interface WifiBridge {
   /** Adapter/radio state. `available: false` when NetworkManager is absent. */
   status(): Promise<WifiStatus>;
-  /** Visible networks, one entry per SSID. `rescan` forces a fresh scan. */
+  /**
+   * Visible networks, one entry per SSID. `rescan` waits for a fresh scan,
+   * resetting the adapter if it never finishes, and fails if none does.
+   */
   networks(rescan?: boolean): Promise<WifiNetwork[]>;
   /** Saved (remembered) networks. */
   saved(): Promise<SavedWifiNetwork[]>;
@@ -200,7 +208,7 @@ export interface WifiBridge {
   disconnect(): Promise<void>;
   /** Delete a saved network. */
   forget(uuid: string): Promise<void>;
-  /** Turn the WiFi radio on or off. */
+  /** Turn the WiFi radio on or off; on resets the adapter first where `canReset`. */
   setRadio(enabled: boolean): Promise<void>;
 }
 

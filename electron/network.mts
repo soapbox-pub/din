@@ -559,6 +559,118 @@ async function firstDevice(type: string): Promise<NmDevice | null> {
   return { iface: row[0], state: row[2], connection: row[3] || null };
 }
 
+// ---------------------------------------------------------------------------
+// Scanning, and starting the adapter over
+//
+// A WiFi driver can stop finishing scans (some do after a wake from sleep)
+// or fail to attach to its card at boot, and NetworkManager's radio switch
+// doesn't touch the card, so neither turning WiFi off and on nor a rescan
+// would help. DinOS has a helper, os/din-wifi.sh, which its launcher names in
+// DIN_WIFI and the shell's user runs through sudo without a password: it
+// resets the cards, whatever their chip, as a reboot would. Turning WiFi on
+// runs it, and so does a refresh whose scan never finishes. Elsewhere such a
+// refresh fails rather than showing the last scan's networks again.
+// ---------------------------------------------------------------------------
+
+const WIFI_HELPER = process.env.DIN_WIFI;
+const SCAN_TIMEOUT_MS = 20_000;
+const SCAN_RECENT_MS = 5_000;
+const SCAN_POLL_MS = 500;
+const RESET_TIMEOUT_MS = 60_000;
+const WIRELESS_IFACE = 'org.freedesktop.NetworkManager.Device.Wireless';
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Start every WiFi card over (os/din-wifi.sh). */
+async function resetWifi(): Promise<void> {
+  if (!WIFI_HELPER) throw new Error("Din can't reset the Wi-Fi adapter on this system");
+  try {
+    await runCommand('sudo', ['-n', WIFI_HELPER, 'reset'], { timeout: RESET_TIMEOUT_MS });
+  } catch (error) {
+    // The helper says what went wrong on its last line.
+    const reason = error instanceof CommandError ? error.stderr.trim().split('\n').pop() : '';
+    throw reason ? new Error(reason) : error;
+  }
+}
+
+/**
+ * When NetworkManager last saw a scan of this interface finish (its
+ * LastScan, ms since boot); null when it can't be asked.
+ */
+async function lastScan(iface: string): Promise<string | null> {
+  try {
+    const props = propertyBlocks(await nmcli(['-t', '-f', 'GENERAL.DBUS-PATH', 'device', 'show', iface]))[0];
+    const dbusPath = props?.get('GENERAL.DBUS-PATH') ?? '';
+    if (!dbusPath.startsWith('/org/freedesktop/NetworkManager/')) return null;
+    return await nmProperty(dbusPath, WIRELESS_IFACE, 'LastScan');
+  } catch {
+    return null;
+  }
+}
+
+/** Milliseconds since boot, counting sleep, as LastScan does (CLOCK_BOOTTIME). */
+function bootMs(): number {
+  return Number.parseFloat(fs.readFileSync('/proc/uptime', 'utf8')) * 1000;
+}
+
+/** Ask for a scan, and say whether one finished in time. */
+async function scanFinishes(iface: string): Promise<boolean> {
+  // NetworkManager may let a rescan asked for just after a scan go, so a
+  // scan that finished a moment before counts too.
+  const since = bootMs() - SCAN_RECENT_MS;
+  const finished = async () => {
+    const at = Number.parseInt((await lastScan(iface)) ?? '', 10);
+    // Without LastScan there's no telling; trust it.
+    return Number.isNaN(at) || at >= since;
+  };
+  // Failing to start one (one under way already, say) is fine: any scan that finishes counts.
+  await nmcli(['device', 'wifi', 'rescan', 'ifname', iface]).catch(() => {});
+  for (const deadline = Date.now() + SCAN_TIMEOUT_MS; Date.now() < deadline; ) {
+    if (await finished()) return true;
+    await wait(SCAN_POLL_MS);
+  }
+  return finished();
+}
+
+/** The WiFi adapter once NetworkManager can scan with it again, after a reset. */
+async function readyWifiDevice(): Promise<NmDevice | null> {
+  for (const deadline = Date.now() + SCAN_TIMEOUT_MS; Date.now() < deadline; ) {
+    const device = await firstDevice('wifi').catch(() => null);
+    if (device && device.state !== 'unavailable' && device.state !== 'unmanaged') return device;
+    await wait(SCAN_POLL_MS);
+  }
+  return null;
+}
+
+let scanning: Promise<void> | null = null;
+
+/**
+ * Scan afresh, resetting the adapter if the scan never finishes; rejects
+ * when there's no fresh scan to be had.
+ */
+function freshScan(): Promise<void> {
+  scanning ??= (async () => {
+    try {
+      if ((await nmcli(['-t', 'radio', 'wifi'])).trim() !== 'enabled') return;
+      const device = await firstDevice('wifi');
+      if (device && (await scanFinishes(device.iface))) return;
+      if (!WIFI_HELPER) {
+        throw new Error(device ? "The Wi-Fi adapter didn't finish scanning" : 'No Wi-Fi adapter was found');
+      }
+      await resetWifi();
+      const ready = await readyWifiDevice();
+      if (!ready || !(await scanFinishes(ready.iface))) {
+        throw new Error("The Wi-Fi adapter didn't finish scanning, even after a reset");
+      }
+    } finally {
+      scanning = null;
+    }
+  })();
+  return scanning;
+}
+
 /** Saved WiFi profiles (client ones - not hotspots), with their SSIDs. */
 async function savedWifiNetworks(): Promise<SavedWifiNetwork[]> {
   const rows = terseRows(
@@ -910,10 +1022,16 @@ export function registerWifiHandlers(options: {
         firstDevice('ethernet'),
         nmcli(['-t', 'radio', 'wifi']),
       ]);
-      return { available: true, radioEnabled: radio.trim() === 'enabled', device, ethernet };
+      return {
+        available: true,
+        radioEnabled: radio.trim() === 'enabled',
+        canReset: Boolean(WIFI_HELPER),
+        device,
+        ethernet,
+      };
     } catch (error) {
       if (messageOf(error) === 'nmcli-missing') {
-        return { available: false, radioEnabled: false, device: null, ethernet: null };
+        return { available: false, radioEnabled: false, canReset: false, device: null, ethernet: null };
       }
       throw error;
     }
@@ -921,12 +1039,14 @@ export function registerWifiHandlers(options: {
 
   ipcMain.handle('wifi:networks', async (event, rescan) => {
     assertShellSender(event);
+    // A refresh lists what a scan it saw finish found, not what's left of the last one.
+    if (rescan === true) await freshScan();
     const rows = terseRows(
       await nmcli(
         [
           '-t', '-f', 'IN-USE,SSID,SIGNAL,SECURITY,FREQ',
           'device', 'wifi', 'list',
-          '--rescan', rescan === true ? 'yes' : 'auto',
+          '--rescan', rescan === true ? 'no' : 'auto',
         ],
         30_000,
       ),
@@ -1037,7 +1157,16 @@ export function registerWifiHandlers(options: {
 
   ipcMain.handle('wifi:setRadio', async (event, enabled) => {
     assertShellSender(event);
-    await nmcli(['radio', 'wifi', enabled === true ? 'on' : 'off']);
+    if (enabled !== true) {
+      await nmcli(['radio', 'wifi', 'off']);
+      return;
+    }
+    // Turning WiFi on starts the adapter over, so that it works again
+    // whatever had gone wrong with it. The radio comes on even if that fails.
+    let resetError: unknown = null;
+    if (WIFI_HELPER) await resetWifi().catch((error: unknown) => (resetError = error));
+    await nmcli(['radio', 'wifi', 'on']);
+    if (resetError) throw resetError;
   });
 }
 

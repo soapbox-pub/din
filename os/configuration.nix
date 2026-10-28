@@ -223,6 +223,15 @@ let
     text = builtins.readFile ./din-tor.sh;
   };
 
+  # The privileged half of Settings → Wi-Fi's reset, which starts the WiFi
+  # cards over when their drivers stop working (see the script, and
+  # electron/network.mts).
+  din-wifi = pkgs.writeShellApplication {
+    name = "din-wifi";
+    runtimeInputs = with pkgs; [ coreutils gnused kmod ];
+    text = builtins.readFile ./din-wifi.sh;
+  };
+
   # Puts what the boot screen shows on the boot partition (see the script,
   # and electron/boot-screen.mts).
   din-boot-screen = pkgs.writeShellApplication {
@@ -331,8 +340,8 @@ let
   # bubblewrap to sandbox them (electron/files.mts), CUPS's tools and poppler's
   # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
   # and sudo (from /run/wrappers) for
-  # the Installer's, the updater's, the keyboard layout's, the time zone's
-  # and Tor's helpers.
+  # the Installer's, the updater's, the keyboard layout's, the time zone's,
+  # Tor's and the WiFi reset's helpers.
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils ]}:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
@@ -344,6 +353,7 @@ let
     export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
     export DIN_TIME=${din-time}/bin/din-time
     export DIN_TOR=${din-tor}/bin/din-tor
+    export DIN_WIFI=${din-wifi}/bin/din-wifi
     export DIN_FWUPDMGR=${config.services.fwupd.package}/bin/fwupdmgr
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
@@ -615,6 +625,7 @@ in
       "${din-boot-screen}/bin/din-boot-screen"
       "${din-time}/bin/din-time"
       "${din-tor}/bin/din-tor"
+      "${din-wifi}/bin/din-wifi reset"
       "${din-lock}/bin/din-lock start"
       "${din-lock}/bin/din-lock status"
       # It checks the old password itself.

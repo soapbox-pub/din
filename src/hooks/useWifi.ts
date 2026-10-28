@@ -117,5 +117,12 @@ export function useWifiMutations() {
     onSettled: invalidate,
   });
 
-  return { connect, activate, disconnect, forget, update, add, setRadio };
+  /** A fresh scan (the refresh button), which replaces the visible networks. */
+  const rescan = useMutation({
+    mutationFn: () => requireBridge().networks(true),
+    onSuccess: (networks) => queryClient.setQueryData(['wifi', 'networks'], networks),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['wifi', 'status'] }),
+  });
+
+  return { connect, activate, disconnect, forget, update, add, setRadio, rescan };
 }
