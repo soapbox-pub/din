@@ -459,6 +459,20 @@ export function useProjectIcons(roots: string[]): Map<string, string> {
   });
 }
 
+/**
+ * For each folder a conversation worked in, its project's favicon: a
+ * worktree's comes from its main checkout. Folders without one are left out.
+ */
+export function useDirectoryIcons(directories: string[]): Map<string, string> {
+  const mains = useMainCheckouts(directories);
+  const roots = directories.map((d) => mains.get(d) ?? d);
+  const icons = useProjectIcons([...new Set(roots)]);
+  return new Map(directories.flatMap((d, i) => {
+    const icon = icons.get(roots[i]);
+    return icon ? [[d, icon] as const] : [];
+  }));
+}
+
 /** The folder new conversations work in. */
 export function useAssistantDirectory(): string | undefined {
   const { config } = useAppContext();

@@ -11,6 +11,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/components/desktop/assistant/ConversationActions';
+import { ProjectIcon } from '@/components/desktop/assistant/ProjectIcon';
+import { WindowDragRegion } from '@/components/desktop/WindowHeader';
 import {
   useActiveSessions,
   useAssistantSessions,
@@ -242,7 +244,8 @@ export function SessionList({
       onPointerLeave={() => setHeld(null)}
       style={style}
       className={cn('w-64 shrink-0 flex-col border-r border-border/60 bg-muted/30', className)}>
-      <div className="flex items-center gap-2 p-2">
+      {/* The window's title bar runs across the list's top, so it drags the window too. */}
+      <WindowDragRegion className="flex h-9 shrink-0 items-center gap-1 px-2">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
           <Input
@@ -250,21 +253,21 @@ export function SessionList({
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Search"
             aria-label="Search conversations"
-            className="h-8 pl-8 text-sm"
+            className="h-7 pl-8 text-sm"
           />
         </div>
         <Button
           variant="ghost"
           size="icon"
-          className="size-8 shrink-0"
+          className="size-7 shrink-0"
           aria-label="New conversation"
           title="New conversation"
           onClick={() => onNew()}
         >
           <SquarePen className="size-4" aria-hidden />
         </Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+      </WindowDragRegion>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {isLoading ? (
           <div className="space-y-2 p-2" aria-label="Loading conversations">
             <Skeleton className="h-3 w-1/3" />
@@ -316,7 +319,7 @@ export function SessionList({
                             className={cn('size-3.5 shrink-0 motion-safe:transition-transform', open && 'rotate-90')}
                             aria-hidden
                           />
-                          {icons.has(project.root) && <ProjectIcon src={icons.get(project.root)!} />}
+                          <ProjectIcon src={icons.get(project.root)} />
                           <span className="truncate">{project.label}</span>
                         </button>
                       </ContextMenuTrigger>
@@ -370,22 +373,6 @@ export function SessionList({
         onDeleted={() => deleting && onDeleted(deleting.id)}
       />
     </nav>
-  );
-}
-
-/** A project's favicon, small enough to sit in the header's line; gone if it doesn't load. */
-function ProjectIcon({ src }: { src: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
-  return (
-    <img
-      src={src}
-      alt=""
-      aria-hidden
-      draggable={false}
-      onError={() => setFailed(true)}
-      className="size-3.5 shrink-0 rounded-sm object-contain"
-    />
   );
 }
 

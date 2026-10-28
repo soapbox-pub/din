@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AssistantUnavailable } from '@/components/desktop/assistant/AssistantUnavailable';
 import { Composer } from '@/components/desktop/assistant/Composer';
+import { ProjectIcon } from '@/components/desktop/assistant/ProjectIcon';
 import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -12,6 +13,7 @@ import {
   useAssistantDirectory,
   useAssistantReady,
   useAssistantSessions,
+  useDirectoryIcons,
   useHomeDirectory,
   usePendingRequests,
   usePreferredModel,
@@ -205,6 +207,7 @@ function SessionSection({
   onShow: (sessionID: string) => void;
   running?: boolean;
 }) {
+  const icons = useDirectoryIcons([...new Set(sessions.map((s) => s.location.directory))]);
   return (
     <section aria-label={title} className="pb-2">
       <h3 className="px-4 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>
@@ -219,7 +222,10 @@ function SessionSection({
               {running ? (
                 <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
               ) : (
-                <Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <ProjectIcon
+                  src={icons.get(session.location.directory)}
+                  fallback={<Bot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+                />
               )}
               <span className="min-w-0 flex-1 truncate text-sm">{sessionTitle(session)}</span>
               <span className="shrink-0 text-xs text-muted-foreground">

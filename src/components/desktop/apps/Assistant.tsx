@@ -4,7 +4,6 @@ import {
   Folder,
   FolderOpen,
   Loader2,
-  MessageSquare,
   MoreHorizontal,
   PanelLeft,
   Pencil,
@@ -33,11 +32,13 @@ import { FormCard, PermissionCard } from '@/components/desktop/assistant/Request
 import { SessionList } from '@/components/desktop/assistant/SessionList';
 import { Transcript } from '@/components/desktop/assistant/Transcript';
 import { useQuestionHandoff } from '@/components/desktop/assistant/useQuestionHandoff';
+import { ProjectIcon } from '@/components/desktop/assistant/ProjectIcon';
 import { TabStrip } from '@/components/desktop/TabStrip';
+import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
+import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { moveItem } from '@/hooks/useDragReorder';
 import {
   useActiveSessions,
@@ -49,6 +50,7 @@ import {
   useAssistantSession,
   useAssistantSessions,
   useBackgroundSession,
+  useDirectoryIcons,
   useCancelQueued,
   useCompactSession,
   useHomeDirectory,
@@ -150,6 +152,8 @@ interface TabInfo {
   id: string;
   title: string;
   state: 'new' | 'idle' | 'running' | 'waiting';
+  /** The folder its conversation works in, for the project's favicon. */
+  directory?: string;
 }
 
 /** `tab`, selected, beside the selected one, or in its place when that one is blank. */
@@ -190,7 +194,9 @@ function initialTabs(sessionID: string | null, directory: string | null): TabsSt
  * before what its rules say to ask about; the request shows above the
  * composer.
  *
- * Conversations open in tabs, in the window's title bar, kept across closing
+ * The conversation list runs to the top of the window, GNOME-style, and the
+ * app draws the title bar on either side of it (WindowHeader).
+ * Conversations open in tabs, in the title bar over them, kept across closing
  * the window and restarts (lib/assistantTabs). Only the selected tab is
  * mounted: each conversation polls the server while it is. Opened with
  * `sessionID` (and a fresh `nonce`) in its launch params, it selects that
@@ -202,7 +208,6 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   const requested = typeof params?.sessionID === 'string' ? params.sessionID : null;
   const requestedDirectory = typeof params?.directory === 'string' ? params.directory : null;
   const { close: closeWindow } = useWindowActions();
-  const setTitlebar = useWindowTitlebar();
   const [{ tabs, activeId }, setState] = useState(() => initialTabs(requested, requestedDirectory));
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   const [closed, setClosed] = useState<AssistantTab[]>([]);
@@ -265,10 +270,13 @@ export function Assistant({ windowId, params }: AppComponentProps) {
         id: tab.id,
         title: session ? sessionTitle(session) : 'Loading…',
         state: waiting.has(tab.sessionID) ? 'waiting' : running.includes(tab.sessionID) ? 'running' : 'idle',
+        directory: session?.location.directory,
       };
     }),
   );
   const stripTabs = useMemo((): TabInfo[] => JSON.parse(infoKey), [infoKey]);
+  const icons = useDirectoryIcons([...new Set(stripTabs.flatMap((t) => (t.directory ? [t.directory] : [])))]);
+  useOwnWindowHeader(ready);
   useWindowTitle(activeTab.sessionID ? (stripTabs.find((t) => t.id === activeTab.id)?.title ?? null) : null);
 
   const select = (id: string) => setState((prev) => ({ ...prev, activeId: id }));
@@ -349,41 +357,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
     setRenaming(sessionID);
   };
 
-  // The strip lives in the title bar and outlives renders; it calls the latest of these.
   const move = (id: string, to: number) => setState((prev) => ({ ...prev, tabs: moveItem(prev.tabs, id, to) }));
-  const actions = useRef({ select, closeTab, openTab, reopen, renameTab, move });
-  useLayoutEffect(() => {
-    actions.current = { select, closeTab, openTab, reopen, renameTab, move };
-  });
-
-  const canReopen = closed.length > 0;
-  useEffect(() => {
-    if (!ready) return;
-    setTitlebar(
-      <TabStrip
-        tabs={stripTabs.map((t) => ({ id: t.id, title: t.title, icon: <TabIcon state={t.state} /> }))}
-        activeId={activeId}
-        label="Assistant tabs"
-        newTabLabel="New conversation"
-        newTabMenuLabel="New conversation"
-        onActivate={(id) => actions.current.select(id)}
-        onClose={(id) => actions.current.closeTab(id)}
-        onNew={() => actions.current.openTab()}
-        onMove={(id, to) => actions.current.move(id, to)}
-        onReopen={canReopen ? () => actions.current.reopen() : undefined}
-        tabMenuItems={(id) =>
-          stripTabs.find((t) => t.id === id)?.state !== 'new' && (
-            <ContextMenuItem onSelect={() => actions.current.renameTab(id)}>Rename</ContextMenuItem>
-          )
-        }
-        onTabMenuCloseAutoFocus={(e) => {
-          if (renamingFromMenu.current) e.preventDefault();
-          renamingFromMenu.current = false;
-        }}
-      />,
-    );
-    return () => setTitlebar(null);
-  }, [ready, stripTabs, activeId, canReopen, setTitlebar]);
 
   if (!ready) {
     return (
@@ -441,7 +415,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
         style={{ width: listWidth }}
         className={cn(
           listOpen ? 'flex' : 'hidden',
-          'absolute inset-y-0 left-0 z-20 max-w-[85%] shadow-xl @2xl/assistant:static @2xl/assistant:flex @2xl/assistant:max-w-none @2xl/assistant:shadow-none',
+          'absolute inset-y-0 left-0 z-20 max-w-[85%] bg-background shadow-xl @2xl/assistant:static @2xl/assistant:bg-muted/30 @2xl/assistant:flex @2xl/assistant:max-w-none @2xl/assistant:shadow-none',
         )}
       />
       <div
@@ -472,13 +446,42 @@ export function Assistant({ windowId, params }: AppComponentProps) {
         />
       )}
       <main className="flex min-w-0 flex-1 flex-col">
+        {/* The title bar over the conversation; the list has its own part of it. */}
+        <WindowDragRegion className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 pl-2 pr-3">
+          <ListToggle onClick={() => setListOpen(true)} />
+          <TabStrip
+            tabs={stripTabs.map((t) => ({
+              id: t.id,
+              title: t.title,
+              icon: <TabIcon state={t.state} favicon={t.directory && icons.get(t.directory)} />,
+            }))}
+            activeId={activeId}
+            label="Assistant tabs"
+            newTabLabel="New conversation"
+            newTabMenuLabel="New conversation"
+            onActivate={select}
+            onClose={closeTab}
+            onNew={openTab}
+            onMove={move}
+            onReopen={closed.length > 0 ? reopen : undefined}
+            tabMenuItems={(id) =>
+              stripTabs.find((t) => t.id === id)?.state !== 'new' && (
+                <ContextMenuItem onSelect={() => renameTab(id)}>Rename</ContextMenuItem>
+              )
+            }
+            onTabMenuCloseAutoFocus={(e) => {
+              if (renamingFromMenu.current) e.preventDefault();
+              renamingFromMenu.current = false;
+            }}
+          />
+          <WindowControls />
+        </WindowDragRegion>
         {activeTab.sessionID ? (
           <Conversation
             key={activeTab.sessionID}
             sessionID={activeTab.sessionID}
             editingTitle={renaming === activeTab.sessionID}
             onEditingTitleChange={(editing) => setRenaming(editing ? activeTab.sessionID : null)}
-            onShowList={() => setListOpen(true)}
             onDeleted={() => activeTab.sessionID && removeSessions(new Set([activeTab.sessionID]))}
             onNew={startNew}
           />
@@ -489,7 +492,6 @@ export function Assistant({ windowId, params }: AppComponentProps) {
             onDirectoryChange={(directory) => updateTab(activeTab.id, { directory })}
             draftKey={newConversationDraftKey(activeTab.id)}
             onStarted={(sessionID) => started(activeTab, sessionID)}
-            onShowList={() => setListOpen(true)}
           />
         )}
       </main>
@@ -497,8 +499,11 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   );
 }
 
-/** A tab's icon: whether its conversation is working, or waiting on the user. */
-function TabIcon({ state }: { state: TabInfo['state'] }) {
+/**
+ * A tab's icon: whether its conversation is working or waiting on the user,
+ * else its project's favicon, if it has one.
+ */
+function TabIcon({ state, favicon }: { state: TabInfo['state']; favicon?: string }) {
   switch (state) {
     case 'waiting':
       return (
@@ -511,7 +516,7 @@ function TabIcon({ state }: { state: TabInfo['state'] }) {
     case 'new':
       return <SquarePen className="size-3.5" aria-hidden />;
     default:
-      return <MessageSquare className="size-3.5" aria-hidden />;
+      return <ProjectIcon src={favicon} />;
   }
 }
 
@@ -523,7 +528,6 @@ function Conversation({
   sessionID,
   editingTitle,
   onEditingTitleChange: setEditingTitle,
-  onShowList,
   onDeleted,
   onNew,
 }: {
@@ -531,7 +535,6 @@ function Conversation({
   /** The title is being edited (Rename, or /rename). */
   editingTitle: boolean;
   onEditingTitleChange: (editing: boolean) => void;
-  onShowList: () => void;
   onDeleted: () => void;
   onNew: (directory?: string) => void;
 }) {
@@ -622,7 +625,6 @@ function Conversation({
         running={running}
         editing={editingTitle}
         onEditingChange={setEditingTitle}
-        onShowList={onShowList}
         onDeleted={onDeleted}
       />
       <div
@@ -706,7 +708,6 @@ function ConversationHeader({
   running,
   editing,
   onEditingChange: setEditing,
-  onShowList,
   onDeleted,
 }: {
   session: SessionInfo | undefined;
@@ -715,7 +716,6 @@ function ConversationHeader({
   /** The title is being edited (Rename, or /rename). */
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
-  onShowList: () => void;
   onDeleted: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -733,7 +733,6 @@ function ConversationHeader({
 
   return (
     <header className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-      <ListToggle onClick={onShowList} />
       <ContextMenu>
         <ContextMenuTrigger asChild disabled={!session || editing}>
           <div className="min-w-0 flex-1">
@@ -830,14 +829,12 @@ function NewConversation({
   onDirectoryChange: setDirectory,
   draftKey,
   onStarted,
-  onShowList,
 }: {
   /** The folder it works in; null for the default one. */
   directory: string | null;
   onDirectoryChange: (directory: string) => void;
   draftKey: string;
   onStarted: (id: string) => void;
-  onShowList: () => void;
 }) {
   const defaultDirectory = useAssistantDirectory();
   const home = useHomeDirectory();
@@ -870,9 +867,6 @@ function NewConversation({
 
   return (
     <>
-      <header className="flex items-center px-3 py-2 @2xl/assistant:hidden">
-        <ListToggle onClick={onShowList} />
-      </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center gap-6 px-4 py-10 @2xl/assistant:px-6">
           <div className="flex flex-col items-center gap-4 text-center">

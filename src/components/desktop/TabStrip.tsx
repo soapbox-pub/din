@@ -20,8 +20,9 @@ export interface TabDescriptor {
 
 /**
  * A generic, closable/addable tab strip, meant to be published into a
- * window's title bar via `useWindowTitlebar` so tabs sit on the same line as
- * the window controls (Chrome-style). The surrounding <header> is the window
+ * window's title bar via `useWindowTitlebar` (or laid out in an app's own,
+ * WindowHeader) so tabs sit on the same line as the window controls
+ * (Chrome-style). The surrounding title bar is the window
  * drag handle; tab buttons and the new-tab button handle their own clicks, so
  * dragging empty space still moves the window, while dragging a tab moves the
  * tab along the strip (or, for a window's only tab, the window). With `transfer`, a tab dragged off the strip moves to
@@ -183,7 +184,7 @@ function TabButton({
         dragging && 'border-border/60 bg-background shadow-md',
       )}
     >
-      {tab.icon && <span className="shrink-0 opacity-80">{tab.icon}</span>}
+      {tab.icon && <span className="shrink-0 opacity-80 empty:hidden">{tab.icon}</span>}
       <span className="min-w-0 flex-1 truncate">{tab.title}</span>
       <button
         type="button"
