@@ -28,9 +28,6 @@ const FileViewer = lazy(() =>
 const TextEditor = lazy(() =>
   import('@/components/desktop/apps/TextEditor').then((m) => ({ default: m.TextEditor })),
 );
-const Paint = lazy(() =>
-  import('@/components/desktop/apps/Paint').then((m) => ({ default: m.Paint })),
-);
 const PhotoEditor = lazy(() =>
   import('@/components/desktop/apps/PhotoEditor').then((m) => ({ default: m.PhotoEditor })),
 );
@@ -244,17 +241,10 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 1120, height: 720 },
     keywords: ['notepad', 'gedit', 'editor', 'text', 'code', 'notes', 'write', 'ide', 'vscode', 'vs code', 'programming', 'develop'],
   },
-  {
-    // Pictures and pixel art, MS Paint style with Kid Pix's toys. Launch
-    // params `{ path }` open a picture; `{ width, height, transparent, zoom }`
-    // start a new one.
-    id: 'paint',
-    name: 'Paint',
-    icon: '/icons/apps/paint.png',
-    component: Paint,
-    defaultSize: { width: 960, height: 700 },
-    keywords: ['mspaint', 'kid pix', 'draw', 'drawing', 'pixel art', 'sprite', 'image', 'picture', 'art'],
-  },
+  // Pictures and pixel art, MS Paint style with Kid Pix's toys. Launch
+  // params `{ path }` open a picture; `{ width, height, transparent, zoom }`
+  // start a new one.
+  dinApp('paint'),
   {
     // Layered pictures, Photoshop style: opens and saves PSDs and OpenRaster
     // (.ora). Files opens both here. Launch params `{ path }` open one;

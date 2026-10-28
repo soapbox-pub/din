@@ -72,7 +72,7 @@ export interface Hello {
 /** What an app can ask, by method: the params, and what the reply carries. */
 export interface Requests {
   'app.ready': [void, void];
-  'app.open': [{ appId: string; params?: Record<string, unknown> }, void];
+  'app.open': [{ appId: string; params?: Record<string, unknown>; handles?: string[] }, void];
   'app.openFiles': [{ handles: string[] }, void];
   'app.openUrl': [{ url: string }, void];
   'storage.migrated': [void, void];

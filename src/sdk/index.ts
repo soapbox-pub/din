@@ -49,6 +49,17 @@ export class DinPermissionError extends Error {
   }
 }
 
+/**
+ * File types as the desktop's `FileFilter` lists name them (`{ name,
+ * patterns: ['*.png'] }`), for apps that already have such lists.
+ */
+export function typesFromFilters(filters: readonly { name: string; patterns: readonly string[] }[]): { description: string; extensions: string[] }[] {
+  return filters.map((f) => ({
+    description: f.name,
+    extensions: f.patterns.filter((p) => p.startsWith('*.')).map((p) => p.slice(1)),
+  }));
+}
+
 /** The MIME type a Din drag carries its token under. */
 export const DRAG_MIME = 'application/x-din-drag';
 
@@ -266,7 +277,7 @@ async function start(): Promise<Din> {
         if (typeof content === 'string') payload = content;
         else if (content instanceof Blob) payload = await content.arrayBuffer();
         else if (content instanceof ArrayBuffer) payload = content;
-        else payload = content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength) as ArrayBuffer;
+        else payload = new Uint8Array(content.buffer, content.byteOffset, content.byteLength).slice().buffer;
         await request('files.write', { handle: data.id, data: payload });
       },
       onChange(cb) {
@@ -311,7 +322,7 @@ async function start(): Promise<Din> {
       readied = true;
       tell('app.ready');
     },
-    open: (appId, params) => request('app.open', { appId, params }),
+    open: (appId, params, files) => request('app.open', { appId, params, handles: files?.map(idOf) }),
     openFiles: (files) => request('app.openFiles', { handles: files.map(idOf) }),
     openUrl: (url) => request('app.openUrl', { url }),
   };

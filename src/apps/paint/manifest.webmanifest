@@ -1,0 +1,38 @@
+{
+  "name": "Paint",
+  "description": "Pictures and pixel art, MS Paint style with Kid Pix's toys.",
+  "icons": [
+    {
+      "src": "/icons/apps/paint.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "window": {
+      "size": {
+        "width": 960,
+        "height": 700
+      },
+      "frame": "standard"
+    },
+    "keywords": [
+      "mspaint",
+      "kid pix",
+      "draw",
+      "drawing",
+      "pixel art",
+      "sprite",
+      "image",
+      "picture",
+      "art"
+    ],
+    "migrateStorage": [
+      "din:paint:*"
+    ]
+  }
+}

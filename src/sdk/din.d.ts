@@ -99,8 +99,12 @@ export interface DinApp {
    * splash. Called automatically on `load` if the app never calls it.
    */
   ready(): void;
-  /** Launch another app (or a new window of this one) with launch parameters. */
-  open(appId: string, params?: Record<string, unknown>): Promise<void>;
+  /**
+   * Launch another app (or a new window of this one) with launch
+   * parameters, and files it holds for the new window to open (they arrive
+   * in its `launch.files`).
+   */
+  open(appId: string, params?: Record<string, unknown>, files?: DinFileHandle[]): Promise<void>;
   /** Open files in whichever app the desktop has for them (Files' default). */
   openFiles(files: DinFileHandle[]): Promise<void>;
   /** Open a URL in the Web Browser (or the app that handles its scheme). */
@@ -297,7 +301,7 @@ export interface DinFileHandle {
   /** Read the whole file. */
   getFile(): Promise<File>;
   /** Replace its contents (and create it, for a handle from `save`). Needs `writable`. */
-  write(data: Blob | BufferSource | string): Promise<void>;
+  write(data: Blob | ArrayBuffer | ArrayBufferView | string): Promise<void>;
   /** Whether `write` is allowed. False for files opened read-only. */
   readonly writable: boolean;
   /** Hear when something else changes or removes the file. */
@@ -328,6 +332,10 @@ export interface OpenFileOptions {
 
 export interface SaveFileOptions {
   title?: string;
+  /**
+   * The types to save as. A name typed without one of the chosen type's
+   * extensions gets its first one.
+   */
   types?: FileTypeFilter[];
   suggestedName?: string;
   startIn?: OpenFileOptions['startIn'];

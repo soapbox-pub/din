@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
-import { cleanFsError, getFsBridge, parentPath } from '@/lib/fs';
-import { setCloseGuard } from '@/lib/closeGuards';
-import { invalidateListings } from '@/hooks/useFileSystem';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
+import { cleanFsError } from '@/lib/fs';
+import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import {
   Menubar,
   MenubarCheckboxItem,
@@ -112,7 +107,6 @@ function readSettings(): Settings {
   }
 }
 
-const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const num = (v: unknown, fallback: number) =>
   typeof v === 'number' && Number.isFinite(v) && v >= 1 ? Math.min(4096, Math.round(v)) : fallback;
 const rand = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
@@ -222,15 +216,13 @@ function twinkle(s: Surface, x: number, y: number, c: Packed, big: boolean) {
  * what pixel artists need: hard-edged drawing, big zoom with a grid,
  * symmetry, see-through backgrounds, game palettes and an outline effect.
  *
- * Launch params: `{ path?: string }` opens a picture; `{ width?, height?,
- * transparent?, zoom? }` sets up a new one.
+ * Launched with a file, it opens that picture; launch params `{ width?,
+ * height?, transparent?, zoom? }` set up a new one.
  */
-export function Paint({ windowId, params }: AppComponentProps) {
-  const fs = getFsBridge();
-  const { open, close, focus } = useWindowActions();
-  const { pickFile, pickFiles } = useFilePicker();
-  const queryClient = useQueryClient();
-  const initialPath = typeof params?.path === 'string' ? params.path : null;
+export function Paint() {
+  const din = useDin();
+  const params = din.app.launch.params;
+  const launchFile = din.app.launch.files[0] ?? null;
 
   const [initial] = useState(() => ({
     width: num(params?.width, 640),
@@ -258,11 +250,11 @@ export function Paint({ windowId, params }: AppComponentProps) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [floatVersion, setFloatVersion] = useState(0);
   const [textBox, setTextBox] = useState<{ x: number; y: number; value: string } | null>(null);
-  const [path, setPath] = useState<string | null>(null);
+  const [file, setFile] = useState<DinFileHandle | null>(null);
   const [docId, setDocId] = useState(0);
   const [savedId, setSavedId] = useState(0);
   const [history, setHistory] = useState({ undo: 0, redo: 0 });
-  const [loading, setLoading] = useState(initialPath !== null && fs !== undefined);
+  const [loading, setLoading] = useState(launchFile !== null);
   const [status, setStatus] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'unsaved' | 'attributes' | 'about' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -294,7 +286,7 @@ export function Paint({ windowId, params }: AppComponentProps) {
   const loadSeq = useRef(0);
 
   const dirty = docId !== savedId;
-  const name = path ? basename(path) : 'untitled';
+  const name = file ? file.name : 'untitled';
   useWindowTitle(`${dirty ? '• ' : ''}${name}`);
 
   const surf = () => surfRef.current!;
@@ -1255,13 +1247,13 @@ export function Paint({ windowId, params }: AppComponentProps) {
   // ---- Files ------------------------------------------------------------------------
 
   const load = useCallback(
-    (target: string) => {
-      if (!fs) return;
+    (target: DinFileHandle) => {
       const seq = ++loadSeq.current;
-      fs.readFile(target, MAX_BYTES)
-        .then((r) => {
-          if (r.truncated) throw new Error('It’s too big for Paint.');
-          return decode(r.data, target);
+      target
+        .getFile()
+        .then(async (f) => {
+          if (f.size > MAX_BYTES) throw new Error('It’s too big for Paint.');
+          return decode(new Uint8Array(await f.arrayBuffer()), target.name);
         })
         .then((s) => {
           if (seq !== loadSeq.current) return;
@@ -1284,7 +1276,7 @@ export function Paint({ windowId, params }: AppComponentProps) {
           setDocId(id);
           setSavedId(id);
           setHistory({ undo: 0, redo: 0 });
-          setPath(target);
+          setFile(target);
           setStatus(null);
           setLoading(false);
           const ws = wsRef.current;
@@ -1297,72 +1289,64 @@ export function Paint({ windowId, params }: AppComponentProps) {
         .catch((err: unknown) => {
           if (seq !== loadSeq.current) return;
           setLoading(false);
-          setError(`Couldn’t open ${basename(target)}. ${err instanceof Error && err.message.startsWith('It') ? err.message : cleanFsError(err)}`);
+          setError(`Couldn’t open ${target.name}. ${err instanceof Error && err.message.startsWith('It') ? err.message : cleanFsError(err)}`);
           sfx.error();
         });
     },
-    [fs],
+    [],
   );
 
-  const [prevInitial, setPrevInitial] = useState<string | null>(null);
-  if (initialPath !== prevInitial) {
-    setPrevInitial(initialPath);
-    if (initialPath && fs) setLoading(true);
-  }
   useEffect(() => {
-    if (initialPath) load(initialPath);
-  }, [initialPath, load]);
+    if (launchFile) load(launchFile);
+  }, [launchFile, load]);
 
-  const writeTo = async (target: string): Promise<boolean> => {
-    if (!fs) return false;
+  const writeTo = async (target: DinFileHandle): Promise<boolean> => {
     settle();
     try {
-      const bytes = await encode(surf(), target);
-      await fs.writeFile(target, bytes);
-      setPath(target);
+      await target.write(await encode(surf(), target.name));
+      setFile(target);
       setSavedId(idRef.current.current);
       setStatus('Saved');
       sfx.save();
-      void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', target] });
-      void invalidateListings(queryClient, target);
       return true;
     } catch (err) {
-      setError(`Couldn’t save ${basename(target)}. ${cleanFsError(err)}`);
+      setError(`Couldn’t save ${target.name}. ${cleanFsError(err)}`);
       sfx.error();
       return false;
     }
   };
 
   const saveAs = async (): Promise<boolean> => {
-    const current = path && savesAs(path) ? basename(path) : `${path ? basename(path).replace(/\.[^.]*$/, '') : 'untitled'}.png`;
-    const result = await pickFiles({
-      mode: 'save',
+    const current = file && savesAs(file.name) ? file.name : `${file ? file.name.replace(/\.[^.]*$/, '') : 'untitled'}.png`;
+    const target = await din.files.save({
       title: 'Save As',
-      currentName: current,
-      initialPath: path ? parentPath(path) : undefined,
-      filters: SAVE_TYPES,
+      suggestedName: current,
+      startIn: file ?? undefined,
+      types: typesFromFilters(SAVE_TYPES),
     });
-    if (!result) return false;
-    let target = result.paths[0];
-    if (!savesAs(target)) {
-      const filter = SAVE_TYPES[result.filter ?? 0] ?? SAVE_TYPES[0];
-      target += filter.patterns[0].slice(1);
+    if (!target) return false;
+    if (!savesAs(target.name)) {
+      setError(`Paint can’t save ${target.name}: choose PNG, JPEG, Bitmap or WebP.`);
+      return false;
     }
     return writeTo(target);
   };
 
-  const save = (): Promise<boolean> => (path && savesAs(path) ? writeTo(path) : saveAs());
+  const save = (): Promise<boolean> => (file && file.writable && savesAs(file.name) ? writeTo(file) : saveAs());
+
+  const pick = async (title: string) =>
+    (await din.files.open({
+      title,
+      types: [{ description: 'Pictures', extensions: OPEN_EXTENSIONS }],
+      startIn: file ?? undefined,
+    }))[0] ?? null;
 
   const openFile = async () => {
-    const target = await pickFile({
-      title: 'Open',
-      extensions: OPEN_EXTENSIONS,
-      initialPath: path ? parentPath(path) : undefined,
-    });
+    const target = await pick('Open');
     if (!target) return;
     // Unsaved work stays put; the picture gets a window of its own.
     if (dirty) {
-      open('paint', { path: target });
+      void din.app.open('paint', {}, [target]);
       return;
     }
     setLoading(true);
@@ -1370,32 +1354,30 @@ export function Paint({ windowId, params }: AppComponentProps) {
   };
 
   const pasteFrom = async () => {
-    if (!fs) return;
-    const target = await pickFile({ title: 'Paste From', extensions: OPEN_EXTENSIONS, initialPath: path ? parentPath(path) : undefined });
+    const target = await pick('Paste From');
     if (!target) return;
     try {
-      const r = await fs.readFile(target, MAX_BYTES);
-      placeFloating(await decode(r.data, target));
+      const f = await target.getFile();
+      placeFloating(await decode(new Uint8Array(await f.arrayBuffer()), target.name));
     } catch (err) {
-      setError(`Couldn’t open ${basename(target)}. ${err instanceof Error ? err.message : String(err)}`);
+      setError(`Couldn’t open ${target.name}. ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   // Closing with unsaved changes asks first.
-  useEffect(() => {
-    if (!dirty) return;
-    setCloseGuard(windowId, () => {
-      focus(windowId);
-      setDialog('unsaved');
-      return true;
-    });
-    return () => setCloseGuard(windowId, null);
-  }, [dirty, windowId, focus]);
+  useCloseGuard(
+    dirty
+      ? () => {
+          din.window.focus();
+          setDialog('unsaved');
+          return true;
+        }
+      : null,
+  );
 
   const closeNow = () => {
-    setCloseGuard(windowId, null);
     setDialog(null);
-    close(windowId);
+    din.window.close();
   };
 
   // ---- Canvas size -----------------------------------------------------------------
@@ -1461,8 +1443,8 @@ export function Paint({ windowId, params }: AppComponentProps) {
     if (ctrl && !e.shiftKey && key === 's') void save();
     else if (ctrl && e.shiftKey && key === 's') void saveAs();
     else if (ctrl && !e.shiftKey && key === 'o') void openFile();
-    else if (ctrl && !e.shiftKey && key === 'n') open('paint');
-    else if (ctrl && (key === 'w' || key === 'q')) close(windowId);
+    else if (ctrl && !e.shiftKey && key === 'n') din.app.open('paint');
+    else if (ctrl && (key === 'w' || key === 'q')) din.window.requestClose();
     else if (typing) handled = false;
     else if (ctrl && !e.shiftKey && key === 'z') undo();
     else if (ctrl && (key === 'y' || (e.shiftKey && key === 'z'))) redo();
@@ -1532,7 +1514,6 @@ export function Paint({ windowId, params }: AppComponentProps) {
   const checker = zoom >= 8 ? zoom : zoom >= 4 ? zoom * Math.ceil(8 / zoom) : 8;
   const cw = size.w * zoom;
   const ch = size.h * zoom;
-  const fileOps = fs !== undefined;
 
   return (
     <div
@@ -1546,23 +1527,23 @@ export function Paint({ windowId, params }: AppComponentProps) {
         <MenubarMenu>
           <MenubarTrigger><u>F</u>ile</MenubarTrigger>
           <MenubarContent>
-            <MenubarItem shortcut="Ctrl+N" onSelect={() => open('paint')}>New</MenubarItem>
+            <MenubarItem shortcut="Ctrl+N" onSelect={() => din.app.open('paint')}>New</MenubarItem>
             <MenubarSub>
               <MenubarSubTrigger>New Sprite</MenubarSubTrigger>
               <MenubarSubContent>
                 {[16, 32, 48, 64, 128].map((n) => (
-                  <MenubarItem key={n} onSelect={() => open('paint', { width: n, height: n, transparent: true, zoom: Math.max(2, Math.floor(384 / n)) })}>
+                  <MenubarItem key={n} onSelect={() => din.app.open('paint', { width: n, height: n, transparent: true, zoom: Math.max(2, Math.floor(384 / n)) })}>
                     {n} × {n}
                   </MenubarItem>
                 ))}
-                <MenubarItem onSelect={() => open('paint', { width: 320, height: 240, zoom: 2 })}>320 × 240 game screen</MenubarItem>
+                <MenubarItem onSelect={() => din.app.open('paint', { width: 320, height: 240, zoom: 2 })}>320 × 240 game screen</MenubarItem>
               </MenubarSubContent>
             </MenubarSub>
-            <MenubarItem shortcut="Ctrl+O" disabled={!fileOps} onSelect={() => void openFile()}>Open…</MenubarItem>
-            <MenubarItem shortcut="Ctrl+S" disabled={!fileOps} onSelect={() => void save()}>Save</MenubarItem>
-            <MenubarItem shortcut="Ctrl+Shift+S" disabled={!fileOps} onSelect={() => void saveAs()}>Save As…</MenubarItem>
+            <MenubarItem shortcut="Ctrl+O" onSelect={() => void openFile()}>Open…</MenubarItem>
+            <MenubarItem shortcut="Ctrl+S" onSelect={() => void save()}>Save</MenubarItem>
+            <MenubarItem shortcut="Ctrl+Shift+S" onSelect={() => void saveAs()}>Save As…</MenubarItem>
             <MenubarSeparator />
-            <MenubarItem shortcut="Ctrl+W" onSelect={() => close(windowId)}>Exit</MenubarItem>
+            <MenubarItem shortcut="Ctrl+W" onSelect={() => din.window.requestClose()}>Exit</MenubarItem>
           </MenubarContent>
         </MenubarMenu>
         <MenubarMenu>
@@ -1577,7 +1558,7 @@ export function Paint({ windowId, params }: AppComponentProps) {
             <MenubarItem shortcut="Del" disabled={!selection} onSelect={deleteSelection}>Clear Selection</MenubarItem>
             <MenubarItem shortcut="Ctrl+A" onSelect={selectAll}>Select All</MenubarItem>
             <MenubarSeparator />
-            <MenubarItem disabled={!fileOps} onSelect={() => void pasteFrom()}>Paste From…</MenubarItem>
+            <MenubarItem onSelect={() => void pasteFrom()}>Paste From…</MenubarItem>
           </MenubarContent>
         </MenubarMenu>
         <MenubarMenu>

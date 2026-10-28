@@ -8,7 +8,9 @@ import { DataMenuBar, PointMenu } from '@/components/desktop/dinHost/DataMenus';
 import { onThemeChange, themeSnapshot } from '@/components/desktop/dinHost/theme';
 import { sanitizeImageUrl } from '@/components/desktop/dinHost/urls';
 import { WindowMenuItems } from '@/components/desktop/WindowContextMenu';
+import { useQueryClient } from '@tanstack/react-query';
 import { useWindowFrame, useOwnWindowHeader } from '@/contexts/WindowFrameContext';
+import { invalidateListings } from '@/hooks/useFileSystem';
 import { useWindowChrome } from '@/contexts/WindowChromeContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
@@ -126,6 +128,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const areas = useWorkAreas();
   const { config } = useAppContext();
   const { user } = useCurrentUser();
+  const queryClient = useQueryClient();
   const zoom = config.zoomLevel / 100;
   const permissions = manifestPermissions(manifest);
   const appName = manifest.short_name ?? manifest.name;
@@ -262,12 +265,16 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   useLayoutEffect(() => {
     handlers.current = {
       'app.ready': () => setReady(true),
-      'app.open': ({ appId: target, params: p }) => {
+      'app.open': ({ appId: target, params: p, handles }) => {
         // The Installer is the desktop's alone to open.
         if (typeof target !== 'string' || target === 'installer') return;
-        // Paths in params grant nothing; files travel as handles.
+        // Paths in params grant nothing; files travel as handles, which the
+        // window manager hands on as paths (and the new window's frame
+        // turns back into handles).
         const { path: _path, paths: _paths, ...clean } = (p ?? {}) as Record<string, unknown>;
-        live.current.actions.open(target, clean);
+        const paths = (handles ?? []).map((id) => grantOf(id).path);
+        const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };
+        live.current.actions.open(target, { ...clean, ...files });
       },
       'app.openFiles': ({ handles }) => {
         for (const id of handles) {
@@ -407,8 +414,13 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           filters: o.types?.map((t) => ({ name: t.description, patterns: t.extensions.map((e) => `*${e.startsWith('.') ? e : `.${e}`}`), mimeTypes: [] })),
           initialPath: start ? dirname(start) : undefined,
         });
-        const path = result?.paths[0];
-        return path ? grantFile(path, 'file', true) : null;
+        let path = result?.paths[0];
+        if (!path) return null;
+        // A name typed without the chosen type's extension gets it.
+        const type = o.types?.[result?.filter ?? 0];
+        const extensions = (type?.extensions ?? []).map((e) => (e.startsWith('.') ? e : `.${e}`).toLowerCase());
+        if (extensions.length > 0 && !extensions.some((e) => path!.toLowerCase().endsWith(e))) path += extensions[0];
+        return grantFile(path, 'file', true);
       },
       'files.read': async ({ handle }) => {
         const g = grantOf(handle);
@@ -424,6 +436,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const fs = getFsBridge();
         if (!fs) throw new Error('Files are only available inside Din');
         await fs.writeFile(g.path, typeof data === 'string' ? data : new Uint8Array(data));
+        // Files windows showing the folder (and anything cached of the file) catch up.
+        void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', g.path] });
+        void invalidateListings(queryClient, g.path);
       },
       'files.entries': async ({ handle }) => {
         const g = grantOf(handle);

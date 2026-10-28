@@ -1,6 +1,6 @@
 # Moving built-in apps out of the desktop
 
-> **Status: under way.** Moved: Calculator.
+> **Status: under way.** Moved: Calculator, Paint.
 
 Each app moves in its own commit: its folder goes from
 `src/components/desktop/apps/` to `src/apps/<id>/`, it gets an
@@ -77,7 +77,7 @@ a time.
 | # | App | First to use |
 |---|---|---|
 | 1 | Calculator ✓ | The whole path: `din://`, the port, the manifest, `setBounds`, `workArea` |
-| 2 | Paint | Files by handle, close requests, the title |
+| 2 | Paint ✓ | Files by handle, close requests, the title |
 | 3 | Word Processor, Spreadsheet, Slides | Shared office code, accent, printing, opening URLs |
 | 4 | Photo Editor, Vector Editor, Publisher | Shared `photo/` code |
 | 5 | Preview | Launch files, icon, wallpaper |

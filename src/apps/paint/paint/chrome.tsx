@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 import { Menubar as MenubarPrimitive } from 'radix-ui';
-import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
 import { FOCUS, RAISED, RETRO_FONT, SUNKEN } from './styles';
 
@@ -115,7 +114,7 @@ const CONTENT = cn('z-50 min-w-48 bg-[#c0c0c0] p-[3px] text-xs text-black', RAIS
 
 export function MenubarContent({ className, ...props }: React.ComponentProps<typeof MenubarPrimitive.Content>) {
   return (
-    <MenubarPrimitive.Portal container={portalContainer()}>
+    <MenubarPrimitive.Portal>
       <MenubarPrimitive.Content align="start" sideOffset={1} className={cn(CONTENT, className)} style={RETRO_FONT} {...props} />
     </MenubarPrimitive.Portal>
   );
@@ -123,7 +122,7 @@ export function MenubarContent({ className, ...props }: React.ComponentProps<typ
 
 export function MenubarSubContent({ className, ...props }: React.ComponentProps<typeof MenubarPrimitive.SubContent>) {
   return (
-    <MenubarPrimitive.Portal container={portalContainer()}>
+    <MenubarPrimitive.Portal>
       <MenubarPrimitive.SubContent alignOffset={-3} className={cn(CONTENT, className)} style={RETRO_FONT} {...props} />
     </MenubarPrimitive.Portal>
   );
