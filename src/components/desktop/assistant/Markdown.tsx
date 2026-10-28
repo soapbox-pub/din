@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Copy, FolderOpen, SquareArrowOutUpRight } from 'lucide-react';
 import { CopyButton } from '@/components/desktop/assistant/CopyButton';
 import { FileLinkBaseContext, filePathOfHref } from '@/components/desktop/assistant/fileLinks';
+import { useHighlightedCode } from '@/components/desktop/assistant/highlight';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -64,24 +65,21 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
         </a>
       );
     },
-    pre: ({ node, children }) => {
+    pre: ({ node }) => {
       const code = node?.children[0];
       const classes = code?.type === 'element' ? code.properties.className : undefined;
       const language = Array.isArray(classes)
         ? classes.map(String).find((name) => name.startsWith('language-'))?.slice('language-'.length)
         : undefined;
-      return <CodeBlock language={language}>{children}</CodeBlock>;
+      const text = code?.type === 'element' ? code.children.map((c) => (c.type === 'text' ? c.value : '')).join('') : '';
+      return <CodeBlock language={language} code={text.replace(/\n$/, '')} />;
     },
-    code: ({ className: language, children, ...props }: ComponentProps<'code'>) => {
-      // Fenced blocks carry a language class or span lines; the rest is inline.
-      const block = Boolean(language) || String(children).includes('\n');
-      if (block) return <code className="font-mono">{children}</code>;
-      return (
-        <code className={cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]', c && 'text-md-code')} {...props}>
-          {children}
-        </code>
-      );
-    },
+    // Inline only: fenced blocks are drawn by `pre`, from the text itself.
+    code: ({ className: _language, children, ...props }: ComponentProps<'code'>) => (
+      <code className={cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]', c && 'text-md-code')} {...props}>
+        {children}
+      </code>
+    ),
     p: ({ children }) => <p className="my-3 first:mt-0 last:mb-0">{children}</p>,
     ul: ({ children }) => <ul className={cn('my-3 list-disc space-y-1.5 pl-6 first:mt-0 last:mb-0', marker)}>{children}</ul>,
     ol: ({ children }) => <ol className={cn('my-3 list-decimal space-y-1.5 pl-6 first:mt-0 last:mb-0', marker)}>{children}</ol>,
@@ -175,17 +173,18 @@ function FileLink({ path, className, children }: { path: string; className: stri
   );
 }
 
-/** A fenced block with its language and a copy button above it. */
-function CodeBlock({ language, children }: { language?: string; children: ReactNode }) {
+/** A fenced block, its syntax colored, with its language and a copy button above it. */
+function CodeBlock({ language, code }: { language?: string; code: string }) {
   const ref = useRef<HTMLPreElement>(null);
+  const highlighted = useHighlightedCode(code, language);
   return (
     <div className="my-4 overflow-hidden rounded-xl border border-border/60 bg-muted/50 first:mt-0 last:mb-0">
       <div className="flex items-center justify-between border-b border-border/60 py-1 pl-4 pr-1.5">
         <span className="font-mono text-xs text-muted-foreground">{language}</span>
         <CopyButton text={() => ref.current?.textContent ?? ''} label="Copy code" showLabel />
       </div>
-      <pre ref={ref} className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed [&_code]:bg-transparent [&_code]:p-0">
-        {children}
+      <pre ref={ref} className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed">
+        <code>{highlighted}</code>
       </pre>
     </div>
   );

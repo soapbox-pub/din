@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { HighlightStyle, syntaxHighlighting, type TagStyle } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import type { Extension } from '@codemirror/state';
 
@@ -76,7 +76,8 @@ export function fontSizeTheme(px: number): Extension {
   });
 }
 
-const light = HighlightStyle.define([
+/** Syntax colors after GitHub Light; the Assistant's code blocks use them too. */
+export const LIGHT_SYNTAX: TagStyle[] = [
   { tag: [t.keyword, t.modifier, t.operatorKeyword, t.controlKeyword, t.definitionKeyword, t.moduleKeyword], color: '#cf222e' },
   { tag: [t.string, t.special(t.string), t.character], color: '#0a3069' },
   { tag: [t.regexp, t.escape], color: '#116329' },
@@ -97,9 +98,10 @@ const light = HighlightStyle.define([
   { tag: t.deleted, color: '#82071e', backgroundColor: '#ffebe9' },
   { tag: t.changed, color: '#953800' },
   { tag: t.invalid, color: '#82071e' },
-]);
+];
 
-const dark = HighlightStyle.define([
+/** Syntax colors after GitHub Dark. */
+export const DARK_SYNTAX: TagStyle[] = [
   { tag: [t.keyword, t.modifier, t.operatorKeyword, t.controlKeyword, t.definitionKeyword, t.moduleKeyword], color: '#ff7b72' },
   { tag: [t.string, t.special(t.string), t.character], color: '#a5d6ff' },
   { tag: [t.regexp, t.escape], color: '#7ee787' },
@@ -120,7 +122,10 @@ const dark = HighlightStyle.define([
   { tag: t.deleted, color: '#ffdcd7', backgroundColor: '#67060c' },
   { tag: t.changed, color: '#ffa657' },
   { tag: t.invalid, color: '#ffa198' },
-]);
+];
+
+const light = HighlightStyle.define(LIGHT_SYNTAX);
+const dark = HighlightStyle.define(DARK_SYNTAX);
 
 /** Syntax colors for a light or dark desktop. */
 export function syntaxTheme(isDark: boolean): Extension {
