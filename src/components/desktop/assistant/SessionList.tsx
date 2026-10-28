@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type Ref } from 'react';
-import { ChevronRight, GitBranch, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
+import { ChevronRight, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -90,13 +90,14 @@ function inOrder<T>(items: T[], order: string[], id: (item: T) => string): T[] {
  * belongs to, with the ones waiting on the user pulled out on top so a
  * collapsed project can't hide them. Searching flattens it. Middle-clicking
  * a conversation opens it in a new tab; right-clicking one does that too, or
- * renames or deletes it; right-clicking a project starts a conversation there.
+ * forks, renames or deletes it; right-clicking a project starts a conversation there.
  */
 export function SessionList({
   selected,
   onSelect,
   onOpenInNewTab,
   onNew,
+  onFork,
   onDeleted,
   searchRef,
   className,
@@ -107,6 +108,8 @@ export function SessionList({
   onOpenInNewTab: (id: string) => void;
   /** Start a new conversation, in `directory` when given. */
   onNew: (directory?: string) => void;
+  /** Continue a conversation in a new one with its history. */
+  onFork: (id: string) => void;
   /** A conversation was deleted from the list. */
   onDeleted: (id: string) => void;
   /** The search field, for Ctrl+F. */
@@ -212,6 +215,9 @@ export function SessionList({
             </ContextMenuItem>
             <ContextMenuItem onSelect={() => onNew(session.location.directory)}>
               <SquarePen aria-hidden /> New Conversation in This Folder
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onFork(session.id)}>
+              <GitFork aria-hidden /> Fork
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem

@@ -410,6 +410,13 @@ export const assistantApi = {
 
   remove: (sessionID: string) => call<unknown>('DELETE', `/api/session/${id(sessionID)}`),
 
+  /**
+   * A new conversation with this one's history: all of it, or what came
+   * before the message `before`. The original carries on unchanged.
+   */
+  fork: async (sessionID: string, before?: string) =>
+    (await call<{ data: SessionInfo }>('POST', `/api/session/${id(sessionID)}/fork`, before ? { before } : {})).data,
+
   switchModel: (sessionID: string, model: ModelRef) =>
     call<unknown>('POST', `/api/session/${id(sessionID)}/model`, { model }),
 

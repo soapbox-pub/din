@@ -60,6 +60,15 @@ export function draftStorageKey(key: string): string {
   return `din.assistant.draft.${key}`;
 }
 
+/** Put text in the composer under `key`, for when it next shows. */
+export function saveDraft(key: string, text: string): void {
+  try {
+    if (text) localStorage.setItem(draftStorageKey(key), text);
+  } catch {
+    // Full or unavailable: the composer starts empty.
+  }
+}
+
 /** Where a question's unsent answers are kept, by the question's id. */
 export function formDraftStorageKey(formID: string): string {
   return `din.assistant.form.${formID}`;

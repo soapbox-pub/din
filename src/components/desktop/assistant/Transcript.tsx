@@ -6,9 +6,11 @@ import {
   ChevronRight,
   CircleAlert,
   Clock,
+  Copy,
   FilePen,
   FileText,
   FolderSearch,
+  GitFork,
   Globe,
   ListTodo,
   Loader2,
@@ -21,6 +23,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { CopyButton } from '@/components/desktop/assistant/CopyButton';
 import { Markdown } from '@/components/desktop/assistant/Markdown';
 import {
@@ -98,6 +101,7 @@ export const Transcript = memo(function Transcript({
   running,
   home,
   onCancelQueued,
+  onFork,
 }: {
   messages: SessionMessage[];
   /** Messages sent while it works that the agent hasn't taken yet. */
@@ -106,6 +110,8 @@ export const Transcript = memo(function Transcript({
   running: boolean;
   home?: string;
   onCancelQueued?: (message: QueuedMessage) => void;
+  /** Fork the conversation from before one of the user's messages. */
+  onFork?: (message: UserMessage) => void;
 }) {
   const entries = group(messages);
   const last = entries[entries.length - 1];
@@ -118,7 +124,7 @@ export const Transcript = memo(function Transcript({
         if (entry.kind === 'user') {
           return (
             <li key={entry.message.id} className="group/user flex justify-end">
-              <UserBubble message={entry.message} />
+              <UserBubble message={entry.message} onFork={onFork && (() => onFork(entry.message))} />
             </li>
           );
         }
@@ -204,20 +210,44 @@ function Attachments({ files = [] }: { files?: { mime: string; name?: string }[]
   );
 }
 
-function UserBubble({ message }: { message: Extract<SessionMessage, { type: 'user' }> }) {
+function UserBubble({ message, onFork }: { message: UserMessage; onFork?: () => void }) {
+  const hasText = !!message.text.trim();
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
       <Attachments files={message.files} />
-      <div className="whitespace-pre-wrap wrap-anywhere rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground">
-        {message.text}
+      <ContextMenu>
+        <ContextMenuTrigger asChild disabled={!hasText && !onFork}>
+          <div className="whitespace-pre-wrap wrap-anywhere rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground">
+            {message.text}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {hasText && (
+            <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(message.text).catch(() => {})}>
+              <Copy aria-hidden /> Copy
+            </ContextMenuItem>
+          )}
+          {onFork && (
+            <ContextMenuItem onSelect={onFork}>
+              <GitFork aria-hidden /> Fork
+            </ContextMenuItem>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+      <div className="-mt-0.5 flex opacity-0 focus-within:opacity-100 group-hover/user:opacity-100">
+        {onFork && (
+          <button
+            type="button"
+            onClick={onFork}
+            aria-label="Fork from here"
+            title="Fork: a new conversation from before this message, with it in the composer"
+            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <GitFork className="size-4" aria-hidden />
+          </button>
+        )}
+        {hasText && <CopyButton text={message.text} label="Copy message" />}
       </div>
-      {message.text.trim() && (
-        <CopyButton
-          text={message.text}
-          label="Copy message"
-          className="-mt-0.5 opacity-0 focus-visible:opacity-100 group-hover/user:opacity-100"
-        />
-      )}
     </div>
   );
 }

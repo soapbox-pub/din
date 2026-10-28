@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Folder,
   FolderOpen,
+  GitFork,
   Loader2,
   MoreHorizontal,
   PanelLeft,
@@ -28,6 +29,7 @@ import { ConversationTitleInput, DeleteConversationDialog } from '@/components/d
 import { Composer, type SlashCommand } from '@/components/desktop/assistant/Composer';
 import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
 import { FileLinkBaseContext } from '@/components/desktop/assistant/fileLinks';
+import { ForkDialog, type UserMessage } from '@/components/desktop/assistant/ForkDialog';
 import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
 import { SessionList } from '@/components/desktop/assistant/SessionList';
 import { Transcript } from '@/components/desktop/assistant/Transcript';
@@ -53,6 +55,7 @@ import {
   useDirectoryIcons,
   useCancelQueued,
   useCompactSession,
+  useForkSession,
   useHomeDirectory,
   useInterruptSession,
   useMainCheckouts,
@@ -89,6 +92,7 @@ import {
   newAssistantTab,
   newConversationDraftKey,
   saveAssistantTabs,
+  saveDraft,
   type AssistantTab,
 } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
@@ -102,6 +106,7 @@ const SUGGESTIONS = [
 /** The commands Din runs itself in a conversation, beside the server's. */
 const CONVERSATION_COMMANDS: SlashCommand[] = [
   { name: 'compact', description: 'Summarize the conversation to free up the model’s context', instant: true },
+  { name: 'fork', description: 'Continue in a new conversation, from here or an earlier message', instant: true },
   { name: 'new', description: 'Start a new conversation in this folder', instant: true },
   { name: 'rename', args: '[title]', description: 'Rename this conversation' },
   { name: 'stop', description: 'Stop the agent', instant: true },
@@ -358,6 +363,26 @@ export function Assistant({ windowId, params }: AppComponentProps) {
     setRenaming(sessionID);
   };
 
+  const fork = useForkSession();
+  const { toast } = useToast();
+  /**
+   * Fork a conversation into a tab beside its own: all of it, or what came
+   * before `message`, which waits in the new one's composer (as in OpenCode).
+   */
+  const forkSession = (sessionID: string, message?: UserMessage) =>
+    fork.mutate(
+      { sessionID, before: message?.id },
+      {
+        onSuccess: (session) => {
+          if (message) saveDraft(session.id, message.text);
+          setState((prev) => placeTab(prev, newAssistantTab(session.id)));
+          setListOpen(false);
+        },
+        onError: (error) =>
+          toast({ title: 'Couldn’t fork the conversation', description: cleanAssistantError(error), variant: 'destructive' }),
+      },
+    );
+
   const move = (id: string, to: number) => setState((prev) => ({ ...prev, tabs: moveItem(prev.tabs, id, to) }));
 
   if (!ready) {
@@ -416,6 +441,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
         onSelect={choose}
         onOpenInNewTab={openInNewTab}
         onNew={startNew}
+        onFork={forkSession}
         onDeleted={(id) => removeSessions(new Set([id]))}
         searchRef={searchRef}
         style={{ width: listWidth }}
@@ -470,11 +496,17 @@ export function Assistant({ windowId, params }: AppComponentProps) {
             onNew={openTab}
             onMove={move}
             onReopen={closed.length > 0 ? reopen : undefined}
-            tabMenuItems={(id) =>
-              stripTabs.find((t) => t.id === id)?.state !== 'new' && (
-                <ContextMenuItem onSelect={() => renameTab(id)}>Rename</ContextMenuItem>
-              )
-            }
+            tabMenuItems={(id) => {
+              const sessionID = tabs.find((t) => t.id === id)?.sessionID;
+              return (
+                sessionID && (
+                  <>
+                    <ContextMenuItem onSelect={() => renameTab(id)}>Rename</ContextMenuItem>
+                    <ContextMenuItem onSelect={() => forkSession(sessionID)}>Fork</ContextMenuItem>
+                  </>
+                )
+              );
+            }}
             onTabMenuCloseAutoFocus={(e) => {
               if (renamingFromMenu.current) e.preventDefault();
               renamingFromMenu.current = false;
@@ -490,6 +522,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
             onEditingTitleChange={(editing) => setRenaming(editing ? activeTab.sessionID : null)}
             onDeleted={() => activeTab.sessionID && removeSessions(new Set([activeTab.sessionID]))}
             onNew={startNew}
+            onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
           />
         ) : (
           <NewConversation
@@ -536,6 +569,7 @@ function Conversation({
   onEditingTitleChange: setEditingTitle,
   onDeleted,
   onNew,
+  onFork,
 }: {
   sessionID: string;
   /** The title is being edited (Rename, or /rename). */
@@ -543,6 +577,8 @@ function Conversation({
   onEditingTitleChange: (editing: boolean) => void;
   onDeleted: () => void;
   onNew: (directory?: string) => void;
+  /** Fork it, whole or from before `message`. */
+  onFork: (message?: UserMessage) => void;
 }) {
   const { data: session } = useAssistantSession(sessionID);
   const { data: transcript, isLoading } = useSessionMessages(sessionID);
@@ -563,6 +599,7 @@ function Conversation({
   const compact = useCompactSession();
   const rename = useRenameSession();
   const { toast } = useToast();
+  const [forking, setForking] = useState(false);
   const running = active.includes(sessionID);
   const messages = transcript?.messages;
   const commands = useSlashCommands(session?.location.directory, CONVERSATION_COMMANDS);
@@ -603,6 +640,8 @@ function Conversation({
         return compact.mutateAsync(sessionID, { onError: fail('Couldn’t compact the conversation') });
       case 'new':
         return onNew(session?.location.directory);
+      case 'fork':
+        return setForking(true);
       case 'rename':
         if (!args) return setEditingTitle(true);
         return rename.mutateAsync({ sessionID, title: args }, { onError: fail('Couldn’t rename') });
@@ -632,7 +671,9 @@ function Conversation({
         editing={editingTitle}
         onEditingChange={setEditingTitle}
         onDeleted={onDeleted}
+        onFork={() => onFork()}
       />
+      <ForkDialog messages={messages ?? []} open={forking} onOpenChange={setForking} onFork={onFork} />
       <div
         ref={scrollRef}
         onScroll={(e) => {
@@ -659,6 +700,7 @@ function Conversation({
                   onCancelQueued={(message) =>
                     cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
                   }
+                  onFork={onFork}
                 />
               </FileLinkBaseContext>
             </>
@@ -715,6 +757,7 @@ function ConversationHeader({
   editing,
   onEditingChange: setEditing,
   onDeleted,
+  onFork,
 }: {
   session: SessionInfo | undefined;
   home?: string;
@@ -723,6 +766,7 @@ function ConversationHeader({
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
   onDeleted: () => void;
+  onFork: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   // Rename puts focus in the title field; the closing menu mustn't take it back.
@@ -769,6 +813,9 @@ function ConversationHeader({
           <ContextMenuItem onSelect={rename}>
             <Pencil aria-hidden /> Rename
           </ContextMenuItem>
+          <ContextMenuItem onSelect={onFork}>
+            <GitFork aria-hidden /> Fork
+          </ContextMenuItem>
           <ContextMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
             <Trash2 aria-hidden /> Delete
           </ContextMenuItem>
@@ -784,6 +831,9 @@ function ConversationHeader({
           <DropdownMenuContent align="end" onCloseAutoFocus={keepFocus}>
             <DropdownMenuItem onSelect={rename}>
               <Pencil aria-hidden /> Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onFork}>
+              <GitFork aria-hidden /> Fork
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
               <Trash2 aria-hidden /> Delete

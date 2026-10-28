@@ -681,6 +681,18 @@ export function useDeleteSession() {
   });
 }
 
+/** Fork a conversation, whole or from before the message `before`; resolves with the new one. */
+export function useForkSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionID, before }: { sessionID: string; before?: string }) => assistantApi.fork(sessionID, before),
+    onSuccess: (session) => {
+      dinSessions.add(session.id);
+      void queryClient.invalidateQueries({ queryKey: assistantKeys.sessions });
+    },
+  });
+}
+
 export function useSwitchModel() {
   const queryClient = useQueryClient();
   return useMutation({
