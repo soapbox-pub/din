@@ -21,7 +21,6 @@ import { useAppData } from '@/hooks/useAppData';
 import {
   canonicalHostOfUrl,
   NO_NSITE_APPS,
-  NSITE_APP_DEFAULT_SIZE,
   NSITE_APPS_KEY,
   NsiteAppsSchema,
   nsiteAppId,
@@ -113,7 +112,7 @@ function nsiteAppToDefinition(entry: NsiteAppEntry, summary: NsiteSummary | unde
     icon: summary?.app?.icon ?? undefined,
     themeColor: summary?.app?.themeColor ?? undefined,
   }, summary?.app?.favicon ?? undefined, entry.host);
-  return { ...definition, defaultSize: NSITE_APP_DEFAULT_SIZE, web: false };
+  return { ...definition, web: false };
 }
 
 /** Hosts this session has already asked the store to install. */

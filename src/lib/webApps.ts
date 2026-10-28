@@ -42,8 +42,8 @@ export const WEB_APPS_KEY = 'web-apps';
 /** Default (empty) list of installed web apps. Module-level for stability. */
 export const DEFAULT_WEB_APPS: WebApp[] = [];
 
-/** Default window size for installed web apps. */
-export const WEB_APP_DEFAULT_SIZE = { width: 1000, height: 700 };
+/** Default window size for installed web apps and nsites. */
+export const WEB_APP_DEFAULT_SIZE = { width: 1280, height: 800 };
 
 /** Create a new WebApp entry with a fresh unique id. */
 export function createWebApp(input: Omit<WebApp, 'id'>): WebApp {
