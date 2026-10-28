@@ -164,7 +164,7 @@ function QueuedBubble({ message, onCancel }: { message: QueuedMessage; onCancel?
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
       <Attachments files={message.payload.files} />
-      <div className="whitespace-pre-wrap break-words rounded-3xl border border-dashed border-border px-5 py-2.5 leading-7 text-muted-foreground">
+      <div className="whitespace-pre-wrap wrap-anywhere rounded-3xl border border-dashed border-border px-5 py-2.5 leading-7 text-muted-foreground">
         {message.payload.text}
       </div>
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -207,7 +207,7 @@ function UserBubble({ message }: { message: Extract<SessionMessage, { type: 'use
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
       <Attachments files={message.files} />
-      <div className="whitespace-pre-wrap break-words rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground">
+      <div className="whitespace-pre-wrap wrap-anywhere rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground">
         {message.text}
       </div>
       {message.text.trim() && (
