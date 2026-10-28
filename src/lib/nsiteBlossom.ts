@@ -50,25 +50,26 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 export function blossomFileSource(event: NostrEvent): NsiteFileSource {
   const paths = manifestPaths(event);
   const servers = serversOf(event);
+  const readBlob = async (hash: string): Promise<Uint8Array | null> => {
+    if (!HASH_RE.test(hash)) return null;
+    for (const server of servers) {
+      try {
+        const response = await fetch(new URL(hash, server), {
+          credentials: 'omit',
+          signal: AbortSignal.timeout(BLOB_TIMEOUT_MS),
+        });
+        if (!response.ok) continue;
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if ((await sha256Hex(bytes)) === hash) return bytes;
+      } catch {
+        // Network error or timeout: try the next server.
+      }
+    }
+    return null;
+  };
   return {
     paths,
-    read: async (path) => {
-      const hash = paths[path];
-      if (!hash) return null;
-      for (const server of servers) {
-        try {
-          const response = await fetch(new URL(hash, server), {
-            credentials: 'omit',
-            signal: AbortSignal.timeout(BLOB_TIMEOUT_MS),
-          });
-          if (!response.ok) continue;
-          const bytes = new Uint8Array(await response.arrayBuffer());
-          if ((await sha256Hex(bytes)) === hash) return bytes;
-        } catch {
-          // Network error or timeout: try the next server.
-        }
-      }
-      return null;
-    },
+    read: async (path) => (paths[path] ? readBlob(paths[path]) : null),
+    readBlob,
   };
 }
