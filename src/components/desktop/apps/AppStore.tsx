@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Check, ChevronLeft, Copy, Globe, RefreshCw, Search, Store } from 'lucide-react';
+import { Check, ChevronLeft, Copy, Globe, RefreshCw, Search } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import type { StoreApp } from '@/lib/nsiteCatalog';
 import { canonicalNsiteUrl } from '@/lib/nsite';
@@ -30,6 +30,11 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
+import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
+import { ThemeStore, type ThemeAddress } from '@/components/desktop/apps/appstore/ThemeStore';
+import { useThemeCatalog } from '@/hooks/useThemes';
+import { parseThemeNaddr } from '@/lib/themeDefinition';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -39,9 +44,19 @@ const APP_STORE_ICON = '/icons/apps/app-store.png';
 /** Opens a site's detail page; provided by AppStore to every card. */
 const SelectAppContext = createContext<(app: StoreApp) => void>(() => {});
 
+type StoreTab = 'apps' | 'themes';
+
+const TABS: { id: StoreTab; name: string }[] = [
+  { id: 'apps', name: 'Apps' },
+  { id: 'themes', name: 'Themes' },
+];
+
 /**
- * The App Store: browses nsites (NIP-5A static websites), the only kind of
- * app it offers, and installs any of them in one click.
+ * The App Store, in categories picked in the title bar: Apps, and Themes
+ * (see ThemeStore). Launch params `{ tab: 'themes' }` open on Themes, and
+ * `{ theme: 'naddr1…' }` on one theme's page.
+ *
+ * Apps are nsites (NIP-5A static websites), installed in one click.
  *
  * The catalog is Tenna's: the sites a known set of publishers put on Nostr
  * plus whatever the user and the people they follow publish
@@ -60,13 +75,22 @@ const SelectAppContext = createContext<(app: StoreApp) => void>(() => {});
  * nsite store downloads every file, and the entry roams via encrypted app
  * data.
  */
-export function AppStore(_props: AppComponentProps) {
+export function AppStore({ params }: AppComponentProps) {
   const catalog = useNsiteCatalog();
   const featured = useFeaturedApps();
+  const [tab, setTab] = useState<StoreTab>(() =>
+    params?.tab === 'themes' || typeof params?.theme === 'string' ? 'themes' : 'apps',
+  );
+  const themes = useThemeCatalog(tab === 'themes');
   const [search, setSearch] = useState('');
   // The site whose detail page is showing. The list stays mounted underneath
   // so going back returns to the same scroll position.
   const [selected, setSelected] = useState<StoreApp | null>(null);
+  const [selectedTheme, setSelectedTheme] = useState<ThemeAddress | null>(() =>
+    typeof params?.theme === 'string' ? parseThemeNaddr(params.theme) : null,
+  );
+  const onThemes = tab === 'themes';
+  const detailOpen = onThemes ? !!selectedTheme : !!selected;
 
   const rawQuery = search.trim();
   const searching = rawQuery.length > 0;
@@ -96,17 +120,18 @@ export function AppStore(_props: AppComponentProps) {
   const setTitlebar = useWindowTitlebar();
   const refetchCatalog = catalog.refresh;
   const refetchFeatured = featured.refetch;
-  const refreshing = catalog.refreshing || featured.isRefetching;
-  const refreshDisabled = catalog.isLoading || refreshing;
+  const refetchThemes = themes.refresh;
+  const refreshing = onThemes ? themes.refreshing : catalog.refreshing || featured.isRefetching;
+  const refreshDisabled = (onThemes ? themes.isLoading : catalog.isLoading) || refreshing;
   useEffect(() => {
     setTitlebar(
       <div className="flex min-w-0 flex-1 items-center gap-2 pl-1">
-        {selected && (
+        {detailOpen && (
           <button
             type="button"
             data-window-no-drag
-            onClick={() => setSelected(null)}
-            aria-label="Back to all apps"
+            onClick={() => (onThemes ? setSelectedTheme(null) : setSelected(null))}
+            aria-label={onThemes ? 'Back to all themes' : 'Back to all apps'}
             title="Back"
             className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -114,9 +139,38 @@ export function AppStore(_props: AppComponentProps) {
           </button>
         )}
         <AppIcon icon={APP_STORE_ICON} className="size-4 shrink-0 text-muted-foreground" />
-        <span className="mr-auto truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
+        <span className="truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
           App Store
         </span>
+        <div
+          data-window-no-drag
+          role="tablist"
+          aria-label="Categories"
+          className="mr-auto flex shrink-0 rounded-md bg-foreground/5 p-0.5"
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          {TABS.map(({ id, name }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => {
+                if (tab === id) return;
+                setTab(id);
+                setSearch('');
+              }}
+              className={cn(
+                'rounded px-2.5 py-0.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                tab === id
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
         <div
           data-window-no-drag
           className="relative w-full max-w-64 min-w-0"
@@ -130,10 +184,11 @@ export function AppStore(_props: AppComponentProps) {
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
-              setSelected(null);
+              if (onThemes) setSelectedTheme(null);
+              else setSelected(null);
             }}
-            placeholder="Search apps, or paste an address"
-            aria-label="Search apps, or paste an address"
+            placeholder={onThemes ? 'Search themes, or paste an address' : 'Search apps, or paste an address'}
+            aria-label={onThemes ? 'Search themes, or paste an address' : 'Search apps, or paste an address'}
             autoComplete="off"
             spellCheck={false}
             className="h-7 pl-7 text-sm md:text-sm"
@@ -142,6 +197,10 @@ export function AppStore(_props: AppComponentProps) {
         <button
           type="button"
           onClick={() => {
+            if (onThemes) {
+              void refetchThemes();
+              return;
+            }
             refetchCatalog();
             refetchFeatured();
           }}
@@ -154,7 +213,18 @@ export function AppStore(_props: AppComponentProps) {
         </button>
       </div>,
     );
-  }, [setTitlebar, search, selected, refetchCatalog, refetchFeatured, refreshing, refreshDisabled]);
+  }, [
+    setTitlebar,
+    tab,
+    onThemes,
+    detailOpen,
+    search,
+    refetchCatalog,
+    refetchFeatured,
+    refetchThemes,
+    refreshing,
+    refreshDisabled,
+  ]);
   useEffect(() => () => setTitlebar(null), [setTitlebar]);
 
   const moreFromPublisher = useMemo(() => {
@@ -168,6 +238,19 @@ export function AppStore(_props: AppComponentProps) {
     }
     return apps;
   }, [selected, featured.data, catalog.allApps]);
+
+  if (onThemes) {
+    return (
+      <div className="flex h-full w-full flex-col bg-background text-foreground">
+        <ThemeStore
+          catalog={themes}
+          search={search}
+          selected={selectedTheme}
+          onSelect={setSelectedTheme}
+        />
+      </div>
+    );
+  }
 
   return (
     <SelectAppContext.Provider value={setSelected}>
@@ -238,55 +321,6 @@ export function AppStore(_props: AppComponentProps) {
         </div>
       </div>
     </SelectAppContext.Provider>
-  );
-}
-
-/**
- * Whether an element has come on screen, latching true. Cards read their
- * site's files from Blossom, so they wait until someone can see them.
- */
-function useSeen<T extends Element>() {
-  const ref = useRef<T>(null);
-  const [seen, setSeen] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || seen) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
-      },
-      { rootMargin: '200px' },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [seen]);
-  return [ref, seen] as const;
-}
-
-/**
- * The bottom of the list: loads the next page while it is on screen, once
- * the last one has been fetched and checked.
- */
-function MoreSentinel({ onReached, paused }: { onReached: () => void; paused: boolean }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => setVisible(entries.some((entry) => entry.isIntersecting)),
-      { rootMargin: '400px' },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
-    if (visible && !paused) onReached();
-  }, [visible, paused, onReached]);
-  return (
-    <div ref={ref} aria-hidden className="flex justify-center py-2">
-      {paused && <RefreshCw className="size-4 animate-spin text-muted-foreground" />}
-    </div>
   );
 }
 
@@ -858,17 +892,6 @@ function GetPill({
   );
 }
 
-function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
-  return (
-    <div>
-      <h2 className="text-xl font-bold tracking-tight">{title}</h2>
-      {subtitle && (
-        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{subtitle}</p>
-      )}
-    </div>
-  );
-}
-
 function FeaturedSkeleton() {
   return (
     <div className="flex flex-col gap-4">
@@ -931,17 +954,6 @@ function CatalogSkeleton() {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="grid place-items-center py-8">
-      <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
-        <Store className="mx-auto mb-3 size-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm text-muted-foreground">{message}</p>
-      </div>
     </div>
   );
 }
