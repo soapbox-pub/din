@@ -339,6 +339,7 @@ function Conversation({
         <div ref={composerRef} hidden={forms.length > 0}>
           <Composer
             autoFocus
+            draftKey={sessionID}
             running={running}
             busy={send.isPending || compact.isPending}
             placeholder={running ? 'Add something while it works…' : 'Reply, or type / for commands…'}
@@ -555,6 +556,7 @@ function NewConversation({
           </div>
           <Composer
             autoFocus
+            draftKey="new"
             busy={start.isPending}
             placeholder="Ask the assistant to do something…"
             onSubmit={(text, files) => begin(text, files)}

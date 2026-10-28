@@ -33,6 +33,26 @@ export interface SlashCommand {
   instant?: boolean;
 }
 
+/**
+ * The composer's text, kept in localStorage under `key` (when given) so it
+ * outlasts the window, Din and a restart. An empty message leaves no entry.
+ */
+function useDraft(key: string | undefined) {
+  const storageKey = key && `din.assistant.draft.${key}`;
+  const [text, setText] = useState(() => (storageKey && localStorage.getItem(storageKey)) || '');
+  const save = (value: string) => {
+    setText(value);
+    if (!storageKey) return;
+    try {
+      if (value) localStorage.setItem(storageKey, value);
+      else localStorage.removeItem(storageKey);
+    } catch {
+      // Full or unavailable: it still works, just without keeping the draft.
+    }
+  };
+  return [text, save] as const;
+}
+
 /** The commands a partly typed `/name` could be, those it starts first. */
 function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] {
   const query = typed.toLowerCase();
@@ -53,6 +73,8 @@ function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] 
  * `onCommand` instead. Typing `/` lists them, narrowing as the name goes
  * on: the arrows move through it, Tab or Enter fills one in (Enter runs an
  * instant one), Escape puts it away.
+ *
+ * With `draftKey`, unsent text is kept until it's sent.
  */
 export function Composer({
   onSubmit,
@@ -68,6 +90,7 @@ export function Composer({
   onCycleAgent,
   className,
   textareaRef,
+  draftKey,
 }: {
   /** Resolves once sent; the text stays put if it rejects. */
   onSubmit: (text: string, files: PromptAttachment[]) => Promise<unknown> | void;
@@ -87,8 +110,10 @@ export function Composer({
   onCycleAgent?: () => void;
   className?: string;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
+  /** Keeps unsent text across restarts, one draft per key. */
+  draftKey?: string;
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(draftKey);
   const [files, setFiles] = useState<PromptAttachment[]>([]);
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const ref = textareaRef ?? ownRef;
