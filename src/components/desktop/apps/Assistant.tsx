@@ -844,7 +844,11 @@ function ConversationHeader({
             )}
             {session && (
               <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-                <Folder className="size-3 shrink-0" aria-hidden />
+                {running ? (
+                  <Loader2 className="size-3 shrink-0 animate-spin text-primary" role="img" aria-label="Working" />
+                ) : (
+                  <Folder className="size-3 shrink-0" aria-hidden />
+                )}
                 <span className="truncate" title={session.location.directory}>
                   {tildify(session.location.directory, home)}
                 </span>
@@ -855,11 +859,6 @@ function ConversationHeader({
                     title="How much of the model’s context window the conversation fills"
                   >
                     · {formatContextUsage(context)} context
-                  </span>
-                )}
-                {running && (
-                  <span className="flex items-center gap-1 text-primary">
-                    · <Loader2 className="size-3 animate-spin" aria-hidden /> Working
                   </span>
                 )}
               </p>
