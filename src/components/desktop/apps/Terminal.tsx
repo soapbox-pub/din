@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Terminal as XTerm, type ILink } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
@@ -26,11 +26,10 @@ import { registerDictationTarget } from '@/lib/dictation';
 import '@xterm/xterm/css/xterm.css';
 
 /**
- * Fixed terminal palette (terminals keep their own colors regardless of the
- * OS theme). Roughly the default
- * "Tango dark" palette with a slightly brighter foreground for contrast.
+ * Dark palette, roughly "Tango dark" with a slightly brighter foreground for
+ * contrast.
  */
-const TERMINAL_THEME = {
+const DARK_THEME = {
   background: '#0a0a0a',
   foreground: '#e5e5e5',
   cursor: '#e5e5e5',
@@ -53,6 +52,62 @@ const TERMINAL_THEME = {
   brightCyan: '#67e8f9',
   brightWhite: '#fafafa',
 };
+
+/**
+ * Light palette, after GitHub Light: every color, "white" included, stays
+ * readable on the white background.
+ */
+const LIGHT_THEME = {
+  background: '#ffffff',
+  foreground: '#1f2328',
+  cursor: '#1f2328',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#b6d6fd',
+  black: '#24292f',
+  red: '#cf222e',
+  green: '#116329',
+  yellow: '#4d2d00',
+  blue: '#0969da',
+  magenta: '#8250df',
+  cyan: '#1b7c83',
+  white: '#6e7781',
+  brightBlack: '#57606a',
+  brightRed: '#a40e26',
+  brightGreen: '#1a7f37',
+  brightYellow: '#633c01',
+  brightBlue: '#218bff',
+  brightMagenta: '#a475f9',
+  brightCyan: '#3192aa',
+  brightWhite: '#8c959f',
+};
+
+const terminalTheme = (dark: boolean) => (dark ? DARK_THEME : LIGHT_THEME);
+
+/**
+ * Whether Din is dark right now: the class on <html>, which follows the
+ * Light/Dark/System setting and a custom theme's own background alike.
+ * Sessions live outside React, so they subscribe here and repaint when it
+ * changes.
+ */
+const isDinDark = () => document.documentElement.classList.contains('dark');
+let currentDark = isDinDark();
+const darkListeners = new Set<(dark: boolean) => void>();
+
+new MutationObserver(() => {
+  const dark = isDinDark();
+  if (dark === currentDark) return;
+  currentDark = dark;
+  for (const listener of darkListeners) listener(dark);
+}).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
+function subscribeDark(onChange: () => void) {
+  darkListeners.add(onChange);
+  return () => {
+    darkListeners.delete(onChange);
+  };
+}
+
+const useDinDark = () => useSyncExternalStore(subscribeDark, () => currentDark);
 
 let nextSessionId = 0;
 const newSessionId = () => `term-${nextSessionId++}`;
@@ -339,6 +394,7 @@ export function Terminal({ windowId, params }: AppComponentProps) {
   const bridge = getPtyBridge();
   const { close: closeWindow, focus: focusWindow } = useWindowActions();
   const setTitlebar = useWindowTitlebar();
+  const dark = useDinDark();
 
   const [tabs, setTabs] = useState<TermTab[]>(() => {
     // A window opened for a tab dragged out of another one.
@@ -589,7 +645,10 @@ export function Terminal({ windowId, params }: AppComponentProps) {
 
   return (
     // overflow-clip: background tabs park outside it (see TerminalTab).
-    <div className="relative h-full w-full overflow-clip bg-[#0a0a0a]">
+    <div
+      className="relative h-full w-full overflow-clip"
+      style={{ background: terminalTheme(dark).background }}
+    >
       {/* All tabs stay mounted so background tabs keep their scrollback
           and running programs; only the active one is visible. */}
       {tabs.map((tab) => (
@@ -757,7 +816,7 @@ const TerminalTab = memo(function TerminalTab({
         >
           <div
             className={cn(
-              'bg-white/15 transition-colors group-hover:bg-white/40',
+              'bg-black/15 transition-colors group-hover:bg-black/40 dark:bg-white/15 dark:group-hover:bg-white/40',
               d.dir === 'row' ? 'h-full w-px' : 'h-px w-full',
             )}
           />
@@ -838,7 +897,7 @@ function paneSession(
     fontFamily:
       "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace",
     scrollback: 5000,
-    theme: TERMINAL_THEME,
+    theme: terminalTheme(currentDark),
     // The graphemes addon needs the proposed `unicode` API.
     allowProposedApi: true,
   });
@@ -983,6 +1042,37 @@ function paneSession(
   };
   fontSizeListeners.add(applyFontSize);
 
+  // Light or dark, following Din. Programs can ask for the background
+  // (OSC 11, which xterm answers from the theme), and ones that turn on
+  // mode 2031 (Neovim, Helix) are told when it flips, so they switch too:
+  // DSR 997, "1" for dark, "2" for light. DSR 996 asks for it outright.
+  let reportScheme = false;
+  const schemeReport = () => `\x1b[?997;${currentDark ? 1 : 2}n`;
+  const setReportScheme = (on: boolean) => (params: (number | number[])[]) => {
+    if (params.includes(2031)) reportScheme = on;
+    return false;
+  };
+  const schemeHandlers = [
+    term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, setReportScheme(true)),
+    term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, setReportScheme(false)),
+    term.parser.registerCsiHandler({ prefix: '?', intermediates: '$', final: 'p' }, (params) => {
+      if (params[0] !== 2031) return false;
+      term.input(`\x1b[?2031;${reportScheme ? 1 : 2}$y`, false);
+      return true;
+    }),
+    term.parser.registerCsiHandler({ prefix: '?', final: 'n' }, (params) => {
+      if (params[0] !== 996) return false;
+      term.input(schemeReport(), false);
+      return true;
+    }),
+  ];
+  const applyDark = (dark: boolean) => {
+    if (disposed) return;
+    term.options.theme = terminalTheme(dark);
+    if (reportScheme) term.input(schemeReport(), false);
+  };
+  darkListeners.add(applyDark);
+
   // Ctrl/Cmd +/-/0 keyboard zoom and gnome-terminal/Tilix-style tab
   // shortcuts: Ctrl+PageUp/PageDown switch tabs, Ctrl+T or Ctrl+Shift+T
   // opens one, Ctrl+Shift+W closes the current one. Copy and paste work
@@ -1113,6 +1203,8 @@ function paneSession(
     disposed = true;
     paneSessions.delete(paneId);
     fontSizeListeners.delete(applyFontSize);
+    darkListeners.delete(applyDark);
+    for (const handler of schemeHandlers) handler.dispose();
     offData();
     offExit();
     offCommandStart();
