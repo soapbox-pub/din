@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
 import { useDragReorder } from '@/hooks/useDragReorder';
 import { useTabTransfer, type TabTransferOptions } from '@/hooks/useTabTransfer';
@@ -28,7 +28,8 @@ export interface TabDescriptor {
  * tab along the strip (or, for a window's only tab, the window). With `transfer`, a tab dragged off the strip moves to
  * another window of the app (see useTabTransfer), and its context menu
  * offers the same. The context menu also opens a new tab and closes the tabs
- * around one.
+ * around one. Past their minimum width, tabs collapse to just their icon and
+ * the strip scrolls.
  *
  * Used by the Terminal, Files and Assistant apps; the Web Browser has its own richer
  * variant (favicons, loading state) but the same interaction model.
@@ -79,14 +80,36 @@ export function TabStrip({
     // A window's only tab moves the window, like Chrome's.
     moveWindow: tabs.length === 1 ? chrome : undefined,
   });
+  // Tabs shrink to fit the strip, like Chrome's. Closing one with the mouse
+  // holds the others at their current width until the pointer leaves the
+  // strip, so the next tab's close button slides under the cursor.
+  const [lockedWidth, setLockedWidth] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  // Past the minimum tab width the strip scrolls; keep the active tab in view.
+  // (By hand: scrollIntoView would also scroll the desktop's clipped ancestors.)
+  useEffect(() => {
+    const list = listRef.current;
+    const tab = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!list || !tab) return;
+    const start = tab.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft;
+    const end = start + tab.offsetWidth;
+    if (start < list.scrollLeft) list.scrollLeft = start;
+    else if (end > list.scrollLeft + list.clientWidth) list.scrollLeft = end - list.clientWidth;
+  }, [activeId, tabs.length]);
   return (
     <div
-      ref={(el) => tabTransfer.setList(el)}
+      ref={(el) => {
+        listRef.current = el;
+        tabTransfer.setList(el);
+      }}
       role="tablist"
       aria-label={label}
-      // When tabs overflow they shrink to fit (Chrome-style) rather than
-      // scrolling; overflow-hidden is just a guard for the minimum-width case.
-      className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden"
+      onPointerLeave={() => setLockedWidth(null)}
+      onWheel={(e) => {
+        // There's no scrollbar, so the wheel scrolls the tabs sideways.
+        if (e.deltaY !== 0 && e.deltaX === 0) e.currentTarget.scrollLeft += e.deltaY;
+      }}
+      className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
     >
       {tabs.map((tab, index) => (
         <TabContextMenu
@@ -108,10 +131,14 @@ export function TabStrip({
             tab={tab}
             active={tab.id === activeId}
             dragging={reorder.draggingId === tab.id}
+            lockedWidth={lockedWidth}
             ref={(el) => reorder.register(tab.id, el)}
             onPointerDown={(e) => reorder.onPointerDown(tab.id, e)}
             onActivate={() => onActivate(tab.id)}
-            onClose={() => onClose(tab.id)}
+            onClose={(width) => {
+              if (width !== undefined) setLockedWidth(width);
+              onClose(tab.id);
+            }}
           />
         </TabContextMenu>
       ))}
@@ -132,6 +159,11 @@ export function TabStrip({
   );
 }
 
+/** A tab's icon classes, for when it gets too narrow for its title. */
+function narrowIcon(active: boolean) {
+  return active ? '@max-[3.25rem]:hidden' : '@max-[3.25rem]:mx-auto';
+}
+
 /**
  * A single tab in the strip. Every tab is closable — including a lone one:
  * apps close the whole window when their last tab closes.
@@ -140,6 +172,7 @@ function TabButton({
   tab,
   active,
   dragging,
+  lockedWidth = null,
   ref,
   onPointerDown,
   onActivate,
@@ -149,11 +182,15 @@ function TabButton({
   tab: TabDescriptor;
   active: boolean;
   dragging: boolean;
+  /** Hold the tab at this width instead of fitting it to the strip. */
+  lockedWidth?: number | null;
   ref: React.Ref<HTMLDivElement>;
   onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onActivate: () => void;
-  onClose: () => void;
+  /** Close the tab; given the tab's width when the mouse closed it. */
+  onClose: (width?: number) => void;
 } & Omit<React.ComponentProps<'div'>, 'onPointerDown'>) {
+  const widthOf = (el: Element) => el.closest('[role="tab"]')?.getBoundingClientRect().width;
   return (
     <div
       {...props}
@@ -172,11 +209,15 @@ function TabButton({
       }}
       onAuxClick={(e) => {
         // Middle-click closes, like every browser.
-        if (e.button === 1) onClose();
+        if (e.button === 1) onClose(widthOf(e.currentTarget));
       }}
       title={tab.title}
+      style={lockedWidth !== null ? { flex: `0 0 ${lockedWidth}px` } : undefined}
       className={cn(
-        'group relative flex h-7 w-44 min-w-9 shrink cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
+        // Tabs shrink from 11rem as the strip fills, and are containers so
+        // their contents can collapse once they get narrow.
+        '@container group relative flex h-7 basis-44 shrink cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
+        active ? 'min-w-10' : 'min-w-9',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         active
           ? 'border-border/60 bg-background text-foreground shadow-sm'
@@ -184,19 +225,25 @@ function TabButton({
         dragging && 'border-border/60 bg-background shadow-md',
       )}
     >
-      {tab.icon && <span className="shrink-0 opacity-80 empty:hidden">{tab.icon}</span>}
-      <span className="min-w-0 flex-1 truncate">{tab.title}</span>
+      {/* Too narrow for everything, a tab shows just its icon - or, if it's
+          the active one, just its close button - like Chrome's. */}
+      {tab.icon && (
+        <span className={cn('grid shrink-0 place-items-center opacity-80 empty:hidden', narrowIcon(active))}>
+          {tab.icon}
+        </span>
+      )}
+      <span className={cn('min-w-0 flex-1 truncate', tab.icon && '@max-[3.25rem]:hidden')}>{tab.title}</span>
       <button
         type="button"
         aria-label={`Close ${tab.title}`}
         onClick={(e) => {
           e.stopPropagation();
-          onClose();
+          onClose(e.detail > 0 ? widthOf(e.currentTarget) : undefined);
         }}
         className={cn(
           'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
           'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-          active && 'opacity-100',
+          active ? 'opacity-100 @max-[3.25rem]:mx-auto' : '@max-[3.25rem]:hidden',
           'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         )}
       >
