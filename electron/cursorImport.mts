@@ -1,7 +1,7 @@
 // Importing cursor themes: whatever the user picked (a CursorXP
-// .CurXPTheme, an XCursor theme as a folder or an archive) becomes a plain
-// XCursor theme in ~/.local/share/icons, which Settings lists and the
-// pointer uses like any other (electron/cursor.mts).
+// .CurXPTheme, a Windows .cur/.ani pack, an XCursor theme; as a folder or an
+// archive) becomes a plain XCursor theme in ~/.local/share/icons, which
+// Settings lists and the pointer uses like any other (electron/cursor.mts).
 //
 // Every source is read into memory first, as a tree of files and symlinks
 // by their paths inside it, so nothing from it touches the disk until it has
@@ -360,47 +360,76 @@ function xcursorThemes(tree: Tree, fallbackName: string): ImportedTheme[] {
 }
 
 // ---------------------------------------------------------------------------
+// Cursor roles
+// ---------------------------------------------------------------------------
+
+/**
+ * The cursors Windows themes have, by their CursorXP and Windows registry
+ * names, in the order of a Windows scheme; each one's XCursor name, and the
+ * other names it answers to.
+ */
+const ROLES: { curxp: string; windows: string; name: string; aliases: string[] }[] = [
+  { curxp: 'Arrow', windows: 'Arrow', name: 'left_ptr', aliases: ['default', 'arrow', 'top_left_arrow', 'left_arrow'] },
+  { curxp: 'Help', windows: 'Help', name: 'help', aliases: ['question_arrow', 'whats_this', 'left_ptr_help'] },
+  { curxp: 'AppStarting', windows: 'AppStarting', name: 'progress', aliases: ['left_ptr_watch', 'half-busy'] },
+  { curxp: 'Wait', windows: 'Wait', name: 'wait', aliases: ['watch'] },
+  { curxp: 'Cross', windows: 'Crosshair', name: 'crosshair', aliases: ['cross', 'tcross', 'cross_reverse', 'diamond_cross'] },
+  { curxp: 'IBeam', windows: 'IBeam', name: 'text', aliases: ['xterm', 'ibeam'] },
+  { curxp: 'Handwriting', windows: 'NWPen', name: 'pencil', aliases: [] },
+  { curxp: 'NO', windows: 'NO', name: 'not-allowed', aliases: ['crossed_circle', 'forbidden', 'circle', 'no-drop', 'dnd-no-drop'] },
+  {
+    curxp: 'SizeNS',
+    windows: 'SizeNS',
+    name: 'ns-resize',
+    aliases: ['size_ver', 'sb_v_double_arrow', 'v_double_arrow', 'double_arrow', 'n-resize', 's-resize', 'top_side', 'bottom_side', 'row-resize', 'split_v'],
+  },
+  {
+    curxp: 'SizeWE',
+    windows: 'SizeWE',
+    name: 'ew-resize',
+    aliases: ['size_hor', 'sb_h_double_arrow', 'h_double_arrow', 'e-resize', 'w-resize', 'left_side', 'right_side', 'col-resize', 'split_h'],
+  },
+  {
+    curxp: 'SizeNWSE',
+    windows: 'SizeNWSE',
+    name: 'nwse-resize',
+    aliases: ['size_fdiag', 'bd_double_arrow', 'nw-resize', 'se-resize', 'top_left_corner', 'bottom_right_corner'],
+  },
+  {
+    curxp: 'SizeNESW',
+    windows: 'SizeNESW',
+    name: 'nesw-resize',
+    aliases: ['size_bdiag', 'fd_double_arrow', 'ne-resize', 'sw-resize', 'top_right_corner', 'bottom_left_corner'],
+  },
+  { curxp: 'SizeAll', windows: 'SizeAll', name: 'move', aliases: ['fleur', 'size_all', 'all-scroll'] },
+  { curxp: 'UpArrow', windows: 'UpArrow', name: 'up_arrow', aliases: ['center_ptr', 'sb_up_arrow'] },
+  { curxp: 'Hand', windows: 'Hand', name: 'pointer', aliases: ['hand2', 'hand1', 'hand', 'pointing_hand'] },
+];
+
+/** Writes a theme's cursors and their aliases, by role, given each role's frames. */
+function themeFromRoles(
+  name: string,
+  framesFor: (role: (typeof ROLES)[number]) => XcursorFrame[] | null,
+): ImportedTheme | null {
+  const files = new Map<string, Buffer>();
+  const links = new Map<string, string>();
+  for (const role of ROLES) {
+    const frames = framesFor(role);
+    if (!frames?.length) continue;
+    files.set(role.name, encodeXcursor(frames));
+    for (const alias of role.aliases) links.set(alias, role.name);
+  }
+  if (!files.has('left_ptr')) return null;
+  return { name, inherits: [], files, links };
+}
+
+// ---------------------------------------------------------------------------
 // CursorXP (.CurXPTheme)
 // ---------------------------------------------------------------------------
 //
 // A ZIP of Scheme.ini, which describes each cursor (frame count, interval,
 // hotspot, animation style), and one PNG per cursor holding its frames side
 // by side.
-
-/** Each CursorXP role's XCursor name, and the other names it answers to. */
-const CURXP_ROLES: { role: string; name: string; aliases: string[] }[] = [
-  { role: 'Arrow', name: 'left_ptr', aliases: ['default', 'arrow', 'top_left_arrow', 'left_arrow'] },
-  { role: 'Help', name: 'help', aliases: ['question_arrow', 'whats_this', 'left_ptr_help'] },
-  { role: 'AppStarting', name: 'progress', aliases: ['left_ptr_watch', 'half-busy'] },
-  { role: 'Wait', name: 'wait', aliases: ['watch'] },
-  { role: 'Cross', name: 'crosshair', aliases: ['cross', 'tcross', 'cross_reverse', 'diamond_cross'] },
-  { role: 'IBeam', name: 'text', aliases: ['xterm', 'ibeam'] },
-  { role: 'Handwriting', name: 'pencil', aliases: [] },
-  { role: 'NO', name: 'not-allowed', aliases: ['crossed_circle', 'forbidden', 'circle', 'no-drop', 'dnd-no-drop'] },
-  {
-    role: 'SizeNS',
-    name: 'ns-resize',
-    aliases: ['size_ver', 'sb_v_double_arrow', 'v_double_arrow', 'double_arrow', 'n-resize', 's-resize', 'top_side', 'bottom_side', 'row-resize', 'split_v'],
-  },
-  {
-    role: 'SizeWE',
-    name: 'ew-resize',
-    aliases: ['size_hor', 'sb_h_double_arrow', 'h_double_arrow', 'e-resize', 'w-resize', 'left_side', 'right_side', 'col-resize', 'split_h'],
-  },
-  {
-    role: 'SizeNWSE',
-    name: 'nwse-resize',
-    aliases: ['size_fdiag', 'bd_double_arrow', 'nw-resize', 'se-resize', 'top_left_corner', 'bottom_right_corner'],
-  },
-  {
-    role: 'SizeNESW',
-    name: 'nesw-resize',
-    aliases: ['size_bdiag', 'fd_double_arrow', 'ne-resize', 'sw-resize', 'top_right_corner', 'bottom_left_corner'],
-  },
-  { role: 'SizeAll', name: 'move', aliases: ['fleur', 'size_all', 'all-scroll'] },
-  { role: 'UpArrow', name: 'up_arrow', aliases: ['center_ptr', 'sb_up_arrow'] },
-  { role: 'Hand', name: 'pointer', aliases: ['hand2', 'hand1', 'hand', 'pointing_hand'] },
-];
 
 type IniData = Map<string, Map<string, string>>;
 
@@ -462,22 +491,20 @@ function curxpTheme(tree: Tree, schemePath: string, fallbackName: string): Impor
   if (!scheme) return null;
   const ini = parseIni(scheme.data.toString('utf8'));
 
-  const files = new Map<string, Buffer>();
-  const links = new Map<string, string>();
-  for (const { role, name, aliases } of CURXP_ROLES) {
-    const section = ini.get(role.toLowerCase());
-    const pngPath = byLowerName.get(`${role.toLowerCase()}.png`);
+  return themeFromRoles(fallbackName, ({ curxp }) => {
+    const section = ini.get(curxp.toLowerCase());
+    const pngPath = byLowerName.get(`${curxp.toLowerCase()}.png`);
     const png = pngPath ? resolve(tree, pngPath) : null;
-    if (!section || !png) continue;
+    if (!section || !png) return null;
 
     const count = Math.min(MAX_FRAMES, Math.max(1, toInt(section.get('frames'), 1)));
     const interval = Math.max(1, toInt(section.get('interval'), 60));
     const style = toInt(section.get('animation style'), 0);
     const image = nativeImage.createFromBuffer(png.data);
-    if (image.isEmpty()) continue;
+    if (image.isEmpty()) return null;
     const { width, height } = image.getSize();
     const frameWidth = Math.floor(width / count);
-    if (frameWidth < 1 || frameWidth > MAX_FRAME_DIMENSION || height > MAX_FRAME_DIMENSION) continue;
+    if (frameWidth < 1 || frameWidth > MAX_FRAME_DIMENSION || height > MAX_FRAME_DIMENSION) return null;
     const hotX = Math.min(Math.max(0, toInt(section.get('hot spot x'), 0)), frameWidth - 1);
     const hotY = Math.min(Math.max(0, toInt(section.get('hot spot y'), 0)), height - 1);
     // The nominal size is the image's own: CursorXP cursors have one size.
@@ -489,13 +516,329 @@ function curxpTheme(tree: Tree, schemePath: string, fallbackName: string): Impor
       if (pixels.length !== frameWidth * height * 4) break;
       frames.push({ size, width: frameWidth, height, hotX, hotY, pixels });
     }
-    if (frames.length === 0) continue;
+    return frames.length ? animate(frames, interval, style) : null;
+  });
+}
 
-    files.set(name, encodeXcursor(animate(frames, interval, style)));
-    for (const alias of aliases) links.set(alias, name);
+// ---------------------------------------------------------------------------
+// Windows cursors (.cur, .ani)
+// ---------------------------------------------------------------------------
+//
+// A .cur is an icon directory: one image per size, each a PNG or a BMP
+// (colors, then a 1-bit transparency mask) with a hotspot. An .ani is a
+// RIFF file of .cur frames with a play sequence and per-step timing. A pack
+// is a folder or archive of them, usually with an install.inf saying which
+// file is which cursor.
+
+/** One image of a .cur, as premultiplied BGRA. */
+type WinImage = Omit<XcursorFrame, 'delay' | 'size'>;
+
+function premultiply(bgra: Buffer): Buffer {
+  for (let i = 0; i < bgra.length; i += 4) {
+    const a = bgra[i + 3];
+    if (a === 255) continue;
+    bgra[i] = Math.round((bgra[i] * a) / 255);
+    bgra[i + 1] = Math.round((bgra[i + 1] * a) / 255);
+    bgra[i + 2] = Math.round((bgra[i + 2] * a) / 255);
   }
-  if (!files.has('left_ptr')) return null;
-  return { name: fallbackName, inherits: [], files, links };
+  return bgra;
+}
+
+/** A BMP-format icon image (a DIB with a doubled height and an AND mask). */
+function decodeDib(data: Buffer, hotX: number, hotY: number): WinImage | null {
+  if (data.length < 40) return null;
+  const headerSize = data.readUInt32LE(0);
+  const width = data.readInt32LE(4);
+  const height = Math.abs(data.readInt32LE(8)) / 2;
+  const bitCount = data.readUInt16LE(14);
+  const compression = data.readUInt32LE(16);
+  const colorsUsed = data.readUInt32LE(32);
+  if (width < 1 || height < 1 || width > MAX_FRAME_DIMENSION || height > MAX_FRAME_DIMENSION) return null;
+  if (![1, 4, 8, 24, 32].includes(bitCount) || (compression !== 0 && compression !== 3)) return null;
+
+  let p = headerSize + (compression === 3 && headerSize === 40 ? 12 : 0);
+  const paletteSize = bitCount <= 8 ? colorsUsed || 1 << bitCount : 0;
+  const palette = p;
+  p += paletteSize * 4;
+  const colorStride = Math.floor((width * bitCount + 31) / 32) * 4;
+  const maskStride = Math.floor((width + 31) / 32) * 4;
+  const colors = p;
+  const mask = colors + colorStride * height;
+  if (mask > data.length) return null;
+  const hasMask = mask + maskStride * height <= data.length;
+
+  const out = Buffer.alloc(width * height * 4);
+  let anyAlpha = false;
+  for (let y = 0; y < height; y++) {
+    const row = colors + (height - 1 - y) * colorStride;
+    const maskRow = mask + (height - 1 - y) * maskStride;
+    for (let x = 0; x < width; x++) {
+      const o = (y * width + x) * 4;
+      let b: number, g: number, r: number, a = 255;
+      if (bitCount === 32) {
+        [b, g, r, a] = [data[row + x * 4], data[row + x * 4 + 1], data[row + x * 4 + 2], data[row + x * 4 + 3]];
+        if (a) anyAlpha = true;
+      } else if (bitCount === 24) {
+        [b, g, r] = [data[row + x * 3], data[row + x * 3 + 1], data[row + x * 3 + 2]];
+      } else {
+        const bit = x * bitCount;
+        const index = (data[row + (bit >> 3)] >> (8 - bitCount - (bit & 7))) & ((1 << bitCount) - 1);
+        const entry = palette + Math.min(index, paletteSize - 1) * 4;
+        [b, g, r] = [data[entry], data[entry + 1], data[entry + 2]];
+      }
+      const masked = hasMask && (data[maskRow + (x >> 3)] >> (7 - (x & 7))) & 1;
+      if (bitCount !== 32 && masked) {
+        // Masked with a color means "invert the screen", which XCursor
+        // can't do; black is what that usually looks like on light ground.
+        if (b || g || r) [b, g, r, a] = [0, 0, 0, 255];
+        else a = 0;
+      }
+      out[o] = b;
+      out[o + 1] = g;
+      out[o + 2] = r;
+      out[o + 3] = a;
+    }
+  }
+  // 32-bit images with no alpha at all rely on the mask instead.
+  if (bitCount === 32 && !anyAlpha && hasMask) {
+    for (let y = 0; y < height; y++) {
+      const maskRow = mask + (height - 1 - y) * maskStride;
+      for (let x = 0; x < width; x++) {
+        const masked = (data[maskRow + (x >> 3)] >> (7 - (x & 7))) & 1;
+        out[(y * width + x) * 4 + 3] = masked ? 0 : 255;
+      }
+    }
+  }
+  return {
+    width,
+    height,
+    hotX: Math.min(hotX, width - 1),
+    hotY: Math.min(hotY, height - 1),
+    pixels: premultiply(out),
+  };
+}
+
+/** Every image of a .cur (or .ico) file. */
+function decodeCur(data: Buffer): WinImage[] {
+  if (data.length < 6 || data.readUInt16LE(0) !== 0) return [];
+  const type = data.readUInt16LE(2);
+  const count = data.readUInt16LE(4);
+  if ((type !== 1 && type !== 2) || count > 64) return [];
+  const images: WinImage[] = [];
+  for (let i = 0; i < count; i++) {
+    const entry = 6 + i * 16;
+    if (entry + 16 > data.length) break;
+    const hotX = type === 2 ? data.readUInt16LE(entry + 4) : 0;
+    const hotY = type === 2 ? data.readUInt16LE(entry + 6) : 0;
+    const length = data.readUInt32LE(entry + 8);
+    const offset = data.readUInt32LE(entry + 12);
+    if (offset + length > data.length) continue;
+    const bytes = data.subarray(offset, offset + length);
+    if (bytes.length < 4) continue;
+    if (bytes.readUInt32BE(0) === 0x89504e47) {
+      const image = nativeImage.createFromBuffer(bytes);
+      const { width, height } = image.getSize();
+      if (image.isEmpty() || width > MAX_FRAME_DIMENSION || height > MAX_FRAME_DIMENSION) continue;
+      const pixels = image.toBitmap();
+      if (pixels.length !== width * height * 4) continue;
+      images.push({ width, height, hotX: Math.min(hotX, width - 1), hotY: Math.min(hotY, height - 1), pixels });
+    } else {
+      const image = decodeDib(bytes, hotX, hotY);
+      if (image) images.push(image);
+    }
+  }
+  return images;
+}
+
+/** The image of `images` nearest `size`. */
+function nearest(images: WinImage[], size: number): WinImage {
+  return images.reduce((best, image) =>
+    Math.abs(Math.max(image.width, image.height) - size) < Math.abs(Math.max(best.width, best.height) - size)
+      ? image
+      : best,
+  );
+}
+
+/** A .cur as XCursor frames: one still image per size. */
+function curFrames(data: Buffer): XcursorFrame[] {
+  return decodeCur(data).map((image) => ({ ...image, size: Math.max(image.width, image.height), delay: 0 }));
+}
+
+/** An .ani as XCursor frames: its animation, at each size its first frame has. */
+function aniFrames(data: Buffer): XcursorFrame[] {
+  if (data.length < 12 || data.toString('latin1', 0, 4) !== 'RIFF' || data.toString('latin1', 8, 12) !== 'ACON') {
+    return [];
+  }
+  let steps = 0;
+  let jiffies = 0;
+  let rates: number[] | null = null;
+  let sequence: number[] | null = null;
+  const frames: WinImage[][] = [];
+  const end = Math.min(data.length, 8 + data.readUInt32LE(4));
+  const walk = (start: number, stop: number) => {
+    let p = start;
+    while (p + 8 <= stop) {
+      const id = data.toString('latin1', p, p + 4);
+      const length = data.readUInt32LE(p + 4);
+      const body = p + 8;
+      if (body + length > stop) break;
+      if (id === 'anih' && length >= 36) {
+        steps = data.readUInt32LE(body + 8) || data.readUInt32LE(body + 4);
+        jiffies = data.readUInt32LE(body + 28);
+      } else if (id === 'rate' || id === 'seq ') {
+        const values = Array.from({ length: Math.floor(length / 4) }, (_, i) => data.readUInt32LE(body + i * 4));
+        if (id === 'rate') rates = values;
+        else sequence = values;
+      } else if (id === 'LIST' && length >= 4) {
+        walk(body + 4, body + length);
+      } else if (id === 'icon' && frames.length < MAX_FRAMES) {
+        frames.push(decodeCur(data.subarray(body, body + length)));
+      }
+      p = body + length + (length & 1);
+    }
+  };
+  walk(12, end);
+  if (frames.length === 0 || frames.some((f) => f.length === 0)) return [];
+
+  const order: number[] = (sequence as number[] | null) ?? frames.map((_, i) => i);
+  const count = Math.min(MAX_FRAMES, steps || order.length, order.length);
+  const delayOf = (step: number) =>
+    Math.max(1, Math.round((((rates as number[] | null)?.[step] ?? jiffies) || 1) * (1000 / 60)));
+  const result: XcursorFrame[] = [];
+  for (const first of frames[0]) {
+    const size = Math.max(first.width, first.height);
+    for (let step = 0; step < count; step++) {
+      const images = frames[order[step]] ?? frames[0];
+      result.push({ ...nearest(images, size), size, delay: count > 1 ? delayOf(step) : 0 });
+    }
+  }
+  return result;
+}
+
+/** The fields of an .inf line, quotes taken off: `HKCU,"Control Panel\Cursors",Arrow,...`. */
+function infFields(line: string): string[] {
+  const fields: string[] = [];
+  let field = '';
+  let quoted = false;
+  for (const char of line) {
+    if (char === '"') quoted = !quoted;
+    else if (char === ',' && !quoted) {
+      fields.push(field.trim());
+      field = '';
+    } else field += char;
+  }
+  fields.push(field.trim());
+  return fields;
+}
+
+/**
+ * Which file each Windows role is, from an install.inf: its scheme (every
+ * role's file in scheme order) or its per-role registry lines, with
+ * %strings% filled in. Also the scheme's name, if it gives one.
+ */
+function parseInf(text: string): { name: string | null; files: Map<string, string> } {
+  const strings = new Map<string, string>();
+  let section = '';
+  const lines = text.split(/\r?\n/).map((l) => l.replace(/;.*$/, '').trim()).filter(Boolean);
+  for (const line of lines) {
+    const header = /^\[(.+)\]$/.exec(line);
+    if (header) {
+      section = header[1].toLowerCase();
+      continue;
+    }
+    const eq = line.indexOf('=');
+    if (section === 'strings' && eq > 0) {
+      strings.set(line.slice(0, eq).trim().toLowerCase(), line.slice(eq + 1).trim().replace(/^"(.*)"$/, '$1'));
+    }
+  }
+  const expand = (value: string) => {
+    let result = value;
+    for (let i = 0; i < 4; i++) result = result.replace(/%([^%]*)%/g, (_, key: string) => strings.get(key.toLowerCase()) ?? '');
+    return result;
+  };
+  const fileName = (value: string) => expand(value).split(/[\\/]/).pop()?.trim() ?? '';
+
+  let name: string | null = strings.get('scheme_name') ?? null;
+  const files = new Map<string, string>();
+  for (const line of lines) {
+    if (line.startsWith('[')) continue;
+    const fields = infFields(line);
+    const key = (fields[1] ?? '').toLowerCase();
+    if (key.endsWith('control panel\\cursors\\schemes') && fields[4]) {
+      name ??= expand(fields[2] ?? '') || null;
+      expand(fields[4]).split(',').forEach((value, i) => {
+        const file = fileName(value);
+        if (file && ROLES[i]) files.set(ROLES[i].windows.toLowerCase(), file);
+      });
+    } else if (key.endsWith('control panel\\cursors') && fields[2] && fields[4]) {
+      const file = fileName(fields[4]);
+      if (file) files.set(expand(fields[2]).toLowerCase(), file);
+    }
+  }
+  return { name, files };
+}
+
+/** File-name patterns for each Windows role, for packs without an install.inf. Most specific first. */
+const WINDOWS_NAME_GUESSES: [string, RegExp][] = [
+  ['uparrow', /up.?arrow|alternate/],
+  ['help', /help/],
+  ['appstarting', /appstart|working|background|progress/],
+  ['wait', /wait|busy/],
+  ['crosshair', /cross|precision/],
+  ['ibeam', /ibeam|beam|text/],
+  ['nwpen', /handwrit|pen/],
+  ['no', /^no$|unavailable|not.?allowed|forbidden/],
+  ['sizens', /sizens|vert/],
+  ['sizewe', /sizewe|horz|horiz/],
+  ['sizenwse', /sizenwse|nwse|dgn1|diag.?1/],
+  ['sizenesw', /sizenesw|nesw|dgn2|diag.?2/],
+  ['sizeall', /sizeall|move/],
+  ['hand', /hand|link/],
+  ['arrow', /arrow|normal|default|pointer/],
+];
+
+/** A Windows pack: the .cur and .ani files directly in `dir`, and its install.inf if any. */
+function windowsTheme(tree: Tree, dir: string, fallbackName: string): ImportedTheme | null {
+  const prefix = dir ? `${dir}/` : '';
+  const cursors = new Map<string, string>();
+  let inf: Buffer | null = null;
+  for (const key of tree.keys()) {
+    if (!key.startsWith(prefix) || key.slice(prefix.length).includes('/')) continue;
+    const base = key.slice(prefix.length).toLowerCase();
+    if (/\.(cur|ani)$/.test(base)) cursors.set(base, key);
+    else if (base.endsWith('.inf')) inf ??= resolve(tree, key)?.data ?? null;
+  }
+  if (cursors.size === 0) return null;
+
+  const fileFor = new Map<string, string>();
+  let name: string | null = null;
+  if (inf) {
+    const parsed = parseInf(inf.toString('latin1'));
+    name = parsed.name;
+    for (const [role, file] of parsed.files) {
+      const key = cursors.get(file.toLowerCase());
+      if (key) fileFor.set(role, key);
+    }
+  }
+  if (!fileFor.has('arrow')) {
+    const unclaimed = new Set(cursors.keys());
+    for (const [role, pattern] of WINDOWS_NAME_GUESSES) {
+      if (fileFor.has(role)) continue;
+      const match = [...unclaimed].find((file) => pattern.test(file.replace(/\.(cur|ani)$/, '')));
+      if (!match) continue;
+      unclaimed.delete(match);
+      fileFor.set(role, cursors.get(match) as string);
+    }
+  }
+  // A single cursor on its own is the pointer.
+  if (cursors.size === 1 && fileFor.size === 0) fileFor.set('arrow', [...cursors.values()][0]);
+
+  return themeFromRoles(name || (dir ? path.posix.basename(dir) : fallbackName), ({ windows }) => {
+    const key = fileFor.get(windows.toLowerCase());
+    const file = key ? resolve(tree, key) : null;
+    if (!key || !file) return null;
+    return key.toLowerCase().endsWith('.ani') ? aniFrames(file.data) : curFrames(file.data);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -504,9 +847,19 @@ function curxpTheme(tree: Tree, schemePath: string, fallbackName: string): Impor
 
 function findThemes(tree: Tree, fallbackName: string): ImportedTheme[] {
   const themes: ImportedTheme[] = [];
+  const windowsDirs = new Set<string>();
   for (const key of tree.keys()) {
-    if (path.posix.basename(key).toLowerCase() !== 'scheme.ini') continue;
-    const theme = curxpTheme(tree, key, fallbackName);
+    const base = path.posix.basename(key).toLowerCase();
+    if (base === 'scheme.ini') {
+      const theme = curxpTheme(tree, key, fallbackName);
+      if (theme) themes.push(theme);
+    } else if (/\.(cur|ani)$/.test(base)) {
+      const dir = path.posix.dirname(key);
+      windowsDirs.add(dir === '.' ? '' : dir);
+    }
+  }
+  for (const dir of windowsDirs) {
+    const theme = windowsTheme(tree, dir, fallbackName);
     if (theme) themes.push(theme);
   }
   themes.push(...xcursorThemes(tree, fallbackName));
@@ -574,9 +927,12 @@ export async function importCursorThemes(
   source: string,
   options: { base: string; taken: (id: string) => Promise<boolean> },
 ): Promise<string[]> {
+  // A Windows pack's install.inf stands for its folder.
+  if (/\.inf$/i.test(source)) source = path.dirname(source);
   const stat = await fs.stat(source);
   const fallbackName =
-    path.basename(source).replace(/\.(curxptheme|zip|tar(\.(gz|xz|bz2))?|tgz|txz|tbz2?)$/i, '') || 'Imported cursors';
+    path.basename(source).replace(/\.(curxptheme|zip|tar(\.(gz|xz|bz2))?|tgz|txz|tbz2?|cur|ani)$/i, '') ||
+    'Imported cursors';
   const tree: Tree = new Map();
   const budget = newBudget();
 
@@ -585,7 +941,9 @@ export async function importCursorThemes(
   } else {
     if (stat.size > MAX_SOURCE_BYTES) throw new ImportError(TOO_BIG);
     const data = await fs.readFile(source);
-    if (!(await readArchive(data, source, tree, budget))) {
+    if (/\.(cur|ani)$/i.test(source)) {
+      tree.set(path.basename(source), { data });
+    } else if (!(await readArchive(data, source, tree, budget))) {
       throw new ImportError('Din can’t read this kind of file as cursors.');
     }
   }

@@ -3632,8 +3632,8 @@ function SystemCursorPicker() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            CursorXP themes (.CurXPTheme) and Linux cursor themes, as a folder or an archive. Animated cursors
-            play everywhere.
+            CursorXP themes (.CurXPTheme), Windows cursors (.cur, .ani) and Linux cursor themes, as a folder
+            or an archive. Animated cursors play everywhere.
           </p>
         </div>
       )}
@@ -3684,7 +3684,7 @@ function SystemCursorPicker() {
 /** What the importer reads, for the file picker. */
 const CURSOR_IMPORT_FILTER = {
   name: 'Cursor themes',
-  patterns: ['*.CurXPTheme', '*.zip', '*.tar', '*.tar.gz', '*.tgz', '*.tar.xz', '*.txz', '*.tar.bz2', '*.tbz2'],
+  patterns: ['*.CurXPTheme', '*.zip', '*.tar', '*.tar.gz', '*.tgz', '*.tar.xz', '*.txz', '*.tar.bz2', '*.tbz2', '*.cur', '*.ani', '*.inf'],
   mimeTypes: [],
 };
 
