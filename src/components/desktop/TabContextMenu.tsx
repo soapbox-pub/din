@@ -32,6 +32,7 @@ export function TabContextMenu({
   onTogglePin,
   items,
   onCloseAutoFocus,
+  disabled,
   children,
 }: {
   tabId: string;
@@ -51,11 +52,13 @@ export function TabContextMenu({
   items?: ReactNode;
   /** An item that starts inline editing prevents this, so the field keeps focus. */
   onCloseAutoFocus?: (event: Event) => void;
+  /** Leave right-clicks to the native menu (its title is being edited). */
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuTrigger asChild disabled={disabled}>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-52" onCloseAutoFocus={onCloseAutoFocus}>
         {(onNew || onReopen) && (
           <>

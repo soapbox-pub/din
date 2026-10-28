@@ -17,8 +17,8 @@ import { cn } from '@/lib/utils';
 
 /**
  * A conversation's title, editable in place: Enter or leaving the field
- * saves it, Escape gives up. Shared by the header and the list, which both
- * offer Rename (the header's ⋯ menu, either one's right-click menu).
+ * saves it, Escape gives up. Shared by the tabs and the list, which both
+ * offer Rename in their right-click menus.
  */
 export function ConversationTitleInput({
   session,

@@ -48,6 +48,7 @@ export function TabStrip({
   tabMenuItems,
   onReopen,
   onTabMenuCloseAutoFocus,
+  editing,
 }: {
   tabs: TabDescriptor[];
   activeId: string;
@@ -70,6 +71,8 @@ export function TabStrip({
   onReopen?: () => void;
   /** Passed to a tab's right-click menu (see TabContextMenu). */
   onTabMenuCloseAutoFocus?: (event: Event) => void;
+  /** A tab whose title is being edited, and the field to show in its place. */
+  editing?: { id: string; editor: ReactNode } | null;
 }) {
   const tabTransfer = useTabTransfer(transfer, tabs.length);
   const chrome = useWindowChrome();
@@ -126,9 +129,11 @@ export function TabStrip({
           items={tabMenuItems?.(tab.id)}
           onReopen={onReopen}
           onCloseAutoFocus={onTabMenuCloseAutoFocus}
+          disabled={editing?.id === tab.id}
         >
           <TabButton
             tab={tab}
+            editor={editing?.id === tab.id ? editing.editor : undefined}
             active={tab.id === activeId}
             dragging={reorder.draggingId === tab.id}
             lockedWidth={lockedWidth}
@@ -170,6 +175,7 @@ function narrowIcon(active: boolean) {
  */
 function TabButton({
   tab,
+  editor,
   active,
   dragging,
   lockedWidth = null,
@@ -180,6 +186,8 @@ function TabButton({
   ...props
 }: {
   tab: TabDescriptor;
+  /** Shown instead of the title while it's being edited. */
+  editor?: ReactNode;
   active: boolean;
   dragging: boolean;
   /** Hold the tab at this width instead of fitting it to the strip. */
@@ -238,7 +246,19 @@ function TabButton({
           {tab.icon}
         </span>
       )}
-      <span className={cn('min-w-0 flex-1 truncate', tab.icon && '@max-[3.25rem]:hidden')}>{tab.title}</span>
+      {editor ? (
+        // The field's clicks, drags and keys are its own, not the tab's.
+        <span
+          className="min-w-0 flex-1"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {editor}
+        </span>
+      ) : (
+        <span className={cn('min-w-0 flex-1 truncate', tab.icon && '@max-[3.25rem]:hidden')}>{tab.title}</span>
+      )}
       <button
         type="button"
         aria-label={`Close ${tab.title}`}

@@ -1,19 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-  ArrowDown,
-  ChevronDown,
-  Folder,
-  FolderOpen,
-  GitFork,
-  Loader2,
-  MoreHorizontal,
-  PanelLeft,
-  Pencil,
-  SquarePen,
-  Trash2,
-} from 'lucide-react';
+import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, SquarePen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -221,6 +209,8 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   const [closed, setClosed] = useState<AssistantTab[]>([]);
   // The conversation whose title is being edited (Rename, or /rename).
   const [renaming, setRenaming] = useState<string | null>(null);
+  // The conversation a tab's Delete is asking about.
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [listWidth, setListWidth] = useState(loadListWidth);
@@ -365,6 +355,9 @@ export function Assistant({ windowId, params }: AppComponentProps) {
     select(id);
     setRenaming(sessionID);
   };
+  // Renamed in its tab, while the conversation is open in one.
+  const renamingTab = renaming ? tabs.find((t) => t.sessionID === renaming) : undefined;
+  const renamingSession = renaming ? sessions[sessionIDs.indexOf(renaming)]?.session : undefined;
 
   const fork = useForkSession();
   const { toast } = useToast();
@@ -506,6 +499,9 @@ export function Assistant({ windowId, params }: AppComponentProps) {
                   <>
                     <ContextMenuItem onSelect={() => renameTab(id)}>Rename</ContextMenuItem>
                     <ContextMenuItem onSelect={() => forkSession(sessionID)}>Fork</ContextMenuItem>
+                    <ContextMenuItem variant="destructive" onSelect={() => setDeleting(sessionID)}>
+                      Delete
+                    </ContextMenuItem>
                   </>
                 )
               );
@@ -514,6 +510,20 @@ export function Assistant({ windowId, params }: AppComponentProps) {
               if (renamingFromMenu.current) e.preventDefault();
               renamingFromMenu.current = false;
             }}
+            editing={
+              renamingTab && renamingSession
+                ? {
+                    id: renamingTab.id,
+                    editor: (
+                      <ConversationTitleInput
+                        session={renamingSession}
+                        onDone={() => setRenaming(null)}
+                        className="h-5 rounded-sm px-1 text-xs md:text-xs"
+                      />
+                    ),
+                  }
+                : null
+            }
           />
           <WindowControls />
         </WindowDragRegion>
@@ -521,9 +531,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
           <Conversation
             key={activeTab.sessionID}
             sessionID={activeTab.sessionID}
-            editingTitle={renaming === activeTab.sessionID}
-            onEditingTitleChange={(editing) => setRenaming(editing ? activeTab.sessionID : null)}
-            onDeleted={() => activeTab.sessionID && removeSessions(new Set([activeTab.sessionID]))}
+            onRename={() => setRenaming(activeTab.sessionID)}
             onNew={startNew}
             onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
           />
@@ -537,6 +545,12 @@ export function Assistant({ windowId, params }: AppComponentProps) {
           />
         )}
       </main>
+      <DeleteConversationDialog
+        session={deleting ? sessions[sessionIDs.indexOf(deleting)]?.session : undefined}
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        onDeleted={() => deleting && removeSessions(new Set([deleting]))}
+      />
     </div>
   );
 }
@@ -568,17 +582,13 @@ function TabIcon({ state, favicon }: { state: TabInfo['state']; favicon?: string
 
 function Conversation({
   sessionID,
-  editingTitle,
-  onEditingTitleChange: setEditingTitle,
-  onDeleted,
+  onRename,
   onNew,
   onFork,
 }: {
   sessionID: string;
-  /** The title is being edited (Rename, or /rename). */
-  editingTitle: boolean;
-  onEditingTitleChange: (editing: boolean) => void;
-  onDeleted: () => void;
+  /** Edit its title in its tab (/rename on its own). */
+  onRename: () => void;
   onNew: (directory?: string) => void;
   /** Fork it, whole or from before `message`. */
   onFork: (message?: UserMessage) => void;
@@ -660,7 +670,7 @@ function Conversation({
       case 'fork':
         return setForking(true);
       case 'rename':
-        if (!args) return setEditingTitle(true);
+        if (!args) return onRename();
         return rename.mutateAsync({ sessionID, title: args }, { onError: fail('Couldn’t rename') });
       case 'stop':
         return interrupt.mutateAsync(sessionID, { onError: fail('Couldn’t stop') });
@@ -681,16 +691,6 @@ function Conversation({
         toBackground();
       }}
     >
-      <ConversationHeader
-        session={session}
-        home={home}
-        running={running}
-        context={messages ? contextUsage(messages, models) : null}
-        editing={editingTitle}
-        onEditingChange={setEditingTitle}
-        onDeleted={onDeleted}
-        onFork={() => onFork()}
-      />
       <ForkDialog messages={messages ?? []} open={forking} onOpenChange={setForking} onFork={onFork} />
       <div className="relative flex min-h-0 flex-1 flex-col">
         {/* Focusable so arrow keys, Page Up/Down, Home and End scroll it after a click. */}
@@ -753,7 +753,7 @@ function Conversation({
           </Button>
         )}
       </div>
-      <div className="mx-auto w-full max-w-3xl space-y-3 px-4 pb-4 @2xl/assistant:px-6">
+      <div className="mx-auto w-full max-w-3xl space-y-3 px-4 pb-2 @2xl/assistant:px-6">
         {permissions.map((request) => (
           <PermissionCard key={request.id} request={request} />
         ))}
@@ -791,114 +791,32 @@ function Conversation({
             onCycleAgent={cycleAgent}
           />
         </div>
+        {session && (
+          <StatusLine session={session} home={home} context={messages ? contextUsage(messages, models) : null} />
+        )}
       </div>
     </div>
   );
 }
 
-function ConversationHeader({
-  session,
-  home,
-  running,
-  context,
-  editing,
-  onEditingChange: setEditing,
-  onDeleted,
-  onFork,
-}: {
-  session: SessionInfo | undefined;
-  home?: string;
-  running: boolean;
-  /** How full the model's context window is, as a fraction. */
-  context: number | null;
-  /** The title is being edited (Rename, or /rename). */
-  editing: boolean;
-  onEditingChange: (editing: boolean) => void;
-  onDeleted: () => void;
-  onFork: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  // Rename puts focus in the title field; the closing menu mustn't take it back.
-  const renaming = useRef(false);
-  const rename = () => {
-    renaming.current = true;
-    setEditing(true);
-  };
-  const keepFocus = (e: Event) => {
-    if (renaming.current) e.preventDefault();
-    renaming.current = false;
-  };
-  const cost = session ? formatCost(session.cost) : '';
-
+/** Under the composer: where the conversation works, what it has cost, and how full the model's context is. */
+function StatusLine({ session, home, context }: { session: SessionInfo; home?: string; context: number | null }) {
+  const cost = formatCost(session.cost);
   return (
-    <header className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-      <ContextMenu>
-        <ContextMenuTrigger asChild disabled={!session || editing}>
-          <div className="min-w-0 flex-1">
-            {editing && session ? (
-              <ConversationTitleInput session={session} onDone={() => setEditing(false)} />
-            ) : session ? (
-              <h2 className="truncate text-sm font-semibold">{sessionTitle(session)}</h2>
-            ) : (
-              <Skeleton className="h-4 w-48" />
-            )}
-            {session && (
-              <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-                {running ? (
-                  <Loader2 className="size-3 shrink-0 animate-spin text-primary" role="img" aria-label="Working" />
-                ) : (
-                  <Folder className="size-3 shrink-0" aria-hidden />
-                )}
-                <span className="truncate" title={session.location.directory}>
-                  {tildify(session.location.directory, home)}
-                </span>
-                {cost && <span aria-label="Cost so far">· {cost}</span>}
-                {context !== null && (
-                  <span
-                    className={cn('shrink-0', context >= 0.8 && 'text-amber-600 dark:text-amber-400')}
-                    title="How much of the model’s context window the conversation fills"
-                  >
-                    · {formatContextUsage(context)} context
-                  </span>
-                )}
-              </p>
-            )}
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent onCloseAutoFocus={keepFocus}>
-          <ContextMenuItem onSelect={rename}>
-            <Pencil aria-hidden /> Rename
-          </ContextMenuItem>
-          <ContextMenuItem onSelect={onFork}>
-            <GitFork aria-hidden /> Fork
-          </ContextMenuItem>
-          <ContextMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
-            <Trash2 aria-hidden /> Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      {session && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-8" aria-label="Conversation options">
-              <MoreHorizontal className="size-4" aria-hidden />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" onCloseAutoFocus={keepFocus}>
-            <DropdownMenuItem onSelect={rename}>
-              <Pencil aria-hidden /> Rename
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onFork}>
-              <GitFork aria-hidden /> Fork
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
-              <Trash2 aria-hidden /> Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+    <div className="flex h-4 items-center gap-3 px-1 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate" title={session.location.directory}>
+        {tildify(session.location.directory, home)}
+      </span>
+      {cost && <span className="shrink-0" aria-label="Cost so far">{cost}</span>}
+      {context !== null && (
+        <span
+          className={cn('shrink-0', context >= 0.8 && 'text-amber-600 dark:text-amber-400')}
+          title="How much of the model’s context window the conversation fills"
+        >
+          {formatContextUsage(context)} context
+        </span>
       )}
-      <DeleteConversationDialog session={session} open={confirming} onOpenChange={setConfirming} onDeleted={onDeleted} />
-    </header>
+    </div>
   );
 }
 
