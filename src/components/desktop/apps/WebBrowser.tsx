@@ -1911,6 +1911,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           history={browsingHistory}
           onChangeValue={(text) => updateTab(activeId, { address: text })}
           onNavigate={navigate}
+          onOpenLocation={(url) => openTab(url, true, null, activeId)}
           onionLocation={onionLocation}
           nsiteLocation={siteLocations.nsite}
           site={
@@ -2190,6 +2191,7 @@ function AddressBar({
   history,
   onChangeValue,
   onNavigate,
+  onOpenLocation,
   onionLocation,
   nsiteLocation,
   site,
@@ -2201,6 +2203,8 @@ function AddressBar({
   history: BrowserHistoryEntry[];
   onChangeValue: (text: string) => void;
   onNavigate: (raw: string) => void;
+  /** Open the onion service or nsite the page names, in a new tab beside it. */
+  onOpenLocation: (url: string) => void;
   /** The onion service the page names (Onion-Location), offered at the end of the bar. */
   onionLocation?: string | null;
   /** The nsite the page names (Nsite-Location), offered at the end of the bar. */
@@ -2345,9 +2349,9 @@ function AddressBar({
           {showNsite && (
             <button
               type="button"
-              onClick={() => onNavigate(nsiteLocation)}
-              title={`Open this site's nsite: ${nsiteLocation}`}
-              aria-label="Open this site's nsite"
+              onClick={() => onOpenLocation(nsiteLocation)}
+              title={`Open this site's nsite in a new tab: ${nsiteLocation}`}
+              aria-label="Open this site's nsite in a new tab"
               className={cn(
                 badgeClass,
                 'text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-400',
@@ -2360,9 +2364,9 @@ function AddressBar({
           {showOnion && (
             <button
               type="button"
-              onClick={() => onNavigate(onionLocation)}
-              title={`Open this site's onion service: ${hostnameOf(onionLocation) ?? onionLocation}`}
-              aria-label="Open this site's onion service"
+              onClick={() => onOpenLocation(onionLocation)}
+              title={`Open this site's onion service in a new tab: ${hostnameOf(onionLocation) ?? onionLocation}`}
+              aria-label="Open this site's onion service in a new tab"
               className={cn(
                 badgeClass,
                 'text-violet-700 hover:bg-violet-500/15 dark:text-violet-400',
