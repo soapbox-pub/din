@@ -5,6 +5,7 @@ import { Composer } from '@/components/desktop/assistant/Composer';
 import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
 import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
 import { Transcript } from '@/components/desktop/assistant/Transcript';
+import { useQuestionHandoff } from '@/components/desktop/assistant/useQuestionHandoff';
 import {
   useAssistantReady,
   useAssistantSession,
@@ -33,6 +34,7 @@ export function AssistantPalette({ assistant, onClose }: { assistant: CadAssista
   const { data: transcript } = useSessionMessages(sessionID);
   const { data: permissions = [] } = useSessionPermissions(sessionID);
   const { data: forms = [] } = useSessionForms(sessionID);
+  const composerRef = useQuestionHandoff(forms.length > 0);
   const { data: queued } = useSessionInbox(sessionID);
   const { model, setModel, models } = usePreferredModel();
   const interrupt = useInterruptSession();
@@ -124,31 +126,33 @@ export function AssistantPalette({ assistant, onClose }: { assistant: CadAssista
             {forms.map((form) => (
               <FormCard key={form.id} form={form} />
             ))}
-            <Composer
-              textareaRef={textareaRef}
-              running={running}
-              busy={sending}
-              placeholder={running ? 'Add something while it works…' : sessionID ? 'Ask for another change…' : 'What should change?'}
-              onSubmit={(text, files) => {
-                stick.current = true;
-                return submit(text, files).catch((error: unknown) => {
-                  fail('Couldn’t send')(error);
-                  throw error;
-                });
-              }}
-              onStop={() => sessionID && interrupt.mutate(sessionID, { onError: fail('Couldn’t stop') })}
-              toolbar={
-                <ModelPicker
-                  models={models}
-                  value={session?.model ?? model}
-                  recent={model ? [modelKey(model)] : []}
-                  onChange={(m) => {
-                    setModel(m);
-                    if (sessionID) switchModel.mutate({ sessionID, model: m }, { onError: fail('Couldn’t switch models') });
-                  }}
-                />
-              }
-            />
+            <div ref={composerRef} hidden={forms.length > 0}>
+              <Composer
+                textareaRef={textareaRef}
+                running={running}
+                busy={sending}
+                placeholder={running ? 'Add something while it works…' : sessionID ? 'Ask for another change…' : 'What should change?'}
+                onSubmit={(text, files) => {
+                  stick.current = true;
+                  return submit(text, files).catch((error: unknown) => {
+                    fail('Couldn’t send')(error);
+                    throw error;
+                  });
+                }}
+                onStop={() => sessionID && interrupt.mutate(sessionID, { onError: fail('Couldn’t stop') })}
+                toolbar={
+                  <ModelPicker
+                    models={models}
+                    value={session?.model ?? model}
+                    recent={model ? [modelKey(model)] : []}
+                    onChange={(m) => {
+                      setModel(m);
+                      if (sessionID) switchModel.mutate({ sessionID, model: m }, { onError: fail('Couldn’t switch models') });
+                    }}
+                  />
+                }
+              />
+            </div>
           </div>
         </>
       )}

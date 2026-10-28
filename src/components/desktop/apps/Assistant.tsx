@@ -30,6 +30,7 @@ import { FileLinkBaseContext } from '@/components/desktop/assistant/fileLinks';
 import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
 import { SessionList } from '@/components/desktop/assistant/SessionList';
 import { Transcript } from '@/components/desktop/assistant/Transcript';
+import { useQuestionHandoff } from '@/components/desktop/assistant/useQuestionHandoff';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import {
   useActiveSessions,
@@ -218,6 +219,7 @@ function Conversation({
   const { data: transcript, isLoading } = useSessionMessages(sessionID);
   const { data: permissions = [] } = useSessionPermissions(sessionID);
   const { data: forms = [] } = useSessionForms(sessionID);
+  const composerRef = useQuestionHandoff(forms.length > 0);
   const { data: queued } = useSessionInbox(sessionID);
   const { data: active = [] } = useActiveSessions();
   const { models, setModel } = usePreferredModel();
@@ -334,34 +336,36 @@ function Conversation({
         {forms.map((form) => (
           <FormCard key={form.id} form={form} />
         ))}
-        <Composer
-          autoFocus
-          running={running}
-          busy={send.isPending || compact.isPending}
-          placeholder={running ? 'Add something while it works…' : 'Reply, or type / for commands…'}
-          onSubmit={(text, files) => {
-            stick.current = true;
-            return send.mutateAsync({ text, files }, { onError: fail('Couldn’t send') });
-          }}
-          commands={commands}
-          onCommand={runCommand}
-          onStop={() => interrupt.mutate(sessionID, { onError: fail('Couldn’t stop') })}
-          toolbar={
-            <>
-              <ModelPicker
-                models={models}
-                value={session?.model}
-                recent={recentData}
-                onChange={(model) => {
-                  setModel(model);
-                  switchModel.mutate({ sessionID, model }, { onError: fail('Couldn’t switch models') });
-                }}
-              />
-              <AgentPicker value={agent} onChange={changeAgent} />
-            </>
-          }
-          onCycleAgent={cycleAgent}
-        />
+        <div ref={composerRef} hidden={forms.length > 0}>
+          <Composer
+            autoFocus
+            running={running}
+            busy={send.isPending || compact.isPending}
+            placeholder={running ? 'Add something while it works…' : 'Reply, or type / for commands…'}
+            onSubmit={(text, files) => {
+              stick.current = true;
+              return send.mutateAsync({ text, files }, { onError: fail('Couldn’t send') });
+            }}
+            commands={commands}
+            onCommand={runCommand}
+            onStop={() => interrupt.mutate(sessionID, { onError: fail('Couldn’t stop') })}
+            toolbar={
+              <>
+                <ModelPicker
+                  models={models}
+                  value={session?.model}
+                  recent={recentData}
+                  onChange={(model) => {
+                    setModel(model);
+                    switchModel.mutate({ sessionID, model }, { onError: fail('Couldn’t switch models') });
+                  }}
+                />
+                <AgentPicker value={agent} onChange={changeAgent} />
+              </>
+            }
+            onCycleAgent={cycleAgent}
+          />
+        </div>
       </div>
     </div>
   );

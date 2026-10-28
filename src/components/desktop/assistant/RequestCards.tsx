@@ -216,7 +216,7 @@ export function FormCard({ form, className }: { form: FormInfo; className?: stri
               </nav>
             )}
             {current && (
-              <div ref={stepRef} tabIndex={-1} className="outline-none">
+              <div ref={stepRef} tabIndex={-1} data-form-step className="outline-none">
                 <FormFieldInput
                   key={current.key}
                   field={current}
