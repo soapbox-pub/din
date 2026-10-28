@@ -4,6 +4,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useProfileTheme } from '@/hooks/useProfileTheme';
 import { toast } from '@/hooks/useToast';
+import { useThemePreview } from '@/lib/themePreview';
 import {
   ACTIVE_PROFILE_THEME_KIND,
   PRESET_THEME_COLORS,
@@ -24,6 +25,16 @@ export function useDesktopTheme(): DesktopTheme | null {
   const { config } = useAppContext();
   if (!config.customThemeEnabled) return null;
   return config.syncProfileTheme ? profileTheme : config.localTheme;
+}
+
+/**
+ * The theme the desktop paints: one being tried on (see themePreview), else
+ * the one worn. Only for painting; anything that saves uses useDesktopTheme.
+ */
+export function usePaintedTheme(): DesktopTheme | null {
+  const preview = useThemePreview();
+  const theme = useDesktopTheme();
+  return preview ?? theme;
 }
 
 export type AppearanceMode = 'light' | 'dark' | 'custom';
@@ -91,7 +102,7 @@ export function useDesktopThemeEditor() {
         const event = await publishEvent({
           kind: ACTIVE_PROFILE_THEME_KIND,
           content: '',
-          tags: buildProfileThemeTags(next),
+          tags: buildProfileThemeTags(next, pubkey),
         });
         updateConfig((current) =>
           current.profileThemeMetadata?.pubkey === event.pubkey
@@ -190,6 +201,35 @@ export function useDesktopThemeEditor() {
     [config.localTheme, profileTheme, pubkey, updateConfig, applyProfile],
   );
 
+  /**
+   * Change the custom theme worn by hand. A theme taken from someone else
+   * stops crediting them; one of the user's own keeps its name, so it can
+   * be updated. `local` keeps it on this computer, as applyLocal does.
+   */
+  const edit = useCallback(
+    (next: DesktopTheme, { local = false }: { local?: boolean } = {}) => {
+      const own = next.source && next.source.pubkey === pubkey;
+      const edited = own ? next : { ...next, source: undefined };
+      if (local) applyLocal(edited);
+      else apply(edited);
+    },
+    [apply, applyLocal, pubkey],
+  );
+
+  /** What's worn now, to put back later with `restore` (Undo). */
+  const snapshot = useCallback(
+    (): { mode: AppearanceMode; theme: DesktopTheme | null } => ({ mode, theme }),
+    [mode, theme],
+  );
+
+  const restore = useCallback(
+    (saved: { mode: AppearanceMode; theme: DesktopTheme | null }) => {
+      if (saved.theme) apply(saved.theme);
+      else setMode(saved.mode);
+    },
+    [apply, setMode],
+  );
+
   const canSync = !!user;
   const syncProfileTheme = config.syncProfileTheme;
 
@@ -206,9 +246,26 @@ export function useDesktopThemeEditor() {
       base,
       apply,
       applyLocal,
+      edit,
+      snapshot,
+      restore,
       setMode,
       setSync,
     }),
-    [theme, mode, syncing, canSync, syncProfileTheme, base, apply, applyLocal, setMode, setSync],
+    [
+      theme,
+      mode,
+      syncing,
+      canSync,
+      syncProfileTheme,
+      base,
+      apply,
+      applyLocal,
+      edit,
+      snapshot,
+      restore,
+      setMode,
+      setSync,
+    ],
   );
 }

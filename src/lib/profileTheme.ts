@@ -20,6 +20,9 @@ import { isDarkThemeColor } from '@/lib/themeColor';
 /** Replaceable event kind for the user's active profile theme. */
 export const ACTIVE_PROFILE_THEME_KIND = 16767;
 
+/** Addressable event kind for a named, shareable theme (see src/lib/themeDefinition.ts). */
+export const THEME_DEFINITION_KIND = 36767;
+
 const HEX_COLOR_REGEX = /^#[0-9a-f]{6}$/;
 
 /**
@@ -44,6 +47,16 @@ const ThemeFontSchema = z.object({
   url: HttpsUrlSchema,
 });
 
+const HEX_PUBKEY_REGEX = /^[0-9a-f]{64}$/;
+
+/** Who made a theme someone wears: its author, and its `d` tag when it's a named theme. */
+const ThemeSourceSchema = z.object({
+  pubkey: z.string().regex(HEX_PUBKEY_REGEX),
+  identifier: z.string().optional(),
+});
+
+export type ThemeSource = z.infer<typeof ThemeSourceSchema>;
+
 export const ProfileThemeSchema = z.object({
   colors: z.object({
     background: HexColorSchema,
@@ -63,6 +76,11 @@ export const ProfileThemeSchema = z.object({
     .optional(),
   /** Human-readable theme name. */
   title: z.string().optional(),
+  /**
+   * The named theme this one was taken from, credited in the profile theme's
+   * `a`/`p` tags. Editing someone else's theme drops it.
+   */
+  source: ThemeSourceSchema.optional(),
 });
 
 export type ProfileTheme = z.infer<typeof ProfileThemeSchema>;
@@ -120,8 +138,8 @@ export const PRESET_THEME_COLORS: Record<'light' | 'dark', ProfileTheme['colors'
   dark: { background: '#020817', text: '#f8fafc', primary: '#f8fafc' },
 };
 
-/** The tags of a kind 16767 event for a theme, as `parseProfileThemeEvent` reads them. */
-export function buildProfileThemeTags(theme: ProfileTheme): string[][] {
+/** A theme's look as `c`, `f` and `bg` tags, shared by kinds 16767 and 36767. */
+export function buildThemeLookTags(theme: ProfileTheme): string[][] {
   const tags: string[][] = [
     ['c', theme.colors.background, 'background'],
     ['c', theme.colors.text, 'text'],
@@ -133,9 +151,39 @@ export function buildProfileThemeTags(theme: ProfileTheme): string[][] {
     const { url, mode, mimeType } = theme.background;
     tags.push(['bg', `url ${url}`, `mode ${mode}`, `m ${mimeType}`]);
   }
+  return tags;
+}
+
+/**
+ * The tags of a kind 16767 event for a theme, as `parseProfileThemeEvent`
+ * reads them. A theme taken from a named one credits it with an `a` tag, and
+ * its maker with a `p` tag when that's someone other than `author`.
+ */
+export function buildProfileThemeTags(theme: ProfileTheme, author?: string): string[][] {
+  const tags = buildThemeLookTags(theme);
   if (theme.title) tags.push(['title', theme.title]);
+  const { source } = theme;
+  if (source?.identifier) {
+    tags.push(['a', `${THEME_DEFINITION_KIND}:${source.pubkey}:${source.identifier}`]);
+  }
+  if (source && source.pubkey !== author) tags.push(['p', source.pubkey]);
   tags.push(['alt', 'Active profile theme']);
   return tags;
+}
+
+/** Whether two themes look the same: colors, fonts and background. */
+export function sameThemeLook(a: ProfileTheme | DesktopTheme, b: ProfileTheme | DesktopTheme): boolean {
+  const font = (f?: ThemeFont) => (f ? `${f.family}\u0000${f.url}` : '');
+  const bg = (theme: ProfileTheme | DesktopTheme) =>
+    theme.background ? `${theme.background.url}\u0000${theme.background.mode}` : '';
+  return (
+    a.colors.background === b.colors.background &&
+    a.colors.text === b.colors.text &&
+    a.colors.primary === b.colors.primary &&
+    font(a.fonts.body) === font(b.fonts.body) &&
+    font(a.fonts.title) === font(b.fonts.title) &&
+    bg(a) === bg(b)
+  );
 }
 
 /** Stored sync state for the logged-in user's active profile theme. */
@@ -187,6 +235,23 @@ function parseBackgroundTag(tag: string[]): ProfileTheme['background'] | null {
 }
 
 /**
+ * The credit on a profile theme: the named theme in its `a` tag, or else the
+ * maker in its `p` tag.
+ */
+function parseThemeSource(tags: string[][]): ThemeSource | undefined {
+  const a = tags.find(([name]) => name === 'a')?.[1];
+  if (a) {
+    const [kind, pubkey, ...rest] = a.split(':');
+    const identifier = rest.join(':');
+    if (kind === String(THEME_DEFINITION_KIND) && HEX_PUBKEY_REGEX.test(pubkey ?? '') && identifier) {
+      return { pubkey, identifier };
+    }
+  }
+  const p = tags.find(([name]) => name === 'p')?.[1];
+  return p && HEX_PUBKEY_REGEX.test(p) ? { pubkey: p } : undefined;
+}
+
+/**
  * Parse a kind 16767 "Active Profile Theme" event into a sanitized
  * {@link ProfileTheme}. Returns `null` when the event doesn't carry the three
  * required color roles. Invalid optional parts (fonts, background) are
@@ -194,13 +259,23 @@ function parseBackgroundTag(tag: string[]): ProfileTheme['background'] | null {
  */
 export function parseProfileThemeEvent(event: NostrEvent): ProfileTheme | null {
   if (event.kind !== ACTIVE_PROFILE_THEME_KIND) return null;
+  const theme = parseThemeTags(event.tags);
+  if (!theme) return null;
+  const source = parseThemeSource(event.tags);
+  return source ? { ...theme, source } : theme;
+}
 
+/**
+ * A theme's look and title from the `c`, `f`, `bg` and `title` tags kinds
+ * 16767 and 36767 share, or `null` without the three required colors.
+ */
+export function parseThemeTags(tags: string[][]): ProfileTheme | null {
   const colors: Partial<ProfileTheme['colors']> = {};
   const fonts: ProfileTheme['fonts'] = {};
   let background: ProfileTheme['background'];
   let title: string | undefined;
 
-  for (const tag of event.tags) {
+  for (const tag of tags) {
     switch (tag[0]) {
       case 'c': {
         const [, rawColor, marker] = tag;

@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 import { MonitorsContext } from '@/contexts/MonitorsContext';
-import { useDesktopTheme } from '@/hooks/useDesktopTheme';
+import { usePaintedTheme } from '@/hooks/useDesktopTheme';
 import { rectStyle, viewportMonitor } from '@/lib/monitors';
 
 /**
@@ -17,7 +17,7 @@ export function Wallpaper({
   children: React.ReactNode;
   backdrop?: React.ReactNode;
 }) {
-  const theme = useDesktopTheme();
+  const theme = usePaintedTheme();
   const layout = useContext(MonitorsContext);
   const monitors = layout?.monitors ?? [viewportMonitor()];
   const primary = layout?.primary ?? monitors[0];

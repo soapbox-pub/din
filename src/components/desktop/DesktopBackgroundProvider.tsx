@@ -19,7 +19,7 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useDesktopThemeEditor } from '@/hooks/useDesktopTheme';
 import { useToast } from '@/hooks/useToast';
-import { useUploadFile } from '@/hooks/useUploadFile';
+import { useUploadLocalPicture } from '@/hooks/useUploadLocalPicture';
 import { getColorSchemeBridge } from '@/lib/colorScheme';
 import { cleanFsError, getFsBridge, joinPath, localFileUrl, parentPath } from '@/lib/fs';
 import { isLocalBackground, type DesktopTheme } from '@/lib/profileTheme';
@@ -40,9 +40,6 @@ const IMAGE_TYPES: Record<string, string> = {
 
 /** Where pictures used on this computer only are kept, under the home folder. */
 const BACKGROUNDS_DIR = '.local/share/din/backgrounds';
-
-/** The biggest picture uploaded as a background. */
-const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 
 function imageType(name: string): string | null {
   const dot = name.lastIndexOf('.');
@@ -88,7 +85,7 @@ export function DesktopBackgroundProvider({ children }: { children: ReactNode })
   const { pickFile } = useFilePicker();
   const { open } = useWindowActions();
   const { toast } = useToast();
-  const { mutateAsync: upload } = useUploadFile();
+  const uploadPicture = useUploadLocalPicture();
 
   /** A local picture waiting on the upload question. */
   const [pending, setPending] = useState<string | null>(null);
@@ -118,7 +115,7 @@ export function DesktopBackgroundProvider({ children }: { children: ReactNode })
         await fs.mkdir(dir);
         kept = await fs.copyInto(path, dir);
       }
-      editor.applyLocal(withBackground(editor.base(), localFileUrl(kept), mimeType));
+      editor.edit(withBackground(editor.base(), localFileUrl(kept), mimeType), { local: true });
 
       // The copy of the picture this replaces isn't needed any more.
       if (localThemeBackground && isLocalBackground(localThemeBackground)) {
@@ -134,17 +131,10 @@ export function DesktopBackgroundProvider({ children }: { children: ReactNode })
   /** Upload a picture and wear it in the profile theme. */
   const uploadAndApply = useCallback(
     async (path: string, mimeType: string) => {
-      const fs = getFsBridge();
-      if (!fs) throw new Error('Pictures on this computer need the Din shell.');
-      const { data, truncated } = await fs.readFile(path, MAX_UPLOAD_BYTES);
-      if (truncated) throw new Error('The picture is too big to upload.');
-      const name = path.slice(path.lastIndexOf('/') + 1);
-      const tags = await upload(new File([new Uint8Array(data)], name, { type: mimeType }));
-      const url = sanitizeUrl(tags.find(([tag]) => tag === 'url')?.[1] ?? '');
-      if (!url) throw new Error('The upload gave back no address for the picture.');
-      editor.apply(withBackground(editor.base(), url, mimeType));
+      const url = await uploadPicture(path, mimeType);
+      editor.edit(withBackground(editor.base(), url, mimeType));
     },
-    [editor, upload],
+    [editor, uploadPicture],
   );
 
   const setBackground = useCallback(
@@ -153,7 +143,7 @@ export function DesktopBackgroundProvider({ children }: { children: ReactNode })
         if ('url' in source) {
           const url = sanitizeUrl(source.url);
           if (!url) throw new Error('Only https pictures can be a background.');
-          editor.apply(withBackground(editor.base(), url, await remoteImageType(url)));
+          editor.edit(withBackground(editor.base(), url, await remoteImageType(url)));
           toast({ title: 'Desktop background changed' });
           return;
         }
