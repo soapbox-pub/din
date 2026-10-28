@@ -32,6 +32,9 @@ export const NSITE_APPS_KEY = 'nsite-apps';
 
 export const NO_NSITE_APPS: NsiteAppEntry[] = [];
 
+/** Default window size for installed nsites. */
+export const NSITE_APP_DEFAULT_SIZE = { width: 1280, height: 800 };
+
 /** The desktop app id for an installed nsite. */
 export function nsiteAppId(host: string): string {
   return `nsite-${host}`;
