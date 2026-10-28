@@ -29,7 +29,7 @@ export interface TabDescriptor {
  * offers the same. The context menu also opens a new tab and closes the tabs
  * around one.
  *
- * Used by the Terminal and Files apps; the Web Browser has its own richer
+ * Used by the Terminal, Files and Assistant apps; the Web Browser has its own richer
  * variant (favicons, loading state) but the same interaction model.
  */
 export function TabStrip({
@@ -44,6 +44,8 @@ export function TabStrip({
   onMove,
   transfer,
   tabMenuItems,
+  onReopen,
+  onTabMenuCloseAutoFocus,
 }: {
   tabs: TabDescriptor[];
   activeId: string;
@@ -62,6 +64,10 @@ export function TabStrip({
   transfer?: TabTransferOptions;
   /** App-specific items for a tab's right-click menu. */
   tabMenuItems?: (id: string) => ReactNode;
+  /** Reopen the tab closed last, offered in a tab's right-click menu. */
+  onReopen?: () => void;
+  /** Passed to a tab's right-click menu (see TabContextMenu). */
+  onTabMenuCloseAutoFocus?: (event: Event) => void;
 }) {
   const tabTransfer = useTabTransfer(transfer, tabs.length);
   const chrome = useWindowChrome();
@@ -94,6 +100,8 @@ export function TabStrip({
           onCloseToRight={() => tabs.slice(index + 1).forEach((t) => onClose(t.id))}
           canCloseToRight={index < tabs.length - 1}
           items={tabMenuItems?.(tab.id)}
+          onReopen={onReopen}
+          onCloseAutoFocus={onTabMenuCloseAutoFocus}
         >
           <TabButton
             tab={tab}

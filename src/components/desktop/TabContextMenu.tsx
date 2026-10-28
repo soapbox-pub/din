@@ -31,6 +31,7 @@ export function TabContextMenu({
   pinned,
   onTogglePin,
   items,
+  onCloseAutoFocus,
   children,
 }: {
   tabId: string;
@@ -48,12 +49,14 @@ export function TabContextMenu({
   onTogglePin?: () => void;
   /** App-specific items, shown after the new-tab items. */
   items?: ReactNode;
+  /** An item that starts inline editing prevents this, so the field keeps focus. */
+  onCloseAutoFocus?: (event: Event) => void;
   children: ReactNode;
 }) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-52">
+      <ContextMenuContent className="w-52" onCloseAutoFocus={onCloseAutoFocus}>
         {(onNew || onReopen) && (
           <>
             {onNew && <ContextMenuItem onSelect={onNew}>{newLabel}</ContextMenuItem>}

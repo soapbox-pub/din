@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
+  AssistantError,
   assistantApi,
   getAssistantBridge,
   modelKey,
@@ -14,6 +15,7 @@ import {
   type PermissionDecision,
   type PermissionRequest,
   type PromptAttachment,
+  type SessionInfo,
   linkedIconPaths,
   PROJECT_ICON_PATHS,
   worktreeMainCheckout,
@@ -193,6 +195,24 @@ export function useAssistantSession(sessionID: string | null) {
     queryFn: () => assistantApi.session(sessionID!),
     enabled: ready && sessionID !== null,
     staleTime: 30_000,
+  });
+}
+
+/** Several sessions by id, `gone` for the ones the server no longer has. */
+export function useSessionsByID(sessionIDs: string[]): { session?: SessionInfo; gone: boolean }[] {
+  const ready = useAssistantReady();
+  return useQueries({
+    queries: sessionIDs.map((sessionID) => ({
+      queryKey: assistantKeys.session(sessionID),
+      queryFn: () => assistantApi.session(sessionID),
+      enabled: ready,
+      staleTime: 30_000,
+    })),
+    combine: (results) =>
+      results.map((r) => ({
+        session: r.data,
+        gone: r.error instanceof AssistantError && r.error.status === 404,
+      })),
   });
 }
 

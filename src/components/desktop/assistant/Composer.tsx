@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useIsDictatingInto } from '@/hooks/useDictation';
 import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
+import { draftStorageKey } from '@/lib/assistantTabs';
 import { elementTarget, finishDictation, hasDictationBridge, startDictation } from '@/lib/dictation';
 import { cn } from '@/lib/utils';
 
@@ -38,7 +39,7 @@ export interface SlashCommand {
  * outlasts the window, Din and a restart. An empty message leaves no entry.
  */
 function useDraft(key: string | undefined) {
-  const storageKey = key && `din.assistant.draft.${key}`;
+  const storageKey = key && draftStorageKey(key);
   const [text, setText] = useState(() => (storageKey && localStorage.getItem(storageKey)) || '');
   const save = (value: string) => {
     setText(value);

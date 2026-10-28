@@ -1,12 +1,14 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   Folder,
   FolderOpen,
   Loader2,
+  MessageSquare,
   MoreHorizontal,
   PanelLeft,
   Pencil,
+  SquarePen,
   Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -31,7 +33,12 @@ import { FormCard, PermissionCard } from '@/components/desktop/assistant/Request
 import { SessionList } from '@/components/desktop/assistant/SessionList';
 import { Transcript } from '@/components/desktop/assistant/Transcript';
 import { useQuestionHandoff } from '@/components/desktop/assistant/useQuestionHandoff';
+import { TabStrip } from '@/components/desktop/TabStrip';
 import { useFilePicker } from '@/contexts/FilePickerContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { moveItem } from '@/hooks/useDragReorder';
 import {
   useActiveSessions,
   useAgentColor,
@@ -48,6 +55,7 @@ import {
   useInterruptSession,
   useMainCheckouts,
   useMarkViewedSession,
+  usePendingRequests,
   usePreferredModel,
   useRenameSession,
   useSendPrompt,
@@ -55,6 +63,7 @@ import {
   useSessionInbox,
   useSessionMessages,
   useSessionPermissions,
+  useSessionsByID,
   useStartConversation,
   useSwitchAgent,
   useSwitchModel,
@@ -71,6 +80,15 @@ import {
   type PromptAttachment,
   type SessionInfo,
 } from '@/lib/assistant';
+import {
+  forgetTabDraft,
+  isBlankTab,
+  loadAssistantTabs,
+  newAssistantTab,
+  newConversationDraftKey,
+  saveAssistantTabs,
+  type AssistantTab,
+} from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
 
 const SUGGESTIONS = [
@@ -104,6 +122,51 @@ function useSlashCommands(directory: string | undefined, own: SlashCommand[]): S
   );
 }
 
+/** Where each conversation was left scrolled, for coming back to its tab. */
+const scrollPositions = new Map<string, { top: number; stuck: boolean }>();
+
+/** How many closed tabs Ctrl+Shift+T can bring back. */
+const CLOSED_TABS_LIMIT = 20;
+
+interface TabsState {
+  tabs: AssistantTab[];
+  activeId: string;
+}
+
+/** What a tab shows in the strip. */
+interface TabInfo {
+  id: string;
+  title: string;
+  state: 'new' | 'idle' | 'running' | 'waiting';
+}
+
+/** `tab`, selected, beside the selected one, or in its place when that one is blank. */
+function placeTab({ tabs, activeId }: TabsState, tab: AssistantTab): TabsState {
+  const index = tabs.findIndex((t) => t.id === activeId);
+  const next =
+    index !== -1 && isBlankTab(tabs[index])
+      ? tabs.map((t, i) => (i === index ? tab : t))
+      : [...tabs.slice(0, index + 1), tab, ...tabs.slice(index + 1)];
+  return { tabs: next, activeId: tab.id };
+}
+
+/** Selects the conversation's tab, opening one for it if it has none. */
+function showSession(state: TabsState, sessionID: string): TabsState {
+  const open = state.tabs.find((t) => t.sessionID === sessionID);
+  return open ? { ...state, activeId: open.id } : placeTab(state, newAssistantTab(sessionID));
+}
+
+/** The tabs the window opens with: the ones it had, and what it was opened for. */
+function initialTabs(sessionID: string | null, directory: string | null): TabsState {
+  const saved = loadAssistantTabs();
+  const state = saved
+    ? { tabs: saved.tabs, activeId: (saved.tabs[saved.active] ?? saved.tabs[0]).id }
+    : { tabs: [], activeId: '' };
+  if (sessionID) return showSession(state, sessionID);
+  if (directory || state.tabs.length === 0) return placeTab(state, newAssistantTab(null, directory));
+  return state;
+}
+
 /**
  * Assistant - conversations with OpenCode, the coding agent, through its
  * background server (see src/lib/assistant.ts).
@@ -113,21 +176,27 @@ function useSlashCommands(directory: string | undefined, own: SlashCommand[]): S
  * closed: the menu bar's robot shows what's running, and Din notifies when
  * the agent finishes or needs an answer (AssistantHost). The agent asks
  * before what its rules say to ask about; the request shows above the
- * composer. Opened with `sessionID` (and a fresh `nonce`) in its launch
- * params, it shows that conversation; with `directory` instead (Files' "Open
- * in Assistant"), it starts a new one in that folder.
+ * composer.
+ *
+ * Conversations open in tabs, in the window's title bar, kept across closing
+ * the window and restarts (lib/assistantTabs). Only the selected tab is
+ * mounted: each conversation polls the server while it is. Opened with
+ * `sessionID` (and a fresh `nonce`) in its launch params, it selects that
+ * conversation's tab; with `directory` instead (Files' "Open in Assistant"),
+ * it opens a new conversation in that folder.
  */
-export function Assistant({ params }: AppComponentProps) {
+export function Assistant({ windowId, params }: AppComponentProps) {
   const ready = useAssistantReady();
   const requested = typeof params?.sessionID === 'string' ? params.sessionID : null;
   const requestedDirectory = typeof params?.directory === 'string' ? params.directory : null;
-  const [sessionID, setSessionID] = useState<string | null>(requested);
+  const { close: closeWindow } = useWindowActions();
+  const setTitlebar = useWindowTitlebar();
+  const [{ tabs, activeId }, setState] = useState(() => initialTabs(requested, requestedDirectory));
+  const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  const [closed, setClosed] = useState<AssistantTab[]>([]);
+  // The conversation whose title is being edited (Rename, or /rename).
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
-  // A new conversation from the list, in a project's folder when it says so.
-  const [draft, setDraft] = useState<{ directory: string | null; count: number }>({
-    directory: requestedDirectory,
-    count: 0,
-  });
 
   // Single-instance: a relaunch (a notification, the menu bar) brings new
   // params without remounting. One with no session asks for a new one.
@@ -137,9 +206,170 @@ export function Assistant({ params }: AppComponentProps) {
   const [launch, setLaunch] = useState({ requested, nonce });
   if (launch.requested !== requested || launch.nonce !== nonce) {
     setLaunch({ requested, nonce });
-    setSessionID(requested);
-    setDraft((prev) => ({ directory: requestedDirectory, count: prev.count }));
+    setState((prev) =>
+      requested ? showSession(prev, requested) : placeTab(prev, newAssistantTab(null, requestedDirectory)),
+    );
   }
+
+  useEffect(() => saveAssistantTabs(tabs, activeId), [tabs, activeId]);
+
+  /** Close the tabs of conversations that are gone, leaving a new one if none is left. */
+  const removeSessions = useCallback((ids: ReadonlySet<string>) => {
+    setClosed((c) => c.filter((t) => !t.sessionID || !ids.has(t.sessionID)));
+    setState((prev) => {
+      const next = prev.tabs.filter((t) => !t.sessionID || !ids.has(t.sessionID));
+      if (next.length === prev.tabs.length) return prev;
+      if (next.length === 0) {
+        const tab = newAssistantTab();
+        return { tabs: [tab], activeId: tab.id };
+      }
+      if (next.some((t) => t.id === prev.activeId)) return { ...prev, tabs: next };
+      const index = prev.tabs.findIndex((t) => t.id === prev.activeId);
+      return { tabs: next, activeId: next[Math.min(Math.max(0, index - 1), next.length - 1)].id };
+    });
+  }, []);
+
+  // Conversations deleted elsewhere (a Terminal, another computer) lose their tabs.
+  const sessionIDs = useMemo(() => tabs.flatMap((t) => (t.sessionID ? [t.sessionID] : [])), [tabs]);
+  const sessions = useSessionsByID(sessionIDs);
+  const gone = sessionIDs.filter((_, i) => sessions[i]?.gone).join(' ');
+  const [pruned, setPruned] = useState('');
+  if (gone && gone !== pruned) {
+    setPruned(gone);
+    removeSessions(new Set(gone.split(' ')));
+  }
+
+  const { data: running = [] } = useActiveSessions();
+  const pending = usePendingRequests();
+  const waiting = new Set([...pending.permissions.map((p) => p.sessionID), ...pending.forms.map((f) => f.sessionID)]);
+  // Stable while nothing shown changes, so the title bar isn't republished on every render.
+  const infoKey = JSON.stringify(
+    tabs.map((tab): TabInfo => {
+      if (!tab.sessionID) return { id: tab.id, title: 'New conversation', state: 'new' };
+      const session = sessions[sessionIDs.indexOf(tab.sessionID)]?.session;
+      return {
+        id: tab.id,
+        title: session ? sessionTitle(session) : 'Loading…',
+        state: waiting.has(tab.sessionID) ? 'waiting' : running.includes(tab.sessionID) ? 'running' : 'idle',
+      };
+    }),
+  );
+  const stripTabs = useMemo((): TabInfo[] => JSON.parse(infoKey), [infoKey]);
+  useWindowTitle(activeTab.sessionID ? (stripTabs.find((t) => t.id === activeTab.id)?.title ?? null) : null);
+
+  const select = (id: string) => setState((prev) => ({ ...prev, activeId: id }));
+
+  const openTab = () => {
+    const tab = newAssistantTab();
+    setState((prev) => ({ tabs: [...prev.tabs, tab], activeId: tab.id }));
+  };
+
+  const closeTab = (id: string) => {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab) return;
+    forgetTabDraft(tab);
+    if (tab.sessionID) {
+      scrollPositions.delete(tab.sessionID);
+      setClosed((c) => [...c, tab].slice(-CLOSED_TABS_LIMIT));
+    }
+    // Closing the last tab closes the window, which opens fresh next time.
+    if (tabs.length === 1) {
+      saveAssistantTabs([], '');
+      closeWindow(windowId);
+      return;
+    }
+    setState((prev) => {
+      const index = prev.tabs.findIndex((t) => t.id === id);
+      const next = prev.tabs.filter((t) => t.id !== id);
+      if (index === -1 || next.length === 0) return prev;
+      return { tabs: next, activeId: prev.activeId === id ? next[Math.max(0, index - 1)].id : prev.activeId };
+    });
+  };
+
+  const reopen = () => {
+    const sessionID = closed.at(-1)?.sessionID;
+    if (!sessionID) return;
+    setClosed((c) => c.slice(0, -1));
+    setState((prev) => showSession(prev, sessionID));
+  };
+
+  const cycle = (delta: number) => {
+    const index = tabs.findIndex((t) => t.id === activeId);
+    select(tabs[(index + delta + tabs.length) % tabs.length].id);
+  };
+
+  const choose = (sessionID: string) => {
+    setState((prev) => showSession(prev, sessionID));
+    setListOpen(false);
+  };
+
+  /** Open a conversation in a tab of its own, behind the selected one. */
+  const openInNewTab = (sessionID: string) =>
+    setState((prev) => {
+      if (prev.tabs.some((t) => t.sessionID === sessionID)) return prev;
+      const index = prev.tabs.findIndex((t) => t.id === prev.activeId);
+      const tab = newAssistantTab(sessionID);
+      return { ...prev, tabs: [...prev.tabs.slice(0, index + 1), tab, ...prev.tabs.slice(index + 1)] };
+    });
+
+  const startNew = (directory?: string) => {
+    setState((prev) => placeTab(prev, newAssistantTab(null, directory ?? null)));
+    setListOpen(false);
+  };
+
+  const updateTab = (id: string, change: Partial<AssistantTab>) =>
+    setState((prev) => ({ ...prev, tabs: prev.tabs.map((t) => (t.id === id ? { ...t, ...change } : t)) }));
+
+  const started = (tab: AssistantTab, sessionID: string) => {
+    forgetTabDraft(tab);
+    updateTab(tab.id, { sessionID });
+  };
+
+  // Rename from a tab's menu puts focus in the title field; the closing menu mustn't take it back.
+  const renamingFromMenu = useRef(false);
+  const renameTab = (id: string) => {
+    const sessionID = tabs.find((t) => t.id === id)?.sessionID;
+    if (!sessionID) return;
+    renamingFromMenu.current = true;
+    select(id);
+    setRenaming(sessionID);
+  };
+
+  // The strip lives in the title bar and outlives renders; it calls the latest of these.
+  const move = (id: string, to: number) => setState((prev) => ({ ...prev, tabs: moveItem(prev.tabs, id, to) }));
+  const actions = useRef({ select, closeTab, openTab, reopen, renameTab, move });
+  useLayoutEffect(() => {
+    actions.current = { select, closeTab, openTab, reopen, renameTab, move };
+  });
+
+  const canReopen = closed.length > 0;
+  useEffect(() => {
+    if (!ready) return;
+    setTitlebar(
+      <TabStrip
+        tabs={stripTabs.map((t) => ({ id: t.id, title: t.title, icon: <TabIcon state={t.state} /> }))}
+        activeId={activeId}
+        label="Assistant tabs"
+        newTabLabel="New conversation"
+        newTabMenuLabel="New conversation"
+        onActivate={(id) => actions.current.select(id)}
+        onClose={(id) => actions.current.closeTab(id)}
+        onNew={() => actions.current.openTab()}
+        onMove={(id, to) => actions.current.move(id, to)}
+        onReopen={canReopen ? () => actions.current.reopen() : undefined}
+        tabMenuItems={(id) =>
+          stripTabs.find((t) => t.id === id)?.state !== 'new' && (
+            <ContextMenuItem onSelect={() => actions.current.renameTab(id)}>Rename</ContextMenuItem>
+          )
+        }
+        onTabMenuCloseAutoFocus={(e) => {
+          if (renamingFromMenu.current) e.preventDefault();
+          renamingFromMenu.current = false;
+        }}
+      />,
+    );
+    return () => setTitlebar(null);
+  }, [ready, stripTabs, activeId, canReopen, setTitlebar]);
 
   if (!ready) {
     return (
@@ -149,23 +379,33 @@ export function Assistant({ params }: AppComponentProps) {
     );
   }
 
-  const choose = (id: string | null) => {
-    setSessionID(id);
-    setListOpen(false);
-  };
-
-  const startNew = (directory?: string) => {
-    setDraft((prev) => ({ directory: directory ?? null, count: prev.count + 1 }));
-    choose(null);
+  // Tab shortcuts work everywhere in the window, the composer included.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!e.ctrlKey || e.altKey || e.metaKey) return;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (key === 't') {
+      if (e.shiftKey) reopen();
+      else openTab();
+    } else if (key === 'w' && !e.shiftKey) closeTab(activeTab.id);
+    else if (key === 'Tab') cycle(e.shiftKey ? -1 : 1);
+    else if ((key === 'PageUp' || key === 'PageDown') && !e.shiftKey) cycle(key === 'PageUp' ? -1 : 1);
+    else if (/^[1-9]$/.test(key) && !e.shiftKey) select(tabs[key === '9' ? tabs.length - 1 : Math.min(Number(key), tabs.length) - 1].id);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
   };
 
   return (
-    <div className="@container/assistant relative flex h-full w-full bg-background text-foreground">
+    <div
+      className="@container/assistant relative flex h-full w-full bg-background text-foreground"
+      onKeyDownCapture={onKeyDown}
+    >
       <SessionList
-        selected={sessionID}
+        selected={activeTab.sessionID}
         onSelect={choose}
+        onOpenInNewTab={openInNewTab}
         onNew={startNew}
-        onDeleted={(id) => id === sessionID && choose(null)}
+        onDeleted={(id) => removeSessions(new Set([id]))}
         className={cn(
           listOpen ? 'flex' : 'hidden',
           'absolute inset-y-0 left-0 z-20 shadow-xl @2xl/assistant:static @2xl/assistant:flex @2xl/assistant:shadow-none',
@@ -180,19 +420,23 @@ export function Assistant({ params }: AppComponentProps) {
         />
       )}
       <main className="flex min-w-0 flex-1 flex-col">
-        {sessionID ? (
+        {activeTab.sessionID ? (
           <Conversation
-            key={sessionID}
-            sessionID={sessionID}
+            key={activeTab.sessionID}
+            sessionID={activeTab.sessionID}
+            editingTitle={renaming === activeTab.sessionID}
+            onEditingTitleChange={(editing) => setRenaming(editing ? activeTab.sessionID : null)}
             onShowList={() => setListOpen(true)}
-            onDeleted={() => choose(null)}
+            onDeleted={() => activeTab.sessionID && removeSessions(new Set([activeTab.sessionID]))}
             onNew={startNew}
           />
         ) : (
           <NewConversation
-            key={`${String(launch.nonce)}:${draft.count}`}
-            initialDirectory={draft.directory}
-            onStarted={choose}
+            key={activeTab.id}
+            directory={activeTab.directory}
+            onDirectoryChange={(directory) => updateTab(activeTab.id, { directory })}
+            draftKey={newConversationDraftKey(activeTab.id)}
+            onStarted={(sessionID) => started(activeTab, sessionID)}
             onShowList={() => setListOpen(true)}
           />
         )}
@@ -201,17 +445,40 @@ export function Assistant({ params }: AppComponentProps) {
   );
 }
 
+/** A tab's icon: whether its conversation is working, or waiting on the user. */
+function TabIcon({ state }: { state: TabInfo['state'] }) {
+  switch (state) {
+    case 'waiting':
+      return (
+        <span className="grid size-3.5 place-items-center" aria-label="Waiting for you">
+          <span className="size-2 rounded-full bg-primary" />
+        </span>
+      );
+    case 'running':
+      return <Loader2 className="size-3.5 animate-spin" aria-label="Working" />;
+    case 'new':
+      return <SquarePen className="size-3.5" aria-hidden />;
+    default:
+      return <MessageSquare className="size-3.5" aria-hidden />;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // One conversation
 // ---------------------------------------------------------------------------
 
 function Conversation({
   sessionID,
+  editingTitle,
+  onEditingTitleChange: setEditingTitle,
   onShowList,
   onDeleted,
   onNew,
 }: {
   sessionID: string;
+  /** The title is being edited (Rename, or /rename). */
+  editingTitle: boolean;
+  onEditingTitleChange: (editing: boolean) => void;
   onShowList: () => void;
   onDeleted: () => void;
   onNew: (directory?: string) => void;
@@ -240,15 +507,22 @@ function Conversation({
   const commands = useSlashCommands(session?.location.directory, CONVERSATION_COMMANDS);
   const directory = session?.location.directory;
   const fileLinkBase = useMemo(() => ({ directory, home }), [directory, home]);
-  const [editingTitle, setEditingTitle] = useState(false);
   useMarkViewedSession(sessionID);
 
   // Follow the conversation down as it grows, unless the user scrolled up.
+  // Coming back to its tab finds it where it was left.
   const scrollRef = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
+  const [left] = useState(() => scrollPositions.get(sessionID));
+  const stick = useRef(left?.stuck ?? true);
+  const restoreTop = useRef(left && !left.stuck ? left.top : null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (stick.current) el.scrollTop = el.scrollHeight;
+    else if (restoreTop.current !== null && messages) {
+      el.scrollTop = restoreTop.current;
+      restoreTop.current = null;
+    }
   }, [messages, queued, permissions.length, forms.length, running]);
 
   const fail = (title: string) => (error: unknown) =>
@@ -305,6 +579,7 @@ function Conversation({
         onScroll={(e) => {
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+          scrollPositions.set(sessionID, { top: el.scrollTop, stuck: stick.current });
         }}
         className="min-h-0 flex-1 overflow-y-auto"
       >
@@ -502,17 +777,21 @@ function TranscriptSkeleton() {
 // ---------------------------------------------------------------------------
 
 function NewConversation({
-  initialDirectory,
+  directory,
+  onDirectoryChange: setDirectory,
+  draftKey,
   onStarted,
   onShowList,
 }: {
-  initialDirectory: string | null;
+  /** The folder it works in; null for the default one. */
+  directory: string | null;
+  onDirectoryChange: (directory: string) => void;
+  draftKey: string;
   onStarted: (id: string) => void;
   onShowList: () => void;
 }) {
   const defaultDirectory = useAssistantDirectory();
   const home = useHomeDirectory();
-  const [directory, setDirectory] = useState<string | null>(initialDirectory);
   const [agent, setAgent] = useState('build');
   const cycleAgent = useCycleAgent(agent, setAgent);
   const agentColor = useAgentColor();
@@ -561,7 +840,7 @@ function NewConversation({
           </div>
           <Composer
             autoFocus
-            draftKey="new"
+            draftKey={draftKey}
             busy={start.isPending}
             placeholder="Ask the assistant to do something…"
             onSubmit={(text, files) => begin(text, files)}

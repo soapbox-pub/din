@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ComponentProps } from 'react';
-import { ChevronRight, GitBranch, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, Trash2 } from 'lucide-react';
+import { ChevronRight, GitBranch, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -86,19 +86,21 @@ function inOrder<T>(items: T[], order: string[], id: (item: T) => string): T[] {
 /**
  * The conversation list: one line per conversation, under the project it
  * belongs to, with the ones waiting on the user pulled out on top so a
- * collapsed project can't hide them. Searching flattens it. Right-clicking
- * a conversation renames or deletes it; right-clicking a project starts a
- * conversation there.
+ * collapsed project can't hide them. Searching flattens it. Middle-clicking
+ * a conversation opens it in a new tab; right-clicking one does that too, or
+ * renames or deletes it; right-clicking a project starts a conversation there.
  */
 export function SessionList({
   selected,
   onSelect,
+  onOpenInNewTab,
   onNew,
   onDeleted,
   className,
 }: {
   selected: string | null;
   onSelect: (id: string) => void;
+  onOpenInNewTab: (id: string) => void;
   /** Start a new conversation, in `directory` when given. */
   onNew: (directory?: string) => void;
   /** A conversation was deleted from the list. */
@@ -179,6 +181,14 @@ export function SessionList({
               waiting={waitingNow.has(session.id)}
               home={home}
               onSelect={() => onSelect(session.id)}
+              onAuxClick={(e) => {
+                // Middle-click opens it in a new tab, like a link.
+                if (e.button === 1) onOpenInNewTab(session.id);
+              }}
+              onMouseDown={(e) => {
+                // No autoscroll.
+                if (e.button === 1) e.preventDefault();
+              }}
             />
           </ContextMenuTrigger>
           <ContextMenuContent
@@ -189,6 +199,9 @@ export function SessionList({
           >
             <ContextMenuItem onSelect={() => onSelect(session.id)}>
               <MessageSquare aria-hidden /> Open
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onOpenInNewTab(session.id)}>
+              <SquarePlus aria-hidden /> Open in New Tab
             </ContextMenuItem>
             <ContextMenuItem onSelect={() => onNew(session.location.directory)}>
               <SquarePen aria-hidden /> New Conversation in This Folder
