@@ -135,8 +135,10 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
   const { toast } = useToast();
 
   const all = sessions ?? [];
-  const working = all.filter((s) => active.includes(s.id));
-  const recent = all.filter((s) => !active.includes(s.id) && !s.time.archived).slice(0, 5);
+  const recent = [
+    ...all.filter((s) => active.includes(s.id)),
+    ...all.filter((s) => !active.includes(s.id) && !s.time.archived).slice(0, 5),
+  ];
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -170,15 +172,14 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
         <p className="mt-1.5 px-1 text-xs text-muted-foreground">Super+A asks from anywhere.</p>
       </div>
 
-      {working.length > 0 && (
-        <SessionSection title="Working" sessions={working} home={home} onShow={onShow} running />
-      )}
       {isLoading ? (
         <p className="flex items-center gap-2 px-4 pb-4 text-sm text-muted-foreground">
           <Loader2 className="size-3.5 animate-spin" aria-hidden /> Loading conversations…
         </p>
       ) : (
-        recent.length > 0 && <SessionSection title="Recent" sessions={recent} home={home} onShow={onShow} />
+        recent.length > 0 && (
+          <SessionSection title="Recent" sessions={recent} active={active} home={home} onShow={onShow} />
+        )
       )}
       <button
         type="button"
@@ -197,15 +198,15 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
 function SessionSection({
   title,
   sessions,
+  active,
   home,
   onShow,
-  running = false,
 }: {
   title: string;
   sessions: SessionInfo[];
+  active: string[];
   home?: string;
   onShow: (sessionID: string) => void;
-  running?: boolean;
 }) {
   const icons = useDirectoryIcons([...new Set(sessions.map((s) => s.location.directory))]);
   return (
@@ -219,8 +220,8 @@ function SessionSection({
               onClick={() => onShow(session.id)}
               className="flex w-full items-center gap-2.5 px-4 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
             >
-              {running ? (
-                <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
+              {active.includes(session.id) ? (
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-label="Working" />
               ) : (
                 <ProjectIcon
                   src={icons.get(session.location.directory)}
