@@ -486,6 +486,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // Persistent browsing history (feeds address-bar autocomplete).
   const { history: browsingHistory, recordVisit, recordTitle, recordFavicon, clearHistory } =
     useBrowserHistory();
+  // The https address each tab was last sent to from the address bar, until
+  // its load commits. A server redirect commits somewhere else
+  // (fastmail.com → app.fastmail.com), so the address that was typed is
+  // recorded too, or it could never autocomplete.
+  const typedUrls = useRef(new Map<string, string>());
   const newTabSites = useMemo(
     () => topSites(browsingHistory, NEW_TAB_LINKS, NEW_TAB_SITE_COUNT),
     [browsingHistory],
@@ -1072,9 +1077,15 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // (about:blank, chrome-extension://). The iframe fallback never
           // fires this event - it records in navigateTab / go instead.
           // Private windows keep no history.
-          if (!isPrivate) recordVisit(event.url);
+          if (!isPrivate) {
+            const typed = typedUrls.current.get(id);
+            typedUrls.current.delete(id);
+            if (typed && typed !== event.url) recordVisit(typed);
+            recordVisit(event.url);
+          }
           break;
         case 'loadError':
+          typedUrls.current.delete(id);
           // Ignore the error for a URL the tab has already navigated past
           // (a late did-fail-load for a superseded load); otherwise show it.
           setLoadErrors((prev) => new Map(prev).set(id, event.value));
@@ -1481,6 +1492,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       // The iframe fallback emits no navigate events, so record here (never
       // in a private window).
       if (!webviewMode && !isPrivate) recordVisit(resolved);
+      if (webviewMode && resolved.startsWith('https://')) typedUrls.current.set(id, resolved);
+      else typedUrls.current.delete(id);
     },
     [updateTab, clearLoadError, webviewMode, recordVisit, userscriptsBridge, promptUserscriptInstall, isPrivate],
   );
