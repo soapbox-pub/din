@@ -34,6 +34,7 @@ export const assistantKeys = {
   inbox: (id: string) => ['assistant', 'inbox', id] as const,
   models: ['assistant', 'models'] as const,
   agents: ['assistant', 'agents'] as const,
+  commands: (directory: string) => ['assistant', 'commands', directory] as const,
   integrations: ['assistant', 'integrations'] as const,
 };
 
@@ -311,6 +312,17 @@ export function useAssistantAgents() {
   });
 }
 
+/** The slash commands the server offers in a folder (its project can add its own). */
+export function useAssistantCommands(directory: string | undefined) {
+  const ready = useAssistantReady();
+  return useQuery({
+    queryKey: assistantKeys.commands(directory ?? ''),
+    queryFn: () => assistantApi.commands(directory),
+    enabled: ready && directory !== undefined,
+    staleTime: 60_000,
+  });
+}
+
 export function useAssistantIntegrations(enabled = true) {
   const ready = useAssistantReady();
   return useQuery({
@@ -502,30 +514,44 @@ export interface StartConversation {
   model?: ModelRef | null;
   agent?: string;
   directory?: string;
+  /** Begin with this slash command, `text` being what follows it. */
+  command?: string;
 }
 
 /** Start a conversation with its first message; resolves with the new session. */
 export function useStartConversation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ text, files, model, agent, directory }: StartConversation) => {
+    mutationFn: async ({ text, files, model, agent, directory, command }: StartConversation) => {
       const session = await assistantApi.create({ directory, model: model ?? undefined, agent });
       dinSessions.add(session.id);
-      await assistantApi.prompt(session.id, text, files);
+      if (command) await assistantApi.command(session.id, command, text, files);
+      else await assistantApi.prompt(session.id, text, files);
       return session;
     },
     onSuccess: (session) => invalidateSession(queryClient, session.id),
   });
 }
 
+/** Send a message, or with `command`, run that slash command with `text` after it. */
 export function useSendPrompt(sessionID: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ text, files }: { text: string; files?: PromptAttachment[] }) => {
+    mutationFn: ({ text, files, command }: { text: string; files?: PromptAttachment[]; command?: string }) => {
       dinSessions.add(sessionID!);
-      return assistantApi.prompt(sessionID!, text, files);
+      return command
+        ? assistantApi.command(sessionID!, command, text, files)
+        : assistantApi.prompt(sessionID!, text, files);
     },
     onSuccess: () => sessionID && invalidateSession(queryClient, sessionID),
+  });
+}
+
+export function useCompactSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionID: string) => assistantApi.compact(sessionID),
+    onSuccess: (_data, sessionID) => invalidateSession(queryClient, sessionID),
   });
 }
 

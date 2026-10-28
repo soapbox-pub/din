@@ -1,9 +1,9 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, FileText, ImageIcon, Mic, Paperclip, Square, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useIsDictatingInto } from '@/hooks/useDictation';
-import type { PromptAttachment } from '@/lib/assistant';
+import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
 import { elementTarget, finishDictation, hasDictationBridge, startDictation } from '@/lib/dictation';
 import { cn } from '@/lib/utils';
 
@@ -24,15 +24,39 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
+export interface SlashCommand {
+  name: string;
+  description?: string;
+  /** What goes after it, shown in the menu (`title`). */
+  args?: string;
+  /** Takes nothing after it, so picking it in the menu runs it. */
+  instant?: boolean;
+}
+
+/** The commands a partly typed `/name` could be, those it starts first. */
+function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] {
+  const query = typed.toLowerCase();
+  const starts = commands.filter((c) => c.name.toLowerCase().startsWith(query));
+  const contains = commands.filter((c) => !starts.includes(c) && c.name.toLowerCase().includes(query));
+  return [...starts, ...contains];
+}
+
 /**
  * Where the user writes to the agent. Enter sends and Shift+Enter starts a
  * new line. Files come from Din's file picker or are pasted in (pictures),
  * and go along with the message. While the agent works, a message sent
  * steers it, and Stop interrupts it. The mic button dictates into it, the
  * same as Super+H does anywhere.
+ *
+ * A message starting with one of `commands` (`/compact`) goes to
+ * `onCommand` instead. Typing `/` lists them, narrowing as the name goes
+ * on: the arrows move through it, Tab or Enter fills one in (Enter runs an
+ * instant one), Escape puts it away.
  */
 export function Composer({
   onSubmit,
+  commands = [],
+  onCommand,
   onStop,
   running = false,
   busy = false,
@@ -45,6 +69,9 @@ export function Composer({
 }: {
   /** Resolves once sent; the text stays put if it rejects. */
   onSubmit: (text: string, files: PromptAttachment[]) => Promise<unknown> | void;
+  commands?: SlashCommand[];
+  /** Like `onSubmit`, for a command: its name and what followed it. */
+  onCommand?: (name: string, args: string, files: PromptAttachment[]) => Promise<unknown> | void;
   onStop?: () => void;
   running?: boolean;
   /** Sending right now. */
@@ -64,19 +91,80 @@ export function Composer({
   const { pickFiles } = useFilePicker();
   const dictating = useIsDictatingInto(ref);
 
+  const menuID = useId();
+  // The text Escape put the menu away for; typing on brings it back.
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState({ typed: '', index: 0 });
+  const typed = /^\/(\S*)$/.exec(text)?.[1];
+  const matches = useMemo(
+    () => (typed === undefined || !onCommand ? [] : matchCommands(commands, typed)),
+    [commands, onCommand, typed],
+  );
+  const menuOpen = matches.length > 0 && dismissed !== text && !disabled;
+  const active = menuOpen ? Math.min(highlight.typed === typed ? highlight.index : 0, matches.length - 1) : -1;
+  const optionID = (index: number) => `${menuID}-${index}`;
+
+  useEffect(() => {
+    if (active >= 0) document.getElementById(`${menuID}-${active}`)?.scrollIntoView({ block: 'nearest' });
+  }, [active, menuID]);
+
   const canSend = !disabled && !busy && text.trim().length > 0;
 
-  const submit = async () => {
-    if (!canSend) return;
-    const sent = { text: text.trim(), files };
+  const send = async (message: string) => {
+    if (disabled || busy || !message) return;
+    const sent = { text: message, files };
+    const command = parseSlashCommand(message);
+    const known = command && onCommand && commands.some((c) => c.name === command.name) ? command : null;
     setText('');
     setFiles([]);
     try {
-      await onSubmit(sent.text, sent.files);
+      if (known) await onCommand!(known.name, known.args, sent.files);
+      else await onSubmit(sent.text, sent.files);
     } catch {
       // Give it back to try again.
       setText(sent.text);
       setFiles(sent.files);
+    }
+  };
+
+  const submit = () => send(text.trim());
+
+  const pick = (command: SlashCommand, run: boolean) => {
+    if (run && command.instant) {
+      void send(`/${command.name}`);
+    } else {
+      setText(`/${command.name} `);
+      ref.current?.focus();
+    }
+  };
+
+  /** The menu's keys; true when one was used. */
+  const menuKey = (event: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!menuOpen) return false;
+    const move = (by: number) => setHighlight({ typed: typed ?? '', index: (active + by + matches.length) % matches.length });
+    switch (event.key) {
+      case 'ArrowDown':
+        move(1);
+        return true;
+      case 'ArrowUp':
+        move(-1);
+        return true;
+      case 'Tab':
+        if (event.shiftKey) return false;
+        pick(matches[active], false);
+        return true;
+      case 'Enter':
+        if (event.shiftKey || event.nativeEvent.isComposing) return false;
+        // Typed out in full already: Enter sends it as it is.
+        if (text === `/${matches[active].name}` && !matches[active].instant) return false;
+        pick(matches[active], true);
+        return true;
+      case 'Escape':
+        event.stopPropagation();
+        setDismissed(text);
+        return true;
+      default:
+        return false;
     }
   };
 
@@ -119,10 +207,41 @@ export function Composer({
   return (
     <div
       className={cn(
-        'flex flex-col gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm transition-shadow focus-within:border-ring/60 focus-within:shadow-md',
+        'relative flex flex-col gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm transition-shadow focus-within:border-ring/60 focus-within:shadow-md',
         className,
       )}
     >
+      {menuOpen && (
+        <ul
+          id={menuID}
+          role="listbox"
+          aria-label="Commands"
+          className="absolute inset-x-0 bottom-full z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+        >
+          {matches.map((command, index) => (
+            <li
+              key={command.name}
+              id={optionID(index)}
+              role="option"
+              aria-selected={index === active}
+              // Keeps focus in the message.
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseMove={() => index !== active && setHighlight({ typed: typed ?? '', index })}
+              onClick={() => pick(command, true)}
+              className={cn(
+                'flex cursor-pointer items-baseline gap-3 rounded-lg px-3 py-2 text-sm',
+                index === active && 'bg-accent text-accent-foreground',
+              )}
+            >
+              <span className="shrink-0 font-mono font-medium">
+                /{command.name}
+                {command.args && <span className="font-normal text-muted-foreground"> {command.args}</span>}
+              </span>
+              {command.description && <span className="truncate text-muted-foreground">{command.description}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
       {files.length > 0 && (
         <ul className="flex flex-wrap gap-1.5 px-1 pt-1" aria-label="Attachments">
           {files.map((file) => {
@@ -155,6 +274,10 @@ export function Composer({
         onChange={(event) => setText(event.target.value)}
         onPaste={(event) => void onPaste(event)}
         onKeyDown={(event) => {
+          if (menuKey(event)) {
+            event.preventDefault();
+            return;
+          }
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
             void submit();
@@ -165,6 +288,11 @@ export function Composer({
         autoFocus={autoFocus}
         rows={1}
         aria-label="Message"
+        role={onCommand ? 'combobox' : undefined}
+        aria-autocomplete={onCommand ? 'list' : undefined}
+        aria-expanded={onCommand ? menuOpen : undefined}
+        aria-controls={menuOpen ? menuID : undefined}
+        aria-activedescendant={active >= 0 ? optionID(active) : undefined}
         className="field-sizing-content max-h-60 min-h-11 w-full resize-none bg-transparent px-2 py-1.5 text-base leading-relaxed outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
       />
       <div className="flex items-center gap-1">

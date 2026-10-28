@@ -263,6 +263,12 @@ export interface AgentInfo {
   description?: string;
 }
 
+/** A slash command the server runs: the built-in ones and the user's own. */
+export interface CommandInfo {
+  name: string;
+  description?: string;
+}
+
 export type IntegrationMethod =
   | { type: 'key'; label?: string }
   | { type: 'env'; names: string[] }
@@ -368,6 +374,17 @@ export const assistantApi = {
       ...(files.length > 0 ? { files } : {}),
     }),
 
+  /** Run a slash command (`/review branch` is `review` with `branch`). */
+  command: (sessionID: string, name: string, text: string, files: PromptAttachment[] = []) =>
+    call<unknown>('POST', `/api/session/${id(sessionID)}/command`, {
+      name,
+      text,
+      ...(files.length > 0 ? { files } : {}),
+    }),
+
+  /** Summarize the conversation so far, to free up the model's context. */
+  compact: (sessionID: string) => call<unknown>('POST', `/api/session/${id(sessionID)}/compact`, {}),
+
   /** The user's messages the agent hasn't taken yet, oldest first. */
   inbox: async (sessionID: string) =>
     (await call<{ data: { type: string }[] }>('GET', `/api/session/${id(sessionID)}/inbox`)).data.filter(
@@ -420,6 +437,10 @@ export const assistantApi = {
   defaultModel: async () => (await call<{ data: ModelInfo | null }>('GET', '/api/model/default')).data,
 
   agents: async () => (await call<{ data: AgentInfo[] }>('GET', '/api/agent')).data,
+
+  /** The slash commands a folder has: the server's and its project's own. */
+  commands: async (directory?: string) =>
+    (await call<{ data: CommandInfo[] }>('GET', `/api/command${query({ 'location[directory]': directory })}`)).data,
 
   integrations: async () => (await call<{ data: IntegrationInfo[] }>('GET', '/api/integration')).data,
 
@@ -517,6 +538,17 @@ export function linkedIconPaths(html: string): string[] {
     if (path) paths.push(`public/${path}`, path);
   }
   return paths;
+}
+
+/**
+ * A message that starts with a slash command, split into its name and the
+ * rest (`/review  branch` is `review` and `branch`), or null when it doesn't
+ * start with one. Whether the name is a command is the caller's to check:
+ * `/home/din` is a path.
+ */
+export function parseSlashCommand(text: string): { name: string; args: string } | null {
+  const match = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
+  return match ? { name: match[1], args: (match[2] ?? '').trim() } : null;
 }
 
 /** What a session is called before the server has titled it. */

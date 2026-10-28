@@ -21,7 +21,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { AssistantUnavailable } from '@/components/desktop/assistant/AssistantUnavailable';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/components/desktop/assistant/ConversationActions';
-import { Composer } from '@/components/desktop/assistant/Composer';
+import { Composer, type SlashCommand } from '@/components/desktop/assistant/Composer';
 import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
 import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
 import { SessionList } from '@/components/desktop/assistant/SessionList';
@@ -30,16 +30,19 @@ import { useFilePicker } from '@/contexts/FilePickerContext';
 import {
   useActiveSessions,
   useAssistantAgents,
+  useAssistantCommands,
   useAssistantDirectory,
   useAssistantReady,
   useAssistantSession,
   useAssistantSessions,
   useBackgroundSession,
   useCancelQueued,
+  useCompactSession,
   useHomeDirectory,
   useInterruptSession,
   useMarkViewedSession,
   usePreferredModel,
+  useRenameSession,
   useSendPrompt,
   useSessionForms,
   useSessionInbox,
@@ -57,6 +60,7 @@ import {
   modelKey,
   sessionTitle,
   tildify,
+  type PromptAttachment,
   type SessionInfo,
 } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
@@ -66,6 +70,31 @@ const SUGGESTIONS = [
   'Write a script that renames my screenshots by date',
   'Explain what this computer is running right now',
 ];
+
+/** The commands Din runs itself in a conversation, beside the server's. */
+const CONVERSATION_COMMANDS: SlashCommand[] = [
+  { name: 'compact', description: 'Summarize the conversation to free up the model’s context', instant: true },
+  { name: 'new', description: 'Start a new conversation in this folder', instant: true },
+  { name: 'rename', args: '[title]', description: 'Rename this conversation' },
+  { name: 'stop', description: 'Stop the agent', instant: true },
+];
+
+/** A new conversation has only the server's: there is nothing yet to compact or rename. */
+const NO_COMMANDS: SlashCommand[] = [];
+
+/** Din's commands and then the server's, those it has too left out. */
+function useSlashCommands(directory: string | undefined, own: SlashCommand[]): SlashCommand[] {
+  const { data: server } = useAssistantCommands(directory);
+  return useMemo(
+    () => [
+      ...own,
+      ...(server ?? [])
+        .filter((command) => !own.some((c) => c.name === command.name))
+        .map((command) => ({ name: command.name, description: command.description })),
+    ],
+    [own, server],
+  );
+}
 
 /**
  * Assistant - conversations with OpenCode, the coding agent, through its
@@ -139,7 +168,13 @@ export function Assistant({ params }: AppComponentProps) {
       )}
       <main className="flex min-w-0 flex-1 flex-col">
         {sessionID ? (
-          <Conversation key={sessionID} sessionID={sessionID} onShowList={() => setListOpen(true)} onDeleted={() => choose(null)} />
+          <Conversation
+            key={sessionID}
+            sessionID={sessionID}
+            onShowList={() => setListOpen(true)}
+            onDeleted={() => choose(null)}
+            onNew={startNew}
+          />
         ) : (
           <NewConversation
             key={`${String(launch.nonce)}:${draft.count}`}
@@ -161,10 +196,12 @@ function Conversation({
   sessionID,
   onShowList,
   onDeleted,
+  onNew,
 }: {
   sessionID: string;
   onShowList: () => void;
   onDeleted: () => void;
+  onNew: (directory?: string) => void;
 }) {
   const { data: session } = useAssistantSession(sessionID);
   const { data: transcript, isLoading } = useSessionMessages(sessionID);
@@ -181,9 +218,13 @@ function Conversation({
   const cancelQueued = useCancelQueued();
   const switchModel = useSwitchModel();
   const switchAgent = useSwitchAgent();
+  const compact = useCompactSession();
+  const rename = useRenameSession();
   const { toast } = useToast();
   const running = active.includes(sessionID);
   const messages = transcript?.messages;
+  const commands = useSlashCommands(session?.location.directory, CONVERSATION_COMMANDS);
+  const [editingTitle, setEditingTitle] = useState(false);
   useMarkViewedSession(sessionID);
 
   // Follow the conversation down as it grows, unless the user scrolled up.
@@ -199,6 +240,23 @@ function Conversation({
 
   const toBackground = () => background.mutate(sessionID, { onError: fail('Couldn’t move it to the background') });
 
+  const runCommand = (name: string, args: string, files: PromptAttachment[]) => {
+    stick.current = true;
+    switch (name) {
+      case 'compact':
+        return compact.mutateAsync(sessionID, { onError: fail('Couldn’t compact the conversation') });
+      case 'new':
+        return onNew(session?.location.directory);
+      case 'rename':
+        if (!args) return setEditingTitle(true);
+        return rename.mutateAsync({ sessionID, title: args }, { onError: fail('Couldn’t rename') });
+      case 'stop':
+        return interrupt.mutateAsync(sessionID, { onError: fail('Couldn’t stop') });
+      default:
+        return send.mutateAsync({ command: name, text: args, files }, { onError: fail(`Couldn’t run /${name}`) });
+    }
+  };
+
   return (
     // Focusable so Ctrl+B still reaches it after a click in the transcript.
     <div
@@ -211,7 +269,15 @@ function Conversation({
         toBackground();
       }}
     >
-      <ConversationHeader session={session} home={home} running={running} onShowList={onShowList} onDeleted={onDeleted} />
+      <ConversationHeader
+        session={session}
+        home={home}
+        running={running}
+        editing={editingTitle}
+        onEditingChange={setEditingTitle}
+        onShowList={onShowList}
+        onDeleted={onDeleted}
+      />
       <div
         ref={scrollRef}
         onScroll={(e) => {
@@ -251,12 +317,14 @@ function Conversation({
         <Composer
           autoFocus
           running={running}
-          busy={send.isPending}
-          placeholder={running ? 'Add something while it works…' : 'Reply…'}
+          busy={send.isPending || compact.isPending}
+          placeholder={running ? 'Add something while it works…' : 'Reply, or type / for commands…'}
           onSubmit={(text, files) => {
             stick.current = true;
             return send.mutateAsync({ text, files }, { onError: fail('Couldn’t send') });
           }}
+          commands={commands}
+          onCommand={runCommand}
           onStop={() => interrupt.mutate(sessionID, { onError: fail('Couldn’t stop') })}
           toolbar={
             <>
@@ -285,16 +353,20 @@ function ConversationHeader({
   session,
   home,
   running,
+  editing,
+  onEditingChange: setEditing,
   onShowList,
   onDeleted,
 }: {
   session: SessionInfo | undefined;
   home?: string;
   running: boolean;
+  /** The title is being edited (Rename, or /rename). */
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
   onShowList: () => void;
   onDeleted: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // Rename puts focus in the title field; the closing menu mustn't take it back.
   const renaming = useRef(false);
@@ -421,10 +493,11 @@ function NewConversation({
   const { pickFile } = useFilePicker();
   const { toast } = useToast();
   const folder = directory ?? defaultDirectory;
+  const commands = useSlashCommands(folder, NO_COMMANDS);
 
-  const begin = (text: string, files: Parameters<typeof start.mutateAsync>[0]['files'] = []) =>
+  const begin = (text: string, files: PromptAttachment[] = [], command?: string) =>
     start.mutateAsync(
-      { text, files, model, agent, directory: folder },
+      { text, files, model, agent, directory: folder, command },
       {
         onSuccess: (session) => onStarted(session.id),
         onError: (error) =>
@@ -462,6 +535,8 @@ function NewConversation({
             busy={start.isPending}
             placeholder="Ask the assistant to do something…"
             onSubmit={(text, files) => begin(text, files)}
+            commands={commands}
+            onCommand={(name, args, files) => begin(args, files, name)}
             toolbar={
               <>
                 <ModelPicker models={models} value={model} recent={recent} onChange={setModel} />
