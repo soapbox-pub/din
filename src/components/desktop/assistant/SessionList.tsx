@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ComponentProps, type CSSProperties } from 'react';
+import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type Ref } from 'react';
 import { ChevronRight, GitBranch, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -98,6 +98,7 @@ export function SessionList({
   onOpenInNewTab,
   onNew,
   onDeleted,
+  searchRef,
   className,
   style,
 }: {
@@ -108,6 +109,8 @@ export function SessionList({
   onNew: (directory?: string) => void;
   /** A conversation was deleted from the list. */
   onDeleted: (id: string) => void;
+  /** The search field, for Ctrl+F. */
+  searchRef?: Ref<HTMLInputElement>;
   className?: string;
   style?: CSSProperties;
 }) {
@@ -245,17 +248,12 @@ export function SessionList({
       style={style}
       className={cn('w-64 shrink-0 flex-col border-r border-border/60 bg-muted/30', className)}>
       {/* The window's title bar runs across the list's top, so it drags the window too. */}
-      <WindowDragRegion className="flex h-9 shrink-0 items-center gap-1 px-2">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search"
-            aria-label="Search conversations"
-            className="h-7 pl-8 text-sm"
-          />
-        </div>
+      <WindowDragRegion className="flex h-9 shrink-0 items-center gap-2 pl-3 pr-2">
+        <img src="/icons/apps/assistant.png" alt="" aria-hidden draggable={false} className="size-4 shrink-0 object-contain" />
+        {/* In the theme's title font, like a window's title. */}
+        <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
+          Assistant
+        </span>
         <Button
           variant="ghost"
           size="icon"
@@ -267,6 +265,23 @@ export function SessionList({
           <SquarePen className="size-4" aria-hidden />
         </Button>
       </WindowDragRegion>
+      <div className="relative shrink-0 px-2 pb-1">
+        <Search className="pointer-events-none absolute left-4.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Input
+          ref={searchRef}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape' || !filter) return;
+            e.stopPropagation();
+            setFilter('');
+          }}
+          placeholder="Search"
+          aria-label="Search conversations"
+          title="Search conversations (Ctrl+F)"
+          className="h-8 pl-8 text-sm"
+        />
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {isLoading ? (
           <div className="space-y-2 p-2" aria-label="Loading conversations">

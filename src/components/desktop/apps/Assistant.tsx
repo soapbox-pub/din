@@ -214,6 +214,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   // The conversation whose title is being edited (Rename, or /rename).
   const [renaming, setRenaming] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [listWidth, setListWidth] = useState(loadListWidth);
   useEffect(() => localStorage.setItem(LIST_WIDTH_KEY, String(listWidth)), [listWidth]);
 
@@ -377,7 +378,11 @@ export function Assistant({ windowId, params }: AppComponentProps) {
     } else if (key === 'w' && !e.shiftKey) closeTab(activeTab.id);
     else if (key === 'Tab') cycle(e.shiftKey ? -1 : 1);
     else if ((key === 'PageUp' || key === 'PageDown') && !e.shiftKey) cycle(key === 'PageUp' ? -1 : 1);
-    else if (/^[1-9]$/.test(key) && !e.shiftKey) select(tabs[key === '9' ? tabs.length - 1 : Math.min(Number(key), tabs.length) - 1].id);
+    else if ((key === 'f' || key === 'k') && !e.shiftKey) {
+      // Search the list, sliding it out first in a narrow window.
+      setListOpen(true);
+      requestAnimationFrame(() => searchRef.current?.select());
+    } else if (/^[1-9]$/.test(key) && !e.shiftKey) select(tabs[key === '9' ? tabs.length - 1 : Math.min(Number(key), tabs.length) - 1].id);
     else return;
     e.preventDefault();
     e.stopPropagation();
@@ -412,6 +417,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
         onOpenInNewTab={openInNewTab}
         onNew={startNew}
         onDeleted={(id) => removeSessions(new Set([id]))}
+        searchRef={searchRef}
         style={{ width: listWidth }}
         className={cn(
           listOpen ? 'flex' : 'hidden',
