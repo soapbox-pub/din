@@ -1,0 +1,12 @@
+{
+  "name": "Calculator",
+  "description": "A basic calculator, and behind its Advanced switch a graphing calculator with computer algebra, in place of a TI-89: exact answers, solve, d, ∫, limits, matrices, graphs and tables.",
+  "icons": [{ "src": "/icons/apps/calculator.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "navigate-new" },
+  "din": {
+    "window": { "size": { "width": 380, "height": 620 }, "floating": true, "frame": "standard" },
+    "keywords": ["arithmetic", "TI-89", "TI-84", "graphing calculator", "CAS", "algebra", "calculus", "derivative", "integral", "solve", "math", "graph", "homework"],
+    "migrateStorage": ["din:calculator:*"]
+  }
+}

@@ -1,11 +1,9 @@
 # `din.window`: the app's window
 
-> **Status: design.** Today's equivalents are the per-window React
-> contexts in `src/contexts/` (`WindowTitleContext`,
-> `WindowFrameContext`, `WindowChromeContext`, …) and `setFrameless` in
-> `src/hooks/useWindows.ts`. Transparency, shapes and moving from inside
-> the app were tried in a standalone spike (Electron 43, webviews on
-> `din://`); notes below say what it showed.
+> **Status: in place** (`DinAppFrame` on the desktop's side, standing in
+> for the per-window React contexts apps in the desktop's tree use).
+> Transparency, shapes and moving from inside the app were first tried in
+> a standalone spike (Electron 43); notes below say what it showed.
 
 Every app window is a Din window: the desktop places it, tiles it,
 snaps it, minimizes it into the Dock, lists it in the switcher. The app
@@ -125,22 +123,21 @@ For skins (Media Player's Winamp and WMP skins) and anything with its
 own shape. Today's `setFrameless`.
 
 ```ts
-din.window.setChrome({ frame: 'none', background: 'transparent', resizable: false });
+din.window.setChrome({ frame: 'none' });
 din.window.setShape([
   { x: 0, y: 12, width: 120, height: 90 },
   { x: 110, y: 0, width: 160, height: 110 },
 ]);
 ```
 
-- **`background: 'transparent'`**: wherever the page doesn't paint, the
-  desktop (and windows behind) shows through. The page's own `html` and
-  `body` must be transparent. App webviews are created transparent (Din
-  forces web pages opaque, apps not); in the spike the desktop showed
-  through in every light/dark combination of desktop and app, with none
-  of the opaque-canvas trouble iframes have. A `standard` or `custom`
-  window's opaque background is painted by the desktop behind the
-  webview, so those windows need do nothing. Scrollbar tracks are still
-  drawn opaque.
+- **Transparency**: wherever the page doesn't paint, the desktop (and
+  windows behind) shows through. App webviews are created transparent
+  (Din forces web pages opaque, apps not) and `src/sdk/app.css` makes
+  `html` and `body` transparent; in the spike the desktop showed through in
+  every light/dark combination of desktop and app. A `standard` or
+  `custom` window has the desktop's frosted window background behind the
+  page, so the app looks like any Din window without painting one.
+  Scrollbar tracks are still drawn opaque.
 - **`setShape(rects)`**: the window exists only inside these rectangles.
   Outside them it neither draws nor takes clicks: a click there goes to
   whatever's behind. Without a shape, transparent pixels still take
@@ -152,22 +149,16 @@ din.window.setShape([
 - Moving and resizing are the app's job: `beginMove` from its own grab
   areas, `beginResize(edge, e)` from its own grips, or `setBounds`.
 
-### Other chrome options
-
-| Option | Default | |
-|---|---|---|
-| `background` | `opaque`; `transparent` for `none` | See above |
-| `shadow` | true; false for `none` | Din's soft shadow |
-| `resizable` | true | Hides the resize handles and disables Super+drag resizing |
-| `minSize`, `maxSize` | Din's minimum | Enforced by the desktop's resize and tiling |
-| `aspectRatio` | none | Kept while resizing (video, calculators) |
+Minimum and maximum sizes, aspect ratios and windows the user can't
+resize aren't in the API yet; they'll come with the first app that needs
+one.
 
 ## Moving and resizing
 
 ```ts
 grip.addEventListener('pointerdown', (e) => din.window.beginMove(e));
 corner.addEventListener('pointerdown', (e) => din.window.beginResize('se', e));
-din.window.setBounds({ width: 380, height: 620 });   // Calculator switching modes
+din.window.setBounds({ width: 1160, height: 720 });  // Calculator switching to Advanced
 ```
 
 - `beginMove` and `beginResize` hand the gesture to the desktop, which
@@ -206,15 +197,16 @@ din.window.onCloseRequest(() => {
 ```
 
 The handler must answer at once (true or false); the asking happens after.
-An app that doesn't answer within a few seconds is shown as not
-responding ([lifecycle.md](lifecycle.md)). `din.window.close()` from the
-app itself never asks its own handler.
+An app that doesn't answer within five seconds is shown as not responding
+([lifecycle.md](lifecycle.md)). `din.window.close()` from the app itself
+never asks its own handler; `din.window.requestClose()` closes as the user
+would, through it (`<WindowControls>`' close button does that).
 
-## Child windows
+In React, `useCloseGuard(() => dirty && (askToSave(), true))` from
+`@/sdk/react` installs the handler while mounted.
 
-`din.window.openChild(params, size)` opens another window of the same
-app that stays with this one: it closes with it, minimizes with it, and
-floats above it. For tool palettes and pop-ups (a Paint color picker, the
-browser's undocked inspector). The child is its own document with its own
-port; the two talk through `params` and their own `BroadcastChannel`
-(same origin).
+## The window menu
+
+`din.window.showWindowMenu({ x, y })` opens Din's window menu (Minimize,
+Maximize, tiling, workspaces, displays, Close) at a point in the window,
+drawn by the desktop. `<WindowDragRegion>` does it on right-click.

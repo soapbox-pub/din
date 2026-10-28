@@ -14,7 +14,8 @@ export interface FileClipboard {
 let clipboard: FileClipboard | null = null;
 const listeners = new Set<() => void>();
 
-function subscribe(listener: () => void) {
+/** Hear when what's cut or copied changes. */
+export function subscribeFileClipboard(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
@@ -31,7 +32,7 @@ export function getFileClipboard(): FileClipboard | null {
 }
 
 export function useFileClipboard(): FileClipboard | null {
-  return useSyncExternalStore(subscribe, () => clipboard);
+  return useSyncExternalStore(subscribeFileClipboard, () => clipboard);
 }
 
 /** One undoable file operation. */

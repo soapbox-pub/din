@@ -1,11 +1,13 @@
 # Moving built-in apps out of the desktop
 
-> **Status: plan.** No app has moved yet.
+> **Status: under way.** Moved: Calculator.
 
 Each app moves in its own commit: its folder goes from
-`src/components/desktop/apps/` to `src/apps/<id>/`, it gets a manifest,
-its `AppDefinition` leaves `src/lib/apps.ts`, and its uses of the
-desktop's internals are replaced as below.
+`src/components/desktop/apps/` to `src/apps/<id>/`, it gets an
+`index.html`, a `manifest.webmanifest` and a `main.tsx`
+(`startApp(() => <App />)`), its `AppDefinition` in `src/lib/apps.ts`
+becomes `dinApp('<id>')`, and its uses of the desktop's internals are
+replaced as below. `src/apps/calculator/` is the model.
 
 ## Old → new
 
@@ -20,6 +22,7 @@ desktop's internals are replaced as below.
 | `resize(windowId, w, h)` | `din.window.setBounds({ width, height })` |
 | `setFrameless(windowId, true, geometry)` | `din.window.setChrome({ frame: 'none', … })` + `setBounds` |
 | `useWindowTitle(title)` | `useWindowTitle(title)` from `@/sdk/react`, or `din.window.setTitle` |
+| `import '…/files/Dialogs'` for `Overlay`, `DialogButton` | `@/shared/dialogs` |
 | `useWindowIcon(url)` | `din.window.setIcon(url)` |
 | `useWindowAccent(color)` | `din.window.setAccent(color)` |
 | `useWindowTitlebar(node)` (content in Din's title bar) | `frame: 'custom'` and the app's own header |
@@ -35,7 +38,7 @@ desktop's internals are replaced as below.
 | `pickFile({ mode: 'save' })` → `window.fs.writeFile` | `din.files.save()` → `write()` |
 | `window.fs.*` (general) | `din.system.fs` with the `fs` permission; most apps need handles instead |
 | `window.pty` | `din.system.pty` with `pty` |
-| `window.printing` | `din.system.printing` with `printing` |
+| `printHtml(title, html)`, `printFile(path)` | `din.print.html(title, html)`, `din.print.file(handle)` with `printing` |
 | `fileClipboard` | `din.clipboard` |
 | `files/dnd.ts` (`startFileDrag`, `activeFileDrag`, `FILES_MIME`) | `din.drag.startFiles`, `din.drag.current`, `din.drag.accept` |
 | `tabTransfer` | `din.drag.startTab`, `onTabDetached` |
@@ -54,10 +57,10 @@ Some code is imported across app folders today. It moves to
 `src/shared/` (bundled into each app that uses it; it can't touch the
 desktop) or splits:
 
-- `files/Dialogs`, `FileIcon`, `FileViewerBody` (used by Calculator,
-  Text Editor, Media Player, the browser, native windows) → `src/shared/`.
-  Calculator imports `files/Dialogs.tsx` only for its buttons, which pulls
-  in `useFileSystem`; that import goes.
+- `files/Dialogs`' `Overlay` and `DialogButton` are in
+  `src/shared/dialogs.tsx` (Calculator was the first to need them);
+  `FileIcon` and `FileViewerBody` (Text Editor, Media Player, the
+  browser, native windows) follow when those apps move.
 - `photo/` and `vector/pdf` (Vector Editor, Publisher) → `src/shared/`.
 - `components/desktop/assistant/*` (Assistant, CAD, Settings) →
   `src/shared/assistant/`, with its `window.assistant` use behind a
@@ -73,7 +76,7 @@ a time.
 
 | # | App | First to use |
 |---|---|---|
-| 1 | Calculator | The whole path: `din://`, the port, the manifest, `setBounds`, `workArea` |
+| 1 | Calculator ✓ | The whole path: `din://`, the port, the manifest, `setBounds`, `workArea` |
 | 2 | Paint | Files by handle, close requests, the title |
 | 3 | Word Processor, Spreadsheet, Slides | Shared office code, accent, printing, opening URLs |
 | 4 | Photo Editor, Vector Editor, Publisher | Shared `photo/` code |

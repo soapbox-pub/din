@@ -11,6 +11,17 @@
 // This file runs as TypeScript directly via Node's native type stripping
 // (Electron 43 embeds Node 24) - no build step, so only erasable TS syntax.
 
+// First: it records every IPC handler as it's registered (electron/din-apps.mts).
+import {
+  appIdOf,
+  attachAppGuest,
+  DIN_APPS_PARTITION,
+  DIN_SCHEME,
+  forwardPushToGrants,
+  isAppGuest as isDinAppGuest,
+  isBridgeEvent,
+  registerDinApps,
+} from './din-apps.mts';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -162,6 +173,17 @@ protocol.registerSchemesAsPrivileged([
     },
   },
   {
+    // Built-in apps (electron/din-apps.mts): an origin of their own each,
+    // secure, fetchable and streamable, but none of the desktop's app:.
+    scheme: DIN_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+  {
     scheme: 'crx',
     privileges: {
       bypassCSP: true,
@@ -268,6 +290,9 @@ let shellContentsId = -1;
 
 /** Whether a request comes from the shell window's main frame, on the shell origin. */
 function isShellSender(event: IpcEvent): boolean {
+  // A call on a bridge port the shell granted an app, already checked against
+  // the app's permission there (electron/din-apps.mts).
+  if (isBridgeEvent(event)) return true;
   return (
     event.sender.id === shellContentsId &&
     !!event.senderFrame &&
@@ -3053,6 +3078,8 @@ const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
  * works for an installed nsite in its app window and in a tab.
  */
 const NAPP_PRELOAD = path.join(import.meta.dirname, 'napp-preload.cjs');
+// Built-in apps' preload: their ports to the desktop and main, nothing else.
+const DIN_APP_PRELOAD = path.join(import.meta.dirname, 'din-app-preload.cjs');
 
 /**
  * Absolute path to the session preload that gives websites Web Push and what
@@ -3129,6 +3156,7 @@ function sendToShell(channel: string, payload?: unknown): void {
   if (shellWindow && !shellWindow.webContents.isDestroyed()) {
     shellWindow.webContents.send(channel, payload);
   }
+  forwardPushToGrants(channel, [payload]);
 }
 
 /** How often, at most, a guest's pointer moves are forwarded to the shell. */
@@ -4778,6 +4806,7 @@ const GUEST_PARTITIONS = new Set([
   WEBBROWSER_PRIVATE_PARTITION,
   WEBBROWSER_TOR_PARTITION,
   DEVTOOLS_PARTITION,
+  DIN_APPS_PARTITION,
 ]);
 
 /** The session all devtools host <webview>s run in. */
@@ -5158,6 +5187,18 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(resolveFile(pathname)).toString());
   });
 
+  registerDinApps(
+    {
+      distDir: DIST,
+      devUrl: DEV_URL,
+      shell: () => (shellWindow && !shellWindow.webContents.isDestroyed() ? shellWindow.webContents : null),
+      assertShellSender,
+      isShellSender,
+      protectedPaths: () => [app.getPath('userData')],
+    },
+    DIN_APP_PRELOAD,
+  );
+
   registerFsHandlers();
   registerFileOpsHandlers({ assertShellSender, sendToShell });
   registerProjectHandlers({ assertShellSender });
@@ -5396,6 +5437,22 @@ app.whenReady().then(() => {
     // shell's storage, including any locally stored nsec.
     if (!GUEST_PARTITIONS.has(params.partition)) {
       event.preventDefault();
+      return;
+    }
+    // A built-in app's window: din:// only, sandboxed, no extra preloads, and
+    // transparent, so an app can draw its own window's shape.
+    if (params.partition === DIN_APPS_PARTITION) {
+      if (!appIdOf(typeof params.src === 'string' ? params.src : '')) {
+        event.preventDefault();
+        return;
+      }
+      attachingGuestSrc = params.src;
+      attachingGuestIsApp = false;
+      webPreferences.nodeIntegration = false;
+      webPreferences.contextIsolation = true;
+      webPreferences.sandbox = true;
+      webPreferences.nodeIntegrationInSubFrames = false;
+      delete webPreferences.preload;
       return;
     }
     // Electron spreads the element's `webpreferences` into these, so the
@@ -5669,6 +5726,49 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   forwardGuestInput(contents);
+
+  // A built-in app's window (electron/din-apps.mts): none of what follows,
+  // which is for web pages.
+  if (isDinAppGuest(contents)) {
+    attachAppGuest(contents, attachingGuestSrc, sendToShell);
+    attachingGuestSrc = '';
+    contents.on('before-input-event', (event, input) => {
+      const shortcut = shellShortcutForInput(input);
+      if (
+        shortcut?.action === 'cycle-windows' ||
+        shortcut?.action === 'apps-menu' ||
+        shortcut?.action === 'assistant' ||
+        shortcut?.action === 'dictation' ||
+        shortcut?.action === 'system-monitor' ||
+        shortcut?.action === 'security-options' ||
+        shortcut?.action === 'screenshot' ||
+        shortcut?.action === 'screenshot-area' ||
+        shortcut?.action === 'wm'
+      ) {
+        claimGuestKey(contents, event, input);
+        sendToShell('shortcut', shortcut);
+      }
+    });
+    // Apps draw their own menus; text fields keep cut, copy and paste.
+    contents.on('context-menu', (_e, params) => {
+      if (!params.isEditable) return;
+      const { editFlags } = params;
+      const menu = new Menu();
+      if (editFlags.canCut) menu.append(new MenuItem({ role: 'cut' }));
+      if (editFlags.canCopy) menu.append(new MenuItem({ role: 'copy' }));
+      if (editFlags.canPaste) menu.append(new MenuItem({ role: 'paste' }));
+      if (menu.items.length > 0) {
+        menu.append(new MenuItem({ type: 'separator' }));
+        menu.append(new MenuItem({ role: 'selectAll' }));
+      }
+      if (menu.items.length === 0) return;
+      setImmediate(() => {
+        if (shellWindow && !shellWindow.isDestroyed()) menu.popup({ window: shellWindow });
+      });
+    });
+    return;
+  }
+
   watchMediaGuest(contents);
 
   // An installed app's window, as the shell said in will-attach-webview

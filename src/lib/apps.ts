@@ -1,8 +1,13 @@
-import { lazy } from 'react';
+import { createElement, lazy } from 'react';
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
 import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
+import { dinManifest, dinManifests, manifestIcon, manifestSize } from '@/lib/dinApps';
+
+const DinAppFrame = lazy(() =>
+  import('@/components/desktop/DinAppFrame').then((m) => ({ default: m.DinAppFrame })),
+);
 
 // Built-in apps are code-split: each is its own chunk, loaded the first time
 // it's launched (windows render app content inside <Suspense>). Statically
@@ -37,9 +42,6 @@ const Spreadsheet = lazy(() =>
 );
 const Slides = lazy(() =>
   import('@/components/desktop/apps/Slides').then((m) => ({ default: m.Slides })),
-);
-const Calculator = lazy(() =>
-  import('@/components/desktop/apps/Calculator').then((m) => ({ default: m.Calculator })),
 );
 const VectorEditor = lazy(() =>
   import('@/components/desktop/apps/VectorEditor').then((m) => ({ default: m.VectorEditor })),
@@ -172,6 +174,41 @@ export interface AppDefinition {
   nostr?: { url?: string; kinds: number[] | null };
 }
 
+/** Window bodies of din:// apps, one per app so windows keep their component. */
+const dinAppComponents = new Map<string, ComponentType<AppComponentProps>>();
+
+/**
+ * A built-in app at din://<id>/ (src/apps/<id>/, docs/din/README.md), as the
+ * window manager sees it: from its manifest, with DinAppFrame for a body.
+ */
+function dinApp(id: string): AppDefinition {
+  const manifest = dinManifest(id);
+  if (!manifest) throw new Error(`No manifest for the built-in app ${id}`);
+  let component = dinAppComponents.get(id);
+  if (!component) {
+    component = function DinApp(props: AppComponentProps) {
+      return createElement(DinAppFrame, { ...props, appId: id, manifest });
+    };
+    dinAppComponents.set(id, component);
+  }
+  return {
+    id,
+    name: manifest.short_name ?? manifest.name,
+    icon: manifestIcon(manifest),
+    component,
+    defaultSize: manifestSize(manifest),
+    floating: manifest.din.window?.floating,
+    keywords: manifest.din.keywords,
+    hidden: manifest.din.hidden,
+    singleInstance: manifest.launch_handler?.client_mode === 'focus-existing',
+    dockAs: manifest.din.dockAs,
+    actions: manifest.shortcuts?.map((s) => ({
+      label: s.name,
+      params: { ...s.din?.params, ...(s.din?.id ? { shortcut: s.din.id } : {}) },
+    })),
+  };
+}
+
 /** All apps installed on the desktop, in launcher order. */
 export const APPS: readonly AppDefinition[] = [
   {
@@ -263,19 +300,8 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 1280, height: 800 },
     keywords: ['powerpoint', 'microsoft powerpoint', 'office', 'pptx', 'ppt', 'odp', 'opendocument', 'keynote', 'impress', 'libreoffice', 'presentation', 'slideshow', 'deck'],
   },
-  {
-    // A basic calculator, and behind its Advanced switch a graphing
-    // calculator with computer algebra, in place of a TI-89: exact answers,
-    // solve, d, ∫, limits, matrices, graphs and tables. The window resizes
-    // itself to whichever is showing.
-    id: 'calculator',
-    name: 'Calculator',
-    icon: '/icons/apps/calculator.png',
-    component: Calculator,
-    defaultSize: { width: 380, height: 620 },
-    floating: true,
-    keywords: ['arithmetic', 'TI-89', 'TI-84', 'graphing calculator', 'CAS', 'algebra', 'calculus', 'derivative', 'integral', 'solve', 'math', 'graph', 'homework'],
-  },
+  // A basic calculator and a graphing one (src/apps/calculator/).
+  dinApp('calculator'),
   {
     // Vector art, Illustrator style: opens and saves .ai files (and PDF and
     // SVG). Files opens Illustrator files here. Launch params `{ path }` open
@@ -434,6 +460,12 @@ export const APPS: readonly AppDefinition[] = [
     hidden: true,
   },
 ];
+
+// Apps with a folder in src/apps/ but no place in the list above come last.
+const listed = new Set(APPS.map((app) => app.id));
+for (const id of dinManifests().keys()) {
+  if (!listed.has(id)) (APPS as AppDefinition[]).push(dinApp(id));
+}
 
 /** The built-in apps whose windows go under this app's Dock tile. */
 export function appsDockedAs(id: string): string[] {

@@ -1,9 +1,9 @@
 # The manifest
 
-> **Status: design.** Today an app's metadata is its `AppDefinition`
-> entry in `src/lib/apps.ts`, and which app opens which file is
-> `appForFile` in `src/lib/fileTypes.ts`. Both move into each app's
-> manifest; the desktop builds its app list from the manifests.
+> **Status: in place**, except `file_handlers` and maskable icons, which
+> aren't read yet: which app opens which file is still `appForFile` in
+> `src/lib/fileTypes.ts`. Apps still in the desktop's tree keep their
+> `AppDefinition` entries in `src/lib/apps.ts` until they move.
 
 Every app ships `manifest.webmanifest` beside its `index.html`: a
 standard [W3C web app manifest](https://www.w3.org/TR/appmanifest/) with
@@ -44,13 +44,13 @@ when the app is published as an nsite, and Din reads ordinary members
 | Member | Replaces | Use |
 |---|---|---|
 | `name`, `short_name` | `AppDefinition.name` | Launcher, Dock, title bar |
-| `icons` | `AppDefinition.icon` | The largest square one; `purpose: "maskable"` gets Din's tile shape |
+| `icons` | `AppDefinition.icon` | The largest square one, as a root path of Din's public files (`/icons/apps/<id>.png`), which both the desktop and the app can load |
 | `start_url` | | The page each window loads; default `/` |
 | `background_color` | | The splash until `din.app.ready()` |
 | `theme_color` | | The title bar's default accent |
 | `launch_handler.client_mode` | `singleInstance` | `focus-existing`: one window, re-launches go to `onLaunch` |
 | `shortcuts` | `actions` | Dock and launcher jump lists; `din.id` and `din.params` reach the app as `launch.shortcut` and `launch.params` |
-| `file_handlers` | `appForFile` | Which files Files opens here; `din.default: true` makes it the default over other handlers of the same type |
+| `file_handlers` | `appForFile` | Not read yet. Which files Files opens here; `din.default: true` makes it the default over other handlers of the same type |
 | `protocol_handlers` | | Which `nostr:` links open here, and which event kinds; see below |
 
 ## Opening `nostr:` links
@@ -89,7 +89,7 @@ Defaults are listed, and reset, in Settings > Nostr & Storage.
 | `permissions` | | What the app needs beyond the basics ([permissions.md](permissions.md)) |
 | `window.size` | `defaultSize` | The first window's size |
 | `window.floating` | `floating` | Floats above tiling, for small tools |
-| `window.frame`, `background`, `shadow`, `resizable`, `minSize`, `maxSize`, `aspectRatio` | | The chrome the window opens with, until `setChrome` ([window.md](window.md)) |
+| `window.frame` | | The frame the window opens with, until `setChrome` ([window.md](window.md)) |
 | `keywords` | `keywords` | Launcher search terms |
 | `hidden` | `hidden` | Openable by id, not listed (Preview, Developer Tools) |
 | `dockAs` | `dockAs` | Windows go under another app's Dock tile |
@@ -105,12 +105,14 @@ desktop then deletes its copies. Remove the field a release or two later.
 
 ## Where manifests live and how Din finds them
 
-Built-in apps live in `src/apps/<id>/` with `index.html` and
-`manifest.webmanifest`, and build to `dist/apps/<id>/`, served at
-`din://<id>/`. The build also writes `dist/apps/index.json`, the list of
-built-in apps with their manifests, which the desktop loads at boot
-instead of importing `src/lib/apps.ts`. The id is the directory name.
+Built-in apps live in `src/apps/<id>/` with `index.html`,
+`manifest.webmanifest` and `main.tsx`. The build (the `din-apps` plugin in
+`vite.config.ts`) makes each `index.html` a page of its own, so it lands
+in `dist/src/apps/<id>/`, served at `din://<id>/`. The id is the
+directory name.
 
-Apps that stay inside the desktop for now (the Web Browser, native
-windows, Screenshot, the Installer) keep their `AppDefinition` entries
-until they move.
+The desktop bundles the manifests (`import.meta.glob` in
+`src/lib/dinApps.ts`), and `src/lib/apps.ts` turns each into the
+`AppDefinition` the window manager knows, with `DinAppFrame` as its
+window body: `dinApp('calculator')` in the `APPS` list puts it in
+launcher order, and apps not in the list come last.

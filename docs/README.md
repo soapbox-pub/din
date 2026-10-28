@@ -1,8 +1,9 @@
 # Din's app platform
 
-> **Status: design.** These pages describe where Din is going, and are written
-> ahead of the code so the API can be reviewed first. Each page says what
-> exists today. When code lands, the page changes from "will" to "does".
+> **Status: in place, apps moving over.** The layers, the host and the SDK
+> exist; built-in apps move out of the desktop one at a time
+> ([migrating-builtin-apps.md](migrating-builtin-apps.md) says which have).
+> Each page's status note says what of it is built.
 
 Din used to run every built-in app inside the desktop's own page, in one
 React tree at one origin. That's quick to build on, but one app's busy loop
@@ -70,12 +71,15 @@ Where a page and the types disagree, the types win and the page is a bug.
 | Path | What |
 |---|---|
 | `electron/main.mts` | Schemes (`app:`, `din:`, `nsite:`), sessions, webview attach policy |
+| `electron/din-apps.mts` | The `din:` scheme's files, the apps' session, port handshakes, granted bridge ports, app guests' policy |
 | `electron/preload.cjs` | The desktop's preload: `window.dinos` |
-| `electron/din-app-preload.cjs` | Apps' preload: holds the ports and exposes them as functions, nothing else (planned) |
-| `src/sdk/` | The `window.din` client and its React pieces, bundled into every app (planned; types exist) |
-| `src/platform/` | `GuestSurface` and its backends (planned) |
-| `src/components/desktop/DinHost.tsx` | The desktop's end of every app's port (planned) |
-| `src/apps/<id>/` | Each built-in app: `index.html`, `manifest.webmanifest`, its code (planned) |
+| `electron/din-app-preload.cjs` | Apps' preload: holds the ports and exposes them as functions, nothing else |
+| `src/sdk/` | `din.d.ts` (the API), `index.ts` (`connect()`), `react/` (hooks and title-bar pieces), `start.tsx` (an app's entry point), `protocol.ts` (the port's messages) |
+| `src/platform/` | `GuestSurface` and the guest helpers ([guest-surfaces.md](guest-surfaces.md)) |
+| `src/components/desktop/DinAppFrame.tsx` | The desktop's end of every app window's port; `dinHost/` beside it |
+| `src/lib/dinApps.ts`, `src/lib/dinDrag.ts` | Apps' manifests and ports; the drag broker |
+| `src/apps/<id>/` | Each built-in app: `index.html`, `manifest.webmanifest`, `main.tsx`, its code |
+| `src/shared/` | Code apps and the desktop both use (it must not reach the desktop's internals) |
 
 ## The plan
 
@@ -83,9 +87,10 @@ Where a page and the types disagree, the types win and the page is a bug.
 2. ~~Spike the risky parts~~ (done): transparency, shapes, moving a
    window from inside an app, drag and drop across webviews, keyboard
    input, hung apps and `din://` isolation all work; the pages say how.
-3. Groundwork: collect the desktop's globals into `window.dinos`; put
-   `<webview>` behind `GuestSurface`; make `WindowFrame` plain data.
-4. The app host: the `din:` scheme and session, `DinHost`, the SDK, a
-   multi-page build.
+3. ~~Groundwork~~ (done): the desktop's globals are `window.dinos`;
+   `<webview>` is behind `GuestSurface`. (The desktop's `WindowFrame`
+   stays as it is: apps get their own, `din.window.frameStyle`.)
+4. ~~The app host~~ (done): the `din:` scheme and session, `DinAppFrame`,
+   the SDK, a multi-page build.
 5. Move apps over one at a time
    ([migrating-builtin-apps.md](migrating-builtin-apps.md) has the order).

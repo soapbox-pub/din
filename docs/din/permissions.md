@@ -1,7 +1,8 @@
 # Permissions and `din.system`
 
-> **Status: design.** Today every built-in app can use every desktop
-> global (`window.fs`, `window.pty`, `window.wifi`, …).
+> **Status: in place** for apps on `din://`. `media-session` and
+> `wallpaper` are reserved for the apps that will need them, and do
+> nothing yet.
 
 ## What every app has
 
@@ -26,10 +27,10 @@ When nsites get `window.din`, the user approves the list at install.
 | Permission | Grants | Built-in apps that need it |
 |---|---|---|
 | `account` | `din.account`: pubkey, relays, Blossom servers | Assistant, App Store |
-| `nostr` | `din.account.nostr` and `window.nostr`, through Din's prompts. Implies `account` | App Store |
+| `nostr` | `din.account.nostr` and `window.nostr`, signing as the signed-in user. Implies `account` | App Store |
 | `fs` | `din.system.fs`: the whole filesystem by path; `path` on handles | Files, Text Editor |
 | `pty` | `din.system.pty`: terminals | Terminal |
-| `printing` | `din.system.printing` | Word Processor, Publisher, Preview |
+| `printing` | `din.print`: Din's print dialog for HTML or a file the app holds | Word Processor, Publisher, Preview |
 | `notifications` | Notification center entries, the Dock badge | Assistant |
 | `media-session` | Report what's playing; hear the media keys | Media Player |
 | `wallpaper` | Set the desktop's wallpaper | Files, Preview |
@@ -67,14 +68,15 @@ the one copy `contextBridge` already makes for today's globals. Callbacks
 (`onChange`, a pty's data) come back on the same port.
 
 Main binds each port to the app and permission it was made for and
-enforces the limits itself: `din.system.fs` can't reach Din's own
-configuration (`~/.config/din`) or nostrd's keys, even for Files. The
-desktop can revoke a grant, which closes the port.
+enforces the limits itself: `din.system.fs` can't reach Din's own Electron
+profile (where the desktop's storage, and outside DinOS the signed-in
+account's key, live), even for Files. On DinOS nostrd's keys belong to
+another Unix user anyway. A pty port can touch only the terminals it
+spawned, and they end with the grant. The desktop can revoke a grant,
+which closes the port.
 
-Files' contents are better read through handles than through
-`fs.readFile`: a handle's `getFile()` streams from the local-file scheme
-(as Preview and thumbnails do today) rather than sending a 200 MB file as
-one message.
+Printing isn't a bridge: the print dialog is the desktop's, so
+`din.print` goes to the desktop.
 
 New system pieces are added as the apps that need them move over
 (Settings needs most of `window.dinos`, and moves last). Each one gets a

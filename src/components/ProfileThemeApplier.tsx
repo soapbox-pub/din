@@ -3,6 +3,7 @@ import { usePaintedTheme } from '@/hooks/useDesktopTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getColorSchemeBridge } from '@/lib/colorScheme';
 import { deriveThemeTokens, isDarkTheme } from '@/lib/profileTheme';
+import { setThemeFontFaces } from '@/lib/themeFontFaces';
 
 const FONT_SANS_FALLBACK =
   "'Inter Variable', ui-sans-serif, system-ui, sans-serif, " +
@@ -83,6 +84,11 @@ export function ProfileThemeApplier() {
     const loadedFaces: FontFace[] = [];
     let cancelled = false;
 
+    setThemeFontFaces([
+      ...(bodyFamily && bodyUrl ? [{ family: bodyFamily, url: bodyUrl }] : []),
+      ...(titleFamily && titleUrl ? [{ family: titleFamily, url: titleUrl }] : []),
+    ]);
+
     const loadFont = async (font: { family: string; url: string }, apply: () => void) => {
       try {
         // FontFace API avoids interpolating event data into a stylesheet.
@@ -116,6 +122,7 @@ export function ProfileThemeApplier() {
 
     return () => {
       cancelled = true;
+      setThemeFontFaces([]);
       for (const face of loadedFaces) {
         document.fonts.delete(face);
       }

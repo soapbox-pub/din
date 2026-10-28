@@ -9,6 +9,8 @@
  * here for the duration.
  */
 
+import { DRAG_MIME, currentDrag, finishDrag, registerDrag } from '@/lib/dinDrag';
+
 export const FILES_MIME = 'application/x-din-files';
 
 export interface ActiveDrag {
@@ -36,8 +38,20 @@ export function fileDragActive(): boolean {
   return active !== null;
 }
 
+/** The token of the drag this document started, for apps to take it by (src/lib/dinDrag.ts). */
+let token: string | null = null;
+
 export function startFileDrag(e: React.DragEvent, drag: ActiveDrag, label: string): void {
   setActive(drag);
+  token = crypto.randomUUID();
+  registerDrag({
+    token,
+    kind: 'files',
+    source: 'din',
+    paths: drag.paths,
+    folders: drag.paths.length > 0 && drag.paths.every((p) => drag.folders.has(p)),
+  });
+  e.dataTransfer.setData(DRAG_MIME, token);
   e.dataTransfer.setData(FILES_MIME, JSON.stringify(drag.paths));
   e.dataTransfer.setData('text/plain', drag.paths.join('\n'));
   e.dataTransfer.effectAllowed = 'copyMove';
@@ -54,13 +68,21 @@ export function startFileDrag(e: React.DragEvent, drag: ActiveDrag, label: strin
   requestAnimationFrame(() => ghost.remove());
 }
 
-export function endFileDrag(): void {
+export function endFileDrag(e?: React.DragEvent): void {
   setActive(null);
+  if (token) finishDrag(token, e?.dataTransfer.dropEffect ?? 'none');
+  token = null;
 }
 
-/** The files being dragged right now, if the drag is one of ours. */
+/**
+ * The files being dragged right now, if the drag is one of ours: from this
+ * document, or files an app is dragging (which the desktop knows by token).
+ */
 export function activeFileDrag(e: React.DragEvent): ActiveDrag | null {
-  return e.dataTransfer.types.includes(FILES_MIME) ? active : null;
+  if (e.dataTransfer.types.includes(FILES_MIME)) return active;
+  const app = e.dataTransfer.types.includes(DRAG_MIME) ? currentDrag() : null;
+  if (app?.kind !== 'files' || app.source === 'din') return null;
+  return { paths: app.paths, folders: new Set(app.folders ? app.paths : []) };
 }
 
 /** Whether a drop should copy (Ctrl held) rather than move. */

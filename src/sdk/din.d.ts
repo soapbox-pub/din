@@ -14,13 +14,16 @@
  *   `onChange` that returns an unsubscribe function.
  * - Requests that the desktop answers return promises. Fire-and-forget
  *   setters (`setTitle`) return nothing and apply in order.
- * - Anything that needs a permission throws `DinPermissionError` when the
- *   app's manifest didn't ask for it (docs/din/permissions.md).
+ * - Anything that needs a permission rejects with an error named
+ *   `DinPermissionError` when the app's manifest didn't ask for it
+ *   (docs/din/permissions.md).
+ *
+ * The implementation is src/sdk/index.ts (`connect()`), and the React
+ * pieces are src/sdk/react.tsx.
  */
 
 import type { FsBridge } from '@/lib/fs';
 import type { PtyBridge } from '@/lib/pty';
-import type { PrintingBridge } from '@/lib/printing';
 
 export type Unsubscribe = () => void;
 
@@ -52,6 +55,7 @@ export interface Din {
   theme: DinTheme;
   account: DinAccount;
   notifications: DinNotifications;
+  print: DinPrint;
   permissions: DinPermissions;
   /** Privileged system bridges, present only when the manifest asks for them. */
   system: DinSystem;
@@ -101,6 +105,11 @@ export interface DinApp {
   openFiles(files: DinFileHandle[]): Promise<void>;
   /** Open a URL in the Web Browser (or the app that handles its scheme). */
   openUrl(url: string): Promise<void>;
+  /**
+   * localStorage keys this app kept on the desktop's origin before it moved
+   * out are copied in before the app's code runs (the manifest's
+   * `migrateStorage`); nothing to call.
+   */
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +132,7 @@ export interface WindowState {
   snapped: 'left' | 'right' | null;
   /** The page went fullscreen (requestFullscreen). */
   fullscreen: boolean;
-  /** The window's content area on the desktop, in CSS pixels. */
+  /** Where the window is on the desktop and its size, frame included, in CSS pixels. */
   bounds: Rect;
   /** The work area of the monitor it's on (the screen minus the menu bar and Dock). */
   workArea: Rect;
@@ -142,21 +151,13 @@ export type FrameMode =
   /** Nothing: the app's pixels are the window, at any shape (skins). */
   | 'none';
 
+/**
+ * How the window is drawn. The page itself is always transparent where it
+ * doesn't paint: a `standard` or `custom` window has the desktop's frosted
+ * background behind it, a `none` window nothing.
+ */
 export interface WindowChrome {
   frame: FrameMode;
-  /**
-   * `transparent` lets the desktop show through wherever the page doesn't
-   * paint. `custom` windows default to opaque, `none` windows to transparent.
-   */
-  background?: 'opaque' | 'transparent';
-  /** Din's soft window shadow. Default: true unless `frame` is `none`. */
-  shadow?: boolean;
-  /** Whether the user can resize it. Default true. */
-  resizable?: boolean;
-  minSize?: Size;
-  maxSize?: Size;
-  /** Width over height, kept while resizing. */
-  aspectRatio?: number;
 }
 
 /** The look of the title bar, for SDK pieces drawn inside the app. */
@@ -210,6 +211,14 @@ export interface DinWindow {
   focus(): void;
   /** Close this window. Doesn't consult its own `onCloseRequest`. */
   close(): void;
+  /** Close it as the user would (`<WindowControls>`' close button): through `onCloseRequest`. */
+  requestClose(): void;
+  /**
+   * Din's window menu (Minimize, Maximize, tiling, workspaces, Close) at a
+   * point in the window: what right-clicking a title bar opens.
+   * `<WindowDragRegion>` does this itself.
+   */
+  showWindowMenu(at: Point): void;
   /**
    * Have a say when the user (or the desktop) closes the window. Return true
    * to keep it open: the app then asks its question ("Save changes?") and
@@ -217,9 +226,6 @@ export interface DinWindow {
    * doesn't is offered for force quitting. One handler; a second replaces it.
    */
   onCloseRequest(handler: (() => boolean) | null): void;
-
-  /** Open a new window of this app, as a child that follows this one (a pop-up tool). */
-  openChild(params?: Record<string, unknown>, size?: Size): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +239,7 @@ export interface MenuItemBase {
   enabled?: boolean;
   /** Shown beside the label and bound while the window is focused, e.g. `Ctrl+S`. */
   accelerator?: string;
-  /** A lucide icon name, or a data:/din: URL. */
+  /** An image: a data: URL, https, or a root path of Din's public files (`/icons/…`). */
   icon?: string;
   /** Drawn in the destructive color (Delete, Close Without Saving). */
   destructive?: boolean;
@@ -334,8 +340,6 @@ export interface DinFiles {
   save(options?: SaveFileOptions): Promise<DinFileHandle | null>;
   /** A handle kept by `persist()`; null if the file is gone or the grant was revoked. */
   restore(token: string): Promise<DinFileHandle | null>;
-  /** Add to Din's recent files (Files' Recent, the Dock tile's menu). */
-  addRecent(file: DinFileHandle): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,12 +412,13 @@ export interface ThemeSnapshot {
   scheme: 'light' | 'dark';
   /**
    * Din's design tokens as CSS custom properties without the `--`
-   * (`background`, `foreground`, `primary`, `radius`, …). The SDK sets them
-   * on `:root`, so Tailwind classes match the desktop's out of the box.
+   * (`background`, `foreground`, `primary`, `radius`, …), as the desktop
+   * computes them, profile theme included. The SDK sets them on `:root`, so
+   * Tailwind classes match the desktop's out of the box.
    */
   tokens: Record<string, string>;
-  /** The UI font stack and the monospace one. */
-  fonts: { sans: string; mono: string };
+  /** A profile theme's web fonts, which the SDK loads. */
+  fontFaces: { family: string; url: string }[];
   /** The desktop's interface zoom. The desktop already scales the window; for canvas apps. */
   zoom: number;
   /** The user prefers reduced motion. */
@@ -488,6 +493,17 @@ export interface DinNotifications {
 }
 
 // ---------------------------------------------------------------------------
+// din.print (permission `printing`)
+// ---------------------------------------------------------------------------
+
+export interface DinPrint {
+  /** Din's print dialog for a document, as HTML (with its own styles inline). */
+  html(title: string, html: string): Promise<void>;
+  /** Din's print dialog for a file the app holds (a PDF, a picture, text). */
+  file(file: DinFileHandle): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
 // din.permissions and din.system
 // ---------------------------------------------------------------------------
 
@@ -505,7 +521,7 @@ export type Permission =
   | 'fs'
   /** Terminals (`din.system.pty`). Terminal. */
   | 'pty'
-  /** Print documents (`din.system.printing`). */
+  /** Print documents (`din.print`). */
   | 'printing'
   /** Notifications kept in the notification center, and a Dock badge. Toasts need nothing. */
   | 'notifications'
@@ -519,21 +535,16 @@ export interface DinPermissions {
   has(permission: Permission): boolean;
 }
 
-export class DinPermissionError extends Error {
-  readonly permission: Permission;
-}
-
 /**
  * The desktop's own bridges (`window.dinos` namespaces), for the few apps
  * whose job they are. Each is present only with its permission, and talks
  * to Electron main over a port of its own that the desktop had main make
  * for this app, so it's as fast as the desktop's own. Functions that take
- * callbacks work as on the desktop.
+ * callbacks work as on the desktop. Absent outside Electron.
  */
 export interface DinSystem {
   fs?: FsBridge;
   pty?: PtyBridge;
-  printing?: PrintingBridge;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,12 +1,9 @@
 # `din.drag`: drag and drop between apps
 
-> **Status: design.** Today drags of files work because every app shares
-> one document: `src/components/desktop/apps/files/dnd.ts` puts raw paths
-> under `application/x-din-files` and keeps the active drag in a module
-> variable that targets read while hovering. Tabs move between windows
-> through `src/lib/tabTransfer.ts`, the same way. Neither survives apps in
-> separate processes, and raw paths would let any app make Files move
-> anything.
+> **Status: in place.** The broker is `src/lib/dinDrag.ts`. Drags the
+> desktop's own Files starts (`files/dnd.ts`) register with it too, so
+> apps can take them, and Files windows take files dragged from apps.
+> Apps still in the desktop's tree move tabs with `src/lib/tabTransfer.ts`.
 
 ## The idea
 
@@ -40,7 +37,10 @@ din.drag.onEnd(({ dropped, operation }) => {
 
 `startFiles` sets the DataTransfer: the token under
 `application/x-din-drag`, the names as `text/plain` for targets that only
-take text, and a compact drag image ("3 items") like today's.
+take text, and a compact drag image ("3 items") like today's. The
+DataTransfer has to be filled during `dragstart`, so the SDK mints the
+token itself (a random UUID, which no other app can guess) and registers
+it with the desktop alongside; the desktop refuses a token already in use.
 
 ## Taking a drop
 

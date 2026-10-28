@@ -8,10 +8,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
-import { useWorkAreas } from '@/contexts/MonitorsContext';
-import type { AppComponentProps } from '@/lib/apps';
-import { areaFor } from '@/lib/monitors';
+import { useDin } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { BreakError, Cas } from './calculator/cas';
 import { Basic, ViewSwitch } from './calculator/Basic';
@@ -142,14 +139,14 @@ const VIEW_SIZES: Record<CalculatorView, { width: number; height: number }> = {
  * click away, the advanced one: a graphing calculator with a computer
  * algebra system, built to stand in for a TI-89.
  */
-export function Calculator({ windowId }: AppComponentProps) {
+export function Calculator() {
   const [basic, setBasic] = useState(loadBasicState);
   useEffect(() => saveBasicState(basic), [basic]);
   const setView = (view: CalculatorView) => setBasic((b) => ({ ...b, view }));
 
   return (
     <>
-      <FitWindow windowId={windowId} view={basic.view} />
+      <FitWindow view={basic.view} />
       {basic.view === 'basic' ? (
         <Basic tape={basic.tape} onTape={(tape) => setBasic((b) => ({ ...b, tape }))} onView={setView} />
       ) : (
@@ -159,36 +156,20 @@ export function Calculator({ windowId }: AppComponentProps) {
   );
 }
 
-/**
- * Sizes the window for the calculator it shows, keeping it on its monitor.
- * A component of its own: it follows every window change, and re-rendering
- * the calculator for each would be wasteful.
- */
-function FitWindow({ windowId, view }: { windowId: string; view: CalculatorView }) {
-  const { windows } = useWindowManager();
-  const { resize } = useWindowActions();
-  const areas = useWorkAreas();
-  const current = useRef({ windows, areas });
+/** Sizes the window for the calculator it shows, keeping it on its monitor. */
+function FitWindow({ view }: { view: CalculatorView }) {
+  const din = useDin();
   useEffect(() => {
-    current.current = { windows, areas };
-  }, [windows, areas]);
-
-  useEffect(() => {
-    const { windows, areas } = current.current;
-    const win = windows.find((w) => w.id === windowId);
-    if (!win || win.maximized || win.snapped) return;
+    const { maximized, snapped, bounds, workArea } = din.window.state;
+    if (maximized || snapped) return;
     let { width, height } = VIEW_SIZES[view];
-    if (win.width === width && win.height === height) return;
-    let { x, y } = win;
-    if (areas.length > 0) {
-      const area = areaFor(areas, win);
-      width = Math.min(width, area.width);
-      height = Math.min(height, area.height);
-      x = Math.max(area.x, Math.min(x, area.x + area.width - width));
-      y = Math.max(area.y, Math.min(y, area.y + area.height - height));
-    }
-    resize(windowId, { x, y, width, height });
-  }, [windowId, view, resize]);
+    if (bounds.width === width && bounds.height === height) return;
+    width = Math.min(width, workArea.width);
+    height = Math.min(height, workArea.height);
+    const x = Math.max(workArea.x, Math.min(bounds.x, workArea.x + workArea.width - width));
+    const y = Math.max(workArea.y, Math.min(bounds.y, workArea.y + workArea.height - height));
+    din.window.setBounds({ x, y, width, height });
+  }, [din, view]);
 
   return null;
 }

@@ -1,8 +1,6 @@
 # Building a built-in app
 
-> **Status: design.** This is how it will go once the app host lands
-> (step 4 of the plan in [README.md](README.md)). Until then, built-in
-> apps are components registered in `src/lib/apps.ts`.
+> **Status: in place.** `src/apps/calculator/` is a real, small example.
 
 A small example: **Stopwatch**, a floating window with a custom header.
 
@@ -41,43 +39,48 @@ No permissions: it needs nothing but its window. See
 ## 3. The page
 
 ```html
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <title>Stopwatch</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="./main.tsx"></script>
-  </body>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Stopwatch</title>
+        <meta name="description" content="A stopwatch with laps.">
+        <meta property="og:type" content="website">
+        <meta property="og:title" content="Stopwatch">
+        <meta property="og:description" content="A stopwatch with laps.">
+        <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'none'">
+        <link rel="manifest" href="./manifest.webmanifest">
+    </head>
+    <body>
+        <div id="root"></div>
+        <script type="module" src="./main.tsx"></script>
+    </body>
 </html>
 ```
 
-The repo's lint rules for HTML apply: no inline scripts, a manifest link.
-Each app page gets a strict CSP from its `din:` response headers.
+The repo's lint rules for HTML apply: no inline scripts, a description
+and Open Graph tags, a manifest link. The CSP is the app's own, and
+strict: widen it (a `connect-src` for the relays an app talks to,
+`'wasm-unsafe-eval'` for WebAssembly) only as far as the app needs. In
+development the build adds `ws://localhost:*` to `connect-src` for Vite's
+hot reloading.
 
 ## 4. Connecting
 
 ```tsx
 // main.tsx
-import { createRoot } from 'react-dom/client';
-import { connect } from '@/sdk';
-import { DinProvider } from '@/sdk/react';
-import '@/sdk/app.css';                      // Tailwind with Din's tokens
+import { startApp } from '@/sdk/start';
 import { Stopwatch } from './Stopwatch';
 
-const din = await connect();
-createRoot(document.getElementById('root')!).render(
-  <DinProvider din={din}>
-    <Stopwatch />
-  </DinProvider>,
-);
+void startApp(() => <Stopwatch />);
 ```
 
-`connect()` resolves once the desktop has said hello; the theme is
-already applied.
+`startApp` loads Din's base styles and polyfills, waits for `connect()`
+(which resolves once the desktop has said hello, with the theme already
+applied) and renders the app inside `<DinProvider>`, React Query and the
+tooltip provider. An app that needs something else can call `connect()`
+from `@/sdk` and render itself.
 
 ## 5. The app
 
@@ -102,7 +105,7 @@ export function Stopwatch() {
   useEffect(() => din.window.setTitle(running ? format(ms) : null), [din, running, ms]);
 
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
+    <div className="flex h-full flex-col text-foreground">
       <WindowDragRegion className="flex h-9 items-center px-3">
         <span className="flex-1 text-sm text-muted-foreground">Stopwatch</span>
         <WindowControls />
@@ -123,5 +126,6 @@ export function Stopwatch() {
   iframe, a different origin from the desktop, so the same isolation
   holds.
 
-The app appears in the launcher once its folder exists; there's no
-registry to edit.
+The app appears in the launcher once its folder exists, after the apps
+listed in `src/lib/apps.ts`; add `dinApp('stopwatch')` there to give it a
+place in the launcher's order.

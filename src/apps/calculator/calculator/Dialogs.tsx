@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Search, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { DialogButton, Overlay } from '../files/Dialogs';
+import { DialogButton, Overlay } from '@/shared/dialogs';
 import { CATALOG, insertText, type CatalogEntry, type Category } from './catalog';
 import { parse } from './expr';
 import { tidy } from './present';

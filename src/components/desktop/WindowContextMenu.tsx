@@ -56,7 +56,7 @@ export function WindowContextMenu({
 }
 
 /** The menu's items: mounted only while it's open, so the hooks cost nothing otherwise. */
-function WindowMenuItems({
+export function WindowMenuItems({
   win,
   onMinimize,
   onToggleMaximize,

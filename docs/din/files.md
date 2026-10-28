@@ -1,8 +1,9 @@
 # `din.files` and `din.clipboard`: files the user hands an app
 
-> **Status: design.** Today apps call `useFilePicker()` for a path and
-> then `window.fs.readFile(path)`, and every app can read any path.
-> Files' cut/copy/paste lives in `src/lib/fileClipboard.ts`.
+> **Status: in place.** `getFile()` reads through the desktop (the whole
+> file in one message; a streaming URL for large media will come with the
+> apps that play it). Apps still in the desktop's tree pick paths with
+> `useFilePicker()` and read them with `window.dinos.fs`.
 
 ## Handles, not paths
 

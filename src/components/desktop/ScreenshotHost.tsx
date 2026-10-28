@@ -289,8 +289,8 @@ function CaptureThumbnail({
                   setDragging(true);
                   startFileDrag(e, { paths: [path], folders: new Set() }, name);
                 }}
-                onDragEnd={() => {
-                  endFileDrag();
+                onDragEnd={(e) => {
+                  endFileDrag(e);
                   setDragging(false);
                   setHovered(false);
                 }}

@@ -1,9 +1,9 @@
 # Theme, account and notifications
 
-> **Status: design.** Today apps read the theme from the desktop's CSS
-> variables (they're in the same document), the account from
-> `useCurrentUser` and `useAppContext`, and notify through `useToast` /
-> `notify()` in `src/lib/notificationCenter.ts`.
+> **Status: in place**, except the Dock badge (`setBadge` is accepted and
+> shows nothing yet). Apps still in the desktop's tree read the theme from
+> its CSS, the account from `useCurrentUser` and `useAppContext`, and
+> notify through `notify()`.
 
 ## `din.theme`
 
@@ -48,8 +48,10 @@ Without the permission, `pubkey` is null and the lists are empty.
 `din.account.nostr` is a NIP-07 signer backed by Din's: `getPublicKey`,
 `signEvent`, `nip04` and `nip44`. The SDK also installs it as
 `window.nostr`, so Nostrify and other NIP-07 libraries work unchanged.
-Requests go through Din's signer prompts, attributed to the app by name
-and icon, with the same per-kind remembered grants as websites get.
+For built-in apps, whose code is Din's own and reviewed, requests go
+straight to the signed-in user's signer, as they did when the apps lived
+in the desktop. (nsites, when they get `window.din`, will go through
+Din's signer prompts as websites do.)
 
 Apps query relays themselves (`@nostrify/nostrify`'s pool, from the app's
 own origin). The desktop's NostrProvider connection isn't shared; a

@@ -1,8 +1,10 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
+import type { Plugin } from "vite";
 
 /**
  * `npm run build:profile`: a production build that can be profiled. Two
@@ -23,15 +25,57 @@ import { defineConfig } from "vitest/config";
 const PROFILE_BUILD = process.env.VITE_PROFILE === "1";
 const PROFILE_REACT = PROFILE_BUILD && process.env.VITE_PROFILE_REACT === "1";
 
+/**
+ * Built-in apps (docs/din/README.md): every src/apps/<id>/index.html is a
+ * page of the build, served at din://<id>/ by electron/din-apps.mts. In
+ * development their pages come from this server, through din:// in Electron
+ * and from <id>.localhost here in a plain browser, so the HMR client is
+ * pointed at localhost, and their CSP (and the desktop's, for framing them
+ * outside Electron) lets it through.
+ */
+function dinApps(): Plugin {
+  const appsDir = path.resolve(__dirname, "src/apps");
+  const pages = fs.existsSync(appsDir)
+    ? fs.readdirSync(appsDir).filter((id) => fs.existsSync(path.join(appsDir, id, "index.html")))
+    : [];
+  return {
+    name: "din-apps",
+    config: () => ({
+      build: {
+        rollupOptions: {
+          input: {
+            main: path.resolve(__dirname, "index.html"),
+            ...Object.fromEntries(pages.map((id) => [`app-${id}`, path.join(appsDir, id, "index.html")])),
+          },
+        },
+      },
+    }),
+    transformIndexHtml: {
+      order: "pre",
+      handler(html, ctx) {
+        if (!ctx.server) return html;
+        if (ctx.path.startsWith("/src/apps/")) {
+          return html.replace("connect-src ", "connect-src ws://localhost:* ");
+        }
+        return html.replace("frame-src ", "frame-src http://*.localhost:* ");
+      },
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
   server: {
     host: "::",
     port: 8080,
+    // Apps' pages are din:// (or <id>.localhost) documents: their HMR
+    // client must still find this server.
+    hmr: { host: "localhost", protocol: "ws" },
   },
   plugins: [
     react(),
     tailwindcss(),
+    dinApps(),
   ],
   // The Calculator's giac worker imports its WebAssembly relative to
   // itself, which pre-bundling would break.

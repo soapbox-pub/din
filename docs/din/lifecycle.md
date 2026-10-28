@@ -1,8 +1,9 @@
 # Lifecycle: launching, ready, closing, hangs
 
-> **Status: design.** Today the window manager renders an app component
-> with `{ windowId, params }` props (`AppComponentProps` in
-> `src/lib/apps.ts`), and close guards live in `src/lib/closeGuards.ts`.
+> **Status: in place.** On the desktop's side the window manager still
+> opens a window with launch params; `DinAppFrame` turns them into the
+> app's launch context and answers its close requests through the
+> desktop's close guards (`src/lib/closeGuards.ts`).
 
 ## Launching
 
@@ -22,8 +23,11 @@ const { reason, params, files, shortcut } = din.app.launch;
 | `shortcut` | The manifest shortcut's `din.id`, for Dock and launcher jump lists |
 | `reason` | `new`, or `relaunch` for `onLaunch` below |
 
-Launch params are structured-cloneable data. File paths in params don't
-grant anything; files travel as handles in `files`.
+Launch params are structured-cloneable data. Paths an app puts in
+`din.app.open` params are dropped: files travel as handles. On the
+desktop's side, though, Files and the rest still open apps with
+`{ path }` or `{ paths }` params, which `DinAppFrame` turns into granted
+handles in `files` (and leaves out of `params`).
 
 ### Single-instance apps
 
@@ -79,10 +83,9 @@ itself. The desktop treats it as not responding when either:
   after it in the spike, so this alone is slow; or
 - a request the desktop sent (a close request) goes unanswered for 5 s.
 
-Its window then dims, the title says "(Not Responding)", and the desktop
-offers **Wait** or **Force Quit**. Force quit has main kill the renderer
-process (`dinos.apps.kill`), and `render-process-gone` follows within
-about 50 ms. A window whose renderer is gone, killed or crashed, shows
-"Paint stopped" with **Reopen**, which reloads the webview: a new process,
-the same webContents, a fresh port, and the same launch context. System Monitor lists app windows by their processes and
-can end them the same way.
+Its window then says "Paint isn't responding" over the app and offers
+**Wait** or **Force Quit**. Force quit has main kill the renderer process
+(`dinos.apps.kill`), and `render-process-gone` follows within about
+100 ms. A window whose renderer is gone, killed or crashed, shows "Paint
+stopped" with **Reopen**, which reloads the webview: a new process, the
+same webContents, a fresh port, and the same launch context.

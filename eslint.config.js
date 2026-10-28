@@ -44,6 +44,24 @@ export default defineConfig(
     },
   },
   {
+    // Built-in apps and the code they share run in their own documents and
+    // reach the desktop only through window.din (docs/din/README.md).
+    name: "app/apps",
+    files: ["src/apps/**/*.{ts,tsx}", "src/shared/**/*.{ts,tsx}", "src/sdk/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [
+          { group: ["@/components/desktop/*"], message: "Apps run in their own document: use window.din (@/sdk), or move shared code to src/shared/." },
+          { group: ["@/contexts/Window*", "@/contexts/FilePickerContext", "@/contexts/MonitorsContext", "@/hooks/useWindows", "@/lib/apps", "@/lib/dinApps", "@/lib/closeGuards", "@/lib/menuBarSlot", "@/lib/portalContainer", "@/platform/*"], message: "That's the desktop's; apps use window.din (@/sdk)." },
+        ],
+      }],
+      "no-restricted-syntax": ["error", {
+        selector: "MemberExpression[object.name='window'][property.name='dinos']",
+        message: "window.dinos is the desktop's alone; apps use window.din (din.system for granted bridges).",
+      }],
+    },
+  },
+  {
     // The one place that knows the guest engine (docs/guest-surfaces.md).
     name: "app/platform",
     files: ["src/platform/**/*.{ts,tsx}"],
@@ -88,7 +106,7 @@ export default defineConfig(
     // directly (window/document/Element/requestAnimationFrame), so they need
     // browser globals on top of the electron block's node globals.
     name: "app/electron-dom-preload",
-    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/geolocation-preload.cjs", "electron/nostr-preload.cjs", "electron/adblock-preload.cjs", "electron/adblock-scriptlets-preload.cjs", "electron/popup-preload.cjs", "electron/print-preload.cjs", "electron/screen-share-preload.cjs", "electron/media-preload.cjs", "electron/napp-preload.cjs", "electron/web-push-preload.cjs"],
+    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/geolocation-preload.cjs", "electron/nostr-preload.cjs", "electron/adblock-preload.cjs", "electron/adblock-scriptlets-preload.cjs", "electron/popup-preload.cjs", "electron/print-preload.cjs", "electron/screen-share-preload.cjs", "electron/media-preload.cjs", "electron/napp-preload.cjs", "electron/web-push-preload.cjs", "electron/din-app-preload.cjs", "electron/preload.cjs"],
     languageOptions: {
       globals: globals.browser,
     },

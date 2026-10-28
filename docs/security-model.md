@@ -1,8 +1,8 @@
 # Security model
 
-> **Status: design.** Today every built-in app shares the desktop's origin
-> and has all of its powers. This page describes the boundaries the app
-> platform puts in place.
+> **Status: in place** for apps that have moved to `din://`
+> ([migrating-builtin-apps.md](migrating-builtin-apps.md)). Apps still in
+> the desktop's tree share its origin and all of its powers until they move.
 
 ## What we defend against
 
@@ -29,17 +29,23 @@ still apply, and moving apps out shrinks what code runs there.
 | Browser tabs, installed web apps, nsites | their own | `persist:webbrowser` | nostr, napp, web push, … | one per site |
 | Private and Tor tabs | their own | in-memory sessions | fewer | one per site |
 
-- **Each scheme is served by its own handler.** `app:` serves only the
-  desktop's files (`dist/`); `din:` serves only `dist/apps/<host>/`, and
-  only in the `persist:din-apps` session. Neither can be made to serve the
-  other's files.
+- **Each scheme is served by its own handler.** `app:` serves the
+  desktop's files (`dist/`) in the default session. `din:` exists only in
+  the `persist:din-apps` session (`electron/din-apps.mts`): `din://<id>/`
+  is `dist/src/apps/<id>/index.html`, other paths the app's own built
+  files or the build's shared assets and public files, never the
+  desktop's page. In development it proxies the Vite server instead.
 - **Each built-in app is its own origin**, so its `localStorage`,
   IndexedDB and caches are its own. `din://paint` can't read
   `din://terminal`'s storage.
 - **Built-in apps don't share a session with the web.** No cookies,
   extensions, ad blocking or permission grants in common with tabs.
-- **The desktop's CSP** allows frames only from `din:` and the guest
-  schemes, never from `app:` itself.
+- **Each app page has a strict CSP** in its `index.html` (`default-src
+  'none'`, scripts from itself only). Apps that reach the network widen
+  `connect-src` there, in review.
+- **Built-in apps' guests are created only by `DinAppFrame`**, in their
+  partition, and `will-attach-webview` refuses a `din-apps` guest whose
+  `src` isn't `din://`.
 
 ## Who trusts whom
 
@@ -116,8 +122,10 @@ main gain over today, where every app could read the whole home folder.
   today. Frames of other `din://` apps are blocked the same way; they
   wouldn't get `window.din` anyway, since the preload only connects the
   main frame.
-- `window.open` and links go through `din.app.openUrl`; the webview's own
-  pop-ups are denied.
+- `window.open` and links are denied as pop-ups; http(s) and nsite URLs
+  open in the Web Browser instead. Apps open URLs with `din.app.openUrl`.
+- The apps' session grants only clipboard, fullscreen and pointer lock;
+  every other permission request is refused without a prompt.
 - Apps can't frame `app://` and can't fetch it: the apps' session has no
   `app:` handler at all, and Chromium allows cross-origin requests only on
   http(s)-like schemes, so one `din://` app can't fetch another's files

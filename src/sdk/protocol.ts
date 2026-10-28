@@ -1,0 +1,176 @@
+/**
+ * The messages between an app (src/sdk/) and the desktop (DinAppFrame) on
+ * the app's port. Internal: apps use window.din, never these. Versioned by
+ * `Din.version`. Everything is structured-cloneable.
+ */
+import type {
+  DragInfo,
+  FrameStyle,
+  LaunchContext,
+  Menu,
+  MenuItem,
+  OpenFileOptions,
+  Permission,
+  Point,
+  Rect,
+  SaveFileOptions,
+  ThemeSnapshot,
+  WindowChrome,
+  WindowState,
+  DinNotificationOptions,
+  Edge,
+} from '@/sdk/din';
+
+/** A file handle as it crosses the port; the SDK wraps it in a DinFileHandle. */
+export interface HandleData {
+  /** The desktop's id for this grant, unique to the app's port. */
+  id: string;
+  kind: 'file' | 'directory';
+  name: string;
+  /** Stable for the same file within the app. */
+  key: string;
+  /** Only for apps with `fs`. */
+  path: string | null;
+  writable: boolean;
+}
+
+/** A file's contents, read through a handle. */
+export interface FileData {
+  name: string;
+  type: string;
+  lastModified: number;
+  bytes: ArrayBuffer;
+}
+
+export interface AccountSnapshot {
+  pubkey: string | null;
+  relays: { url: string; read: boolean; write: boolean }[];
+  blossom: string[];
+}
+
+/** The desktop's first message: everything the app reads synchronously. */
+export interface Hello {
+  type: 'hello';
+  version: 1;
+  appId: string;
+  launch: Omit<LaunchContext, 'files'> & { files: HandleData[] };
+  state: WindowState;
+  frameStyle: FrameStyle;
+  theme: ThemeSnapshot;
+  account: AccountSnapshot;
+  permissions: Permission[];
+  /**
+   * localStorage entries the app kept on the desktop's origin before it
+   * moved out (its manifest's `migrateStorage`), to seed its own storage
+   * with once. Null when there's nothing to move.
+   */
+  storage: Record<string, string> | null;
+  /** The drag going on, if one is. */
+  drag: DragInfo | null;
+}
+
+/** What an app can ask, by method: the params, and what the reply carries. */
+export interface Requests {
+  'app.ready': [void, void];
+  'app.open': [{ appId: string; params?: Record<string, unknown> }, void];
+  'app.openFiles': [{ handles: string[] }, void];
+  'app.openUrl': [{ url: string }, void];
+  'storage.migrated': [void, void];
+
+  'window.setTitle': [{ title: string | null }, void];
+  'window.setIcon': [{ url: string | null }, void];
+  'window.setAccent': [{ color: string | null }, void];
+  'window.setChrome': [WindowChrome, void];
+  'window.setShape': [{ shape: Rect[] | null }, void];
+  /** `at` in the app's CSS pixels. */
+  'window.beginMove': [{ at: Point }, void];
+  'window.beginResize': [{ edge: Edge; at: Point }, void];
+  'window.setBounds': [Partial<Rect>, void];
+  'window.minimize': [void, void];
+  'window.maximize': [void, void];
+  'window.restore': [void, void];
+  'window.toggleMaximize': [void, void];
+  'window.focus': [void, void];
+  'window.close': [void, void];
+  'window.requestClose': [void, void];
+  /** Whether the app has an onCloseRequest handler. */
+  'window.setCloseGuard': [{ on: boolean }, void];
+  /** The app's answer to a `closeRequest` push. */
+  'window.closeAnswer': [{ request: number; keep: boolean }, void];
+  /** The window menu (Minimize, Maximize, workspaces…), drawn by the desktop. */
+  'window.menu': [{ at: Point }, void];
+
+  'menus.setMenuBar': [{ menus: Menu[] | null }, void];
+  'menus.popup': [{ items: MenuItem[]; at: Point }, string | null];
+
+  'files.open': [OpenFileOptions & { startInHandle?: string }, HandleData[]];
+  'files.save': [SaveFileOptions & { startInHandle?: string }, HandleData | null];
+  'files.read': [{ handle: string }, FileData];
+  'files.write': [{ handle: string; data: ArrayBuffer | string }, void];
+  'files.entries': [{ handle: string }, HandleData[]];
+  'files.watch': [{ handle: string }, void];
+  'files.unwatch': [{ handle: string }, void];
+  'files.persist': [{ handle: string }, string];
+  'files.restore': [{ token: string }, HandleData | null];
+
+  /** The token is the app's own (random); the desktop refuses one already in use. */
+  'drag.startFiles': [{ token: string; handles: string[] }, void];
+  'drag.startTab': [{ token: string; tabType: string; state: unknown }, void];
+  'drag.accept': [{ token: string; operation: 'copy' | 'move' | 'link' }, DropResultData | null];
+  /** The source's dragend: whether anything took the drop, and where it ended. */
+  'drag.finish': [{ token: string; dropEffect: string; at: Point }, void];
+
+  'clipboard.readFiles': [void, { files: HandleData[]; cut: boolean } | null];
+  'clipboard.writeFiles': [{ handles: string[]; cut: boolean }, void];
+
+  'notifications.show': [{ title: string; options: DinNotificationOptions }, void];
+  'notifications.setBadge': [{ count: number | null }, void];
+
+  'print.html': [{ title: string; html: string }, void];
+  'print.file': [{ handle: string }, void];
+
+  'nostr.getPublicKey': [void, string];
+  'nostr.signEvent': [{ event: unknown }, unknown];
+  'nostr.encrypt': [{ version: 'nip04' | 'nip44'; pubkey: string; text: string }, string];
+  'nostr.decrypt': [{ version: 'nip04' | 'nip44'; pubkey: string; text: string }, string];
+}
+
+export type DropResultData =
+  | { kind: 'files'; files: HandleData[]; operation: 'copy' | 'move' | 'link' }
+  | { kind: 'tab'; tabType: string; state: unknown };
+
+export type Method = keyof Requests;
+
+export interface RequestMessage<M extends Method = Method> {
+  type: 'request';
+  id: number;
+  method: M;
+  params: Requests[M][0];
+}
+
+export interface ReplyMessage {
+  type: 'reply';
+  id: number;
+  result?: unknown;
+  error?: { name: string; message: string };
+}
+
+/** What the desktop tells the app unasked. */
+export type Push =
+  | { type: 'state'; state: WindowState }
+  | { type: 'frameStyle'; style: FrameStyle }
+  | { type: 'theme'; theme: ThemeSnapshot }
+  | { type: 'account'; account: AccountSnapshot }
+  | { type: 'launch'; launch: Omit<LaunchContext, 'files'> & { files: HandleData[] } }
+  | { type: 'menuAction'; id: string }
+  | { type: 'closeRequest'; request: number }
+  | { type: 'moveEnd' }
+  | { type: 'drag'; drag: DragInfo | null }
+  | { type: 'dragEnd'; token: string; dropped: boolean; operation: 'copy' | 'move' | 'link' | null }
+  | { type: 'tabDetached'; tabType: string; state: unknown; at: Point }
+  | { type: 'fileChange'; handle: string; change: 'modified' | 'removed' }
+  | { type: 'clipboardFiles'; has: { count: number; cut: boolean } | null }
+  | { type: 'notificationAction'; tag: string | null; action: string };
+
+export type FromDesktop = Hello | ReplyMessage | Push;
+export type FromApp = RequestMessage;

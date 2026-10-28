@@ -1,0 +1,17 @@
+/*
+ * A built-in app's base styles: Din's Tailwind setup and design tokens (the
+ * SDK keeps the tokens current with the desktop's theme), on a transparent
+ * page. A standard or custom window paints its own background behind the
+ * app, frosted like every Din window; an app that wants a solid one paints
+ * it, and an app in a frameless window draws only what it means to.
+ */
+@import "../index.css";
+
+html,
+body {
+  background: transparent;
+}
+
+#root {
+  height: 100%;
+}

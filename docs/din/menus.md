@@ -1,9 +1,8 @@
 # `din.menus`: the menu bar and menus that leave the window
 
-> **Status: design.** Today Media Player portals React menus into the
-> menu bar with `<MenuBarMenus>` (`src/components/desktop/MenuBarMenus.tsx`),
-> and apps portal dropdowns and dialogs onto the desktop's `#shell` layer
-> with `portalContainer()`. Neither can cross into another process.
+> **Status: in place.** The desktop draws an app's data menus with its own
+> menu components (`src/components/desktop/dinHost/DataMenus.tsx`). Apps
+> still in the desktop's tree portal React menus with `<MenuBarMenus>`.
 
 ## The menu bar
 
@@ -41,11 +40,15 @@ din.menus.onAction((id) => commands[id]?.());
   focused, and switches them as focus moves between its windows. Each
   window has its own menu bar; an app with several windows sets it in
   each.
-- **Accelerators** are bound by the desktop while the window is focused,
-  whatever has focus inside it, and they're shown in the menu. An app
-  that also handles the same key itself (a text field's Ctrl+A) should
-  leave it out of the accelerator, as desktop apps do.
-- Item `icon` is a lucide icon name or an image URL.
+- **Accelerators** work wherever focus is in the window, and they're shown
+  in the menu. Keys go to the app's document, not the desktop's, so the
+  SDK matches them there (`src/sdk/accelerators.ts`; Ctrl and Meta count
+  as one) and reports the item through `onAction`, before the page's own
+  handlers see the key. An app that also handles the same key itself (a
+  text field's Ctrl+A) should leave it out of the accelerator, as desktop
+  apps do.
+- Item `icon` is an image URL: a data: URL, https, or a root path of
+  Din's public files.
 
 In React, `useMenuBar(menus, onAction)` from `@/sdk/react` does both and
 re-sends on change.

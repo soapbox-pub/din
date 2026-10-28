@@ -1,7 +1,6 @@
 # `window.dinos`: the desktop's bridge to the OS
 
-> **Status: in place**, apart from `dinos.apps` (planned with the app
-> host). The 61 namespaces used to be separate globals (`window.fs`,
+> **Status: in place.** The 61 namespaces used to be separate globals (`window.fs`,
 > `window.pty`, …); they moved under one object with no change in
 > behavior.
 
@@ -105,7 +104,7 @@ interface Dinos {
   // The Assistant
   assistant: AssistantBridge;
 
-  // Planned: hosting din:// apps (below)
+  // Hosting din:// apps (below)
   apps: AppsBridge;
 }
 ```
@@ -157,16 +156,20 @@ reference.
 
 ## New for the app platform
 
-One namespace is new: `dinos.apps`, the desktop's side of hosting apps.
+One namespace is new: `dinos.apps`, the desktop's side of hosting apps
+(`AppsBridge` in `src/lib/dinApps.ts`, handled by `electron/din-apps.mts`).
 
 | Method | Does |
 |---|---|
-| `onPort(cb: (e: { webContentsId, appId, port: MessagePort }) => void)` | A `din://` app's webview finished the handshake ([../security-model.md](../security-model.md)) |
-| `grant(webContentsId, permission)` | Have main open a port from that app straight to a system bridge (`fs`, `pty`, `printing`), bound to the app and permission ([../din/permissions.md](../din/permissions.md#dinsystem)) |
-| `revoke(webContentsId, permission)` | Close that port |
-| `onUnresponsive(cb)`, `onResponsive(cb)` | Main's `unresponsive`/`responsive` for an app's webContents, which the `<webview>` element never sees |
-| `kill(webContentsId)` | Force quit a hung app: main kills its renderer process (about 50 ms to `render-process-gone`; `forcefullyCrashRenderer` took seconds on a hung page) |
-| `migrateStorage(appId, entries)` | Seed a new app origin's `localStorage` before its first load ([../din/manifest.md](../din/manifest.md)) |
+| `grant(webContentsId, permission)` | Have main open a port from that app straight to a system bridge (`fs` or `pty`), bound to the app and permission ([../din/permissions.md](../din/permissions.md#dinsystem)) |
+| `revoke(webContentsId, permission)` | Close that port (and end the app's terminals) |
+| `onResponsive(cb)` | Main's `unresponsive`/`responsive` for an app's webContents, which the `<webview>` element never sees |
+| `kill(webContentsId)` | Force quit a hung app: main kills its renderer process (about 100 ms to `render-process-gone`; `forcefullyCrashRenderer` took seconds on a hung page) |
+
+An app window's port to the desktop isn't a method: a port can't cross
+`contextBridge`, so the preload posts each one to the page as a window
+message (`dinos-apps:port`), which `onAppPort` in `src/lib/dinApps.ts`
+hands to the window's `DinAppFrame`.
 
 ## Conventions for adding to it
 

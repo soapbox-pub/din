@@ -3012,4 +3012,46 @@ expose('media', {
   },
 });
 
+// Apps bridge (window.dinos.apps): hosting built-in apps at din://<id>/
+// (electron/din-apps.mts, docs/dinos/README.md). Each app window's port to
+// the desktop arrives here; a port can't cross contextBridge, so it goes to
+// the page as a window message (src/lib/dinApps.ts listens for it).
+ipcRenderer.on('dinos-apps:port', (event, info) => {
+  window.postMessage({ type: 'dinos-apps:port', info }, location.origin, [event.ports[0]]);
+});
+
+expose('apps', {
+  /**
+   * Have main open a port from an app straight to a system bridge.
+   * @param {number} webContentsId
+   * @param {'fs' | 'pty'} permission
+   * @returns {Promise<void>}
+   */
+  grant: (webContentsId, permission) => ipcRenderer.invoke('dinos-apps:grant', webContentsId, permission),
+  /**
+   * Close that port.
+   * @param {number} webContentsId
+   * @param {'fs' | 'pty'} permission
+   * @returns {Promise<void>}
+   */
+  revoke: (webContentsId, permission) => ipcRenderer.invoke('dinos-apps:revoke', webContentsId, permission),
+  /**
+   * Force quit an app window: kill its renderer process.
+   * @param {number} webContentsId
+   * @returns {Promise<void>}
+   */
+  kill: (webContentsId) => ipcRenderer.invoke('dinos-apps:kill', webContentsId),
+  /**
+   * Hear when an app window stops or starts answering (main's unresponsive).
+   * @param {(e: { webContentsId: number, responsive: boolean }) => void} callback
+   * @returns {() => void}
+   */
+  onResponsive: (callback) => {
+    /** @param {unknown} _event @param {{ webContentsId: number, responsive: boolean }} e */
+    const listener = (_event, e) => callback(e);
+    ipcRenderer.on('dinos-apps:responsive', listener);
+    return () => ipcRenderer.removeListener('dinos-apps:responsive', listener);
+  },
+});
+
 contextBridge.exposeInMainWorld('dinos', dinos);
