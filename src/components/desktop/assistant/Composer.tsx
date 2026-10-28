@@ -134,6 +134,15 @@ export function Composer({
   const active = menuOpen ? Math.min(highlight.typed === typed ? highlight.index : 0, matches.length - 1) : -1;
   const optionID = (index: number) => `${menuID}-${index}`;
 
+  // Not the autoFocus attribute: that leaves the caret before a restored draft.
+  useEffect(() => {
+    const textarea = ref.current;
+    if (!autoFocus || !textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when it first shows
+  }, []);
+
   useEffect(() => {
     if (active >= 0) document.getElementById(`${menuID}-${active}`)?.scrollIntoView({ block: 'nearest' });
   }, [active, menuID]);
@@ -320,7 +329,6 @@ export function Composer({
         }}
         placeholder={placeholder}
         disabled={disabled}
-        autoFocus={autoFocus}
         rows={1}
         aria-label="Message"
         role={onCommand ? 'combobox' : undefined}
