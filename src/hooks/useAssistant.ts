@@ -4,6 +4,7 @@ import {
   assistantApi,
   getAssistantBridge,
   modelKey,
+  type AgentInfo,
   type AssistantEvent,
   type AssistantStatus,
   type FormInfo,
@@ -18,7 +19,9 @@ import {
   worktreeMainCheckout,
 } from '@/lib/assistant';
 import { getFsBridge, localFileUrl, type FsEntry } from '@/lib/fs';
+import { agentColor } from '@/lib/agentColors';
 import { useAppContext } from '@/hooks/useAppContext';
+import { useIsDark } from '@/hooks/useIsDark';
 
 const STATUS_KEY = ['assistant', 'status'] as const;
 const MODEL_STORAGE_KEY = 'din.assistant.model';
@@ -301,15 +304,30 @@ export function useAssistantModels() {
   });
 }
 
-export function useAssistantAgents() {
+/** Every agent that isn't hidden, subagents too. */
+function useVisibleAgents<T = AgentInfo[]>(select?: (agents: AgentInfo[]) => T) {
   const ready = useAssistantReady();
   return useQuery({
     queryKey: assistantKeys.agents,
-    queryFn: async () =>
-      (await assistantApi.agents()).filter((agent) => agent.mode !== 'subagent' && !agent.hidden),
+    queryFn: async () => (await assistantApi.agents()).filter((agent) => !agent.hidden),
+    select,
     enabled: ready,
     staleTime: 5 * 60_000,
   });
+}
+
+const primaryAgents = (agents: AgentInfo[]) => agents.filter((agent) => agent.mode !== 'subagent');
+
+/** The agents a conversation can be switched to. */
+export function useAssistantAgents() {
+  return useVisibleAgents(primaryAgents);
+}
+
+/** An agent's color for Din's light or dark theme, as OpenCode's terminal shows it. */
+export function useAgentColor(): (agent: string) => string | undefined {
+  const { data: agents } = useVisibleAgents();
+  const dark = useIsDark();
+  return useCallback((agent: string) => (agents ? agentColor(agents, agent, dark) : undefined), [agents, dark]);
 }
 
 /** The slash commands the server offers in a folder (its project can add its own). */

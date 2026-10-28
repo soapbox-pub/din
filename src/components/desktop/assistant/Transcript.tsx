@@ -1,4 +1,4 @@
-import { createElement, memo, useEffect, useState, type ReactNode } from 'react';
+import { createElement, memo, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   Bot,
   Braces,
@@ -31,6 +31,7 @@ import {
   type ToolState,
 } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
+import { useAgentColor } from '@/hooks/useAssistant';
 
 /** Tool output shown in full up to this many characters. */
 const MAX_OUTPUT_CHARS = 20_000;
@@ -95,6 +96,7 @@ export const Transcript = memo(function Transcript({
   messages,
   queued = [],
   running,
+  agent,
   home,
   onCancelQueued,
 }: {
@@ -103,6 +105,8 @@ export const Transcript = memo(function Transcript({
   queued?: QueuedMessage[];
   /** The agent is working: the last turn shows it. */
   running: boolean;
+  /** The conversation's agent now. */
+  agent?: string;
   home?: string;
   onCancelQueued?: (message: QueuedMessage) => void;
 }) {
@@ -128,6 +132,7 @@ export const Transcript = memo(function Transcript({
                 turn={entry}
                 working={running && entry === last}
                 latest={entry === last}
+                agent={agent}
                 home={home}
               />
             </li>
@@ -142,6 +147,7 @@ export const Transcript = memo(function Transcript({
             turn={{ kind: 'turn', id: `turn:${last.message.id}`, start: last.message.time.created, items: [] }}
             working
             latest
+            agent={agent}
             home={home}
           />
         </li>
@@ -306,11 +312,14 @@ function Turn({
   turn,
   working,
   latest,
+  agent,
   home,
 }: {
   turn: TurnEntry;
   working: boolean;
   latest: boolean;
+  /** The conversation's agent, for a turn whose agent hasn't said anything yet. */
+  agent?: string;
   home?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -352,10 +361,17 @@ function Turn({
     return <Steps key={block.key} steps={block.steps} live={live && block === tail} />;
   };
 
+  // In the color of the agent that did the work, as OpenCode's terminal marks it.
+  const agentColor = useAgentColor();
+  const turnAgent = lastMessage?.agent ?? agent;
+  const color = turnAgent ? agentColor(turnAgent) : undefined;
+  const tint = color ? ({ color, '--shimmer': color } as CSSProperties) : undefined;
   const summary = (
     <>
-      {working && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
-      <span className={cn('min-w-0 truncate', working && SHIMMER)}>{label}</span>
+      {working && <Loader2 className="size-3.5 shrink-0 animate-spin" style={tint} aria-hidden />}
+      <span className={cn('min-w-0 truncate', working && SHIMMER)} style={tint}>
+        {label}
+      </span>
     </>
   );
 
@@ -401,7 +417,7 @@ function Turn({
 }
 
 const SHIMMER =
-  'bg-[linear-gradient(90deg,var(--color-muted-foreground)_40%,var(--color-foreground)_50%,var(--color-muted-foreground)_60%)] bg-[length:200%_100%] bg-clip-text text-transparent motion-safe:animate-shimmer';
+  'bg-[linear-gradient(90deg,var(--shimmer,var(--color-muted-foreground))_40%,var(--color-foreground)_50%,var(--shimmer,var(--color-muted-foreground))_60%)] bg-[length:200%_100%] bg-clip-text text-transparent motion-safe:animate-shimmer';
 
 const TRIGGER =
   'flex min-w-0 items-center gap-1.5 rounded-md text-left text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -690,13 +706,22 @@ function Divider({ children }: { children: ReactNode }) {
   );
 }
 
+function AgentSwitched({ agent }: { agent: string }) {
+  const color = useAgentColor();
+  return (
+    <Divider>
+      Agent: <span style={{ color: color(agent) }}>{agent}</span>
+    </Divider>
+  );
+}
+
 /** Everything else a session records, as a quiet line, or nothing. */
 function Note({ message, home }: { message: SessionMessage; home?: string }) {
   switch (message.type) {
     case 'model-switched':
       return <Divider>Model: {message.model.id}</Divider>;
     case 'agent-switched':
-      return <Divider>Agent: {message.agent}</Divider>;
+      return <AgentSwitched agent={message.agent} />;
     case 'location-switched':
       return <Divider>Working in {tildify(message.location.directory, home)}</Divider>;
     case 'compaction':

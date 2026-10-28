@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from 'react';
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
@@ -126,17 +125,4 @@ const dark = HighlightStyle.define([
 /** Syntax colors for a light or dark desktop. */
 export function syntaxTheme(isDark: boolean): Extension {
   return [syntaxHighlighting(isDark ? dark : light), EditorView.darkTheme.of(isDark)];
-}
-
-const isDarkNow = () => document.documentElement.classList.contains('dark');
-
-function subscribeDark(onChange: () => void) {
-  const observer = new MutationObserver(onChange);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  return () => observer.disconnect();
-}
-
-/** Whether Din is showing its dark theme right now. */
-export function useIsDark(): boolean {
-  return useSyncExternalStore(subscribeDark, isDarkNow);
 }

@@ -261,6 +261,8 @@ export interface AgentInfo {
   mode: 'primary' | 'subagent' | 'all';
   hidden?: boolean;
   description?: string;
+  /** Its own color (`#rrggbb`), when its config sets one. */
+  color?: string | null;
 }
 
 /** A slash command the server runs: the built-in ones and the user's own. */

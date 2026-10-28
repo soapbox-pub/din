@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowUp, FileText, ImageIcon, Mic, Paperclip, Square, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useFilePicker } from '@/contexts/FilePickerContext';
@@ -88,6 +88,7 @@ export function Composer({
   autoFocus = false,
   toolbar,
   onCycleAgent,
+  accent,
   className,
   textareaRef,
   draftKey,
@@ -108,6 +109,8 @@ export function Composer({
   toolbar?: ReactNode;
   /** Shift+Tab: on to the next agent. Without it, Shift+Tab moves focus as usual. */
   onCycleAgent?: () => void;
+  /** The selected agent's color, tinting the border. */
+  accent?: string;
   className?: string;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   /** Keeps unsent text across restarts, one draft per key. */
@@ -235,8 +238,12 @@ export function Composer({
 
   return (
     <div
+      style={accent ? ({ '--agent': accent } as CSSProperties) : undefined}
       className={cn(
-        'relative flex flex-col gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm transition-shadow focus-within:border-ring/60 focus-within:shadow-md',
+        'relative flex flex-col gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-[border-color,box-shadow] duration-300 focus-within:shadow-md',
+        accent
+          ? 'border-[color-mix(in_oklab,var(--agent)_30%,var(--border))] focus-within:border-[color-mix(in_oklab,var(--agent)_65%,var(--border))]'
+          : 'border-border focus-within:border-ring/60',
         className,
       )}
     >

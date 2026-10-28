@@ -34,6 +34,7 @@ import { useQuestionHandoff } from '@/components/desktop/assistant/useQuestionHa
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import {
   useActiveSessions,
+  useAgentColor,
   useAssistantAgents,
   useAssistantCommands,
   useAssistantDirectory,
@@ -257,6 +258,7 @@ function Conversation({
   const agent = (switchAgent.isPending ? switchAgent.variables?.agent : session?.agent) ?? 'build';
   const changeAgent = (agent: string) => switchAgent.mutate({ sessionID, agent }, { onError: fail('Couldn’t switch') });
   const cycleAgent = useCycleAgent(agent, changeAgent);
+  const agentColor = useAgentColor();
 
   const toBackground = () => background.mutate(sessionID, { onError: fail('Couldn’t move it to the background') });
 
@@ -319,6 +321,7 @@ function Conversation({
                   messages={messages ?? []}
                   queued={queued}
                   running={running}
+                  agent={session?.agent}
                   home={home}
                   onCancelQueued={(message) =>
                     cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
@@ -365,6 +368,7 @@ function Conversation({
               </>
             }
             onCycleAgent={cycleAgent}
+            accent={agentColor(agent)}
           />
         </div>
       </div>
@@ -511,6 +515,7 @@ function NewConversation({
   const [directory, setDirectory] = useState<string | null>(initialDirectory);
   const [agent, setAgent] = useState('build');
   const cycleAgent = useCycleAgent(agent, setAgent);
+  const agentColor = useAgentColor();
   const { model, setModel, models } = usePreferredModel();
   const { data: recent } = useRecentModelKeys();
   const start = useStartConversation();
@@ -569,6 +574,7 @@ function NewConversation({
               </>
             }
             onCycleAgent={cycleAgent}
+            accent={agentColor(agent)}
           />
           <div className="flex flex-wrap items-center justify-center gap-2">
             <FolderPicker value={folder} home={home} onChange={setDirectory} onOther={() => void chooseFolder()} />
@@ -605,6 +611,7 @@ function useCycleAgent(value: string, onChange: (agent: string) => void): (() =>
 /** Build (does the work) or Plan (only reads and plans), and any others configured. */
 function AgentPicker({ value, onChange }: { value: string; onChange: (agent: string) => void }) {
   const { data: agents = [] } = useAssistantAgents();
+  const color = useAgentColor();
   const current = agents.find((a) => a.id === value);
   if (agents.length < 2) return null;
   return (
@@ -613,7 +620,8 @@ function AgentPicker({ value, onChange }: { value: string; onChange: (agent: str
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+          className="h-8 gap-1 px-2 text-xs font-medium text-muted-foreground transition-colors duration-300 hover:text-foreground"
+          style={{ color: color(value) }}
           aria-label={`Agent: ${current?.name ?? value}`}
           title="Agent (Shift+Tab to switch)"
         >
@@ -626,7 +634,9 @@ function AgentPicker({ value, onChange }: { value: string; onChange: (agent: str
           {agents.map((agent) => (
             <DropdownMenuRadioItem key={agent.id} value={agent.id} className="items-start">
               <span>
-                <span className="block font-medium">{agent.name}</span>
+                <span className="block font-medium" style={{ color: color(agent.id) }}>
+                  {agent.name}
+                </span>
                 {agent.description && (
                   <span className="line-clamp-2 block text-xs text-muted-foreground">{agent.description}</span>
                 )}

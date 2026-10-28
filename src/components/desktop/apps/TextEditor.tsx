@@ -61,7 +61,7 @@ import {
   prefEffects,
   type EditorPrefs,
 } from './code/setup';
-import { useIsDark } from './code/theme';
+import { useIsDark } from '@/hooks/useIsDark';
 
 /** Bigger files than this aren't opened. */
 const MAX_BYTES = 16 * 1024 * 1024;
