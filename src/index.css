@@ -52,6 +52,14 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  --color-md-heading: var(--md-heading);
+  --color-md-strong: var(--md-strong);
+  --color-md-emph: var(--md-emph);
+  --color-md-code: var(--md-code);
+  --color-md-link: var(--md-link);
+  --color-md-list: var(--md-list);
+  --color-md-quote: var(--md-quote);
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -173,6 +181,16 @@
   --sidebar-accent-foreground: hsl(240 5.9% 10%);
   --sidebar-border: hsl(220 13% 91%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
+
+  /* Markdown in the assistant's replies, after GitHub Light like the
+     Terminal and Code apps. */
+  --md-heading: #8250df;
+  --md-strong: #953800;
+  --md-emph: #7d4e00;
+  --md-code: #116329;
+  --md-link: #0969da;
+  --md-list: #1b7c83;
+  --md-quote: #bf8700;
 }
 
 .dark {
@@ -218,6 +236,14 @@
   --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
   --sidebar-border: hsl(240 3.7% 15.9%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
+
+  --md-heading: #d2a8ff;
+  --md-strong: #ffa657;
+  --md-emph: #e3b341;
+  --md-code: #7ee787;
+  --md-link: #79c0ff;
+  --md-list: #56d4dd;
+  --md-quote: #d29922;
 }
 
 @layer base {

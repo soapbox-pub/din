@@ -49,6 +49,7 @@ const AppConfigSchema = z.object({
   clockShowSeconds: z.boolean(),
   assistantEnabled: z.boolean(),
   assistantDirectory: z.string(),
+  assistantColorfulReplies: z.boolean(),
 }) satisfies z.ZodType<AppConfig>;
 
 export function AppProvider(props: AppProviderProps) {

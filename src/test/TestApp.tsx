@@ -51,6 +51,7 @@ export function TestApp({ children }: TestAppProps) {
     clockShowSeconds: false,
     assistantEnabled: true,
     assistantDirectory: '',
+    assistantColorfulReplies: true,
   };
 
   return (

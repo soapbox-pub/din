@@ -67,6 +67,7 @@ const defaultConfig: AppConfig = {
   clockShowSeconds: false,
   assistantEnabled: true,
   assistantDirectory: '',
+  assistantColorfulReplies: true,
 };
 
 export function App() {

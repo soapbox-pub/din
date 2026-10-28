@@ -12,6 +12,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useAppContext } from '@/hooks/useAppContext';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
 import { appForFile } from '@/lib/fileTypes';
@@ -29,15 +30,25 @@ const urlTransform = (url: string) => (/^file:/i.test(url) ? url : defaultUrlTra
  * leaves raw HTML out, so nothing the model writes reaches the DOM as
  * markup; links open through Din's router, and only http(s) ones. Links to
  * files open them in Din's apps, relative to the conversation's folder.
+ * Unless turned off in Settings, headings, emphasis, code, links and list
+ * markers each get their own color, as in OpenCode's terminal UI.
  */
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
   const openUrl = useOpenUrl();
   const base = useContext(FileLinkBaseContext);
+  const { config } = useAppContext();
+  const c = config.assistantColorfulReplies;
+  const link = cn(
+    'font-medium underline underline-offset-2',
+    c ? 'text-md-link hover:text-md-link/80' : 'text-primary hover:text-primary/80',
+  );
+  const marker = c ? 'marker:text-md-list' : 'marker:text-muted-foreground';
+  const heading = c && 'text-md-heading';
 
   const components: Components = {
     a: ({ href, children }) => {
       const file = href ? filePathOfHref(href, base) : null;
-      if (file) return <FileLink path={file}>{children}</FileLink>;
+      if (file) return <FileLink path={file} className={link}>{children}</FileLink>;
       const url = href ? sanitizeNavigationUrl(href) : null;
       if (!url) return <span className="underline decoration-dotted">{children}</span>;
       return (
@@ -47,7 +58,7 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
             event.preventDefault();
             openUrl(url);
           }}
-          className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+          className={link}
         >
           {children}
         </a>
@@ -66,22 +77,23 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
       const block = Boolean(language) || String(children).includes('\n');
       if (block) return <code className="font-mono">{children}</code>;
       return (
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]" {...props}>
+        <code className={cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]', c && 'text-md-code')} {...props}>
           {children}
         </code>
       );
     },
     p: ({ children }) => <p className="my-3 first:mt-0 last:mb-0">{children}</p>,
-    ul: ({ children }) => <ul className="my-3 list-disc space-y-1.5 pl-6 marker:text-muted-foreground first:mt-0 last:mb-0">{children}</ul>,
-    ol: ({ children }) => <ol className="my-3 list-decimal space-y-1.5 pl-6 marker:text-muted-foreground first:mt-0 last:mb-0">{children}</ol>,
+    ul: ({ children }) => <ul className={cn('my-3 list-disc space-y-1.5 pl-6 first:mt-0 last:mb-0', marker)}>{children}</ul>,
+    ol: ({ children }) => <ol className={cn('my-3 list-decimal space-y-1.5 pl-6 first:mt-0 last:mb-0', marker)}>{children}</ol>,
     li: ({ children }) => <li className="pl-1 [&>ol]:my-1.5 [&>p]:my-1.5 [&>ul]:my-1.5">{children}</li>,
-    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-    h1: ({ children }) => <h3 className="mb-3 mt-6 text-xl font-semibold first:mt-0">{children}</h3>,
-    h2: ({ children }) => <h3 className="mb-3 mt-6 text-lg font-semibold first:mt-0">{children}</h3>,
-    h3: ({ children }) => <h4 className="mb-2 mt-5 font-semibold first:mt-0">{children}</h4>,
-    h4: ({ children }) => <h4 className="mb-2 mt-4 font-semibold first:mt-0">{children}</h4>,
+    strong: ({ children }) => <strong className={cn('font-semibold', c && 'text-md-strong')}>{children}</strong>,
+    em: ({ children }) => <em className={cn('italic', c && 'text-md-emph')}>{children}</em>,
+    h1: ({ children }) => <h3 className={cn('mb-3 mt-6 text-xl font-semibold first:mt-0', heading)}>{children}</h3>,
+    h2: ({ children }) => <h3 className={cn('mb-3 mt-6 text-lg font-semibold first:mt-0', heading)}>{children}</h3>,
+    h3: ({ children }) => <h4 className={cn('mb-2 mt-5 font-semibold first:mt-0', heading)}>{children}</h4>,
+    h4: ({ children }) => <h4 className={cn('mb-2 mt-4 font-semibold first:mt-0', heading)}>{children}</h4>,
     blockquote: ({ children }) => (
-      <blockquote className="my-3 border-l-2 border-border pl-4 text-muted-foreground">{children}</blockquote>
+      <blockquote className={cn('my-3 border-l-2 pl-4 text-muted-foreground', c ? 'border-md-quote' : 'border-border')}>{children}</blockquote>
     ),
     hr: () => <hr className="my-6 border-border/60" />,
     table: ({ children }) => (
@@ -94,10 +106,10 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
     // Pictures the model names could be anything, from anywhere: a link instead.
     img: ({ src, alt }) => {
       const file = typeof src === 'string' ? filePathOfHref(src, base) : null;
-      if (file) return <FileLink path={file}>{alt || file.slice(file.lastIndexOf('/') + 1)}</FileLink>;
+      if (file) return <FileLink path={file} className={link}>{alt || file.slice(file.lastIndexOf('/') + 1)}</FileLink>;
       const url = typeof src === 'string' ? sanitizeNavigationUrl(src) : null;
       return url ? (
-        <a href={url} onClick={(e) => { e.preventDefault(); openUrl(url); }} className="text-primary underline">
+        <a href={url} onClick={(e) => { e.preventDefault(); openUrl(url); }} className={link}>
           {alt || url}
         </a>
       ) : null;
@@ -117,7 +129,7 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
  * A link to a file on this computer: clicking opens it in the app Files would
  * use (a folder opens in Files), and right-clicking can show it in its folder.
  */
-function FileLink({ path, children }: { path: string; children: ReactNode }) {
+function FileLink({ path, className, children }: { path: string; className: string; children: ReactNode }) {
   const { open } = useWindowActions();
   const { toast } = useToast();
   const fs = getFsBridge();
@@ -142,7 +154,7 @@ function FileLink({ path, children }: { path: string; children: ReactNode }) {
             event.preventDefault();
             openFile();
           }}
-          className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+          className={className}
         >
           {children}
         </a>

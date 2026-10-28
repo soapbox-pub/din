@@ -96,6 +96,8 @@ export interface AppConfig {
   assistantEnabled: boolean;
   /** The folder new assistant conversations work in; empty for the home folder. */
   assistantDirectory: string;
+  /** Whether the assistant's replies color their headings, emphasis, code and links. */
+  assistantColorfulReplies: boolean;
 }
 
 export interface AppContextType {

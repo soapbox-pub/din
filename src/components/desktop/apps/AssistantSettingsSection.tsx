@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { Bot, CircleAlert, Folder, Loader2, RotateCw } from 'lucide-react';
+import { Bot, CircleAlert, Folder, Loader2, Palette, RotateCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -60,6 +60,26 @@ export function AssistantSettingsSection() {
                 value={config.assistantDirectory}
                 onChange={(assistantDirectory) => updateConfig((current) => ({ ...current, assistantDirectory }))}
               />
+              <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <Palette className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <div className="min-w-0">
+                    <Label htmlFor="assistant-colorful" className="cursor-pointer text-sm font-normal">
+                      Colorful replies
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Color headings, bold and italic text, code, links and list markers in the agent’s replies.
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  id="assistant-colorful"
+                  checked={config.assistantColorfulReplies}
+                  onCheckedChange={(assistantColorfulReplies) =>
+                    updateConfig((current) => ({ ...current, assistantColorfulReplies }))
+                  }
+                />
+              </div>
               <ProviderList />
             </>
           )}
