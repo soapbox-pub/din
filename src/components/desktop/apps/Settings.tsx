@@ -13,6 +13,7 @@ import {
   Clock,
   Cloud,
   Cpu,
+  FolderOpen,
   Link2,
   CloudOff,
   Gauge,
@@ -29,7 +30,7 @@ import {
   Minus,
   Monitor,
   Moon,
-  MousePointer2,
+  MoreHorizontal,
   Play,
   Power,
   Printer,
@@ -145,11 +146,11 @@ import { NotificationSitesList } from '@/components/desktop/apps/NotificationSit
 import { PushServiceSetting } from '@/components/desktop/apps/PushServiceSetting';
 import { useToast } from '@/hooks/useToast';
 import { useFilePicker } from '@/contexts/FilePickerContext';
-import { getFsBridge } from '@/lib/fs';
-import { parseCurXPTheme } from '@/lib/cursorTheme';
-import type { CursorTheme } from '@/lib/cursorTheme';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
+import type { SystemCursorTheme } from '@/lib/systemCursor';
 import {
+  useImportSystemCursor,
+  useRemoveSystemCursor,
   useSetSystemCursor,
   useSystemCursorPreview,
   useSystemCursorStatus,
@@ -165,6 +166,13 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -3413,8 +3421,11 @@ function AppearanceSection() {
 
       <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor</p>
       <div className="flex flex-col gap-3">
-        {getSystemCursorBridge() && <SystemCursorPicker />}
-        <CursorThemePicker />
+        {getSystemCursorBridge() ? (
+          <SystemCursorPicker />
+        ) : (
+          <FallbackCard>The cursor is your browser’s.</FallbackCard>
+        )}
       </div>
     </SectionShell>
   );
@@ -3504,12 +3515,17 @@ const CURSOR_SIZE_NAMES: Record<number, string> = {
 
 /**
  * The system pointer: its XCursor theme and size, which apply everywhere
- * (Din, web pages and native apps) at once. See electron/cursor.mts.
+ * (Din, web pages and native apps) at once, and themes imported from other
+ * formats. See electron/cursor.mts and electron/cursorImport.mts.
  */
 function SystemCursorPicker() {
   const status = useSystemCursorStatus();
   const themes = useSystemCursorThemes();
   const setCursor = useSetSystemCursor();
+  const importCursor = useImportSystemCursor();
+  const removeCursor = useRemoveSystemCursor();
+  const { pickFiles } = useFilePicker();
+  const { toast } = useToast();
 
   if (status.isLoading || themes.isLoading) {
     return <Skeleton className="h-40 w-full bg-foreground/10" aria-hidden />;
@@ -3518,11 +3534,51 @@ function SystemCursorPicker() {
     return <FallbackCard>Could not read the cursor settings.</FallbackCard>;
   }
 
-  const { canChange, sizes } = status.data;
+  const { canChange, sizes, fixedSize } = status.data;
   // While a change is in flight, show the requested choice.
   const { theme, size } = setCursor.isPending ? setCursor.variables : status.data;
+  const busy = importCursor.isPending || removeCursor.isPending;
   const choose = (choice: { theme: string; size: number }) => {
     if (choice.theme !== theme || choice.size !== size) setCursor.mutate(choice);
+  };
+
+  const importFrom = async (directory: boolean) => {
+    const picked = await pickFiles({
+      title: directory ? 'Import a cursor theme folder' : 'Import cursors',
+      confirmLabel: 'Import',
+      directory,
+      filters: directory ? undefined : [CURSOR_IMPORT_FILTER],
+    });
+    const source = picked?.paths[0];
+    if (!source) return;
+    importCursor.mutate(source, {
+      onSuccess: (ids) => {
+        const names = ids.map((id) => themes.data.find((t) => t.id === id)?.name ?? id);
+        toast({
+          title: ids.length === 1 ? 'Cursor imported' : `${ids.length} cursor styles imported`,
+          description: ids.length === 1 ? 'It’s now your pointer.' : `Using ${names[0]}.`,
+        });
+      },
+      onError: (error) => {
+        toast({
+          title: 'Couldn’t import the cursor',
+          description: error instanceof Error ? cleanIpcError(error.message) : undefined,
+          variant: 'destructive',
+        });
+      },
+    });
+  };
+
+  const remove = (option: SystemCursorTheme) => {
+    removeCursor.mutate(option.id, {
+      onError: (error) => {
+        toast({
+          title: `Couldn’t remove ${option.name}`,
+          description: error instanceof Error ? cleanIpcError(error.message) : undefined,
+          variant: 'destructive',
+        });
+      },
+    });
   };
 
   return (
@@ -3538,29 +3594,49 @@ function SystemCursorPicker() {
             aria-label="Cursor style"
           >
             {themes.data.map((option) => (
-              <button
+              <SystemCursorOption
                 key={option.id}
-                type="button"
-                role="radio"
-                aria-checked={theme === option.id}
-                disabled={!canChange}
-                onClick={() => choose({ theme: option.id, size })}
-                className={cn(
-                  'flex flex-col items-start gap-2 rounded-xl border p-3 text-left',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  'disabled:cursor-not-allowed disabled:opacity-60',
-                  theme === option.id
-                    ? 'border-primary bg-primary/10 text-foreground'
-                    : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
-                )}
-              >
-                <SystemCursorPreview id={option.id} />
-                <span className="w-full truncate text-sm">{option.name}</span>
-              </button>
+                option={option}
+                selected={theme === option.id}
+                disabled={!canChange || busy}
+                onChoose={() => choose({ theme: option.id, size })}
+                onRemove={() => remove(option)}
+              />
             ))}
           </div>
         )}
       </div>
+
+      {canChange && (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => void importFrom(false)}
+            >
+              {importCursor.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
+              Import file…
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void importFrom(true)}
+            >
+              <FolderOpen aria-hidden />
+              Import folder…
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            CursorXP themes (.CurXPTheme) and Linux cursor themes, as a folder or an archive. Animated cursors
+            play everywhere.
+          </p>
+        </div>
+      )}
 
       <div>
         <p className="mb-2 text-sm text-foreground">Size</p>
@@ -3571,7 +3647,7 @@ function SystemCursorPicker() {
               type="button"
               role="radio"
               aria-checked={size === option}
-              disabled={!canChange}
+              disabled={!canChange || fixedSize}
               onClick={() => choose({ theme, size: option })}
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-sm',
@@ -3586,6 +3662,9 @@ function SystemCursorPicker() {
             </button>
           ))}
         </div>
+        {fixedSize && canChange && (
+          <p className="mt-2 text-xs text-muted-foreground">This style comes in one size only.</p>
+        )}
       </div>
 
       {!canChange && (
@@ -3602,6 +3681,106 @@ function SystemCursorPicker() {
   );
 }
 
+/** What the importer reads, for the file picker. */
+const CURSOR_IMPORT_FILTER = {
+  name: 'Cursor themes',
+  patterns: ['*.CurXPTheme', '*.zip', '*.tar', '*.tar.gz', '*.tgz', '*.tar.xz', '*.txz', '*.tar.bz2', '*.tbz2'],
+  mimeTypes: [],
+};
+
+/** An IPC error's message without Electron's "Error invoking remote method" prefix. */
+function cleanIpcError(message: string): string {
+  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+}
+
+/**
+ * One style in the cursor picker. Every style's right-click menu can use it;
+ * imported ones can also be removed, from there or their ⋯ menu.
+ */
+function SystemCursorOption({
+  option,
+  selected,
+  disabled,
+  onChoose,
+  onRemove,
+}: {
+  option: SystemCursorTheme;
+  selected: boolean;
+  disabled: boolean;
+  onChoose: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild disabled={disabled}>
+        <div className="relative">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={onChoose}
+            className={cn(
+              'flex w-full flex-col items-start gap-2 rounded-xl border p-3 text-left',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'disabled:cursor-not-allowed disabled:opacity-60',
+              option.imported && 'pr-10',
+              selected
+                ? 'border-primary bg-primary/10 text-foreground'
+                : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
+            )}
+          >
+            <SystemCursorPreview id={option.id} />
+            <span className="w-full truncate text-sm">{option.name}</span>
+          </button>
+          {option.imported && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={disabled}
+                  className="absolute right-1 top-1 size-8 text-muted-foreground"
+                  aria-label={`More for ${option.name}`}
+                >
+                  <MoreHorizontal aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={selected} onSelect={onChoose}>
+                  <Check aria-hidden />
+                  Use this cursor
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={onRemove}>
+                  <Trash2 aria-hidden />
+                  Remove
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem disabled={selected} onSelect={onChoose}>
+          <Check aria-hidden />
+          Use this cursor
+        </ContextMenuItem>
+        {option.imported && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem variant="destructive" onSelect={onRemove}>
+              <Trash2 aria-hidden />
+              Remove
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 /** A theme's arrow, hand, I-beam and resize cursors, side by side. */
 function SystemCursorPreview({ id }: { id: string }) {
   const preview = useSystemCursorPreview(id);
@@ -3613,165 +3792,6 @@ function SystemCursorPreview({ id }: { id: string }) {
             <img key={role} src={src} alt="" className="size-8 object-contain" />
           ))
         : <Skeleton className="h-8 w-36 bg-foreground/10" />}
-    </div>
-  );
-}
-
-/**
- * Custom cursor theme picker. Uses Din's in-app file picker to choose a
- * `.CurXPTheme` file, reads it through the `window.fs` bridge, parses it in the
- * browser, and stores the resulting cursor frames in AppConfig (see
- * CursorThemeApplier for the animated DOM side). Other cursor formats can be
- * added later by extending src/lib/cursorTheme.ts.
- */
-function CursorThemePicker() {
-  const { config, updateConfig } = useAppContext();
-  const { toast } = useToast();
-  const { pickFile } = useFilePicker();
-  const bridge = getFsBridge();
-  const [busy, setBusy] = useState(false);
-
-  const active = config.customCursor;
-
-  const choose = async () => {
-    const path = await pickFile({
-      title: 'Choose a cursor theme',
-      confirmLabel: 'Apply cursor',
-      extensions: ['.CurXPTheme'],
-    });
-    if (!path) return;
-
-    setBusy(true);
-    try {
-      const fs = getFsBridge();
-      if (!fs) throw new Error('Filesystem is unavailable outside the Din shell.');
-      const { data } = await fs.readFile(path);
-      const fileName = path.split('/').pop() ?? 'Custom cursor';
-      const theme = await parseCurXPTheme(data, fileName);
-      updateConfig((current) => ({ ...current, customCursor: theme }));
-      toast({
-        title: 'Cursor applied',
-        description: `"${theme.name}" is now your cursor.`,
-      });
-    } catch (error) {
-      toast({
-        title: "Couldn't load cursor theme",
-        description:
-          error instanceof Error
-            ? error.message
-            : 'The file could not be read as a .CurXPTheme.',
-        variant: 'destructive',
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const clear = () => {
-    updateConfig((current) => ({ ...current, customCursor: null }));
-  };
-
-  const mappedCount = active ? Object.keys(active.cursors).length : 0;
-
-  return (
-    <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm text-foreground">Custom cursor</p>
-          <p className="text-xs text-muted-foreground">
-            Choose a{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
-              .CurXPTheme
-            </code>{' '}
-            file to use over Din’s own windows, in place of the style above.
-            Animated cursors play their full animation.
-          </p>
-        </div>
-        <MousePointer2
-          className={cn(
-            'size-5 shrink-0',
-            active ? 'text-primary' : 'text-muted-foreground/60',
-          )}
-          aria-hidden
-        />
-      </div>
-
-      {active && (
-        <div className="flex items-center gap-3 rounded-md border bg-background/60 p-2">
-          <CursorThemePreview theme={active} />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-foreground">
-              {active.name}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {mappedCount} cursor{mappedCount === 1 ? '' : 's'} mapped
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={busy || !bridge}
-          onClick={choose}
-        >
-          {busy ? (
-            <Loader2 className="animate-spin" aria-hidden />
-          ) : (
-            <Upload aria-hidden />
-          )}
-          {active ? 'Replace…' : 'Choose file…'}
-        </Button>
-        {active && (
-          <Button type="button" variant="ghost" size="sm" onClick={clear}>
-            <Trash2 aria-hidden />
-            Reset
-          </Button>
-        )}
-      </div>
-
-      {!bridge && (
-        <p className="text-xs text-muted-foreground">
-          Cursor themes require the Din desktop shell.
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * Small animated preview of a cursor theme's default (Arrow) cursor, so the
- * user can see the animation in Settings without moving their pointer.
- */
-function CursorThemePreview({ theme }: { theme: CursorTheme }) {
-  const cursor = theme.cursors.default ?? Object.values(theme.cursors)[0];
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    if (!cursor || cursor.frames.length <= 1) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const id = window.setInterval(() => {
-      setFrame((f) => f + 1);
-    }, cursor.intervalMs);
-    return () => window.clearInterval(id);
-  }, [cursor]);
-
-  if (!cursor) return null;
-
-  // Clamp into range so switching themes (with fewer frames) never over-indexes.
-  const src = cursor.frames[frame % cursor.frames.length];
-
-  return (
-    <div className="grid size-10 shrink-0 place-items-center rounded-md bg-muted/40">
-      <img
-        src={src}
-        alt=""
-        className="max-h-8 max-w-8 object-contain"
-        style={{ imageRendering: 'auto' }}
-      />
     </div>
   );
 }

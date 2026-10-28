@@ -1,6 +1,5 @@
 import { createContext } from "react";
 import type { DesktopTheme, ProfileThemeMetadata } from "@/lib/profileTheme";
-import type { CursorTheme } from "@/lib/cursorTheme";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -83,13 +82,6 @@ export interface AppConfig {
    * applies. Device-specific, so it is kept local and never synced.
    */
   zoomLevel: number;
-  /**
-   * User-selected custom cursor theme (e.g. a `.CurXPTheme`), parsed into
-   * source-format-agnostic cursor images. `null` uses the native OS cursor.
-   * Stored inline (cursor frames are PNG data URLs) so the cursor persists
-   * across reloads without re-selecting the file.
-   */
-  customCursor: CursorTheme | null;
   /** Whether clocks (menu bar, boot and lock screens) show 12- or 24-hour time. */
   clockFormat: ClockFormat;
   /** Whether the menu-bar clock shows the weekday and date beside the time. */

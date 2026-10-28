@@ -54,3 +54,22 @@ export function useSetSystemCursor() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['cursor', 'status'] }),
   });
 }
+
+/** Import the cursor themes in a file or folder, and use the first. */
+export function useImportSystemCursor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (source: string) => requireBridge().importTheme(source),
+    // A theme imported anew keeps its id, so its preview is refetched too.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['cursor'] }),
+  });
+}
+
+/** Delete a theme Din imported. */
+export function useRemoveSystemCursor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => requireBridge().removeTheme(id),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['cursor'] }),
+  });
+}

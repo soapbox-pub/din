@@ -46,7 +46,6 @@ export function TestApp({ children }: TestAppProps) {
     tilingEnabled: false,
     tilingGap: 8,
     zoomLevel: 100,
-    customCursor: null,
     clockFormat: 'auto',
     clockShowDate: true,
     clockShowSeconds: false,

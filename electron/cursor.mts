@@ -1,13 +1,14 @@
 // The pointer: its theme and size, which Settings → Appearance shows and
-// changes.
+// changes, and the themes the user imports (electron/cursorImport.mts).
 //
 // Chromium on Wayland draws its own cursors (cage has no cursor-shape
 // protocol), loading them from the XCursor theme GTK names. GTK takes the
 // name and size from GSettings (org.gnome.desktop.interface cursor-theme and
 // cursor-size), and tells Chromium when they change, so a new theme or size
-// shows at once, without a restart. Native GTK and Qt apps read the same
-// keys; X11 apps and anything else that only knows XCURSOR_THEME and
-// XCURSOR_SIZE get those in their environment, from Din's.
+// shows at once, without a restart. Chromium plays a theme's animated
+// cursors itself. Native GTK and Qt apps read the same keys; X11 apps and
+// anything else that only knows XCURSOR_THEME and XCURSOR_SIZE get those in
+// their environment, from Din's.
 //
 // Din only changes them where it is the desktop (DinOS, DIN_DESKTOP_SESSION);
 // on GNOME and the like they're the desktop's settings, not Din's.
@@ -19,7 +20,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ipcMain } from 'electron';
+import { FALLBACK_THEME, IMPORTED_KEY, importCursorThemes } from './cursorImport.mts';
 import { runCommand } from './system.mts';
+import { decodeXcursor, xcursorSizes } from './xcursor.mts';
 
 const SCHEMA = 'org.gnome.desktop.interface';
 
@@ -34,12 +37,16 @@ interface CursorTheme {
   id: string;
   /** Human-readable name from index.theme, else the id. */
   name: string;
+  /** Whether Din imported it, and so can remove it. */
+  imported: boolean;
 }
 
 interface CursorStatus {
   theme: string;
   size: number;
   sizes: number[];
+  /** Whether the theme has one size only, whatever size is asked for. */
+  fixedSize: boolean;
   canChange: boolean;
 }
 
@@ -49,6 +56,12 @@ interface CursorPreview {
   width: number;
   height: number;
   rgba: Uint8Array;
+}
+
+/** Where imported themes go: the user's own icon themes. */
+function importBase(): string {
+  const data = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share');
+  return path.join(data, 'icons');
 }
 
 /** XCursor's search path, as libXcursor and libwayland-cursor walk it. */
@@ -63,17 +76,22 @@ function searchPath(): string[] {
         '/usr/share/icons',
         '/usr/share/pixmaps',
       ];
-  return dirs.map((dir) => dir.replace(/^~(?=\/|$)/, home));
+  return dirs.map((dir) => path.normalize(dir.replace(/^~(?=\/|$)/, home)));
 }
 
-/** The Name= of an icon theme's index.theme, if it has one. */
-async function themeName(dir: string): Promise<string | null> {
+/** An icon theme's index.theme, or '' without one. */
+async function indexTheme(dir: string): Promise<string> {
   try {
-    const text = await fs.readFile(path.join(dir, 'index.theme'), 'utf8');
-    return /^Name\s*=\s*(.+)$/m.exec(text)?.[1].trim() || null;
+    return await fs.readFile(path.join(dir, 'index.theme'), 'utf8');
   } catch {
-    return null;
+    return '';
   }
+}
+
+/** Whether `dir` holds a theme Din imported. */
+async function isImported(dir: string): Promise<boolean> {
+  if (path.dirname(dir) !== importBase()) return false;
+  return new RegExp(`^${IMPORTED_KEY}\\s*=\\s*true\\s*$`, 'm').test(await indexTheme(dir));
 }
 
 /** Every installed theme with cursors in it, first on the search path winning. */
@@ -94,10 +112,40 @@ async function themes(): Promise<CursorTheme[]> {
       } catch {
         continue;
       }
-      found.set(id, { id, name: (await themeName(dir)) ?? id.replace(/[-_]+/g, ' ') });
+      const name = /^Name\s*=\s*(.+)$/m.exec(await indexTheme(dir))?.[1].trim();
+      found.set(id, { id, name: name || id.replace(/[-_]+/g, ' '), imported: await isImported(dir) });
     }
   }
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The cursors/ directory XCursor would use for a theme. */
+async function cursorsDir(id: string): Promise<string | null> {
+  for (const base of searchPath()) {
+    const candidate = path.join(base, id, 'cursors');
+    try {
+      await fs.access(path.join(candidate, 'left_ptr'));
+      return candidate;
+    } catch {
+      // not on this part of the path
+    }
+  }
+  return null;
+}
+
+/** Whether a new import may not be called `id`: another theme by that name would clash. */
+async function taken(id: string): Promise<boolean> {
+  const own = path.join(importBase(), id);
+  for (const base of new Set([...searchPath(), importBase()])) {
+    const dir = path.join(base, id);
+    try {
+      await fs.lstat(dir);
+    } catch {
+      continue;
+    }
+    if (dir !== own || !(await isImported(dir))) return true;
+  }
+  return false;
 }
 
 async function gsettings(...args: string[]): Promise<string> {
@@ -106,7 +154,7 @@ async function gsettings(...args: string[]): Promise<string> {
 
 /** The current theme and size, from GSettings, falling back to DinOS's defaults. */
 async function current(): Promise<{ theme: string; size: number }> {
-  let theme = 'capitaine-cursors';
+  let theme = FALLBACK_THEME;
   let size = 40;
   try {
     const [rawTheme, rawSize] = await Promise.all([
@@ -121,6 +169,17 @@ async function current(): Promise<{ theme: string; size: number }> {
   return { theme, size };
 }
 
+/** Whether a theme's arrow comes in one size only. */
+async function hasFixedSize(id: string): Promise<boolean> {
+  const dir = await cursorsDir(id);
+  if (!dir) return false;
+  try {
+    return xcursorSizes(await fs.readFile(path.join(dir, 'left_ptr'))).length === 1;
+  } catch {
+    return false;
+  }
+}
+
 function canChange(): boolean {
   return process.env.DIN_DESKTOP_SESSION === '1';
 }
@@ -131,11 +190,15 @@ function exportEnvironment(theme: string, size: number): void {
   process.env.XCURSOR_SIZE = String(size);
 }
 
-// ---------------------------------------------------------------------------
-// Previews: XCursor files decoded to RGBA
-// ---------------------------------------------------------------------------
+async function apply(theme: string, size: number): Promise<void> {
+  await gsettings('set', SCHEMA, 'cursor-theme', theme);
+  await gsettings('set', SCHEMA, 'cursor-size', String(size));
+  exportEnvironment(theme, size);
+}
 
-const XCURSOR_IMAGE = 0xfffd0002;
+// ---------------------------------------------------------------------------
+// Previews
+// ---------------------------------------------------------------------------
 
 /** The file names each previewed role goes by, newest naming first. */
 const PREVIEW_ROLES: { role: string; names: string[] }[] = [
@@ -145,53 +208,8 @@ const PREVIEW_ROLES: { role: string; names: string[] }[] = [
   { role: 'nwse-resize', names: ['nwse-resize', 'size_fdiag', 'bottom_right_corner'] },
 ];
 
-/** The first image of an XCursor file nearest `want` in nominal size. */
-function decodeXcursor(data: Buffer, want: number): Omit<CursorPreview, 'role'> | null {
-  if (data.length < 16 || data.toString('latin1', 0, 4) !== 'Xcur') return null;
-  const headerSize = data.readUInt32LE(4);
-  const count = data.readUInt32LE(12);
-  let best: { size: number; position: number } | null = null;
-  for (let i = 0; i < count; i++) {
-    const entry = headerSize + i * 12;
-    if (entry + 12 > data.length) break;
-    if (data.readUInt32LE(entry) !== XCURSOR_IMAGE) continue;
-    const size = data.readUInt32LE(entry + 4);
-    const position = data.readUInt32LE(entry + 8);
-    if (!best || Math.abs(size - want) < Math.abs(best.size - want)) best = { size, position };
-  }
-  if (!best || best.position + 36 > data.length) return null;
-  const width = data.readUInt32LE(best.position + 16);
-  const height = data.readUInt32LE(best.position + 20);
-  const pixels = best.position + 36;
-  if (width === 0 || height === 0 || width > 512 || height > 512) return null;
-  if (pixels + width * height * 4 > data.length) return null;
-
-  // Premultiplied ARGB, one little-endian word per pixel.
-  const rgba = new Uint8Array(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    const argb = data.readUInt32LE(pixels + i * 4);
-    const a = argb >>> 24;
-    const unpremultiply = (c: number) => (a === 0 ? 0 : Math.min(255, Math.round((c * 255) / a)));
-    rgba[i * 4] = unpremultiply((argb >>> 16) & 0xff);
-    rgba[i * 4 + 1] = unpremultiply((argb >>> 8) & 0xff);
-    rgba[i * 4 + 2] = unpremultiply(argb & 0xff);
-    rgba[i * 4 + 3] = a;
-  }
-  return { width, height, rgba };
-}
-
 async function previews(id: string, size: number): Promise<CursorPreview[]> {
-  let dir: string | null = null;
-  for (const base of searchPath()) {
-    const candidate = path.join(base, id, 'cursors');
-    try {
-      await fs.access(path.join(candidate, 'left_ptr'));
-      dir = candidate;
-      break;
-    } catch {
-      // not on this part of the path
-    }
-  }
+  const dir = await cursorsDir(id);
   if (!dir) return [];
 
   const result: CursorPreview[] = [];
@@ -226,7 +244,8 @@ export function registerCursorHandlers(options: {
 
   ipcMain.handle('cursor:status', async (event): Promise<CursorStatus> => {
     assertShellSender(event);
-    return { ...(await current()), sizes: SIZES, canChange: canChange() };
+    const { theme, size } = await current();
+    return { theme, size, sizes: SIZES, fixedSize: await hasFixedSize(theme), canChange: canChange() };
   });
 
   ipcMain.handle('cursor:themes', async (event) => {
@@ -248,8 +267,35 @@ export function registerCursorHandlers(options: {
       throw new Error('Unknown cursor theme');
     }
     if (typeof size !== 'number' || !SIZES.includes(size)) throw new Error('Unsupported cursor size');
-    await gsettings('set', SCHEMA, 'cursor-theme', theme);
-    await gsettings('set', SCHEMA, 'cursor-size', String(size));
-    exportEnvironment(theme, size);
+    await apply(theme, size);
+  });
+
+  // Import the themes in a file or folder and make the first one the pointer's.
+  ipcMain.handle('cursor:import', async (event, source: unknown): Promise<string[]> => {
+    assertShellSender(event);
+    if (!canChange()) throw new Error('Din can\'t change the cursor on this system');
+    if (typeof source !== 'string' || !path.isAbsolute(source)) throw new Error('Choose a file to import');
+    const ids = await importCursorThemes(path.normalize(source), { base: importBase(), taken });
+    const { theme, size } = await current();
+    // The same name again (a theme imported anew) isn't a change GTK passes
+    // on, so the old cursors would stay; go through another theme first.
+    if (theme === ids[0]) await apply(FALLBACK_THEME, size);
+    await apply(ids[0], size);
+    return ids;
+  });
+
+  ipcMain.handle('cursor:remove', async (event, id: unknown) => {
+    assertShellSender(event);
+    if (!canChange()) throw new Error('Din can\'t change the cursor on this system');
+    if (typeof id !== 'string' || !THEME_NAME.test(id)) throw new Error('Not a cursor theme');
+    const dir = path.join(importBase(), id);
+    if (!(await isImported(dir))) throw new Error('Only cursors imported into Din can be removed');
+    const { theme, size } = await current();
+    if (theme === id) {
+      const others = (await themes()).filter((t) => t.id !== id);
+      const next = others.find((t) => t.id === FALLBACK_THEME) ?? others[0];
+      if (next) await apply(next.id, size);
+    }
+    await fs.rm(dir, { recursive: true, force: true });
   });
 }

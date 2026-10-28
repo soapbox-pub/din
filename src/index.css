@@ -294,16 +294,12 @@
 
 /* ===== Scrollbars =====
 
-   Styled with ::-webkit-scrollbar so Blink treats every scrollbar as a
-   *custom* scrollbar. This matters beyond looks: for native scrollbars,
-   Blink's EventHandler::SelectCursor() hardcodes the default arrow, which
-   breaks custom cursor themes (CursorThemeApplier) when hovering scroll
-   areas. Custom scrollbars run the normal cursor path, so the themed
-   cursor (inherited from <html>) applies over them too.
+   Styled with ::-webkit-scrollbar, so Blink treats every scrollbar as a
+   *custom* scrollbar.
 
    Do NOT add the standard `scrollbar-width` / `scrollbar-color` properties:
    when those are set, Chromium ignores ::-webkit-scrollbar styling and
-   reverts to native (cursor-breaking) scrollbars. */
+   reverts to native scrollbars. */
 
 /* Matches of Settings search (useSearchHighlight in Settings.tsx). */
 ::highlight(settings-search) {

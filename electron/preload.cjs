@@ -884,7 +884,7 @@ contextBridge.exposeInMainWorld('datetime', {
 
 // Cursor bridge (window.cursor), backed by the cursor:* handlers in
 // electron/cursor.mts: the pointer's XCursor theme and size, which Settings
-// shows and, on DinOS, changes.
+// shows and, on DinOS, changes, and the themes the user imports.
 contextBridge.exposeInMainWorld('cursor', {
   /** { theme, size, sizes, canChange }. */
   status: () => ipcRenderer.invoke('cursor:status'),
@@ -904,6 +904,19 @@ contextBridge.exposeInMainWorld('cursor', {
    * @param {{ theme: string, size: number }} choice
    */
   set: (choice) => ipcRenderer.invoke('cursor:set', choice),
+
+  /**
+   * Import the cursor themes in a file or folder and make the first the
+   * pointer's; resolves with their ids.
+   * @param {string} source absolute path
+   */
+  importTheme: (source) => ipcRenderer.invoke('cursor:import', source),
+
+  /**
+   * Delete a theme Din imported.
+   * @param {string} id
+   */
+  removeTheme: (id) => ipcRenderer.invoke('cursor:remove', id),
 });
 
 // InDesign bridge (window.indd), backed by the indd:* handler in

@@ -10,7 +10,6 @@ import { NostrSync } from '@/components/NostrSync';
 import { NostrdSync } from '@/components/NostrdSync';
 import { AppDataSync } from '@/components/AppDataSync';
 import { ProfileThemeApplier } from '@/components/ProfileThemeApplier';
-import { CursorThemeApplier } from '@/components/CursorThemeApplier';
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NostrLoginProvider } from '@nostrify/react/login';
 import { AppProvider } from '@/components/AppProvider';
@@ -63,7 +62,6 @@ const defaultConfig: AppConfig = {
   tilingEnabled: false,
   tilingGap: 8,
   zoomLevel: 100,
-  customCursor: null,
   clockFormat: 'auto',
   clockShowDate: true,
   clockShowSeconds: false,
@@ -82,7 +80,6 @@ export function App() {
               <NostrdSync />
               <AppDataSync />
               <ProfileThemeApplier />
-              <CursorThemeApplier />
               <TooltipProvider>
                 <Suspense>
                   <AppRouter />

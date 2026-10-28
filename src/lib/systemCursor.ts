@@ -4,8 +4,9 @@
  *
  * The pointer's theme and size are the system's (XCursor themes, named in
  * GSettings): they apply to Din's own windows, web pages and native apps
- * alike, and change at once. Din can change them on DinOS; elsewhere they're
- * only shown. In a plain browser the bridge is absent.
+ * alike, and change at once. Din can change them on DinOS, and import
+ * themes from other formats as XCursor ones; elsewhere they're only shown.
+ * In a plain browser the bridge is absent.
  */
 
 export interface SystemCursorTheme {
@@ -13,6 +14,8 @@ export interface SystemCursorTheme {
   id: string;
   /** Human-readable name, e.g. "Bibata Modern Classic". */
   name: string;
+  /** Whether Din imported it, and so can remove it. */
+  imported: boolean;
 }
 
 export interface SystemCursorStatus {
@@ -22,6 +25,8 @@ export interface SystemCursorStatus {
   size: number;
   /** The sizes that can be chosen. */
   sizes: number[];
+  /** Whether the theme has one size only, whatever size is asked for. */
+  fixedSize: boolean;
   /** Whether Din can change the cursor here. */
   canChange: boolean;
 }
@@ -40,6 +45,10 @@ export interface SystemCursorBridge {
   themes(): Promise<SystemCursorTheme[]>;
   preview(id: string, size: number): Promise<SystemCursorPreview[]>;
   set(choice: { theme: string; size: number }): Promise<void>;
+  /** Import the themes in a file or folder (absolute path) and use the first; resolves with their ids. */
+  importTheme(source: string): Promise<string[]>;
+  /** Delete a theme Din imported. */
+  removeTheme(id: string): Promise<void>;
 }
 
 declare global {
