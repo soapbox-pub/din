@@ -1,11 +1,21 @@
-import { useState } from 'react';
-import { Moon, Palette, Sun, Trash2, Wallpaper } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Loader2, Moon, Palette, Save, Sun, Trash2, Upload, Wallpaper } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { YourThemes } from '@/components/desktop/apps/YourThemes';
 import {
   Select,
   SelectContent,
@@ -17,7 +27,16 @@ import {
 } from '@/components/ui/select';
 import { useDesktopBackground } from '@/contexts/DesktopBackgroundContext';
 import { useDesktopThemeEditor, type AppearanceMode } from '@/hooks/useDesktopTheme';
-import type { DesktopTheme, ThemeFont } from '@/lib/profileTheme';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useToast } from '@/hooks/useToast';
+import { useThemeActions, useThemeLibrary } from '@/hooks/useThemes';
+import {
+  isLocalBackground,
+  sameThemeLook,
+  type DesktopTheme,
+  type ThemeFont,
+} from '@/lib/profileTheme';
+import { THEME_DESCRIPTION_MAX, THEME_TITLE_MAX } from '@/lib/themeDefinition';
 import { CURATED_FONTS, THEME_FONT_CATEGORIES, previewFamily } from '@/lib/themeFonts';
 
 const MODES: { value: AppearanceMode; name: string; icon: LucideIcon }[] = [
@@ -37,10 +56,13 @@ const HEX_COLOR = /^#[0-9a-f]{6}$/;
 /**
  * Settings → Appearance's theme: built-in light or dark, or a custom one of
  * colors, fonts and a background picture, and whether the custom one is the
- * profile theme or this computer's own (see useDesktopThemeEditor).
+ * profile theme or this computer's own (see useDesktopThemeEditor). Below
+ * them, the user's named themes (YourThemes); a custom theme can be saved
+ * as one, and one of the user's own updated after editing.
  */
 export function ThemeSettings() {
   const editor = useDesktopThemeEditor();
+  const editorRef = useRef<HTMLDivElement>(null);
 
   return (
     <>
@@ -67,7 +89,11 @@ export function ThemeSettings() {
         ))}
       </div>
 
-      {editor.theme && <CustomTheme theme={editor.theme} apply={editor.apply} />}
+      {editor.theme && (
+        <div ref={editorRef} className="scroll-mt-4">
+          <CustomTheme theme={editor.theme} edit={editor.edit} />
+        </div>
+      )}
 
       {editor.canSync && (
         <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
@@ -87,22 +113,33 @@ export function ThemeSettings() {
           />
         </div>
       )}
+
+      <YourThemes
+        onEdit={() =>
+          // The editor shows once the theme is worn, a render later.
+          requestAnimationFrame(() =>
+            editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+          )
+        }
+      />
     </>
   );
 }
 
 function CustomTheme({
   theme,
-  apply,
+  edit,
 }: {
   theme: DesktopTheme;
-  apply: (theme: DesktopTheme) => void;
+  edit: (theme: DesktopTheme) => void;
 }) {
   const { chooseBackground } = useDesktopBackground();
   const background = theme.background;
 
   return (
     <div className="flex flex-col gap-4 rounded-md border bg-muted/20 p-3">
+      <SaveThemeBar theme={theme} />
+
       <div>
         <p className="mb-2 text-sm text-foreground">Colors</p>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-2">
@@ -111,7 +148,7 @@ function CustomTheme({
               key={role}
               name={name}
               value={theme.colors[role]}
-              onChange={(color) => apply({ ...theme, colors: { ...theme.colors, [role]: color } })}
+              onChange={(color) => edit({ ...theme, colors: { ...theme.colors, [role]: color } })}
             />
           ))}
         </div>
@@ -123,12 +160,12 @@ function CustomTheme({
           <FontField
             name="Text"
             value={theme.fonts.body}
-            onChange={(font) => apply({ ...theme, fonts: { ...theme.fonts, body: font } })}
+            onChange={(font) => edit({ ...theme, fonts: { ...theme.fonts, body: font } })}
           />
           <FontField
             name="Titles"
             value={theme.fonts.title}
-            onChange={(font) => apply({ ...theme, fonts: { ...theme.fonts, title: font } })}
+            onChange={(font) => edit({ ...theme, fonts: { ...theme.fonts, title: font } })}
           />
         </div>
       </div>
@@ -157,7 +194,7 @@ function CustomTheme({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => apply({ ...theme, background: undefined })}
+                  onClick={() => edit({ ...theme, background: undefined })}
                 >
                   <Trash2 aria-hidden />
                   Remove
@@ -172,7 +209,7 @@ function CustomTheme({
                     type="button"
                     role="radio"
                     aria-checked={background.mode === mode}
-                    onClick={() => apply({ ...theme, background: { ...background, mode } })}
+                    onClick={() => edit({ ...theme, background: { ...background, mode } })}
                     className={cn(
                       'rounded-md border px-3 py-1 text-xs',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -292,5 +329,177 @@ function FontField({
         </SelectContent>
       </Select>
     </div>
+  );
+}
+
+/**
+ * Saving the custom theme worn as a named theme (kind 36767), or, when it's
+ * one of the user's own that's been changed, updating that one.
+ */
+function SaveThemeBar({ theme }: { theme: DesktopTheme }) {
+  const { user } = useCurrentUser();
+  const editor = useDesktopThemeEditor();
+  const library = useThemeLibrary();
+  const actions = useThemeActions();
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  if (!user) return null;
+
+  const source = theme.source;
+  const editing =
+    source?.pubkey === user.pubkey
+      ? library.own.find((t) => t.identifier === source.identifier)
+      : undefined;
+  const changed = editing ? !sameThemeLook(editing.theme, theme) : false;
+
+  const update = async () => {
+    if (!editing) return;
+    setBusy(true);
+    try {
+      const published = await actions.publish({
+        theme,
+        title: editing.title,
+        description: editing.description || undefined,
+        identifier: editing.identifier,
+      });
+      editor.apply(published.theme);
+      toast({ title: `${published.title} updated` });
+    } catch (error) {
+      toast({
+        title: 'Couldn’t update the theme',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <p className="mr-auto min-w-0 truncate text-sm text-foreground">
+        {editing ? editing.title : theme.title || 'Custom theme'}
+      </p>
+      {editing && changed && (
+        <Button type="button" size="sm" disabled={busy} onClick={() => void update()}>
+          {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
+          Update “{editing.title}”
+        </Button>
+      )}
+      <Button
+        type="button"
+        size="sm"
+        variant={editing && changed ? 'secondary' : 'default'}
+        onClick={() => setSaving(true)}
+      >
+        <Save aria-hidden />
+        {editing ? 'Save as New Theme…' : 'Save as Theme…'}
+      </Button>
+      <SaveThemeDialog theme={theme} open={saving} onOpenChange={setSaving} />
+    </div>
+  );
+}
+
+function SaveThemeDialog({
+  theme,
+  open,
+  onOpenChange,
+}: {
+  theme: DesktopTheme;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const editor = useDesktopThemeEditor();
+  const actions = useThemeActions();
+  const { toast } = useToast();
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const uploads = !!theme.background && isLocalBackground(theme.background.url);
+
+  const save = async () => {
+    const name = title.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      const published = await actions.publish({
+        theme,
+        title: name,
+        description: description.trim() || undefined,
+      });
+      editor.apply(published.theme);
+      onOpenChange(false);
+      setTitle('');
+      setDescription('');
+      toast({
+        title: `${published.title} saved`,
+        description: 'It’s in Your Themes, and others can find it in the App Store.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Couldn’t save the theme',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+      <DialogContent className="sm:max-w-md">
+        <form
+          className="contents"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Save as theme</DialogTitle>
+            <DialogDescription>
+              Your theme is published on Nostr under this name, where anyone can find it and try it
+              on.
+              {uploads &&
+                ' Its background picture is on this computer, so it will be uploaded to your Blossom servers first.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="theme-title">Name</Label>
+              <Input
+                id="theme-title"
+                value={title}
+                maxLength={THEME_TITLE_MAX}
+                onChange={(e) => setTitle(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="theme-description">Description (optional)</Label>
+              <Textarea
+                id="theme-description"
+                value={description}
+                maxLength={THEME_DESCRIPTION_MAX}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy || !title.trim()}>
+              {busy && <Loader2 className="animate-spin" aria-hidden />}
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
