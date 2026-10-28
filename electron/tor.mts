@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { ipcMain } from 'electron';
 import { setTorSocksPort } from './network.mts';
-import { isPlainOnionHost } from './onion-proxy.mts';
+import { isPlainOnionHost, markPlainOnionHost, markTlsOnionHost } from './onion-proxy.mts';
 import { CommandError, runCommand } from './system.mts';
 
 const HELPER = process.env.DIN_TOR;
@@ -283,6 +283,7 @@ export function onionRequest(details: Electron.OnBeforeRequestListenerDetails): 
   if (onion && url.port) return null;
   // A clearnet page leaves the session (keepTorSession).
   if (!onion && details.resourceType === 'mainFrame') return null;
+  if (onion) markPlainOnionHost(url.hostname);
   url.protocol = 'https:';
   return { redirectURL: url.href };
 }
@@ -320,6 +321,23 @@ export function secureOnionSites(s: Electron.Session): void {
       }
     }
     callback({ requestHeaders: headers });
+  });
+
+  // A site served plain that sends its visitor to https:// on itself has TLS
+  // of its own (Facebook's does): it can't know its page is https already,
+  // so it would send the same URL round forever. The Location header as
+  // sent, since a relative one comes out as https here too.
+  s.webRequest.onBeforeRedirect({ urls: ['https://*.onion/*'] }, (details) => {
+    try {
+      const url = new URL(details.url);
+      if (!isPlainOnionHost(url.hostname)) return;
+      const location = Object.entries(details.responseHeaders ?? {}).find(([name]) => name.toLowerCase() === 'location')?.[1][0] ?? '';
+      if (!/^https:\/\//i.test(location)) return;
+      const target = new URL(location);
+      if (target.hostname === url.hostname && !target.port) markTlsOnionHost(url.hostname);
+    } catch {
+      // Not a URL: not a redirect to anything.
+    }
   });
 }
 
