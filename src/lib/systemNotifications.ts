@@ -42,6 +42,11 @@ export interface SystemNotification {
    * opens it, or null for its front page.
    */
   site: { host: string; url: string | null } | null;
+  /**
+   * For a website's service worker's (electron/web-push.mts): its origin,
+   * and whether it's an installed web app's rather than the Web Browser's.
+   */
+  worker: { origin: string; installed: boolean } | null;
 }
 
 export interface SystemNotificationsBridge {

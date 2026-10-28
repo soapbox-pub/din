@@ -15,6 +15,7 @@ import {
 } from '@/lib/notificationCenter';
 import { nsiteAppId } from '@/lib/nsiteApps';
 import { getSystemNotificationsBridge, type SystemNotification } from '@/lib/systemNotifications';
+import { getWebPushHost } from '@/lib/webPush';
 
 /** The shortest time an app may ask a popup to stay. */
 const MIN_POPUP_MS = 2000;
@@ -44,16 +45,20 @@ function guestWindowId(webContentsId: number): string | null {
  * a Linux app's window, the tab or web app a page's came from, or an
  * installed nsite's window at the notification's `data.url` - which its
  * service worker may then move (clients.openWindow, see electron/napp.mts).
+ * A website's service worker decides for itself what a click on its
+ * notification opens or focuses (electron/web-push.mts), as in Chrome.
  */
 export function SystemNotificationsHost() {
   const { windows, focus, open } = useWindowManager();
-  const { getApp } = useInstalledApps();
+  const { getApp, findAppIdForUrl } = useInstalledApps();
   // Read when a notification arrives or is clicked, without resubscribing.
   const windowsRef = useRef(windows);
   const getAppRef = useRef(getApp);
+  const findAppIdForUrlRef = useRef(findAppIdForUrl);
   useLayoutEffect(() => {
     windowsRef.current = windows;
     getAppRef.current = getApp;
+    findAppIdForUrlRef.current = findAppIdForUrl;
   });
 
   useEffect(() => {
@@ -83,6 +88,14 @@ export function SystemNotificationsHost() {
       return { name: n.appName, icon: getAppRef.current('web-browser')?.icon, origin };
     };
 
+    /** A website's worker's notification is from its installed web app, or from the site in the Web Browser. */
+    const workerSource = (n: SystemNotification, worker: { origin: string; installed: boolean }): NotificationSource => {
+      const appId = worker.installed ? findAppIdForUrlRef.current(`${worker.origin}/`) : undefined;
+      const app = appId ? getAppRef.current(appId) : undefined;
+      if (app) return { appId: app.id, name: app.name, origin: worker.origin };
+      return { name: n.appName, icon: getAppRef.current('web-browser')?.icon, origin: worker.origin };
+    };
+
     /** Open an installed nsite, at a page of its own or where it was. */
     const openSite = (host: string, url: string | null) => {
       const appId = nsiteAppId(host);
@@ -90,10 +103,24 @@ export function SystemNotificationsHost() {
       open(appId, url ? { url } : undefined);
     };
 
+    /** Where a website's worker opens a window: its installed app, or a browser tab. */
+    const openForWorker = (url: string, installed: boolean) => {
+      const appId = installed ? findAppIdForUrlRef.current(url) : undefined;
+      if (appId) {
+        open(appId, { url });
+        return;
+      }
+      if (!hasTabConsumer()) open('web-browser');
+      publishTabCommand({ type: 'open', url });
+    };
+
     const show = (n: SystemNotification) => {
       const takesClick = n.actions.some((a) => a.id === 'default');
       const guest = n.guest;
       const site = n.site;
+      const worker = n.worker;
+      // A page's and its worker's notifications replace each other by tag.
+      const webOrigin = guest?.origin ?? worker?.origin;
       const siteApp = site ? getAppRef.current(nsiteAppId(site.host)) : undefined;
       notify({
         id: n.id,
@@ -101,7 +128,9 @@ export function SystemNotificationsHost() {
           ? guestSource(n, guest.webContentsId)
           : site
             ? { appId: siteApp?.id, name: siteApp?.name ?? `${site.host.slice(0, 12)}…`, origin: `nsite://${site.host}` }
-            : { appId: n.appId, name: n.appName || 'Notification', icon: n.icon },
+            : worker
+              ? workerSource(n, worker)
+              : { appId: n.appId, name: n.appName || 'Notification', icon: n.icon },
         title: n.title,
         body: n.body,
         image: n.image,
@@ -113,10 +142,14 @@ export function SystemNotificationsHost() {
             : n.timeout && Math.max(n.timeout, MIN_POPUP_MS),
         history: !n.transient,
         resident: n.resident,
-        replaceKey: guest && n.tag
-          ? `web\0${guest.origin}\0${n.tag}`
+        replaceKey: webOrigin && n.tag
+          ? `web\0${webOrigin}\0${n.tag}`
           : site && n.tag ? `napp\0${site.host}\0${n.tag}` : undefined,
         onActivate: (action) => {
+          if (worker) {
+            bridge.activate(n.id, action);
+            return;
+          }
           if (site) {
             // Open at once; the worker's notificationclick comes after.
             if (action === 'default') openSite(site.host, site.url);
@@ -139,10 +172,15 @@ export function SystemNotificationsHost() {
     const offShow = bridge.onShow(show);
     const offClose = bridge.onClose((id) => closeNotification(id, 'closed'));
     const offOpen = getNappHost()?.onOpen(({ host, url }) => openSite(host, url));
+    const webPush = getWebPushHost();
+    const offWorkerOpen = webPush?.onOpen(({ url, installed }) => openForWorker(url, installed));
+    const offWorkerFocus = webPush?.onFocus(({ webContentsId }) => raiseGuest(webContentsId));
     return () => {
       offShow();
       offClose();
       offOpen?.();
+      offWorkerOpen?.();
+      offWorkerFocus?.();
     };
   }, [focus, open]);
 

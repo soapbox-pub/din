@@ -18,6 +18,8 @@
 // Installed nsites' come from napp.mts (their pages' and service workers'
 // registration.showNotification). They outlive the page; clicks and
 // dismissals go back to napp.mts, which raises them in the site's worker.
+// Other websites' registration.showNotification (a push, typically) comes
+// from web-push.mts the same way.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -67,6 +69,11 @@ export interface SystemNotification {
    * front page.
    */
   site: { host: string; url: string | null } | null;
+  /**
+   * For a website's service worker's (web-push.mts): its origin, and
+   * whether it's an installed web app's rather than the Web Browser's.
+   */
+  worker: { origin: string; installed: boolean } | null;
 }
 
 type CloseReason = 'expired' | 'dismissed' | 'closed';
@@ -119,6 +126,7 @@ async function show(message: Extract<ServerMessage, { type: 'notify' }>): Promis
     guest: null,
     tag: '',
     site: null,
+    worker: null,
   };
   sendToShell('notifications:show', notification);
 }
@@ -141,6 +149,7 @@ export function notifyFromSystem(key: string, title: string, body: string): void
     guest: null,
     tag: '',
     site: null,
+    worker: null,
   };
   sendToShell('notifications:show', notification);
 }
@@ -319,6 +328,7 @@ function registerWebHandlers(
       guest: { webContentsId: contents.id, origin, remembered: remembered(contents.session) },
       tag: webText(opts.tag, 256),
       site: null,
+      worker: null,
     };
     sendToShell('notifications:show', notification);
     return id;
@@ -335,7 +345,7 @@ function registerWebHandlers(
 // Installed nsites (napp.mts)
 // ---------------------------------------------------------------------------
 
-/** What napp.mts hears back about the notifications it showed. */
+/** What napp.mts (and web-push.mts) hear back about the notifications they showed. */
 export interface SiteNotificationHandlers {
   activate: (id: number, action: string) => void;
   closed: (id: number, reason: CloseReason) => void;
@@ -384,6 +394,7 @@ export async function showSiteNotification(
     guest: null,
     tag: notification.tag,
     site: { host: notification.host, url: notification.url },
+    worker: null,
   };
   sendToShell('notifications:show', shown);
 }
@@ -393,11 +404,69 @@ export function closeSiteNotification(id: number): void {
   sendToShell('notifications:close', `napp:${id}`);
 }
 
+// ---------------------------------------------------------------------------
+// Websites' service workers (web-push.mts)
+// ---------------------------------------------------------------------------
+
+let workerHandlers: SiteNotificationHandlers | null = null;
+
+export function setWorkerNotificationHandlers(handlers: SiteNotificationHandlers): void {
+  workerHandlers = handlers;
+}
+
+/**
+ * Show a website's registration.showNotification (web-push.mts has checked
+ * it may). Its icon is fetched in the site's own session, as a page's is.
+ */
+export async function showWorkerNotification(
+  s: Electron.Session,
+  notification: {
+    id: number;
+    origin: string;
+    installed: boolean;
+    title: string;
+    body: string;
+    icon: string;
+    tag: string;
+    actions: { action: string; title: string }[];
+    requireInteraction: boolean;
+    silent: boolean;
+  },
+): Promise<void> {
+  const image = notification.icon ? await fetchIcon(s, notification.icon) : null;
+  const shown: SystemNotification = {
+    id: `sw:${notification.id}`,
+    appName: new URL(notification.origin).host,
+    appId: null,
+    icon: null,
+    image,
+    title: notification.title.slice(0, MAX_WEB_TITLE),
+    body: notification.body.slice(0, MAX_WEB_BODY),
+    actions: notification.actions.slice(0, 3).map((a) => ({ id: a.action, label: a.title })),
+    urgency: notification.silent ? 'low' : 'normal',
+    timeout: notification.requireInteraction ? 0 : -1,
+    resident: false,
+    transient: false,
+    guest: null,
+    tag: notification.tag,
+    site: null,
+    worker: { origin: notification.origin, installed: notification.installed },
+  };
+  sendToShell('notifications:show', shown);
+}
+
+/** Take down a website's service-worker notification. */
+export function closeWorkerNotification(id: number): void {
+  sendToShell('notifications:close', `sw:${id}`);
+}
+
+type NotificationKind = 'dbus' | 'web' | 'napp' | 'sw';
+
 /** The id behind an opaque shell id, by kind. */
-function parseId(id: unknown): { kind: 'dbus' | 'web' | 'napp'; id: number } | null {
+function parseId(id: unknown): { kind: NotificationKind; id: number } | null {
   if (typeof id !== 'string') return null;
-  const match = /^(dbus|web|napp):(\d+)$/.exec(id);
-  return match ? { kind: match[1] as 'dbus' | 'web' | 'napp', id: Number(match[2]) } : null;
+  const match = /^(dbus|web|napp|sw):(\d+)$/.exec(id);
+  return match ? { kind: match[1] as NotificationKind, id: Number(match[2]) } : null;
 }
 
 /** Register the notifications IPC surface (window.systemNotifications) and start the server. */
@@ -417,13 +486,16 @@ export function registerNotificationHandlers(options: {
     if (!isShellSender(event) || !target || typeof action !== 'string') return;
     if (target.kind === 'dbus') command({ type: 'action', id: target.id, key: action.slice(0, 256) });
     else if (target.kind === 'napp') siteHandlers?.activate(target.id, action.slice(0, 256));
+    else if (target.kind === 'sw') workerHandlers?.activate(target.id, action.slice(0, 256));
     else if (action === 'default') webEvent(target.id, 'click');
   });
   ipcMain.on('notifications:closed', (event, id, reason) => {
     const target = parseId(id);
     if (!isShellSender(event) || !target) return;
+    const why: CloseReason = reason in REASON_CODES ? (reason as CloseReason) : 'closed';
     if (target.kind === 'dbus') command({ type: 'closed', id: target.id, reason: REASON_CODES[reason as CloseReason] ?? 4 });
-    else if (target.kind === 'napp') siteHandlers?.closed(target.id, reason in REASON_CODES ? (reason as CloseReason) : 'closed');
+    else if (target.kind === 'napp') siteHandlers?.closed(target.id, why);
+    else if (target.kind === 'sw') workerHandlers?.closed(target.id, why);
     else webEvent(target.id, 'close');
   });
 

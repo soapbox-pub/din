@@ -78,6 +78,8 @@
 //     installed as apps (see src/lib/nsiteStore.ts / electron/nsite-store.mts)
 //   - window.nappHost: installed nsites' napp runtime - their ENV, clearing
 //     their data, opening their windows (see src/lib/napp.ts / electron/napp.mts)
+//   - window.webPushHost: websites' Web Push - the push service, and their
+//     workers opening windows (see src/lib/webPush.ts / electron/web-push.mts)
 //   - window.promptHost: yes/no questions for the user - site permissions and
 //     extension installs (see PromptHost)
 //   - window.screenShare: pages asking to share the screen, and the shares
@@ -2722,6 +2724,51 @@ contextBridge.exposeInMainWorld('nappHost', {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('napp:open', listener);
     return () => ipcRenderer.removeListener('napp:open', listener);
+  },
+});
+
+// Websites' Web Push (window.webPushHost), backed by the web-push:* handlers
+// in electron/web-push.mts: the push service and its state for Settings, and
+// a site's service worker asking for a window after a click on one of its
+// notifications.
+contextBridge.exposeInMainWorld('webPushHost', {
+  /** The push service: its URL, the default's, whether it's connected, and how many subscriptions it holds. */
+  status: () => ipcRenderer.invoke('web-push:status'),
+  /**
+   * Use another push service (null: the default). Every subscription is
+   * dropped; sites hear so and subscribe again.
+   * @param {string | null} url
+   */
+  setServer: (url) => ipcRenderer.invoke('web-push:setServer', url),
+  /**
+   * The status changed. Returns an unsubscribe fn.
+   * @param {() => void} callback
+   */
+  onChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('web-push:changed', listener);
+    return () => ipcRenderer.removeListener('web-push:changed', listener);
+  },
+  /**
+   * A worker opened a window (clients.openWindow): an installed web app's
+   * worker, or a browser tab's. Returns an unsubscribe fn.
+   * @param {(request: { url: string, installed: boolean }) => void} callback
+   */
+  onOpen: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, payload: { url: string, installed: boolean }) => void} */
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('web-push:open', listener);
+    return () => ipcRenderer.removeListener('web-push:open', listener);
+  },
+  /**
+   * A worker focused one of its pages (WindowClient.focus). Returns an unsubscribe fn.
+   * @param {(request: { webContentsId: number }) => void} callback
+   */
+  onFocus: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, payload: { webContentsId: number }) => void} */
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('web-push:focus', listener);
+    return () => ipcRenderer.removeListener('web-push:focus', listener);
   },
 });
 

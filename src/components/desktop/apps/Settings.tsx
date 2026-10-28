@@ -142,6 +142,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
 import { setDoNotDisturb, useNotificationCenter } from '@/lib/notificationCenter';
 import { NotificationSitesList } from '@/components/desktop/apps/NotificationSitesList';
+import { PushServiceSetting } from '@/components/desktop/apps/PushServiceSetting';
 import { useToast } from '@/hooks/useToast';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { getFsBridge } from '@/lib/fs';
@@ -3258,7 +3259,8 @@ function ClockOptions() {
 
 /**
  * Do Not Disturb, which applies to every notification and stays on this
- * computer, and the apps and sites allowed to notify (NotificationSitesList).
+ * computer, the apps and sites allowed to notify (NotificationSitesList), and
+ * the push service websites' notifications come through (PushServiceSetting).
  */
 function NotificationsSection() {
   const { doNotDisturb } = useNotificationCenter();
@@ -3275,6 +3277,7 @@ function NotificationsSection() {
           onCheckedChange={setDoNotDisturb}
         />
         <NotificationSitesList />
+        <PushServiceSetting />
       </div>
     </SectionShell>
   );

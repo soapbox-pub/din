@@ -21,11 +21,10 @@
 // decided here, with the site read from the calling frame or worker - never
 // from what the site says.
 //
-// Events reach a worker the way Electron allows a host to: the worker is
-// started for its scope, kept alive with a task while it handles one event,
-// and handed the event over IPC; its preload dispatches it as a real
-// PushEvent/NotificationEvent/PeriodicSyncEvent and waits on waitUntil().
-// One event at a time per site, five minutes at most each.
+// Events reach a worker through worker-events.mts: started for its scope and
+// handed the event over IPC, which its preload raises as a real
+// PushEvent/NotificationEvent/PeriodicSyncEvent. One event at a time per
+// site, five minutes at most each.
 //
 // For diagnosis, the push pool, worker wakes, notifications and the workers'
 // own consoles log `[napp]` lines to the system log, and the pool's live
@@ -43,6 +42,7 @@ import { fetchAbort, fetchAbortAll, fetchRead, fetchStart, type NappFetchRequest
 import { normalizeSubscriptions, PushPool, type NappSubscription, type SitePush } from './napp-push.mts';
 import { parseCanonicalHost } from './nsite-store.mts';
 import { closeSiteNotification, setSiteNotificationHandlers, showSiteNotification } from './notifications.mts';
+import { WorkerEvents, type DispatchResult } from './worker-events.mts';
 
 /** A capability a site asks the user for, as main.mts files it. */
 export type NappCapability = 'notifications' | 'background-sync';
@@ -62,10 +62,6 @@ export interface NappOptions {
   forgetPermissions: (origin: string) => void;
 }
 
-/** How long one event may keep a worker busy (Chromium's own ceiling). */
-const DISPATCH_TIMEOUT_MS = 5 * 60_000;
-/** Events waiting for a site's worker before new ones are dropped. */
-const MAX_QUEUED = 100;
 /** How long after a click on its notification a worker may open its window. */
 const INTERACTION_WINDOW_MS = 60_000;
 const MAX_NOTIFICATIONS_PER_SITE = 32;
@@ -232,8 +228,15 @@ function pageCaller(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent):
 // ---------------------------------------------------------------------------
 
 const attached = new WeakSet<Electron.ServiceWorkerMain>();
-let nextDispatchId = 1;
-const pendingDispatches = new Map<number, (ok: boolean) => void>();
+const events = new WorkerEvents({
+  prefix: 'napp',
+  log,
+  onOutcome: (host, type, outcome, ms) => {
+    lastDispatch.set(host, { type, outcome, at: Date.now(), ms });
+    statusChanged();
+  },
+  onWorker: (worker) => attach(worker),
+});
 
 /** Wire up a running worker's IPC, if it's an installed nsite's. */
 function attach(worker: Electron.ServiceWorkerMain): void {
@@ -241,18 +244,13 @@ function attach(worker: Electron.ServiceWorkerMain): void {
   const host = hostOf(worker.scope);
   if (!host) return;
   attached.add(worker);
+  events.attach(worker);
   try {
     worker.ipc.handle('napp:call', (event, method, params) => {
       if (event.session !== options.session()) return failure('Not available here');
       const scopeHost = hostOf(event.serviceWorker.scope);
       if (!scopeHost) return failure('Not available here');
       return call({ host: scopeHost, worker: true }, method, params);
-    });
-    worker.ipc.on('napp:dispatched', (_event, id, ok) => {
-      const resolve = typeof id === 'number' ? pendingDispatches.get(id) : undefined;
-      if (!resolve) return;
-      pendingDispatches.delete(id);
-      resolve(ok === true);
     });
   } catch {
     // Already wired (a second handle() for the same worker throws).
@@ -277,78 +275,15 @@ function watchWorkers(s: Electron.Session): void {
 }
 
 /**
- * Start a site's worker (if it has one) and raise an event in it. Resolves
- * with whether it ran: false when the site has no worker.
+ * Start a site's worker (if it has one) and raise an event in it.
  */
-async function dispatch(host: string, type: string, init: Record<string, unknown>): Promise<boolean> {
-  const started = Date.now();
-  const outcome = (what: string): void => {
-    const ms = Date.now() - started;
-    lastDispatch.set(host, { type, outcome: what, at: Date.now(), ms });
-    log(`${host}: ${type} ${what} (${ms} ms)`);
-    statusChanged();
-  };
-  let worker: Electron.ServiceWorkerMain;
-  try {
-    worker = await options.session().serviceWorkers.startWorkerForScope(`${originOf(host)}/`);
-  } catch (error) {
-    outcome(`not delivered, no worker: ${error instanceof Error ? error.message : error}`);
-    return false;
-  }
-  attach(worker);
-  const task = worker.startTask();
-  const id = nextDispatchId++;
-  try {
-    const ok = await new Promise<boolean | 'timeout' | 'unsent'>((resolve) => {
-      const timer = setTimeout(() => {
-        pendingDispatches.delete(id);
-        resolve('timeout');
-      }, DISPATCH_TIMEOUT_MS);
-      pendingDispatches.set(id, (ok) => {
-        clearTimeout(timer);
-        resolve(ok);
-      });
-      try {
-        worker.send('napp:dispatch', id, type, init);
-      } catch {
-        clearTimeout(timer);
-        pendingDispatches.delete(id);
-        resolve('unsent');
-      }
-    });
-    if (ok === 'timeout') outcome('timed out');
-    else if (ok === 'unsent') outcome('could not be sent to the worker');
-    else outcome(ok ? 'handled' : 'failed in the worker');
-    return ok === true;
-  } finally {
-    task.end();
-  }
+function dispatch(host: string, type: string, init: Record<string, unknown>): Promise<DispatchResult> {
+  return events.dispatch(options.session(), `${originOf(host)}/`, host, type, init);
 }
 
-const queues = new Map<string, { tail: Promise<void>; length: number }>();
-
-/** Run jobs for a site's worker one after another; drops jobs past MAX_QUEUED. */
+/** Run jobs for a site's worker one after another. */
 function enqueue(host: string, job: () => Promise<unknown>): void {
-  let queue = queues.get(host);
-  if (!queue) {
-    queue = { tail: Promise.resolve(), length: 0 };
-    queues.set(host, queue);
-  }
-  if (queue.length >= MAX_QUEUED) {
-    log(`${host}: ${MAX_QUEUED} events already waiting for the worker; dropped one`);
-    return;
-  }
-  queue.length++;
-  const q = queue;
-  q.tail = q.tail
-    .then(async () => {
-      await job();
-    })
-    .catch(() => {})
-    .finally(() => {
-      q.length--;
-      if (q.length === 0 && queues.get(host) === q) queues.delete(host);
-    });
+  events.enqueue(host, job);
 }
 
 // ---------------------------------------------------------------------------
@@ -697,7 +632,7 @@ export async function forgetNappSite(host: string): Promise<void> {
   save();
   closeAllNotifications(host);
   fetchAbortAll(host);
-  queues.delete(host);
+  events.forget(host);
   lastInteraction.delete(host);
   options.forgetPermissions(originOf(host));
   await options.session().clearStorageData({ origin: originOf(host) }).catch(() => {});

@@ -11,8 +11,9 @@
 // same prompt, and checked again in the main process for every notification.
 //
 // registration.showNotification() isn't covered here. Installed nsites get
-// theirs from napp-preload.cjs, which also runs in their service workers;
-// anyone else's still goes through libnotify, to Din's D-Bus server.
+// theirs from napp-preload.cjs and other sites from web-push-preload.cjs,
+// which also run in their service workers; a private window's is still
+// Chromium's own.
 //
 // Registered with session.registerPreloadScript in main.mts, so it runs
 // alongside each guest's own preload. Top documents of web pages only.

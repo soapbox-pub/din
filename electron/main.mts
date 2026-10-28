@@ -78,6 +78,7 @@ import { registerOpenUri } from './open-uri.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { registerGeolocationHandlers } from './geolocation.mts';
 import { forgetNappSite, nappPermissionChanged, registerNappHandlers } from './napp.mts';
+import { forgetWebPushPartition, registerWebPushHandlers, webPushPermissionChanged } from './web-push.mts';
 import { watchLiveStick } from './live-stick.mts';
 import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
@@ -3043,6 +3044,15 @@ const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
  */
 const NAPP_PRELOAD = path.join(import.meta.dirname, 'napp-preload.cjs');
 
+/**
+ * Absolute path to the session preload that gives websites Web Push and what
+ * goes with it (see electron/web-push.mts): registration.pushManager,
+ * notifications from a registration, and the worker's push and notification
+ * events. Registered on the browser and apps sessions for frames and service
+ * workers alike.
+ */
+const WEB_PUSH_PRELOAD = path.join(import.meta.dirname, 'web-push-preload.cjs');
+
 /** The BrowserWindow hosting the shell (set at startup). */
 let shellWindow: BrowserWindow | null = null;
 
@@ -3956,6 +3966,7 @@ function decide(s: Electron.Session, origin: string, capability: SiteCapability,
   if (!remembersDecisions(s)) return;
   saveDecisions(decisions);
   nappPermissionChanged(origin, capability, allow);
+  webPushPermissionChanged(origin, capability, allow);
   sendToShell('site-permissions:changed');
 }
 
@@ -4556,6 +4567,8 @@ function registerBrowserDataHandlers(): void {
     if (opts.cookies === true) {
       // No `storages` filter: clear every storage type (cookies included).
       await s.clearStorageData();
+      // Service workers went too, and push subscriptions belong to them.
+      forgetWebPushPartition('browser');
     }
   });
 }
@@ -5100,6 +5113,11 @@ app.whenReady().then(() => {
   // Installed nsites are napps: their pages and their service workers.
   appSession().registerPreloadScript({ id: 'din-napp', type: 'frame', filePath: NAPP_PRELOAD });
   appSession().registerPreloadScript({ id: 'din-napp-worker', type: 'service-worker', filePath: NAPP_PRELOAD });
+  // Websites get Web Push, in tabs and as installed apps; private ones none.
+  for (const s of [browserSession(), appSession()]) {
+    s.registerPreloadScript({ id: 'din-web-push', type: 'frame', filePath: WEB_PUSH_PRELOAD });
+    s.registerPreloadScript({ id: 'din-web-push-worker', type: 'service-worker', filePath: WEB_PUSH_PRELOAD });
+  }
 
   protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
@@ -5170,6 +5188,13 @@ app.whenReady().then(() => {
     forgetPermissions: (origin) => {
       for (const capability of SITE_CAPABILITIES) decide(appSession(), origin, capability, null);
     },
+  });
+  registerWebPushHandlers({
+    sessions: { browser: browserSession, apps: appSession },
+    sendToShell,
+    assertShellSender,
+    permission: (origin) => siteNotificationPermission(browserSession(), origin),
+    requestPermission: (s, origin) => requestSiteCapability(s, origin, 'notifications'),
   });
   registerGeolocationHandlers({
     request: (s, origin) => requestSiteCapability(s, origin, 'geolocation'),
