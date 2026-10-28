@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   Folder,
+  FolderOpen,
   Loader2,
   MoreHorizontal,
   PanelLeft,
@@ -14,8 +15,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -41,6 +44,7 @@ import {
   useCompactSession,
   useHomeDirectory,
   useInterruptSession,
+  useMainCheckouts,
   useMarkViewedSession,
   usePreferredModel,
   useRenameSession,
@@ -57,6 +61,7 @@ import { useToast } from '@/hooks/useToast';
 import type { AppComponentProps } from '@/lib/apps';
 import {
   cleanAssistantError,
+  directoryName,
   formatCost,
   modelKey,
   sessionTitle,
@@ -560,11 +565,7 @@ function NewConversation({
             onCycleAgent={cycleAgent}
           />
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 rounded-full" onClick={() => void chooseFolder()}>
-              <Folder className="size-3.5" aria-hidden />
-              <span className="max-w-60 truncate">{folder ? tildify(folder, home) : 'Home'}</span>
-              <ChevronDown className="size-3 opacity-60" aria-hidden />
-            </Button>
+            <FolderPicker value={folder} home={home} onChange={setDirectory} onOther={() => void chooseFolder()} />
             {SUGGESTIONS.map((suggestion) => (
               <Button
                 key={suggestion}
@@ -627,6 +628,75 @@ function AgentPicker({ value, onChange }: { value: string; onChange: (agent: str
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** How many recent folders the folder picker offers. */
+const RECENT_FOLDER_LIMIT = 8;
+
+/**
+ * The folders recent conversations worked in, most recent first. A
+ * worktree counts as its main checkout, since worktrees come and go.
+ */
+function useRecentFolders(): string[] {
+  const { data: sessions } = useAssistantSessions();
+  const listed = useMemo(
+    () => (sessions ?? []).filter((s) => !s.time.archived).sort((a, b) => b.time.updated - a.time.updated),
+    [sessions],
+  );
+  const directories = useMemo(() => [...new Set(listed.map((s) => s.location.directory))], [listed]);
+  const mains = useMainCheckouts(directories);
+  return useMemo(
+    () => [...new Set(directories.map((d) => mains.get(d) ?? d))].slice(0, RECENT_FOLDER_LIMIT),
+    [directories, mains],
+  );
+}
+
+/** The folder a new conversation works in: a recent one, or another from the file picker. */
+function FolderPicker({
+  value,
+  home,
+  onChange,
+  onOther,
+}: {
+  value: string | undefined;
+  home: string | undefined;
+  onChange: (directory: string) => void;
+  onOther: () => void;
+}) {
+  const recent = useRecentFolders();
+  const folders = value && !recent.includes(value) ? [value, ...recent] : recent;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 rounded-full" aria-label="Work in a folder">
+          <Folder className="size-3.5" aria-hidden />
+          <span className="max-w-60 truncate">{value ? tildify(value, home) : 'Home'}</span>
+          <ChevronDown className="size-3 opacity-60" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        {folders.length > 0 && (
+          <>
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Recent folders</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={value ?? ''} onValueChange={onChange}>
+              {folders.map((folder) => (
+                <DropdownMenuRadioItem key={folder} value={folder} title={folder}>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{directoryName(folder, home)}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{tildify(folder, home)}</span>
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem onSelect={onOther}>
+          <FolderOpen aria-hidden /> Other folder…
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
