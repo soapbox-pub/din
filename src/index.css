@@ -57,7 +57,6 @@
   --color-md-emph: var(--md-emph);
   --color-md-code: var(--md-code);
   --color-md-link: var(--md-link);
-  --color-md-list: var(--md-list);
   --color-md-quote: var(--md-quote);
 
   --radius-lg: var(--radius);
@@ -189,7 +188,6 @@
   --md-emph: #7d4e00;
   --md-code: #116329;
   --md-link: #0969da;
-  --md-list: #1b7c83;
   --md-quote: #bf8700;
 }
 
@@ -242,7 +240,6 @@
   --md-emph: #e3b341;
   --md-code: #7ee787;
   --md-link: #79c0ff;
-  --md-list: #56d4dd;
   --md-quote: #d29922;
 }
 

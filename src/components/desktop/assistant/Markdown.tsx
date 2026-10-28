@@ -31,8 +31,9 @@ const urlTransform = (url: string) => (/^file:/i.test(url) ? url : defaultUrlTra
  * leaves raw HTML out, so nothing the model writes reaches the DOM as
  * markup; links open through Din's router, and only http(s) ones. Links to
  * files open them in Din's apps, relative to the conversation's folder.
- * Unless turned off in Settings, headings, emphasis, code, links and list
- * markers each get their own color, as in OpenCode's terminal UI.
+ * Unless turned off in Settings, headings, emphasis, code and links each get
+ * their own color, and list markers share bold text's, as in OpenCode's
+ * terminal UI.
  */
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
   const openUrl = useOpenUrl();
@@ -43,7 +44,7 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
     'font-medium underline underline-offset-2',
     c ? 'text-md-link hover:text-md-link/80' : 'text-primary hover:text-primary/80',
   );
-  const marker = c ? 'marker:text-md-list' : 'marker:text-muted-foreground';
+  const marker = c ? 'marker:text-md-strong' : 'marker:text-muted-foreground';
   const heading = c && 'text-md-heading';
 
   const components: Components = {
