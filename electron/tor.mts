@@ -4,8 +4,9 @@
 // DinOS runs Tor from boot (os/configuration.nix). Elsewhere Din uses one
 // that's running already: a system Tor on 9050, or Tor Browser's on 9150.
 // Either way it's found by speaking SOCKS5 to it, and network.mts points the
-// browser's Tor session at it. Browser tabs on .onion addresses, and only
-// those, run in that session (keepTorSession). Tor's
+// browser's Tor session at it, through onion-proxy.mts, which makes
+// plain-http onion sites https origins (onionRequest). Browser tabs on .onion
+// addresses, and only those, run in that session (keepTorSession). Tor's
 // control socket, where Din may use it, says how far Tor has got
 // connecting; without one, a Tor that answers counts as connected.
 //
@@ -22,6 +23,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { ipcMain } from 'electron';
 import { setTorSocksPort } from './network.mts';
+import { isPlainOnionHost } from './onion-proxy.mts';
 import { CommandError, runCommand } from './system.mts';
 
 const HELPER = process.env.DIN_TOR;
@@ -255,6 +257,70 @@ export function isOnionUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * What becomes of a request in the Tor session before it goes out (ahead of
+ * the ad blocker, which has the session's one onBeforeRequest). Onion sites
+ * run as https, as Tor Browser's onion sites are secure contexts: an
+ * http:// onion address on the default port goes to https://, which the
+ * onion proxy serves however the site does (electron/onion-proxy.mts). Other
+ * onion addresses go as they are, since Tor encrypts them anyway; the tab
+ * lets them load (allowRunningInsecureContent). Plain http to anywhere else
+ * is mixed content, so a page's requests go to https or, for a WebSocket,
+ * nowhere. Null: on its way.
+ */
+export function onionRequest(details: Electron.OnBeforeRequestListenerDetails): Electron.CallbackResponse | null {
+  let url: URL;
+  try {
+    url = new URL(details.url);
+  } catch {
+    return null;
+  }
+  const onion = isOnionHost(url.hostname);
+  if (url.protocol === 'ws:') return onion ? null : { cancel: true };
+  if (url.protocol !== 'http:') return null;
+  if (onion && url.port) return null;
+  // A clearnet page leaves the session (keepTorSession).
+  if (!onion && details.resourceType === 'mainFrame') return null;
+  url.protocol = 'https:';
+  return { redirectURL: url.href };
+}
+
+/**
+ * Tell a plain-http onion site what it would hear from Tor Browser: that its
+ * pages are on http://, in the Origin and Referer of their requests to it.
+ * Sites check those against their own scheme (Django's CSRF check does).
+ * Only for requests to the same site: a cross-origin request's Origin is what
+ * its CORS answer must match, and the page's is https.
+ */
+export function secureOnionSites(s: Electron.Session): void {
+  s.webRequest.onBeforeSendHeaders({ urls: ['https://*.onion/*', 'wss://*.onion/*'] }, (details, callback) => {
+    let host: string;
+    try {
+      const url = new URL(details.url);
+      if (!isPlainOnionHost(url.hostname)) {
+        callback({});
+        return;
+      }
+      host = url.host;
+    } catch {
+      callback({});
+      return;
+    }
+    const secure = `https://${host}`;
+    const headers = details.requestHeaders;
+    for (const name of Object.keys(headers)) {
+      const value = headers[name];
+      const header = name.toLowerCase();
+      if (header === 'origin' && value === secure) {
+        headers[name] = `http://${host}`;
+      } else if (header === 'referer' && (value === secure || value.startsWith(`${secure}/`))) {
+        headers[name] = `http://${host}${value.slice(secure.length)}`;
+      }
+    }
+    callback({ requestHeaders: headers });
+  });
 }
 
 /**

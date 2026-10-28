@@ -54,7 +54,15 @@ import { registerNativeDisplayHandlers } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
-import { isOnionUrl, keepTorSession, registerTorHandlers, torNetworkChanged } from './tor.mts';
+import { isOnionProxyCertificate } from './onion-proxy.mts';
+import {
+  isOnionUrl,
+  keepTorSession,
+  onionRequest,
+  registerTorHandlers,
+  secureOnionSites,
+  torNetworkChanged,
+} from './tor.mts';
 import {
   attachSiteLocations,
   registerSiteLocationHandlers,
@@ -4367,7 +4375,9 @@ function registerCertificateHandling(): void {
       if (
         request.hostname &&
         fingerprint &&
-        pinned.has(certKey(request.hostname, fingerprint))
+        (pinned.has(certKey(request.hostname, fingerprint)) ||
+          // The onion proxy's own, standing in for a plain-http onion site.
+          (s === torBrowserSession() && isOnionProxyCertificate(request.hostname, fingerprint)))
       ) {
         callback(0);
         return;
@@ -5090,6 +5100,7 @@ app.whenReady().then(() => {
   hardenGuestSession(browserSession(), { prompts: true });
   hardenGuestSession(privateBrowserSession(), { prompts: true });
   hardenGuestSession(torBrowserSession(), { prompts: true });
+  secureOnionSites(torBrowserSession());
   hardenGuestSession(devtoolsSession(), { prompts: false });
   // Web pages' notifications go to Din's notification center.
   for (const s of [browserSession(), privateBrowserSession(), torBrowserSession()]) {
@@ -5268,6 +5279,7 @@ app.whenReady().then(() => {
     browserSession: browserSession(),
     privateSessions: [privateBrowserSession(), torBrowserSession()],
     isBrowserTab: (contents) => anyBrowserTabFromId(contents.id) === contents || isAppGuest(contents),
+    beforeRequest: (s, details) => (s === torBrowserSession() ? onionRequest(details) : null),
     assertShellSender,
     sendToShell,
     onTopLevelResponse: (url, coop, onionLocation, nsiteLocation) => {
@@ -5407,6 +5419,13 @@ app.whenReady().then(() => {
     // session preloads guard themselves to the top document.
     if (ephemeralTab) {
       webPreferences.nodeIntegrationInSubFrames = true;
+    }
+    // Onion sites run as https (electron/onion-proxy.mts) but still name
+    // http:// and ws:// onion addresses, which Tor already encrypts and
+    // authenticates; Tor Browser lets them load. Plain http to anywhere else
+    // goes to https or nowhere (onionRequest in tor.mts).
+    if (params.partition === WEBBROWSER_TOR_PARTITION) {
+      webPreferences.allowRunningInsecureContent = true;
     }
     if (params.partition === WEBBROWSER_PARTITION) {
       // Load frame preloads into sub-frames, not just the top document, so the

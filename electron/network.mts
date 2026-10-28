@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { app, ipcMain, session } from 'electron';
+import { setOnionProxyTorPort, startOnionProxy } from './onion-proxy.mts';
 import { CommandError, runCommand } from './system.mts';
 
 type AssertSender = (event: Electron.IpcMainInvokeEvent) => void;
@@ -459,11 +460,13 @@ function electronProxyConfig(proxy: ProxySettings): Electron.ProxyConfig {
 }
 
 // Browser tabs on onion services run in a session of their own whose every
-// request goes to Tor's SOCKS port (electron/tor.mts), and no other session
-// sends anything there. Chromium hands SOCKS5 the hostname, so nothing
-// resolves an onion address, or the clearnet hosts an onion site loads from,
-// outside Tor. The network's proxy doesn't apply to that session: Tor is on
-// this machine, and makes its own way out.
+// request goes to Tor's SOCKS port (electron/tor.mts), by way of the proxy
+// that serves plain-http onion sites as https (electron/onion-proxy.mts),
+// and no other session sends anything there. Chromium hands SOCKS5 the
+// hostname, and so does that proxy, so nothing resolves an onion address, or
+// the clearnet hosts an onion site loads from, outside Tor. The network's
+// proxy doesn't apply to that session: Tor is on this machine, and makes its
+// own way out.
 //
 // (A PAC script sending only .onion hosts to Tor would have kept one session,
 // but Electron rejects every PAC lookup for a request from a page on a
@@ -478,9 +481,10 @@ let torSession: Electron.Session | null = null;
 
 async function applyTorProxy(): Promise<void> {
   if (!torSession) return;
+  setOnionProxyTorPort(torSocksPort ?? DEFAULT_TOR_SOCKS_PORT);
   await torSession.setProxy({
     mode: 'fixed_servers',
-    proxyRules: `socks5://127.0.0.1:${torSocksPort ?? DEFAULT_TOR_SOCKS_PORT}`,
+    proxyRules: `socks5://127.0.0.1:${await startOnionProxy()}`,
     // Even loopback: an onion site has no business with this machine's servers.
     proxyBypassRules: '<-loopback>',
   });

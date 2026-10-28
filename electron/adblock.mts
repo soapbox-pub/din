@@ -81,6 +81,12 @@ let countsTimer: NodeJS.Timeout | null = null;
 
 let sendToShell: (channel: string, payload?: unknown) => void = () => {};
 let isBrowserTab: (contents: Electron.WebContents) => boolean = () => false;
+let beforeRequest: BeforeRequest = () => null;
+
+type BeforeRequest = (
+  session: Electron.Session,
+  details: Electron.OnBeforeRequestListenerDetails,
+) => Electron.CallbackResponse | null;
 
 function settingsFile(): string {
   return path.join(app.getPath('userData'), 'adblock.json');
@@ -236,6 +242,11 @@ function blockInSession(session: Electron.Session): void {
     details.webContentsId === undefined ? undefined : webContents.fromId(details.webContentsId);
 
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    const first = beforeRequest(session, details);
+    if (first) {
+      callback(first);
+      return;
+    }
     const tab = tabOf(details);
     if (details.resourceType === 'mainFrame' || !tab || !engine || !activeFor(tab)) {
       callback({});
@@ -372,6 +383,12 @@ export function setupAdblock(options: {
   privateSessions: Electron.Session[];
   /** The pages it blocks in: browser tabs, and installed apps' windows. */
   isBrowserTab: (contents: Electron.WebContents) => boolean;
+  /**
+   * What a request in one of privateSessions gets before the filters see it,
+   * if anything (Tor's onionRequest): a session has only one onBeforeRequest
+   * listener, and in those sessions it's the ad blocker's.
+   */
+  beforeRequest?: BeforeRequest;
   assertShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => void;
   sendToShell: (channel: string, payload?: unknown) => void;
   /**
@@ -389,6 +406,7 @@ export function setupAdblock(options: {
 }): void {
   sendToShell = options.sendToShell;
   isBrowserTab = options.isBrowserTab;
+  beforeRequest = options.beforeRequest ?? beforeRequest;
   const { assertShellSender } = options;
 
   loadSettings();
