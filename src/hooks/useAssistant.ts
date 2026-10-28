@@ -17,7 +17,7 @@ import {
   PROJECT_ICON_PATHS,
   worktreeMainCheckout,
 } from '@/lib/assistant';
-import { getFsBridge, localFileUrl } from '@/lib/fs';
+import { getFsBridge, localFileUrl, type FsEntry } from '@/lib/fs';
 import { useAppContext } from '@/hooks/useAppContext';
 
 const STATUS_KEY = ['assistant', 'status'] as const;
@@ -371,6 +371,9 @@ export function useMainCheckouts(directories: string[]): Map<string, string> {
  * For each project folder with a favicon, a URL for it: the icon its
  * `index.html` links, else the first of the usual places that has one.
  * Folders without one are left out.
+ *
+ * It looks in folder listings rather than stat'ing each guess, since every
+ * failed call logs an error in the main process.
  */
 export function useProjectIcons(roots: string[]): Map<string, string> {
   const fs = getFsBridge();
@@ -379,11 +382,34 @@ export function useProjectIcons(roots: string[]): Map<string, string> {
       queryKey: ['fs', 'project-icon', root],
       queryFn: async () => {
         const dir = root.replace(/\/+$/, '');
-        const page = await fs!.readFile(`${dir}/index.html`, 65536).catch(() => null);
+        const listings = new Map<string, Promise<FsEntry[]>>();
+        const list = (path: string) => {
+          let listing = listings.get(path);
+          if (!listing) {
+            listing = fs!.readdir(`${dir}${path && `/${path}`}`).then((l) => l.entries, () => []);
+            listings.set(path, listing);
+          }
+          return listing;
+        };
+        // The entry at a path relative to the project, listing only folders known to exist.
+        const entry = async (path: string): Promise<FsEntry | undefined> => {
+          const parts = path.split('/');
+          let parent = '';
+          for (const [i, name] of parts.entries()) {
+            const found = (await list(parent)).find((e) => e.name === name);
+            if (!found || i === parts.length - 1) return found;
+            if (found.kind !== 'directory') return undefined;
+            parent = parent ? `${parent}/${name}` : name;
+          }
+        };
+
+        const page = (await entry('index.html'))?.kind === 'file'
+          ? await fs!.readFile(`${dir}/index.html`, 65536).catch(() => null)
+          : null;
         const linked = page ? linkedIconPaths(new TextDecoder().decode(page.data)) : [];
         for (const path of [...new Set([...linked, ...PROJECT_ICON_PATHS])]) {
-          const stat = await fs!.stat(`${dir}/${path}`).catch(() => null);
-          if (stat?.kind === 'file' && stat.size > 0) return localFileUrl(`${dir}/${path}`);
+          const found = await entry(path);
+          if (found?.kind === 'file' && found.size) return localFileUrl(`${dir}/${path}`);
         }
         return null;
       },
