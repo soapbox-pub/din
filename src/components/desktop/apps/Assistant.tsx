@@ -236,7 +236,6 @@ function Conversation({
                 onCancelQueued={(message) =>
                   cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
                 }
-                onBackground={toBackground}
               />
             </>
           )}

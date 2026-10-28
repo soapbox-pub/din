@@ -1,6 +1,5 @@
 import { createElement, memo, useEffect, useState, type ReactNode } from 'react';
 import {
-  ArrowDownToLine,
   Bot,
   Braces,
   Brain,
@@ -35,12 +34,6 @@ import { cn } from '@/lib/utils';
 
 /** Tool output shown in full up to this many characters. */
 const MAX_OUTPUT_CHARS = 20_000;
-
-/** The tools OpenCode can move to the background: commands and subagents. */
-const BACKGROUNDABLE = /^(bash|shell|task|subagent)$/;
-
-/** How long one runs before the transcript offers that, as the TUI does. */
-const BACKGROUND_HINT_MS = 3000;
 
 type AssistantMessage = Extract<SessionMessage, { type: 'assistant' }>;
 type UserMessage = Extract<SessionMessage, { type: 'user' }>;
@@ -104,7 +97,6 @@ export const Transcript = memo(function Transcript({
   running,
   home,
   onCancelQueued,
-  onBackground,
 }: {
   messages: SessionMessage[];
   /** Messages sent while it works that the agent hasn't taken yet. */
@@ -113,8 +105,6 @@ export const Transcript = memo(function Transcript({
   running: boolean;
   home?: string;
   onCancelQueued?: (message: QueuedMessage) => void;
-  /** Moves the commands and subagents it's waiting on to the background. */
-  onBackground?: () => void;
 }) {
   const entries = group(messages);
   const last = entries[entries.length - 1];
@@ -139,7 +129,6 @@ export const Transcript = memo(function Transcript({
                 working={running && entry === last}
                 latest={entry === last}
                 home={home}
-                onBackground={onBackground}
               />
             </li>
           );
@@ -318,27 +307,16 @@ function Turn({
   working,
   latest,
   home,
-  onBackground,
 }: {
   turn: TurnEntry;
   working: boolean;
   latest: boolean;
   home?: string;
-  onBackground?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const now = useNow(working);
   const assistants = turn.items.filter((m): m is AssistantMessage => m.type === 'assistant');
   const lastMessage = assistants[assistants.length - 1];
-  // A command or subagent the agent has been waiting on for a while can go to the background.
-  const blocking =
-    working && lastMessage && !lastMessage.time.completed
-      ? lastMessage.content.find(
-          (part): part is ToolPart =>
-            part.type === 'tool' && part.state.status === 'running' && BACKGROUNDABLE.test(part.name.toLowerCase()),
-        )
-      : undefined;
-  const offerBackground = !!onBackground && !!blocking && now - (blocking.time.ran ?? blocking.time.created) >= BACKGROUND_HINT_MS;
   const list = blocks(turn.items);
   const tail = list[list.length - 1];
   const tailSteps = tail?.kind === 'steps' ? tail.steps : [];
@@ -397,21 +375,6 @@ function Turn({
         (working || outcome !== 'succeeded') && (
           <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">{summary}</p>
         )
-      )}
-      {offerBackground && (
-        <p className="-mt-2 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-          <button
-            type="button"
-            onClick={onBackground}
-            className="inline-flex items-center gap-1 rounded-md font-medium text-foreground/80 underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ArrowDownToLine className="size-3.5" aria-hidden />
-            Move to the background
-          </button>
-          <span>
-            (<kbd className="font-sans">Ctrl+B</kbd>) so it carries on while this runs
-          </span>
-        </p>
       )}
       {workErrors.map(render)}
       {after.map(render)}
