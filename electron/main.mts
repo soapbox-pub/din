@@ -4994,7 +4994,7 @@ function registerDevtoolsHandlers(): void {
   // Open a tab's devtools inside a devtools host <webview>.
   ipcMain.handle('devtools:open', async (event, targetWcId, hostWcId) => {
     assertShellSender(event);
-    const target = browserTabFromId(targetWcId);
+    const target = anyBrowserTabFromId(targetWcId);
     const host = devtoolsHostFromId(hostWcId);
     if (!target || !host) throw new Error('devtools: invalid target or host');
     await devtoolsBridge.open(target, host);
@@ -5018,7 +5018,7 @@ function registerDevtoolsHandlers(): void {
   // Apply or clear device/responsive emulation on a tab.
   ipcMain.handle('devtools:emulate', async (event, targetWcId, metrics) => {
     assertShellSender(event);
-    const target = browserTabFromId(targetWcId);
+    const target = anyBrowserTabFromId(targetWcId);
     if (!target) throw new Error('devtools: invalid target');
     if (metrics === null) {
       await devtoolsBridge.emulate(target.id, null);
@@ -5645,6 +5645,8 @@ app.on('web-contents-created', (_event, contents) => {
     contents.once('destroyed', () => appGuests.delete(contents.id));
   }
   const isBrowserTab = contents.session === browserSession() && !isAppWindow;
+  // Private and Tor tabs too: what goes for every tab, like the inspector.
+  const isAnyBrowserTab = isBrowserTab || isEphemeralBrowserSession(contents.session);
 
   // Guests that start on a chrome-extension:// URL are extension pages, not
   // web content: the in-shell action popup (ExtensionPopupHost) and any
@@ -5828,14 +5830,20 @@ app.on('web-contents-created', (_event, contents) => {
   // Shell-level shortcuts inside a page: F12 / Ctrl+Shift+I toggles the
   // tab's docked devtools; Ctrl+T / Ctrl+W manage browser tabs; Alt+Tab
   // switches desktop windows. Keyboard focus lives in the guest then, so
-  // the shell can't see the keys itself - forward them.
-  if (isBrowserTab) {
+  // the shell can't see the keys itself - forward them. The devtools toggle
+  // goes for private and Tor tabs too: left to Chromium, it opens DevTools in
+  // a window of its own, which cage can't show next to Din.
+  if (isAnyBrowserTab) {
     contents.on('before-input-event', (event, input) => {
       if (isDevtoolsToggleInput(input)) {
         claimGuestKey(contents, event, input);
         sendToShell('devtools:toggleRequested', { wcId: contents.id });
-        return;
       }
+    });
+  }
+  if (isBrowserTab) {
+    contents.on('before-input-event', (event, input) => {
+      if (isDevtoolsToggleInput(input)) return;
       if (isPrintInput(input)) {
         claimGuestKey(contents, event, input);
         requestPagePrint(contents);
@@ -5967,7 +5975,7 @@ app.on('web-contents-created', (_event, contents) => {
     // native window (unusable in the single-window kiosk shell). Rebuild the
     // menu with that item swapped for one that routes to the shell's docked
     // devtools pane.
-    if (isBrowserTab) {
+    if (isAnyBrowserTab) {
       const replaced = new Menu();
       for (const item of menu.items.slice(0, -1)) replaced.append(item);
       replaced.append(
