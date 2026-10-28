@@ -80,9 +80,11 @@ function group(messages: SessionMessage[]): Entry[] {
       prompt = undefined;
     } else if (message.type === 'assistant' || turn || prompt) {
       if (!turn) {
+        // A turn whose prompt is past the loaded window would otherwise be keyed by its
+        // first visible message, which changes as the window slides and remounts it.
         turn = {
           kind: 'turn',
-          id: prompt ? `turn:${prompt.id}` : message.id,
+          id: prompt ? `turn:${prompt.id}` : entries.length === 0 ? 'turn:earlier' : message.id,
           start: prompt?.time.created ?? message.time.created,
           items: [],
         };
