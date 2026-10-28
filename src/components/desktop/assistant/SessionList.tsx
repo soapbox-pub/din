@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ComponentProps } from 'react';
+import { useMemo, useRef, useState, type ComponentProps, type CSSProperties } from 'react';
 import { ChevronRight, GitBranch, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -97,6 +97,7 @@ export function SessionList({
   onNew,
   onDeleted,
   className,
+  style,
 }: {
   selected: string | null;
   onSelect: (id: string) => void;
@@ -106,6 +107,7 @@ export function SessionList({
   /** A conversation was deleted from the list. */
   onDeleted: (id: string) => void;
   className?: string;
+  style?: CSSProperties;
 }) {
   const { data: sessions, isLoading } = useAssistantSessions();
   const { data: active = [] } = useActiveSessions();
@@ -238,6 +240,7 @@ export function SessionList({
       aria-label="Conversations"
       onPointerEnter={hold}
       onPointerLeave={() => setHeld(null)}
+      style={style}
       className={cn('w-64 shrink-0 flex-col border-r border-border/60 bg-muted/30', className)}>
       <div className="flex items-center gap-2 p-2">
         <div className="relative min-w-0 flex-1">

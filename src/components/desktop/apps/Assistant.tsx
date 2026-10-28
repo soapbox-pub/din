@@ -125,6 +125,18 @@ function useSlashCommands(directory: string | undefined, own: SlashCommand[]): S
 /** Where each conversation was left scrolled, for coming back to its tab. */
 const scrollPositions = new Map<string, { top: number; stuck: boolean }>();
 
+const LIST_WIDTH_KEY = 'din.assistant.list-width';
+const DEFAULT_LIST_WIDTH = 256;
+const MIN_LIST_WIDTH = 192;
+const MAX_LIST_WIDTH = 560;
+
+const clampListWidth = (width: number) => Math.min(MAX_LIST_WIDTH, Math.max(MIN_LIST_WIDTH, width));
+
+function loadListWidth(): number {
+  const width = Number(localStorage.getItem(LIST_WIDTH_KEY));
+  return width ? clampListWidth(width) : DEFAULT_LIST_WIDTH;
+}
+
 /** How many closed tabs Ctrl+Shift+T can bring back. */
 const CLOSED_TABS_LIMIT = 20;
 
@@ -197,6 +209,8 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   // The conversation whose title is being edited (Rename, or /rename).
   const [renaming, setRenaming] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
+  const [listWidth, setListWidth] = useState(loadListWidth);
+  useEffect(() => localStorage.setItem(LIST_WIDTH_KEY, String(listWidth)), [listWidth]);
 
   // Single-instance: a relaunch (a notification, the menu bar) brings new
   // params without remounting. One with no session asks for a new one.
@@ -395,6 +409,24 @@ export function Assistant({ windowId, params }: AppComponentProps) {
     e.stopPropagation();
   };
 
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = listWidth;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => setListWidth(clampListWidth(startWidth + ev.clientX - startX));
+    const up = () => {
+      target.removeEventListener('pointermove', move);
+      target.removeEventListener('pointerup', up);
+      target.removeEventListener('pointercancel', up);
+    };
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', up);
+    target.addEventListener('pointercancel', up);
+  };
+
   return (
     <div
       className="@container/assistant relative flex h-full w-full bg-background text-foreground"
@@ -406,10 +438,30 @@ export function Assistant({ windowId, params }: AppComponentProps) {
         onOpenInNewTab={openInNewTab}
         onNew={startNew}
         onDeleted={(id) => removeSessions(new Set([id]))}
+        style={{ width: listWidth }}
         className={cn(
           listOpen ? 'flex' : 'hidden',
-          'absolute inset-y-0 left-0 z-20 shadow-xl @2xl/assistant:static @2xl/assistant:flex @2xl/assistant:shadow-none',
+          'absolute inset-y-0 left-0 z-20 max-w-[85%] shadow-xl @2xl/assistant:static @2xl/assistant:flex @2xl/assistant:max-w-none @2xl/assistant:shadow-none',
         )}
+      />
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the conversation list"
+        aria-valuenow={listWidth}
+        aria-valuemin={MIN_LIST_WIDTH}
+        aria-valuemax={MAX_LIST_WIDTH}
+        tabIndex={0}
+        title="Drag to resize, double-click to reset"
+        onPointerDown={startResize}
+        onDoubleClick={() => setListWidth(DEFAULT_LIST_WIDTH)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft') setListWidth((w) => clampListWidth(w - 16));
+          else if (e.key === 'ArrowRight') setListWidth((w) => clampListWidth(w + 16));
+          else return;
+          e.preventDefault();
+        }}
+        className="z-10 -ml-1 hidden w-1 shrink-0 cursor-col-resize touch-none hover:bg-ring/40 focus-visible:bg-ring/60 focus-visible:outline-none @2xl/assistant:block"
       />
       {listOpen && (
         <button
