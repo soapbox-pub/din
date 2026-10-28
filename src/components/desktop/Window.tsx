@@ -1,11 +1,11 @@
 import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Maximize2, Minus, Minimize2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
-import { WindowContextMenu } from '@/components/desktop/WindowContextMenu';
+import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
+import { WindowFrameContext, WindowOwnHeaderContext, type WindowFrame } from '@/contexts/WindowFrameContext';
 import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
 import { animateGenieMesh } from '@/lib/genieMesh';
@@ -337,6 +337,8 @@ export const Window = memo(function Window({
   // default icon + name. The setter is stable so apps can publish from an
   // effect without re-subscribing.
   const [titlebar, setTitlebar] = useState<ReactNode>(null);
+  // The app draws the whole title bar itself, from WindowHeader's pieces.
+  const [ownHeader, setOwnHeader] = useState(false);
 
   // Chrome accent color published by the hosted app (e.g. the loaded page's
   // theme-color), tinting the title bar Safari-style. The raw value comes
@@ -914,7 +916,7 @@ export const Window = memo(function Window({
       // A right press opens the title bar's menu instead.
       if (e.button !== 0) return;
       const target = e.target as HTMLElement;
-      if (target.closest('button, [role="tab"], [data-window-no-drag]')) return;
+      if (target.closest('button, input, textarea, [role="tab"], [data-window-no-drag]')) return;
       // Presses in menus the title bar's content portals elsewhere (a tab's
       // context menu) bubble here through React, but aren't on the title bar.
       if (!(e.currentTarget as HTMLElement).contains(target)) return;
@@ -1345,6 +1347,26 @@ export const Window = memo(function Window({
   // tokens, so re-point them at the accent the same way.
   const titlebarTint = accent ? (themeColorTokens(accent) as CSSProperties) : undefined;
 
+  // Din's title bar, or the pieces of it an app lays out itself (WindowHeader).
+  const frame: WindowFrame = {
+    win,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    minimize: () => {
+      stopWobble(false);
+      minimize(win.id);
+    },
+    toggleMaximize: () => {
+      stopWobble(false);
+      toggleMaximize(win.id);
+    },
+    close: () => close(win.id),
+    muted: chromeMuted,
+    hover: chromeHover,
+  };
+  const ownsHeader = ownHeader && !frameless;
+
   return (
     <section
       ref={sectionRef}
@@ -1404,55 +1426,22 @@ export const Window = memo(function Window({
         !flush && !frameless && isTop && win.tiled && 'ring-2 ring-primary/80',
       )}
     >
-      {!frameless && (
-        <WindowContextMenu
-          win={win}
-          onMinimize={() => {
-            stopWobble(false);
-            minimize(win.id);
-          }}
-          onToggleMaximize={() => {
-            stopWobble(false);
-            toggleMaximize(win.id);
-          }}
-        >
-          <header
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-            onContextMenu={(e) => {
-              // From a menu the title bar's content portals elsewhere, not the
-              // title bar itself: preventing it keeps the window menu shut.
-              if (!e.currentTarget.contains(e.target as Node)) e.preventDefault();
-            }}
-            onDoubleClick={(e) => {
-              if (!e.currentTarget.contains(e.target as Node)) return;
-              stopWobble(false);
-              toggleMaximize(win.id);
-            }}
-            style={accent ? { backgroundColor: accent } : undefined}
-            className={cn(
-              'flex h-9 shrink-0 touch-none select-none items-center gap-2 rounded-t-[inherit] border-b pr-3',
-              accent
-                ? accentDark ? 'border-white/10' : 'border-black/10'
-                : 'border-border/60 bg-background/60',
-              titlebar ? 'pl-2' : 'pl-3',
+      <WindowFrameContext.Provider value={frame}>
+      {!frameless && !ownsHeader && (
+        <WindowDragRegion
+          style={accent ? { backgroundColor: accent } : undefined}
+          className={cn(
+            'flex h-9 shrink-0 items-center gap-2 rounded-t-[inherit] border-b pr-3',
+            accent
+              ? accentDark ? 'border-white/10' : 'border-black/10'
+              : 'border-border/60 bg-background/60',
+            titlebar ? 'pl-2' : 'pl-3',
           )}
         >
           {titlebar ? (
             // The app owns the flexible region (drag still works on its empty
             // space; interactive controls inside handle their own events).
-            // Its text fields keep their native menu; its own menus (a tab's)
-            // already claim the event, which the window menu then leaves be.
-            <div
-              className="flex min-w-0 flex-1 items-center self-stretch"
-              style={titlebarTint}
-              onContextMenu={(e) => {
-                const field = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
-                if ((e.target as HTMLElement).closest(field)) e.stopPropagation();
-              }}
-            >
+            <div className="flex min-w-0 flex-1 items-center self-stretch" style={titlebarTint}>
               {/* Rendered here rather than under the app, so it needs its own
                   chrome: a window's only tab drags the window. */}
               <WindowChromeContext.Provider value={chrome}>{titlebar}</WindowChromeContext.Provider>
@@ -1466,45 +1455,18 @@ export const Window = memo(function Window({
               </span>
             </>
           )}
-          <button
-            type="button"
-            aria-label="Minimize window"
-            onClick={() => {
-              stopWobble(false);
-              minimize(win.id);
-            }}
-            className={cn('grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted, chromeHover)}
-          >
-            <Minus className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label={win.maximized ? 'Restore window' : 'Maximize window'}
-            onClick={() => {
-              stopWobble(false);
-              toggleMaximize(win.id);
-            }}
-            className={cn('grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted, chromeHover)}
-          >
-            {win.maximized ? (
-              <Minimize2 className="size-3.5" />
-            ) : (
-              <Maximize2 className="size-3.5" />
-            )}
-          </button>
-          <button
-            type="button"
-            aria-label="Close window"
-            onClick={() => close(win.id)}
-            className={cn('grid size-6 place-items-center rounded-md hover:bg-destructive/80 hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', chromeMuted)}
-          >
-            <X className="size-4" />
-          </button>
-        </header>
-        </WindowContextMenu>
+          <WindowControls />
+        </WindowDragRegion>
       )}
 
-      <div className={cn('relative flex-1 overflow-hidden rounded-b-[inherit]', !frameless && 'bg-background/80')}>
+      <div
+        className={cn(
+          'relative flex-1 overflow-hidden',
+          ownsHeader ? 'rounded-[inherit]' : 'rounded-b-[inherit]',
+          !frameless && 'bg-background/80',
+        )}
+      >
+        <WindowOwnHeaderContext.Provider value={setOwnHeader}>
         <WindowFocusContext.Provider value={isTop}>
           <WindowTitlebarContext.Provider value={setTitlebar}>
             <WindowTitleContext.Provider value={publishTitle}>
@@ -1528,7 +1490,9 @@ export const Window = memo(function Window({
             </WindowTitleContext.Provider>
           </WindowTitlebarContext.Provider>
         </WindowFocusContext.Provider>
+        </WindowOwnHeaderContext.Provider>
       </div>
+      </WindowFrameContext.Provider>
 
       {/* Tiled windows are sized by the layout (Super+- / Super+=). */}
       {!flush &&
