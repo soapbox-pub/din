@@ -4140,7 +4140,9 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
 function registerSitePermissionHandlers(): void {
   const resolve = (origin: unknown, isPrivate: unknown): { origin: string; s: Electron.Session } => {
     if (typeof origin !== 'string' || siteOriginOf(origin) !== origin) throw new Error('Invalid site');
-    if (isOnionUrl(origin)) return { origin, s: torBrowserSession() };
+    // The Web Browser shows a plain-http onion site as http://, but its pages
+    // run as https:// (onionRequest), and that's the origin they ask as.
+    if (isOnionUrl(origin)) return { origin: origin.replace(/^http:\/\/([^:/]+)$/i, 'https://$1'), s: torBrowserSession() };
     return { origin, s: isPrivate === true ? privateBrowserSession() : browserSession() };
   };
 

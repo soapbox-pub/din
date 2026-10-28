@@ -132,6 +132,18 @@ export function isPlainOnionHost(hostname: string): boolean {
   return isOnionHost(hostname) && !tlsHosts.has(hostname.toLowerCase());
 }
 
+let onTlsHosts: (hosts: string[]) => void = () => {};
+
+/** The onion hosts known to have TLS of their own. */
+export function tlsOnionHosts(): string[] {
+  return [...tlsHosts];
+}
+
+/** Hear of each onion host found to have TLS of its own (with all of them). */
+export function watchTlsOnionHosts(listener: (hosts: string[]) => void): void {
+  onTlsHosts = listener;
+}
+
 /** Open connections to plain onion hosts, by host, for when one turns out to have TLS. */
 const plainConnections = new Map<string, Set<net.Socket>>();
 
@@ -142,7 +154,10 @@ const plainConnections = new Map<string, Set<net.Socket>>();
  */
 export function markTlsOnionHost(hostname: string): void {
   const key = hostname.toLowerCase();
-  tlsHosts.add(key);
+  if (!tlsHosts.has(key)) {
+    tlsHosts.add(key);
+    onTlsHosts([...tlsHosts]);
+  }
   for (const socket of plainConnections.get(key) ?? []) socket.destroy();
   plainConnections.delete(key);
 }
@@ -280,7 +295,7 @@ async function connectOnion443(host: string): Promise<{ upstream: Upstream; plai
   }
   // Nothing on 80: an https-only service. It closed the circuit refusing,
   // so 443 waits for Tor to build another.
-  tlsHosts.add(key);
+  markTlsOnionHost(key);
   let secure = upstream;
   for (const wait of TLS_RETRY_MS) {
     await sleep(wait);

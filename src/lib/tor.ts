@@ -29,6 +29,9 @@ export interface TorBridge {
   onStatus(callback: (status: TorStatus) => void): () => void;
   /** A browser tab's page went to or from an onion site, to be loaded in the other session. */
   onMoveTab(callback: (move: { wcId: number; url: string }) => void): () => void;
+  /** Onion hosts with TLS of their own. */
+  tlsHosts(): Promise<string[]>;
+  onTlsHosts(callback: (hosts: string[]) => void): () => void;
 }
 
 declare global {
@@ -66,6 +69,43 @@ export function isOnionUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Onion hosts with TLS of their own, kept up to date once something asks. */
+const tlsHosts = new Set<string>();
+let watchingTlsHosts = false;
+
+function watchTlsHosts(): void {
+  const bridge = getTorBridge();
+  if (watchingTlsHosts || !bridge) return;
+  watchingTlsHosts = true;
+  const replace = (hosts: string[]) => {
+    tlsHosts.clear();
+    for (const host of hosts) tlsHosts.add(host);
+  };
+  bridge.onTlsHosts(replace);
+  bridge.tlsHosts().then(replace, () => {});
+}
+
+/**
+ * A page's address as the user should see it. Din runs plain-http onion
+ * sites as https so their pages are secure contexts, as Tor Browser's are
+ * (electron/onion-proxy.mts), but their address is http://, and that's what
+ * the address bar, history and copied links say. Sites with TLS of their
+ * own keep https://. Anything else comes back as it is.
+ */
+export function shownUrl(url: string): string {
+  if (!/^https:/i.test(url)) return url;
+  watchTlsHosts();
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  if (parsed.port || !isOnionHost(parsed.hostname) || tlsHosts.has(parsed.hostname.toLowerCase())) return url;
+  parsed.protocol = 'http:';
+  return parsed.href;
 }
 
 /** The bridge's error without Electron's "Error invoking remote method" wrapper. */

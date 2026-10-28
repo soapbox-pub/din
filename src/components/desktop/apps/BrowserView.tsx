@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { useAppContext } from '@/hooks/useAppContext';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
+import { shownUrl } from '@/lib/tor';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
 
 /**
@@ -414,7 +415,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         };
         if (isMainFrame === false || errorCode === -3) return;
         onLoadError?.({
-          url: typeof validatedURL === 'string' ? validatedURL : '',
+          url: typeof validatedURL === 'string' ? shownUrl(validatedURL) : '',
           errorCode: typeof errorCode === 'number' ? errorCode : 0,
           errorDescription:
             typeof errorDescription === 'string' ? errorDescription : '',
@@ -461,7 +462,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
         // `view-source:` prefix the tab must keep.
         const current = el.getURL();
         onNavigate?.(
-          current === `view-source:${url}` ? current : url,
+          current === `view-source:${url}` ? `view-source:${shownUrl(url)}` : shownUrl(url),
           el.canGoBack(),
           el.canGoForward(),
         );

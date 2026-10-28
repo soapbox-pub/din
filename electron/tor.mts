@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { ipcMain } from 'electron';
 import { setTorSocksPort } from './network.mts';
-import { isPlainOnionHost, markTlsOnionHost } from './onion-proxy.mts';
+import { isPlainOnionHost, markTlsOnionHost, tlsOnionHosts, watchTlsOnionHosts } from './onion-proxy.mts';
 import { CommandError, runCommand } from './system.mts';
 
 const HELPER = process.env.DIN_TOR;
@@ -388,4 +388,12 @@ export function registerTorHandlers(options: {
     await helper([enabled ? 'on' : 'off']);
     return refresh();
   });
+
+  // Which onion sites have TLS of their own: the rest run as https behind the
+  // onion proxy, but the Web Browser shows their address as the http:// it is.
+  ipcMain.handle('tor:tls-hosts', (event) => {
+    assertShellSender(event);
+    return tlsOnionHosts();
+  });
+  watchTlsOnionHosts((hosts) => sendToShell('tor:tls-hosts', hosts));
 }

@@ -561,6 +561,24 @@ contextBridge.exposeInMainWorld('tor', {
     ipcRenderer.on('tor:move-tab', listener);
     return () => ipcRenderer.removeListener('tor:move-tab', listener);
   },
+
+  /** Onion hosts with TLS of their own. @returns {Promise<string[]>} */
+  tlsHosts: () => ipcRenderer.invoke('tor:tls-hosts'),
+
+  /**
+   * Subscribe to the onion hosts with TLS of their own, as one is found.
+   * Returns an unsubscribe fn.
+   * @param {(hosts: string[]) => void} callback
+   */
+  onTlsHosts: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string[]} hosts
+     */
+    const listener = (_event, hosts) => callback(hosts);
+    ipcRenderer.on('tor:tls-hosts', listener);
+    return () => ipcRenderer.removeListener('tor:tls-hosts', listener);
+  },
 });
 
 // Site locations bridge (window.siteLocations), backed by
