@@ -35,7 +35,7 @@ export function NotificationCard({
 }: {
   notification: DesktopNotification;
   variant: 'popup' | 'list';
-  /** After a click on it or one of its actions (the list closes). */
+  /** After a click on its body (the list closes); its actions leave the list open. */
   onActivated?: () => void;
   /** Its right-click menu opened or closed (a popup holds its timeout meanwhile). */
   onMenuOpenChange?: (open: boolean) => void;
@@ -49,9 +49,10 @@ export function NotificationCard({
   const browser = getBrowserBridge();
   const blockable = browser && source.origin ? { browser, origin: source.origin } : null;
 
+  /** The body opens what it's about, so the list closes; an action is done in place. */
   const activate = (action?: string) => {
     activateNotification(notification.id, action);
-    onActivated?.();
+    if (!action) onActivated?.();
   };
 
   return (
