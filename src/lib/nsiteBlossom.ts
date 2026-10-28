@@ -70,6 +70,6 @@ export function blossomFileSource(event: NostrEvent): NsiteFileSource {
   return {
     paths,
     read: async (path) => (paths[path] ? readBlob(paths[path]) : null),
-    readBlob,
+    servers,
   };
 }

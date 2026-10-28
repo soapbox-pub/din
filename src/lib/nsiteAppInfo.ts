@@ -9,6 +9,7 @@
  * (DOMParser never runs scripts or loads subresources).
  */
 
+import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import type { NsiteAppInfo, NsiteStore, NsiteSummary } from '@/lib/nsiteStore';
 
@@ -314,11 +315,8 @@ export interface NsiteFileSource {
   /** Path -> sha256 of the manifest being read. */
   paths: Record<string, string>;
   read(path: string): Promise<Uint8Array | null>;
-  /**
-   * Read a blob by sha256 from the site's own Blossom servers, checked
-   * against the hash. Only a source that reads from Blossom has this.
-   */
-  readBlob?(hash: string): Promise<Uint8Array | null>;
+  /** The Blossom servers the site's files are on, for a source that reads from Blossom. */
+  servers?: string[];
 }
 
 /** Read and parse a JSON file of the site, or null. */
@@ -399,10 +397,15 @@ function webManifestPath(doc: Document): string | null {
   return href ? toPathname(href, '/') : null;
 }
 
-/** A screenshot a site's web app manifest names, read from its own files. */
+/** A screenshot a site's web app manifest names. */
 export interface NsiteScreenshot {
-  /** The image as a data URL, so it needs no object URL kept alive and revoked. */
+  /**
+   * The image: a data URL for one the site ships (so it needs no object URL
+   * kept alive and revoked), or the https URL the manifest gives.
+   */
   src: string;
+  /** The same blob on the site's other Blossom servers, to try in turn if `src` fails. */
+  fallbacks: string[];
   label: string | null;
   /** `wide` for a desktop screen, `narrow` for a phone, or null when unsaid. */
   formFactor: 'wide' | 'narrow' | null;
@@ -438,28 +441,17 @@ function firstSize(sizes: unknown): { width: number; height: number } | null {
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
-/**
- * The sha256 a Blossom URL names (`https://host/<sha256>[.ext]`), and the last
- * path segment for its extension.
- */
-function blossomHash(href: string): { sha256: string; name: string } | null {
-  try {
-    const url = new URL(href);
-    if (url.protocol !== 'https:') return null;
-    const name = url.pathname.slice(url.pathname.lastIndexOf('/') + 1);
-    const match = name.match(/^([0-9a-f]{64})(\.[a-z0-9]+)?$/i);
-    return match ? { sha256: match[1].toLowerCase(), name } : null;
-  } catch {
-    return null;
-  }
+/** The last path segment of a Blossom URL (`<sha256>[.ext]`), or null for any other URL. */
+function blossomBlob(url: URL): string | null {
+  const name = url.pathname.slice(url.pathname.lastIndexOf('/') + 1);
+  return /^[0-9a-f]{64}(\.[a-z0-9]+)?$/i.test(name) ? name : null;
 }
 
 /**
  * The screenshots and categories a site's web app manifest declares. Wide
- * screenshots come first, since Din is a desktop. Like icons, only images the
- * site ships are read: a hotlinked one would be a request to a third party on
- * the site's behalf. A Blossom URL is the exception, since its hash lets it be
- * read from the site's own servers and checked.
+ * screenshots come first, since Din is a desktop. One the site ships is read
+ * from its files; one elsewhere is shown from its https URL, and if that is a
+ * Blossom URL, the site's own Blossom servers are tried after it.
  */
 export async function deriveNsiteListing(files: NsiteFileSource): Promise<NsiteListing> {
   const listing: NsiteListing = { screenshots: [], categories: [] };
@@ -487,38 +479,38 @@ export async function deriveNsiteListing(files: NsiteFileSource): Promise<NsiteL
   }
 
   if (!Array.isArray(manifest.screenshots)) return listing;
-  const declared: Array<
-    { read: () => Promise<Uint8Array | null>; type: string } & Omit<NsiteScreenshot, 'src'>
-  > = [];
+  type Image = Pick<NsiteScreenshot, 'src' | 'fallbacks'>;
+  const declared: Array<{ load: () => Promise<Image | null> } & Omit<NsiteScreenshot, keyof Image>> = [];
   for (const shot of manifest.screenshots) {
     if (typeof shot !== 'object' || shot === null) continue;
-    const { src, sizes, label, form_factor, type: declaredType } = shot as Record<string, unknown>;
+    const { src, sizes, label, form_factor } = shot as Record<string, unknown>;
     if (typeof src !== 'string' || !src.trim()) continue;
     const path = toPathname(src.trim(), base);
-    let read: (() => Promise<Uint8Array | null>) | null = null;
-    let name: string | null = null;
-    if (path && paths[path]) {
-      read = () => files.read(path);
-      name = path;
+    let load: () => Promise<Image | null>;
+    if (path) {
+      // One of the site's own files.
+      const type = MIME_BY_EXTENSION[path.slice(path.lastIndexOf('.') + 1).toLowerCase()];
+      if (!paths[path] || !type || type === 'image/x-icon') continue;
+      load = async () => {
+        const bytes = await files.read(path);
+        return bytes
+          ? { src: await toDataUrl(new Blob([bytes as BlobPart], { type })), fallbacks: [] }
+          : null;
+      };
     } else {
-      // A Blossom URL names its blob by hash, so it is read from the site's
-      // own servers rather than the host the URL points at.
-      const hash = blossomHash(src.trim());
-      const { readBlob } = files;
-      if (hash && readBlob) {
-        read = () => readBlob(hash.sha256);
-        name = hash.name;
-      }
+      const href = sanitizeImageUrl(src);
+      if (!href?.startsWith('https:')) continue;
+      const blob = blossomBlob(new URL(href));
+      const fallbacks = blob
+        ? (files.servers ?? [])
+            .map((server) => new URL(blob, server).href)
+            .filter((url) => url !== href)
+        : [];
+      load = async () => ({ src: href, fallbacks });
     }
-    if (!read || !name) continue;
-    const type =
-      MIME_BY_EXTENSION[name.slice(name.lastIndexOf('.') + 1).toLowerCase()] ??
-      Object.values(MIME_BY_EXTENSION).find((known) => known === declaredType);
-    if (!type || type === 'image/x-icon') continue;
     const size = firstSize(sizes);
     declared.push({
-      read,
-      type,
+      load,
       label: tidyLabel(label, 200),
       formFactor: form_factor === 'wide' || form_factor === 'narrow' ? form_factor : null,
       width: size?.width ?? null,
@@ -528,13 +520,13 @@ export async function deriveNsiteListing(files: NsiteFileSource): Promise<NsiteL
   const order = { wide: 0, null: 1, narrow: 2 } as const;
   declared.sort((a, b) => order[a.formFactor ?? 'null'] - order[b.formFactor ?? 'null']);
 
-  const read = await Promise.all(
-    declared.slice(0, MAX_SCREENSHOTS).map(async ({ read, type, ...shot }) => {
-      const bytes = await read();
-      return bytes ? { ...shot, src: await toDataUrl(new Blob([bytes as BlobPart], { type })) } : null;
+  const loaded = await Promise.all(
+    declared.slice(0, MAX_SCREENSHOTS).map(async ({ load, ...shot }) => {
+      const image = await load();
+      return image ? { ...shot, ...image } : null;
     }),
   );
-  listing.screenshots = read.filter((shot) => shot !== null);
+  listing.screenshots = loaded.filter((shot) => shot !== null);
   return listing;
 }
 

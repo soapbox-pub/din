@@ -693,6 +693,8 @@ function AppDetail({
 function Screenshots({ app, name }: { app: StoreApp; name: string }) {
   const { data, isPending } = useStoreAppListing(app);
   const [open, setOpen] = useState<number | null>(null);
+  // How many of each screenshot's URLs have failed to load, by index.
+  const [failed, setFailed] = useState<Record<number, number>>({});
 
   if (isPending) {
     return (
@@ -703,10 +705,15 @@ function Screenshots({ app, name }: { app: StoreApp; name: string }) {
       </div>
     );
   }
-  const shots = data?.screenshots;
-  if (!shots?.length) return null;
+  // Each shot at the first of its URLs that hasn't failed; one with none left is dropped.
+  const shots = (data?.screenshots ?? []).flatMap((shot, i) => {
+    const src = [shot.src, ...shot.fallbacks][failed[i] ?? 0];
+    return src ? [{ ...shot, src, index: i }] : [];
+  });
+  if (!shots.length) return null;
 
-  const current = open === null ? null : shots[open];
+  const current = open === null ? null : (shots[open] ?? null);
+  const fail = (index: number) => setFailed((prev) => ({ ...prev, [index]: (prev[index] ?? 0) + 1 }));
 
   return (
     <section className="flex flex-col gap-4" aria-label="Screenshots">
@@ -714,7 +721,7 @@ function Screenshots({ app, name }: { app: StoreApp; name: string }) {
       <div className="-mx-1 flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-2">
         {shots.map((shot, i) => (
           <button
-            key={i}
+            key={shot.index}
             type="button"
             onClick={() => setOpen(i)}
             aria-label={`View screenshot ${i + 1} of ${name} full size`}
@@ -722,11 +729,14 @@ function Screenshots({ app, name }: { app: StoreApp; name: string }) {
             className="shrink-0 snap-start overflow-hidden rounded-xl border border-border bg-muted shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             <img
+              key={shot.src}
               src={shot.src}
               alt={shot.label ?? `Screenshot ${i + 1} of ${name}`}
               width={shot.width ?? undefined}
               height={shot.height ?? undefined}
               loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={() => fail(shot.index)}
               className={cn(
                 'block w-auto max-w-none object-contain',
                 shot.formFactor === 'narrow' ? 'h-80' : 'h-56',
@@ -750,10 +760,13 @@ function Screenshots({ app, name }: { app: StoreApp; name: string }) {
           <DialogTitle className="pr-8 text-sm font-medium">
             {current?.label ?? `${name}, screenshot ${(open ?? 0) + 1} of ${shots.length}`}
           </DialogTitle>
-          {open !== null && (
+          {current && (
             <img
-              src={shots[open].src}
-              alt={current?.label ?? ''}
+              key={current.src}
+              src={current.src}
+              alt={current.label ?? ''}
+              referrerPolicy="no-referrer"
+              onError={() => fail(current.index)}
               className="max-h-[calc(100vh-8rem)] w-full rounded-md object-contain"
             />
           )}
