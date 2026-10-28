@@ -24,6 +24,9 @@ npm install --silent
 # The ad blocker's filter engine bundle (electron/adblock.mts).
 node scripts/build-adblock-engine.mjs
 
+# The cursor converter bundle (electron/cursorConverter.mts).
+node scripts/build-cursor-converter.mjs
+
 ELECTRON="${ROOT_DIR}/node_modules/.bin/electron"
 if [ ! -x "${ELECTRON}" ]; then
   echo "Electron binary not found at ${ELECTRON}." >&2

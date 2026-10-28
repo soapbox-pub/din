@@ -24,6 +24,9 @@ electron/*.mjs
 # The ad blocker's bundled filter engine (scripts/build-adblock-engine.mjs)
 electron/adblock-extension/engine.js
 
+# The cursor converter's bundle (scripts/build-cursor-converter.mjs)
+electron/cursor-converter.js
+
 # Tooling caches
 .eslintcache
 .tsbuildinfo

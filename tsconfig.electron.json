@@ -35,5 +35,5 @@
   },
   "include": ["electron"],
   /* The ad blocker's extension runs in an extension page, not Node. */
-  "exclude": ["electron/adblock-extension", "electron/*.mjs"]
+  "exclude": ["electron/adblock-extension", "electron/*.mjs", "electron/cursor-converter.js"]
 }

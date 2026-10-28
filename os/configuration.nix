@@ -29,12 +29,14 @@ let
         "electron"
       ]
       # The ad blocker's engine bundle is built from these two
-      # (electron/adblock.mts), and the Electron host is compiled by
-      # build-electron.mjs. `scripts` itself must pass for its files to.
+      # (electron/adblock.mts), the Electron host is compiled by
+      # build-electron.mjs, and the cursor converter (electron/cursorConverter.mts)
+      # is bundled by build-cursor-converter.mjs. `scripts` itself must pass for its files to.
       || rel == "scripts"
       || rel == "scripts/build-electron.mjs"
       || rel == "scripts/build-adblock-engine.mjs"
-      || rel == "scripts/adblock-engine-entry.js";
+      || rel == "scripts/adblock-engine-entry.js"
+      || rel == "scripts/build-cursor-converter.mjs";
   };
 
   # The release this system is (os/version), which a release's tag repeats
@@ -62,6 +64,7 @@ let
       npm exec -- vite build -l error
       node scripts/build-electron.mjs
       node scripts/build-adblock-engine.mjs
+      node scripts/build-cursor-converter.mjs
       runHook postBuild
     '';
 
@@ -74,6 +77,8 @@ let
       # Node's TypeScript stripper), the .cjs preloads, and the pty helper.
       # Copied wholesale so a new module can't be forgotten here.
       install -m444 electron/*.mjs electron/*.cjs $out/share/din/
+      # The cursor converter's sandboxed page, bundled above.
+      install -m444 electron/cursor-converter.js $out/share/din/cursor-converter.js
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
       # Publisher's INDD reader (electron/indd.mts), committed prebuilt.
       install -m444 electron/indd.wasm $out/share/din/indd.wasm
