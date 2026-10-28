@@ -584,7 +584,6 @@ function Conversation({
   const agent = (switchAgent.isPending ? switchAgent.variables?.agent : session?.agent) ?? 'build';
   const changeAgent = (agent: string) => switchAgent.mutate({ sessionID, agent }, { onError: fail('Couldn’t switch') });
   const cycleAgent = useCycleAgent(agent, changeAgent);
-  const agentColor = useAgentColor();
 
   const toBackground = () => background.mutate(sessionID, { onError: fail('Couldn’t move it to the background') });
 
@@ -648,7 +647,6 @@ function Conversation({
                   messages={messages ?? []}
                   queued={queued}
                   running={running}
-                  agent={session?.agent}
                   home={home}
                   onCancelQueued={(message) =>
                     cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
@@ -695,7 +693,6 @@ function Conversation({
               </>
             }
             onCycleAgent={cycleAgent}
-            accent={agentColor(agent)}
           />
         </div>
       </div>
@@ -846,7 +843,6 @@ function NewConversation({
   const home = useHomeDirectory();
   const [agent, setAgent] = useState('build');
   const cycleAgent = useCycleAgent(agent, setAgent);
-  const agentColor = useAgentColor();
   const { model, setModel, models } = usePreferredModel();
   const { data: recent } = useRecentModelKeys();
   const start = useStartConversation();
@@ -905,7 +901,6 @@ function NewConversation({
               </>
             }
             onCycleAgent={cycleAgent}
-            accent={agentColor(agent)}
           />
           <div className="flex flex-wrap items-center justify-center gap-2">
             <FolderPicker value={folder} home={home} onChange={setDirectory} onOther={() => void chooseFolder()} />
