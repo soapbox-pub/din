@@ -18,7 +18,10 @@ import type {
   WindowChrome,
   WindowState,
   DinNotificationOptions,
+  DictationStatus,
   Edge,
+  MediaAction,
+  MediaSession,
 } from '@/sdk/din';
 
 /** A file handle as it crosses the port; the SDK wraps it in a DinFileHandle. */
@@ -67,6 +70,7 @@ export interface Hello {
   storage: Record<string, string> | null;
   /** The drag going on, if one is. */
   drag: DragInfo | null;
+  dictation: { available: boolean; status: DictationStatus };
 }
 
 /** What an app can ask, by method: the params, and what the reply carries. */
@@ -112,6 +116,14 @@ export interface Requests {
   'files.unwatch': [{ handle: string }, void];
   'files.persist': [{ handle: string }, string];
   'files.restore': [{ token: string }, HandleData | null];
+  'files.url': [{ handle: string }, string];
+  'files.fromPath': [{ path: string }, HandleData];
+
+  'media.setSession': [{ session: MediaSession | null }, void];
+  'desktop.setWallpaper': [{ handle: string }, void];
+  'dictation.start': [{ held: boolean }, void];
+  'dictation.finish': [void, void];
+  'dictation.cancel': [void, void];
 
   /** The token is the app's own (random); the desktop refuses one already in use. */
   'drag.startFiles': [{ token: string; handles: string[] }, void];
@@ -170,7 +182,9 @@ export type Push =
   | { type: 'tabDetached'; tabType: string; state: unknown; at: Point }
   | { type: 'fileChange'; handle: string; change: 'modified' | 'removed' }
   | { type: 'clipboardFiles'; has: { count: number; cut: boolean } | null }
-  | { type: 'notificationAction'; tag: string | null; action: string };
+  | { type: 'notificationAction'; tag: string | null; action: string }
+  | { type: 'mediaAction'; action: MediaAction }
+  | { type: 'dictation'; status: DictationStatus };
 
 export type FromDesktop = Hello | ReplyMessage | Push;
 export type FromApp = RequestMessage;

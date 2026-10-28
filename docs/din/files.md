@@ -1,8 +1,6 @@
 # `din.files` and `din.clipboard`: files the user hands an app
 
-> **Status: in place.** `getFile()` reads through the desktop (the whole
-> file in one message; a streaming URL for large media will come with the
-> apps that play it). Apps still in the desktop's tree pick paths with
+> **Status: in place.** Apps still in the desktop's tree pick paths with
 > `useFilePicker()` and read them with `window.dinos.fs`.
 
 ## Handles, not paths
@@ -38,7 +36,8 @@ Electron and in a browser.
 | `name`, `kind` | `photo.png`, `file` or `directory` |
 | `key` | Stable within the app for the same file; compare handles with it |
 | `path` | The full path, only for apps with `fs`; null otherwise |
-| `getFile()` | The contents as a `File` |
+| `getFile()` | The contents as a `File`, read through the desktop in one message: fine for documents |
+| `url()` | A `din-file://<token>/<name>` URL to load it from instead (`<img>`, `<audio>`, `<video>`, `fetch` with Range), streamed by main. For media and anything big |
 | `write(data)` | Replace the contents. Only if `writable` |
 | `onChange(cb)` | Something else modified or removed it (reload prompts) |
 | `entries()` | Folders: what's in them, granted with the folder |
@@ -77,3 +76,16 @@ const pasted = await din.clipboard.readFiles();   // handles, granted on read
 
 Cut is a hint for the app that pastes: Files moves; an app without `fs`
 gets copies (it can't delete the originals).
+
+## Streaming and paths
+
+`handle.url()` asks main for an unguessable URL bound to that file and to
+the app's window; main serves it on the apps' session with Range support
+(the same code as the desktop's own `din-file://localhost/…` URLs, which
+don't exist there). The URL lasts as long as the page: a reload or a
+closed window ends it. The app's CSP must allow `din-file:` where it
+loads it (`img-src`, `media-src`, `connect-src`).
+
+Apps with `fs` reach files by path through `din.system.fs` anyway.
+`din.files.fromPath(path)` gives one of them a handle for a path, for
+`url()` or to hand the file to another app with `din.app.open`.

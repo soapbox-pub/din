@@ -11,7 +11,9 @@
 // This file runs as TypeScript directly via Node's native type stripping
 // (Electron 43 embeds Node 24) - no build step, so only erasable TS syntax.
 
-// First: it records every IPC handler as it's registered (electron/din-apps.mts).
+// First: it records every IPC handler as it's registered, for apps' bridge
+// ports (electron/din-apps.mts).
+import './ipc-registry.mts';
 import {
   appIdOf,
   attachAppGuest,

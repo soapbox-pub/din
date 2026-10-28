@@ -3036,6 +3036,14 @@ expose('apps', {
    */
   revoke: (webContentsId, permission) => ipcRenderer.invoke('dinos-apps:revoke', webContentsId, permission),
   /**
+   * A URL an app window can stream a file from (din-file://<token>/…), good
+   * while that window's page stays loaded.
+   * @param {number} webContentsId
+   * @param {string} path
+   * @returns {Promise<string>}
+   */
+  fileUrl: (webContentsId, path) => ipcRenderer.invoke('dinos-apps:fileUrl', webContentsId, path),
+  /**
    * Force quit an app window: kill its renderer process.
    * @param {number} webContentsId
    * @returns {Promise<void>}

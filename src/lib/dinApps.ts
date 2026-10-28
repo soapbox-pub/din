@@ -9,10 +9,15 @@ import { guestsAvailable } from '@/platform/guest';
 /** The session partition apps run in (DIN_APPS_PARTITION in electron/din-apps.mts). */
 export const DIN_APPS_PARTITION = 'persist:din-apps';
 
+/** Permissions whose bridges get a port of their own to main (SYSTEM_PERMISSIONS in electron/din-apps.mts). */
+export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'indd'] as const;
+export type SystemPermission = (typeof SYSTEM_PERMISSIONS)[number];
+
 /** What the desktop's preload exposes for hosting apps (electron/preload.cjs). */
 export interface AppsBridge {
-  grant(webContentsId: number, permission: 'fs' | 'pty'): Promise<void>;
-  revoke(webContentsId: number, permission: 'fs' | 'pty'): Promise<void>;
+  grant(webContentsId: number, permission: SystemPermission): Promise<void>;
+  revoke(webContentsId: number, permission: SystemPermission): Promise<void>;
+  fileUrl(webContentsId: number, path: string): Promise<string>;
   kill(webContentsId: number): Promise<void>;
   onResponsive(callback: (e: { webContentsId: number; responsive: boolean }) => void): () => void;
 }

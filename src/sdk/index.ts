@@ -9,7 +9,12 @@ import type {
   DinAccount,
   DinApp,
   DinClipboard,
+  DinDesktop,
+  DinDictation,
   DinDrag,
+  DinMedia,
+  DictationStatus,
+  MediaAction,
   DinFileHandle,
   DinFiles,
   DinMenus,
@@ -34,6 +39,8 @@ import type {
 } from '@/sdk/din';
 import type { FsBridge } from '@/lib/fs';
 import type { PtyBridge } from '@/lib/pty';
+import type { AssistantBridge } from '@/lib/assistant';
+import type { InddBridge } from '@/lib/indd';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 
@@ -167,6 +174,16 @@ function fsBridge(t: NonNullable<Transport['system']>): FsBridge {
   return bridge as unknown as FsBridge;
 }
 
+function assistantBridge(t: NonNullable<Transport['system']>): AssistantBridge {
+  const bridge: Record<string, unknown> = {};
+  for (const m of ['status', 'setEnabled', 'install', 'restart', 'recentModels', 'request']) {
+    bridge[m] = (...args: unknown[]) => t.call('assistant', `assistant:${m}`, args);
+  }
+  bridge.onStatus = (cb: (status: unknown) => void) => t.on('assistant', 'assistant:status', (s) => cb(s));
+  bridge.onEvent = (cb: (event: unknown) => void) => t.on('assistant', 'assistant:event', (e) => cb(e));
+  return bridge as unknown as AssistantBridge;
+}
+
 function ptyBridge(t: NonNullable<Transport['system']>): PtyBridge {
   return {
     spawn: (...args: unknown[]) => t.call('pty', 'pty:spawn', args),
@@ -292,6 +309,7 @@ async function start(): Promise<Din> {
         };
       },
       persist: () => request('files.persist', { handle: data.id }),
+      url: () => request('files.url', { handle: data.id }),
     };
     if (data.kind === 'directory') {
       handle.entries = async () => (await request('files.entries', { handle: data.id })).map(wrap);
@@ -435,6 +453,10 @@ async function start(): Promise<Din> {
     restore: async (token) => {
       const result = await request('files.restore', { token });
       return result ? wrap(result) : null;
+    },
+    fromPath: async (path) => {
+      need('fs');
+      return wrap(await request('files.fromPath', { path }));
     },
   };
 
@@ -596,6 +618,42 @@ async function start(): Promise<Din> {
   };
   const permissionsApi: DinPermissions = { has: (p) => permissions.has(p) };
 
+  // ---- media session, wallpaper, dictation ----
+  const mediaActions = new Emitter<MediaAction>();
+  pushes.on((p) => {
+    if (p.type === 'mediaAction') mediaActions.emit(p.action);
+  });
+  const media: DinMedia = {
+    setSession(session) {
+      need('media-session');
+      tell('media.setSession', { session });
+    },
+    onAction: (cb) => mediaActions.on(cb),
+  };
+  const desktop: DinDesktop = {
+    setWallpaper: async (file) => {
+      need('wallpaper');
+      await request('desktop.setWallpaper', { handle: idOf(file) });
+    },
+  };
+  let dictationStatus = h.dictation.status;
+  const dictationChanges = new Emitter<DictationStatus>();
+  pushes.on((p) => {
+    if (p.type !== 'dictation') return;
+    dictationStatus = p.status;
+    dictationChanges.emit(p.status);
+  });
+  const dictation: DinDictation = {
+    available: h.dictation.available,
+    get status() {
+      return dictationStatus;
+    },
+    onStatus: (cb) => dictationChanges.on(cb),
+    start: (options) => request('dictation.start', { held: options?.held === true }),
+    finish: () => request('dictation.finish'),
+    cancel: () => tell('dictation.cancel'),
+  };
+
   // ---- system bridges, over their own ports to main ----
   const system: DinSystem = {};
   const sys = transport.system;
@@ -607,6 +665,14 @@ async function start(): Promise<Din> {
     if (permissions.has('pty')) {
       await sys.ready('pty');
       system.pty = ptyBridge(sys);
+    }
+    if (permissions.has('assistant')) {
+      await sys.ready('assistant');
+      system.assistant = assistantBridge(sys);
+    }
+    if (permissions.has('indd')) {
+      await sys.ready('indd');
+      system.indd = { convert: (...args: unknown[]) => sys.call('indd', 'indd:convert', args) } as unknown as InddBridge;
     }
   }
 
@@ -623,6 +689,9 @@ async function start(): Promise<Din> {
     account,
     notifications,
     print,
+    media,
+    desktop,
+    dictation,
     permissions: permissionsApi,
     system,
   };

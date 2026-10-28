@@ -31,6 +31,17 @@ import { printFile, printHtml } from '@/lib/printing';
 import { areaFor } from '@/lib/monitors';
 import { isDarkThemeColor } from '@/lib/themeColor';
 import { getFileClipboard, setFileClipboard, subscribeFileClipboard } from '@/lib/fileClipboard';
+import { registerMediaSource, type MediaSource } from '@/lib/nowPlaying';
+import {
+  cancelDictation,
+  finishDictation,
+  focusedDictationTarget,
+  getDictationState,
+  hasDictationBridge,
+  startDictation,
+  subscribeDictation,
+} from '@/lib/dictation';
+import { DesktopBackgroundContext } from '@/contexts/DesktopBackgroundContext';
 import {
   appUrl,
   DIN_APPS_PARTITION,
@@ -45,7 +56,7 @@ import { acceptDrag, dragInfo, finishDrag, registerDrag, subscribeDrag, currentD
 import { guestsAvailable } from '@/platform/guest';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
-import type { DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
+import type { DinManifest, FrameStyle, MediaSession, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
 import type { AccountSnapshot, FromApp, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
 
@@ -125,6 +136,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const publishIcon = useContext(WindowIconContext);
   const publishAccent = useContext(WindowAccentContext);
   const picker = useContext(FilePickerContext);
+  const background = useContext(DesktopBackgroundContext);
   const areas = useWorkAreas();
   const { config } = useAppContext();
   const { user } = useCurrentUser();
@@ -165,6 +177,13 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     closeRequests: Map<number, ReturnType<typeof setTimeout>>;
     watches: Map<string, { dir: string; id: number | null }>;
   } | null>(null);
+
+  /** What the app is playing, among the desktop's media sources (registered below). */
+  const media = useRef<{ session: MediaSession | null; since: number; notify: () => void }>({
+    session: null,
+    since: 0,
+    notify: () => {},
+  });
 
   // ---- what the app sees of its window ----
   const win = frame?.win;
@@ -488,6 +507,39 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         }
         return grantFile(entry.path, entry.kind, entry.writable);
       },
+      'files.url': async ({ handle }) => {
+        const g = grantOf(handle);
+        const apps = getAppsBridge();
+        if (!apps || guestId === null) throw new Error('File URLs are only available inside Din');
+        return apps.fileUrl(guestId, g.path);
+      },
+      'files.fromPath': async ({ path }) => {
+        need('fs');
+        if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('An absolute path is required');
+        const [handle] = await grantPaths([path]);
+        if (!handle) throw new Error(`${path} doesn’t exist`);
+        return handle;
+      },
+
+      'media.setSession': ({ session: next }) => {
+        need('media-session');
+        media.current.session = next;
+        media.current.notify();
+      },
+      'desktop.setWallpaper': async ({ handle }) => {
+        need('wallpaper');
+        if (!background) throw new Error('No desktop to set');
+        await background.setBackground({ path: grantOf(handle).path });
+      },
+      'dictation.start': async ({ held }) => {
+        // Into the field focused in the app: the guest is what's focused here.
+        const target = focusedDictationTarget();
+        const el = surface.current?.element();
+        if (!target || !el || target.owner !== el) throw new Error('Nothing in the app is focused');
+        await startDictation(target, { held });
+      },
+      'dictation.finish': () => finishDictation(),
+      'dictation.cancel': () => cancelDictation(),
 
       'drag.startFiles': ({ token, handles }) => {
         const grants = handles.map(grantOf);
@@ -650,6 +702,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       permissions,
       storage: storageToMigrate(manifest),
       drag: dragInfo(currentDrag()),
+      dictation: { available: hasDictationBridge(), status: getDictationState().status },
     };
     if (session.current === s) port.postMessage(hello);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -683,6 +736,60 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [appId, manifest, serve]);
+
+  // What the app is playing, among the desktop's media sources.
+  useEffect(() => {
+    if (!permissions.includes('media-session')) return;
+    const listeners = new Set<() => void>();
+    const current = (): MediaSource | null => {
+      const { session, since } = media.current;
+      return session
+        ? {
+            id: `app:${windowId}`,
+            kind: 'app',
+            title: session.title,
+            subtitle: session.subtitle,
+            artwork: session.artwork ? sanitizeImageUrl(session.artwork) : null,
+            playing: session.playing,
+            canPlay: session.canPlay,
+            canPrevious: session.canPrevious,
+            canNext: session.canNext,
+            since: since || Date.now(),
+          }
+        : null;
+    };
+    media.current.notify = () => {
+      const m = media.current;
+      if (m.session?.playing && !m.since) m.since = Date.now();
+      if (!m.session) m.since = 0;
+      for (const l of listeners) l();
+    };
+    return registerMediaSource({
+      current,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      control: (action) => push({ type: 'mediaAction', action }),
+      playIdle: () => {
+        if (!media.current.session?.canPlay) return false;
+        push({ type: 'mediaAction', action: 'play' });
+        return true;
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowId, push]);
+
+  // Dictation's status, for the app's mic buttons.
+  useEffect(() => {
+    let last = getDictationState().status;
+    return subscribeDictation(() => {
+      const status = getDictationState().status;
+      if (status === last) return;
+      last = status;
+      push({ type: 'dictation', status });
+    });
+  }, [push]);
 
   // The manifest's theme color tints the title bar until the app says otherwise.
   useEffect(() => {

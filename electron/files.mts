@@ -1191,14 +1191,25 @@ const MIME: Record<string, string> = {
 export function registerLocalFileProtocol(shellOrigin: string): void {
   protocol.handle(LOCAL_FILE_SCHEME, async (request) => {
     const cors = { 'access-control-allow-origin': shellOrigin };
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
-      return new Response(null, { status: 405, headers: cors });
-    }
     let file: string;
     try {
       file = absolute(decodeURIComponent(new URL(request.url).pathname));
     } catch {
       return new Response(null, { status: 400, headers: cors });
+    }
+    return serveLocalFile(request, file, cors);
+  });
+}
+
+/**
+ * A local file as an HTTP response: its type, Range requests (so video can
+ * seek), and never as a document that could run script. `cors` names who
+ * may read it.
+ */
+export async function serveLocalFile(request: Request, file: string, cors: Record<string, string>): Promise<Response> {
+  {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return new Response(null, { status: 405, headers: cors });
     }
     let size: number;
     try {
@@ -1242,5 +1253,5 @@ export function registerLocalFileProtocol(shellOrigin: string): void {
     if (request.method === 'HEAD' || size === 0) return new Response(null, { status, headers });
     const stream = fs.createReadStream(file, { start, end });
     return new Response(Readable.toWeb(stream) as ReadableStream, { status, headers });
-  });
+  }
 }

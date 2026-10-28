@@ -16,7 +16,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { ipcMain, MessageChannelMain, net, session, webContents } from 'electron';
+import { LOCAL_FILE_SCHEME, serveLocalFile } from './files.mts';
+import { invokeHandlers, sendHandlers } from './ipc-registry.mts';
 import type { MessagePortMain } from 'electron';
 
 export const DIN_SCHEME = 'din';
@@ -29,36 +32,19 @@ const APP_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const SYSTEM_PERMISSIONS = {
   fs: /^fs:[a-zA-Z]+$/,
   pty: /^pty:(spawn|write|resize|kill)$/,
+  assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request)$/,
+  indd: /^indd:convert$/,
 } as const;
 export type SystemPermission = keyof typeof SYSTEM_PERMISSIONS;
 
 /** Events main pushes to the shell on a bridge's channels, which granted apps hear too. */
-const SYSTEM_PUSHES: Record<SystemPermission, RegExp> = {
+const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   fs: /^fs:changed$/,
-  pty: /^pty:/,
+  // A pty's output goes to the sender that spawned it.
+  pty: null,
+  assistant: /^assistant:(status|event)$/,
+  indd: null,
 };
-
-// ---------------------------------------------------------------------------
-// The shell's IPC handlers, by channel, so a granted bridge port can reach the
-// same code the shell's ipcRenderer calls do. Installed before any handler is
-// registered (this module is imported at the top of main.mts).
-// ---------------------------------------------------------------------------
-
-type Handler = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent, ...args: unknown[]) => unknown;
-const invokeHandlers = new Map<string, Handler>();
-const sendHandlers = new Map<string, Handler>();
-{
-  const handle = ipcMain.handle.bind(ipcMain);
-  ipcMain.handle = (channel, listener) => {
-    invokeHandlers.set(channel, listener as Handler);
-    return handle(channel, listener);
-  };
-  const on = ipcMain.on.bind(ipcMain);
-  ipcMain.on = (channel, listener) => {
-    if (typeof channel === 'string') sendHandlers.set(channel, listener as Handler);
-    return on(channel, listener);
-  };
-}
 
 /**
  * Events made here for calls arriving on a granted bridge port. The shell's
@@ -117,6 +103,7 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
   options = opts;
   const s = appsSession();
   s.protocol.handle(DIN_SCHEME, (request) => serve(request));
+  s.protocol.handle(LOCAL_FILE_SCHEME, (request) => serveFileUrl(request));
   s.registerPreloadScript({ id: 'din-app', type: 'frame', filePath: preloadPath });
   // Apps get what a document app needs and nothing that would prompt.
   const allowed = new Set(['clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
@@ -150,6 +137,19 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
   ipcMain.handle('dinos-apps:revoke', (event, wcId, permission) => {
     opts.assertShellSender(event);
     if (typeof wcId === 'number' && typeof permission === 'string') revoke(wcId, permission as SystemPermission);
+  });
+
+  // A URL an app can load a file it was granted from (media, big pictures),
+  // streamed with Range support instead of sent whole over its port.
+  ipcMain.handle('dinos-apps:fileUrl', (event, wcId, file) => {
+    opts.assertShellSender(event);
+    const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
+    if (!contents || !isAppGuest(contents) || typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('No such file');
+    const appId = appIdOf(contents.getURL());
+    if (!appId) throw new Error('Not an app');
+    const token = randomUUID();
+    fileUrls.set(token, { file: path.resolve(file), wcId: contents.id, appId });
+    return `${LOCAL_FILE_SCHEME}://${token}/${encodeURIComponent(path.basename(file))}`;
   });
 
   // Force quit: SIGKILL reaches a renderer stuck in a loop at once, where
@@ -241,6 +241,21 @@ async function serve(request: Request): Promise<Response> {
     return net.fetch(pathToFileURL(resolved).toString());
   }
   return notFound();
+}
+
+/** Files granted to apps as URLs, by the token that is the URL's host. */
+const fileUrls = new Map<string, { file: string; wcId: number; appId: string }>();
+
+function serveFileUrl(request: Request): Promise<Response> | Response {
+  let token: string;
+  try {
+    token = new URL(request.url).hostname;
+  } catch {
+    return notFound();
+  }
+  const grant = fileUrls.get(token);
+  if (!grant) return notFound();
+  return serveLocalFile(request, grant.file, { 'access-control-allow-origin': `${DIN_SCHEME}://${grant.appId}` });
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +373,9 @@ function revoke(wcId: number, permission: SystemPermission): void {
 
 function revokeAll(wcId: number): void {
   for (const permission of Object.keys(SYSTEM_PERMISSIONS) as SystemPermission[]) revoke(wcId, permission);
+  for (const [token, grant] of fileUrls) {
+    if (grant.wcId === wcId) fileUrls.delete(token);
+  }
 }
 
 /**
@@ -367,7 +385,7 @@ function revokeAll(wcId: number): void {
 export function forwardPushToGrants(channel: string, args: unknown[]): void {
   for (const byPermission of grants.values()) {
     for (const [permission, entry] of byPermission) {
-      if (permission === 'pty' || !SYSTEM_PUSHES[permission].test(channel)) continue;
+      if (!SYSTEM_PUSHES[permission]?.test(channel)) continue;
       entry.port.postMessage({ push: channel, args });
     }
   }

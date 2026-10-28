@@ -24,6 +24,8 @@
 
 import type { FsBridge } from '@/lib/fs';
 import type { PtyBridge } from '@/lib/pty';
+import type { AssistantBridge } from '@/lib/assistant';
+import type { InddBridge } from '@/lib/indd';
 
 export type Unsubscribe = () => void;
 
@@ -56,6 +58,9 @@ export interface Din {
   account: DinAccount;
   notifications: DinNotifications;
   print: DinPrint;
+  media: DinMedia;
+  desktop: DinDesktop;
+  dictation: DinDictation;
   permissions: DinPermissions;
   /** Privileged system bridges, present only when the manifest asks for them. */
   system: DinSystem;
@@ -300,6 +305,12 @@ export interface DinFileHandle {
   readonly path: string | null;
   /** Read the whole file. */
   getFile(): Promise<File>;
+  /**
+   * A URL the app can load the file from (an `<img>`, `<audio>`, `<video>`,
+   * or `fetch` with Range requests), streamed rather than sent whole. Good
+   * while this page stays loaded. Not available outside Electron.
+   */
+  url(): Promise<string>;
   /** Replace its contents (and create it, for a handle from `save`). Needs `writable`. */
   write(data: Blob | ArrayBuffer | ArrayBufferView | string): Promise<void>;
   /** Whether `write` is allowed. False for files opened read-only. */
@@ -348,6 +359,12 @@ export interface DinFiles {
   save(options?: SaveFileOptions): Promise<DinFileHandle | null>;
   /** A handle kept by `persist()`; null if the file is gone or the grant was revoked. */
   restore(token: string): Promise<DinFileHandle | null>;
+  /**
+   * A handle for a path, for apps with `fs`, which reach files by path
+   * anyway (`din.system.fs`) but want a handle's `url()` or to hand the
+   * file to another app.
+   */
+  fromPath(path: string): Promise<DinFileHandle>;
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +518,65 @@ export interface DinNotifications {
 }
 
 // ---------------------------------------------------------------------------
+// din.media (permission `media-session`)
+// ---------------------------------------------------------------------------
+
+/** What an app is playing, for Din's media controls and the media keys. */
+export interface MediaSession {
+  title: string;
+  /** The artist, or what it's playing from. */
+  subtitle: string;
+  /** Cover art: a data: or https URL. */
+  artwork: string | null;
+  playing: boolean;
+  canPlay: boolean;
+  canPrevious: boolean;
+  canNext: boolean;
+}
+
+export type MediaAction = 'play' | 'pause' | 'nexttrack' | 'previoustrack';
+
+export interface DinMedia {
+  /** What's playing now, or null when nothing is (the controls go). */
+  setSession(session: MediaSession | null): void;
+  /**
+   * Din's media controls or a media key. `play` also comes when a play key
+   * is pressed with nothing else playing and the session can play.
+   */
+  onAction(cb: (action: MediaAction) => void): Unsubscribe;
+}
+
+// ---------------------------------------------------------------------------
+// din.desktop (permission `wallpaper`)
+// ---------------------------------------------------------------------------
+
+export interface DinDesktop {
+  /** Make a picture the app holds the desktop's background. */
+  setWallpaper(file: DinFileHandle): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// din.dictation: speech to text, into the app's focused field
+// ---------------------------------------------------------------------------
+
+export type DictationStatus = 'idle' | 'listening' | 'transcribing' | 'error';
+
+export interface DinDictation {
+  /** Whether this computer can take dictation. */
+  readonly available: boolean;
+  readonly status: DictationStatus;
+  onStatus(cb: (status: DictationStatus) => void): Unsubscribe;
+  /**
+   * Listen, and type what's said into the field focused in the app when it
+   * finishes (as Din's dictation key does). `held`: stops when `finish()`
+   * is called rather than at a pause.
+   */
+  start(options?: { held?: boolean }): Promise<void>;
+  finish(): Promise<void>;
+  cancel(): void;
+}
+
+// ---------------------------------------------------------------------------
 // din.print (permission `printing`)
 // ---------------------------------------------------------------------------
 
@@ -533,10 +609,14 @@ export type Permission =
   | 'printing'
   /** Notifications kept in the notification center, and a Dock badge. Toasts need nothing. */
   | 'notifications'
-  /** Report what's playing and hear the media keys. */
+  /** Report what's playing and hear the media keys (`din.media`). */
   | 'media-session'
-  /** Set the desktop wallpaper. */
-  | 'wallpaper';
+  /** Set the desktop wallpaper (`din.desktop`). */
+  | 'wallpaper'
+  /** The Assistant's OpenCode service (`din.system.assistant`). Assistant, CAD. */
+  | 'assistant'
+  /** InDesign conversion (`din.system.indd`). Publisher. */
+  | 'indd';
 
 export interface DinPermissions {
   /** Whether the manifest asked for it and the desktop granted it. */
@@ -553,6 +633,8 @@ export interface DinPermissions {
 export interface DinSystem {
   fs?: FsBridge;
   pty?: PtyBridge;
+  assistant?: AssistantBridge;
+  indd?: InddBridge;
 }
 
 // ---------------------------------------------------------------------------

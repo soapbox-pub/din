@@ -1,8 +1,6 @@
 # Permissions and `din.system`
 
-> **Status: in place** for apps on `din://`. `media-session` and
-> `wallpaper` are reserved for the apps that will need them, and do
-> nothing yet.
+> **Status: in place** for apps on `din://`.
 
 ## What every app has
 
@@ -32,8 +30,10 @@ When nsites get `window.din`, the user approves the list at install.
 | `pty` | `din.system.pty`: terminals | Terminal |
 | `printing` | `din.print`: Din's print dialog for HTML or a file the app holds | Word Processor, Publisher, Preview |
 | `notifications` | Notification center entries, the Dock badge | Assistant |
-| `media-session` | Report what's playing; hear the media keys | Media Player |
-| `wallpaper` | Set the desktop's wallpaper | Files, Preview |
+| `media-session` | `din.media`: report what's playing; hear the media keys and Din's media controls | Media Player |
+| `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
+| `assistant` | `din.system.assistant`: the Assistant's OpenCode service | Assistant, CAD |
+| `indd` | `din.system.indd`: InDesign conversion | Publisher |
 
 Check at runtime with `din.permissions.has('fs')`. Calling something
 without its permission rejects with `DinPermissionError`.
@@ -55,6 +55,12 @@ These are the same interfaces the desktop uses (`FsBridge`,
 They don't go through the desktop. When the app connects, the desktop
 checks its grants and asks main for a port from the app straight to each
 granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made)):
+
+Bridges with ports of their own: `fs`, `pty`, `assistant`, `indd`
+(`SYSTEM_PERMISSIONS` in `electron/din-apps.mts`, mirrored in
+`src/lib/dinApps.ts` and the SDK). A bridge's pushes reach the apps
+granted it: a pty's output goes to the app that spawned it, and what main
+sends the shell on `fs:changed` or `assistant:*` goes to granted apps too.
 
 ```
 Terminal ──port──▶ Electron main (pty)      one hop, as window.pty is today
