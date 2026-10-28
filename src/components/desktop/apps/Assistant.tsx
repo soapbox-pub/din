@@ -23,6 +23,7 @@ import { AssistantUnavailable } from '@/components/desktop/assistant/AssistantUn
 import { ConversationTitleInput, DeleteConversationDialog } from '@/components/desktop/assistant/ConversationActions';
 import { Composer, type SlashCommand } from '@/components/desktop/assistant/Composer';
 import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
+import { FileLinkBaseContext } from '@/components/desktop/assistant/fileLinks';
 import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
 import { SessionList } from '@/components/desktop/assistant/SessionList';
 import { Transcript } from '@/components/desktop/assistant/Transcript';
@@ -224,6 +225,8 @@ function Conversation({
   const running = active.includes(sessionID);
   const messages = transcript?.messages;
   const commands = useSlashCommands(session?.location.directory, CONVERSATION_COMMANDS);
+  const directory = session?.location.directory;
+  const fileLinkBase = useMemo(() => ({ directory, home }), [directory, home]);
   const [editingTitle, setEditingTitle] = useState(false);
   useMarkViewedSession(sessionID);
 
@@ -294,15 +297,17 @@ function Conversation({
               {transcript?.more && (
                 <p className="mb-6 text-center text-xs text-muted-foreground">Earlier messages aren’t shown.</p>
               )}
-              <Transcript
-                messages={messages ?? []}
-                queued={queued}
-                running={running}
-                home={home}
-                onCancelQueued={(message) =>
-                  cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
-                }
-              />
+              <FileLinkBaseContext value={fileLinkBase}>
+                <Transcript
+                  messages={messages ?? []}
+                  queued={queued}
+                  running={running}
+                  home={home}
+                  onCancelQueued={(message) =>
+                    cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
+                  }
+                />
+              </FileLinkBaseContext>
             </>
           )}
         </div>

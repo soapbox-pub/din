@@ -1,23 +1,43 @@
-import { memo, useRef, type ComponentProps, type ReactNode } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import { memo, useContext, useRef, type ComponentProps, type ReactNode } from 'react';
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Copy, FolderOpen, SquareArrowOutUpRight } from 'lucide-react';
 import { CopyButton } from '@/components/desktop/assistant/CopyButton';
+import { FileLinkBaseContext, filePathOfHref } from '@/components/desktop/assistant/fileLinks';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
+import { useToast } from '@/hooks/useToast';
+import { appForFile } from '@/lib/fileTypes';
+import { cleanFsError, getFsBridge, parentPath } from '@/lib/fs';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 
 const REMARK_PLUGINS = [remarkGfm];
 
+// The default drops `file:` links; they are opened as files, never loaded.
+const urlTransform = (url: string) => (/^file:/i.test(url) ? url : defaultUrlTransform(url));
+
 /**
  * The agent's replies, as Markdown. react-markdown builds React elements and
  * leaves raw HTML out, so nothing the model writes reaches the DOM as
- * markup; links open through Din's router, and only http(s) ones.
+ * markup; links open through Din's router, and only http(s) ones. Links to
+ * files open them in Din's apps, relative to the conversation's folder.
  */
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
   const openUrl = useOpenUrl();
+  const base = useContext(FileLinkBaseContext);
 
   const components: Components = {
     a: ({ href, children }) => {
+      const file = href ? filePathOfHref(href, base) : null;
+      if (file) return <FileLink path={file}>{children}</FileLink>;
       const url = href ? sanitizeNavigationUrl(href) : null;
       if (!url) return <span className="underline decoration-dotted">{children}</span>;
       return (
@@ -73,6 +93,8 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
     td: ({ children }) => <td className="border border-border/60 px-2 py-1 align-top">{children}</td>,
     // Pictures the model names could be anything, from anywhere: a link instead.
     img: ({ src, alt }) => {
+      const file = typeof src === 'string' ? filePathOfHref(src, base) : null;
+      if (file) return <FileLink path={file}>{alt || file.slice(file.lastIndexOf('/') + 1)}</FileLink>;
       const url = typeof src === 'string' ? sanitizeNavigationUrl(src) : null;
       return url ? (
         <a href={url} onClick={(e) => { e.preventDefault(); openUrl(url); }} className="text-primary underline">
@@ -84,12 +106,62 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
 
   return (
     <div className={cn('break-words leading-7', className)}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} urlTransform={urlTransform} components={components}>
         {text}
       </ReactMarkdown>
     </div>
   );
 });
+
+/**
+ * A link to a file on this computer: clicking opens it in the app Files would
+ * use (a folder opens in Files), and right-clicking can show it in its folder.
+ */
+function FileLink({ path, children }: { path: string; children: ReactNode }) {
+  const { open } = useWindowActions();
+  const { toast } = useToast();
+  const fs = getFsBridge();
+  if (!fs) return <span className="underline decoration-dotted" title={path}>{children}</span>;
+
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const openFile = () => {
+    fs.stat(path).then(
+      ({ kind }) => open(kind === 'directory' ? 'file-browser' : appForFile(name), { path }),
+      (error: unknown) => toast({ title: `Couldn’t open ${name}`, description: cleanFsError(error), variant: 'destructive' }),
+    );
+  };
+  const showInFolder = () => open('file-browser', { path: parentPath(path), select: name });
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <a
+          href={`file://${encodeURI(path)}`}
+          title={path}
+          onClick={(event) => {
+            event.preventDefault();
+            openFile();
+          }}
+          className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+        >
+          {children}
+        </a>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={openFile}>
+          <SquareArrowOutUpRight aria-hidden /> Open
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={showInFolder}>
+          <FolderOpen aria-hidden /> Show in Folder
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(path).catch(() => {})}>
+          <Copy aria-hidden /> Copy Path
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
 
 /** A fenced block with its language and a copy button above it. */
 function CodeBlock({ language, children }: { language?: string; children: ReactNode }) {
