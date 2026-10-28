@@ -543,6 +543,24 @@ export function linkedIconPaths(html: string): string[] {
 }
 
 /**
+ * The icon a `package.json` names in its top-level `"icon"` field (the
+ * convention VS Code and Raycast extensions use), as a path relative to the
+ * project, or null when there is none or it points outside the project.
+ */
+export function packageIconPath(json: string): string | null {
+  let icon: unknown;
+  try {
+    icon = (JSON.parse(json) as { icon?: unknown } | null)?.icon;
+  } catch {
+    return null;
+  }
+  if (typeof icon !== 'string') return null;
+  const url = icon.trim();
+  if (!url || /^[a-z][a-z\d+.-]*:|^\/\//i.test(url) || url.split('/').includes('..')) return null;
+  return url.replace(/^\.?\/+/, '') || null;
+}
+
+/**
  * A message that starts with a slash command, split into its name and the
  * rest (`/review  branch` is `review` and `branch`), or null when it doesn't
  * start with one. Whether the name is a command is the caller's to check:

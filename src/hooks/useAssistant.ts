@@ -17,6 +17,7 @@ import {
   type PromptAttachment,
   type SessionInfo,
   linkedIconPaths,
+  packageIconPath,
   PROJECT_ICON_PATHS,
   worktreeMainCheckout,
 } from '@/lib/assistant';
@@ -407,7 +408,8 @@ export function useMainCheckouts(directories: string[]): Map<string, string> {
 
 /**
  * For each project folder with a favicon, a URL for it: the icon its
- * `index.html` links, else the first of the usual places that has one.
+ * `package.json` names, else the one its `index.html` links, else the first
+ * of the usual places that has one.
  * Folders without one are left out.
  *
  * It looks in folder listings rather than stat'ing each guess, since every
@@ -441,11 +443,14 @@ export function useProjectIcons(roots: string[]): Map<string, string> {
           }
         };
 
-        const page = (await entry('index.html'))?.kind === 'file'
-          ? await fs!.readFile(`${dir}/index.html`, 65536).catch(() => null)
+        const read = async (path: string) => (await entry(path))?.kind === 'file'
+          ? await fs!.readFile(`${dir}/${path}`, 65536).then((f) => new TextDecoder().decode(f.data), () => null)
           : null;
-        const linked = page ? linkedIconPaths(new TextDecoder().decode(page.data)) : [];
-        for (const path of [...new Set([...linked, ...PROJECT_ICON_PATHS])]) {
+        const pkg = await read('package.json');
+        const named = pkg ? packageIconPath(pkg) : null;
+        const page = await read('index.html');
+        const linked = page ? linkedIconPaths(page) : [];
+        for (const path of [...new Set([...(named ? [named] : []), ...linked, ...PROJECT_ICON_PATHS])]) {
           const found = await entry(path);
           if (found?.kind === 'file' && found.size) return localFileUrl(`${dir}/${path}`);
         }
