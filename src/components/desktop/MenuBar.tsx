@@ -781,7 +781,7 @@ function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect:
 }
 
 /**
- * Menu-bar clock: weekday, date, and time. Clicking opens a calendar above
+ * Menu-bar clock: weekday, date, and time. Clicking opens a calendar beside
  * the notification center; a dot beside the time marks unread notifications.
  */
 const ClockMenuItem = memo(function ClockMenuItem() {
@@ -814,13 +814,18 @@ const ClockMenuItem = memo(function ClockMenuItem() {
         align="center"
         sideOffset={8}
         style={{ maxHeight }}
-        className="flex w-96 flex-col overflow-hidden p-0"
+        className="flex w-96 flex-col overflow-hidden p-0 md:w-auto md:flex-row"
       >
         <CalendarSection onOpenSettings={() => setOpen(false)} />
-        <NotificationsPanel
-          onNavigate={() => setOpen(false)}
-          className="min-h-0 flex-1 border-t border-border/60"
-        />
+        {/* Side by side, as in GNOME, the notifications sit left of the
+            calendar and scroll within its height instead of stretching the
+            panel; on narrow screens they stack below it. */}
+        <div className="relative flex min-h-0 flex-1 flex-col border-t border-border/60 md:order-first md:w-96 md:flex-none md:border-t-0 md:border-r">
+          <NotificationsPanel
+            onNavigate={() => setOpen(false)}
+            className="min-h-0 flex-1 md:absolute md:inset-0"
+          />
+        </div>
       </PopoverContent>
     </Popover>
   );
