@@ -241,6 +241,11 @@ function Conversation({
   const fail = (title: string) => (error: unknown) =>
     toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
 
+  // The one being switched to, so a quick second Shift+Tab goes on from there.
+  const agent = (switchAgent.isPending ? switchAgent.variables?.agent : session?.agent) ?? 'build';
+  const changeAgent = (agent: string) => switchAgent.mutate({ sessionID, agent }, { onError: fail('Couldn’t switch') });
+  const cycleAgent = useCycleAgent(agent, changeAgent);
+
   const toBackground = () => background.mutate(sessionID, { onError: fail('Couldn’t move it to the background') });
 
   const runCommand = (name: string, args: string, files: PromptAttachment[]) => {
@@ -342,12 +347,10 @@ function Conversation({
                   switchModel.mutate({ sessionID, model }, { onError: fail('Couldn’t switch models') });
                 }}
               />
-              <AgentPicker
-                value={session?.agent ?? 'build'}
-                onChange={(agent) => switchAgent.mutate({ sessionID, agent }, { onError: fail('Couldn’t switch') })}
-              />
+              <AgentPicker value={agent} onChange={changeAgent} />
             </>
           }
+          onCycleAgent={cycleAgent}
         />
       </div>
     </div>
@@ -492,6 +495,7 @@ function NewConversation({
   const home = useHomeDirectory();
   const [directory, setDirectory] = useState<string | null>(initialDirectory);
   const [agent, setAgent] = useState('build');
+  const cycleAgent = useCycleAgent(agent, setAgent);
   const { model, setModel, models } = usePreferredModel();
   const { data: recent } = useRecentModelKeys();
   const start = useStartConversation();
@@ -548,6 +552,7 @@ function NewConversation({
                 <AgentPicker value={agent} onChange={setAgent} />
               </>
             }
+            onCycleAgent={cycleAgent}
           />
           <div className="flex flex-wrap items-center justify-center gap-2">
             <Button variant="outline" size="sm" className="h-8 gap-1.5 rounded-full" onClick={() => void chooseFolder()}>
@@ -578,6 +583,13 @@ function NewConversation({
 // Pickers
 // ---------------------------------------------------------------------------
 
+/** Switches to the agent after `value`, for Shift+Tab; undefined with fewer than two. */
+function useCycleAgent(value: string, onChange: (agent: string) => void): (() => void) | undefined {
+  const { data: agents = [] } = useAssistantAgents();
+  if (agents.length < 2) return undefined;
+  return () => onChange(agents[(agents.findIndex((a) => a.id === value) + 1) % agents.length].id);
+}
+
 /** Build (does the work) or Plan (only reads and plans), and any others configured. */
 function AgentPicker({ value, onChange }: { value: string; onChange: (agent: string) => void }) {
   const { data: agents = [] } = useAssistantAgents();
@@ -591,6 +603,7 @@ function AgentPicker({ value, onChange }: { value: string; onChange: (agent: str
           size="sm"
           className="h-8 gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
           aria-label={`Agent: ${current?.name ?? value}`}
+          title="Agent (Shift+Tab to switch)"
         >
           {current?.name ?? value}
           <ChevronDown className="size-3 opacity-60" aria-hidden />

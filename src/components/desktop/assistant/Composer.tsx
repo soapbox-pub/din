@@ -46,7 +46,8 @@ function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] 
  * new line. Files come from Din's file picker or are pasted in (pictures),
  * and go along with the message. While the agent works, a message sent
  * steers it, and Stop interrupts it. The mic button dictates into it, the
- * same as Super+H does anywhere.
+ * same as Super+H does anywhere. Shift+Tab switches agents, given
+ * `onCycleAgent`.
  *
  * A message starting with one of `commands` (`/compact`) goes to
  * `onCommand` instead. Typing `/` lists them, narrowing as the name goes
@@ -64,6 +65,7 @@ export function Composer({
   placeholder = 'Ask anything…',
   autoFocus = false,
   toolbar,
+  onCycleAgent,
   className,
   textareaRef,
 }: {
@@ -81,6 +83,8 @@ export function Composer({
   autoFocus?: boolean;
   /** Controls beside the send button: the model and agent pickers. */
   toolbar?: ReactNode;
+  /** Shift+Tab: on to the next agent. Without it, Shift+Tab moves focus as usual. */
+  onCycleAgent?: () => void;
   className?: string;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }) {
@@ -276,6 +280,11 @@ export function Composer({
         onKeyDown={(event) => {
           if (menuKey(event)) {
             event.preventDefault();
+            return;
+          }
+          if (onCycleAgent && event.key === 'Tab' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+            event.preventDefault();
+            onCycleAgent();
             return;
           }
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
