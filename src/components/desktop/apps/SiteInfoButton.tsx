@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { AppWindow, Lock, RotateCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { AppWindow, Lock, RotateCw, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
 import { getPopupsBridge } from '@/lib/popups';
 import { isOnionUrl } from '@/lib/tor';
+import { NsiteIcon } from '@/components/icons/NsiteIcon';
 import { OnionIcon } from '@/components/icons/OnionIcon';
 import type { SiteCapability } from '@/lib/promptBridge';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
@@ -59,7 +60,8 @@ const SECURITY: Record<Security, { title: string; detail: string; warn: boolean 
 
 /**
  * The icon at the start of the address bar, Chrome-style: a lock for a secure
- * page, a warning for one that isn't. Clicking it shows how the connection
+ * page, a green N for an nsite, a violet onion for an onion service, and a
+ * warning for a page that isn't secure. Clicking it shows how the connection
  * stands and what the site may do (camera, microphone, location,
  * notifications, pop-ups), each of which can be switched or forgotten.
  * Renders nothing for pages that aren't websites (the new tab page, settings).
@@ -119,6 +121,13 @@ export function SiteInfoButton({
           : 'secure'
         : 'insecure';
   const { title, detail, warn } = SECURITY[security];
+  // nsites and onions wear the colors of their address-bar badges.
+  const tint =
+    security === 'verified'
+      ? 'text-emerald-700 dark:text-emerald-400'
+      : security === 'onion'
+        ? 'text-violet-700 dark:text-violet-400'
+        : null;
   const site = siteName(url);
   const hostname = new URL(url).hostname;
   const popupsAllowed = !!popupSettings?.allowlist.includes(hostname);
@@ -152,12 +161,15 @@ export function SiteInfoButton({
           className={cn(
             'absolute left-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full',
             'hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            warn ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
-            open && 'bg-foreground/10 text-foreground',
+            warn ? 'text-destructive' : (tint ?? 'text-muted-foreground hover:text-foreground'),
+            open && 'bg-foreground/10',
+            open && !warn && !tint && 'text-foreground',
           )}
         >
           {warn ? (
             <TriangleAlert className="size-3.5" aria-hidden />
+          ) : security === 'verified' ? (
+            <NsiteIcon className="size-3.5" />
           ) : security === 'onion' ? (
             <OnionIcon className="size-3.5" />
           ) : (
@@ -172,13 +184,13 @@ export function SiteInfoButton({
           <span
             className={cn(
               'grid size-8 shrink-0 place-items-center rounded-md',
-              warn ? 'bg-destructive/15 text-destructive' : 'bg-secondary text-muted-foreground',
+              warn ? 'bg-destructive/15 text-destructive' : cn('bg-secondary', tint ?? 'text-muted-foreground'),
             )}
           >
             {warn ? (
               <TriangleAlert className="size-4" aria-hidden />
             ) : security === 'verified' ? (
-              <ShieldCheck className="size-4" aria-hidden />
+              <NsiteIcon className="size-4" />
             ) : security === 'onion' ? (
               <OnionIcon className="size-4" />
             ) : (
