@@ -572,6 +572,7 @@ export function installDin(transport: Transport): void {
     fontFaces: [],
     zoom: 1,
     reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    icons: {},
   };
   const themes = new Emitter<ThemeSnapshot>();
   pushes.on((p) => {

@@ -533,6 +533,12 @@ export interface ThemeSnapshot {
   zoom: number;
   /** The user prefers reduced motion. */
   reducedMotion: boolean;
+  /**
+   * File-type icons from the system's icon theme, as data URLs keyed by
+   * freedesktop icon name (`folder`, `image-x-generic`, …). Empty while Din
+   * shows its own icons, and missing any the theme doesn't have.
+   */
+  icons: Record<string, string>;
 }
 
 export interface DinTheme {

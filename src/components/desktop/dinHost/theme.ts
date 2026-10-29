@@ -1,9 +1,10 @@
 import type { ThemeSnapshot } from '@/sdk/din';
 import { themeFontFaces } from '@/lib/themeFontFaces';
+import { fileThemeIcons } from '@/shared/themeIcons';
 
 /**
  * The desktop's look as apps get it: every design token as the desktop
- * computes it (profile theme included), its scheme and fonts. Tailwind's own
+ * computes it (profile theme included), its scheme, fonts and file icons. Tailwind's own
  * internals (`--tw-*`) stay out.
  */
 export function themeSnapshot(zoom: number): ThemeSnapshot {
@@ -21,10 +22,11 @@ export function themeSnapshot(zoom: number): ThemeSnapshot {
     fontFaces: themeFontFaces(),
     zoom,
     reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    icons: fileThemeIcons(),
   };
 }
 
-/** Hear when the desktop's look may have changed (its root's class or style). */
+/** Hear when the desktop's look may have changed (its root's class, style or icon theme). */
 export function onThemeChange(listener: () => void): () => void {
   let frame = 0;
   const schedule = () => {
@@ -32,7 +34,7 @@ export function onThemeChange(listener: () => void): () => void {
     frame = requestAnimationFrame(listener);
   };
   const observer = new MutationObserver(schedule);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-icon-theme'] });
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
   motion.addEventListener('change', schedule);
   return () => {

@@ -10,6 +10,7 @@ import { NostrSync } from '@/components/NostrSync';
 import { NostrdSync } from '@/components/NostrdSync';
 import { AppDataSync } from '@/components/AppDataSync';
 import { ProfileThemeApplier } from '@/components/ProfileThemeApplier';
+import { IconThemeSync } from '@/components/IconThemeSync';
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NostrLoginProvider } from '@nostrify/react/login';
 import { AppProvider } from '@/components/AppProvider';
@@ -87,6 +88,7 @@ export function App() {
               <NostrdSync />
               <AppDataSync />
               <ProfileThemeApplier />
+              <IconThemeSync />
               <TooltipProvider>
                 <Suspense>
                   <AppRouter />

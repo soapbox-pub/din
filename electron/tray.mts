@@ -22,7 +22,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, ipcMain, nativeImage } from 'electron';
 import { DBusConnection, DBusError, unwrap, Variant, type MethodCall, type Message } from './dbus.mts';
-import { appIdForPid, resolveIcon } from './native-apps.mts';
+import { resolveIcon } from './icon-theme.mts';
+import { appIdForPid } from './native-apps.mts';
 import { sessionBusAddress } from './native-display.mts';
 
 const WATCHER = 'org.kde.StatusNotifierWatcher';

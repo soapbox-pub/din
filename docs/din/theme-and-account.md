@@ -28,9 +28,18 @@ din.theme.onChange((t) => terminal.setTheme(xtermThemeFrom(t.tokens)));
 | `fonts` | `{ sans, mono }` font stacks |
 | `zoom` | The interface zoom. The desktop already scales the webview; canvas apps use it for crisp pixels |
 | `reducedMotion` | Also reflected in `prefers-reduced-motion` |
+| `icons` | The icon theme's file-type icons by name, or `{}` |
 
 A profile theme (the signed-in user's colors) arrives as tokens like any
 other; apps don't need to know.
+
+`icons` holds file-type icons from the system's icon theme, as data URLs
+keyed by freedesktop icon name (`folder`, `image-x-generic`,
+`text-x-generic`, …; the list is `FILE_ICON_NAMES` in
+`src/shared/themeIcons.ts`). It's empty while Din shows its own icons (the
+"Din" theme, which is DinOS's default, or any desktop that isn't Din's),
+and leaves out names the theme doesn't have, so draw your own icon when a
+name is missing. `FileIcon` (`src/shared/FileIcon.tsx`) already does.
 
 ## `din.account` (permission `account`)
 

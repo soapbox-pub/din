@@ -84,6 +84,7 @@ import {
   siteLocationResponse,
 } from './site-locations.mts';
 import { registerCursorHandlers } from './cursor.mts';
+import { registerIconThemeHandlers } from './icon-theme.mts';
 import { registerInddHandlers } from './indd.mts';
 import {
   ensureNightLightTool,
@@ -5301,6 +5302,10 @@ app.whenReady().then(() => {
   registerKeyboardHandlers({ assertShellSender });
   registerDateTimeHandlers({ assertShellSender });
   registerCursorHandlers({ assertShellSender });
+  registerIconThemeHandlers({
+    assertShellSender,
+    shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
+  });
   registerInddHandlers({ assertShellSender });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerOpenUri({ sendToShell });

@@ -18,6 +18,7 @@ import type { FsEntryKind } from '@/lib/fs';
 import { fileCategory, hasThumbnail } from '@/lib/fileTypes';
 import type { FileCategory } from '@/lib/fileTypes';
 import { getThumbnail } from '@/lib/thumbnails';
+import { FILE_ICON_NAMES, themeIcon, useThemeIcons } from '@/shared/themeIcons';
 
 const CATEGORY_ICON: Record<FileCategory, LucideIcon> = {
   folder: Folder,
@@ -61,7 +62,7 @@ export interface FileIconProps {
   className?: string;
 }
 
-/** A file's icon, or its thumbnail when there's one to show. */
+/** A file's icon (the icon theme's, else Din's), or its thumbnail when there's one to show. */
 export function FileIcon({
   path,
   name,
@@ -90,8 +91,11 @@ export function FileIcon({
   }, [wantsThumb, path, size, mtimeMs, key]);
 
   const url = thumb?.key === key ? thumb.url : null;
+  const themed = themeIcon(useThemeIcons(), FILE_ICON_NAMES[category]);
   const Icon = CATEGORY_ICON[category];
   const iconPx = Math.round(px * (px <= 20 ? 1 : 0.75));
+  // Theme icons come with their own margins.
+  const themedPx = Math.round(px * (px <= 20 ? 1 : 0.9));
 
   return (
     <span
@@ -109,6 +113,14 @@ export function FileIcon({
             px > 24 && 'ring-1 ring-foreground/10',
             'motion-safe:animate-in motion-safe:fade-in-0',
           )}
+        />
+      ) : themed ? (
+        <img
+          src={themed}
+          alt=""
+          draggable={false}
+          className="object-contain"
+          style={{ width: themedPx, height: themedPx }}
         />
       ) : (
         <Icon

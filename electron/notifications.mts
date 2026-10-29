@@ -26,7 +26,8 @@
 
 import { fileURLToPath } from 'node:url';
 import { ipcMain, nativeImage } from 'electron';
-import { appIdForPid, resolveIcon } from './native-apps.mts';
+import { resolveIcon } from './icon-theme.mts';
+import { appIdForPid } from './native-apps.mts';
 import { sessionBusAddress } from './native-display.mts';
 import type { RawImage, ServerCommand, ServerMessage } from './notification-server.mts';
 import { startService, type Service } from './services.mts';

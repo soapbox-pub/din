@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { WEB_APP_ICON } from '@/lib/appIcons';
+import { THEMED_APP_ICONS, WEB_APP_ICON } from '@/lib/appIcons';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
+import { themeIcon, useThemeIcons } from '@/shared/themeIcons';
 
 /**
  * Renders a desktop app icon: a root-relative image path for built-in apps
- * (bundled under public/icons/apps/), a remote image (favicon) for installed
- * web apps, or a Lucide component. Remote URLs are sanitized (https or inline
+ * (bundled under public/icons/apps/, or the icon theme's counterpart, see
+ * THEMED_APP_ICONS), a remote image (favicon) for installed web apps, or a
+ * Lucide component. Remote URLs are sanitized (https or inline
  * data:image URIs); local paths must be root-relative (`/...` but not `//...`).
  * Anything that fails validation or loading falls back to the globe icon.
  */
@@ -39,6 +41,7 @@ export function AppIcon({
   web?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
+  const themeIcons = useThemeIcons();
 
   if (typeof icon !== 'string') {
     const Icon = icon;
@@ -48,7 +51,8 @@ export function AppIcon({
   // Root-relative paths ship with the app itself; everything else must pass
   // the https-only sanitizer (protocol-relative `//` is remote, not local).
   const isLocal = icon.startsWith('/') && !icon.startsWith('//');
-  const src = isLocal ? icon : sanitizeImageUrl(icon);
+  const themed = isLocal && THEMED_APP_ICONS[icon] ? themeIcon(themeIcons, THEMED_APP_ICONS[icon]) : null;
+  const src = themed ?? (isLocal ? icon : sanitizeImageUrl(icon));
   const shown = !src || failed ? WEB_APP_ICON : src;
 
   const img = (

@@ -151,6 +151,9 @@ import { PushServiceSetting } from '@/components/desktop/apps/PushServiceSetting
 import { useToast } from '@/hooks/useToast';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
+import { getIconThemeBridge } from '@/lib/iconTheme';
+import { IconThemePicker } from '@/components/desktop/apps/IconThemePicker';
+import { AppIcon } from '@/components/desktop/AppIcon';
 import type { SystemCursorTheme } from '@/lib/systemCursor';
 import {
   useImportSystemCursor,
@@ -545,7 +548,7 @@ export function Settings({ params, windowId }: AppComponentProps) {
       >
         {/* The window's title bar runs across the sidebar's top, so it drags the window too. */}
         <WindowDragRegion className="-mx-2 -mb-2 flex h-9 shrink-0 items-center gap-2 px-3">
-          <img src="/icons/apps/settings.png" alt="" aria-hidden draggable={false} className="size-4 shrink-0 object-contain" />
+          <AppIcon icon="/icons/apps/settings.png" className="size-4 shrink-0 object-contain" />
           <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
             Settings
           </span>
@@ -3527,6 +3530,13 @@ function AppearanceSection({ windowId }: { windowId: string }) {
           onChange={(closeEffect) => updateConfig((current) => ({ ...current, closeEffect }))}
         />
       </div>
+
+      <p className="mb-3 mt-4 text-sm text-muted-foreground">Icons</p>
+      {getIconThemeBridge() ? (
+        <IconThemePicker />
+      ) : (
+        <FallbackCard>Din uses its own icons in the browser.</FallbackCard>
+      )}
 
       <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor</p>
       <div className="flex flex-col gap-3">

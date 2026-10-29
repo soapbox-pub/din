@@ -20,6 +20,7 @@
 //   - window.dinos.keyboard: the system's keyboard layout, for Settings
 //   - window.dinos.datetime: the system's time zone and clock, for Settings
 //   - window.dinos.cursor: the pointer's theme and size, for Settings
+//   - window.dinos.iconTheme: the icon theme, for Settings and Din's icons
 //   - window.dinos.tray: apps' status icons and their menus, for the menu bar
 //   - window.dinos.systemNotifications: Linux apps' and web pages' notifications,
 //     for the notification center
@@ -981,6 +982,40 @@ expose('cursor', {
    * @param {string} id
    */
   removeTheme: (id) => ipcRenderer.invoke('cursor:remove', id),
+});
+
+// Icon theme bridge (window.dinos.iconTheme), backed by the icon-theme:*
+// handlers in electron/icon-theme.mts: the session's freedesktop icon theme,
+// which Settings shows and, on DinOS, changes, and the icons Din's own apps
+// and file types take from it.
+expose('iconTheme', {
+  /** { theme, din, canChange }. */
+  status: () => ipcRenderer.invoke('icon-theme:status'),
+
+  /** The installed icon themes: { id, name, preview }[]. */
+  themes: () => ipcRenderer.invoke('icon-theme:themes'),
+
+  /**
+   * The theme's icons as data URLs, keyed by each request's first name.
+   * @param {{ names: string[], kind: 'apps' | 'files' }[]} requests
+   */
+  lookup: (requests) => ipcRenderer.invoke('icon-theme:lookup', requests),
+
+  /**
+   * Make a theme the session's.
+   * @param {string} theme
+   */
+  set: (theme) => ipcRenderer.invoke('icon-theme:set', theme),
+
+  /**
+   * Subscribe to theme changes. Returns an unsubscribe fn.
+   * @param {() => void} callback
+   */
+  onChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('icon-theme:changed', handler);
+    return () => ipcRenderer.removeListener('icon-theme:changed', handler);
+  },
 });
 
 // InDesign bridge (window.dinos.indd), backed by the indd:* handler in

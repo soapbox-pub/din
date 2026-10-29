@@ -7,9 +7,7 @@
 // Two jobs live here:
 //
 //   1. Discovery - parse XDG desktop entries into launchable app records,
-//      with icons resolved through the icon-theme spec and inlined as data
-//      URLs (the shell's CSP allows `img-src data:`, and adding a custom
-//      scheme for icons would mean widening it).
+//      with icons resolved through the icon theme (icon-theme.mts).
 //   2. Launching - spawn a desktop entry's Exec line onto the embedded
 //      display, detached from the shell, remembering the pid so its windows
 //      can be matched back to the app that owns them.
@@ -24,7 +22,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { ipcMain, nativeImage } from 'electron';
+import { ipcMain } from 'electron';
+import { forgetIconIndex, resolveIcon } from './icon-theme.mts';
 import {
   embeddedDisplay,
   embeddedDisplayAvailable,
@@ -386,281 +385,6 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
 }
 
 // ---------------------------------------------------------------------------
-// Icons
-//
-// The icon-theme spec's lookup is "find the file named <Icon> in the
-// best-matching directory of the current theme, then its parents, then
-// hicolor". Din does it once, in bulk: the ranked directory list is walked
-// and indexed into a name -> path map, so 200 apps cost one pass over a few
-// dozen directories instead of thousands of stat() probes.
-// ---------------------------------------------------------------------------
-
-/** Icon size Din renders at, in the launcher and Dock (logical px, 2x). */
-const TARGET_ICON_SIZE = 96;
-/** Cap on an inlined icon; larger PNGs are downscaled before encoding. */
-const MAX_ICON_BYTES = 128 * 1024;
-
-/** Roots that can contain icon themes, most specific first. */
-function iconRoots(): string[] {
-  return [
-    ...new Set([
-      path.join(dataHome(), 'icons'),
-      path.join(os.homedir(), '.icons'),
-      ...dataDirs().map((dir) => path.join(dir, 'icons')),
-      path.join(dataHome(), 'flatpak/exports/share/icons'),
-      '/var/lib/flatpak/exports/share/icons',
-    ]),
-  ];
-}
-
-/** Flat directories of loose icons, searched after the themes. */
-function pixmapDirs(): string[] {
-  return [...new Set(dataDirs().map((dir) => path.join(dir, 'pixmaps')))];
-}
-
-/**
- * The session's icon theme name.
- *
- * Read from the GTK settings file rather than by shelling out to gsettings:
- * it's the same answer, costs no subprocess, and works in a session where
- * gsettings isn't installed. Falls back to hicolor, which every theme
- * inherits anyway.
- */
-function currentIconTheme(): string {
-  const files = [
-    path.join(os.homedir(), '.config/gtk-4.0/settings.ini'),
-    path.join(os.homedir(), '.config/gtk-3.0/settings.ini'),
-    path.join(os.homedir(), '.gtkrc-2.0'),
-  ];
-  for (const file of files) {
-    try {
-      const match = /^\s*gtk-icon-theme-name\s*=\s*"?([^"\n]+?)"?\s*$/m.exec(
-        fs.readFileSync(file, 'utf8'),
-      );
-      if (match) return match[1];
-    } catch {
-      // Not present; try the next one.
-    }
-  }
-  return 'hicolor';
-}
-
-/** An index.theme's subdirectory, with what the spec needs to rank it. */
-interface ThemeDir {
-  name: string;
-  size: number;
-  scale: number;
-  context: string;
-  /** Scalable directories hold SVGs that look right at any size. */
-  scalable: boolean;
-}
-
-/** Parse a theme's index.theme into its directory list and parent themes. */
-function parseIndexTheme(file: string): { dirs: ThemeDir[]; inherits: string[] } | null {
-  let text: string;
-  try {
-    text = fs.readFileSync(file, 'utf8');
-  } catch {
-    return null;
-  }
-  const groups = new Map<string, Map<string, string>>();
-  let current: Map<string, string> | null = null;
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.trim();
-    if (line.startsWith('#') || line.length === 0) continue;
-    if (line.startsWith('[') && line.endsWith(']')) {
-      current = new Map();
-      groups.set(line.slice(1, -1), current);
-      continue;
-    }
-    const eq = line.indexOf('=');
-    if (eq === -1 || !current) continue;
-    current.set(line.slice(0, eq).trim(), line.slice(eq + 1).trim());
-  }
-
-  const head = groups.get('Icon Theme');
-  if (!head) return null;
-  const names = [head.get('Directories'), head.get('ScaledDirectories')]
-    .filter((v): v is string => Boolean(v))
-    .flatMap((v) => v.split(',').map((s) => s.trim()))
-    .filter(Boolean);
-
-  const dirs: ThemeDir[] = [];
-  for (const name of names) {
-    const group = groups.get(name);
-    if (!group) continue;
-    dirs.push({
-      name,
-      size: Number(group.get('Size') ?? 0) || 0,
-      scale: Number(group.get('Scale') ?? 1) || 1,
-      context: group.get('Context') ?? '',
-      scalable: (group.get('Type') ?? 'Threshold') === 'Scalable',
-    });
-  }
-  return { dirs, inherits: (head.get('Inherits') ?? '').split(',').map((s) => s.trim()).filter(Boolean) };
-}
-
-/**
- * Rank a theme directory: lower sorts first.
- *
- * Application icons are what a launcher wants, at roughly the size it
- * renders. Scalable directories win outright (one SVG beats any raster
- * size), then unscaled raster directories by distance from the target, with
- * too-small icons penalized harder than too-large ones - upscaling a 16px
- * icon into a Dock tile looks far worse than downscaling a 256px one.
- */
-function rankThemeDir(dir: ThemeDir): number {
-  const contextPenalty = dir.context === 'Applications' ? 0 : 1000;
-  const scalePenalty = (dir.scale - 1) * 500;
-  if (dir.scalable) return contextPenalty + scalePenalty;
-  const distance =
-    dir.size >= TARGET_ICON_SIZE
-      ? dir.size - TARGET_ICON_SIZE
-      : (TARGET_ICON_SIZE - dir.size) * 4;
-  return contextPenalty + scalePenalty + 1 + distance;
-}
-
-/** The theme's inheritance chain, depth-first, always ending in hicolor. */
-function themeChain(theme: string): string[] {
-  const chain: string[] = [];
-  const seen = new Set<string>();
-  const visit = (name: string, depth: number): void => {
-    if (seen.has(name) || depth > 8) return;
-    seen.add(name);
-    chain.push(name);
-    for (const root of iconRoots()) {
-      const parsed = parseIndexTheme(path.join(root, name, 'index.theme'));
-      if (!parsed) continue;
-      for (const parent of parsed.inherits) visit(parent, depth + 1);
-      break;
-    }
-  };
-  visit(theme, 0);
-  visit('Adwaita', 0);
-  visit('hicolor', 0);
-  return chain;
-}
-
-/** Extensions Din can inline, best first (SVG scales; XPM can't be rendered). */
-const ICON_EXTENSIONS = ['.svg', '.png'];
-
-/** name -> icon file path, built once per process. */
-let iconIndex: Map<string, string> = new Map();
-/** In-flight index build, so concurrent callers share one pass. */
-let iconIndexBuild: Promise<Map<string, string>> | null = null;
-
-/** Build (once) the icon-name index over the whole theme chain. */
-function buildIconIndex(): Promise<Map<string, string>> {
-  if (iconIndex.size > 0) return Promise.resolve(iconIndex);
-  iconIndexBuild ??= indexIcons();
-  return iconIndexBuild;
-}
-
-async function indexIcons(): Promise<Map<string, string>> {
-  const index = new Map<string, string>();
-
-  /** Record every usable icon in a directory, without overwriting a better hit. */
-  const indexDir = (dir: string): void => {
-    let dirents: fs.Dirent[];
-    try {
-      dirents = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const dirent of dirents) {
-      if (dirent.isDirectory()) continue;
-      const ext = path.extname(dirent.name).toLowerCase();
-      if (!ICON_EXTENSIONS.includes(ext)) continue;
-      const name = dirent.name.slice(0, -ext.length);
-      if (!index.has(name)) index.set(name, path.join(dir, dirent.name));
-    }
-  };
-
-  const roots = iconRoots();
-  for (const theme of themeChain(currentIconTheme())) {
-    // A theme can be split across roots (a user override plus the system
-    // copy); merge every root's copy of it, best-ranked directories first.
-    const dirs: ThemeDir[] = [];
-    for (const root of roots) {
-      const parsed = parseIndexTheme(path.join(root, theme, 'index.theme'));
-      for (const dir of parsed?.dirs ?? []) {
-        if (!dirs.some((d) => d.name === dir.name)) dirs.push(dir);
-      }
-    }
-    for (const dir of [...dirs].sort((a, b) => rankThemeDir(a) - rankThemeDir(b))) {
-      for (const root of roots) indexDir(path.join(root, theme, dir.name));
-      await breathe();
-    }
-  }
-  for (const dir of pixmapDirs()) indexDir(dir);
-
-  iconIndex = index;
-  iconIndexBuild = null;
-  return index;
-}
-
-/** icon path -> data URL, so shared icons are encoded once. */
-const iconDataUrls = new Map<string, string | null>();
-
-/**
- * Inline an icon file as a data: URL.
- *
- * Oversized PNGs are downscaled through nativeImage first - a handful of
- * apps ship 512px icons, and shipping those verbatim would put megabytes of
- * base64 through IPC for something rendered at 48px.
- */
-function iconDataUrl(file: string): string | null {
-  const cached = iconDataUrls.get(file);
-  if (cached !== undefined) return cached;
-
-  let url: string | null;
-  try {
-    const ext = path.extname(file).toLowerCase();
-    if (ext === '.svg') {
-      const data = fs.readFileSync(file);
-      url =
-        data.length <= MAX_ICON_BYTES
-          ? `data:image/svg+xml;base64,${data.toString('base64')}`
-          : null;
-    } else {
-      let data: Uint8Array = fs.readFileSync(file);
-      if (data.length > MAX_ICON_BYTES) {
-        const image = nativeImage
-          .createFromPath(file)
-          .resize({ width: TARGET_ICON_SIZE, height: TARGET_ICON_SIZE, quality: 'good' });
-        data = image.isEmpty() ? new Uint8Array(0) : image.toPNG();
-      }
-      url =
-        data.length > 0 && data.length <= MAX_ICON_BYTES
-          ? `data:image/png;base64,${Buffer.from(data).toString('base64')}`
-          : null;
-    }
-  } catch {
-    url = null;
-  }
-  iconDataUrls.set(file, url);
-  return url;
-}
-
-/**
- * Resolve an icon name (or absolute path), as desktop entries and tray items
- * give them, to a data URL, or null.
- */
-export async function resolveIcon(iconName: string | null): Promise<string | null> {
-  if (!iconName) return null;
-  // An absolute path is used as-is, per the spec.
-  if (iconName.startsWith('/')) {
-    return fs.existsSync(iconName) ? iconDataUrl(iconName) : null;
-  }
-  // Some entries carry a filename ("foo.png") rather than an icon name.
-  const bare = ICON_EXTENSIONS.includes(path.extname(iconName).toLowerCase())
-    ? iconName.slice(0, -path.extname(iconName).length)
-    : iconName;
-  const file = (await buildIconIndex()).get(bare);
-  return file ? iconDataUrl(file) : null;
-}
-
-// ---------------------------------------------------------------------------
 // Launching and window matching
 // ---------------------------------------------------------------------------
 
@@ -926,7 +650,7 @@ function watchUserApplications(onChange: () => void): void {
       timer = null;
       entryCache = null;
       // New programs bring new icons, which the index hasn't seen.
-      iconIndex = new Map();
+      forgetIconIndex();
       onChange();
     }, 1_000);
   };
