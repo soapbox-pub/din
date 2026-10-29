@@ -1037,6 +1037,117 @@ async function recentFiles(extra: [string, number][]): Promise<RecentFile[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Finding files by name, for the Files app's search.
+// ---------------------------------------------------------------------------
+
+/** Matches returned by one search, at most. */
+const MAX_FIND = 1_000;
+/** Entries a walk looks at before giving up, when fd isn't installed. */
+const MAX_FIND_SCAN = 500_000;
+const FIND_TIMEOUT_MS = 60_000;
+/** Folders not searched: dependencies, caches, version control. */
+const FIND_SKIPPED_DIRS = ['node_modules', '.git', '.hg', '.svn', '.cache', '__pycache__', '.venv', '.direnv'];
+
+interface FoundEntry {
+  /** Relative to the folder searched, with `/` separators. */
+  name: string;
+  kind: 'directory' | 'file' | 'other';
+  symlink: boolean;
+  size: number | null;
+  mtimeMs: number | null;
+}
+
+/** Paths beneath `root` whose names contain `query` (any case), by fd. */
+async function fdFind(root: string, query: string, hidden: boolean, signal: AbortSignal): Promise<string[]> {
+  const { stdout } = await runCommand('fd', [
+    '--fixed-strings', '--ignore-case', '--no-ignore', '--print0', '--color', 'never',
+    '--max-results', String(MAX_FIND + 1),
+    ...(hidden ? ['--hidden'] : []),
+    ...FIND_SKIPPED_DIRS.flatMap((d) => ['--exclude', d]),
+    '--', query, root,
+  ], { timeout: FIND_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, signal });
+  return stdout.split('\0').filter(Boolean).map((p) => path.normalize(p));
+}
+
+/** The same, by walking breadth first, for systems without fd. */
+async function walkFind(root: string, query: string, hidden: boolean, signal: AbortSignal): Promise<string[]> {
+  const needle = query.toLowerCase();
+  const skipped = new Set(FIND_SKIPPED_DIRS);
+  const found: string[] = [];
+  let budget = MAX_FIND_SCAN;
+  let level = [root];
+  while (level.length > 0 && budget > 0 && found.length <= MAX_FIND && !signal.aborted) {
+    const next: string[] = [];
+    for (const dir of level) {
+      if (budget <= 0 || found.length > MAX_FIND || signal.aborted) break;
+      let dirents: fs.Dirent[];
+      try {
+        dirents = await fsp.readdir(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const d of dirents) {
+        if (!hidden && d.name.startsWith('.')) continue;
+        budget--;
+        const p = path.join(dir, d.name);
+        if (d.name.toLowerCase().includes(needle)) found.push(p);
+        if (d.isDirectory() && !skipped.has(d.name)) next.push(p);
+      }
+    }
+    level = next;
+  }
+  return found;
+}
+
+/** Each search a window has running, so its next one can stop it. */
+const finds = new Map<number, AbortController>();
+
+/**
+ * Files and folders beneath `root` whose names contain `query`, as entries
+ * named by their path relative to it. A window's new search stops its last.
+ */
+async function findFiles(sender: number, root: string, query: string, hidden: boolean) {
+  finds.get(sender)?.abort();
+  const controller = new AbortController();
+  finds.set(sender, controller);
+  try {
+    let paths: string[];
+    try {
+      paths = await fdFind(root, query, hidden, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error('Search stopped', { cause: error });
+      if (!isMissing(error)) throw toolError(error);
+      paths = await walkFind(root, query, hidden, controller.signal);
+    }
+    if (controller.signal.aborted) throw new Error('Search stopped');
+    const truncated = paths.length > MAX_FIND;
+    const entries = await Promise.all(paths.slice(0, MAX_FIND).map(async (p): Promise<FoundEntry> => {
+      const entry: FoundEntry = {
+        name: path.relative(root, p).split(path.sep).join('/'),
+        kind: 'other',
+        symlink: false,
+        size: null,
+        mtimeMs: null,
+      };
+      try {
+        const link = await fsp.lstat(p);
+        entry.symlink = link.isSymbolicLink();
+        const stats = entry.symlink ? await fsp.stat(p) : link;
+        entry.kind = stats.isDirectory() ? 'directory' : stats.isFile() ? 'file' : 'other';
+        entry.size = stats.size;
+        entry.mtimeMs = stats.mtimeMs;
+      } catch {
+        // Gone since, or a broken link.
+      }
+      return entry;
+    }));
+    return { entries: entries.filter((e) => e.name && !e.name.startsWith('..')), truncated };
+  } finally {
+    if (finds.get(sender) === controller) finds.delete(sender);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Registration.
 // ---------------------------------------------------------------------------
 
@@ -1164,6 +1275,12 @@ export function registerFileOpsHandlers({ assertShellSender, sendToShell }: {
             : [])
       : [];
     return recentFiles(used);
+  });
+  ipcMain.handle('fs:find', async (event, root, query, options) => {
+    assertShellSender(event);
+    if (typeof query !== 'string' || query.length === 0 || query.length > 255) throw new Error('Nothing to search for');
+    const hidden = typeof options === 'object' && options !== null && (options as { hidden?: unknown }).hidden === true;
+    return findFiles(event.sender.id, absolute(root), query, hidden);
   });
 }
 

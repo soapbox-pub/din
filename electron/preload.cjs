@@ -301,6 +301,15 @@ expose('fs', {
   recent: (extra) => ipcRenderer.invoke('fs:recent', extra),
 
   /**
+   * Files and folders beneath `root` whose names contain `query`. A new
+   * search from the same window stops the last.
+   * @param {string} root
+   * @param {string} query
+   * @param {{ hidden?: boolean }} [options]
+   */
+  find: (root, query, options) => ipcRenderer.invoke('fs:find', root, query, options),
+
+  /**
    * Every file beneath a folder, as paths relative to it: a git checkout's
    * tracked and unignored files, else a walk that skips dependency folders.
    * @param {string} root

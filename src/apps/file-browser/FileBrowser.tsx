@@ -5,11 +5,13 @@ import {
   ArrowRight,
   ArrowUp,
   ChevronRight,
+  FileText,
   Folder,
   HardDrive,
   Home,
   LayoutGrid,
   List,
+  Loader2,
   RotateCw,
   Search,
   Trash2,
@@ -31,11 +33,13 @@ import {
   invalidateListings,
   useBookmarks,
   useDirectory,
+  useFindFiles,
   useFsDetails,
   useHomeDir,
   useTrashDir,
   useWatchDirectory,
 } from '@/hooks/useFileSystem';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useVolumes } from '@/hooks/useVolumes';
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
@@ -93,6 +97,8 @@ const newTabId = () => `files-${nextTabId++}`;
 
 /** How long type-ahead keeps adding to what's been typed (ms). */
 const TYPEAHEAD_MS = 1000;
+/** How long typing in the search field pauses before subfolders are searched (ms). */
+const SEARCH_DEBOUNCE_MS = 250;
 
 const SORT_LABELS: Record<SortKey, string> = {
   name: 'Name',
@@ -456,6 +462,12 @@ function freshName(entries: FsEntry[] | undefined, base: string): string {
 
 const basename = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 
+/** `p` named relative to `dir`, as search results are, or null when it isn't beneath it. */
+function relativeTo(dir: string, p: string): string | null {
+  const prefix = dir === '/' ? '/' : `${dir}/`;
+  return p.startsWith(prefix) && p.length > prefix.length ? p.slice(prefix.length) : null;
+}
+
 /**
  * One Files tab: an independent navigation context with its own history,
  * selection, and dialogs. Reports its current directory up via
@@ -502,8 +514,10 @@ function FileBrowserTab({
   const [historyIndex, setHistoryIndex] = useState(initialPath ? 0 : -1);
   // While the user is typing a location; null shows the breadcrumbs.
   const [addressEdit, setAddressEdit] = useState<string | null>(null);
-  // Filter for the current folder (Ctrl+F); null hides the field.
+  // Search of the current folder and beneath it (Ctrl+F); null hides the field.
   const [filter, setFilter] = useState<string | null>(null);
+  // Whether the search looks inside files rather than at their names.
+  const [searchContents, setSearchContents] = useState(false);
 
   const [selection, setSelection] = useState<Set<string>>(() => new Set());
   const [cursor, setCursor] = useState<string | null>(null);
@@ -543,15 +557,29 @@ function FileBrowserTab({
   useWatchDirectory(active ? cwd : null);
   const cwdDetails = useFsDetails(cwd);
 
+  // Searching looks through subfolders too (not in the Trash, whose items
+  // are put back by name); this folder's own matches show while it does.
+  const needle = filter?.trim() ?? '';
+  const query = useDebouncedValue(needle, SEARCH_DEBOUNCE_MS);
+  const found = useFindFiles(cwd, query, { hidden: prefs.showHidden, contents: searchContents }, active && !isTrash);
+  const searching = !isTrash && needle !== '' && (query !== needle || found.isFetching);
+  const foundCurrent = !isTrash && needle !== '' && query === needle && found.isSuccess && !found.isPlaceholderData;
+
   const entries = useMemo(() => {
     let items = listing.data?.entries ?? [];
     if (!prefs.showHidden) items = items.filter((e) => !e.name.startsWith('.'));
-    if (filter) {
-      const needle = filter.toLowerCase();
-      items = items.filter((e) => e.name.toLowerCase().includes(needle));
+    if (needle && searchContents && !isTrash) {
+      items = foundCurrent ? found.data.entries : [];
+    } else if (needle) {
+      const lower = needle.toLowerCase();
+      const matches = (name: string) => basename(name).toLowerCase().includes(lower);
+      items = items.filter((e) => matches(e.name));
+      // The last search's finds narrow as the next one is typed.
+      const deeper = isTrash ? [] : (found.data?.entries ?? []).filter((e) => e.name.includes('/') && matches(e.name));
+      if (deeper.length > 0) items = [...items, ...deeper];
     }
     return sortEntriesBy(items, prefs.sort.key, prefs.sort.descending);
-  }, [listing.data, prefs.showHidden, prefs.sort, filter]);
+  }, [listing.data, prefs.showHidden, prefs.sort, needle, searchContents, isTrash, foundCurrent, found.data]);
 
   const byName = useMemo(() => new Map(entries.map((e, i) => [e.name, i])), [entries]);
   // The selection, less anything that's gone (deleted, filtered, hidden).
@@ -569,7 +597,7 @@ function FileBrowserTab({
   );
   const cut = useMemo(() => {
     if (!clipboard || cwd === null) return new Set<string>();
-    return new Set(clipboard.cutPaths.filter((p) => parentPath(p) === cwd).map(basename));
+    return new Set(clipboard.cutPaths.flatMap((p) => relativeTo(cwd, p) ?? []));
   }, [clipboard, cwd]);
 
   const focusView = useCallback(() => {
@@ -885,13 +913,14 @@ function FileBrowserTab({
     (from: string, to: string) => {
       setRenaming(null);
       requestAnimationFrame(focusView);
-      if (cwd === null || from === to) return;
+      if (cwd === null || basename(from) === to) return;
+      // A search result is renamed where it is, in its own folder.
       const src = joinPath(cwd, from);
-      const dest = joinPath(cwd, to);
-      void run(`Renaming ${from}…`, async () => {
+      const dest = joinPath(parentPath(src), to);
+      void run(`Renaming ${basename(from)}…`, async () => {
         await fs.move(src, dest);
         refresh(src, dest);
-        setPending({ names: [to] });
+        setPending({ names: [relativeTo(cwd, dest) ?? to] });
         pushUndo(din, `rename of “${to}”`, { kind: 'move', moves: [{ from: src, to: dest }] });
       });
     },
@@ -920,11 +949,14 @@ function FileBrowserTab({
       void run(`Duplicating ${describe(names)}…`, async () => {
         const made: string[] = [];
         try {
-          for (const name of names) made.push(await fs.copyInto(joinPath(cwd, name), cwd));
+          for (const name of names) {
+            const src = joinPath(cwd, name);
+            made.push(await fs.copyInto(src, parentPath(src)));
+          }
         } finally {
-          refresh(cwd);
+          refresh(cwd, ...made);
           if (made.length > 0) {
-            setPending({ names: made.map(basename) });
+            setPending({ names: made.map((p) => relativeTo(cwd, p) ?? basename(p)) });
             pushUndo(din, `duplicate of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
           }
         }
@@ -947,7 +979,8 @@ function FileBrowserTab({
         let incomplete = false;
         try {
           for (const name of archives) {
-            const out = await fs.extract(joinPath(cwd, name), cwd, job);
+            const archive = joinPath(cwd, name);
+            const out = await fs.extract(archive, parentPath(archive), job);
             made.push(out.path);
             damaged.push(...out.damaged);
             removedLinks.push(...out.removedLinks);
@@ -961,9 +994,9 @@ function FileBrowserTab({
         } finally {
           canceledJobs.current.delete(job);
           setExtractJob((current) => (current === job ? null : current));
-          refresh(cwd);
+          refresh(cwd, ...made);
           if (made.length > 0) {
-            setPending({ names: made.map(basename) });
+            setPending({ names: made.map((p) => relativeTo(cwd, p) ?? basename(p)) });
             pushUndo(din, `extraction of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
           }
         }
@@ -1353,7 +1386,7 @@ function FileBrowserTab({
       const from = index === -1 ? 0 : t.text.length === 1 ? index + 1 : index;
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[(from + i) % entries.length];
-        if (entry.name.toLowerCase().startsWith(t.text)) {
+        if (basename(entry.name).toLowerCase().startsWith(t.text)) {
           handled();
           selectOnly(entry.name);
           reveal();
@@ -1370,6 +1403,11 @@ function FileBrowserTab({
   const single = selectedEntries.length === 1 ? selectedEntries[0] : null;
   const singleFolderPath = single?.kind === 'directory' && cwd ? joinPath(cwd, single.name) : null;
   const anyExtractable = selectedNames.some(isExtractable);
+  // Search results from subfolders, which can't be packed into an archive here.
+  const inSubfolder = selectedNames.some((n) => n.includes('/'));
+  const showInFolder = (name: string) => {
+    if (cwd) navigate(parentPath(joinPath(cwd, name)), basename(name));
+  };
   const selectionBytes = selectedEntries.reduce((n, e) => n + (e.kind === 'file' ? (e.size ?? 0) : 0), 0);
 
   const viewMenuItems = (
@@ -1526,13 +1564,17 @@ function FileBrowserTab({
         )}
 
         {filter !== null ? (
-          <div className="relative w-40 shrink-0 sm:w-48">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <div className="relative w-44 shrink-0 sm:w-56">
+            {searching ? (
+              <Loader2 className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground motion-safe:animate-spin" aria-hidden />
+            ) : (
+              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            )}
             <input
               ref={filterRef}
               type="search"
-              aria-label="Filter this folder"
-              placeholder="Filter"
+              aria-label={isTrash ? 'Filter the Trash' : searchContents ? 'Search inside files here and in subfolders' : 'Search this folder and its subfolders'}
+              placeholder={isTrash ? 'Filter' : searchContents ? 'Search contents' : 'Search'}
               value={filter}
               autoFocus
               onChange={(e) => setFilter(e.target.value)}
@@ -1548,12 +1590,34 @@ function FileBrowserTab({
                   focusView();
                 }
               }}
-              className="h-8 w-full rounded-md border border-border/60 bg-background pl-7 pr-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className={cn(
+                'h-8 w-full rounded-md border border-border/60 bg-background pl-7 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                isTrash ? 'pr-2' : 'pr-8',
+              )}
             />
+            {!isTrash && (
+              <button
+                type="button"
+                aria-pressed={searchContents}
+                aria-label="Search inside files"
+                title={searchContents ? 'Searching inside files (click to search names)' : 'Search inside files'}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setSearchContents((on) => !on)}
+                className={cn(
+                  'absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  searchContents
+                    ? 'bg-primary/15 text-primary'
+                    : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+                )}
+              >
+                <FileText className="size-3.5" aria-hidden />
+              </button>
+            )}
           </div>
         ) : (
           <ToolButton
-            label="Filter (Ctrl+F)"
+            label="Search (Ctrl+F)"
             onClick={() => {
               setFilter('');
               requestAnimationFrame(() => filterRef.current?.focus());
@@ -1742,7 +1806,13 @@ function FileBrowserTab({
                   {entries.length === 0 && (
                     <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
                       <p className="text-sm text-muted-foreground">
-                        {filter ? `Nothing here matches “${filter}”.` : isTrash ? 'The Trash is empty.' : 'This folder is empty.'}
+                        {searching
+                          ? 'Searching…'
+                          : found.isError && needle && !isTrash
+                            ? `Couldn’t search: ${cleanFsError(found.error)}`
+                            : filter
+                              ? `Nothing here matches “${filter}”.`
+                              : isTrash ? 'The Trash is empty.' : 'This folder is empty.'}
                       </p>
                     </div>
                   )}
@@ -1761,6 +1831,9 @@ function FileBrowserTab({
                       {single && isWindowsProgram(single.name) ? 'Run' : 'Open'}
                       <ContextMenuShortcut>Enter</ContextMenuShortcut>
                     </ContextMenuItem>
+                    {single?.name.includes('/') && (
+                      <ContextMenuItem onSelect={() => showInFolder(single.name)}>Show in Enclosing Folder</ContextMenuItem>
+                    )}
                     {selectedEntries.some((e) => e.kind === 'directory') && (
                       <>
                         <ContextMenuItem onSelect={() => openNames(selectedNames.filter((n) => entries[byName.get(n)!].kind === 'directory'), 'tab')}>
@@ -1846,6 +1919,7 @@ function FileBrowserTab({
                           <ContextMenuItem onSelect={() => extract(selectedNames)}>Extract Here</ContextMenuItem>
                         )}
                         <ContextMenuItem
+                          disabled={inSubfolder}
                           onSelect={() =>
                             setDialog({ type: 'compress', names: selectedNames, error: null, pending: false })
                           }
@@ -2047,10 +2121,14 @@ function FileBrowserTab({
                 ? `“${selectedNames[0]}” selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`
                 : `${selectedNames.length.toLocaleString()} of ${entries.length.toLocaleString()} selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`}
         </span>
-        {listing.data?.truncated && (
+        {listing.data?.truncated && !filter && (
           <span className="shrink-0 text-amber-600 dark:text-amber-400">
             Showing the first {listing.data.entries.length.toLocaleString()} items.
           </span>
+        )}
+        {searching && entries.length > 0 && <span className="shrink-0">Searching subfolders…</span>}
+        {foundCurrent && found.data.truncated && (
+          <span className="shrink-0 text-amber-600 dark:text-amber-400">Too many matches; showing some of them.</span>
         )}
         <span
           role={status?.kind === 'error' ? 'alert' : 'status'}

@@ -121,6 +121,13 @@ export interface FsBridge {
    * pairs of the shell's own.
    */
   recent(extra: [string, number][]): Promise<FsRecentFile[]>;
+  /**
+   * Files and folders beneath `root` whose names contain `query` (any case),
+   * named by their path relative to it. Hidden ones only with `hidden`;
+   * dependency and cache folders never. A new search from the same window
+   * stops the last.
+   */
+  find(root: string, query: string, options?: { hidden?: boolean }): Promise<{ entries: FsEntry[]; truncated: boolean }>;
   // The Text Editor's project operations (electron/project.mts).
 
   /**
@@ -346,6 +353,8 @@ export function compareEntriesBy(
     const idx = name.lastIndexOf('.');
     return idx > 0 ? name.slice(idx + 1).toLowerCase() : '';
   };
+  // Search results are named by a path beneath the folder; they sort by their own name.
+  const base = (name: string) => name.slice(name.lastIndexOf('/') + 1);
   const sign = descending ? -1 : 1;
   return (a, b) => {
     if ((a.kind === 'directory') !== (b.kind === 'directory')) {
@@ -355,6 +364,7 @@ export function compareEntriesBy(
     if (key === 'size') order = (a.size ?? -1) - (b.size ?? -1);
     else if (key === 'modified') order = (a.mtimeMs ?? 0) - (b.mtimeMs ?? 0);
     else if (key === 'type') order = NAME_COLLATOR.compare(ext(a.name), ext(b.name));
+    if (order === 0) order = NAME_COLLATOR.compare(base(a.name), base(b.name));
     if (order === 0) order = NAME_COLLATOR.compare(a.name, b.name);
     return order * sign;
   };

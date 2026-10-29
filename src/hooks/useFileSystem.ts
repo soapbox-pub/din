@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { getFsBridge, joinPath, parentPath } from '@/lib/fs';
-import type { FsDetails, FsDiskUsage, FsListing, FsReadResult, FsRecentFile } from '@/lib/fs';
+import type { FsDetails, FsDiskUsage, FsEntry, FsListing, FsReadResult, FsRecentFile } from '@/lib/fs';
 import { readPickedFiles } from '@/lib/pickedFiles';
 
 /**
@@ -58,6 +58,55 @@ export function useRecentFiles(enabled: boolean) {
   });
 }
 
+/** Files a search found, at most, when it searched their contents. */
+const MAX_CONTENT_RESULTS = 1_000;
+
+/**
+ * Everything beneath `root` matching `query`: by name, or with `contents`,
+ * the files whose text contains it. Entries are named by their path
+ * relative to `root`.
+ */
+export function useFindFiles(
+  root: string | null,
+  query: string,
+  options: { hidden: boolean; contents: boolean },
+  enabled: boolean,
+) {
+  const fs = getFsBridge();
+  const { hidden, contents } = options;
+  return useQuery<{ entries: FsEntry[]; truncated: boolean }>({
+    queryKey: ['fs', 'find', root, query, hidden, contents],
+    queryFn: async () => {
+      if (!root) throw new Error('No path');
+      const bridge = requireBridge();
+      if (!contents) return bridge.find(root, query, { hidden });
+      const result = await bridge.search(root, {
+        query, regex: false, caseSensitive: false, wholeWord: false, include: '', exclude: '',
+      });
+      const files = result.files
+        .filter((f) => hidden || !f.path.split('/').some((part) => part.startsWith('.')))
+        .slice(0, MAX_CONTENT_RESULTS);
+      const entries = await Promise.all(files.map(async ({ path }): Promise<FsEntry> => {
+        try {
+          const stat = await bridge.stat(joinPath(root, path));
+          return { name: path, kind: stat.kind, symlink: false, size: stat.size, mtimeMs: stat.mtimeMs };
+        } catch {
+          return { name: path, kind: 'file', symlink: false, size: null, mtimeMs: null };
+        }
+      }));
+      return { entries, truncated: result.truncated || result.files.length > MAX_CONTENT_RESULTS };
+    },
+    enabled: fs !== undefined && root !== null && query !== '' && enabled,
+    // While the next search runs, the last one's results stand in (from the same folder, the same way).
+    placeholderData: (previous, previousQuery) => {
+      const [, , lastRoot, , lastHidden, lastContents] = previousQuery?.queryKey ?? [];
+      return lastRoot === root && lastHidden === hidden && lastContents === contents ? previous : undefined;
+    },
+    staleTime: 5_000,
+    retry: false,
+  });
+}
+
 /** Read (a capped prefix of) a regular file, e.g. for previews. */
 export function useFileContent(path: string | null, maxBytes?: number) {
   const fs = getFsBridge();
@@ -87,9 +136,10 @@ export function invalidateListings(queryClient: QueryClient, ...paths: string[])
   return queryClient.invalidateQueries({
     predicate: (query) => {
       const [scope, op, dir] = query.queryKey;
-      if (scope !== 'fs' || (op !== 'readdir' && op !== 'details') || typeof dir !== 'string') {
-        return false;
-      }
+      if (scope !== 'fs' || typeof dir !== 'string') return false;
+      // A search beneath a folder covers whatever changes inside it.
+      if (op === 'find') return affected.some((p) => p === dir || p.startsWith(dir === '/' ? '/' : `${dir}/`));
+      if (op !== 'readdir' && op !== 'details') return false;
       return affected.some(
         (p) => dir === p || dir.startsWith(p === '/' ? '/' : `${p}/`),
       );

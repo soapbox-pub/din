@@ -513,9 +513,19 @@ function itemTone({ selected, isCursor, focused, isDropTarget }: ItemProps) {
   );
 }
 
+/**
+ * An entry's own name and, for a search result from a subfolder (named by
+ * its path beneath the folder shown), that subfolder.
+ */
+function splitName(name: string): [string, string | null] {
+  const slash = name.lastIndexOf('/');
+  return slash === -1 ? [name, null] : [name.slice(slash + 1), name.slice(0, slash)];
+}
+
 const ListRow = memo(function ListRow(props: ItemProps) {
   const { id, dir, entry, top, left, width, height, iconPx, selected, isCut, renaming } = props;
   const path = joinPath(dir, entry.name);
+  const [name, folder] = splitName(entry.name);
   return (
     <div
       id={id}
@@ -543,7 +553,7 @@ const ListRow = memo(function ListRow(props: ItemProps) {
       >
         <FileIcon
           path={path}
-          name={entry.name}
+          name={name}
           kind={entry.kind}
           size={entry.size}
           mtimeMs={entry.mtimeMs}
@@ -553,15 +563,17 @@ const ListRow = memo(function ListRow(props: ItemProps) {
         {renaming ? (
           <RenameInput entry={entry} onSubmit={props.onRenameSubmit} onCancel={props.onRenameCancel} />
         ) : (
-          <span className="truncate text-foreground">{entry.name}</span>
+          <span className="truncate text-foreground">{name}</span>
         )}
       </div>
-      <span className="min-w-0 flex-1" />
+      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={folder ?? undefined}>
+        {folder}
+      </span>
       <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
         {entry.kind === 'file' && entry.size !== null ? formatBytes(entry.size) : ''}
       </span>
       <span className="hidden w-32 shrink-0 truncate text-xs text-muted-foreground @xl:block">
-        {typeLabel(entry.name, entry.kind)}
+        {typeLabel(name, entry.kind)}
       </span>
       <span className="hidden w-40 shrink-0 truncate text-xs tabular-nums text-muted-foreground @md:block">
         {entry.mtimeMs !== null ? MTIME_FORMAT.format(entry.mtimeMs) : ''}
@@ -573,6 +585,7 @@ const ListRow = memo(function ListRow(props: ItemProps) {
 const GridTile = memo(function GridTile(props: ItemProps) {
   const { id, dir, entry, top, left, width, height, iconPx, selected, isCut, renaming } = props;
   const path = joinPath(dir, entry.name);
+  const [name] = splitName(entry.name);
   return (
     <div
       id={id}
@@ -601,7 +614,7 @@ const GridTile = memo(function GridTile(props: ItemProps) {
       >
         <FileIcon
           path={path}
-          name={entry.name}
+          name={name}
           kind={entry.kind}
           size={entry.size}
           mtimeMs={entry.mtimeMs}
@@ -617,7 +630,7 @@ const GridTile = memo(function GridTile(props: ItemProps) {
               selected && 'font-medium',
             )}
           >
-            {entry.name}
+            {name}
           </span>
         )}
       </div>
@@ -640,14 +653,15 @@ function RenameInput({
   onCancel: () => void;
   centered?: boolean;
 }) {
-  const [value, setValue] = useState(entry.name);
+  const [name] = splitName(entry.name);
+  const [value, setValue] = useState(name);
   const valid = isValidEntryName(value.trim());
   const done = useRef(false);
 
   return (
     <input
       type="text"
-      aria-label={`Rename ${entry.name}`}
+      aria-label={`Rename ${name}`}
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onMouseDown={(e) => e.stopPropagation()}
@@ -668,15 +682,15 @@ function RenameInput({
       onBlur={() => {
         if (done.current) return;
         // Clicking away keeps a valid edit, like Nautilus and Finder.
-        if (valid && value.trim() !== entry.name) onSubmit(entry.name, value.trim());
+        if (valid && value.trim() !== name) onSubmit(entry.name, value.trim());
         else onCancel();
       }}
       ref={(el) => {
         if (!el || el.dataset.ready) return;
         el.dataset.ready = 'true';
         el.focus();
-        const dot = entry.kind === 'directory' ? -1 : entry.name.lastIndexOf('.');
-        el.setSelectionRange(0, dot > 0 ? dot : entry.name.length);
+        const dot = entry.kind === 'directory' ? -1 : name.lastIndexOf('.');
+        el.setSelectionRange(0, dot > 0 ? dot : name.length);
       }}
       spellCheck={false}
       autoComplete="off"

@@ -120,7 +120,7 @@ function applyTheme(theme: ThemeSnapshot, loadedFaces: Set<string>): void {
 const FS_METHODS = [
   'homedir', 'stat', 'readdir', 'readFile', 'writeFile', 'mkdir', 'rename', 'copyFile', 'rm', 'copyInto', 'moveInto',
   'move', 'trash', 'restore', 'purge', 'trashDir', 'details', 'du', 'chmod', 'extract', 'cancelExtract', 'compress',
-  'listArchive', 'recent', 'listFiles', 'search', 'watch', 'unwatch',
+  'listArchive', 'recent', 'find', 'listFiles', 'search', 'watch', 'unwatch',
 ] as const;
 
 function fsBridge(t: NonNullable<Transport['system']>): FsBridge {
