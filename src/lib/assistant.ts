@@ -52,8 +52,11 @@ export interface AssistantBridge {
   request(method: string, path: string, body?: unknown): Promise<Reply>;
   /** sudo's password requests from the agent's commands. */
   passwords(): Promise<PasswordRequest[]>;
-  /** The password, or null to cancel. `ok` is false when the password isn't right. */
-  answerPassword(requestId: number, password: string | null): Promise<{ ok: boolean }>;
+  /**
+   * The password, or null to cancel. `ok` is false when the password isn't
+   * right. `remember` stops sudo asking in its conversation.
+   */
+  answerPassword(requestId: number, password: string | null, remember?: boolean): Promise<{ ok: boolean }>;
   onStatus(callback: (status: AssistantStatus) => void): () => void;
   onEvent(callback: (event: AssistantEvent) => void): () => void;
 }

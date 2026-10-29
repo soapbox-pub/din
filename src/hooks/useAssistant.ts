@@ -818,8 +818,15 @@ export function useReplyPermission() {
 export function useAnswerPassword() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ request, password }: { request: PasswordRequest; password: string | null }) =>
-      requireBridge().answerPassword(request.requestId, password),
+    mutationFn: ({
+      request,
+      password,
+      remember,
+    }: {
+      request: PasswordRequest;
+      password: string | null;
+      remember?: boolean;
+    }) => requireBridge().answerPassword(request.requestId, password, remember),
     onSuccess: ({ ok }) => {
       if (ok) void queryClient.invalidateQueries({ queryKey: assistantKeys.passwords });
     },

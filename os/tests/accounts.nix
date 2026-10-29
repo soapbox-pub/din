@@ -17,6 +17,28 @@ let
         conn.sendall((json.dumps({"password": answer} if answer != "-" else {}) + "\n").encode())
         conn.close()
   '';
+
+  # An Assistant's server, for "Allow for this conversation": run by a bash
+  # called opencode, it runs sudo as the agent would, each step waiting on
+  # the test, and writes down how each sudo went.
+  agentScript = pkgs.writeShellScript "agent" ''
+    export PATH=/run/wrappers/bin:/run/current-system/sw/bin
+    wait_for() { while [ ! -e "$1" ]; do sleep 0.1; done; }
+    run() { OPENCODE_SESSION_ID=$1 setsid -w sudo -k true </dev/null >/dev/null 2>&1; echo $? > /tmp/oc/$2; }
+    OPENCODE_SESSION_ID=ses_test2 SUDO_ASKPASS=${slowPass} DISPLAY=:x setsid -w sudo -k true </dev/null >/dev/null 2>&1
+    echo $? > /tmp/oc/asked
+    run ses_test2 again
+    run ses_other other
+    wait_for /tmp/oc/revoked
+    run ses_test2 after
+  '';
+  # Answers once the test has granted the conversation, saying which sudo asked.
+  slowPass = pkgs.writeShellScript "slow-pass" ''
+    export PATH=/run/current-system/sw/bin
+    echo $PPID > /tmp/oc/sudo.pid
+    while [ ! -e /tmp/oc/granted ]; do sleep 0.1; done
+    echo hunter22
+  '';
 in
 
 # The computer's accounts and password: nostrd holds the Nostr keys as its
@@ -35,6 +57,7 @@ pkgs.testers.runNixOSTest {
     users.users.stranger.isNormalUser = true;
     environment.systemPackages = [ pkgs.keyutils pkgs.cryptsetup pkgs.libsecret ];
     virtualisation.memorySize = 2048;
+    environment.etc."test-agent".source = agentScript;
   };
 
   testScript = ''
@@ -166,6 +189,25 @@ pkgs.testers.runNixOSTest {
         asked_session, command = machine.succeed("cat /tmp/rt/din-askpass.sock.asked").split("\n")[0].split(" ", 1)
         assert asked_session == "ses_test1", asked_session
         assert command.split(" ", 1)[0].endswith("sudo") and command.endswith(" -k true"), command
+
+    with subtest("a conversation allowed once isn't asked again, and only it"):
+        as_din("mkdir -m 700 /tmp/oc && cp ${pkgs.bash}/bin/bash /tmp/oc/opencode")
+        machine.succeed("systemd-run --uid=din --unit=agent /tmp/oc/opencode /etc/test-agent")
+        machine.wait_until_succeeds("test -s /tmp/oc/sudo.pid")
+        sudo_pid = machine.succeed("cat /tmp/oc/sudo.pid").strip()
+        machine.fail(f"su - din -c \"printf 'nope\\n{sudo_pid}\\n' | sudo -n {password} sudo grant\"")
+        as_din(f"printf 'hunter22\\n{sudo_pid}\\n' | sudo -n {password} sudo grant")
+        as_din("touch /tmp/oc/granted")
+        machine.wait_until_succeeds("test -s /tmp/oc/other")
+        assert machine.succeed("cat /tmp/oc/asked").strip() == "0"
+        assert machine.succeed("cat /tmp/oc/again").strip() == "0"
+        assert machine.succeed("cat /tmp/oc/other").strip() != "0"
+        # Outside its server, the conversation's id is no good.
+        machine.fail("su - din -c 'OPENCODE_SESSION_ID=ses_test2 setsid -w sudo -k true </dev/null'")
+        as_din(f"printf 'ses_test2\\n' | sudo -n {password} sudo revoke")
+        as_din("touch /tmp/oc/revoked")
+        machine.wait_until_succeeds("test -s /tmp/oc/after")
+        assert machine.succeed("cat /tmp/oc/after").strip() != "0"
 
     with subtest("changing the password needs the old one"):
         machine.fail(f"su - din -c \"printf 'nope\\nbattery-staple\\n' | sudo -n {password} change\"")

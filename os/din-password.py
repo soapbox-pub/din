@@ -10,6 +10,15 @@ so Din can run it through sudo without a password.
     din-password sudo status|ask|skip
                            whether sudo asks for it: `skip` takes the password
                            on stdin, so nothing `din` runs can turn it off
+    din-password sudo grant
+                           the password and a sudo's pid on stdin: sudo stops
+                           asking in the Assistant conversation that sudo runs
+                           in, for as long as its OpenCode server runs
+    din-password sudo revoke
+                           a conversation's id on stdin, or nothing for all
+    din-password sudo check
+                           sudo's PAM stack (pam_exec, as root): succeeds when
+                           the sudo above it runs in a granted conversation
 
 Passwords never go on a command line, where other users could read them:
 cryptsetup gets them through pipes, nostrd over its socket, din-keyring,
@@ -18,6 +27,12 @@ if a later step fails, the message says what still has the old password.
 
 sudo skips the password with a rule in /var/lib/din/sudoers.d, which sudoers
 includes (os/configuration.nix); /etc/sudoers.d stays the owner's own.
+
+A conversation's grant is a file in /run/din/sudo-grants, root's alone,
+naming the OpenCode server whose commands it covers by pid and start time
+(so a reused pid doesn't match). A sudo is let through when its
+OPENCODE_SESSION_ID has a grant and that server is one of its ancestors:
+commands from the Terminal, other programs or other servers still ask.
 """
 
 import ctypes
@@ -31,6 +46,7 @@ import sys
 USER = "din"
 NOSTRD_SOCKET = "/run/nostrd/signer.sock"
 SKIP_RULE = "/var/lib/din/sudoers.d/no-password"
+GRANTS = "/run/din/sudo-grants"
 
 
 def fail(message):
@@ -202,6 +218,89 @@ def sudo_ask():
         pass
 
 
+def proc(pid, name):
+    with open(f"/proc/{pid}/{name}", "rb") as f:
+        return f.read()
+
+
+def stat(pid):
+    """Parent pid and start time."""
+    fields = proc(pid, "stat").decode().rsplit(")", 1)[1].split()
+    return int(fields[1]), fields[19]
+
+
+def session_of(pid):
+    for entry in proc(pid, "environ").split(b"\0"):
+        if entry.startswith(b"OPENCODE_SESSION_ID="):
+            session = entry.split(b"=", 1)[1].decode("ascii", "replace")
+            if session.startswith("ses_") and session[4:].isalnum() and len(session) <= 68:
+                return session
+    return None
+
+
+def ancestors(pid):
+    """Each process above pid: its pid, start time and name."""
+    seen = 0
+    pid = stat(pid)[0]
+    while pid > 1 and seen < 64:
+        parent, started = stat(pid)
+        yield pid, started, proc(pid, "comm").decode().strip()
+        pid, seen = parent, seen + 1
+
+
+def sudo_grant():
+    lines = sys.stdin.read().split("\n")
+    if len(lines) < 2 or not lines[1].isdigit():
+        fail("The password and sudo's pid are needed.")
+    password, sudo = lines[0], int(lines[1])
+    hashed = password_hash()
+    if not hashed or not password_matches(password, hashed):
+        fail("That isn't the password.")
+    try:
+        if proc(sudo, "comm").decode().strip() != "sudo":
+            fail("That isn't sudo.")
+        session = session_of(sudo)
+        server = next(((pid, started) for pid, started, name in ancestors(sudo) if name == "opencode"), None)
+    except OSError:
+        fail("That sudo is gone.")
+    if not session or not server:
+        fail("That sudo isn't the Assistant's.")
+    os.makedirs(GRANTS, mode=0o700, exist_ok=True)
+    temporary = os.path.join(GRANTS, f".{session}")
+    with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as grant:
+        grant.write(f"{server[0]} {server[1]}\n")
+    os.rename(temporary, os.path.join(GRANTS, session))
+
+
+def sudo_revoke():
+    session = sys.stdin.read().strip()
+    if session and not (session.startswith("ses_") and session[4:].isalnum()):
+        fail("That isn't a conversation.")
+    if not os.path.isdir(GRANTS):
+        return
+    for name in os.listdir(GRANTS):
+        if not session or name == session:
+            os.remove(os.path.join(GRANTS, name))
+
+
+def sudo_check():
+    if os.environ.get("PAM_SERVICE") != "sudo" or os.environ.get("PAM_USER") != USER:
+        sys.exit(1)
+    try:
+        sudo = os.getppid()
+        if proc(sudo, "comm").decode().strip() != "sudo":
+            sys.exit(1)
+        session = session_of(sudo)
+        if not session:
+            sys.exit(1)
+        with open(os.path.join(GRANTS, session)) as grant:
+            pid, started = grant.read().split()
+        if not any(str(p) == pid and s == started for p, s, _ in ancestors(sudo)):
+            sys.exit(1)
+    except (OSError, ValueError):
+        sys.exit(1)
+
+
 def main():
     args = sys.argv[1:]
     if args == ["change"]:
@@ -212,8 +311,14 @@ def main():
         sudo_skip()
     elif args == ["sudo", "ask"]:
         sudo_ask()
+    elif args == ["sudo", "grant"]:
+        sudo_grant()
+    elif args == ["sudo", "revoke"]:
+        sudo_revoke()
+    elif args == ["sudo", "check"]:
+        sudo_check()
     else:
-        fail("usage: din-password change | sudo status|ask|skip")
+        fail("usage: din-password change | sudo status|ask|skip|grant|revoke|check")
 
 
 if __name__ == "__main__":

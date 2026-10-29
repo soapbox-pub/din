@@ -19,6 +19,12 @@
 // The session id is the asker's word, so a program could put its request in
 // a conversation; it gets no more than it would from the dialog.
 //
+// "Allow for this conversation" also has din-password (DIN_PASSWORD, as
+// root) grant the conversation: its next sudos pass sudo's PAM stack without
+// asking at all, while the OpenCode server that runs them does. The password
+// isn't kept anywhere. Grants go when their conversation is deleted, and all
+// of them when Din starts.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
@@ -46,6 +52,8 @@ export interface AssistantPasswordRequest {
 
 interface Pending {
   socket: net.Socket;
+  /** sudo's. */
+  pid: number;
   timer: NodeJS.Timeout;
   request: AskpassRequest;
   /** The conversation it's asked in, or null for the dialog. */
@@ -63,6 +71,7 @@ const MAX_PASSWORD = 4096;
 const TIMEOUT_MS = 10 * 60_000;
 const CHECK_TIMEOUT_MS = 15_000;
 const SESSION_ID = /^ses_[A-Za-z0-9]{1,64}$/;
+const PASSWORD_HELPER = process.env.DIN_PASSWORD;
 /** Programs that only pass a command on: the one that asked is above them. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'env', 'timeout', 'nohup']);
 
@@ -142,7 +151,7 @@ function ask(socket: net.Socket, pid: unknown, session: unknown): void {
     command: ['sudo', ...args.slice(1)].map(quote).join(' '),
   };
   const sessionID = typeof session === 'string' && SESSION_ID.test(session) ? session : null;
-  pending.set(requestId, { socket, request, sessionID, timer: setTimeout(() => settle(requestId, null), TIMEOUT_MS) });
+  pending.set(requestId, { socket, pid: pid as number, request, sessionID, timer: setTimeout(() => settle(requestId, null), TIMEOUT_MS) });
   socket.on('close', () => settle(requestId, null));
   if (sessionID) passwordsChanged();
   else options.sendToShell('askpass:request', request);
@@ -163,8 +172,33 @@ function check(password: string): Promise<boolean> {
   });
 }
 
-/** Answer a request with the password, or null to cancel. `ok` is false for a wrong password. */
-async function answer(entry: Pending | undefined, password: unknown): Promise<{ ok: boolean }> {
+/** din-password's `sudo <command>`, `input` on its stdin. Resolves whether it succeeded. */
+function passwordHelper(command: string, input: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!PASSWORD_HELPER) {
+      resolve(false);
+      return;
+    }
+    const child = spawn('sudo', ['-n', PASSWORD_HELPER, 'sudo', command], { stdio: ['pipe', 'ignore', 'ignore'] });
+    child.stdin.on('error', () => {});
+    child.stdin.end(input);
+    child.on('error', () => resolve(false));
+    child.on('close', (code) => resolve(code === 0));
+  });
+}
+
+/** Ask sudo again in a conversation (it was deleted), or in every one. */
+export function revokeSudoGrant(sessionID?: string): void {
+  if (sessionID !== undefined && !SESSION_ID.test(sessionID)) return;
+  void passwordHelper('revoke', sessionID ? `${sessionID}\n` : '');
+}
+
+/**
+ * Answer a request with the password, or null to cancel. `ok` is false for a
+ * wrong password. `remember` grants its conversation, so sudo doesn't ask
+ * there again.
+ */
+async function answer(entry: Pending | undefined, password: unknown, remember = false): Promise<{ ok: boolean }> {
   if (!entry) return { ok: true };
   const { requestId } = entry.request;
   if (password === null) {
@@ -175,6 +209,7 @@ async function answer(entry: Pending | undefined, password: unknown): Promise<{ 
     return { ok: false };
   }
   if (!(await check(password))) return { ok: false };
+  if (remember && entry.sessionID) await passwordHelper('grant', `${password}\n${entry.pid}\n`);
   // It may have gone while the password was tried.
   if (pending.get(requestId) === entry) settle(requestId, password);
   return { ok: true };
@@ -252,9 +287,10 @@ export function registerAskpass(opts: Options): void {
       sessionID ? [{ requestId: request.requestId, sessionID, command: request.command }] : [],
     );
   });
-  ipcMain.handle('assistant:answerPassword', (event, requestId: unknown, password: unknown) => {
+  ipcMain.handle('assistant:answerPassword', (event, requestId: unknown, password: unknown, remember: unknown) => {
     opts.assertShellSender(event);
-    return answer(forAssistant(requestId), password);
+    return answer(forAssistant(requestId), password, remember === true);
   });
+  revokeSudoGrant();
   void listen().catch((error: unknown) => console.error('askpass: listening:', error));
 }

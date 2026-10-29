@@ -1824,11 +1824,14 @@ expose('assistant', {
 
   /**
    * Answer one with the password, or null to cancel. Resolves `{ ok: false }`
-   * when the password isn't right.
+   * when the password isn't right. `remember` stops sudo asking in its
+   * conversation.
    * @param {number} requestId
    * @param {string | null} password
+   * @param {boolean} [remember]
    */
-  answerPassword: (requestId, password) => ipcRenderer.invoke('assistant:answerPassword', requestId, password),
+  answerPassword: (requestId, password, remember) =>
+    ipcRenderer.invoke('assistant:answerPassword', requestId, password, remember),
 
   /**
    * Subscribe to status changes. Returns an unsubscribe fn.

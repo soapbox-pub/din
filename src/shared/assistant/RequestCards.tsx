@@ -121,7 +121,7 @@ export function PasswordCard({
   const { notify } = useAssistantHost();
   const [password, setPassword] = useState('');
   const [wrong, setWrong] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
+  const [picked, setPicked] = useState<'cancel' | 'once' | 'conversation' | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const id = useId();
 
@@ -135,10 +135,10 @@ export function PasswordCard({
     focused.current?.();
   }, [focusKey]);
 
-  const send = (value: string | null) => {
-    setCancelling(value === null);
+  const send = (value: string | null, remember = false) => {
+    setPicked(value === null ? 'cancel' : remember ? 'conversation' : 'once');
     answer.mutate(
-      { request, password: value },
+      { request, password: value, remember },
       {
         onSuccess: ({ ok }) => {
           if (ok) return;
@@ -195,11 +195,21 @@ export function PasswordCard({
         </div>
         <div className="mt-3 flex flex-wrap justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" disabled={answer.isPending} onClick={() => send(null)}>
-            {answer.isPending && cancelling && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+            {answer.isPending && picked === 'cancel' && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
             Cancel
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!password || answer.isPending}
+            onClick={() => send(password, true)}
+          >
+            {answer.isPending && picked === 'conversation' && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+            Allow for this conversation
+          </Button>
           <Button type="submit" size="sm" disabled={!password || answer.isPending}>
-            {answer.isPending && !cancelling && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+            {answer.isPending && picked === 'once' && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
             Allow
           </Button>
         </div>

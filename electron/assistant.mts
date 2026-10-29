@@ -34,6 +34,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ipcMain } from 'electron';
 import { sessionBusAddress } from './native-display.mts';
+import { revokeSudoGrant } from './askpass.mts';
 
 const INSTALL_DIR = path.join(os.homedir(), '.opencode/bin');
 const STATE_DIR = path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state'), 'opencode');
@@ -410,7 +411,9 @@ async function watch(controller: AbortController): Promise<void> {
             .join('\n');
           if (!data) continue;
           try {
-            emitEvent(slim(JSON.parse(data) as Record<string, unknown>));
+            const event = slim(JSON.parse(data) as Record<string, unknown>) as { type: string; sessionID?: string };
+            if (event.type === 'session.deleted' && event.sessionID) revokeSudoGrant(event.sessionID);
+            emitEvent(event);
           } catch {
             // Not JSON: nothing to pass on.
           }

@@ -645,6 +645,8 @@ in
       "${din-password}/bin/din-password sudo status"
       "${din-password}/bin/din-password sudo ask"
       "${din-password}/bin/din-password sudo skip"
+      "${din-password}/bin/din-password sudo grant"
+      "${din-password}/bin/din-password sudo revoke"
       # deckmon's virtual display for an AirPlay receiver, which extends the
       # desktop onto it: its EDID on the spare DisplayPort connector, forced
       # on, and taken away again.
@@ -673,11 +675,27 @@ in
       user = "root";
       group = "root";
     };
+    "/run/din/sudo-grants".d = {
+      mode = "0700";
+      user = "root";
+      group = "root";
+    };
     "/etc/sudoers.d".d = {
       mode = "0750";
       user = "root";
       group = "root";
     };
+  };
+  # An Assistant conversation the password was given for once ("Allow for
+  # this conversation") isn't asked again while its server runs: din-password
+  # keeps the grant, and checks it here, before the password, as root.
+  security.pam.services.sudo.rules.auth.din-grant = {
+    order = config.security.pam.services.sudo.rules.auth.unix.order - 10;
+    control = "sufficient";
+    modulePath = "${config.security.pam.package}/lib/security/pam_exec.so";
+    args = [ "quiet" "seteuid" "${pkgs.writeShellScript "din-sudo-check" ''
+      exec ${pkgs.python3}/bin/python3 -I ${./din-password.py} sudo check
+    ''}" ];
   };
   systemd.services.din-sudo = {
     description = "Let sudo skip the password when din has none";
