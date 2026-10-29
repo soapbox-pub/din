@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 import { setDragPoint, useCurrentDinDrag, useDragPoint, useTabDragLabel } from '@/lib/dinDrag';
 
 /**
@@ -26,13 +27,17 @@ export function DinDragOverlay() {
 
   if (!label || !at) return null;
   return createPortal(
-    <div
-      aria-hidden
-      className="pointer-events-none fixed left-0 top-0 z-[2147483647] max-w-72 truncate whitespace-nowrap rounded-lg bg-primary px-2.5 py-1 text-[13px] font-medium text-primary-foreground shadow-lg"
-      style={{ transform: `translate(${at.x + 12}px, ${at.y + 12}px)` }}
-    >
-      {label}
-    </div>,
+    // The point is in viewport coordinates, so it's placed in a layer over
+    // every monitor: with more than one, <body> is only the primary one, and
+    // a fixed element at its 0,0 lands at that monitor's corner.
+    <ScreenLayer aria-hidden className="pointer-events-none z-[2147483647]">
+      <div
+        className="absolute left-0 top-0 max-w-72 truncate whitespace-nowrap rounded-lg bg-primary px-2.5 py-1 text-[13px] font-medium text-primary-foreground shadow-lg"
+        style={{ transform: `translate(${at.x + 12}px, ${at.y + 12}px)` }}
+      >
+        {label}
+      </div>
+    </ScreenLayer>,
     document.getElementById('shell') ?? document.body,
   );
 }
