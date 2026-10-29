@@ -110,6 +110,7 @@ use HTML drag and drop.
 | App → app | The token, as above |
 | App → web page or nsite | The desktop replays the drop into the page as real files through the DevTools protocol, as it does today for Files (`guestFileDrop` in `electron/main.mts`) |
 | App → native window | The desktop hands the paths to the embedded display, as today |
+| App → Dock tile | The desktop takes the drop and opens the files in the tile's app, if it opens them (`src/lib/dockDrop.ts`) |
 | Web page → app | An ordinary web drag: `accept` returns null, read `e.dataTransfer` |
 | Desktop (Screenshot's thumbnail) → app | The desktop starts a Din drag itself; targets can't tell the difference |
 

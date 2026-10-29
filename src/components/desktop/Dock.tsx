@@ -20,6 +20,9 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useAppData } from '@/hooks/useAppData';
 import { useDragReorder } from '@/hooks/useDragReorder';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
+import { DRAG_MIME, acceptDrag, currentDrag, subscribeDrag } from '@/lib/dinDrag';
+import { dockTakes, openDropped, type DroppedItem } from '@/lib/dockDrop';
+import { getFsBridge } from '@/lib/fs';
 import { registerDockTile } from '@/lib/dockTiles';
 import { cn } from '@/lib/utils';
 import { appsDockedAs } from '@/lib/apps';
@@ -131,7 +134,8 @@ const MAX_DOTS = 4;
  * them, the scroll wheel cycles too, middle-click always opens a new window,
  * right-click offers pin/unpin, close, and uninstall, dragging an
  * unpinned tile left among the pinned ones pins it, and dragging a pinned
- * one up off the Dock unpins it. A divider separates the
+ * one up off the Dock unpins it. Files dropped on a tile open in its app,
+ * if it opens them (src/lib/dockDrop.ts). A divider separates the
  * pinned apps from the rest, and right-clicking it or the Dock's backdrop
  * between tiles offers the Dock's own settings, as on macOS.
  */
@@ -568,6 +572,55 @@ export function Dock({
     if (hidden) scheduleMagnify(null);
   }, [hidden, scheduleMagnify]);
 
+  // Files dragged over a tile, from an app or the desktop: the tile lights
+  // up if its app opens them, and opens them when they're dropped there.
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  useEffect(() => subscribeDrag(() => {
+    if (!currentDrag()) setDropTarget(null);
+  }), []);
+  /** The app whose tile is at the event's target and takes the drag, if any. */
+  const dropAppAt = (e: React.DragEvent): string | null => {
+    const tile = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-dock-tile]') : null;
+    const appId = tile?.dataset.appId;
+    const drag = currentDrag();
+    if (!appId || drag?.kind !== 'files' || !e.dataTransfer.types.includes(DRAG_MIME)) return null;
+    // Whether each is a folder is only known for an all-folder drag until
+    // the drop, which looks.
+    const items = drag.paths.map((path) => ({ path, folder: drag.folders }));
+    return dockTakes(appId, items) ? appId : null;
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    scheduleMagnify(e.clientX);
+    const appId = dropAppAt(e);
+    setDropTarget(appId);
+    if (!appId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+    setDropTarget(null);
+    scheduleMagnify(null);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    setDropTarget(null);
+    scheduleMagnify(null);
+    const appId = dropAppAt(e);
+    if (!appId) return;
+    e.preventDefault();
+    const entry = acceptDrag(e.dataTransfer.getData(DRAG_MIME), 'copy');
+    if (entry?.kind !== 'files') return;
+    const fs = getFsBridge();
+    void Promise.all(
+      entry.paths.map(async (path): Promise<DroppedItem> => ({
+        path,
+        folder: entry.folders || (await fs?.stat(path).then((st) => st.kind === 'directory', () => false)) === true,
+      })),
+    ).then((items) => {
+      if (dockTakes(appId, items)) openDropped(dinControls.open, appId, items);
+    });
+  };
+
   if (entryIds.length === 0) return null;
 
   return (
@@ -588,6 +641,8 @@ export function Dock({
           onPointerEnter={(e) => {
             if (e.pointerType !== 'touch') setRevealed(true);
           }}
+          // Something dragged to the edge, to drop on a tile.
+          onDragEnter={() => setRevealed(true)}
           onPointerDown={(e) => {
             if (e.pointerType === 'touch') swipeStartY.current = e.clientY;
           }}
@@ -647,6 +702,9 @@ export function Dock({
           )}
           onMouseMove={(e) => scheduleMagnify(e.clientX)}
           onMouseLeave={() => scheduleMagnify(null)}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
         >
           {/* Shown only while magnified (see hoverPadRef). First in DOM
               order, so the tiles paint and hit-test above it. */}
@@ -683,6 +741,7 @@ export function Dock({
                   controls={dinControls}
                   isPinned={pinned.includes(appId)}
                   reordering={dragging}
+                  dropping={dropTarget === appId}
                   onTogglePin={togglePin}
                   onDragPointerDown={reorder.onPointerDown}
                   onUninstall={canUninstall(appId) ? uninstall : undefined}
@@ -708,6 +767,7 @@ export function Dock({
  * - right-click: new window, pin/unpin, close all, uninstall
  * - dragging a tile moves it; dropping an unpinned one among the pinned
  *   ones pins it, and dropping a pinned one well above the Dock unpins it
+ * - files dropped on it open in the app
  *
  * Memoized: the dock re-renders on every window commit, but a tile (and its
  * Radix context-menu tree) only re-renders when its own app's
@@ -724,6 +784,7 @@ const DockItem = memo(function DockItem({
   controls,
   isPinned,
   reordering,
+  dropping,
   onTogglePin,
   onDragPointerDown,
   onUninstall,
@@ -742,6 +803,8 @@ const DockItem = memo(function DockItem({
    * reorder measures where tiles land right after each move.
    */
   reordering: boolean;
+  /** Files dragged over the tile that its app opens: dropping them opens them. */
+  dropping: boolean;
   onTogglePin: (appId: string) => void;
   /** Starts a drag to reorder the tiles. */
   onDragPointerDown: (appId: string, e: React.PointerEvent<HTMLElement>) => void;
@@ -832,6 +895,7 @@ const DockItem = memo(function DockItem({
         'group-data-hidden/dock:pointer-events-none',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         'motion-reduce:hover:-translate-y-1 motion-reduce:transition-transform',
+        dropping && 'bg-white/25 ring-2 ring-primary dark:bg-white/15',
       )}
     >
       <AppIcon
@@ -935,6 +999,7 @@ const DockItem = memo(function DockItem({
   const wrapperProps = {
     ref: tileRef,
     'data-dock-tile': '',
+    'data-app-id': app.id,
     // Clicks go to the button; around it they fall through to the Dock's
     // backdrop and its menu.
     className: cn(
@@ -997,6 +1062,7 @@ const DockItem = memo(function DockItem({
   prev.controls === next.controls &&
   prev.isPinned === next.isPinned &&
   prev.reordering === next.reordering &&
+  prev.dropping === next.dropping &&
   prev.onTogglePin === next.onTogglePin &&
   prev.onDragPointerDown === next.onDragPointerDown &&
   prev.onUninstall === next.onUninstall &&
