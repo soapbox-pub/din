@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -855,9 +855,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const chromeColor = isPrivate ? PRIVATE_CHROME_COLOR : activeTab.themeColor;
 
   // Tint the window chrome with the chrome color. The Window sanitizes the raw
-  // value; null restores the default.
+  // value; null restores the default. A layout effect, so the title bar and
+  // the menu bar repaint in the same frame as the toolbar on a tab switch.
   const setAccent = useWindowAccent();
-  useEffect(() => {
+  useLayoutEffect(() => {
     setAccent(chromeColor);
     return () => setAccent(null);
   }, [chromeColor, setAccent]);
