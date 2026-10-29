@@ -8,7 +8,8 @@ import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHea
 import { WindowFrameContext, WindowOwnHeaderContext, type WindowFrame } from '@/contexts/WindowFrameContext';
 import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
-import { animateGenieMesh } from '@/lib/genieMesh';
+import { effectsFor, resolveEffect, runWindowEffect, type EffectEvent, type WindowEffect } from '@/lib/effects';
+import { onEffectPreview } from '@/lib/effects/preview';
 import { getScreenshotBridge } from '@/lib/screenshot';
 import { WindowTitlebarContext } from '@/contexts/WindowTitlebarContext';
 import { WindowAccentContext } from '@/contexts/WindowAccentContext';
@@ -170,6 +171,62 @@ const RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
  * but Din tells native apps they're tiled, and tiled toolkits (Chromium,
  * GTK) leave themselves no resize border, so without these there's none.
  */
+/** A window effect as it played: what, and with which random layout. */
+interface PlayedEffect {
+  effect: WindowEffect | 'none';
+  seed: number;
+}
+
+function newSeed(): number {
+  return Math.floor(Math.random() * 0xffffffff);
+}
+
+/** An element's layout rect in its offset parent's (the workspace's) coordinates. */
+function offsetRect(el: HTMLElement): GenieRect {
+  return { x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight };
+}
+
+/**
+ * The app's dock tile, translated into workspace coordinates. An app always
+ * has a tile while it has windows; the bottom-center fallback covers a
+ * transient gap (e.g. the Dock re-mounting).
+ */
+function dockTarget(workspace: HTMLElement | null, dockId: string): GenieRect {
+  const ws = workspace?.getBoundingClientRect();
+  const wsLeft = ws?.left ?? 0;
+  const wsTop = ws?.top ?? 0;
+  const tile = getDockTileRect(dockId);
+  return tile
+    ? { x: tile.x - wsLeft, y: tile.y - wsTop, width: tile.width, height: tile.height }
+    : {
+        x: (ws?.width ?? window.innerWidth) / 2 - 40,
+        y: ws?.height ?? window.innerHeight,
+        width: 80,
+        height: 80,
+      };
+}
+
+function hasCaptureBridge(): boolean {
+  return !!getScreenshotBridge()?.captureRegion;
+}
+
+/**
+ * Snapshot the element as it's on screen now, decoded. Null without the
+ * shell's capture bridge (a plain browser).
+ */
+function captureSection(el: HTMLElement): Promise<HTMLImageElement> | null {
+  const bridge = getScreenshotBridge();
+  const captureRegion = bridge?.captureRegion?.bind(bridge);
+  if (!captureRegion) return null;
+  const r = el.getBoundingClientRect();
+  return captureRegion({ x: r.left, y: r.top, width: r.width, height: r.height }).then(async (shot) => {
+    const snapshot = new Image();
+    snapshot.src = shot.dataUrl;
+    await snapshot.decode();
+    return snapshot;
+  });
+}
+
 const FRAMELESS_RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
   { dir: 'n', className: '-top-2 inset-x-0 h-2 cursor-ns-resize' },
   { dir: 's', className: '-bottom-2 inset-x-0 h-2 cursor-ns-resize' },
@@ -271,6 +328,11 @@ export const Window = memo(function Window({
   const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon, setAccent, dropTile } =
     useWindowActions();
   const { config } = useAppContext();
+  // Whether closing plays an effect on a snapshot rather than the CSS pop,
+  // decided here so the close classes and the close effect agree.
+  const closeWithEngine =
+    hasCaptureBridge() &&
+    (config.closeEffect === 'random' || effectsFor('close').some((e) => e.id === config.closeEffect));
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
   const areas = useWorkAreas();
@@ -348,6 +410,8 @@ export const Window = memo(function Window({
   // available (a plain browser), in which case the genie falls back to
   // warping the live element.
   const snapshotRef = useRef<HTMLImageElement | null>(null);
+  // The effect the window last minimized with, which restore plays back.
+  const minimizedWith = useRef<PlayedEffect | null>(null);
 
   // Custom title-bar content published by the hosted app (e.g. the browser's
   // tab strip), rendered inline with the window controls. `null` shows the
@@ -532,24 +596,24 @@ export const Window = memo(function Window({
     };
   }, []);
 
-  // Genie minimize/restore (Compiz "magic lamp", macOS genie): when the
-  // minimized flag flips, warp the window into / out of its app's dock tile
-  // instead of blinking (see src/lib/genie.ts). The window stays mounted
-  // either way. Watching the flag here (rather than wrapping the
-  // minimize/focus actions) covers every trigger: title-bar button, dock
-  // tile clicks and scrolls.
+  // Minimize/restore effects: when the minimized flag flips, play the chosen
+  // effect (by default the genie, Compiz's "magic lamp": see
+  // src/lib/genie.ts) into / out of the app's dock tile instead of blinking.
+  // The window stays mounted either way. Watching the flag here (rather than
+  // wrapping the minimize/focus actions) covers every trigger: title-bar
+  // button, dock tile clicks and scrolls.
   //
-  // Inside the Electron shell the warp runs on a *bitmap snapshot* of the
+  // Inside the Electron shell the effect runs on a *bitmap snapshot* of the
   // window, not the live element: the section wraps a <webview>/WebGL guest
   // surface, and a projective transform can't composite a guest cheaply - it
   // re-rasterizes the whole surface every frame, which is what made the genie
   // crawl on full-screen windows. A bitmap can also go through a real mesh:
-  // src/lib/genieMesh.ts draws it in WebGL with curved sides, and without
-  // WebGL a raster <img> warps with the four-corner CSS transform. The
-  // minimize snapshot is cached so restore - whose window is off-screen and
-  // can't be re-captured - can replay it reversed. Outside the shell (a plain
-  // browser: no capture bridge) the genie falls back to warping the live
-  // element, as before.
+  // src/lib/effects draws it in WebGL, and without WebGL a raster <img> warps
+  // with the genie's four-corner CSS transform. The minimize snapshot is
+  // cached, with the effect and seed it played, so restore - whose window is
+  // off-screen and can't be re-captured - can replay it reversed. Outside the
+  // shell (a plain browser: no capture bridge) the genie falls back to
+  // warping the live element, as before, whatever effect is chosen.
   const prevMinimized = useRef(win.minimized);
   useLayoutEffect(() => {
     if (prevMinimized.current === win.minimized) return;
@@ -562,40 +626,30 @@ export const Window = memo(function Window({
 
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-    // A dock-initiated minimize can catch a still-jiggling window; the genie
-    // owns the transform from here.
+    const minimizing = win.minimized;
+    // Random draws an effect at minimize; restore plays that one back.
+    let played = minimizedWith.current;
+    if (minimizing || !played) {
+      const resolved = resolveEffect(config.minimizeEffect, 'minimize');
+      played = { effect: resolved === 'pop' ? 'none' : resolved, seed: newSeed() };
+      minimizedWith.current = played;
+    }
+    const { effect, seed } = played;
+    if (effect === 'none') return;
+
+    // A dock-initiated minimize can catch a still-jiggling window; the
+    // effect owns the transform from here.
     stopWobble(false);
 
     // The rendered rect in workspace coordinates. Offsets rather than the
     // stored geometry, so maximized/tiled windows - whose layout is
     // CSS-percentage-driven - measure correctly; visibility:hidden keeps
     // layout intact, so a just-minimized window still measures.
-    const winRect: GenieRect = {
-      x: el.offsetLeft,
-      y: el.offsetTop,
-      width: el.offsetWidth,
-      height: el.offsetHeight,
-    };
+    const winRect = offsetRect(el);
     if (winRect.width === 0 || winRect.height === 0) return;
 
-    // The app's dock tile, translated into workspace coordinates. An app
-    // always has a tile while it has windows; the bottom-center fallback
-    // covers a transient gap (e.g. the Dock re-mounting).
     const parent = el.parentElement;
-    const ws = parent?.getBoundingClientRect();
-    const wsLeft = ws?.left ?? 0;
-    const wsTop = ws?.top ?? 0;
-    const tile = getDockTileRect(app?.dockAs ?? win.appId);
-    const target: GenieRect = tile
-      ? { x: tile.x - wsLeft, y: tile.y - wsTop, width: tile.width, height: tile.height }
-      : {
-          x: (ws?.width ?? window.innerWidth) / 2 - 40,
-          y: ws?.height ?? window.innerHeight,
-          width: 80,
-          height: 80,
-        };
-
-    const minimizing = win.minimized;
+    const target = dockTarget(parent, app?.dockAs ?? win.appId);
 
     // Warp the live element directly (the pre-snapshot behaviour). Used
     // outside the shell and as a fallback when a capture fails.
@@ -616,27 +670,36 @@ export const Window = memo(function Window({
       });
     };
 
-    // Warp the decoded snapshot - through the WebGL mesh, or failing that as
-    // an overlay <img> - hiding the live section for the whole timeline.
-    // `finish` hands the section's styles back to React; it's shared by
-    // onDone and cancel (which onDone never covers).
-    const warpImage = (snapshot: HTMLImageElement) => {
+    // Play the effect on the decoded snapshot - in WebGL, or failing that
+    // the genie as an overlay <img> - hiding the live section for the whole
+    // timeline. `showSection` hands the section's styles back to React; it's
+    // shared by onDone and cancel (which onDone never covers).
+    const playSnapshot = (snapshot: HTMLImageElement) => {
       if (!parent) return runLiveGenie();
-      const direction = minimizing ? 'minimize' : 'restore';
       const showSection = () => {
         el.style.pointerEvents = '';
         el.style.visibility = minimizing ? 'hidden' : '';
       };
 
-      const meshCancel = animateGenieMesh(parent, snapshot, winRect, target, direction, win.z, () => {
-        animCancel.current = null;
-        showSection();
-      });
-      if (meshCancel) {
+      const effectCancel = runWindowEffect(
+        parent,
+        snapshot,
+        effect,
+        winRect,
+        target,
+        minimizing ? 'out' : 'in',
+        win.z,
+        seed,
+        () => {
+          animCancel.current = null;
+          showSection();
+        },
+      );
+      if (effectCancel) {
         el.style.visibility = 'hidden';
         el.style.pointerEvents = 'none';
         animCancel.current = () => {
-          meshCancel();
+          effectCancel();
           showSection();
         };
         return;
@@ -664,7 +727,7 @@ export const Window = memo(function Window({
         img.remove();
         showSection();
       };
-      const cancel = animateGenie(img, winRect, target, direction, () => {
+      const cancel = animateGenie(img, winRect, target, minimizing ? 'minimize' : 'restore', () => {
         animCancel.current = null;
         finish();
       });
@@ -674,30 +737,25 @@ export const Window = memo(function Window({
       };
     };
 
-    const bridge = getScreenshotBridge();
-    const captureRegion = bridge?.captureRegion?.bind(bridge);
+    const capture = captureSection(el);
 
-    if (minimizing && captureRegion) {
-      // Snapshot the window at rest, then warp the bitmap. Keep the live
-      // section visible for the capture (React just committed it hidden); the
-      // overlay takes over the instant the capture resolves.
+    if (minimizing && capture) {
+      // Snapshot the window at rest, then play the bitmap. Keep the live
+      // section visible for the capture (React just committed it hidden);
+      // the overlay takes over the instant the capture resolves.
       el.style.visibility = 'visible';
       el.style.pointerEvents = 'none';
-      const r = el.getBoundingClientRect();
       let cancelled = false;
       animCancel.current = () => {
         cancelled = true;
         el.style.pointerEvents = '';
         el.style.visibility = 'hidden';
       };
-      captureRegion({ x: r.left, y: r.top, width: r.width, height: r.height })
-        .then(async (shot) => {
-          const snapshot = new Image();
-          snapshot.src = shot.dataUrl;
-          await snapshot.decode();
+      capture
+        .then((snapshot) => {
           if (cancelled) return;
           snapshotRef.current = snapshot;
-          warpImage(snapshot);
+          playSnapshot(snapshot);
         })
         .catch(() => {
           if (!cancelled) runLiveGenie();
@@ -705,16 +763,18 @@ export const Window = memo(function Window({
       return;
     }
 
-    // Restore replays the cached minimize bitmap reversed; the fully-swallowed
-    // first frame is painted synchronously (animateGenie's contract), so the
-    // full-size window never flashes before the warp grows it out of the dock.
-    if (!minimizing && captureRegion && snapshotRef.current) {
-      warpImage(snapshotRef.current);
+    // Restore replays the cached minimize bitmap reversed; the gone first
+    // frame is painted synchronously (runWindowEffect's contract), so the
+    // full-size window never flashes before the effect brings it back.
+    if (!minimizing && hasCaptureBridge() && snapshotRef.current) {
+      playSnapshot(snapshotRef.current);
       return;
     }
 
     runLiveGenie();
-  }, [win.minimized, win.appId, app?.dockAs, win.z, beginGesture, endGesture, stopWobble]);
+    // config.minimizeEffect is read when the flag flips, and a change to it
+    // alone returns at the guard above.
+  }, [win.minimized, win.appId, app?.dockAs, win.z, config.minimizeEffect, beginGesture, endGesture, stopWobble]);
 
   // Maximize/restore/tile transitions FLIP from the previous committed rect
   // to the new one: React swaps the geometry instantly (CSS percentages or
@@ -790,29 +850,121 @@ export const Window = memo(function Window({
   // Neither animation loop may outlive the window (e.g. closed mid-flight).
   useEffect(() => () => animCancel.current?.(), []);
 
-  // Close: close() only marks the window `closing`; the exit animation (a
-  // reverse of the open pop, via the animate-out classes below) plays on the
-  // live element and its animationend calls destroy() for the real removal.
-  // This effect handles the cases with no animation to wait for - reduced
-  // motion, a minimized (invisible) window, or an uninstalled app rendering
-  // null - and arms a safety-net timer so a missed animationend can never
-  // leave an inert ghost window behind.
+  // Close: close() only marks the window `closing`, and this effect sees it
+  // out. With the CSS pop (the default), the exit animation (a reverse of
+  // the open pop, via the animate-out classes below) plays on the live
+  // element and its animationend calls destroy() for the real removal; a
+  // safety-net timer makes sure a missed animationend can never leave an
+  // inert ghost window behind. Any other effect plays on a snapshot, like
+  // minimize, and destroys the window when it's done. Reduced motion, a
+  // minimized (invisible) window, an uninstalled app rendering null and the
+  // `none` effect have nothing to wait for. It runs once per close.
+  const closeRun = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
-    if (!win.closing) return;
+    if (!win.closing || closeRun.current) return;
     animCancel.current?.();
     animCancel.current = null;
     stopWobble(false);
+    const el = sectionRef.current;
+    const effect = resolveEffect(config.closeEffect, 'close');
     if (
-      !sectionRef.current ||
+      !el ||
       win.minimized ||
+      effect === 'none' ||
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ) {
       destroy(win.id);
       return;
     }
-    const timer = window.setTimeout(() => destroy(win.id), 400);
-    return () => window.clearTimeout(timer);
-  }, [win.closing, win.minimized, win.id, destroy, stopWobble]);
+    if (effect === 'pop' || !closeWithEngine) {
+      const timer = window.setTimeout(() => destroy(win.id), 400);
+      closeRun.current = () => window.clearTimeout(timer);
+      return;
+    }
+
+    const parent = el.parentElement;
+    const capture = captureSection(el);
+    if (!parent || !capture) {
+      destroy(win.id);
+      return;
+    }
+    const winRect = offsetRect(el);
+    let cancelled = false;
+    const safety = window.setTimeout(() => destroy(win.id), effect.duration + 3000);
+    // Only the timers: the effect's canvas sits in the workspace, outlives
+    // the window it showed, and removes itself.
+    closeRun.current = () => {
+      cancelled = true;
+      window.clearTimeout(safety);
+    };
+    capture
+      .then((snapshot) => {
+        if (cancelled) return;
+        const played = runWindowEffect(parent, snapshot, effect, winRect, null, 'out', win.z, newSeed(), () =>
+          destroy(win.id),
+        );
+        if (played) el.style.visibility = 'hidden';
+        else destroy(win.id);
+      })
+      .catch(() => {
+        if (!cancelled) destroy(win.id);
+      });
+  }, [win.closing, win.minimized, win.id, win.z, config.closeEffect, closeWithEngine, destroy, stopWobble]);
+  useEffect(() => () => closeRun.current?.(), []);
+
+  // Settings' Preview: play an effect out and back in on this window,
+  // through the same snapshot path as minimize, leaving the window as it was.
+  useEffect(
+    () =>
+      onEffectPreview(win.id, (event: EffectEvent, choice: string) => {
+        const el = sectionRef.current;
+        const parent = el?.parentElement;
+        if (!el || !parent || animCancel.current || win.minimized || win.closing) return;
+        const effect = resolveEffect(choice, event);
+        if (effect === 'none' || effect === 'pop') return;
+        const capture = captureSection(el);
+        if (!capture) return;
+        stopWobble(false);
+        const winRect = offsetRect(el);
+        const target = event === 'minimize' ? dockTarget(parent, app?.dockAs ?? win.appId) : null;
+        const seed = newSeed();
+        let cancelled = false;
+        let current: (() => void) | null = null;
+        const show = () => {
+          el.style.visibility = '';
+          el.style.pointerEvents = '';
+        };
+        const done = () => {
+          animCancel.current = null;
+          show();
+        };
+        el.style.pointerEvents = 'none';
+        animCancel.current = () => {
+          cancelled = true;
+          current?.();
+          show();
+        };
+        capture
+          .then((snapshot) => {
+            if (cancelled) return;
+            current = runWindowEffect(parent, snapshot, effect, winRect, target, 'out', win.z, seed, () => {
+              // Gone for a beat, then back.
+              const timer = window.setTimeout(() => {
+                if (cancelled) return;
+                current = runWindowEffect(parent, snapshot, effect, winRect, target, 'in', win.z, seed, done);
+                if (!current) done();
+              }, 300);
+              current = () => window.clearTimeout(timer);
+            });
+            if (current) el.style.visibility = 'hidden';
+            else done();
+          })
+          .catch(() => {
+            if (!cancelled) done();
+          });
+      }),
+    [win.id, win.minimized, win.closing, win.z, win.appId, app?.dockAs, stopWobble],
+  );
 
   /**
    * Begin a title-bar drag with the pointer at `e`. The caller holds the
@@ -1432,7 +1584,9 @@ export const Window = memo(function Window({
         // the latter also sets transition-duration, which with the default
         // `transition-property: all` holds a hidden window (minimize, the
         // genie's snapshot hand-off) visible for the whole transition.
-        win.closing
+        win.closing && closeWithEngine
+          ? 'pointer-events-none'
+          : win.closing
           ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:animation-duration-150 motion-safe:fill-mode-forwards'
           : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:animation-duration-200',
         flush || frameless

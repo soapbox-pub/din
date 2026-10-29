@@ -59,6 +59,8 @@ const defaultConfig: AppConfig = {
   syncProfileTheme: true,
   localTheme: null,
   wobblyWindows: true,
+  minimizeEffect: 'magic-lamp',
+  closeEffect: 'pop',
   tilingEnabled: false,
   tilingGap: 8,
   dockMagnification: true,

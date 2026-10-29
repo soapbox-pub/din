@@ -22,7 +22,7 @@
  *
  * `genieFrame` is the model: any point of the window at any progress. Inside
  * the shell, minimize warps a bitmap snapshot of the window, which
- * src/lib/genieMesh.ts draws through a real 2 × GRID_RES mesh in WebGL, so
+ * src/lib/effects (the Magic Lamp effect) draws through a real mesh in WebGL, so
  * the sides follow the sigmoid curve as in Compiz. The DOM can't warp live
  * content through a mesh (the windows host an Electron <webview>, xterm,
  * etc.), so `animateGenie` - the fallback outside the shell or without WebGL
@@ -30,7 +30,8 @@
  * transform (CSS matrix3d) mapping the element onto that quad, like the
  * wobbly-windows port in src/lib/wobbly.ts: straight sides, Compiz's
  * "Vacuum" look. Neither has the "wavy" sides of the default Magic Lamp
- * variant (max_waves = 0, as on macOS). A short end-of-timeline fade covers
+ * variant (max_waves = 0, as on macOS); Magic Lamp Wavy, a separate effect
+ * in src/lib/effects/animation.ts, adds them. A short end-of-timeline fade covers
  * the final pop that Compiz hides behind the (opaque) icon — our dock tiles
  * sit on a transparent strip.
  *

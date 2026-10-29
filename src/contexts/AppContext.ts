@@ -71,6 +71,15 @@ export interface AppConfig {
    */
   wobblyWindows: boolean;
   /**
+   * The effect a window minimizes with, and plays backwards to restore: an
+   * id from src/lib/effects, `random` or `none`. Kept as a plain string so
+   * a choice this version doesn't know falls back rather than failing to
+   * load the config.
+   */
+  minimizeEffect: string;
+  /** The effect a window closes with: an id from src/lib/effects, `random`, `pop` or `none`. */
+  closeEffect: string;
+  /**
    * Whether windows tile, Hyprland style, instead of floating: they share
    * each monitor's workspace between them (see src/lib/tiling.ts). Kept on
    * this device, like wobbly windows.

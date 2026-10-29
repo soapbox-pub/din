@@ -42,6 +42,8 @@ const AppConfigSchema = z.object({
   syncProfileTheme: z.boolean(),
   localTheme: DesktopThemeSchema.nullable(),
   wobblyWindows: z.boolean(),
+  minimizeEffect: z.string(),
+  closeEffect: z.string(),
   tilingEnabled: z.boolean(),
   tilingGap: z.number().min(0).max(64),
   dockMagnification: z.boolean(),
