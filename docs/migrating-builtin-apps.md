@@ -2,7 +2,7 @@
 
 > **Status: under way.** Moved: Calculator, Paint, Word Processor,
 > Spreadsheet, Slides, Photo Editor, Vector Editor, Publisher, Text Editor,
-> Terminal, Media Player, Preview.
+> Terminal, Media Player, Preview, Assistant, CAD.
 
 Each app moves in its own commit: its folder goes from
 `src/components/desktop/apps/` to `src/apps/<id>/`, it gets an
@@ -75,6 +75,12 @@ desktop) or splits:
 - `src/shared/FileIcon.tsx`, `src/shared/codeTheme.ts`,
   `src/shared/FileViewerBody.tsx`: Text Editor, Preview, Files (and its
   quick look), the file picker, the Assistant.
+- `src/shared/assistant/`: the Assistant's UI, used by the Assistant and
+  CAD apps and by the desktop's menu-bar assistant and Settings. What it
+  needs from where it's drawn (opening apps and URLs, the picker,
+  notifications, dictation, the title bar's drag region) comes through
+  `AssistantHostContext` (`host.tsx`): the desktop provides it from its
+  own services, apps from `window.din` (`appHost.tsx`).
 - Lib getters that work in both documents: `getFsBridge()` and
   `getPtyBridge()` return `window.din?.system.fs` in an app and
   `window.dinos?.fs` on the desktop, so code shared by both reaches the
@@ -96,7 +102,7 @@ a time.
 | 6 | Media Player ✓ | `frame: 'none'`, transparency, shapes, the menu bar, media session |
 | 7 | Text Editor, Terminal ✓ | `custom` headers with tabs, `fs` and `pty`, tab drags |
 | 8 | Files | Drag sources, the file clipboard, `wallpaper` |
-| 9 | CAD, Assistant, App Store | The `assistant` and `account`/`nostr` permissions |
+| 9 | CAD ✓, Assistant ✓, App Store | The `assistant` and `account`/`nostr` permissions |
 | 10 | System Monitor, Settings | The most of `window.dinos`; last, while their design settles |
 
 Staying in the desktop for now:
@@ -127,6 +133,15 @@ Behavior that changed when apps moved, to fix or to live with:
   let tab strips settle at once.
 - **Media Player's play key while stopped** no longer starts it: a session
   can't yet say "play me when idle" without being listed.
+- **The Assistant's notifications are approximate.** The desktop can't
+  tell which conversation the app shows, so it holds back requests while
+  the Assistant is in front and "done" notifications while it's open; a
+  conversation the app started that finishes after its window closed
+  isn't announced. Owed: main recording Din's sessions, and the app
+  reporting what it views, so the desktop owns these again.
+- **Din's assistant settings** ("Start conversations in", colorful
+  replies) don't reach the apps yet, and the model chosen in the app is
+  its own.
 - **Preview, Media Player and Publisher have `fs`**: Preview steps through
   the file's folder and lists archives, Media Player's library and
   playlists are paths, Publisher links placed pictures by path.
