@@ -33,13 +33,21 @@ export interface AssistantEvent {
   data?: Record<string, unknown>;
 }
 
-/** A command of the agent's run with sudo, waiting on the computer's password (electron/askpass.mts). */
+/**
+ * A command of the agent's run with sudo, waiting on the user's approval or
+ * the computer's password (electron/askpass.mts).
+ */
 export interface PasswordRequest {
   requestId: number;
   sessionID: string;
   /** The sudo command line. */
   command: string;
+  /** Allow or Deny, rather than the password. */
+  approve: boolean;
 }
+
+/** How an approval request is answered. */
+export type ApprovalDecision = 'once' | 'conversation' | 'reject';
 
 type Reply = { ok: true; status: number; data: unknown } | { ok: false; status: number; message: string };
 
@@ -50,13 +58,15 @@ export interface AssistantBridge {
   restart(): Promise<void>;
   recentModels(): Promise<{ providerID: string; modelID: string }[]>;
   request(method: string, path: string, body?: unknown): Promise<Reply>;
-  /** sudo's password requests from the agent's commands. */
+  /** sudo's password and approval requests from the agent's commands. */
   passwords(): Promise<PasswordRequest[]>;
   /**
    * The password, or null to cancel. `ok` is false when the password isn't
    * right. `remember` stops sudo asking in its conversation.
    */
   answerPassword(requestId: number, password: string | null, remember?: boolean): Promise<{ ok: boolean }>;
+  /** Answer an approval request: once, for the rest of its conversation, or not. */
+  approve(requestId: number, decision: ApprovalDecision): Promise<void>;
   onStatus(callback: (status: AssistantStatus) => void): () => void;
   onEvent(callback: (event: AssistantEvent) => void): () => void;
 }

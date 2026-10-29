@@ -6,6 +6,7 @@ import {
   getAssistantBridge,
   modelKey,
   type AgentInfo,
+  type ApprovalDecision,
   type AssistantEvent,
   type AssistantStatus,
   type FormInfo,
@@ -299,7 +300,7 @@ export function useSessionInbox(sessionID: string | null) {
   });
 }
 
-/** sudo's password requests from the agent's commands, in every conversation. */
+/** sudo's password and approval requests from the agent's commands, in every conversation. */
 export function usePasswordRequests() {
   return useQuery({
     queryKey: assistantKeys.passwords,
@@ -830,6 +831,16 @@ export function useAnswerPassword() {
     onSuccess: ({ ok }) => {
       if (ok) void queryClient.invalidateQueries({ queryKey: assistantKeys.passwords });
     },
+  });
+}
+
+/** Answer an approval request. */
+export function useApprovePassword() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ request, decision }: { request: PasswordRequest; decision: ApprovalDecision }) =>
+      requireBridge().approve(request.requestId, decision),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: assistantKeys.passwords }),
   });
 }
 

@@ -1595,29 +1595,28 @@ expose('lock', {
   changePassword: (oldPassword, newPassword) =>
     ipcRenderer.invoke('lock:change-password', oldPassword, newPassword),
 
-  /** Whether sudo asks for the password. */
-  sudoAsks: () => ipcRenderer.invoke('lock:sudo-asks'),
+  /** What sudo asks for: 'approve', 'password' or 'skip'. */
+  sudoMode: () => ipcRenderer.invoke('lock:sudo-mode'),
 
   /**
-   * Make sudo ask for the password, or stop it asking, which takes the
-   * password.
-   * @param {boolean} ask
+   * Change what sudo asks for. Loosening it takes the password.
+   * @param {'approve' | 'password' | 'skip'} mode
    * @param {string} [password]
    */
-  setSudoAsks: (ask, password) => ipcRenderer.invoke('lock:set-sudo-asks', ask, password),
+  setSudoMode: (mode, password) => ipcRenderer.invoke('lock:set-sudo-mode', mode, password),
 });
 
 // Askpass bridge (window.dinos.askpass), backed by electron/askpass.mts: sudo
-// asking for the password with no terminal to ask on.
+// asking to approve a command, or for the password with no terminal to ask on.
 expose('askpass', {
   /**
    * Subscribe to requests. Returns an unsubscribe fn.
-   * @param {(request: { requestId: number, requester: string, command: string }) => void} callback
+   * @param {(request: { requestId: number, requester: string, command: string, approve: boolean }) => void} callback
    */
   onRequest: (callback) => {
     /**
      * @param {Electron.IpcRendererEvent} _event
-     * @param {{ requestId: number, requester: string, command: string }} request
+     * @param {{ requestId: number, requester: string, command: string, approve: boolean }} request
      */
     const listener = (_event, request) => callback(request);
     ipcRenderer.on('askpass:request', listener);
@@ -1646,6 +1645,13 @@ expose('askpass', {
    * @param {string | null} password
    */
   answer: (requestId, password) => ipcRenderer.invoke('askpass:answer', requestId, password),
+
+  /**
+   * Allow an approval request, or deny it.
+   * @param {number} requestId
+   * @param {boolean} allow
+   */
+  approve: (requestId, allow) => ipcRenderer.invoke('askpass:approve', requestId, allow),
 });
 
 // Updater bridge (window.dinos.updater), backed by electron/updater.mts: stages
@@ -1828,7 +1834,7 @@ expose('assistant', {
    */
   request: (method, path, body) => ipcRenderer.invoke('assistant:request', method, path, body),
 
-  /** sudo's password requests from the agent's commands (electron/askpass.mts). */
+  /** sudo's password and approval requests from the agent's commands (electron/askpass.mts). */
   passwords: () => ipcRenderer.invoke('assistant:passwords'),
 
   /**
@@ -1841,6 +1847,14 @@ expose('assistant', {
    */
   answerPassword: (requestId, password, remember) =>
     ipcRenderer.invoke('assistant:answerPassword', requestId, password, remember),
+
+  /**
+   * Answer an approval request: allow it once, for the rest of its
+   * conversation, or deny it.
+   * @param {number} requestId
+   * @param {'once' | 'conversation' | 'reject'} decision
+   */
+  approve: (requestId, decision) => ipcRenderer.invoke('assistant:approve', requestId, decision),
 
   /**
    * Subscribe to status changes. Returns an unsubscribe fn.

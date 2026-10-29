@@ -120,13 +120,60 @@ export function AdminPasswordDialog({
   );
 }
 
+/** A command to allow to run as administrator, or deny, with a click. */
+function ApprovalDialog({
+  open,
+  title,
+  command,
+  onAnswer,
+}: {
+  open: boolean;
+  title: string;
+  command?: string;
+  onAnswer: (allow: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onAnswer(false)}>
+      <DialogContent className="sm:max-w-md">
+        <div className="flex flex-col gap-4">
+          <DialogHeader className="flex-row items-center gap-3 text-left">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+              <ShieldCheck className="size-5" aria-hidden />
+            </span>
+            <div className="min-w-0 space-y-1">
+              <DialogTitle className="break-words">{title}</DialogTitle>
+              <DialogDescription>Only allow commands you expect.</DialogDescription>
+            </div>
+          </DialogHeader>
+
+          {command && (
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-foreground/5 px-3 py-2 font-mono text-sm text-foreground">
+              {command}
+            </pre>
+          )}
+
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => onAnswer(false)}>
+              Deny
+            </Button>
+            <Button type="button" onClick={() => onAnswer(true)}>
+              Allow
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
- * Asks for the computer's password when sudo needs it and has no terminal to
- * ask on (electron/askpass.mts), for programs other than the Assistant, which
- * asks in its conversation. Each request is a notification first, so nothing
- * takes the keyboard while the user is typing elsewhere; clicking it opens
- * the dialog. A wrong password stays there, and only the right one goes to
- * sudo.
+ * Asks to approve what sudo runs (electron/askpass.mts), and for the
+ * computer's password when sudo needs it and has no terminal to ask on, for
+ * programs other than the Assistant, which asks in its conversation. Each
+ * request is a notification first, so nothing takes the keyboard while the
+ * user is typing elsewhere; an approval can be answered right on it, and
+ * clicking it opens the dialog. A wrong password stays there, and only the
+ * right one goes to sudo.
  *
  * Renders nothing outside the Electron shell.
  */
@@ -145,11 +192,25 @@ export function AdminPromptHost() {
         request.requestId,
         notify({
           source: { name: 'Din', icon: ShieldCheck },
-          title: `${request.requester} needs your password`,
+          title: request.approve
+            ? `Allow ${request.requester} to run this as administrator?`
+            : `${request.requester} needs your password`,
           body: request.command,
           urgency: 'critical',
+          actions: request.approve
+            ? [
+                { id: 'allow', label: 'Allow' },
+                { id: 'deny', label: 'Deny' },
+              ]
+            : undefined,
           replaceKey: `askpass:${request.requestId}`,
-          onActivate: () => setOpenId(request.requestId),
+          onActivate: (action) => {
+            if (request.approve && (action === 'allow' || action === 'deny')) {
+              void bridge.approve(request.requestId, action === 'allow').catch(() => {});
+            } else {
+              setOpenId(request.requestId);
+            }
+          },
         }),
       );
     });
@@ -173,6 +234,21 @@ export function AdminPromptHost() {
     if (id) closeNotification(id, 'closed');
     notifications.current.delete(requestId);
   };
+
+  if (current?.approve) {
+    return (
+      <ApprovalDialog
+        key={current.requestId}
+        open
+        title={`${current.requester} wants to run as administrator`}
+        command={current.command}
+        onAnswer={(allow) => {
+          void getAskpassBridge()?.approve(current.requestId, allow).catch(() => {});
+          done(current.requestId);
+        }}
+      />
+    );
+  }
 
   return (
     <AdminPasswordDialog

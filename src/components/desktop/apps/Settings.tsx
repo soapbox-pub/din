@@ -106,7 +106,7 @@ import {
 } from '@/hooks/useAudio';
 import { VolumeGlyph, VolumeSlider } from '@/components/desktop/VolumeIndicator';
 import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
-import { cleanLockError, getLockBridge } from '@/lib/lock';
+import { cleanLockError, getLockBridge, type SudoMode } from '@/lib/lock';
 import { AdminPasswordDialog } from '@/components/desktop/AdminPrompt';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -326,7 +326,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     group: 'Account',
     name: 'Password',
     icon: KeyRound,
-    search: ['Current password', 'New password', 'Changing it here changes it everywhere.', 'lock screen', 'login', 'security', 'disk encryption', 'passphrase', 'Require password for sudo', 'administrator', 'admin', 'root'],
+    search: ['Current password', 'New password', 'Changing it here changes it everywhere.', 'lock screen', 'login', 'security', 'disk encryption', 'passphrase', 'Running as administrator', 'Ask me to approve', 'Ask for the password', 'sudo', 'administrator', 'admin', 'root'],
   },
   {
     id: 'nostr',
@@ -4142,58 +4142,108 @@ function PasswordSection() {
           </Button>
         </div>
       </form>
-      <SudoPasswordSetting />
+      <SudoModeSetting />
     </SectionShell>
   );
 }
 
-/** Whether sudo asks for the computer's password. Turning it off takes the password. */
-function SudoPasswordSetting() {
+const SUDO_MODES: { id: SudoMode; label: string; description: string }[] = [
+  {
+    id: 'approve',
+    label: 'Ask me to approve',
+    description: 'Programs that run as administrator, like the Assistant, ask first, and you allow them with a click.',
+  },
+  {
+    id: 'password',
+    label: 'Ask for the password',
+    description: 'They ask for the computer’s password first.',
+  },
+  {
+    id: 'skip',
+    label: 'Don’t ask',
+    description: 'They run as administrator without asking.',
+  },
+];
+
+/** How much each asks, least first: asking less than now takes the password. */
+const SUDO_STRICTNESS: Record<SudoMode, number> = { skip: 0, approve: 1, password: 2 };
+
+/** What sudo asks for before it runs something as administrator. */
+function SudoModeSetting() {
   const bridge = getLockBridge();
-  const { data: asks, isLoading, refetch } = useQuery({
-    queryKey: ['lock', 'sudo-asks'],
-    queryFn: () => bridge?.sudoAsks() ?? true,
+  const { data: mode, isLoading, refetch } = useQuery({
+    queryKey: ['lock', 'sudo-mode'],
+    queryFn: () => bridge?.sudoMode() ?? 'password',
     enabled: !!bridge,
   });
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<SudoMode | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [saving, setSaving] = useState<SudoMode | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (!bridge) return null;
 
-  const turnOn = () => {
+  const choose = (next: SudoMode) => {
+    if (!mode || next === mode) return;
     setError(null);
+    if (SUDO_STRICTNESS[next] < SUDO_STRICTNESS[mode]) {
+      setAttempt((n) => n + 1);
+      setConfirming(next);
+      return;
+    }
+    setSaving(next);
     bridge
-      .setSudoAsks(true)
+      .setSudoMode(next)
       .catch((e: unknown) => setError(cleanLockError(e)))
-      .finally(() => void refetch());
+      .finally(() => {
+        setSaving(null);
+        void refetch();
+      });
   };
+
+  const selected = saving ?? mode;
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
-        <div className="min-w-0">
-          <Label htmlFor="sudo-asks" className="cursor-pointer text-sm">
-            Require password for sudo
-          </Label>
-          <p className="text-xs text-muted-foreground">
-            Programs that run as administrator, like the Assistant, ask for it first.
-          </p>
-        </div>
-        <Switch
-          id="sudo-asks"
-          checked={asks ?? true}
-          disabled={isLoading}
-          onCheckedChange={(checked) => {
-            if (checked) {
-              turnOn();
-            } else {
-              setAttempt((n) => n + 1);
-              setConfirming(true);
-            }
-          }}
-        />
+      <SubHeading>Running as administrator</SubHeading>
+      <div role="radiogroup" aria-label="Running as administrator" className="flex flex-col gap-2">
+        {SUDO_MODES.map(({ id, label, description }) => {
+          const active = selected === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={isLoading || saving !== null}
+              onClick={() => choose(id)}
+              className={cn(
+                'flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'disabled:cursor-not-allowed disabled:opacity-60',
+                active ? 'border-primary bg-primary/10' : 'border-border/60 bg-background/40 hover:bg-foreground/5',
+              )}
+            >
+              <span
+                className={cn(
+                  'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border',
+                  active ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/50',
+                )}
+                aria-hidden
+              >
+                {active && <Check className="size-3.5" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-foreground">{label}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
+      <p className="text-xs text-muted-foreground">
+        Without Din to ask, as on the text console, the password is always asked for.
+      </p>
       {error && (
         <p className="text-sm text-destructive" role="alert">
           {error}
@@ -4201,17 +4251,19 @@ function SudoPasswordSetting() {
       )}
       <AdminPasswordDialog
         key={attempt}
-        open={confirming}
-        title="Stop asking for the password for sudo?"
-        confirmLabel="Stop asking"
-        onCancel={() => setConfirming(false)}
+        open={confirming !== null}
+        title={confirming === 'skip' ? 'Stop asking before running as administrator?' : 'Stop asking for the password?'}
+        description={confirming === 'approve' ? 'You’ll allow programs with a click instead.' : undefined}
+        confirmLabel={confirming === 'skip' ? 'Stop asking' : 'Ask to approve'}
+        onCancel={() => setConfirming(null)}
         onSubmit={async (password) => {
+          if (!confirming) return null;
           try {
-            await bridge.setSudoAsks(false, password);
+            await bridge.setSudoMode(confirming, password);
           } catch (e) {
             return cleanLockError(e);
           }
-          setConfirming(false);
+          setConfirming(null);
           setError(null);
           void refetch();
           return null;

@@ -18,6 +18,30 @@ let
         conn.close()
   '';
 
+  # Din's main process answering approvals (electron/askpass.mts): answers
+  # each request with the next answer named, and writes down what it was
+  # asked.
+  approveStub = pkgs.writeText "approve-stub.py" ''
+    import json, os, socket, sys
+    if os.path.exists(sys.argv[1]):
+        os.remove(sys.argv[1])
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(sys.argv[1])
+    server.listen()
+    for answer in sys.argv[2:]:
+        conn, _ = server.accept()
+        request = json.loads(conn.makefile().readline())
+        with open(sys.argv[1] + ".asked", "a") as asked:
+            asked.write(f"{request.get('approve')} {request['session']} {request.get('tty')}\n")
+        conn.sendall((json.dumps({"answer": answer}) + "\n").encode())
+        conn.close()
+  '';
+  # din-shell's compositor, which starts Din's main process as its one child.
+  compositorStub = pkgs.writeText "compositor-stub.py" ''
+    import subprocess, sys
+    subprocess.run(sys.argv[1:])
+  '';
+
   # An Assistant's server, for "Allow for this conversation": run by a bash
   # called opencode, it runs sudo as the agent would, each step waiting on
   # the test, and writes down how each sudo went.
@@ -42,8 +66,9 @@ let
 in
 
 # The computer's accounts and password: nostrd holds the Nostr keys as its
-# own user, Din's user reaches it through the link in its home, sudo asks for
-# a password exactly when `din` has one, and the disk passphrase systemd
+# own user, Din's user reaches it through the link in its home, sudo asks
+# exactly when `din` has a password - Din to approve, and only Din, else for
+# the password - and the disk passphrase systemd
 # leaves in root's keyring unlocks nostrd, the login keyring and GPG keys at
 # boot.
 # `nix build ./os#checks.x86_64-linux.accounts`
@@ -52,12 +77,20 @@ pkgs.testers.runNixOSTest {
   node.specialArgs = { inherit din deckmon; };
   nodes.machine = {
     imports = modules;
-    # Din itself isn't under test, and has no GPU here.
-    systemd.services.din-shell.enable = pkgs.lib.mkForce false;
+    # Din itself isn't under test, and has no GPU here: din-shell runs a
+    # stand-in for its compositor and Din's main process, started by the test
+    # with the answers it gives in /tmp/answers.
+    systemd.services.din-shell = pkgs.lib.mkForce {
+      unitConfig.ConditionPathExists = "/tmp/answers";
+      serviceConfig.User = "din";
+      script = "exec ${pkgs.python3}/bin/python3 ${compositorStub} ${pkgs.python3}/bin/python3 ${approveStub} /run/user/1000/din-askpass.sock $(cat /tmp/answers)";
+    };
     users.users.stranger.isNormalUser = true;
     environment.systemPackages = [ pkgs.keyutils pkgs.cryptsetup pkgs.libsecret ];
     virtualisation.memorySize = 2048;
     environment.etc."test-agent".source = agentScript;
+    # In the system, so the VM's garbage collection leaves it be.
+    environment.etc."test-askpass-stub".source = askpassStub;
   };
 
   testScript = ''
@@ -170,14 +203,54 @@ pkgs.testers.runNixOSTest {
     script = machine.succeed(f"grep -o '/nix/store/[^ ]*din-password.py' {password}").strip()
 
     with subtest("sudo stops asking given the password, and asks again"):
+        assert as_din(f"sudo -n {password} sudo status").strip() == "approve"
         machine.fail(f"su - din -c \"printf 'nope\\n' | sudo -n {password} sudo skip\"")
         machine.fail("su - din -c 'sudo -n true'")
         as_din(f"printf 'hunter22\\n' | sudo -n {password} sudo skip")
         assert as_din(f"sudo -n {password} sudo status").strip() == "skip"
         as_din("sudo -n true")
-        as_din(f"sudo -n {password} sudo ask")
-        assert as_din(f"sudo -n {password} sudo status").strip() == "ask"
+        as_din(f"sudo -n {password} sudo password")
+        assert as_din(f"sudo -n {password} sudo status").strip() == "password"
         machine.fail("su - din -c 'sudo -n true'")
+
+    with subtest("asking to approve instead of for the password takes the password"):
+        machine.fail(f"su - din -c \"printf 'nope\\n' | sudo -n {password} sudo approve\"")
+        assert as_din(f"sudo -n {password} sudo status").strip() == "password"
+        as_din(f"printf 'hunter22\\n' | sudo -n {password} sudo approve")
+        assert as_din(f"sudo -n {password} sudo status").strip() == "approve"
+        as_din(f"printf 'hunter22\\n' | sudo -n {password} sudo skip")
+        as_din(f"sudo -n {password} sudo approve </dev/null")
+        assert as_din(f"sudo -n {password} sudo status").strip() == "approve"
+
+    sock = "/run/user/1000/din-askpass.sock"
+    run_sudo = "OPENCODE_SESSION_ID=ses_test9 setsid -w sudo -k true </dev/null"
+
+    with subtest("Din approves sudo with a click"):
+        machine.succeed("echo allow deny > /tmp/answers", "systemctl start din-shell")
+        machine.wait_until_succeeds(f"test -S {sock}")
+        as_din(run_sudo)
+        machine.fail("su - din -c " + shlex.quote(run_sudo))
+        assert machine.succeed(f"cat {sock}.asked").split("\n")[:2] == ["True ses_test9 False"] * 2
+        machine.wait_until_fails("systemctl is-active din-shell")
+
+    with subtest("nothing else can approve it"):
+        machine.succeed(f"rm -f {sock}.asked")
+        machine.succeed(f"su - din -c '${pkgs.python3}/bin/python3 ${approveStub} {sock} allow >/dev/null 2>&1 &'")
+        machine.wait_until_succeeds(f"test -S {sock}")
+        machine.fail("su - din -c " + shlex.quote(run_sudo))
+        # Asked for the password at most, by the askpass helper, never to approve.
+        machine.fail(f"grep -s True {sock}.asked")
+        machine.succeed(f"pkill -u din -f approve-stub || true; rm -f {sock}")
+
+    with subtest("asking for the password, sudo doesn't ask Din"):
+        as_din(f"sudo -n {password} sudo password")
+        machine.succeed("echo allow > /tmp/answers", "systemctl start din-shell")
+        machine.wait_until_succeeds(f"test -S {sock}")
+        machine.fail("su - din -c " + shlex.quote(run_sudo))
+        machine.fail(f"grep -s True {sock}.asked")
+        machine.succeed("systemctl stop din-shell")
+        machine.succeed(f"rm -f {sock}")
+        as_din(f"printf 'hunter22\\n' | sudo -n {password} sudo approve")
 
     with subtest("without a terminal, sudo asks Din"):
         as_din("mkdir -m 700 /tmp/rt")

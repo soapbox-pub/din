@@ -1,9 +1,9 @@
 /**
- * Typed access to sudo's password requests (`window.dinos.askpass`, see
- * electron/preload.cjs + electron/askpass.mts): sudo asking for the
- * computer's password with no terminal to ask on, for a program other than
- * the Assistant (whose commands ask in their conversation). `AdminPromptHost`
- * shows each one. Absent in a plain browser.
+ * Typed access to sudo's requests (`window.dinos.askpass`, see
+ * electron/preload.cjs + electron/askpass.mts): sudo asking to approve a
+ * command, or for the computer's password with no terminal to ask on, for a
+ * program other than the Assistant (whose commands ask in their
+ * conversation). `AdminPromptHost` shows each one. Absent in a plain browser.
  */
 
 export interface AskpassRequest {
@@ -12,6 +12,8 @@ export interface AskpassRequest {
   requester: string;
   /** The sudo command line. */
   command: string;
+  /** Allow or Deny, rather than the password. */
+  approve: boolean;
 }
 
 export interface AskpassBridge {
@@ -19,6 +21,8 @@ export interface AskpassBridge {
   onCancel(callback: (requestId: number) => void): () => void;
   /** The password, or null to cancel. `ok` is false when the password isn't right. */
   answer(requestId: number, password: string | null): Promise<{ ok: boolean }>;
+  /** Allow an approval request, or deny it. */
+  approve(requestId: number, allow: boolean): Promise<void>;
 }
 
 declare global {

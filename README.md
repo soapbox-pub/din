@@ -107,17 +107,24 @@ initrd activates it, and only on the disk it booted from, so a DinOS disk
 attached to another DinOS machine (or under a live stick) is left alone.
 
 One password runs the computer. Encrypting the disk sets its passphrase as
-`din`'s password too, which `sudo` asks for (Din's own helpers excepted), and
-as the password of **nostrd**, the signer daemon that holds the Nostr account
+`din`'s password too, and as the password of **nostrd**, the signer daemon that holds the Nostr account
 keys as its own user so nothing `din` runs can read them. Din signs through
 nostrd's socket, and the passphrase typed at boot unlocks it. It unlocks the
 login keyring too, and any GPG key whose passphrase is the same, so signing
-commits doesn't ask (`os/din-gpg.py`). Without encryption there's no password,
-and `sudo` doesn't ask. Settings → Password changes it everywhere at once
-(`os/din-password.py`, disk first), and can stop `sudo` asking for it. With no
-terminal to ask on, `sudo` asks in Din (`os/din-askpass.py`,
-`electron/askpass.mts`): the agent's commands in the Assistant's
-conversation, others from a notification.
+commits doesn't ask (`os/din-gpg.py`). Settings → Password changes it
+everywhere at once (`os/din-password.py`, disk first).
+
+`sudo` (Din's own helpers excepted) asks you to approve the command in Din,
+with a click and no password: the agent's commands in the Assistant's
+conversation, others from a notification, in a terminal too. Root asks from
+sudo's PAM stack (`os/din-password.py`'s `sudo check`) and only takes an
+answer from Din's main process, the one child of din-shell's compositor,
+whose Electron has its Node inspector fused off so nothing else can run code
+in it. With no Din to ask (the text console, SSH), or no answer, `sudo` asks
+for the password instead, in Din when there's no terminal (`os/din-askpass.py`,
+`electron/askpass.mts`). Settings → Password can have it always ask for the
+password, or never ask. Without encryption there's no password, and `sudo`
+doesn't ask.
 `os/tests/accounts.nix`
 checks all of this in a VM: `nix build ./os#checks.x86_64-linux.accounts`.
 

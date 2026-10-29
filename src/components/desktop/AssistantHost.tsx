@@ -14,6 +14,7 @@ import {
   subscribeAssistantEvents,
   useAssistantDirectory,
   useAssistantEventSync,
+  useApprovePassword,
   useAssistantReady,
   usePendingRequests,
   usePreferredModel,
@@ -49,8 +50,9 @@ const SOURCE = { appId: ASSISTANT_APP_ID, name: 'Assistant' };
  *   Assistant), which starts OpenCode's server and follows its events.
  * - Keeps the assistant's queries current from those events.
  * - Notifies when the agent needs an answer (a permission request, with
- *   Allow and Deny right on the notification, a question, or the password
- *   for a command it runs with sudo) - unless the
+ *   Allow and Deny right on the notification, a question, or approval or
+ *   the password for a command it runs with sudo, approval with Allow and
+ *   Deny on the notification too) - unless the
  *   Assistant is the window in front - and when a conversation started here
  *   finishes while the Assistant isn't open (when it is, it says so itself:
  *   src/apps/assistant).
@@ -103,6 +105,7 @@ function useAssistantNotifications() {
   const { permissions, forms, passwords } = usePendingRequests();
   const { open } = useWindowActions();
   const reply = useReplyPermission();
+  const approve = useApprovePassword();
   const queryClient = useQueryClient();
   const isWatching = useIsWatching();
 
@@ -113,9 +116,9 @@ function useAssistantNotifications() {
     open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce, focusPassword: nonce });
   };
   // The latest of each for callbacks that outlive a render.
-  const latest = useRef({ show, showPassword, reply: reply.mutate, isWatching });
+  const latest = useRef({ show, showPassword, reply: reply.mutate, approve: approve.mutate, isWatching });
   useEffect(() => {
-    latest.current = { show, showPassword, reply: reply.mutate, isWatching };
+    latest.current = { show, showPassword, reply: reply.mutate, approve: approve.mutate, isWatching };
   });
 
   // Permission requests and questions: one notification each, gone once
@@ -154,14 +157,30 @@ function useAssistantNotifications() {
     }
     for (const request of passwords) {
       announce(`password:${request.requestId}`, request.sessionID, () =>
-        notify({
-          source: SOURCE,
-          title: 'The assistant needs your password',
-          body: request.command,
-          urgency: 'critical',
-          replaceKey: `assistant:password:${request.requestId}`,
-          onActivate: () => latest.current.showPassword(request.sessionID),
-        }),
+        request.approve
+          ? notify({
+              source: SOURCE,
+              title: 'Allow the assistant to run this as administrator?',
+              body: request.command,
+              urgency: 'critical',
+              actions: [
+                { id: 'once', label: 'Allow' },
+                { id: 'reject', label: 'Deny' },
+              ],
+              replaceKey: `assistant:password:${request.requestId}`,
+              onActivate: (action) => {
+                if (action === 'once' || action === 'reject') latest.current.approve({ request, decision: action });
+                else latest.current.showPassword(request.sessionID);
+              },
+            })
+          : notify({
+              source: SOURCE,
+              title: 'The assistant needs your password',
+              body: request.command,
+              urgency: 'critical',
+              replaceKey: `assistant:password:${request.requestId}`,
+              onActivate: () => latest.current.showPassword(request.sessionID),
+            }),
       );
     }
     for (const [key, notificationId] of shown.current) {

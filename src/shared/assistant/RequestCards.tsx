@@ -17,10 +17,11 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { useAnswerPassword, useReplyForm, useReplyPermission } from '@/hooks/useAssistant';
+import { useAnswerPassword, useApprovePassword, useReplyForm, useReplyPermission } from '@/hooks/useAssistant';
 import {
   cleanAssistantError,
   describePermission,
+  type ApprovalDecision,
   fieldVisible,
   type FormField,
   type FormInfo,
@@ -101,22 +102,87 @@ export function PermissionCard({ request, className }: { request: PermissionRequ
   );
 }
 
-/**
- * A command of the agent's run with sudo, waiting on the computer's password.
- * It doesn't take the keyboard when it appears; `focusKey` changing (opening
- * it from its notification) puts the cursor in it, and `onFocused` says so.
- */
-export function PasswordCard({
-  request,
-  focusKey,
-  onFocused,
-  className,
-}: {
+interface PasswordCardProps {
   request: PasswordRequest;
   focusKey?: number;
   onFocused?: () => void;
   className?: string;
-}) {
+}
+
+/**
+ * A command of the agent's run with sudo, waiting on the user's approval or
+ * the computer's password. It doesn't take the keyboard when it appears;
+ * `focusKey` changing (opening it from its notification) moves focus to it,
+ * and `onFocused` says so.
+ */
+export function PasswordCard(props: PasswordCardProps) {
+  return props.request.approve ? <ApprovalCard {...props} /> : <PasswordEntryCard {...props} />;
+}
+
+function ApprovalCard({ request, focusKey, onFocused, className }: PasswordCardProps) {
+  const approve = useApprovePassword();
+  const { notify } = useAssistantHost();
+  const [picked, setPicked] = useState<ApprovalDecision | null>(null);
+  const card = useRef<HTMLElement>(null);
+
+  const focused = useRef(onFocused);
+  useEffect(() => {
+    focused.current = onFocused;
+  });
+  useEffect(() => {
+    if (!focusKey) return;
+    card.current?.focus();
+    focused.current?.();
+  }, [focusKey]);
+
+  const send = (decision: ApprovalDecision) => {
+    setPicked(decision);
+    approve.mutate(
+      { request, decision },
+      {
+        onError: (error) => {
+          setPicked(null);
+          notify({ title: 'Couldn’t answer', description: cleanAssistantError(error), destructive: true });
+        },
+      },
+    );
+  };
+
+  return (
+    <section
+      ref={card}
+      tabIndex={-1}
+      aria-label="Administrator request"
+      className={cn('rounded-xl border border-primary/40 bg-primary/5 p-4 shadow-sm outline-none', className)}
+    >
+      <div className="flex items-start gap-3">
+        <ShieldQuestion className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="font-medium text-foreground">The assistant wants to run this as administrator</p>
+          <p className="max-h-32 overflow-y-auto break-all rounded-md bg-muted/60 px-2 py-1 font-mono text-xs text-foreground">
+            {request.command}
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
+        <Button variant="ghost" size="sm" disabled={approve.isPending} onClick={() => send('reject')}>
+          {picked === 'reject' && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+          Deny
+        </Button>
+        <Button variant="outline" size="sm" disabled={approve.isPending} onClick={() => send('conversation')}>
+          {picked === 'conversation' && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+          Allow for this conversation
+        </Button>
+        <Button size="sm" disabled={approve.isPending} onClick={() => send('once')}>
+          {picked === 'once' && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+          Allow
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function PasswordEntryCard({ request, focusKey, onFocused, className }: PasswordCardProps) {
   const answer = useAnswerPassword();
   const { notify } = useAssistantHost();
   const [password, setPassword] = useState('');

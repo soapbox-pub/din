@@ -7,11 +7,20 @@ export interface LockBridge {
   available(): Promise<boolean>;
   lock(): Promise<void>;
   changePassword(oldPassword: string, newPassword: string): Promise<void>;
-  /** Whether sudo asks for the password. */
-  sudoAsks(): Promise<boolean>;
-  /** Make sudo ask for the password, or stop it asking, which takes the password. */
-  setSudoAsks(ask: boolean, password?: string): Promise<void>;
+  /** What sudo asks for. */
+  sudoMode(): Promise<SudoMode>;
+  /**
+   * Change what sudo asks for. Loosening it - from the password to
+   * approval, or to nothing - takes the password.
+   */
+  setSudoMode(mode: SudoMode, password?: string): Promise<void>;
 }
+
+/**
+ * What sudo asks for before it runs something as administrator: approval
+ * with a click in Din, the computer's password, or nothing.
+ */
+export type SudoMode = 'approve' | 'password' | 'skip';
 
 declare global {
   interface Dinos {

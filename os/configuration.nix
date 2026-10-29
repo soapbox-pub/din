@@ -348,6 +348,40 @@ let
     [ -n "$1" ] && [ "$loader" = "$(echo "$1" | ${pkgs.coreutils}/bin/tr A-F a-f)" ]
   '';
 
+  # The Electron Din runs on, with its main process closed to debuggers: a
+  # SIGUSR1 from anything `din` runs would otherwise start Node's inspector
+  # in it, and with that run code in Din's main process, which sudo trusts
+  # to approve commands (os/din-password.py). Electron's
+  # EnableNodeCliInspectArguments fuse turns off that and --inspect alike.
+  # Fuses are bytes in the binary after a sentinel, so only the binary is
+  # copied and changed; the rest of the build is linked, and the wrapper
+  # points at the copy.
+  electron-hardened = pkgs.runCommand "electron-hardened-${electron.version}" { } ''
+    real=$(readlink -f ${electron}/libexec/electron/electron)
+    mkdir -p $out/bin $out/libexec/electron
+    for f in "$(dirname "$real")"/*; do
+      ln -s "$f" $out/libexec/electron/
+    done
+    rm $out/libexec/electron/electron
+    ${pkgs.python3}/bin/python3 - "$real" $out/libexec/electron/electron <<'EOF'
+    import sys
+    data = bytearray(open(sys.argv[1], "rb").read())
+    sentinel = b"dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX"
+    at = data.find(sentinel)
+    assert at >= 0 and data.find(sentinel, at + 1) < 0, "Electron's fuses aren't where they're expected"
+    fuses = at + len(sentinel)
+    assert data[fuses] == 1 and data[fuses + 1] > 3, "Electron's fuses have changed shape"
+    inspect = fuses + 2 + 3  # EnableNodeCliInspectArguments
+    assert data[inspect] in b"01", "Electron's inspector fuse is gone"
+    data[inspect] = ord("0")
+    open(sys.argv[2], "wb").write(data)
+    EOF
+    chmod 555 $out/libexec/electron/electron
+    sed "s|$real|$out/libexec/electron/electron|g" ${electron}/bin/electron > $out/bin/electron
+    grep -q "$out/libexec/electron/electron" $out/bin/electron
+    chmod 555 $out/bin/electron
+  '';
+
   # Launcher: Electron running the Din host on Wayland (din-shell provides
   # the compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
   # variant below can swap in software rendering.
@@ -431,7 +465,7 @@ let
     # manager and don't have it; nothing in Din needs it. pam_systemd has no
     # setting for "none" (an empty one means its default).
     exec ${pkgs.util-linux}/bin/setpriv --inh-caps=-all --ambient-caps=-all \
-      ${electron}/bin/electron \
+      ${electron-hardened}/bin/electron \
       ${din-app}/share/din/main.mjs \
       --ozone-platform=wayland "''${gpuFlags[@]}" ${extraFlags}
   '';
@@ -599,7 +633,7 @@ in
   # keysyms Chromium can't identify - see
   # electron/main.mts. The main process already observes every keystroke via
   # before-input-event; nothing new is exposed to renderers. `wheel` gives
-  # the developer the machine: sudo, behind the computer's password.
+  # the developer the machine: sudo, behind the user's approval (below).
   # The uid is pinned because this user used to be called `web`: installed
   # machines keep owning their home directory across the rename. `tor` lets
   # Din ask Tor, through its control socket, how far it has got connecting.
@@ -611,21 +645,27 @@ in
     shell = pkgs.zsh;
   };
 
-  # sudo asks for the computer's password: `din`'s, which the Installer sets
-  # to the disk's when it encrypts (os/din-install.sh). Otherwise anything the
-  # user runs could become root and read the keys out of nostrd. Din's own
-  # helpers run without one; each takes only the commands it means to.
+  # sudo asks the user before it runs anything as root. Otherwise anything
+  # the user runs could become root and read the keys out of nostrd. Din's
+  # own helpers run without asking; each takes only the commands it means to.
+  #
+  # It asks to approve the command in Din, with a click: in the Assistant's
+  # conversation for the agent's commands, else from a notification - in a
+  # terminal too (din-password's `sudo check`, in sudo's PAM stack below).
+  # Unanswered, denied in a terminal, or with no Din to ask (the text
+  # console, SSH), it asks for the computer's password: `din`'s, which the
+  # Installer sets to the disk's when it encrypts (os/din-install.sh).
   #
   # Where `din` has no password - the live stick, an install without
   # encryption - there's nothing to ask for, so sudo doesn't: din-sudo puts a
   # rule saying so under /run at boot.
   #
-  # Settings → Password can stop it asking: din-password puts a rule saying
-  # so in /var/lib/din/sudoers.d, after checking the password.
+  # Settings → Password can have it ask for the password instead, or not ask
+  # at all: din-password keeps /var/lib/din/sudo-password, or puts a rule in
+  # /var/lib/din/sudoers.d, after checking the password for either looser one.
   #
-  # Without a terminal to ask on, sudo asks in Din (din-askpass): in the
-  # Assistant's conversation for the agent's commands, else from a
-  # notification.
+  # Without a terminal to type the password on, sudo asks for it in Din
+  # (din-askpass), where approvals are asked.
   #
   # /etc/sudoers.d is for the computer's own rules, as on other distros.
   security.sudo.extraRules = [{
@@ -643,7 +683,8 @@ in
       # It checks the old password itself.
       "${din-password}/bin/din-password change"
       "${din-password}/bin/din-password sudo status"
-      "${din-password}/bin/din-password sudo ask"
+      "${din-password}/bin/din-password sudo approve"
+      "${din-password}/bin/din-password sudo password"
       "${din-password}/bin/din-password sudo skip"
       "${din-password}/bin/din-password sudo grant"
       "${din-password}/bin/din-password sudo revoke"
@@ -686,14 +727,16 @@ in
       group = "root";
     };
   };
-  # An Assistant conversation the password was given for once ("Allow for
-  # this conversation") isn't asked again while its server runs: din-password
-  # keeps the grant, and checks it here, before the password, as root.
-  security.pam.services.sudo.rules.auth.din-grant = {
+  # Before the password, as root, din-password lets through what Din
+  # approves, and an Assistant conversation allowed once ("Allow for this
+  # conversation") while its server runs. In a terminal, what it prints (that
+  # it's waiting on Din) is shown there.
+  security.pam.services.sudo.rules.auth.din-check = {
     order = config.security.pam.services.sudo.rules.auth.unix.order - 10;
     control = "sufficient";
     modulePath = "${config.security.pam.package}/lib/security/pam_exec.so";
-    args = [ "quiet" "seteuid" "${pkgs.writeShellScript "din-sudo-check" ''
+    args = [ "quiet" "stdout" "seteuid" "${pkgs.writeShellScript "din-sudo-check" ''
+      export PATH=${pkgs.systemd}/bin
       exec ${pkgs.python3}/bin/python3 -I ${./din-password.py} sudo check
     ''}" ];
   };

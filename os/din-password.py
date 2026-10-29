@@ -7,9 +7,11 @@ GPG key that had it. This changes all five, after checking the old one itself,
 so Din can run it through sudo without a password.
 
     din-password change    old and new password on stdin, one per line
-    din-password sudo status|ask|skip
-                           whether sudo asks for it: `skip` takes the password
-                           on stdin, so nothing `din` runs can turn it off
+    din-password sudo status|approve|password|skip
+                           what sudo asks for: the user's approval in Din,
+                           the password, or nothing. `approve` and `skip`
+                           take the password on stdin (`approve` doesn't from
+                           `skip`), so nothing `din` runs can loosen it
     din-password sudo grant
                            the password and a sudo's pid on stdin: sudo stops
                            asking in the Assistant conversation that sudo runs
@@ -18,7 +20,8 @@ so Din can run it through sudo without a password.
                            a conversation's id on stdin, or nothing for all
     din-password sudo check
                            sudo's PAM stack (pam_exec, as root): succeeds when
-                           the sudo above it runs in a granted conversation
+                           the sudo above it runs in a granted conversation,
+                           or Din approves it
 
 Passwords never go on a command line, where other users could read them:
 cryptsetup gets them through pipes, nostrd over its socket, din-keyring,
@@ -33,6 +36,15 @@ naming the OpenCode server whose commands it covers by pid and start time
 (so a reused pid doesn't match). A sudo is let through when its
 OPENCODE_SESSION_ID has a grant and that server is one of its ancestors:
 commands from the Terminal, other programs or other servers still ask.
+
+Unless /var/lib/din/sudo-password says to ask for the password instead, a
+sudo that isn't granted asks Din to approve it before the password, over
+Din's askpass socket (electron/askpass.mts): Allow lets it through, and
+anything else - Deny, no answer, no Din - leaves it to the password. Only
+Din's main process can answer: the socket's other end has to be the one
+process din-shell's compositor starts, which nothing else `din` runs can
+become, and whose Electron takes no debugger (os/configuration.nix). Its
+`allow-session` answer grants the conversation, as `grant` does.
 """
 
 import ctypes
@@ -40,13 +52,18 @@ import json
 import os
 import pwd
 import socket
+import struct
 import subprocess
 import sys
+import time
 
 USER = "din"
 NOSTRD_SOCKET = "/run/nostrd/signer.sock"
 SKIP_RULE = "/var/lib/din/sudoers.d/no-password"
+ASK_PASSWORD = "/var/lib/din/sudo-password"
 GRANTS = "/run/din/sudo-grants"
+SHELL_SERVICE = "din-shell.service"
+APPROVAL_TIMEOUT = 10 * 60
 
 
 def fail(message):
@@ -197,13 +214,30 @@ def change():
              "the lock screen still take the old one. " + result.stderr.strip())
 
 
-def sudo_skip():
+def check_stdin_password():
     password = sys.stdin.read().split("\n")[0]
     hashed = password_hash()
     if not hashed:
         fail("This computer has no password.")
     if not password_matches(password, hashed):
         fail("That isn't the password.")
+
+
+def remove(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def sudo_status():
+    if os.path.exists(SKIP_RULE):
+        return "skip"
+    return "password" if os.path.exists(ASK_PASSWORD) else "approve"
+
+
+def sudo_skip():
+    check_stdin_password()
     os.makedirs(os.path.dirname(SKIP_RULE), mode=0o750, exist_ok=True)
     temporary = SKIP_RULE + ".tmp"
     with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o440), "w") as rule:
@@ -211,11 +245,18 @@ def sudo_skip():
     os.rename(temporary, SKIP_RULE)
 
 
-def sudo_ask():
-    try:
-        os.remove(SKIP_RULE)
-    except FileNotFoundError:
+def sudo_approve():
+    if sudo_status() == "password":
+        check_stdin_password()
+    remove(ASK_PASSWORD)
+    remove(SKIP_RULE)
+
+
+def sudo_password():
+    os.makedirs(os.path.dirname(ASK_PASSWORD), mode=0o755, exist_ok=True)
+    with open(os.open(ASK_PASSWORD, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644), "w"):
         pass
+    remove(SKIP_RULE)
 
 
 def proc(pid, name):
@@ -260,11 +301,20 @@ def sudo_grant():
         if proc(sudo, "comm").decode().strip() != "sudo":
             fail("That isn't sudo.")
         session = session_of(sudo)
-        server = next(((pid, started) for pid, started, name in ancestors(sudo) if name == "opencode"), None)
+        server = opencode_server(sudo)
     except OSError:
         fail("That sudo is gone.")
     if not session or not server:
         fail("That sudo isn't the Assistant's.")
+    write_grant(session, server)
+
+
+def opencode_server(sudo):
+    """The OpenCode server above sudo: its pid and start time, or None."""
+    return next(((pid, started) for pid, started, name in ancestors(sudo) if name == "opencode"), None)
+
+
+def write_grant(session, server):
     os.makedirs(GRANTS, mode=0o700, exist_ok=True)
     temporary = os.path.join(GRANTS, f".{session}")
     with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as grant:
@@ -283,6 +333,71 @@ def sudo_revoke():
             os.remove(os.path.join(GRANTS, name))
 
 
+def granted(sudo, session):
+    if not session:
+        return False
+    try:
+        with open(os.path.join(GRANTS, session)) as grant:
+            pid, started = grant.read().split()
+    except (OSError, ValueError):
+        return False
+    return any(str(p) == pid and s == started for p, s, _ in ancestors(sudo))
+
+
+def has_terminal(pid):
+    return int(proc(pid, "stat").decode().rsplit(")", 1)[1].split()[4]) != 0
+
+
+def din_shell():
+    """The compositor din-shell.service runs, whose one child is Din's main process."""
+    shown = subprocess.run(
+        ["systemctl", "show", "--property=MainPID", "--value", SHELL_SERVICE],
+        capture_output=True, text=True, timeout=10,
+    )
+    return int(shown.stdout.strip() or 0)
+
+
+def ask_din(sudo, session):
+    """Din's answer to approving sudo: allow, allow-session, deny, or None for none."""
+    compositor = din_shell()
+    # Din tries passwords with a sudo of its own.
+    if compositor <= 1 or stat(stat(sudo)[0])[0] == compositor:
+        return None
+    uid = pwd.getpwnam(USER).pw_uid
+    tty = has_terminal(sudo)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(5)
+        sock.connect(f"/run/user/{uid}/din-askpass.sock")
+        peer, peer_uid, _ = struct.unpack(
+            "3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+        )
+        if peer_uid != uid or stat(peer)[0] != compositor:
+            return None
+        request = {"approve": True, "pid": sudo, "session": session, "tty": tty}
+        sock.sendall((json.dumps(request) + "\n").encode())
+        if tty:
+            print("Waiting for you to allow this in Din...", flush=True)
+        reply = b""
+        deadline = time.monotonic() + APPROVAL_TIMEOUT
+        sock.settimeout(1)
+        while b"\n" not in reply:
+            # sudo was stopped: nobody's waiting for the answer.
+            if time.monotonic() > deadline or os.getppid() != sudo:
+                return None
+            try:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                continue
+            if not chunk or len(reply) > 4096:
+                return None
+            reply += chunk
+    answer = json.loads(reply.split(b"\n", 1)[0])
+    answer = answer.get("answer") if isinstance(answer, dict) else None
+    if answer == "deny" and tty:
+        print("Denied in Din.", flush=True)
+    return answer
+
+
 def sudo_check():
     if os.environ.get("PAM_SERVICE") != "sudo" or os.environ.get("PAM_USER") != USER:
         sys.exit(1)
@@ -291,13 +406,18 @@ def sudo_check():
         if proc(sudo, "comm").decode().strip() != "sudo":
             sys.exit(1)
         session = session_of(sudo)
-        if not session:
+        if granted(sudo, session):
+            return
+        if sudo_status() != "approve":
             sys.exit(1)
-        with open(os.path.join(GRANTS, session)) as grant:
-            pid, started = grant.read().split()
-        if not any(str(p) == pid and s == started for p, s, _ in ancestors(sudo)):
-            sys.exit(1)
-    except (OSError, ValueError):
+        answer = ask_din(sudo, session)
+        if answer == "allow-session" and session:
+            server = opencode_server(sudo)
+            if server:
+                write_grant(session, server)
+    except (OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt):
+        sys.exit(1)
+    if answer not in ("allow", "allow-session"):
         sys.exit(1)
 
 
@@ -306,11 +426,13 @@ def main():
     if args == ["change"]:
         change()
     elif args == ["sudo", "status"]:
-        print("skip" if os.path.exists(SKIP_RULE) else "ask")
+        print(sudo_status())
+    elif args == ["sudo", "approve"]:
+        sudo_approve()
+    elif args == ["sudo", "password"]:
+        sudo_password()
     elif args == ["sudo", "skip"]:
         sudo_skip()
-    elif args == ["sudo", "ask"]:
-        sudo_ask()
     elif args == ["sudo", "grant"]:
         sudo_grant()
     elif args == ["sudo", "revoke"]:
@@ -318,7 +440,7 @@ def main():
     elif args == ["sudo", "check"]:
         sudo_check()
     else:
-        fail("usage: din-password change | sudo status|ask|skip|grant|revoke|check")
+        fail("usage: din-password change | sudo status|approve|password|skip|grant|revoke|check")
 
 
 if __name__ == "__main__":

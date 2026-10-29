@@ -10,7 +10,8 @@
 // The password itself - the disk's, sudo's, the lock screen's and nostrd's,
 // all one - is changed by os/din-password.py (DIN_PASSWORD), which checks
 // the old one before changing anything. Both go to it on stdin. It also says
-// whether sudo asks for the password, and stops it asking given the password.
+// what sudo asks for - approval in Din, the password, or nothing - and
+// changes it, given the password to loosen it.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -78,21 +79,21 @@ export function registerLockHandlers(options: {
     await runPasswordHelper(PASSWORD_HELPER, ['change'], `${old}\n${next}\n`);
   });
 
-  ipcMain.handle('lock:sudo-asks', async (event) => {
+  ipcMain.handle('lock:sudo-mode', async (event) => {
     assertShellSender(event);
-    if (!PASSWORD_HELPER) return true;
+    if (!PASSWORD_HELPER) return 'password';
     const { stdout } = await runCommand('sudo', ['-n', PASSWORD_HELPER, 'sudo', 'status'], { timeout: 10_000 });
-    return stdout.trim() !== 'skip';
+    const mode = stdout.trim();
+    return mode === 'approve' || mode === 'skip' ? mode : 'password';
   });
 
-  ipcMain.handle('lock:set-sudo-asks', async (event, ask: unknown, password: unknown) => {
+  ipcMain.handle('lock:set-sudo-mode', async (event, mode: unknown, password: unknown) => {
     assertShellSender(event);
     if (!PASSWORD_HELPER) throw new Error('This is for DinOS');
-    if (ask === true) {
-      await runPasswordHelper(PASSWORD_HELPER, ['sudo', 'ask'], '');
-      return;
+    if (mode !== 'approve' && mode !== 'password' && mode !== 'skip') throw new Error('Not a choice');
+    if (password !== undefined && (typeof password !== 'string' || password.includes('\n'))) {
+      throw new Error('Not a password');
     }
-    if (typeof password !== 'string' || password.includes('\n')) throw new Error('Not a password');
-    await runPasswordHelper(PASSWORD_HELPER, ['sudo', 'skip'], `${password}\n`);
+    await runPasswordHelper(PASSWORD_HELPER, ['sudo', mode], password === undefined ? '' : `${password}\n`);
   });
 }
