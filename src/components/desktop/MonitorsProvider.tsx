@@ -92,9 +92,11 @@ export function MonitorsProvider({ children }: { children: React.ReactNode }) {
     // Radix's popovers and menus are placed by floating-ui, which looks for a
     // fixed element's containing block but never considers <body>: it places
     // them in viewport coordinates, as if <body> were still at the origin.
-    // Pull them back by the primary monitor's offset to compensate.
+    // Pull them back by the primary monitor's offset to compensate. Not while
+    // the desktop's layer is open for a fullscreen page (PageFullscreenHost):
+    // it's an element, which floating-ui does account for.
     const popperFix = document.createElement('style');
-    popperFix.textContent = `[data-radix-popper-content-wrapper] { left: ${-primary.x}px !important; top: ${-primary.y}px !important; }`;
+    popperFix.textContent = `[data-radix-popper-content-wrapper]:not(#shell[open] *) { left: ${-primary.x}px !important; top: ${-primary.y}px !important; }`;
     document.head.appendChild(popperFix);
     return () => {
       body.style.cssText = saved;
