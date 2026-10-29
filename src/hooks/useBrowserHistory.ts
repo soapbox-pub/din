@@ -279,6 +279,32 @@ export function inlineCompletion(
 }
 
 /**
+ * Where a schemeless address that names a visited site in full should go:
+ * the URL that was visited, so "reddit.com" goes straight to
+ * "https://www.reddit.com/" (as Chrome's omnibox does) instead of through
+ * the site's redirect. A page that loaded (it has a title) beats an address
+ * that was only typed and redirected away (see WebBrowser's typedUrls), then
+ * the most-visited wins; null when nothing matches.
+ */
+export function historyDestination(history: BrowserHistoryEntry[], text: string): string | null {
+  const q = text.trim().toLowerCase();
+  if (!q || /\s/.test(q) || /^[a-z][a-z0-9+.-]*:/.test(q)) return null;
+  let best: BrowserHistoryEntry | null = null;
+  for (const entry of history) {
+    if (!/^https?:\/\//i.test(entry.url)) continue;
+    if (!completionTargets(entry).some((t) => t.toLowerCase() === q)) continue;
+    if (
+      !best ||
+      (!!entry.title && !best.title) ||
+      (!!entry.title === !!best.title && entry.visits > best.visits)
+    ) {
+      best = entry;
+    }
+  }
+  return best?.url ?? null;
+}
+
+/**
  * The web browser's persistent history, stored per-user via `useAppData`
  * on this device only; it never syncs to relays.
  *

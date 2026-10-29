@@ -4684,6 +4684,33 @@ function registerBrowserDataHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Preconnecting for the Web Browser's address bar. As the user types, the
+// shell names where Enter would go, and this opens a connection to it (DNS,
+// TCP, TLS) ahead of time, as Chrome's omnibox does. Chromium dedupes
+// repeats and closes the socket if it goes unused.
+//
+// Only the persistent session: a private or Tor window never asks, since
+// connecting before the user commits to a site would leave a trace of what
+// they typed (Tor would also be slow to bother with).
+// ---------------------------------------------------------------------------
+function registerBrowserPreconnectHandler(): void {
+  ipcMain.on('browser:preconnect', (event, url: unknown) => {
+    if (!isShellSender(event) || typeof url !== 'string') return;
+    let origin: string;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return;
+      // Onion services are Tor's session's alone; outside it, a lookup leaks.
+      if (/\.onion\.?$/i.test(parsed.hostname)) return;
+      origin = parsed.origin;
+    } catch {
+      return;
+    }
+    browserSession().preconnect({ url: origin, numSockets: 1 });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Color scheme. Chromium answers `prefers-color-scheme` from the host
 // desktop's setting, which under cage doesn't exist, so every page saw light.
 // Din is the desktop here: the shell reports its own light/dark mode and
@@ -5275,6 +5302,7 @@ app.whenReady().then(() => {
   registerCrxHandlers();
   registerCertificateHandling();
   registerBrowserDataHandlers();
+  registerBrowserPreconnectHandler();
   registerFindHandlers();
   registerThemeHandler();
   registerUserscriptHandlers({ assertShellSender });

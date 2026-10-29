@@ -2126,6 +2126,13 @@ expose('browser', {
     ipcRenderer.invoke('browser:clearBrowsingData', options),
 
   /**
+   * Open a connection to `url`'s origin in the persistent browser session,
+   * ahead of a likely navigation there (the address bar, as the user types).
+   * @param {string} url
+   */
+  preconnect: (url) => ipcRenderer.send('browser:preconnect', url),
+
+  /**
    * Search a browser tab (`wcId`) for `text`. `options.forward` (default
    * true) sets direction; `options.findNext` continues the current search
    * (Enter/Shift+Enter); `options.matchCase` makes it case-sensitive. An

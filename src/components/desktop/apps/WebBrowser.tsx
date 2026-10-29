@@ -115,6 +115,7 @@ import {
 } from '@/components/ui/context-menu';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
+  historyDestination,
   historyDisplayUrl,
   inlineCompletion,
   matchHistory,
@@ -494,6 +495,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // (fastmail.com → app.fastmail.com), so the address that was typed is
   // recorded too, or it could never autocomplete.
   const typedUrls = useRef(new Map<string, string>());
+  // For navigateTab, which resolves a typed site to the address visited.
+  const historyRef = useRef(browsingHistory);
+  useEffect(() => {
+    historyRef.current = browsingHistory;
+  }, [browsingHistory]);
   const newTabSites = useMemo(
     () => topSites(browsingHistory, NEW_TAB_LINKS, NEW_TAB_SITE_COUNT),
     [browsingHistory],
@@ -866,6 +872,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // main process rejects the load of a self-signed / private-CA host and
   // reports it here (webview mode only; see src/lib/browser.ts).
   const browserBridge = useMemo(() => getBrowserBridge(), []);
+
+  // As the address bar's text changes, connect to wherever Enter would go,
+  // so the connection is (partly) up by the time it's pressed, as Chrome's
+  // omnibox does. Per keystroke, no waiting: typing is about as fast as a
+  // TLS handshake. Repeats are cheap: Chromium does nothing for an origin
+  // it already has a connection to. Never from a private window, which
+  // would leave a trace.
+  const predictNavigation = useMemo(() => {
+    if (isPrivate || !browserBridge) return undefined;
+    return (text: string) => {
+      const url = resolveNavigation(historyDestination(historyRef.current, text) ?? text);
+      if (url && /^https?:\/\//i.test(url) && !isOnionUrl(url)) browserBridge.preconnect(url);
+    };
+  }, [isPrivate, browserBridge]);
   const [certErrors, setCertErrors] = useState<Map<number, CertificateErrorInfo>>(
     () => new Map(),
   );
@@ -1465,7 +1485,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
 
   const navigateTab = useCallback(
     (id: string, raw: string) => {
-      const resolved = resolveNavigation(raw);
+      const resolved = resolveNavigation(historyDestination(historyRef.current, raw) ?? raw);
       if (!resolved) return;
       // A .user.js address is a script install, not a page visit (mirrors
       // the main process's will-navigate intercept for link clicks).
@@ -1928,6 +1948,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           value={activeTab.address}
           history={browsingHistory}
           onChangeValue={(text) => updateTab(activeId, { address: text })}
+          onPredict={predictNavigation}
           onNavigate={navigate}
           onOpenLocation={(url) => openTab(url, true, null, activeId)}
           onionLocation={onionLocation}
@@ -2086,6 +2107,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             preferences={tab.url === PREFERENCES_URL ? preferences : null}
             nostrUri={isNostrUri(tab.url) ? tab.url : null}
             onNavigate={navigateTab}
+            onPredict={predictNavigation}
             onOpenTab={openTabInBackground}
             onOpenWindow={isPrivate ? undefined : openInNewWindow}
             // Only render a docked pane for bottom/right; 'window' hosts its
@@ -2212,6 +2234,7 @@ function AddressBar({
   value,
   history,
   onChangeValue,
+  onPredict,
   onNavigate,
   onOpenLocation,
   onionLocation,
@@ -2224,6 +2247,8 @@ function AddressBar({
   value: string;
   history: BrowserHistoryEntry[];
   onChangeValue: (text: string) => void;
+  /** Where Enter would go now changed (the user typed or arrowed); lets the browser connect ahead. */
+  onPredict?: (text: string) => void;
   onNavigate: (raw: string) => void;
   /** Open the onion service or nsite the page names, in a new tab beside it. */
   onOpenLocation: (url: string) => void;
@@ -2268,6 +2293,7 @@ function AddressBar({
       input.setSelectionRange(text.length, completed.length);
     }
     onChangeValue(completed ?? text);
+    onPredict?.(completed ?? text);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -2290,6 +2316,7 @@ function AddressBar({
       else if (next >= count) next = -1;
       setHighlighted(next);
       onChangeValue(next === -1 ? typed : suggestions[next].url);
+      onPredict?.(next === -1 ? typed : suggestions[next].url);
     } else if (e.key === 'Escape' && show) {
       e.preventDefault();
       dismiss();
@@ -2349,7 +2376,10 @@ function AddressBar({
           setHighlighted(-1);
           setOpen(text.trim().length > 0);
           if (forward) complete(input, text);
-          else onChangeValue(text);
+          else {
+            onChangeValue(text);
+            onPredict?.(text);
+          }
         }}
         onKeyDown={onKeyDown}
         onFocus={(e) => e.currentTarget.select()}
@@ -3629,6 +3659,7 @@ const TabSurface = memo(function TabSurface({
   preferences,
   nostrUri,
   onNavigate: onNavigateToUrl,
+  onPredict,
   onOpenTab,
   onOpenWindow,
   dock,
@@ -3669,6 +3700,8 @@ const TabSurface = memo(function TabSurface({
   nostrUri: string | null;
   /** Navigate this tab to a URL/search (from the new-tab page). */
   onNavigate: (id: string, raw: string) => void;
+  /** Where the new-tab page would go changed (see predictNavigation). */
+  onPredict?: (raw: string) => void;
   /** Open a URL in a new background tab / a new window (from the new-tab page). */
   onOpenTab: (url: string) => void;
   onOpenWindow?: (url: string) => void;
@@ -3817,6 +3850,7 @@ const TabSurface = memo(function TabSurface({
           isPrivate={isPrivate}
           sites={sites}
           onNavigate={(raw) => onNavigateToUrl(id, raw)}
+          onPredict={onPredict}
           onOpenTab={onOpenTab}
           onOpenWindow={onOpenWindow}
         />
@@ -3978,11 +4012,14 @@ function monogramColor(label: string): string {
 function NewTabTile({
   link,
   onNavigate,
+  onPredict,
   onOpenTab,
   onOpenWindow,
 }: {
   link: TopSite;
   onNavigate: (url: string) => void;
+  /** The pointer is on the tile, so a click may follow: connect ahead. */
+  onPredict?: (url: string) => void;
   onOpenTab: (url: string) => void;
   onOpenWindow?: (url: string) => void;
 }) {
@@ -3999,6 +4036,7 @@ function NewTabTile({
           type="button"
           title={link.url}
           onClick={() => onNavigate(link.url)}
+          onPointerEnter={() => onPredict?.(link.url)}
           className="group flex min-w-0 flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {failed || !icon ? (
@@ -4063,6 +4101,7 @@ function NewTabPage({
   isPrivate,
   sites,
   onNavigate,
+  onPredict,
   onOpenTab,
   onOpenWindow,
 }: {
@@ -4070,6 +4109,8 @@ function NewTabPage({
   /** Most-visited sites, defaults included (see `topSites`). */
   sites: TopSite[];
   onNavigate: (raw: string) => void;
+  /** Where a click or Enter would go changed; lets the browser connect ahead. */
+  onPredict?: (raw: string) => void;
   onOpenTab: (url: string) => void;
   onOpenWindow?: (url: string) => void;
 }) {
@@ -4124,7 +4165,10 @@ function NewTabPage({
             inputMode="url"
             aria-label="Search or type a URL"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              onPredict?.(e.target.value);
+            }}
             placeholder="Search or type a URL"
             spellCheck={false}
             autoComplete="off"
@@ -4141,6 +4185,7 @@ function NewTabPage({
                 key={link.url}
                 link={link}
                 onNavigate={onNavigate}
+                onPredict={onPredict}
                 onOpenTab={onOpenTab}
                 onOpenWindow={onOpenWindow}
               />

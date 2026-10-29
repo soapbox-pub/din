@@ -111,6 +111,11 @@ export interface BrowserBridge {
     cookies?: boolean;
   }): Promise<void>;
   /**
+   * Open a connection to `url`'s origin in the persistent browser session,
+   * ahead of a likely navigation there. Never for private or Tor windows.
+   */
+  preconnect(url: string): void;
+  /**
    * Search a tab (`wcId`) for `text`. An empty text clears the highlight.
    * Match counts arrive via onFindResult.
    */
