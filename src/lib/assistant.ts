@@ -165,7 +165,13 @@ export type SessionMessage =
   | (MessageBase & { type: 'agent-switched'; agent: string })
   | (MessageBase & { type: 'model-switched'; model: ModelRef })
   | (MessageBase & { type: 'location-switched'; location: { directory: string } })
-  | (MessageBase & { type: 'compaction'; status: 'running' | 'completed' | 'failed'; summary?: string })
+  | (MessageBase & {
+      type: 'compaction';
+      status: 'running' | 'completed' | 'failed';
+      /** Streams in while it runs. */
+      summary?: string;
+      error?: StructuredError;
+    })
   | (MessageBase & { type: 'idle'; outcome: 'succeeded' | 'failed' | 'interrupted'; error?: StructuredError });
 
 /**

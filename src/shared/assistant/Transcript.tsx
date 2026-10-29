@@ -63,34 +63,42 @@ function group(messages: SessionMessage[]): Entry[] {
   let turn: TurnEntry | undefined;
   // The prompt the agent is working on, until the session goes idle.
   let prompt: UserMessage | undefined;
+  // A compaction partway through a prompt splits its turn; the rest is keyed by the compaction.
+  let compaction: SessionMessage | undefined;
+  const open = (first: SessionMessage): TurnEntry => {
+    // A turn whose prompt is past the loaded window would otherwise be keyed by its
+    // first visible message, which changes as the window slides and remounts it.
+    const from = compaction ?? prompt;
+    turn = {
+      kind: 'turn',
+      id: compaction ? `turn:${compaction.id}` : prompt ? `turn:${prompt.id}` : entries.length === 0 ? 'turn:earlier' : first.id,
+      start: from?.time.created ?? first.time.created,
+      items: [],
+    };
+    entries.push(turn);
+    return turn;
+  };
   for (const message of messages) {
     if (message.type === 'user') {
       // One sent while it works closes the turn so far; the agent's next steps start another.
       entries.push({ kind: 'user', message });
       turn = undefined;
       prompt = message;
+      compaction = undefined;
+    } else if (message.type === 'compaction') {
+      // The summary reads as a reply of its own, not as part of the work.
+      entries.push({ kind: 'note', message });
+      turn = undefined;
+      if (prompt) compaction = message;
     } else if (message.type === 'idle') {
-      if (!turn && prompt) {
-        turn = { kind: 'turn', id: `turn:${prompt.id}`, start: prompt.time.created, items: [] };
-        entries.push(turn);
-      }
+      if (!turn && prompt) open(message);
       if (turn) turn.idle = message;
       else entries.push({ kind: 'note', message });
       turn = undefined;
       prompt = undefined;
+      compaction = undefined;
     } else if (message.type === 'assistant' || turn || prompt) {
-      if (!turn) {
-        // A turn whose prompt is past the loaded window would otherwise be keyed by its
-        // first visible message, which changes as the window slides and remounts it.
-        turn = {
-          kind: 'turn',
-          id: prompt ? `turn:${prompt.id}` : entries.length === 0 ? 'turn:earlier' : message.id,
-          start: prompt?.time.created ?? message.time.created,
-          items: [],
-        };
-        entries.push(turn);
-      }
-      turn.items.push(message);
+      (turn ?? open(message)).items.push(message);
     } else entries.push({ kind: 'note', message });
   }
   return entries;
@@ -155,7 +163,7 @@ export const Transcript = memo(function Transcript({
           />
         </li>
       )}
-      {running && last?.kind === 'note' && (
+      {running && last?.kind === 'note' && !(last.message.type === 'compaction' && last.message.status === 'running') && (
         <li>
           <Working />
         </li>
@@ -732,6 +740,35 @@ function AgentSwitched({ agent }: { agent: string }) {
   );
 }
 
+/** The summary that replaced the conversation so far in the model's context, shown as a reply. */
+function Compaction({ message }: { message: Extract<SessionMessage, { type: 'compaction' }> }) {
+  const summary = message.summary?.trim();
+  if (message.status === 'failed') {
+    return (
+      <div className="flex flex-col gap-4">
+        <Divider>Couldn’t summarize the conversation</Divider>
+        {message.error && message.error.type !== 'aborted' && (
+          <ErrorBanner message={message.error.message ?? 'The summary failed'} />
+        )}
+      </div>
+    );
+  }
+  const running = message.status === 'running';
+  return (
+    <div className="group/turn flex min-w-0 flex-col gap-4">
+      <Divider>
+        <span className={cn(running && SHIMMER)}>{running ? 'Summarizing the conversation…' : 'Conversation summarized'}</span>
+      </Divider>
+      {summary && <Markdown text={summary} />}
+      {!running && summary && (
+        <div className="-ml-2 -mt-2 flex opacity-0 focus-within:opacity-100 group-hover/turn:opacity-100">
+          <CopyButton text={summary} label="Copy summary" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Everything else a session records, as a quiet line, or nothing. */
 function Note({ message, home }: { message: SessionMessage; home?: string }) {
   switch (message.type) {
@@ -742,7 +779,7 @@ function Note({ message, home }: { message: SessionMessage; home?: string }) {
     case 'location-switched':
       return <Divider>Working in {tildify(message.location.directory, home)}</Divider>;
     case 'compaction':
-      return <Divider>{message.status === 'running' ? 'Summarizing the conversation…' : 'Conversation summarized'}</Divider>;
+      return <Compaction message={message} />;
     case 'skill':
       return <Divider>Using skill: {message.name}</Divider>;
     case 'shell':
