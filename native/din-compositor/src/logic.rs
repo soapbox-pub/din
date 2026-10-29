@@ -168,6 +168,7 @@ impl State {
                 t.announced = true;
                 t.title = title.clone();
                 t.csd = csd;
+                t.opaque = crate::gpu::fully_opaque(&surface);
                 t.known_size = Some(geometry.size);
                 t.dirty = true;
                 t.canvas = None;
@@ -184,6 +185,7 @@ impl State {
                     "kind": kind,
                     "transientFor": Value::Null,
                     "csd": csd,
+                    "opaque": t.opaque,
                 }));
                 self.enter_output(&surface);
                 continue;
@@ -318,22 +320,32 @@ impl State {
         let mut idle = Vec::new();
         let mut waiting = Vec::new();
         let mut pixels = 0usize;
-        let State { toplevels, popups, gpu, buffers, frames, .. } = self;
+        let State { toplevels, popups, gpu, buffers, frames, passthrough, .. } = self;
         let (Some(gpu), Some(buffers)) = (gpu.as_mut(), buffers.as_mut()) else { return };
         let windows = toplevels
             .iter_mut()
             .filter(|t| t.announced && t.dirty)
             .map(|t| {
                 let geometry = t.window.geometry();
-                (t.id, t.wl_surface(), geometry, &mut t.dirty, &mut t.target)
+                (t.id, t.wl_surface(), geometry, t.opaque, &mut t.dirty, &mut t.target, &mut t.shown)
             })
             .chain(popups.iter_mut().filter(|p| p.announced && p.dirty).map(|p| {
                 let geometry = p.geometry();
-                (p.id, p.wl_surface(), geometry, &mut p.dirty, &mut p.target)
+                (p.id, p.wl_surface(), geometry, false, &mut p.dirty, &mut p.target, &mut p.shown)
             }));
-        for (id, surface, geometry, dirty, target) in windows {
+        for (id, surface, geometry, opaque, dirty, target, shown) in windows {
             *dirty = false;
             let Some(surface) = surface else { continue };
+            // The app's own buffer, if it can go as it is.
+            if let Some(buffer) = passthrough.show(gpu, buffers, shown, &surface, geometry, opaque) {
+                if let Some(ring) = target.take() {
+                    ring.release(buffers);
+                }
+                presents.push(json!({ "id": id, "buffer": buffer }));
+                waiting.push(surface);
+                continue;
+            }
+            passthrough.stop(shown);
             match gpu.render(target, &surface, geometry, buffers) {
                 Some(buffer) => {
                     pixels += (geometry.size.w * geometry.size.h) as usize;
@@ -350,7 +362,7 @@ impl State {
             if frames.live() {
                 frames.send_json(&present);
             } else {
-                buffers.send(&present, None);
+                buffers.send(&present, &[]);
             }
             self.in_flight += 1;
             if let (Some(stats), Some(started)) = (self.stats.as_mut(), started) {
@@ -367,6 +379,8 @@ impl State {
     /// Drop every window's GPU buffers; they're reallocated (and announced
     /// to Din afresh) on the next render.
     fn release_all_targets(&mut self) {
+        // Din's imports of the apps' own buffers go too.
+        self.passthrough.forget();
         let mut targets: Vec<_> = self.toplevels.iter_mut().map(|t| t.target.take()).collect();
         targets.extend(self.popups.iter_mut().map(|p| p.target.take()));
         for mut target in targets {
@@ -377,6 +391,7 @@ impl State {
     /// The shell put a batch on screen: apps that drew into it may draw again.
     pub fn ack(&mut self) {
         self.in_flight = self.in_flight.saturating_sub(1);
+        self.passthrough.acked();
         for surface in std::mem::take(&mut self.awaiting_frame) {
             if surface.is_alive() {
                 self.frame_done(&surface);

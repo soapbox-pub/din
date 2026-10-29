@@ -13,8 +13,15 @@
 //! Three buffers suffice: the shell acks every batch, at most two batches are
 //! ever in flight, so the buffer being rendered into is never one Din may
 //! still be reading.
+//!
+//! Most windows are one surface in one GPU buffer, though - a game, a video
+//! player, anything through Xwayland - and there's nothing to composite:
+//! Din is handed the app's own buffer instead (Passthrough), imported once
+//! like a ring buffer, and the app gets it back once Din has drawn the frame
+//! after it.
 
 use std::{
+    collections::HashMap,
     io::Write,
     os::{
         fd::{AsFd, AsRawFd, OwnedFd},
@@ -40,11 +47,16 @@ use smithay::{
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
             gles::GlesRenderer,
-            utils::import_surface_tree,
+            utils::{self, import_surface_tree, with_renderer_surface_state},
         },
     },
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    reexports::wayland_server::{
+        Resource,
+        backend::ObjectId,
+        protocol::{wl_buffer::WlBuffer, wl_surface::WlSurface},
+    },
     utils::{DeviceFd, Logical, Physical, Rectangle, Size, Transform},
+    wayland::{compositor::get_children, dmabuf::get_dmabuf},
 };
 
 /// Buffers per window.
@@ -153,6 +165,153 @@ impl Gpu {
         buffer.rendered_at = Some(target.frame);
         Some(buffer.id)
     }
+
+    /// The buffer formats to offer apps: 8-bit RGB (Din's pages show nothing
+    /// deeper), in layouts of a single plane. Those are what Chromium
+    /// imports, so an app's buffer can go to Din as it is; compressed
+    /// layouts (AMD's DCC) carry a second plane it can't.
+    pub fn client_formats(&mut self) -> Vec<smithay::backend::allocator::Format> {
+        let formats = smithay::backend::renderer::ImportDma::dmabuf_formats(&self.renderer);
+        formats
+            .into_iter()
+            .filter(|f| matches!(f.code, Fourcc::Argb8888 | Fourcc::Xrgb8888 | Fourcc::Abgr8888 | Fourcc::Xbgr8888))
+            .filter(|f| {
+                f.modifier == Modifier::Linear
+                    || f.modifier == Modifier::Invalid
+                    || self
+                        .allocator
+                        .create_buffer(64, 64, f.code, &[f.modifier])
+                        .ok()
+                        .and_then(|bo| bo.export().ok())
+                        .is_some_and(|dmabuf| dmabuf.num_planes() == 1)
+            })
+            .collect()
+    }
+
+    fn allocate_id(&mut self) -> u32 {
+        let id = self.next_buffer;
+        self.next_buffer += 1;
+        id
+    }
+}
+
+/// How Din imports a client buffer of FORMAT (its pixel format, in
+/// Electron's terms), or None where it can't be shown as it is. A format
+/// without alpha only goes in an opaque window: Din would take the padding
+/// byte for alpha, which an opaque canvas ignores.
+fn passthrough_format(format: Fourcc, opaque: bool) -> Option<&'static str> {
+    match format {
+        Fourcc::Argb8888 => Some("bgra"),
+        Fourcc::Abgr8888 => Some("rgba"),
+        Fourcc::Xrgb8888 if opaque => Some("bgra"),
+        Fourcc::Xbgr8888 if opaque => Some("rgba"),
+        _ => None,
+    }
+}
+
+/// Whether nothing shows through SURFACE: its buffer has no alpha, or the
+/// app marked all of it opaque.
+pub fn fully_opaque(surface: &WlSurface) -> bool {
+    let buffer = with_renderer_surface_state(surface, |state| {
+        let size = state.surface_size()?;
+        let covered = state.opaque_regions().is_some_and(|regions| {
+            regions.iter().any(|region| region.contains_rect(Rectangle::from_size(size)))
+        });
+        Some((state.buffer()?.clone(), covered))
+    })
+    .flatten();
+    let Some((buffer, covered)) = buffer else { return false };
+    covered
+        || get_dmabuf(&buffer).is_ok_and(|d| matches!(d.format().code, Fourcc::Xrgb8888 | Fourcc::Xbgr8888))
+        || smithay::wayland::shm::with_buffer_contents(&buffer, |_, _, data| {
+            data.format == smithay::reexports::wayland_server::protocol::wl_shm::Format::Xrgb8888
+        })
+        .unwrap_or(false)
+}
+
+/// A window whose app's own buffer Din shows (see the module docs).
+pub struct Shown {
+    buffer: utils::Buffer,
+}
+
+/// Client buffers handed to Din as they are.
+#[derive(Default)]
+pub struct Passthrough {
+    /// The ones Din has imported, by their wl_buffer.
+    known: HashMap<ObjectId, u32>,
+    /// Buffers replaced on screen by the batch in flight: their apps get
+    /// them back once it's acked.
+    releasing: Vec<utils::Buffer>,
+}
+
+impl Passthrough {
+    /// Show SURFACE's buffer itself as a window of GEOMETRY, if it can be:
+    /// a lone surface (no subsurfaces), whose GPU buffer is exactly the
+    /// window, unscaled, in a format Din takes. Returns the buffer's id, or
+    /// None to composite the window as usual.
+    pub fn show(
+        &mut self,
+        gpu: &mut Gpu,
+        channel: &mut BufferChannel,
+        shown: &mut Option<Shown>,
+        surface: &WlSurface,
+        geometry: Rectangle<i32, Logical>,
+        opaque: bool,
+    ) -> Option<u32> {
+        if !get_children(surface).is_empty() || geometry.loc != (0, 0).into() {
+            return None;
+        }
+        let buffer = with_renderer_surface_state(surface, |state| {
+            if state.buffer_scale() != 1 || state.buffer_transform() != Transform::Normal {
+                return None;
+            }
+            let size = state.buffer_size()?;
+            let view = state.view()?;
+            let whole = view.src == Rectangle::from_size(size.to_f64()) && view.dst == size;
+            (whole && size == geometry.size).then(|| state.buffer().cloned()).flatten()
+        })
+        .flatten()?;
+        let dmabuf = get_dmabuf(&buffer).ok()?;
+        let format = passthrough_format(dmabuf.format().code, opaque)?;
+        let id = match self.known.get(&buffer.id()) {
+            Some(&id) => id,
+            None => {
+                let id = gpu.allocate_id();
+                channel.announce(id, dmabuf, format);
+                self.known.insert(buffer.id(), id);
+                id
+            }
+        };
+        if let Some(old) = shown.replace(Shown { buffer }) {
+            self.releasing.push(old.buffer);
+        }
+        Some(id)
+    }
+
+    /// The window is composited again, or gone: its app's buffer goes back
+    /// with the next ack.
+    pub fn stop(&mut self, shown: &mut Option<Shown>) {
+        if let Some(old) = shown.take() {
+            self.releasing.push(old.buffer);
+        }
+    }
+
+    /// Din has drawn the batch in flight: what it replaced goes back.
+    pub fn acked(&mut self) {
+        self.releasing.clear();
+    }
+
+    /// An app destroyed a buffer: Din lets go of its import.
+    pub fn destroyed(&mut self, buffer: &WlBuffer, channel: Option<&mut BufferChannel>) {
+        if let (Some(id), Some(channel)) = (self.known.remove(&buffer.id()), channel) {
+            channel.send(&json!({ "type": "drop", "buffer": id }), &[]);
+        }
+    }
+
+    /// A new reader holds no imports: every buffer is announced afresh.
+    pub fn forget(&mut self) {
+        self.known.clear();
+    }
 }
 
 struct SharedBuffer {
@@ -182,9 +341,8 @@ impl Target {
                 .create_buffer(size.w as u32, size.h as u32, Fourcc::Argb8888, &[Modifier::Linear])
                 .ok()?;
             let dmabuf = bo.export().ok()?;
-            let id = gpu.next_buffer;
-            gpu.next_buffer += 1;
-            channel.announce(id, &dmabuf);
+            let id = gpu.allocate_id();
+            channel.announce(id, &dmabuf, "bgra");
             buffers.push(SharedBuffer { id, dmabuf, _bo: bo, rendered_at: None });
         }
         Some(Self {
@@ -199,7 +357,7 @@ impl Target {
     /// Tell Din these buffers are gone (it releases its imports).
     pub fn release(self, channel: &mut BufferChannel) {
         for buffer in &self.buffers {
-            channel.send(&json!({ "type": "drop", "buffer": buffer.id }), None);
+            channel.send(&json!({ "type": "drop", "buffer": buffer.id }), &[]);
         }
     }
 }
@@ -246,34 +404,42 @@ impl BufferChannel {
         self.client.is_some()
     }
 
-    fn announce(&mut self, id: u32, dmabuf: &Dmabuf) {
+    /// Tell Din about a buffer, in FORMAT (Electron's name for it), with a
+    /// descriptor for each of its planes.
+    fn announce(&mut self, id: u32, dmabuf: &Dmabuf, format: &str) {
         let size = dmabuf.size();
-        let stride = dmabuf.strides().next().unwrap_or(0);
-        let offset = dmabuf.offsets().next().unwrap_or(0);
         let modifier: u64 = dmabuf.format().modifier.into();
+        let fds: Vec<i32> = dmabuf.handles().map(|fd| fd.as_raw_fd()).collect();
+        let planes: Vec<Value> = dmabuf
+            .offsets()
+            .zip(dmabuf.strides())
+            .zip(&fds)
+            .map(|((offset, stride), &fd)| {
+                // SAFETY: lseek on a descriptor the dmabuf owns; a dmabuf's
+                // end is its size, and nothing reads it by position.
+                let end = unsafe { libc::lseek(fd, 0, libc::SEEK_END) }.max(0) as u64;
+                json!({ "offset": offset, "stride": stride, "size": end.saturating_sub(offset as u64) })
+            })
+            .collect();
         let message = json!({
             "type": "buffer",
             "buffer": id,
             "width": size.w,
             "height": size.h,
-            "stride": stride,
-            "offset": offset,
+            "format": format,
+            "planes": planes,
             "modifier": modifier.to_string(),
         });
-        let fd = dmabuf.handles().next().map(|fd| fd.as_raw_fd());
-        self.send(&message, fd);
+        self.send(&message, &fds);
     }
 
-    /// Send one message, with a descriptor riding on its first byte.
-    pub fn send(&mut self, message: &Value, fd: Option<i32>) {
+    /// Send one message, with any descriptors riding on its first byte.
+    pub fn send(&mut self, message: &Value, fds: &[i32]) {
         let Some(stream) = self.client.as_ref() else { return };
         let body = serde_json::to_vec(message).unwrap_or_default();
         let mut bytes = (body.len() as u32).to_le_bytes().to_vec();
         bytes.extend_from_slice(&body);
-        let ok = match fd {
-            None => (&*stream).write_all(&bytes).is_ok(),
-            Some(fd) => send_with_fd(stream, &bytes, fd),
-        };
+        let ok = if fds.is_empty() { (&*stream).write_all(&bytes).is_ok() } else { send_with_fds(stream, &bytes, fds) };
         if !ok {
             self.client = None;
         }
@@ -286,11 +452,12 @@ impl Drop for BufferChannel {
     }
 }
 
-fn send_with_fd(stream: &UnixStream, bytes: &[u8], fd: i32) -> bool {
+fn send_with_fds(stream: &UnixStream, bytes: &[u8], fds: &[i32]) -> bool {
+    let len = size_of_val(fds) as u32;
     // SAFETY: a standard SCM_RIGHTS sendmsg over buffers that outlive it.
     unsafe {
         let mut iov = libc::iovec { iov_base: bytes.as_ptr() as *mut _, iov_len: bytes.len() };
-        let space = libc::CMSG_SPACE(size_of::<i32>() as u32) as usize;
+        let space = libc::CMSG_SPACE(len) as usize;
         let mut control = vec![0u8; space];
         let mut msg: libc::msghdr = std::mem::zeroed();
         msg.msg_iov = &mut iov;
@@ -300,13 +467,13 @@ fn send_with_fd(stream: &UnixStream, bytes: &[u8], fd: i32) -> bool {
         let cmsg = libc::CMSG_FIRSTHDR(&msg);
         (*cmsg).cmsg_level = libc::SOL_SOCKET;
         (*cmsg).cmsg_type = libc::SCM_RIGHTS;
-        (*cmsg).cmsg_len = libc::CMSG_LEN(size_of::<i32>() as u32) as _;
-        std::ptr::write_unaligned(libc::CMSG_DATA(cmsg).cast::<i32>(), fd);
+        (*cmsg).cmsg_len = libc::CMSG_LEN(len) as _;
+        std::ptr::copy_nonoverlapping(fds.as_ptr().cast::<u8>(), libc::CMSG_DATA(cmsg), len as usize);
         let sent = libc::sendmsg(stream.as_fd().as_raw_fd(), &msg, 0);
         if sent < 0 {
             return false;
         }
-        // The descriptor went with the first byte; finish the rest plainly.
+        // The descriptors went with the first byte; finish the rest plainly.
         let sent = sent as usize;
         sent == bytes.len() || (&*stream).write_all(&bytes[sent..]).is_ok()
     }

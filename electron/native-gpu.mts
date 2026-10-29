@@ -1,7 +1,8 @@
 // Zero-copy display of Wayland windows: GPU buffers from din-compositor,
 // shown in the shell without a CPU ever touching their pixels.
 //
-// The compositor renders each window into a ring of dmabufs and sends their
+// The compositor renders each window into a ring of dmabufs, or passes on
+// the app's own buffer where there's nothing to composite, and sends their
 // file descriptors over a Unix socket. Node can't receive descriptors, so
 // native/din-fd (a tiny N-API addon) does, and hands them here. Each buffer
 // is imported once with Electron's sharedTexture API - which wraps it as a
@@ -61,8 +62,10 @@ type BufferMessage =
       buffer: number;
       width: number;
       height: number;
-      stride: number;
-      offset: number;
+      /** A ring buffer is BGRA; an app's own may be RGBA. */
+      format: 'bgra' | 'rgba';
+      /** One per descriptor, in order. */
+      planes: { stride: number; offset: number; size: number }[];
       modifier: string;
     }
   | { type: 'drop'; buffer: number }
@@ -101,27 +104,22 @@ export function connectGpuBuffers(socketPath: string, shell: () => Electron.WebC
     const contents = shell();
     switch (message.type) {
       case 'buffer': {
-        if (fds.length !== 1) {
+        if (fds.length === 0 || fds.length !== message.planes?.length) {
           for (const descriptor of fds) fd.close(descriptor);
           return;
         }
         let texture: Electron.SharedTextureImported;
         try {
-          // Chromium takes ownership of the descriptor from here.
+          // Chromium takes ownership of the descriptors from here.
           texture = sharedTexture.importSharedTexture({
             textureInfo: {
-              pixelFormat: 'bgra',
+              pixelFormat: message.format === 'rgba' ? 'rgba' : 'bgra',
               codedSize: { width: message.width, height: message.height },
               // Apps draw in sRGB, like the rest of the page.
               colorSpace: { primaries: 'bt709', transfer: 'srgb', matrix: 'rgb', range: 'full' },
               handle: {
                 nativePixmap: {
-                  planes: [{
-                    stride: message.stride,
-                    offset: message.offset,
-                    size: message.stride * message.height,
-                    fd: fds[0],
-                  }],
+                  planes: message.planes.map((plane, i) => ({ ...plane, fd: fds[i] })),
                   modifier: message.modifier,
                   supportsZeroCopyWebGpuImport: false,
                 },
@@ -130,7 +128,7 @@ export function connectGpuBuffers(socketPath: string, shell: () => Electron.WebC
           });
         } catch (error) {
           console.error('native-gpu: import failed:', error);
-          fd.close(fds[0]);
+          for (const descriptor of fds) fd.close(descriptor);
           return;
         }
         imported.set(message.buffer, texture);

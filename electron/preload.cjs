@@ -813,7 +813,11 @@ function gpuDraw(id) {
   if (!canvas || !texture) return;
   const frame = texture.getVideoFrame();
   try {
-    canvas.getContext('2d')?.drawImage(frame, 0, 0);
+    const context = canvas.getContext('2d');
+    // An opaque canvas may be showing an app's own buffer whose fourth byte
+    // is padding, which mustn't be blended with as if it were alpha.
+    if (context && context.getContextAttributes().alpha === false) context.globalCompositeOperation = 'copy';
+    context?.drawImage(frame, 0, 0);
   } finally {
     frame.close();
   }

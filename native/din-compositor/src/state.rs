@@ -72,7 +72,7 @@ use crate::{
     canvas::Canvas,
     clipboard::{Contents, read_from_app},
     frames::FrameServer,
-    gpu::{BufferChannel, Gpu, Target},
+    gpu::{BufferChannel, Gpu, Passthrough, Shown, Target},
     stats::Stats,
     wire::Wire,
 };
@@ -100,6 +100,11 @@ pub struct Toplevel {
     pub announced: bool,
     pub canvas: Option<Canvas>,
     pub target: Option<Target>,
+    /// The app's own buffer, while Din shows it as it is (gpu.rs).
+    pub shown: Option<Shown>,
+    /// Whether Din was told nothing shows through the window, so it gives
+    /// it an opaque canvas.
+    pub opaque: bool,
     pub dirty: bool,
     pub title: String,
     /// The size the shell knows the window to be, from either side.
@@ -121,6 +126,8 @@ impl Toplevel {
             announced: false,
             canvas: None,
             target: None,
+            shown: None,
+            opaque: false,
             dirty: false,
             title: String::new(),
             known_size: None,
@@ -161,12 +168,13 @@ pub struct Popup {
     pub announced: bool,
     pub canvas: Option<Canvas>,
     pub target: Option<Target>,
+    pub shown: Option<Shown>,
     pub dirty: bool,
 }
 
 impl Popup {
     pub fn new(id: u32, shell: PopupShell, pos: Point<i32, Logical>, grab: bool) -> Self {
-        Self { id, shell, rel: (0, 0).into(), pos, grab, announced: false, canvas: None, target: None, dirty: false }
+        Self { id, shell, rel: (0, 0).into(), pos, grab, announced: false, canvas: None, target: None, shown: None, dirty: false }
     }
 
     pub fn wl_surface(&self) -> Option<WlSurface> {
@@ -278,6 +286,7 @@ pub struct State {
     /// The GPU path, when there is a GPU (see gpu.rs).
     pub gpu: Option<Gpu>,
     pub buffers: Option<BufferChannel>,
+    pub passthrough: Passthrough,
     pub dmabuf_state: DmabufState,
     _dmabuf_global: Option<DmabufGlobal>,
     pub popup_manager: PopupManager,
@@ -344,10 +353,12 @@ impl State {
         let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
 
         // linux-dmabuf only with a GPU: clients then render on the GPU and
-        // hand over GPU buffers, which the GPU path composites directly.
+        // hand over GPU buffers, which the GPU path composites directly, or
+        // passes on to Din as they are (gpu.rs).
+        let mut gpu = gpu;
         let mut dmabuf_state = DmabufState::new();
-        let dmabuf_global = gpu.as_ref().and_then(|gpu| {
-            let formats = smithay::backend::renderer::ImportDma::dmabuf_formats(&gpu.renderer);
+        let dmabuf_global = gpu.as_mut().and_then(|gpu| {
+            let formats = gpu.client_formats();
             let feedback = DmabufFeedbackBuilder::new(gpu.device, formats).build().ok()?;
             Some(dmabuf_state.create_global_with_default_feedback::<Self>(dh, &feedback))
         });
@@ -392,6 +403,7 @@ impl State {
             renderer: PixmanRenderer::new().expect("pixman"),
             gpu,
             buffers,
+            passthrough: Passthrough::default(),
             dmabuf_state,
             _dmabuf_global: dmabuf_global,
             popup_manager: PopupManager::default(),
@@ -465,6 +477,7 @@ impl State {
     pub fn remove_toplevel(&mut self, index: usize) {
         let mut t = self.toplevels.remove(index);
         self.release_target(&mut t.target);
+        self.passthrough.stop(&mut t.shown);
         if t.announced {
             self.wire.json(serde_json::json!({ "type": "close", "id": t.id }));
         }
@@ -477,6 +490,7 @@ impl State {
     pub fn remove_popup(&mut self, index: usize) {
         let mut p = self.popups.remove(index);
         self.release_target(&mut p.target);
+        self.passthrough.stop(&mut p.shown);
         if p.announced {
             self.wire.json(serde_json::json!({ "type": "close", "id": p.id }));
         }
@@ -556,7 +570,9 @@ impl CompositorHandler for State {
 }
 
 impl BufferHandler for State {
-    fn buffer_destroyed(&mut self, _buffer: &wl_buffer::WlBuffer) {}
+    fn buffer_destroyed(&mut self, buffer: &wl_buffer::WlBuffer) {
+        self.passthrough.destroyed(buffer, self.buffers.as_mut());
+    }
 }
 
 impl ShmHandler for State {

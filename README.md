@@ -230,7 +230,9 @@ servers whose windows Din composites into its own:
   GPU, it composites each window on the GPU into shared dmabufs that Din's
   main process imports once each (`sharedTexture`; the descriptors arrive via
   `native/din-fd`, a small N-API addon) and the shell draws without any CPU
-  copy - apps get linux-dmabuf and render on the GPU too. Without one, pixels
+  copy - apps get linux-dmabuf and render on the GPU too. A window that is
+  one surface in one GPU buffer (most games, video players and X11 apps)
+  isn't composited at all: Din imports the app's own buffer. Without one, pixels
   stream to the shell over a token-guarded localhost WebSocket. Either way,
   apps are paced by the shell's display refresh.
 - **X11** — the compositor's rootless Xwayland, which it manages as the X

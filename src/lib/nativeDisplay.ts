@@ -90,6 +90,8 @@ interface WindowInfo {
   transientFor: number | null;
   /** Absent from servers that predate it. */
   csd?: boolean;
+  /** Nothing shows through the window: its canvas can be opaque. */
+  opaque?: boolean;
 }
 
 interface FrameUpdate {
@@ -234,10 +236,13 @@ function ackOnNextFrame(source: string | undefined): void {
   });
 }
 
-function createCanvas(width: number, height: number): HTMLCanvasElement {
+function createCanvas(width: number, height: number, opaque: boolean): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   // GPU-rendered windows are drawn from shared textures every frame.
   keepAccelerated(canvas);
+  // An opaque window's frames may be an app's own buffer with no alpha
+  // channel (its padding byte must not count), and Chromium needn't blend it.
+  if (opaque) canvas.getContext('2d', { alpha: false });
   canvas.width = Math.max(1, width);
   canvas.height = Math.max(1, height);
   canvas.style.display = 'block';
@@ -299,7 +304,7 @@ function onMessage(message: WorkerMessage): void {
         wmClass: message.wmClass,
         transientFor: message.transientFor,
         csd: message.csd === true,
-        canvas: existing?.canvas ?? createCanvas(message.width, message.height),
+        canvas: existing?.canvas ?? createCanvas(message.width, message.height, message.opaque === true),
       };
       resizeCanvas(surface.canvas, surface.width, surface.height);
       surfaces.set(surface.id, surface);
