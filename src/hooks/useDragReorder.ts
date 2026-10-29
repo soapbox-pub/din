@@ -85,14 +85,23 @@ export interface WindowMoveGesture {
   gestureEnd(): void;
 }
 
-/** Dragging items off the row (tabs into other windows). */
+/** Dragging items off the row (tabs into other windows, apps off the dock). */
 export interface TearOff {
-  /** Whether the item can leave the row at all. */
-  enabled: boolean;
+  /** Whether items, or a given item, can leave the row at all. */
+  enabled: boolean | ((id: string) => boolean);
+  /** How far past the row's top or bottom the pointer goes to tear an item off, in px. */
+  distance?: number;
+  /** Adjust the copy that follows the pointer, once it's made. */
+  decorateGhost?: (ghost: HTMLElement) => void;
   /** While torn off, where the pointer is; null once it's back on the row. */
   onHover?: (id: string, point: DragPoint | null) => void;
   /** The item was released away from the row. */
   onDrop: (id: string, point: DragPoint) => void;
+}
+
+function tearable(tearOff: TearOff | undefined, id: string): boolean {
+  if (!tearOff) return false;
+  return typeof tearOff.enabled === 'function' ? tearOff.enabled(id) : tearOff.enabled;
 }
 
 /** Put a ghost of `el` under the pointer. */
@@ -136,7 +145,8 @@ function createGhost(el: HTMLElement, d: Drag): HTMLElement {
  * the row still count, and the click that ends a drag is swallowed so it
  * doesn't also activate or launch the item.
  *
- * With `tearOff`, dragging an item well above or below the row tears it off:
+ * With `tearOff`, dragging an item well above or below the row tears it off
+ * (tabs into other windows, pinned apps off the dock):
  * it stays in its slot, dimmed, while a copy follows the pointer, and
  * releasing it there hands it to `tearOff.onDrop`. Bringing it back onto the
  * row resumes reordering.
@@ -216,15 +226,17 @@ export function useDragReorder({
   const tear = useCallback(() => {
     const d = drag.current;
     const tearOff = latest.current.tearOff;
-    if (!d?.active || !tearOff?.enabled) return;
+    if (!d?.active || !tearOff || !tearable(tearOff, d.id)) return;
     const el = elements.current.get(d.id);
     if (!el) return;
     const row = (el.parentElement ?? el).getBoundingClientRect();
     if (!d.ghost) {
-      if (d.lastY > row.top - TEAR_OFF_PX && d.lastY < row.bottom + TEAR_OFF_PX) return;
+      const distance = tearOff.distance ?? TEAR_OFF_PX;
+      if (d.lastY > row.top - distance && d.lastY < row.bottom + distance) return;
       el.style.transform = '';
       el.style.opacity = '0.4';
       d.ghost = createGhost(el, d);
+      tearOff.decorateGhost?.(d.ghost);
     } else if (
       d.lastY >= row.top && d.lastY <= row.bottom &&
       d.lastX >= row.left && d.lastX <= row.right
@@ -321,7 +333,7 @@ export function useDragReorder({
         const { tearOff, moveWindow } = latest.current;
         // An item that can be torn off, or that moves its window, starts
         // dragging in any direction.
-        const travel = tearOff?.enabled || moveWindow
+        const travel = tearable(tearOff, d.id) || moveWindow
           ? Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY)
           : Math.abs(ev.clientX - d.startX);
         if (travel < DRAG_THRESHOLD) return;

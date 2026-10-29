@@ -103,6 +103,9 @@ const SWIPE_ZONE = 16;
 /** How far a touch has to travel up from the edge to reveal the dock, in px. */
 const SWIPE_DISTANCE = 24;
 
+/** How far above the Dock a pinned tile is dragged to remove it, in px. */
+const REMOVE_DISTANCE = 48;
+
 /** Wheel travel that steps a tile to its app's next window, in px. */
 const WHEEL_STEP = 50;
 /** Minimum time between wheel steps, so a touchpad flick doesn't spin through every window, in ms. */
@@ -126,8 +129,9 @@ const MAX_DOTS = 4;
  * running apps that aren't pinned. Each tile groups its app's windows, with
  * a dot under it per window: click launches, toggles, or cycles through
  * them, the scroll wheel cycles too, middle-click always opens a new window,
- * right-click offers pin/unpin, close, and uninstall, and dragging an
- * unpinned tile left among the pinned ones pins it. A divider separates the
+ * right-click offers pin/unpin, close, and uninstall, dragging an
+ * unpinned tile left among the pinned ones pins it, and dragging a pinned
+ * one up off the Dock unpins it. A divider separates the
  * pinned apps from the rest, and right-clicking it or the Dock's backdrop
  * between tiles offers the Dock's own settings, as on macOS.
  */
@@ -329,7 +333,8 @@ export function Dock({
   // here stay in the list, after the visible ones. Dragging an unpinned tile
   // left in among the pinned ones pins it there. Pinned tiles stay pinned:
   // they can't be dragged past the last pinned slot (unpinning is in the
-  // tile's menu, and an unpinned app with no windows would vanish mid-drag).
+  // tile's menu or a drag up off the Dock, and an unpinned app with no
+  // windows would vanish mid-drag).
   const reorder = useDragReorder({
     ids: entryIds,
     onMove: (appId, to) => {
@@ -348,6 +353,23 @@ export function Dock({
     constrain: (appId, to) =>
       pinned.includes(appId) ? Math.min(to, pinnedIds.length - 1) : to,
     relayout: magnifies ? paint : undefined,
+    // As on macOS, a pinned tile dragged well up off the Dock is unpinned
+    // when it's let go; one with windows open stays on as a running app.
+    tearOff: {
+      enabled: (appId) => pinned.includes(appId),
+      // Clear of a magnified icon, which reaches above the strip.
+      distance: (magnifies ? magnifiedHeight(size, maxScale) - size : 0) + REMOVE_DISTANCE,
+      decorateGhost: (ghost) => {
+        ghost.style.boxShadow = '';
+        ghost.querySelector('[data-dock-dots]')?.remove();
+        const label = ghost.querySelector<HTMLElement>('[data-dock-label]');
+        if (label) {
+          label.textContent = 'Remove';
+          label.style.opacity = '1';
+        }
+      },
+      onDrop: (appId) => setPinned((prev) => prev.filter((id) => id !== appId)),
+    },
   });
   const dragging = reorder.draggingId !== null;
 
@@ -685,7 +707,7 @@ export function Dock({
  * - middle-click always opens a new window
  * - right-click: new window, pin/unpin, close all, uninstall
  * - dragging a tile moves it; dropping an unpinned one among the pinned
- *   ones pins it
+ *   ones pins it, and dropping a pinned one well above the Dock unpins it
  *
  * Memoized: the dock re-renders on every window commit, but a tile (and its
  * Radix context-menu tree) only re-renders when its own app's
@@ -820,6 +842,7 @@ const DockItem = memo(function DockItem({
       {/* Name label, floating above the (possibly magnified) icon. */}
       <span
         aria-hidden
+        data-dock-label=""
         className={cn(
           'pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap',
           'rounded-md border border-border/40 bg-background/80 px-2 py-0.5 shadow-sm backdrop-blur-xl',
@@ -940,6 +963,7 @@ const DockItem = memo(function DockItem({
   const runningDots = dotCount > 0 && (
     <div
       aria-hidden
+      data-dock-dots=""
       className="pointer-events-none absolute bottom-1 left-1/2 flex -translate-x-1/2 gap-1"
     >
       {Array.from({ length: dotCount }, (_, i) => (
