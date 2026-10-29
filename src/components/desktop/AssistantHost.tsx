@@ -29,6 +29,7 @@ import {
   getAssistantBridge,
   sessionTitle,
   type PermissionRequest,
+  type SessionMessage,
 } from '@/lib/assistant';
 import {
   isAssistantPromptDictationHeld,
@@ -218,25 +219,53 @@ function useAssistantNotifications() {
         const failed = event.type === 'session.execution.failed';
         if (event.type !== 'session.execution.succeeded' && !failed) return;
         const error = event.data?.error as { message?: unknown } | undefined;
-        void queryClient
-          .fetchQuery({ queryKey: assistantKeys.session(sessionID), queryFn: () => assistantApi.session(sessionID) })
-          .catch(() => null)
-          .then((session) =>
-            notify({
-              source: SOURCE,
-              title: session ? sessionTitle(session) : 'The assistant',
-              body: failed
-                ? typeof error?.message === 'string'
-                  ? `Stopped with an error: ${error.message}`
-                  : 'Stopped with an error'
-                : 'Done',
-              replaceKey: `assistant:done:${sessionID}`,
-              onActivate: () => latest.current.show(sessionID),
-            }),
-          );
+        void Promise.all([
+          queryClient
+            .fetchQuery({ queryKey: assistantKeys.session(sessionID), queryFn: () => assistantApi.session(sessionID) })
+            .catch(() => null),
+          failed
+            ? null
+            : assistantApi
+                .messages(sessionID, 20)
+                .then(({ messages }) => replyPreview(messages))
+                .catch(() => null),
+        ]).then(([session, reply]) =>
+          notify({
+            source: SOURCE,
+            title: session ? sessionTitle(session) : 'The assistant',
+            body: failed
+              ? typeof error?.message === 'string'
+                ? `Stopped with an error: ${error.message}`
+                : 'Stopped with an error'
+              : reply || 'Done',
+            replaceKey: `assistant:done:${sessionID}`,
+            onActivate: () => latest.current.show(sessionID),
+          }),
+        );
       }),
     [queryClient],
   );
+}
+
+/** The start of the assistant's last reply, as plain text for a notification. */
+function replyPreview(messages: SessionMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.type === 'user') return null;
+    if (message.type !== 'assistant') continue;
+    const text = message.content
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join('\n')
+      .replace(/```[^\n]*\n?/g, '')
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+)/gm, '')
+      .replace(/[*_`~]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) continue;
+    return text.length > 200 ? `${text.slice(0, 199).trimEnd()}…` : text;
+  }
+  return null;
 }
 
 /** The Super+A box: ask something from anywhere. */
