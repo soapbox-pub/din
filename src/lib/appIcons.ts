@@ -12,7 +12,9 @@ export const NATIVE_APP_ICON = '/icons/apps/native-window.png';
  * freedesktop names of its counterpart, best first (standard names, then
  * the well-known apps of its kind). An icon theme that has one of them
  * replaces Din's icon with it; the rest (the Assistant, web apps) keep
- * Din's in every theme.
+ * Din's in every theme. So does NATIVE_APP_ICON, which stands for a Linux
+ * app with no icon at all; `application-x-executable` is a program file's
+ * icon, and themes draw it as one.
  */
 export const THEMED_APP_ICONS: Record<string, string[]> = {
   '/icons/apps/app-store.png': ['org.gnome.Software', 'system-software-install', 'gnome-software'],
@@ -22,7 +24,6 @@ export const THEMED_APP_ICONS: Record<string, string[]> = {
   '/icons/apps/file-browser.png': ['system-file-manager', 'org.gnome.Nautilus'],
   '/icons/apps/installer.png': ['calamares', 'system-installer'],
   '/icons/apps/media-player.png': ['multimedia-video-player', 'org.gnome.Totem', 'totem'],
-  [NATIVE_APP_ICON]: ['application-x-executable'],
   '/icons/apps/paint.png': ['kolourpaint', 'org.kde.kolourpaint'],
   '/icons/apps/photo-editor.png': ['gimp', 'org.gimp.GIMP'],
   '/icons/apps/preview.png': ['org.gnome.Evince', 'evince', 'document-viewer'],
