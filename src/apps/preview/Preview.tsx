@@ -18,37 +18,14 @@ async function openWith(din: Din, appId: string, path: string, params: Record<st
   await din.app.open(appId, params, [await din.files.fromPath(path)]);
 }
 
-/** Show an icon from Din's public files on the window (setIcon takes data: URLs). */
-function useWindowIcon(din: Din, src: string | null): void {
-  useEffect(() => {
-    if (!src) {
-      din.window.setIcon(null);
-      return;
-    }
-    let live = true;
-    void (async () => {
-      const blob = await (await fetch(src)).blob();
-      const url = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-      });
-      if (live) din.window.setIcon(url);
-    })().catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [din, src]);
-}
-
 /**
  * Preview - a window for one file, opened from Files: pictures and video
  * (with the arrow keys stepping through the rest of the folder's), music,
  * archives' contents, and text, which can be edited and saved.
  *
- * It has `fs`: stepping through the folder, listing and extracting
- * archives and Show in Files all work on the file's folder by path.
+ * It has `file-folders`: stepping through the folder, listing and
+ * extracting archives and Show in Files all work on the shown file's folder
+ * by path, and nowhere else.
  */
 export function Preview() {
   const din = useDin();
@@ -62,12 +39,13 @@ export function Preview() {
 
   const name = path ? path.slice(path.lastIndexOf('/') + 1) : '';
   useWindowTitle(path ? `${dirty ? '• ' : ''}${name}` : null);
-  useWindowIcon(
-    din,
-    isViewableImage(name) ? '/icons/apps/preview-photo.png'
-      : isPlayableVideo(name) ? '/icons/apps/preview-video.png'
-        : null,
-  );
+  useEffect(() => {
+    din.window.setIcon(
+      isViewableImage(name) ? '/icons/apps/preview-photo.png'
+        : isPlayableVideo(name) ? '/icons/apps/preview-video.png'
+          : null,
+    );
+  }, [din, name]);
 
   const dir = path ? parentPath(path) : null;
   const listing = useDirectory(dir);
