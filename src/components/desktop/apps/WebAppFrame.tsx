@@ -9,6 +9,7 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { NappInfoButton } from '@/components/desktop/apps/NappInfoButton';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useSlowLaunch } from '@/hooks/useSlowLaunch';
 
 /**
  * Standalone, chrome-less window content for an installed web app: the site
@@ -57,6 +58,7 @@ export function WebAppFrame({
   // splash hides the guest's blank white surface; afterwards only the thin
   // progress bar shows, so later in-app navigations don't re-flash a splash.
   const [ready, setReady] = useState(false);
+  const slowLaunch = useSlowLaunch();
   // Chrome tint: the install-time theme color pre-tints the title bar; the
   // live page's reported color takes over once known (webview mode only),
   // falling back to the stored color when a page reports none. The Window
@@ -204,7 +206,8 @@ export function WebAppFrame({
       />
       {/* Until the first paint lands, cover the guest's blank white surface
           with a splash tinted by the app's theme color, so opening an app
-          reads as an intentional launch instead of a broken white flash. It
+          reads as an intentional launch instead of a broken white flash. The
+          icon joins it only if the launch is slow (useSlowLaunch). It
           fades out on first load and never returns, so later in-app
           navigations show only the thin progress bar below. */}
       <div
@@ -215,7 +218,7 @@ export function WebAppFrame({
         )}
         style={splashColor ? { backgroundColor: splashColor } : undefined}
       >
-        <AppIcon
+        {slowLaunch && <AppIcon
           icon={icon}
           className={cn(
             'size-14',
@@ -226,7 +229,7 @@ export function WebAppFrame({
                 : 'text-black/80'
               : 'text-muted-foreground',
           )}
-        />
+        />}
       </div>
       {ready && loading && (
         <span

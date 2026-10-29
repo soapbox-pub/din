@@ -32,6 +32,7 @@ import { FilePickerContext } from '@/contexts/FilePickerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useSlowLaunch } from '@/hooks/useSlowLaunch';
 import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { appForFile } from '@/lib/fileTypes';
@@ -225,6 +226,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const [guestId, setGuestId] = useState<number | null>(null);
   const [ready, setReady] = useState(false);
+  const slowLaunch = useSlowLaunch();
   const [gone, setGone] = useState(false);
   const [hung, setHung] = useState(false);
   const [menus, setMenus] = useState<Menu[] | null>(null);
@@ -1351,7 +1353,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           className="pointer-events-none absolute inset-0 grid place-items-center motion-safe:animate-in motion-safe:fade-in-0"
           style={{ backgroundColor: manifest.background_color }}
         >
-          <AppIcon icon={icon} className="size-16 opacity-80" />
+          {slowLaunch && <AppIcon icon={icon} className="size-16 opacity-80 motion-safe:animate-in motion-safe:fade-in-0" />}
         </div>
       )}
       {overlay}
