@@ -1330,6 +1330,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           partition={DIN_APPS_PARTITION}
           className="relative flex size-full"
           onAttach={setGuestId}
+          // A window that opens on top takes the keyboard, the way a native
+          // one does, unless something in it already has it.
+          onDomReady={() => {
+            if (live.current.isTop && !sectionOf()?.contains(document.activeElement)) surface.current?.focus();
+          }}
           onLoadStart={() => setGone(false)}
           onGone={() => {
             setGone(true);
