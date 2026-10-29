@@ -45,8 +45,9 @@ din.menus.onAction((id) => commands[id]?.());
   SDK matches them there (`src/sdk/accelerators.ts`; Ctrl and Meta count
   as one) and reports the item through `onAction`, before the page's own
   handlers see the key. An app that also handles the same key itself (a
-  text field's Ctrl+A) should leave it out of the accelerator, as desktop
-  apps do.
+  text field's Ctrl+A, a search box's Ctrl+F) marks the item
+  `notInFields: true`: shown in the menu, but left to a focused text
+  field.
 - Item `icon` is an image URL: a data: URL, https, or a root path of
   Din's public files.
 

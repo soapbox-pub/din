@@ -43,6 +43,10 @@ Electron and in a browser.
 | `entries()` | Folders: what's in them, granted with the folder |
 | `persist()` | A token that `din.files.restore(token)` turns back into the handle after a restart, for Recent Files and reopening last session's documents |
 
+`startIn` starts the picker in a folder handle, beside a file handle, or
+in a named folder of home (`documents`, `pictures`, `music`, `videos`,
+`downloads`).
+
 ## Saving
 
 ```ts
