@@ -440,13 +440,20 @@ let
   # its newest window fullscreen with all the input, so a second window from
   # Din (Chromium's own detached DevTools, a native dialog) would take its
   # place with no way back; patched, only the first window is ever shown, and
-  # any other is asked to close.
+  # any other is asked to close. And cage commits each frame as soon as the
+  # last one is on screen, so a frame Din finishes a moment later waits a
+  # whole refresh to be queued, and reaches the screen up to two refreshes
+  # after Din drew it; patched, like sway's max_render_time, it commits
+  # CAGE_MAX_RENDER_TIME ms before the refresh instead. Din's frames are
+  # scanned out as they are (cage barely touches the GPU), so a commit is
+  # quick, and the launcher sets 4 ms: about 12 ms off every frame at 60 Hz.
   cage-patched = pkgs.cage.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./patches/cage-gamma-control.patch
       ./patches/cage-xcursor-env.patch
       ./patches/cage-boot-handover.patch
       ./patches/cage-single-window.patch
+      ./patches/cage-max-render-time.patch
     ];
   });
   cage-launcher = pkgs.writeShellScriptBin "cage" ''
@@ -461,6 +468,7 @@ let
       ""|*[!0-9]*) ;;
       *) export XCURSOR_SIZE="$size" ;;
     esac
+    export CAGE_MAX_RENDER_TIME=''${CAGE_MAX_RENDER_TIME:-4}
     exec ${cage-patched}/bin/cage "$@"
   '';
 in
