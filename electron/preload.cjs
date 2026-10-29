@@ -3025,9 +3025,17 @@ expose('apps', {
    * Have main open a port from an app straight to a system bridge.
    * @param {number} webContentsId
    * @param {string} permission
+   * @param {string[]} [roots] for fs, the folders it's scoped to (none: the whole filesystem)
    * @returns {Promise<string | null>} for fs, the URL base the app loads files by path from
    */
-  grant: (webContentsId, permission) => ipcRenderer.invoke('dinos-apps:grant', webContentsId, permission),
+  grant: (webContentsId, permission, roots) => ipcRenderer.invoke('dinos-apps:grant', webContentsId, permission, roots),
+  /**
+   * Another folder an app's scoped fs grant reaches.
+   * @param {number} webContentsId
+   * @param {string} root
+   * @returns {Promise<void>}
+   */
+  addFsRoot: (webContentsId, root) => ipcRenderer.invoke('dinos-apps:addFsRoot', webContentsId, root),
   /**
    * Close that port.
    * @param {number} webContentsId

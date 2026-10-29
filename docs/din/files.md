@@ -35,7 +35,8 @@ Electron and in a browser.
 |---|---|
 | `name`, `kind` | `photo.png`, `file` or `directory` |
 | `key` | Stable within the app for the same file; compare handles with it |
-| `path` | The full path, only for apps with `fs`; null otherwise |
+| `path` | The full path, to show (a Recent list's folder, Copy Path). Knowing it grants nothing |
+| `parent()` | With `file-folders`, a file's folder as a handle (null for a folder) |
 | `getFile()` | The contents as a `File`, read through the desktop in one message: fine for documents |
 | `url()` | A `din-file://<token>/<name>` URL to load it from instead (`<img>`, `<audio>`, `<video>`, `fetch` with Range), streamed by main. For media and anything big |
 | `write(data)` | Replace the contents. Only if `writable` |
@@ -65,9 +66,16 @@ have. A handle from `open` is writable unless the app asked for
 
 An app keeps its own recent list: `handle.persist()` gives a token, kept
 in the app's storage, that `din.files.restore(token)` turns back into a
-handle after a restart (or null if the file is gone). The office apps do
+handle after a restart (or null if the file is gone), and
+`din.files.release(token)` forgets one the app drops. The office apps do
 this. Din's own Recent (Files', the Dock's) doesn't take entries from apps
 yet.
+
+An app that kept a recent list on the desktop's origin before it moved,
+as `{ path, time }` entries, lists the keys in its manifest's
+`migrateRecentFiles`: on its first launch the desktop turns each entry it
+can still find into `{ token, key, name, path, time }` and merges them into
+the app's own list under the same key.
 
 ## The file clipboard
 
@@ -91,6 +99,23 @@ the app's window; main serves it on the apps' session with Range support
 don't exist there). The URL lasts as long as the page: a reload or a
 closed window ends it. The app's CSP must allow `din-file:` where it
 loads it (`img-src`, `media-src`, `connect-src`).
+
+### Some folders by path
+
+`fs` is the whole filesystem. An app that only needs some folders by path
+gets `din.system.fs` scoped to them: main refuses any path outside them
+(symlinks resolved), the calls that reach files by other means (the
+Trash's names, recent files, search) are refused, and change events come
+only from those folders.
+
+- **`file-folders`** (permission): the folders of the files the user
+  hands the app (opened, saved, dropped, launched with). Preview steps
+  through the folder of the picture it shows and lists archives beside it;
+  Publisher finds pictures linked next to its document.
+- **`folders`** (manifest): fixed folders, made if missing: Media Player's
+  `~/Music`, `~/Videos` and skins folder.
+
+`din.permissions.has('fs')` is false for these; `din.system.fs` is there.
 
 Apps with `fs` reach files by path through `din.system.fs` anyway.
 `din.files.fromPath(path)` gives one of them a handle for a path, to hand

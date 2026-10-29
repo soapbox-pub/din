@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { ipcMain, MessageChannelMain, net, session, webContents } from 'electron';
 import { LOCAL_FILE_SCHEME, serveLocalFile } from './files.mts';
 import { invokeHandlers, sendHandlers } from './ipc-registry.mts';
+import { ptyRoutes } from './pty-routes.mts';
 import type { MessagePortMain } from 'electron';
 
 export const DIN_SCHEME = 'din';
@@ -31,7 +32,7 @@ const APP_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 /** The permissions whose bridges get a port straight to main, and the IPC channels each reaches. */
 const SYSTEM_PERMISSIONS = {
   fs: /^fs:[a-zA-Z]+$/,
-  pty: /^pty:(spawn|write|resize|kill)$/,
+  pty: /^pty:(spawn|write|resize|kill|release|adopt)$/,
   assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request)$/,
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|eject)$/,
@@ -128,12 +129,16 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     frame.postMessage('din-app:port', null, [port2]);
   });
 
-  ipcMain.handle('dinos-apps:grant', (event, wcId, permission) => {
+  ipcMain.handle('dinos-apps:grant', (event, wcId, permission, roots) => {
     opts.assertShellSender(event);
     if (typeof permission !== 'string' || !(permission in SYSTEM_PERMISSIONS)) throw new Error('Unknown permission');
     const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
     if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
-    grant(contents, permission as SystemPermission);
+    // fs, scoped: only under these folders (and those added later).
+    const scope = permission === 'fs' && Array.isArray(roots)
+      ? new Set(roots.filter((r): r is string => typeof r === 'string' && path.isAbsolute(r)).map(realish))
+      : null;
+    grant(contents, permission as SystemPermission, scope);
     // An app with fs reaches files by path anyway: it gets a URL base to
     // load any of them from (din-file://<token>/<absolute path>), so a
     // folder of thumbnails costs no round trip each.
@@ -149,6 +154,15 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
   ipcMain.handle('dinos-apps:revoke', (event, wcId, permission) => {
     opts.assertShellSender(event);
     if (typeof wcId === 'number' && typeof permission === 'string') revoke(wcId, permission as SystemPermission);
+  });
+
+  // Another folder a scoped fs grant reaches (the folder of a file the user
+  // handed the app, for apps with file-folders).
+  ipcMain.handle('dinos-apps:addFsRoot', (event, wcId, root) => {
+    opts.assertShellSender(event);
+    const entry = typeof wcId === 'number' ? grants.get(wcId)?.get('fs') : undefined;
+    if (!entry?.roots || typeof root !== 'string' || !path.isAbsolute(root)) return;
+    entry.roots.add(realish(root));
   });
 
   // A URL an app can load a file it was granted from (media, big pictures),
@@ -272,14 +286,15 @@ function serveFileUrl(request: Request): Promise<Response> | Response {
   const grant = fileUrls.get(token);
   if (grant) return serveLocalFile(request, grant.file, { 'access-control-allow-origin': `${DIN_SCHEME}://${grant.appId}` });
   const base = fsUrlBases.get(token);
-  if (!base || !grants.get(base.wcId)?.has('fs')) return notFound();
+  const fsGrant = base ? grants.get(base.wcId)?.get('fs') : undefined;
+  if (!base || !fsGrant) return notFound();
   let file: string;
   try {
     file = path.resolve(decodeURIComponent(new URL(request.url).pathname));
   } catch {
     return notFound();
   }
-  if (isProtectedPath(file)) return notFound();
+  if (isProtectedPath(file) || (fsGrant.roots && !withinRoots(fsGrant.roots, file))) return notFound();
   return serveLocalFile(request, file, { 'access-control-allow-origin': `${DIN_SCHEME}://${base.appId}` });
 }
 
@@ -292,16 +307,20 @@ const fsUrlBases = new Map<string, { wcId: number; appId: string }>();
 
 interface Grant {
   port: MessagePortMain;
-  /** The pty sessions this app spawned; it may touch no others. */
+  /** The pty sessions this app spawned (or adopted); it may touch no others. */
   ptys: Set<number>;
+  /** For a scoped fs grant, the folders it reaches; null for the whole filesystem. */
+  roots: Set<string> | null;
+  /** Where the port's pushes go, as the handlers' sender does. */
+  send: (channel: string, ...args: unknown[]) => void;
 }
 
 const grants = new Map<number, Map<SystemPermission, Grant>>();
 
-function grant(contents: Electron.WebContents, permission: SystemPermission): void {
+function grant(contents: Electron.WebContents, permission: SystemPermission, roots: Set<string> | null = null): void {
   revoke(contents.id, permission);
   const { port1, port2 } = new MessageChannelMain();
-  const entry: Grant = { port: port1, ptys: new Set() };
+  const entry: Grant = { port: port1, ptys: new Set(), roots, send: () => {} };
   let byPermission = grants.get(contents.id);
   if (!byPermission) grants.set(contents.id, (byPermission = new Map()));
   byPermission.set(permission, entry);
@@ -316,6 +335,7 @@ function grant(contents: Electron.WebContents, permission: SystemPermission): vo
     once: () => sender,
     on: () => sender,
   };
+  entry.send = sender.send;
 
   port1.on('message', ({ data }) => {
     const { id, channel, args } = (data ?? {}) as { id?: unknown; channel?: unknown; args?: unknown };
@@ -329,6 +349,15 @@ function grant(contents: Electron.WebContents, permission: SystemPermission): vo
     const refusal = checkCall(permission, channel, args, entry);
     if (refusal) {
       reply({ error: { name: 'DinPermissionError', message: refusal } });
+      return;
+    }
+    if (channel === 'pty:release' || channel === 'pty:adopt') {
+      try {
+        const appId = appIdOf(contents.getURL()) ?? '';
+        reply({ result: channel === 'pty:release' ? releasePty(entry, args[0] as number, appId) : adoptPty(entry, args[0], appId) });
+      } catch (error) {
+        reply({ error: { name: 'NotFoundError', message: error instanceof Error ? error.message : String(error) } });
+      }
       return;
     }
     const event = { sender, senderFrame: null, ports: [], returnValue: undefined, reply: () => {} };
@@ -363,16 +392,101 @@ function grant(contents: Electron.WebContents, permission: SystemPermission): vo
 
 /** Why a call on a bridge port is refused, or null to let it through. */
 function checkCall(permission: SystemPermission, channel: string, args: unknown[], entry: Grant): string | null {
-  if (permission === 'pty' && channel !== 'pty:spawn' && !entry.ptys.has(args[0] as number)) {
+  if (permission === 'pty' && channel !== 'pty:spawn' && channel !== 'pty:adopt' && !entry.ptys.has(args[0] as number)) {
     return 'Not one of this app\'s terminals';
   }
   if (permission === 'fs') {
+    if (entry.roots && !SCOPED_FS.has(channel)) return `${channel} reaches beyond this app's folders`;
+    if (entry.roots && channel === 'fs:compress' && Array.isArray(args[1]) && args[1].some((n) => typeof n !== 'string' || n.includes('/'))) {
+      return 'Names only, inside the folder';
+    }
     for (const arg of args) {
       if (typeof arg !== 'string' || !path.isAbsolute(arg)) continue;
       if (isProtectedPath(arg)) return `${path.resolve(arg)} belongs to Din`;
+      if (entry.roots && !withinRoots(entry.roots, arg)) return `${path.resolve(arg)} is outside this app's folders`;
     }
   }
   return null;
+}
+
+/**
+ * What a scoped fs grant may call: everything that names its paths, and
+ * nothing that reaches files by other means (the Trash's names, recent
+ * files, search across home).
+ */
+const SCOPED_FS = new Set([
+  'fs:homedir', 'fs:stat', 'fs:readdir', 'fs:readFile', 'fs:writeFile', 'fs:mkdir', 'fs:rename', 'fs:copyFile',
+  'fs:rm', 'fs:copyInto', 'fs:moveInto', 'fs:move', 'fs:trash', 'fs:details', 'fs:du', 'fs:chmod', 'fs:extract',
+  'fs:cancelExtract', 'fs:compress', 'fs:listArchive', 'fs:watch', 'fs:unwatch',
+]);
+
+/** A path with its symlinks resolved, as far as it exists (a link inside a root may point anywhere). */
+function realish(file: string): string {
+  let head = path.resolve(file);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(head), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(head);
+      if (parent === head) return path.resolve(file);
+      tail.push(path.basename(head));
+      head = parent;
+    }
+  }
+}
+
+function withinRoots(roots: Set<string>, file: string): boolean {
+  const resolved = realish(file);
+  for (const root of roots) {
+    if (resolved === root || resolved.startsWith(root + path.sep)) return true;
+  }
+  return false;
+}
+
+/** Terminals on their way between windows of an app, by hand-over token. */
+const releasedPtys = new Map<string, { id: number; appId: string; held: [string, unknown[]][]; timer: NodeJS.Timeout }>();
+
+/** How long a released terminal waits to be adopted before its shell ends. */
+const PTY_HANDOVER_MS = 15_000;
+
+/** Let go of a terminal for another window of the app to adopt; its output waits meanwhile. */
+function releasePty(entry: Grant, id: number, appId: string): string {
+  if (!entry.ptys.has(id)) throw new Error('Not one of this app\'s terminals');
+  entry.ptys.delete(id);
+  const token = randomUUID();
+  const held: [string, unknown[]][] = [];
+  ptyRoutes.set(id, (channel, ...args) => {
+    if (held.length < 10_000) held.push([channel, args]);
+  });
+  const timer = setTimeout(() => {
+    releasedPtys.delete(token);
+    ptyRoutes.delete(id);
+    const event = { sender: { id: -1, isDestroyed: () => true, send: () => {} } };
+    bridgeEvents.add(event);
+    try {
+      sendHandlers.get('pty:kill')?.(event as unknown as Electron.IpcMainEvent, id);
+    } catch {
+      // Already gone.
+    }
+  }, PTY_HANDOVER_MS);
+  releasedPtys.set(token, { id, appId, held, timer });
+  return token;
+}
+
+/** Take over a terminal another window of the same app let go of; resolves with its id. */
+function adoptPty(entry: Grant, token: unknown, appId: string): number {
+  const released = typeof token === 'string' ? releasedPtys.get(token) : undefined;
+  if (!released || released.appId !== appId) throw new Error('No such terminal');
+  releasedPtys.delete(token as string);
+  clearTimeout(released.timer);
+  entry.ptys.add(released.id);
+  ptyRoutes.set(released.id, entry.send);
+  // What it said in between, after the adopter has its id.
+  setImmediate(() => {
+    for (const [channel, args] of released.held) entry.send(channel, ...args);
+  });
+  return released.id;
 }
 
 /** Whether a path is one no app may reach, even with fs (Din's own profile). */
@@ -391,6 +505,7 @@ function revoke(wcId: number, permission: SystemPermission): void {
   // An app's terminals end with its grant.
   const kill = sendHandlers.get('pty:kill');
   for (const id of entry.ptys) {
+    ptyRoutes.delete(id);
     const event = { sender: { id: wcId, isDestroyed: () => true, send: () => {} } };
     bridgeEvents.add(event);
     try {
@@ -419,6 +534,8 @@ export function forwardPushToGrants(channel: string, args: unknown[]): void {
   for (const byPermission of grants.values()) {
     for (const [permission, entry] of byPermission) {
       if (!SYSTEM_PUSHES[permission]?.test(channel)) continue;
+      // A scoped grant hears only of its own folders.
+      if (entry.roots && !(typeof args[0] === 'string' && withinRoots(entry.roots, args[0]))) continue;
       entry.port.postMessage({ push: channel, args });
     }
   }

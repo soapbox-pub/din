@@ -25,7 +25,6 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { appForFile } from '@/lib/fileTypes';
-import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { getFsBridge } from '@/lib/fs';
 import { notify } from '@/lib/notificationCenter';
 import { printFile, printHtml } from '@/lib/printing';
@@ -57,12 +56,25 @@ import {
   manifestPermissions,
   onAppPort,
   storageToMigrate,
+  appKeyOf,
+  appSessionState,
+  appWindowIds,
+  appWindows,
+  persistedGrant,
+  persistGrant,
+  recentFilesToMigrate,
+  releaseGrant,
+  windowIdAt,
+  hoverTab,
 } from '@/lib/dinApps';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
+import { readStoredModel, setStoredModel, setViewedSession, subscribeStoredModel, followDinSession } from '@/hooks/useAssistant';
+import { setTabDragLabel } from '@/lib/dinDrag';
 import { acceptDrag, dragInfo, finishDrag, registerDrag, setDragPoint, subscribeDrag, currentDrag } from '@/lib/dinDrag';
 import { guestsAvailable } from '@/platform/guest';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
-import type { DinManifest, FrameStyle, MediaSession, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
+import type { AssistantSettings, DinManifest, FrameStyle, MediaSession, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
 import type { AccountSnapshot, FromApp, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
 
@@ -98,13 +110,6 @@ function dirname(path: string): string {
   return i <= 0 ? '/' : path.slice(0, i);
 }
 
-/** A stable, opaque key for a path, per app. */
-function keyOf(appId: string, path: string): string {
-  let h = 5381;
-  for (const c of `${appId}\u0000${path}`) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0;
-  return h.toString(36) + path.length.toString(36);
-}
-
 const MIME_BY_EXT: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
   svg: 'image/svg+xml', ico: 'image/x-icon', avif: 'image/avif', txt: 'text/plain', md: 'text/markdown',
@@ -116,7 +121,6 @@ function mimeOf(name: string): string {
   return MIME_BY_EXT[name.split('.').pop()?.toLowerCase() ?? ''] ?? '';
 }
 
-const PERSIST_KEY = 'din:app-file-tokens';
 
 /** `startIn`'s named folders, under home. */
 const NAMED_FOLDERS: Record<string, string> = {
@@ -126,14 +130,6 @@ const NAMED_FOLDERS: Record<string, string> = {
   videos: 'Videos',
   downloads: 'Downloads',
 };
-
-function persisted(): Record<string, { appId: string; path: string; kind: 'file' | 'directory'; writable: boolean }> {
-  try {
-    return JSON.parse(localStorage.getItem(PERSIST_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
-}
 
 /**
  * The window body of a built-in app: its din:// page in a guest of its own
@@ -157,9 +153,15 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const { config } = useAppContext();
   const { user } = useCurrentUser();
   const queryClient = useQueryClient();
+  const openUrl = useOpenUrl();
+  const { updateConfig } = useAppContext();
   const zoom = config.zoomLevel / 100;
   const permissions = manifestPermissions(manifest);
   const appName = manifest.short_name ?? manifest.name;
+  // fs scoped to some folders: those of files the user hands it, or fixed ones.
+  const fileFolders = permissions.includes('file-folders');
+  const fixedFolders = manifest.din.folders ?? [];
+  const scopedFs = !permissions.includes('fs') && (fileFolders || fixedFolders.length > 0);
 
   const surface = useRef<GuestSurfaceHandle>(null);
   const iframe = useRef<HTMLIFrameElement>(null);
@@ -192,6 +194,13 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     nextRequest: number;
     closeRequests: Map<number, ReturnType<typeof setTimeout>>;
     watches: Map<string, { dir: string; id: number | null }>;
+    webContentsId: number | null;
+    /** A scoped fs grant's folders, as granted so far; null when not scoped. */
+    fsRoots: Set<string> | null;
+    /** Whether main has the fs grant yet (later roots are added to it). */
+    fsGranted: boolean;
+    /** Roots on their way to main: replies wait for them. */
+    scoping: Promise<unknown>;
   } | null>(null);
 
   /** What the app is playing, among the desktop's media sources (registered below). */
@@ -229,12 +238,24 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       : { pubkey: null, relays: [], blossom: [] };
 
   // Everything a request handler reads, current as of the last render.
-  const live = useRef({ win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account });
+  const live = useRef({ win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig });
   useLayoutEffect(() => {
-    live.current = { win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account };
+    live.current = { win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig };
   });
 
   const push = useCallback((message: Push) => session.current?.port.postMessage(message), []);
+  /** Whether what's being dictated goes into this window. */
+  const dictationHere = () => {
+    const owner = getDictationState().owner;
+    const el = surface.current?.element() ?? iframe.current;
+    return getDictationState().status !== 'idle' && !!el && owner === el;
+  };
+  const assistantSettings = (): AssistantSettings => ({
+    enabled: live.current.config.assistantEnabled !== false,
+    directory: live.current.config.assistantDirectory ?? '',
+    colorfulReplies: live.current.config.assistantColorfulReplies !== false,
+    model: readStoredModel(),
+  });
 
   /** Grant the app a file it was handed, as a handle for its port. */
   const grantFile = useCallback((path: string, kind: 'file' | 'directory', writable: boolean): HandleData | null => {
@@ -242,8 +263,20 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     if (!s) return null;
     const id = `h${s.nextHandle++}`;
     s.grants.set(id, { path, kind, writable });
-    return { id, kind, name: basename(path), key: keyOf(appId, path), path: permissions.includes('fs') ? path : null, writable };
-  }, [appId, permissions]);
+    // With file-folders, the folder of a file the user handed it comes along.
+    if (fileFolders && s.fsRoots) {
+      const root = kind === 'directory' ? path : dirname(path);
+      if (!s.fsRoots.has(root)) {
+        s.fsRoots.add(root);
+        const apps = getAppsBridge();
+        if (s.fsGranted && apps && s.webContentsId !== null) {
+          const wc = s.webContentsId;
+          s.scoping = s.scoping.then(() => apps.addFsRoot(wc, root)).catch(() => {});
+        }
+      }
+    }
+    return { id, kind, name: basename(path), key: appKeyOf(appId, path), path, writable };
+  }, [appId, fileFolders]);
 
   const grantPaths = useCallback(async (paths: string[], writable = true): Promise<HandleData[]> => {
     const fs = getFsBridge();
@@ -305,6 +338,24 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     return { clientX: (r?.left ?? 0) + at.x, clientY: (r?.top ?? 0) + at.y };
   };
   const sectionOf = () => container.current?.closest<HTMLElement>('[data-window-id]') ?? null;
+  /** Whether a path is within this window's scoped fs folders (symlinks aside: main resolves those). */
+  const inScope = (path: string): boolean => {
+    const roots = session.current?.fsRoots;
+    return !!roots && [...roots].some((r) => path === r || path.startsWith(`${r.replace(/\/$/, '')}/`));
+  };
+  /** The frontmost window of this app at a point of the desktop, with the point in it. */
+  const tabTarget = (x: number, y: number): { windowId: string; at: { x: number; y: number } } | null => {
+    const id = windowIdAt(x, y);
+    const target = id ? appWindows.get(id) : undefined;
+    const r = target?.guestRect();
+    if (!id || !target || target.appId !== appId || !r) {
+      hoverTab(null, null);
+      return null;
+    }
+    const at = { x: x - r.left, y: y - r.top };
+    hoverTab(id === windowId ? null : id, at);
+    return { windowId: id, at };
+  };
 
   useLayoutEffect(() => {
     handlers.current = {
@@ -335,16 +386,41 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         if (target === 'assistant') return getAssistantBridge() !== undefined && live.current.config.assistantEnabled !== false;
         return true;
       },
+      // As links open anywhere on the desktop: into an installed app that
+      // owns the site, nostr: links to their viewer, else the Web Browser.
       'app.openUrl': ({ url }) => {
-        if (typeof url !== 'string' || !/^(https?|nsite):\/\//i.test(url)) return;
-        // A tab in the open browser, else a new browser window (the bus
-        // keeps the command until it's up).
-        if (!hasTabConsumer()) live.current.actions.open('web-browser');
-        publishTabCommand({ type: 'open', url });
+        if (typeof url === 'string') live.current.openUrl(url);
       },
       'storage.migrated': () => {
         const entries = storageToMigrate(manifest);
         if (entries) forgetMigratedStorage(entries);
+        for (const key of manifest.din.migrateRecentFiles ?? []) localStorage.removeItem(key);
+      },
+      'app.windows': () =>
+        appWindowIds(appId)
+          .filter((id) => id !== windowId)
+          .map((id) => ({ id, title: appWindows.get(id)?.title() ?? appName })),
+      'app.postToWindow': ({ windowId: to, data }) => {
+        const target = typeof to === 'string' ? appWindows.get(to) : undefined;
+        if (target?.appId === appId) target.push({ type: 'windowMessage', from: windowId, data });
+      },
+      'app.sessionGet': ({ key }) => appSessionState(appId).get(String(key)),
+      'app.sessionSet': ({ key, value }) => {
+        appSessionState(appId).set(String(key), value);
+      },
+      'window.tabDragMove': ({ at, label }) => {
+        setTabDragLabel(typeof label === 'string' ? label.slice(0, 200) : '');
+        const p = toDesktop(at);
+        setDragPoint({ x: p.clientX, y: p.clientY });
+        return tabTarget(p.clientX, p.clientY);
+      },
+      'window.tabDragEnd': ({ at }) => {
+        const p = toDesktop(at);
+        const target = tabTarget(p.clientX, p.clientY);
+        setTabDragLabel(null);
+        setDragPoint(null);
+        hoverTab(null, null);
+        return target;
       },
 
       'window.setTitle': ({ title }) => live.current.publishTitle?.(typeof title === 'string' ? title.slice(0, 300) : null),
@@ -534,17 +610,19 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         session.current!.watches.delete(handle);
         if (w.id !== null) void getFsBridge()?.unwatch(w.id);
       },
-      'files.persist': ({ handle }) => {
+      'files.persist': ({ handle }) => persistGrant({ appId, ...grantOf(handle) }),
+      'files.release': ({ token }) => releaseGrant(appId, String(token)),
+      'files.parent': ({ handle }) => {
+        if (!fileFolders && !permissions.includes('fs')) return null;
+        // A file's folder only: a folder's parent would let file-folders
+        // climb to the root a step at a time.
         const g = grantOf(handle);
-        const token = crypto.randomUUID();
-        const all = persisted();
-        all[token] = { appId, ...g };
-        localStorage.setItem(PERSIST_KEY, JSON.stringify(all));
-        return token;
+        if (g.kind !== 'file') return null;
+        return grantFile(dirname(g.path), 'directory', false);
       },
       'files.restore': async ({ token }) => {
-        const entry = persisted()[token];
-        if (!entry || entry.appId !== appId) return null;
+        const entry = persistedGrant(appId, String(token));
+        if (!entry) return null;
         try {
           await getFsBridge()?.stat(entry.path);
         } catch {
@@ -559,8 +637,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         return apps.fileUrl(guestId, g.path);
       },
       'files.fromPath': async ({ path }) => {
-        need('fs');
         if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('An absolute path is required');
+        if (!permissions.includes('fs') && !inScope(path)) need('fs');
         const [handle] = await grantPaths([path]);
         if (!handle) throw new Error(`${path} doesn’t exist`);
         return handle;
@@ -600,9 +678,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         if (!ok) throw new Error('That drag token is taken');
       },
       'drag.startPaths': async ({ token, paths, label }) => {
-        need('fs');
         const fs = getFsBridge();
         const clean = paths.filter((p): p is string => typeof p === 'string' && p.startsWith('/'));
+        if (!permissions.includes('fs') && !clean.every(inScope)) need('fs');
         const kinds = await Promise.all(clean.map((p) => fs?.stat(p).then((st) => st.kind, () => 'file') ?? 'file'));
         const ok = registerDrag({
           token,
@@ -692,6 +770,21 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         await printFile(grantOf(handle).path);
       },
 
+      'assistant.setSettings': (patch) => {
+        need('assistant');
+        if (typeof patch.enabled === 'boolean') live.current.updateConfig((c) => ({ ...c, assistantEnabled: patch.enabled }));
+        const m = patch.model;
+        if (m && typeof m.id === 'string' && typeof m.providerID === 'string') setStoredModel({ id: m.id, providerID: m.providerID });
+      },
+      'assistant.follow': ({ sessionID }) => {
+        need('assistant');
+        if (typeof sessionID === 'string') followDinSession(sessionID);
+      },
+      'assistant.viewing': ({ sessionID }) => {
+        need('assistant');
+        setViewedSession(windowId, typeof sessionID === 'string' ? sessionID : null);
+      },
+
       'nostr.getPublicKey': async () => {
         need('nostr');
         const signer = live.current.user?.signer;
@@ -722,7 +815,18 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   /** Start serving a newly connected document's port. */
   const serve = useCallback(async (port: MessagePort, webContentsId: number | null) => {
     session.current?.port.close();
-    const s = { port, grants: new Map<string, Grant>(), nextHandle: 1, nextRequest: 1, closeRequests: new Map(), watches: new Map() };
+    const s = {
+      port,
+      grants: new Map<string, Grant>(),
+      nextHandle: 1,
+      nextRequest: 1,
+      closeRequests: new Map(),
+      watches: new Map(),
+      webContentsId,
+      fsRoots: scopedFs ? new Set<string>() : null,
+      fsGranted: false,
+      scoping: Promise.resolve() as Promise<unknown>,
+    };
     session.current = s;
     setReady(false);
     setGone(false);
@@ -742,6 +846,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       }
       Promise.resolve()
         .then(() => handler(message.params))
+        // Folders a reply grants reach main's scoped fs before the app hears of them.
+        .then(async (result) => {
+          await s.scoping;
+          return result;
+        })
         .then((result) => reply({ result }))
         .catch((error: unknown) => {
           const err = error instanceof Error ? error : new Error(String(error));
@@ -749,36 +858,61 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         });
     };
 
+    // Launch files first: with file-folders, their folders are what fs reaches.
+    const launch = await launchOf(params, 'new');
+
     // The bridges it's granted get their own ports to main, before hello.
     const apps = getAppsBridge();
+    const fs = getFsBridge();
     let fsUrlBase: string | null = null;
+    if (scopedFs && s.fsRoots && fs) {
+      const home = (await fs.homedir()).replace(/\/$/, '');
+      for (const folder of fixedFolders) {
+        const dir = folder.startsWith('~/') ? `${home}/${folder.slice(2)}` : folder;
+        if (!dir.startsWith('/')) continue;
+        await fs.mkdir(dir).catch(() => {});
+        s.fsRoots.add(dir.replace(/\/$/, ''));
+      }
+    }
     if (apps && webContentsId !== null) {
       for (const p of SYSTEM_PERMISSIONS) {
-        if (!permissions.includes(p)) continue;
-        const granted = await apps.grant(webContentsId, p).catch((e: unknown) => {
+        const scoped = p === 'fs' && scopedFs;
+        if (!permissions.includes(p) && !scoped) continue;
+        const granted = await apps.grant(webContentsId, p, scoped ? [...(s.fsRoots ?? [])] : undefined).catch((e: unknown) => {
           console.error(`din: granting ${p}:`, e);
           return null;
         });
-        if (p === 'fs') fsUrlBase = granted;
+        if (p === 'fs') {
+          fsUrlBase = granted;
+          s.fsGranted = true;
+        }
       }
     }
+
+    // Recent files it kept here before it moved, as persisted handles.
+    const recent = await recentFilesToMigrate(appId, manifest, (path) =>
+      fs ? fs.stat(path).then((st) => (st.kind === 'directory' ? 'directory' : 'file'), () => null) : Promise.resolve(null),
+    );
 
     const l = live.current;
     const hello: Hello = {
       type: 'hello',
       version: 1,
       appId,
-      launch: await launchOf(params, 'new'),
+      launch,
       state: l.windowState(l.win),
       frameStyle: frameStyle(l.win?.accent ?? null),
       theme: themeSnapshot(l.zoom),
       account: l.account(),
       permissions,
       storage: storageToMigrate(manifest),
+      recentFiles: recent,
       drag: dragInfo(currentDrag()),
-      dictation: { available: hasDictationBridge(), status: getDictationState().status },
+      dictation: { available: hasDictationBridge(), status: getDictationState().status, here: dictationHere() },
       fsUrlBase,
       printAvailable: getPrintingBridge() !== undefined,
+      scopedFs,
+      assistant: permissions.includes('assistant') ? assistantSettings() : null,
     };
     if (session.current === s) port.postMessage(hello);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -819,7 +953,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     const listeners = new Set<() => void>();
     const current = (): MediaSource | null => {
       const { session, since } = media.current;
-      return session
+      // An idle session isn't listed; a play key with nothing else playing starts it.
+      return session && !session.idle
         ? {
             id: `app:${windowId}`,
             kind: 'app',
@@ -858,14 +993,40 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
 
   // Dictation's status, for the app's mic buttons.
   useEffect(() => {
-    let last = getDictationState().status;
+    let last = '';
     return subscribeDictation(() => {
       const status = getDictationState().status;
-      if (status === last) return;
-      last = status;
-      push({ type: 'dictation', status });
+      const here = dictationHere();
+      if (`${status}:${here}` === last) return;
+      last = `${status}:${here}`;
+      push({ type: 'dictation', status, here });
     });
   }, [push]);
+
+  // Din's assistant settings, for apps that show the assistant.
+  const assistantJson = permissions.includes('assistant')
+    ? JSON.stringify({ enabled: config.assistantEnabled, directory: config.assistantDirectory, colorfulReplies: config.assistantColorfulReplies })
+    : '';
+  useEffect(() => {
+    if (!assistantJson) return;
+    push({ type: 'assistantSettings', settings: assistantSettings() });
+    return subscribeStoredModel(() => push({ type: 'assistantSettings', settings: assistantSettings() }));
+  }, [assistantJson, push]);
+
+  // Reachable by the app's other windows (din.app.postToWindow, tab drags).
+  useEffect(() => {
+    appWindows.set(windowId, {
+      appId,
+      push,
+      title: () => live.current.win?.title ?? appName,
+      guestRect: () => guestRect(),
+    });
+    return () => {
+      appWindows.delete(windowId);
+      setViewedSession(windowId, null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowId, appId, push]);
 
   // The manifest's theme color tints the title bar until the app says otherwise.
   useEffect(() => {

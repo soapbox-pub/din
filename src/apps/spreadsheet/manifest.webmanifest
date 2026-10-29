@@ -35,6 +35,9 @@
       "workbook",
       "formulas",
       "budget"
+    ],
+    "migrateRecentFiles": [
+      "din:office:recent:excel"
     ]
   }
 }

@@ -100,6 +100,26 @@ export function dragInfo(entry: DinDragEntry | null): DragInfo | null {
 let point: { x: number; y: number } | null = null;
 const pointListeners = new Set<() => void>();
 
+/** A tab torn off an app's strip: what the overlay shows while it's dragged (din.window.tabDragMove). */
+let tabLabel: string | null = null;
+const labelListeners = new Set<() => void>();
+
+export function setTabDragLabel(label: string | null): void {
+  if (label === tabLabel) return;
+  tabLabel = label;
+  for (const l of labelListeners) l();
+}
+
+export function useTabDragLabel(): string | null {
+  return useSyncExternalStore(
+    (l) => {
+      labelListeners.add(l);
+      return () => labelListeners.delete(l);
+    },
+    () => tabLabel,
+  );
+}
+
 export function setDragPoint(next: { x: number; y: number } | null): void {
   if (point?.x === next?.x && point?.y === next?.y) return;
   point = next;

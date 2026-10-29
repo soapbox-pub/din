@@ -61,6 +61,11 @@ await din.app.openUrl('https://example.com');                // the Web Browser
 await din.app.canOpen('assistant');                          // installed (and, the Assistant, switched on)?
 ```
 
+An app's windows reach each other: `din.app.windows()` lists the others,
+front to back, `din.app.postToWindow(id, data)` sends one a message, and
+`din.app.session` keeps state the desktop holds for the app for as long as
+it runs, across its windows opening and closing (Files' undo history).
+
 `openFiles` runs a Windows program (`.exe`) through Wine instead of
 opening it. `din.print.available` says whether there's a print service.
 

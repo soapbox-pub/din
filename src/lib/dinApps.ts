@@ -5,6 +5,7 @@
  */
 import type { DinManifest, Permission, Size } from '@/sdk/din';
 import { guestsAvailable } from '@/platform/guest';
+import type { Push } from '@/sdk/protocol';
 
 /** The session partition apps run in (DIN_APPS_PARTITION in electron/din-apps.mts). */
 export const DIN_APPS_PARTITION = 'persist:din-apps';
@@ -15,8 +16,13 @@ export type SystemPermission = (typeof SYSTEM_PERMISSIONS)[number];
 
 /** What the desktop's preload exposes for hosting apps (electron/preload.cjs). */
 export interface AppsBridge {
-  /** For fs, resolves with the URL base the app loads files by path from. */
-  grant(webContentsId: number, permission: SystemPermission): Promise<string | null>;
+  /**
+   * For fs, resolves with the URL base the app loads files by path from.
+   * `roots` scopes an fs grant to those folders.
+   */
+  grant(webContentsId: number, permission: SystemPermission, roots?: string[]): Promise<string | null>;
+  /** Another folder an app's scoped fs grant reaches. */
+  addFsRoot(webContentsId: number, root: string): Promise<void>;
   revoke(webContentsId: number, permission: SystemPermission): Promise<void>;
   fileUrl(webContentsId: number, path: string): Promise<string>;
   kill(webContentsId: number): Promise<void>;
@@ -166,4 +172,143 @@ export function storageToMigrate(manifest: DinManifest): Record<string, string> 
 /** The app has its copies: the desktop's go. */
 export function forgetMigratedStorage(entries: Record<string, string>): void {
   for (const key of Object.keys(entries)) localStorage.removeItem(key);
+}
+
+// ---------------------------------------------------------------------------
+// Handles apps keep across restarts (handle.persist(), din.files.restore()).
+// ---------------------------------------------------------------------------
+
+const PERSIST_KEY = 'din:app-file-tokens';
+
+export interface PersistedGrant {
+  appId: string;
+  path: string;
+  kind: 'file' | 'directory';
+  writable: boolean;
+}
+
+function persistedGrants(): Record<string, PersistedGrant> {
+  try {
+    const all: unknown = JSON.parse(localStorage.getItem(PERSIST_KEY) ?? '{}');
+    return typeof all === 'object' && all !== null ? (all as Record<string, PersistedGrant>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Keep a grant for an app; resolves to the token it gets back with. */
+export function persistGrant(grant: PersistedGrant): string {
+  const token = crypto.randomUUID();
+  const all = persistedGrants();
+  all[token] = grant;
+  localStorage.setItem(PERSIST_KEY, JSON.stringify(all));
+  return token;
+}
+
+/** The grant a token stands for, if it's this app's. */
+export function persistedGrant(appId: string, token: string): PersistedGrant | null {
+  const grant = persistedGrants()[token];
+  return grant && grant.appId === appId ? grant : null;
+}
+
+/** An app let go of a token. */
+export function releaseGrant(appId: string, token: string): void {
+  const all = persistedGrants();
+  if (all[token]?.appId !== appId) return;
+  delete all[token];
+  localStorage.setItem(PERSIST_KEY, JSON.stringify(all));
+}
+
+/**
+ * Recent-file lists an app kept here as `{ path, time }` (its manifest's
+ * `migrateRecentFiles`), rewritten for the app's own storage: each entry
+ * gets a persisted grant, so the app can reopen it without paths. Files
+ * that are gone are dropped. Null when there's nothing to move.
+ */
+export async function recentFilesToMigrate(
+  appId: string,
+  manifest: DinManifest,
+  exists: (path: string) => Promise<'file' | 'directory' | null>,
+): Promise<Record<string, string> | null> {
+  const out: Record<string, string> = {};
+  for (const key of manifest.din.migrateRecentFiles ?? []) {
+    const raw = localStorage.getItem(key);
+    if (raw === null) continue;
+    let list: unknown;
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(list)) continue;
+    const entries = [];
+    for (const item of list as { path?: unknown; time?: unknown }[]) {
+      if (typeof item?.path !== 'string' || typeof item.time !== 'number') continue;
+      const kind = await exists(item.path);
+      if (!kind) continue;
+      const token = persistGrant({ appId, path: item.path, kind, writable: true });
+      const name = item.path.replace(/\/+$/, '').split('/').pop() || item.path;
+      entries.push({ token, key: appKeyOf(appId, item.path), name, path: item.path, time: item.time });
+    }
+    out[key] = JSON.stringify(entries);
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** A stable, opaque key for a path, per app (DinFileHandle.key). */
+export function appKeyOf(appId: string, path: string): string {
+  let h = 5381;
+  for (const c of `${appId}\u0000${path}`) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0;
+  return h.toString(36) + path.length.toString(36);
+}
+
+// ---------------------------------------------------------------------------
+// The open app windows, so one can reach another of the same app.
+// ---------------------------------------------------------------------------
+
+export interface AppWindowEntry {
+  appId: string;
+  /** Send the window's document a push. */
+  push: (message: Push) => void;
+  title: () => string;
+  /** Where the window's page is in the desktop's viewport. */
+  guestRect: () => DOMRect | undefined;
+}
+
+export const appWindows = new Map<string, AppWindowEntry>();
+
+/** The window whose frame is frontmost at a point of the desktop's viewport. */
+export function windowIdAt(x: number, y: number): string | null {
+  for (const el of document.elementsFromPoint(x, y)) {
+    const id = el.closest('[data-window-id]')?.getAttribute('data-window-id');
+    if (id) return id;
+  }
+  return null;
+}
+
+/** An app's open windows, front to back. */
+export function appWindowIds(appId: string): string[] {
+  const z = (id: string) => Number(document.querySelector<HTMLElement>(`[data-window-id="${CSS.escape(id)}"]`)?.style.zIndex || 0);
+  return [...appWindows].filter(([, w]) => w.appId === appId).map(([id]) => id).sort((a, b) => z(b) - z(a));
+}
+
+// ---------------------------------------------------------------------------
+// din.app.session: state the desktop keeps for an app while it runs.
+// ---------------------------------------------------------------------------
+
+const appSessions = new Map<string, Map<string, unknown>>();
+
+export function appSessionState(appId: string): Map<string, unknown> {
+  let state = appSessions.get(appId);
+  if (!state) appSessions.set(appId, (state = new Map()));
+  return state;
+}
+
+/** The app window another one's tab is dragged over, which hears where (din.window.onTabHover). */
+let hovered: string | null = null;
+
+export function hoverTab(windowId: string | null, at: { x: number; y: number } | null): void {
+  if (hovered && hovered !== windowId) appWindows.get(hovered)?.push({ type: 'tabHover', at: null });
+  hovered = windowId;
+  if (windowId && at) appWindows.get(windowId)?.push({ type: 'tabHover', at });
 }

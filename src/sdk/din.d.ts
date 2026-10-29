@@ -62,6 +62,7 @@ export interface Din {
   media: DinMedia;
   desktop: DinDesktop;
   dictation: DinDictation;
+  assistant: DinAssistant;
   permissions: DinPermissions;
   /** Privileged system bridges, present only when the manifest asks for them. */
   system: DinSystem;
@@ -121,6 +122,20 @@ export interface DinApp {
    * set up and switched on.
    */
   canOpen(appId: string): Promise<boolean>;
+  /** The app's other open windows, front to back. */
+  windows(): Promise<{ id: string; title: string }[]>;
+  /** Send another of the app's windows a message (structured-cloneable). */
+  postToWindow(windowId: string, data: unknown): void;
+  /** Hear messages from the app's other windows. */
+  onWindowMessage(cb: (from: string, data: unknown) => void): Unsubscribe;
+  /**
+   * State the desktop keeps for the app for as long as it runs, across its
+   * windows opening and closing (Files' undo history). Not saved to disk.
+   */
+  session: {
+    get(key: string): Promise<unknown>;
+    set(key: string, value: unknown): void;
+  };
   /** Open a URL in the Web Browser (or the app that handles its scheme). */
   openUrl(url: string): Promise<void>;
   /**
@@ -238,6 +253,18 @@ export interface DinWindow {
    */
   showWindowMenu(at: Point): void;
   /**
+   * A tab being dragged off this window's tab strip, at a point in this
+   * window (the strip keeps the pointer captured). The desktop shows its
+   * label under the pointer, and says which of the app's windows is
+   * frontmost there, with the point in that window; that window hears
+   * `onTabHover`. Null over anything else.
+   */
+  tabDragMove(at: Point, label: string): Promise<{ windowId: string; at: Point } | null>;
+  /** The drag ended at this point: where it landed, as for `tabDragMove`. The label goes. */
+  tabDragEnd(at: Point): Promise<{ windowId: string; at: Point } | null>;
+  /** Another window's tab is dragged over this one (at a point in it), or no longer (null). */
+  onTabHover(cb: (at: Point | null) => void): Unsubscribe;
+  /**
    * Have a say when the user (or the desktop) closes the window. Return true
    * to keep it open: the app then asks its question ("Save changes?") and
    * calls `close()` itself if it should go. Must answer quickly; an app that
@@ -315,8 +342,11 @@ export interface DinFileHandle {
   readonly name: string;
   /** Opaque and stable for the same file within the app; for comparing handles. */
   readonly key: string;
-  /** Its full path, only for apps with the `fs` permission; null otherwise. */
-  readonly path: string | null;
+  /**
+   * Its full path, to show (a Recent list's folder, Copy Path). Knowing it
+   * grants nothing: reaching a file by path takes `fs` or `file-folders`.
+   */
+  readonly path: string;
   /** Read the whole file. */
   getFile(): Promise<File>;
   /**
@@ -331,6 +361,12 @@ export interface DinFileHandle {
   readonly writable: boolean;
   /** Hear when something else changes or removes the file. */
   onChange(cb: (change: 'modified' | 'removed') => void): Unsubscribe;
+  /**
+   * For apps with `file-folders`: the folder a file is in, as a handle (and
+   * `din.system.fs` reaches it by path). Null without the permission, and
+   * for a folder (whose parent the user didn't hand over).
+   */
+  parent(): Promise<DinFileHandle | null>;
   /** Directories only: the entries, as handles granted along with it. */
   entries?(): Promise<DinFileHandle[]>;
   /** Keep the grant across restarts; resolves with a token for `din.files.restore`. */
@@ -373,6 +409,8 @@ export interface DinFiles {
   save(options?: SaveFileOptions): Promise<DinFileHandle | null>;
   /** A handle kept by `persist()`; null if the file is gone or the grant was revoked. */
   restore(token: string): Promise<DinFileHandle | null>;
+  /** Forget a `persist()` token the app no longer keeps (a Recent entry removed). */
+  release(token: string): void;
   /**
    * A handle for a path, for apps with `fs`, which reach files by path
    * anyway (`din.system.fs`) but want a handle's `url()` or to hand the
@@ -557,6 +595,12 @@ export interface MediaSession {
   canPlay: boolean;
   canPrevious: boolean;
   canNext: boolean;
+  /**
+   * Stopped, with something ready to play: not shown in Din's media
+   * controls, but a play key pressed with nothing else playing starts it
+   * (`onAction('play')`), as a music player does.
+   */
+  idle?: boolean;
 }
 
 export type MediaAction = 'play' | 'pause' | 'nexttrack' | 'previoustrack';
@@ -590,6 +634,8 @@ export interface DinDictation {
   /** Whether this computer can take dictation. */
   readonly available: boolean;
   readonly status: DictationStatus;
+  /** Whether what's being dictated goes into this window (from its mic button, or Din's dictation key). */
+  readonly here: boolean;
   onStatus(cb: (status: DictationStatus) => void): Unsubscribe;
   /**
    * Listen, and type what's said into the field focused in the app when it
@@ -599,6 +645,37 @@ export interface DinDictation {
   start(options?: { held?: boolean }): Promise<void>;
   finish(): Promise<void>;
   cancel(): void;
+}
+
+// ---------------------------------------------------------------------------
+// din.assistant (permission `assistant`): the desktop's side of the assistant
+// ---------------------------------------------------------------------------
+
+/** Din's assistant settings (Settings > Assistant), which the desktop keeps. */
+export interface AssistantSettings {
+  enabled: boolean;
+  /** The folder new conversations work in; '' for the home folder. */
+  directory: string;
+  colorfulReplies: boolean;
+  /** The model new conversations use, if one was chosen. */
+  model: { id: string; providerID: string } | null;
+}
+
+/**
+ * For apps that show the assistant (the Assistant, CAD's palette): Din's
+ * settings for it, and what the desktop needs to know to notify well. The
+ * desktop announces requests, questions and finished turns for
+ * conversations Din started, unless the user is looking at that one.
+ */
+export interface DinAssistant {
+  readonly settings: AssistantSettings;
+  onSettingsChange(cb: (settings: AssistantSettings) => void): Unsubscribe;
+  /** Change the ones the app offers (switching it on, choosing a model). */
+  setSettings(patch: Partial<Pick<AssistantSettings, 'enabled' | 'model'>>): void;
+  /** A conversation the app started or wrote in, which Din then follows. */
+  follow(sessionID: string): void;
+  /** The conversation this window shows now, or null. */
+  setViewing(sessionID: string | null): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -645,7 +722,15 @@ export type Permission =
   /** InDesign conversion (`din.system.indd`). Publisher. */
   | 'indd'
   /** Removable disks: list, mount, eject (`din.system.volumes`). Files. */
-  | 'volumes';
+  | 'volumes'
+  /**
+   * `din.system.fs` scoped to the folders of the files the user handed the
+   * app (opened, saved, dropped, launched with), and `handle.parent()`.
+   * Preview (stepping through a folder, archives), Publisher (linked
+   * pictures). Apps that need fixed folders instead list them in their
+   * manifest's `din.folders`.
+   */
+  | 'file-folders';
 
 export interface DinPermissions {
   /** Whether the manifest asked for it and the desktop granted it. */
@@ -661,7 +746,12 @@ export interface DinPermissions {
  */
 export interface DinSystem {
   fs?: FsBridge;
-  pty?: PtyBridge;
+  /**
+   * Terminals. `release` lets go of one for another window of the app to
+   * `adopt` (a tab moving between windows); its output waits meanwhile, and
+   * it ends if nobody adopts it within 15 seconds.
+   */
+  pty?: PtyBridge & { release(id: number): Promise<string>; adopt(token: string): Promise<number> };
   assistant?: AssistantBridge;
   indd?: InddBridge;
   volumes?: VolumesBridge;
@@ -718,5 +808,18 @@ export interface DinManifest {
      * app's storage before its first launch, once.
      */
     migrateStorage?: string[];
+    /**
+     * Folders the app reaches by path through `din.system.fs` without the
+     * whole filesystem: `~/Music`, `~/.local/share/din/skins`. Created if
+     * missing. Media Player.
+     */
+    folders?: string[];
+    /**
+     * Recent-file lists the app kept on the desktop's origin, as JSON arrays
+     * of `{ path, time }` under these keys. The desktop turns each entry it
+     * can still find into `{ token, key, name, path, time }` (a `persist()`
+     * token) in the app's storage, once.
+     */
+    migrateRecentFiles?: string[];
   };
 }

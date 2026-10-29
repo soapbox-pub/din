@@ -8,6 +8,8 @@ import type {
   Din,
   DinAccount,
   DinApp,
+  DinAssistant,
+  AssistantSettings,
   DinClipboard,
   DinDesktop,
   DinDictation,
@@ -38,7 +40,6 @@ import type {
   WindowState,
 } from '@/sdk/din';
 import type { FsBridge } from '@/lib/fs';
-import type { PtyBridge } from '@/lib/pty';
 import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
 import type { VolumesBridge } from '@/lib/volumes';
@@ -185,7 +186,7 @@ function assistantBridge(t: NonNullable<Transport['system']>): AssistantBridge {
   return bridge as unknown as AssistantBridge;
 }
 
-function ptyBridge(t: NonNullable<Transport['system']>): PtyBridge {
+function ptyBridge(t: NonNullable<Transport['system']>): NonNullable<DinSystem['pty']> {
   return {
     spawn: (...args: unknown[]) => t.call('pty', 'pty:spawn', args),
     write: (...args: unknown[]) => t.send('pty', 'pty:write', args),
@@ -197,7 +198,9 @@ function ptyBridge(t: NonNullable<Transport['system']>): PtyBridge {
       t.on('pty', 'pty:commandStart', (id, command) => cb(id as number, command as string)),
     onCommandDone: (cb: (id: number, done: { command: string; seconds: number }) => void) =>
       t.on('pty', 'pty:commandDone', (id, done) => cb(id as number, done as { command: string; seconds: number })),
-  } as unknown as PtyBridge;
+    release: (id: number) => t.call('pty', 'pty:release', [id]),
+    adopt: (token: string) => t.call('pty', 'pty:adopt', [token]),
+  } as unknown as NonNullable<DinSystem['pty']>;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,10 +278,30 @@ async function start(): Promise<Din> {
     }
     tell('storage.migrated');
   }
+  if (h.recentFiles) {
+    for (const [key, value] of Object.entries(h.recentFiles)) {
+      const parse = (text: string | null): { key?: unknown }[] => {
+        try {
+          const list: unknown = JSON.parse(text ?? '[]');
+          return Array.isArray(list) ? list : [];
+        } catch {
+          return [];
+        }
+      };
+      const mine = parse(localStorage.getItem(key));
+      const known = new Set(mine.map((e) => e?.key));
+      localStorage.setItem(key, JSON.stringify([...mine, ...parse(value).filter((e) => !known.has(e?.key))]));
+    }
+    tell('storage.migrated');
+  }
 
   const permissions = new Set<Permission>(h.permissions);
   const need = (permission: Permission) => {
     if (!permissions.has(permission)) throw new DinPermissionError(permission);
+  };
+  /** The whole filesystem, or the folders a scoped grant reaches (main checks which). */
+  const needFs = () => {
+    if (!permissions.has('fs') && !h.scopedFs) throw new DinPermissionError('fs');
   };
 
   // ---- file handles ----
@@ -323,6 +346,10 @@ async function start(): Promise<Din> {
         };
       },
       persist: () => request('files.persist', { handle: data.id }),
+      parent: async () => {
+        const p = await request('files.parent', { handle: data.id });
+        return p ? wrap(p) : null;
+      },
       url: () => request('files.url', { handle: data.id }),
     };
     if (data.kind === 'directory') {
@@ -335,6 +362,10 @@ async function start(): Promise<Din> {
 
   // ---- app ----
   const launches = new Emitter<LaunchContext>();
+  const windowMessages = new Emitter<{ from: string; data: unknown }>();
+  pushes.on((p) => {
+    if (p.type === 'windowMessage') windowMessages.emit({ from: p.from, data: p.data });
+  });
   let launch = launchOf(h.launch);
   pushes.on((p) => {
     if (p.type === 'launch') {
@@ -358,6 +389,13 @@ async function start(): Promise<Din> {
     openFiles: (files) => request('app.openFiles', { handles: files.map(idOf) }),
     openUrl: (url) => request('app.openUrl', { url }),
     canOpen: (appId) => request('app.canOpen', { appId }),
+    windows: () => request('app.windows'),
+    postToWindow: (windowId, data) => tell('app.postToWindow', { windowId, data }),
+    onWindowMessage: (cb) => windowMessages.on(({ from, data }) => cb(from, data)),
+    session: {
+      get: (key) => request('app.sessionGet', { key }),
+      set: (key, value) => tell('app.sessionSet', { key, value }),
+    },
   };
   if (document.readyState === 'complete') queueMicrotask(() => app.ready());
   else window.addEventListener('load', () => app.ready(), { once: true });
@@ -368,6 +406,10 @@ async function start(): Promise<Din> {
   const states = new Emitter<WindowState>();
   const styles = new Emitter<FrameStyle>();
   let closeHandler: (() => boolean) | null = null;
+  const tabHovers = new Emitter<{ x: number; y: number } | null>();
+  pushes.on((p) => {
+    if (p.type === 'tabHover') tabHovers.emit(p.at);
+  });
   pushes.on((p) => {
     if (p.type === 'state') {
       state = p.state;
@@ -411,6 +453,9 @@ async function start(): Promise<Din> {
     close: () => tell('window.close'),
     requestClose: () => tell('window.requestClose'),
     showWindowMenu: (at) => tell('window.menu', { at }),
+    tabDragMove: (at, label) => request('window.tabDragMove', { at, label }),
+    tabDragEnd: (at) => request('window.tabDragEnd', { at }),
+    onTabHover: (cb) => tabHovers.on(cb),
     onCloseRequest(handler) {
       const had = closeHandler !== null;
       closeHandler = handler;
@@ -478,11 +523,12 @@ async function start(): Promise<Din> {
       return result ? wrap(result) : null;
     },
     fromPath: async (path) => {
-      need('fs');
+      needFs();
       return wrap(await request('files.fromPath', { path }));
     },
+    release: (token) => tell('files.release', { token }),
     pathUrl: (path) => {
-      need('fs');
+      needFs();
       if (!h.fsUrlBase) throw new Error('File URLs are only available inside Din');
       return `${h.fsUrlBase}${path.split('/').map(encodeURIComponent).join('/')}`;
     },
@@ -555,7 +601,7 @@ async function start(): Promise<Din> {
       beginDrag(e, (token) => request('drag.startFiles', { token, handles, label }), list.map((f) => f.name).join('\n'));
     },
     startPaths(e, paths, label) {
-      need('fs');
+      needFs();
       beginDrag(e, (token) => request('drag.startPaths', { token, paths, label }), paths.join('\n'));
     },
     startTab(e, tabType, tabState, label) {
@@ -688,10 +734,12 @@ async function start(): Promise<Din> {
     },
   };
   let dictationStatus = h.dictation.status;
+  let dictationHere = h.dictation.here;
   const dictationChanges = new Emitter<DictationStatus>();
   pushes.on((p) => {
     if (p.type !== 'dictation') return;
     dictationStatus = p.status;
+    dictationHere = p.here;
     dictationChanges.emit(p.status);
   });
   const dictation: DinDictation = {
@@ -699,17 +747,46 @@ async function start(): Promise<Din> {
     get status() {
       return dictationStatus;
     },
+    get here() {
+      return dictationHere;
+    },
     onStatus: (cb) => dictationChanges.on(cb),
     start: (options) => request('dictation.start', { held: options?.held === true }),
     finish: () => request('dictation.finish'),
     cancel: () => tell('dictation.cancel'),
   };
 
+  // ---- the assistant's settings ----
+  const noAssistant: AssistantSettings = { enabled: false, directory: '', colorfulReplies: true, model: null };
+  let assistantSettings = h.assistant ?? noAssistant;
+  const assistantChanges = new Emitter<AssistantSettings>();
+  pushes.on((p) => {
+    if (p.type !== 'assistantSettings') return;
+    assistantSettings = p.settings;
+    assistantChanges.emit(p.settings);
+  });
+  const assistant: DinAssistant = {
+    get settings() {
+      return assistantSettings;
+    },
+    onSettingsChange: (cb) => assistantChanges.on(cb),
+    setSettings: (patch) => {
+      need('assistant');
+      tell('assistant.setSettings', patch);
+    },
+    follow: (sessionID) => {
+      if (permissions.has('assistant')) tell('assistant.follow', { sessionID });
+    },
+    setViewing: (sessionID) => {
+      if (permissions.has('assistant')) tell('assistant.viewing', { sessionID });
+    },
+  };
+
   // ---- system bridges, over their own ports to main ----
   const system: DinSystem = {};
   const sys = bridges;
   if (sys) {
-    if (permissions.has('fs')) {
+    if (permissions.has('fs') || h.scopedFs) {
       await sys.ready('fs');
       system.fs = fsBridge(sys);
     }
@@ -751,6 +828,7 @@ async function start(): Promise<Din> {
     media,
     desktop,
     dictation,
+    assistant,
     permissions: permissionsApi,
     system,
   };

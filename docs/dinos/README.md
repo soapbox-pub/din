@@ -162,6 +162,7 @@ One namespace is new: `dinos.apps`, the desktop's side of hosting apps
 | Method | Does |
 |---|---|
 | `grant(webContentsId, permission)` | Have main open a port from that app straight to a system bridge (`fs`, `pty`, `assistant`, `indd`, `volumes`), bound to the app and permission ([../din/permissions.md](../din/permissions.md#dinsystem)). For `fs`, resolves with the URL base the app loads files from by path |
+| `addFsRoot(webContentsId, root)` | Another folder a scoped `fs` grant reaches (`grant`'s third argument scopes it) |
 | `revoke(webContentsId, permission)` | Close that port (and end the app's terminals) |
 | `fileUrl(webContentsId, path)` | A `din-file://<token>/…` URL that app window can stream the file from ([../din/files.md](../din/files.md#streaming-and-paths)) |
 | `onResponsive(cb)` | Main's `unresponsive`/`responsive` for an app's webContents, which the `<webview>` element never sees |

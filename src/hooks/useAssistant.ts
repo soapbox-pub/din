@@ -514,7 +514,13 @@ export function useAssistantDirectory(): string | undefined {
 // The model new conversations use
 // ---------------------------------------------------------------------------
 
-function readStoredModel(): ModelRef | null {
+/**
+ * The chosen model is the desktop's: an app (the Assistant, CAD) reads and
+ * sets it through din.assistant, so both see the same one.
+ */
+export function readStoredModel(): ModelRef | null {
+  const din = typeof window === 'undefined' ? undefined : window.din;
+  if (din) return din.assistant.settings.model;
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(MODEL_STORAGE_KEY) ?? 'null');
     if (typeof parsed !== 'object' || parsed === null) return null;
@@ -526,6 +532,25 @@ function readStoredModel(): ModelRef | null {
 }
 
 const modelListeners = new Set<() => void>();
+
+export function setStoredModel(model: ModelRef): void {
+  const din = typeof window === 'undefined' ? undefined : window.din;
+  if (din) {
+    din.assistant.setSettings({ model: { id: model.id, providerID: model.providerID } });
+    return;
+  }
+  localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({ id: model.id, providerID: model.providerID }));
+  for (const listener of modelListeners) listener();
+}
+
+export function subscribeStoredModel(listener: () => void): () => void {
+  const din = typeof window === 'undefined' ? undefined : window.din;
+  if (din) return din.assistant.onSettingsChange(listener);
+  modelListeners.add(listener);
+  return () => {
+    modelListeners.delete(listener);
+  };
+}
 
 /**
  * The model new conversations start with: the one last picked in Din, else
@@ -541,18 +566,9 @@ export function usePreferredModel(): {
   const { data, isLoading } = useAssistantModels();
   const [stored, setStored] = useState(readStoredModel);
 
-  useEffect(() => {
-    const listener = () => setStored(readStoredModel());
-    modelListeners.add(listener);
-    return () => {
-      modelListeners.delete(listener);
-    };
-  }, []);
+  useEffect(() => subscribeStoredModel(() => setStored(readStoredModel())), []);
 
-  const setModel = useCallback((model: ModelRef) => {
-    localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({ id: model.id, providerID: model.providerID }));
-    for (const listener of modelListeners) listener();
-  }, []);
+  const setModel = useCallback((model: ModelRef) => setStoredModel(model), []);
 
   const models = useMemo(() => data?.models ?? [], [data]);
   const model = useMemo(() => {
@@ -587,20 +603,34 @@ export function isDinSession(sessionID: string): boolean {
   return dinSessions.has(sessionID);
 }
 
-let viewedSession: string | null = null;
-
-/** The conversation the Assistant window shows, if any. */
-export function getViewedSession(): string | null {
-  return viewedSession;
+/**
+ * Din follows a conversation: started or written in here. In an app the
+ * desktop is told, since it's the desktop that notifies.
+ */
+export function followDinSession(sessionID: string): void {
+  dinSessions.add(sessionID);
+  if (typeof window !== 'undefined') window.din?.assistant.follow(sessionID);
 }
 
-/** Called by the Assistant window as it shows and stops showing one. */
+/** The conversation each window shows, by window id (the desktop's side). */
+const viewedSessions = new Map<string, string>();
+
+/** Whether a window shows this conversation now. */
+export function isViewedIn(windowId: string, sessionID: string): boolean {
+  return viewedSessions.get(windowId) === sessionID;
+}
+
+/** The desktop hears what an app window shows (DinAppFrame). */
+export function setViewedSession(windowId: string, sessionID: string | null): void {
+  if (sessionID) viewedSessions.set(windowId, sessionID);
+  else viewedSessions.delete(windowId);
+}
+
+/** Called by the window showing a conversation, as it shows and stops showing it. */
 export function useMarkViewedSession(sessionID: string): void {
   useEffect(() => {
-    viewedSession = sessionID;
-    return () => {
-      if (viewedSession === sessionID) viewedSession = null;
-    };
+    window.din?.assistant.setViewing(sessionID);
+    return () => window.din?.assistant.setViewing(null);
   }, [sessionID]);
 }
 
@@ -632,7 +662,7 @@ export function useStartConversation() {
   return useMutation({
     mutationFn: async ({ text, files, model, agent, directory, command }: StartConversation) => {
       const session = await assistantApi.create({ directory, model: model ?? undefined, agent });
-      dinSessions.add(session.id);
+      followDinSession(session.id);
       if (command) await assistantApi.command(session.id, command, text, files);
       else await assistantApi.prompt(session.id, text, files);
       return session;
@@ -646,7 +676,7 @@ export function useSendPrompt(sessionID: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ text, files, command }: { text: string; files?: PromptAttachment[]; command?: string }) => {
-      dinSessions.add(sessionID!);
+      followDinSession(sessionID!);
       return command
         ? assistantApi.command(sessionID!, command, text, files)
         : assistantApi.prompt(sessionID!, text, files);
@@ -712,7 +742,7 @@ export function useForkSession() {
   return useMutation({
     mutationFn: ({ sessionID, before }: { sessionID: string; before?: string }) => assistantApi.fork(sessionID, before),
     onSuccess: (session) => {
-      dinSessions.add(session.id);
+      followDinSession(session.id);
       void queryClient.invalidateQueries({ queryKey: assistantKeys.sessions });
     },
   });

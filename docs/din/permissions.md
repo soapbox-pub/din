@@ -35,6 +35,10 @@ When nsites get `window.din`, the user approves the list at install.
 | `assistant` | `din.system.assistant`: the Assistant's OpenCode service | Assistant, CAD |
 | `indd` | `din.system.indd`: InDesign conversion | Publisher |
 | `volumes` | `din.system.volumes`: removable disks, mounting and ejecting | Files |
+| `file-folders` | `din.system.fs` scoped to the folders of files the user hands the app, and `handle.parent()` ([files.md](files.md#some-folders-by-path)) | Preview, Publisher |
+
+A manifest's `din.folders` scopes `din.system.fs` to fixed folders instead
+(Media Player's music, videos and skins). Neither reaches anything else.
 
 Check at runtime with `din.permissions.has('fs')`. Calling something
 without its permission rejects with `DinPermissionError`.

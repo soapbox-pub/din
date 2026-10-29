@@ -34,6 +34,9 @@
       "presentation",
       "slideshow",
       "deck"
+    ],
+    "migrateRecentFiles": [
+      "din:office:recent:powerpoint"
     ]
   }
 }

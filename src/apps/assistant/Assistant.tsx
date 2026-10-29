@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, SquarePen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
@@ -34,7 +33,6 @@ import { useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/
 import type { LaunchContext } from '@/sdk';
 import { moveItem } from '@/hooks/useDragReorder';
 import {
-  assistantKeys,
   useActiveSessions,
   useAgentColor,
   useAssistantAgents,
@@ -52,9 +50,7 @@ import {
   useHomeDirectory,
   useInterruptSession,
   useMainCheckouts,
-  getViewedSession,
-  isDinSession,
-  subscribeAssistantEvents,
+  followDinSession,
   useMarkViewedSession,
   usePendingRequests,
   usePreferredModel,
@@ -70,7 +66,6 @@ import {
   useSwitchModel,
 } from '@/hooks/useAssistant';
 import {
-  assistantApi,
   cleanAssistantError,
   contextUsage,
   directoryName,
@@ -286,7 +281,10 @@ function AssistantWindow() {
     removeSessions(new Set(gone.split(' ')));
   }
 
-  useTurnNotifications(sessionIDs, (sessionID) => setState((prev) => showSession(prev, sessionID)));
+  // Din follows what's open in tabs: the desktop says when one finishes out of sight.
+  useEffect(() => {
+    for (const sessionID of sessionIDs) followDinSession(sessionID);
+  }, [sessionIDs]);
 
   const { data: running = [] } = useActiveSessions();
   const pending = usePendingRequests();
@@ -588,53 +586,6 @@ function AssistantWindow() {
         onDeleted={() => deleting && removeSessions(new Set([deleting]))}
       />
     </div>
-  );
-}
-
-/**
- * Says when a conversation finishes, or fails, out of sight: one this window
- * started or wrote in, or has a tab for (the menu bar's and Super+A's open
- * here). Clicking the notification shows it. With the window closed, the
- * desktop says so for the ones it started.
- */
-function useTurnNotifications(followed: string[], show: (sessionID: string) => void) {
-  const din = useDin();
-  const queryClient = useQueryClient();
-  // The latest of each for callbacks that outlive a render.
-  const latest = useRef({ followed, show });
-  useEffect(() => {
-    latest.current = { followed, show };
-  });
-
-  useEffect(
-    () =>
-      subscribeAssistantEvents((event) => {
-        const sessionID = event.sessionID;
-        const failed = event.type === 'session.execution.failed';
-        if (!sessionID || (event.type !== 'session.execution.succeeded' && !failed)) return;
-        if (!isDinSession(sessionID) && !latest.current.followed.includes(sessionID)) return;
-        const { focused, visible } = din.window.state;
-        if (focused && visible && getViewedSession() === sessionID) return;
-        const error = event.data?.error as { message?: unknown } | undefined;
-        void queryClient
-          .fetchQuery({ queryKey: assistantKeys.session(sessionID), queryFn: () => assistantApi.session(sessionID) })
-          .catch(() => null)
-          .then((session) =>
-            din.notifications.show(failed ? 'The assistant stopped with an error' : 'The assistant is done', {
-              body: failed && typeof error?.message === 'string' ? error.message : session ? sessionTitle(session) : '',
-              tag: `done:${sessionID}`,
-            }),
-          );
-      }),
-    [din, queryClient],
-  );
-
-  useEffect(
-    () =>
-      din.notifications.onAction(({ tag }) => {
-        if (tag?.startsWith('done:')) latest.current.show(tag.slice('done:'.length));
-      }),
-    [din],
   );
 }
 

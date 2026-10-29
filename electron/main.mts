@@ -14,6 +14,7 @@
 // First: it records every IPC handler as it's registered, for apps' bridge
 // ports (electron/din-apps.mts).
 import './ipc-registry.mts';
+import { ptyRoutes } from './pty-routes.mts';
 import {
   appIdOf,
   attachAppGuest,
@@ -529,7 +530,10 @@ function registerPtyHandlers(): void {
     proc.stdio[3]?.on('error', () => {});
 
     const send = (channel: string, ...args: unknown[]) => {
-      if (!sender.isDestroyed()) sender.send(channel, ...args);
+      // A pty handed to another window (electron/pty-routes.mts) talks there.
+      const route = ptyRoutes.get(id);
+      if (route) route(channel, ...args);
+      else if (!sender.isDestroyed()) sender.send(channel, ...args);
     };
 
     proc.stdout?.on('data', (chunk) => send('pty:data', id, chunk));
@@ -561,6 +565,7 @@ function registerPtyHandlers(): void {
     proc.on('exit', (code) => {
       ptySessions.delete(id);
       send('pty:exit', id, code ?? -1);
+      ptyRoutes.delete(id);
     });
 
     return id;

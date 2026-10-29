@@ -94,6 +94,8 @@ Defaults are listed, and reset, in Settings > Nostr & Storage.
 | `hidden` | `hidden` | Openable by id, not listed (Preview, Developer Tools) |
 | `dockAs` | `dockAs` | Windows go under another app's Dock tile |
 | `migrateStorage` | | See below |
+| `migrateRecentFiles` | | Recent lists of `{ path, time }` turned into persisted handles once ([files.md](files.md#recent-files)) |
+| `folders` | | Fixed folders `din.system.fs` reaches by path, without `fs` ([files.md](files.md#some-folders-by-path)) |
 
 ## Moving settings out of the desktop
 

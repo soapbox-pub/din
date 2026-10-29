@@ -76,29 +76,29 @@ zone.addEventListener('drop', async (e) => {
 
 ## Dragging tabs
 
-Terminal, Text Editor, Files and the Assistant move tabs between their
-windows, and tear them off into new ones:
+Tabs move between an app's windows (Terminal, Files), and tear off into new
+ones. Tab strips drag with pointer events, which a strip keeps captured
+while the pointer is outside its window, so tabs don't use HTML drag and
+drop; the desktop helps instead:
 
-```ts
-tab.addEventListener('dragstart', (e) => din.drag.startTab(e, 'terminal', { ptyId, title }, title));
+- `din.window.tabDragMove(at, label)` while a tab is off the strip: the
+  desktop shows the label under the pointer and answers with the app's
+  frontmost window there and the point in it. That window hears
+  `din.window.onTabHover(at)` and marks where the tab would land.
+- `din.window.tabDragEnd(at)` when it's let go: the same answer, and the
+  label and marker go.
+- The tab itself travels with `din.app.postToWindow(windowId, payload)` to
+  that window (`din.app.onWindowMessage`), or for a new window waits in
+  `din.app.session` under a token passed in its launch params.
 
-strip.addEventListener('drop', async (e) => {
-  const r = await din.drag.accept(e, 'move');
-  if (r?.kind === 'tab' && r.tabType === 'terminal') adoptTab(r.state);
-});
+`useDinTabTransfer` (`src/shared/dinTabTransfer.ts`) does all of it and
+returns the `TabTransfer` that `TabStrip` takes, as `useTabTransfer` does
+on the desktop; the new window calls `adoptedTab(din)` when it starts. A
+Terminal tab's payload carries its ptys as hand-over tokens
+(`din.system.pty.release` / `adopt`), so its shells keep running.
 
-din.drag.onTabDetached(({ state, at }) => {
-  closeTab(state.ptyId);
-  void din.app.open(din.app.id, { tab: state, at });
-});
-```
-
-`state` is structured-cloneable data the receiving window needs to adopt
-the tab (a pty id, a document handle's persisted token). Only windows of
-the same app can take a tab; other apps see `kind: 'tab'` and ignore it.
-If the tab is dropped outside every window, the source gets
-`onTabDetached` with the drop point and opens a new window there with
-`din.app.open(id, { tab: state, at })`.
+`din.drag.startTab` (an HTML drag carrying a tab) stays for strips that
+use HTML drag and drop.
 
 ## Into and out of other kinds of window
 

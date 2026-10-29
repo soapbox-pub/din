@@ -10,6 +10,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import {
   assistantKeys,
   isDinSession,
+  isViewedIn,
   subscribeAssistantEvents,
   useAssistantDirectory,
   useAssistantEventSync,
@@ -80,19 +81,19 @@ function AssistantNotifications() {
 }
 
 /**
- * Whether the user is in the Assistant now, and whether it's open at all.
- * It runs in a process of its own, so which conversation it shows isn't
- * known here.
+ * Whether the user is looking at this conversation right now: the window
+ * in front shows it (apps say what they show, setViewedSession).
  */
-function useAssistantWindow(): { focused: () => boolean; open: () => boolean } {
+function useIsWatching(): (sessionID: string) => boolean {
   const { windows } = useWindowManager();
   const windowsRef = useRef<WindowState[]>(windows);
   useEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
-  return {
-    focused: () => document.hasFocus() && focusedWindow(windowsRef.current)?.appId === ASSISTANT_APP_ID,
-    open: () => windowsRef.current.some((w) => w.appId === ASSISTANT_APP_ID),
+  return (sessionID) => {
+    if (!document.hasFocus()) return false;
+    const top = focusedWindow(windowsRef.current);
+    return top !== null && isViewedIn(top.id, sessionID);
   };
 }
 
@@ -102,13 +103,13 @@ function useAssistantNotifications() {
   const { open } = useWindowActions();
   const reply = useReplyPermission();
   const queryClient = useQueryClient();
-  const assistantWindow = useAssistantWindow();
+  const isWatching = useIsWatching();
 
   const show = (sessionID: string) => open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce: Date.now() });
   // The latest of each for callbacks that outlive a render.
-  const latest = useRef({ show, reply: reply.mutate, assistantWindow });
+  const latest = useRef({ show, reply: reply.mutate, isWatching });
   useEffect(() => {
-    latest.current = { show, reply: reply.mutate, assistantWindow };
+    latest.current = { show, reply: reply.mutate, isWatching };
   });
 
   // Permission requests and questions: one notification each, gone once
@@ -117,11 +118,11 @@ function useAssistantNotifications() {
   useEffect(() => {
     if (!ready) return;
     const pending = new Set<string>();
-    const announce = (key: string, make: () => string) => {
+    const announce = (key: string, sessionID: string, make: () => string) => {
       pending.add(key);
       if (shown.current.has(key)) return;
-      if (latest.current.assistantWindow.focused()) {
-        // In front of the user already (its tab says so); don't announce it later either.
+      if (latest.current.isWatching(sessionID)) {
+        // On screen already; don't announce it later either.
         shown.current.set(key, '');
         return;
       }
@@ -129,10 +130,10 @@ function useAssistantNotifications() {
     };
 
     for (const request of permissions) {
-      announce(`permission:${request.id}`, () => notifyPermission(request));
+      announce(`permission:${request.id}`, request.sessionID, () => notifyPermission(request));
     }
     for (const form of forms) {
-      announce(`form:${form.id}`, () =>
+      announce(`form:${form.id}`, form.sessionID, () =>
         notify({
           source: SOURCE,
           title: 'The assistant has a question',
@@ -171,12 +172,12 @@ function useAssistantNotifications() {
     }
   }, [ready, permissions, forms]);
 
-  // A conversation started here finishing, or failing, with the Assistant closed.
+  // A conversation Din follows finishing, or failing, out of sight.
   useEffect(
     () =>
       subscribeAssistantEvents((event) => {
         const sessionID = event.sessionID;
-        if (!sessionID || !isDinSession(sessionID) || latest.current.assistantWindow.open()) return;
+        if (!sessionID || !isDinSession(sessionID) || latest.current.isWatching(sessionID)) return;
         const failed = event.type === 'session.execution.failed';
         if (event.type !== 'session.execution.succeeded' && !failed) return;
         const error = event.data?.error as { message?: unknown } | undefined;

@@ -18,6 +18,7 @@ import type {
   WindowChrome,
   WindowState,
   DinNotificationOptions,
+  AssistantSettings,
   DictationStatus,
   Edge,
   MediaAction,
@@ -32,8 +33,7 @@ export interface HandleData {
   name: string;
   /** Stable for the same file within the app. */
   key: string;
-  /** Only for apps with `fs`. */
-  path: string | null;
+  path: string;
   writable: boolean;
 }
 
@@ -68,12 +68,22 @@ export interface Hello {
    * with once. Null when there's nothing to move.
    */
   storage: Record<string, string> | null;
+  /**
+   * Recent-file lists the app kept on the desktop's origin, as JSON arrays of
+   * `{ token, key, name, path, time }` (the manifest's `migrateRecentFiles`),
+   * merged into the app's own under the same keys.
+   */
+  recentFiles: Record<string, string> | null;
   /** The drag going on, if one is. */
   drag: DragInfo | null;
-  dictation: { available: boolean; status: DictationStatus };
+  dictation: { available: boolean; status: DictationStatus; here: boolean };
+  /** Din's assistant settings, for apps with the assistant permission. */
+  assistant: AssistantSettings | null;
   /** For apps with fs: the URL base to load files from by path (din-file://<token>). */
   fsUrlBase: string | null;
   printAvailable: boolean;
+  /** `din.system.fs` reaches only some folders (`file-folders`, the manifest's `folders`). */
+  scopedFs: boolean;
 }
 
 /** What an app can ask, by method: the params, and what the reply carries. */
@@ -83,6 +93,17 @@ export interface Requests {
   'app.openFiles': [{ handles: string[] }, void];
   'app.openUrl': [{ url: string }, void];
   'app.canOpen': [{ appId: string }, boolean];
+  'app.windows': [void, { id: string; title: string }[]];
+  'app.postToWindow': [{ windowId: string; data: unknown }, void];
+  'app.sessionGet': [{ key: string }, unknown];
+  'app.sessionSet': [{ key: string; value: unknown }, void];
+  'window.tabDragMove': [{ at: Point; label: string }, { windowId: string; at: Point } | null];
+  'window.tabDragEnd': [{ at: Point }, { windowId: string; at: Point } | null];
+  'files.parent': [{ handle: string }, HandleData | null];
+  'files.release': [{ token: string }, void];
+  'assistant.setSettings': [Partial<Pick<AssistantSettings, 'enabled' | 'model'>>, void];
+  'assistant.follow': [{ sessionID: string }, void];
+  'assistant.viewing': [{ sessionID: string | null }, void];
   'storage.migrated': [void, void];
 
   'window.setTitle': [{ title: string | null }, void];
@@ -191,7 +212,10 @@ export type Push =
   | { type: 'clipboardFiles'; has: { count: number; cut: boolean } | null }
   | { type: 'notificationAction'; tag: string | null; action: string }
   | { type: 'mediaAction'; action: MediaAction }
-  | { type: 'dictation'; status: DictationStatus };
+  | { type: 'dictation'; status: DictationStatus; here: boolean }
+  | { type: 'windowMessage'; from: string; data: unknown }
+  | { type: 'tabHover'; at: Point | null }
+  | { type: 'assistantSettings'; settings: AssistantSettings };
 
 export type FromDesktop = Hello | ReplyMessage | Push;
 export type FromApp = RequestMessage;

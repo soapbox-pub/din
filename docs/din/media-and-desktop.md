@@ -22,6 +22,9 @@ any other source. `play` also comes when a play key is pressed with
 nothing else playing, if the session `canPlay`. Artwork is a data: or
 https URL: the desktop can't load the app's own files.
 
+A player that's stopped with something queued sets `idle: true`: it isn't
+listed, but a play key pressed with nothing else playing starts it.
+
 Plain `<audio>` and `<video>` in an app aren't seen by the desktop on
 their own; an app that wants media keys says so with a session.
 
@@ -48,4 +51,25 @@ if (din.dictation.available) {
 ```
 
 `start({ held: true })` listens until `finish()` (push to talk);
-otherwise it stops at a pause.
+otherwise it stops at a pause. `din.dictation.here` says whether what's
+being dictated goes into this window, from its button or Din's dictation
+key, so a mic button can light up either way.
+
+## `din.assistant` (permission `assistant`)
+
+For apps that show the assistant (the Assistant, CAD's palette). The
+desktop keeps Din's settings for it and announces requests, questions and
+finished turns, so it needs to know what an app shows:
+
+```ts
+din.assistant.settings;                   // { enabled, directory, colorfulReplies, model }
+din.assistant.onSettingsChange(apply);
+din.assistant.setSettings({ model });     // or { enabled: true }
+din.assistant.follow(sessionID);          // started or written in here: Din says when it finishes
+din.assistant.setViewing(sessionID);      // this window shows it (null: none)
+```
+
+A conversation Din follows is announced when it finishes, unless the
+window in front shows it; requests and questions likewise. The shared
+hooks in `src/hooks/useAssistant.ts` do this in both documents
+(`followDinSession`, `useMarkViewedSession`, the stored model).
