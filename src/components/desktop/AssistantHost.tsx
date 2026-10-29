@@ -187,8 +187,12 @@ function useAssistantNotifications() {
           .then((session) =>
             notify({
               source: SOURCE,
-              title: failed ? 'The assistant stopped with an error' : 'The assistant is done',
-              body: failed && typeof error?.message === 'string' ? error.message : session ? sessionTitle(session) : '',
+              title: session ? sessionTitle(session) : 'The assistant',
+              body: failed
+                ? typeof error?.message === 'string'
+                  ? `Stopped with an error: ${error.message}`
+                  : 'Stopped with an error'
+                : 'Done',
               replaceKey: `assistant:done:${sessionID}`,
               onActivate: () => latest.current.show(sessionID),
             }),
