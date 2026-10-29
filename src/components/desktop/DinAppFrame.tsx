@@ -118,6 +118,15 @@ function mimeOf(name: string): string {
 
 const PERSIST_KEY = 'din:app-file-tokens';
 
+/** `startIn`'s named folders, under home. */
+const NAMED_FOLDERS: Record<string, string> = {
+  documents: 'Documents',
+  pictures: 'Pictures',
+  music: 'Music',
+  videos: 'Videos',
+  downloads: 'Downloads',
+};
+
 function persisted(): Record<string, { appId: string; path: string; kind: 'file' | 'directory'; writable: boolean }> {
   try {
     return JSON.parse(localStorage.getItem(PERSIST_KEY) ?? '{}');
@@ -280,6 +289,15 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     }
     return g;
   };
+  /** Where the picker starts: in a folder handle, beside a file's, or a named folder of home. */
+  const startFolder = async (handle: string | undefined, named: string | undefined): Promise<string | undefined> => {
+    const g = handle ? session.current?.grants.get(handle) : undefined;
+    if (g) return g.kind === 'directory' ? g.path : dirname(g.path);
+    const folder = named ? NAMED_FOLDERS[named] : undefined;
+    const fs = getFsBridge();
+    if (!folder || !fs) return undefined;
+    return `${(await fs.homedir()).replace(/\/$/, '')}/${folder}`;
+  };
   const guestRect = () =>
     (guestsAvailable() ? surface.current?.element() : iframe.current)?.getBoundingClientRect() ?? container.current?.getBoundingClientRect();
   const toDesktop = (at: { x: number; y: number }) => {
@@ -431,26 +449,26 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'files.open': async (o) => {
         const pick = live.current.picker;
         if (!pick) return [];
-        const start = o.startInHandle ? session.current?.grants.get(o.startInHandle)?.path : undefined;
+        const start = await startFolder(o.startInHandle, typeof o.startIn === 'string' ? o.startIn : undefined);
         const result = await pick.pickFiles({
           title: o.title,
           multiple: o.multiple,
           directory: o.directory,
           filters: o.types?.map((t) => ({ name: t.description, patterns: t.extensions.map((e) => `*${e.startsWith('.') ? e : `.${e}`}`), mimeTypes: [] })),
-          initialPath: start ? dirname(start) : undefined,
+          initialPath: start,
         });
         return result ? grantPaths(result.paths, o.writable !== false) : [];
       },
       'files.save': async (o) => {
         const pick = live.current.picker;
         if (!pick) return null;
-        const start = o.startInHandle ? session.current?.grants.get(o.startInHandle)?.path : undefined;
+        const start = await startFolder(o.startInHandle, typeof o.startIn === 'string' ? o.startIn : undefined);
         const result = await pick.pickFiles({
           title: o.title,
           mode: 'save',
           currentName: o.suggestedName,
           filters: o.types?.map((t) => ({ name: t.description, patterns: t.extensions.map((e) => `*${e.startsWith('.') ? e : `.${e}`}`), mimeTypes: [] })),
-          initialPath: start ? dirname(start) : undefined,
+          initialPath: start,
         });
         let path = result?.paths[0];
         if (!path) return null;

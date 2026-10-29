@@ -95,8 +95,10 @@ function Header() {
 }
 ```
 
-- **`<WindowDragRegion>`**: pressing on its empty space moves the window
-  (`din.window.beginMove`); double-click maximizes; right-click opens
+- **`<WindowDragRegion>`**: dragging its empty space moves the window
+  (`din.window.beginMove`, once the pointer has moved 3 px, so clicks and
+  double-clicks still reach the app: the desktop takes over the whole
+  gesture once it has it); double-click maximizes; right-click opens
   Din's window menu (`din.menus.popup` with the window's items). Presses
   on `button`, `input`, `textarea`, `[role="tab"]` and
   `[data-window-no-drag]` are the app's, as in Din's title bar today. Plain

@@ -33,7 +33,23 @@ export function WindowDragRegion({ className, children, onPointerDown, onDoubleC
         if ((e.target as HTMLElement).closest(INTERACTIVE)) return;
         if (!e.currentTarget.contains(e.target as Node)) return;
         e.preventDefault();
-        din.window.beginMove(e.nativeEvent);
+        // The move is handed to the desktop only once the pointer has moved
+        // a little: the desktop then takes the whole gesture, and a click or
+        // double-click would never come back here.
+        const down = e.nativeEvent;
+        const move = (m: PointerEvent) => {
+          if (Math.hypot(m.clientX - down.clientX, m.clientY - down.clientY) < 3) return;
+          stop();
+          din.window.beginMove(down);
+        };
+        const stop = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', stop);
+          window.removeEventListener('pointercancel', stop);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', stop);
+        window.addEventListener('pointercancel', stop);
       }}
       onDoubleClick={(e) => {
         onDoubleClick?.(e);

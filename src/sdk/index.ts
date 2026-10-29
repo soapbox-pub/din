@@ -425,16 +425,24 @@ async function start(): Promise<Din> {
   });
   // Accelerators work wherever focus is in the window: keys reach this
   // document, not the desktop's, so they're matched here.
-  let accelerators: { id: string; accelerator: string }[] = [];
-  const collect = (items: MenuItem[], out: { id: string; accelerator: string }[]) => {
+  type Bound = { id: string; accelerator: string; notInFields: boolean };
+  let accelerators: Bound[] = [];
+  const collect = (items: MenuItem[], out: Bound[]) => {
     for (const item of items) {
       if (item.type === 'separator' || item.type === 'label') continue;
       if (item.type === 'submenu') collect(item.items, out);
-      else if (item.accelerator && item.enabled !== false) out.push({ id: item.id, accelerator: item.accelerator });
+      else if (item.accelerator && item.enabled !== false) {
+        out.push({ id: item.id, accelerator: item.accelerator, notInFields: item.notInFields === true });
+      }
     }
   };
+  const inField = (target: EventTarget | null) =>
+    target instanceof HTMLElement &&
+    (target.isContentEditable || target instanceof HTMLTextAreaElement ||
+      (target instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'range', 'color'].includes(target.type)));
   window.addEventListener('keydown', (e) => {
-    const hit = accelerators.find((a) => acceleratorMatches(a.accelerator, e));
+    const field = inField(e.target);
+    const hit = accelerators.find((a) => !(field && a.notInFields) && acceleratorMatches(a.accelerator, e));
     if (!hit) return;
     e.preventDefault();
     e.stopPropagation();
@@ -442,7 +450,7 @@ async function start(): Promise<Din> {
   }, true);
   const menus: DinMenus = {
     setMenuBar(list) {
-      const found: { id: string; accelerator: string }[] = [];
+      const found: Bound[] = [];
       for (const menu of list ?? []) collect(menu.items, found);
       accelerators = found;
       tell('menus.setMenuBar', { menus: list });

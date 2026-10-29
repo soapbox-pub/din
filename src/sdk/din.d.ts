@@ -257,6 +257,11 @@ export interface MenuItemBase {
   enabled?: boolean;
   /** Shown beside the label and bound while the window is focused, e.g. `Ctrl+S`. */
   accelerator?: string;
+  /**
+   * Leave the accelerator to a text field that has focus (a search box's
+   * Ctrl+F, a field's Ctrl+A). Shown in the menu either way.
+   */
+  notInFields?: boolean;
   /** An image: a data: URL, https, or a root path of Din's public files (`/icons/…`). */
   icon?: string;
   /** Drawn in the destructive color (Delete, Close Without Saving). */
@@ -346,7 +351,7 @@ export interface OpenFileOptions {
   directory?: boolean;
   /** Ask to write back to what's chosen. Default true for files. */
   writable?: boolean;
-  /** Start next to this file. */
+  /** Start in this folder, beside this file, or in a named folder of home. */
   startIn?: DinFileHandle | 'documents' | 'pictures' | 'music' | 'videos' | 'downloads';
 }
 
