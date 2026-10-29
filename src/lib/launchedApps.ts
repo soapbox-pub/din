@@ -78,6 +78,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   notifications: 'Keep notifications and a Dock badge',
   'media-session': 'Hear the media keys',
   wallpaper: 'Change the desktop wallpaper',
+  cursor: 'Install cursors and change the pointer',
   assistant: 'Use the Assistant',
   indd: 'Convert InDesign documents',
   volumes: 'Mount and eject disks',

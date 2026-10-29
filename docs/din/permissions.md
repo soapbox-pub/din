@@ -32,6 +32,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `notifications` | Notification center entries, the Dock badge | Assistant |
 | `media-session` | `din.media`: report what's playing; hear the media keys and Din's media controls | Media Player |
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
+| `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |
 | `assistant` | `din.system.assistant`: the Assistant's OpenCode service | Assistant, CAD |
 | `indd` | `din.system.indd`: InDesign conversion | Publisher |
 | `volumes` | `din.system.volumes`: removable disks, mounting and ejecting | Files |

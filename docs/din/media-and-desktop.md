@@ -28,14 +28,22 @@ listed, but a play key pressed with nothing else playing starts it.
 Plain `<audio>` and `<video>` in an app aren't seen by the desktop on
 their own; an app that wants media keys says so with a session.
 
-## `din.desktop` (permission `wallpaper`)
+## `din.desktop` (permissions `wallpaper` and `cursor`)
 
 ```ts
 await din.desktop.setWallpaper(pictureHandle);
+await din.desktop.setCursor(themeHandle);
 ```
 
 The desktop's own rules apply: a picture going into a synced profile
 theme is only uploaded once the user agrees.
+
+`setCursor` installs the cursor theme in a file (a .CurXPTheme,
+.CursorFX, .cape, a Windows pack or an archive of a theme) and makes it
+the pointer, as Settings' Import does: it's converted in the cursor
+converter's sandbox and checked before anything is written. It rejects
+with a message to show when the file isn't a theme Din can read, or when
+Din can't change the cursor on this system.
 
 ## `din.dictation`
 

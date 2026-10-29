@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { cleanFsError, fileUrl, formatBytes, getFsBridge } from '@/lib/fs';
 import {
   fileCategory,
+  isCursorTheme,
   isExtractable,
   isPlayableAudio,
   isPlayableVideo,
@@ -13,6 +14,7 @@ import {
 } from '@/lib/fileTypes';
 import { useFileContent } from '@/hooks/useFileSystem';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CursorThemeView } from '@/shared/CursorThemeView';
 import { FileIcon } from '@/shared/FileIcon';
 
 /** Cap for text reads; bigger files show read-only, truncated. */
@@ -31,11 +33,13 @@ export interface FileViewerBodyProps {
   onDirtyChange?: (dirty: boolean) => void;
   /** Extract an archive being shown. */
   onExtract?: () => void;
+  /** Install a cursor theme being shown and make it the pointer. */
+  onUseCursor?: () => Promise<void>;
 }
 
 /**
  * What a file looks like inside: the picture, the video, the song, the
- * text, the archive's listing. Shared by the Preview window and Files'
+ * text, the archive's listing, the cursor theme's cursors. Shared by the Preview window and Files'
  * Quick Look (Space).
  */
 export function FileViewerBody({
@@ -45,6 +49,7 @@ export function FileViewerBody({
   editable,
   onDirtyChange,
   onExtract,
+  onUseCursor,
 }: FileViewerBodyProps) {
   const name = path.slice(path.lastIndexOf('/') + 1);
   const base = useFileUrl(isViewableImage(name) || isPlayableVideo(name) || isPlayableAudio(name) ? path : null);
@@ -69,6 +74,7 @@ export function FileViewerBody({
       </div>
     );
   }
+  if (isCursorTheme(name)) return <CursorThemeView key={path} path={path} mtimeMs={mtimeMs} onUse={onUseCursor} />;
   if (isExtractable(name)) return <ArchiveView path={path} onExtract={onExtract} />;
   const category = fileCategory(name, 'file');
   if (category === 'pdf' || category === 'document' || category === 'disk' || category === 'program' || category === 'image' || category === 'video') {

@@ -147,6 +147,7 @@ export interface Requests {
 
   'media.setSession': [{ session: MediaSession | null }, void];
   'desktop.setWallpaper': [{ handle: string }, void];
+  'desktop.setCursor': [{ handle: string }, void];
   'dictation.start': [{ held: boolean }, void];
   'dictation.finish': [void, void];
   'dictation.cancel': [void, void];

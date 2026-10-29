@@ -638,12 +638,19 @@ export interface DinMedia {
 }
 
 // ---------------------------------------------------------------------------
-// din.desktop (permission `wallpaper`)
+// din.desktop (permissions `wallpaper` and `cursor`)
 // ---------------------------------------------------------------------------
 
 export interface DinDesktop {
   /** Make a picture the app holds the desktop's background. */
   setWallpaper(file: DinFileHandle): Promise<void>;
+  /**
+   * Install the cursor theme in a file the app holds (a .CurXPTheme,
+   * .CursorFX, .cape, an archive of a theme…) and make it the pointer, as
+   * Settings' Import does. Rejects with why when the file isn't one, or
+   * when Din can't change the cursor on this system.
+   */
+  setCursor(file: DinFileHandle): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -739,6 +746,8 @@ export type Permission =
   | 'media-session'
   /** Set the desktop wallpaper (`din.desktop`). */
   | 'wallpaper'
+  /** Install cursor themes and change the pointer (`din.desktop.setCursor`). */
+  | 'cursor'
   /** The Assistant's OpenCode service (`din.system.assistant`). Assistant, CAD. */
   | 'assistant'
   /** InDesign conversion (`din.system.indd`). Publisher. */

@@ -58,6 +58,7 @@ import { InstalledAppsContext } from '@/contexts/InstalledAppsContext';
 import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import { getAssistantBridge } from '@/lib/assistant';
 import { getPrintingBridge } from '@/lib/printing';
+import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import {
   appUrl,
   DIN_APPS_PARTITION,
@@ -767,6 +768,19 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         need('wallpaper');
         if (!background) throw new Error('No desktop to set');
         await background.setBackground({ path: grantOf(handle).path });
+      },
+      'desktop.setCursor': async ({ handle }) => {
+        need('cursor');
+        const cursor = getSystemCursorBridge();
+        if (!cursor) throw new Error('Din can’t change the cursor here');
+        try {
+          await cursor.importTheme(grantOf(handle).path);
+        } catch (error) {
+          throw new Error(cleanCursorError(error), { cause: error });
+        } finally {
+          // Settings lists the new theme and shows it chosen.
+          void queryClient.invalidateQueries({ queryKey: ['cursor'] });
+        }
       },
       'dictation.start': async ({ held }) => {
         // Into the field focused in the app: the guest is what's focused here.

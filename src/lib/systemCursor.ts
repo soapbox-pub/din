@@ -64,6 +64,12 @@ export function getSystemCursorBridge(): SystemCursorBridge | undefined {
   return window.dinos?.cursor;
 }
 
+/** An import's error, without Electron's "Error invoking remote method" prefix. */
+export function cleanCursorError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
+}
+
 /** A preview as a PNG data URL, for an <img>. */
 export function previewToDataUrl(preview: SystemCursorPreview): string {
   const canvas = document.createElement('canvas');

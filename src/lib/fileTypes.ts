@@ -169,6 +169,14 @@ export function isExtractable(name: string): boolean {
   return ARCHIVE.has(ext) || EXTRACTABLE.has(ext);
 }
 
+/** Cursor themes in one file: CursorXP's, CursorFX's and Mousecape's (src/lib/cursorImport). */
+const CURSOR_THEME = new Set(['curxptheme', 'cursorfx', 'cape']);
+
+/** Whether the file is a cursor theme Preview shows and installs. */
+export function isCursorTheme(name: string): boolean {
+  return CURSOR_THEME.has(extensionOf(name));
+}
+
 const CATEGORY_LABEL: Record<FileCategory, string> = {
   folder: 'Folder',
   image: 'Image',
@@ -187,6 +195,7 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
 /** What the Type column says: "PNG image", "Folder", "ZIP archive". */
 export function typeLabel(name: string, kind: FsEntryKind): string {
   if (kind === 'other') return 'Special file';
+  if (kind === 'file' && isCursorTheme(name)) return 'Cursor theme';
   const category = fileCategory(name, kind);
   const ext = extensionOf(name);
   if (category === 'folder' || category === 'pdf' || category === 'program' || !ext) {

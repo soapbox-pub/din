@@ -21,7 +21,8 @@ async function openWith(din: Din, appId: string, path: string, params: Record<st
 /**
  * Preview - a window for one file, opened from Files: pictures and video
  * (with the arrow keys stepping through the rest of the folder's), music,
- * archives' contents, and text, which can be edited and saved.
+ * archives' contents, cursor themes (to install and use), and text, which
+ * can be edited and saved.
  *
  * It has `file-folders`: stepping through the folder, listing and
  * extracting archives and Show in Files all work on the shown file's folder
@@ -99,6 +100,12 @@ export function Preview() {
       setExtractError(`Couldn’t extract: ${cleanFsError(error)}`);
     }
   }, [din, path, dir, queryClient]);
+
+  const canUseCursor = din.permissions.has('cursor');
+  const installCursor = useCallback(async () => {
+    if (!path) return;
+    await din.desktop.setCursor(await din.files.fromPath(path));
+  }, [din, path]);
 
   const image = isViewableImage(name);
   const tools: { label: string; icon: React.ReactNode; run: () => void }[] = path ? [
@@ -189,6 +196,7 @@ export function Preview() {
               editable
               onDirtyChange={setDirty}
               onExtract={() => void extract()}
+              onUseCursor={canUseCursor ? installCursor : undefined}
             />
           </div>
         </ContextMenuTrigger>

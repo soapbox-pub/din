@@ -668,6 +668,11 @@ export function installDin(transport: Transport): void {
       need('wallpaper');
       await request('desktop.setWallpaper', { handle: idOf(file) });
     },
+    setCursor: async (file) => {
+      await ready;
+      need('cursor');
+      await request('desktop.setCursor', { handle: idOf(file) });
+    },
   };
   let dictationStatus: DictationStatus = 'idle';
   let dictationHere = false;
