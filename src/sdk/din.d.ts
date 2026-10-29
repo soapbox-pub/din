@@ -208,7 +208,7 @@ export interface DinWindow {
 
   /** What the window is showing ("Untitled.png"), or null for the app's name. */
   setTitle(title: string | null): void;
-  /** An icon for what it's showing (a data: or din: URL), or null for the app's. */
+  /** An icon for what it's showing (a data: or https URL, or a root path of Din's public files like `/icons/…`), or null for the app's. */
   setIcon(url: string | null): void;
   /** Tint the title bar (a CSS color, e.g. a page's theme-color), or null. */
   setAccent(color: string | null): void;
