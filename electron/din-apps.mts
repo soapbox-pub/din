@@ -233,8 +233,12 @@ async function serve(request: Request): Promise<Response> {
       net.fetch(new URL(target + url.search, opts.devUrl).toString(), { headers: accept ? { accept } : {} });
     if (pathname === '/' || pathname === '/index.html') return fetchDev(`/src/apps/${appId}/index.html`);
     if (/^\/(@|node_modules\/|src\/|__)/.test(pathname)) return fetchDev(pathname);
-    const local = await fetchDev(`/src/apps/${appId}${pathname}`);
-    return local.ok ? local : fetchDev(pathname);
+    // Decided by what's on disk: Vite answers a path it doesn't have with
+    // its HTML fallback, status 200, so an icon from public/ came back as a
+    // page.
+    const appDir = path.resolve(import.meta.dirname, '..', 'src', 'apps', appId);
+    const own = path.resolve(appDir, `.${pathname}`);
+    return fetchDev(own.startsWith(appDir + path.sep) && fs.existsSync(own) ? `/src/apps/${appId}${pathname}` : pathname);
   }
 
   const appDir = path.join(opts.distDir, 'src', 'apps', appId);
