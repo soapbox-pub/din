@@ -486,9 +486,8 @@ let
 
   # Icon themes for Settings → Appearance → Icons (electron/icon-theme.mts).
   # "Din" is Din's own look: it holds no icons, so Din keeps its bundled ones
-  # and native apps fall through to Adwaita. Papirus and Papirus Dark come
-  # without Papirus Light and without breeze, which Papirus inherits from for
-  # the few icons it lacks; Adwaita stands in, and that saves about 100 MB.
+  # and native apps fall through to Adwaita. Other themes the user drops into
+  # ~/.local/share/icons show up beside it.
   din-icon-themes = pkgs.runCommand "din-icon-themes" { } ''
     mkdir -p $out/share/icons/Din/scalable/apps
     cat > $out/share/icons/Din/index.theme <<'THEME'
@@ -505,15 +504,6 @@ let
     Type=Scalable
     Context=Applications
     THEME
-    cp -a ${pkgs.papirus-icon-theme}/share/icons/{Papirus,Papirus-Dark} $out/share/icons/
-    for theme in Papirus Papirus-Dark; do
-      file=$out/share/icons/$theme/index.theme
-      chmod u+w $file
-      # Rewritten in place: cp -a left the directory read-only, so sed -i
-      # couldn't make its temporary file there.
-      text=$(sed 's/^Inherits=.*/Inherits=Adwaita,hicolor/' $file)
-      printf '%s\n' "$text" > $file
-    done
   '';
 
   # The screen: din-compositor's session mode, Din's own compositor
