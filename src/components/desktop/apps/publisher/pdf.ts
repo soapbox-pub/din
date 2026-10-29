@@ -1,6 +1,6 @@
-import type { Color } from '../vector/pdf/color';
-import { PdfRef, type PdfDict, type PdfValue } from '../vector/pdf/objects';
-import { fmt, hexString, imageXObject, jpegInfo, matOps, N, PdfContent, pdfDate, pdfText, PdfWriter, splitRgba } from '../vector/pdf/writer';
+import type { Color } from '@/shared/pdf/color';
+import { PdfRef, type PdfDict, type PdfValue } from '@/shared/pdf/objects';
+import { fmt, hexString, imageXObject, jpegInfo, matOps, N, PdfContent, pdfDate, pdfText, PdfWriter, splitRgba } from '@/shared/pdf/writer';
 import { css, resolveColor, type RGB, type Swatches } from './colors';
 import { measure, type Composition, type Line, type Look, type TableLayout } from './compose';
 import { apply, intersects, invert, mul, transformRect, type Mat, type PathSink, type Rect } from './geom';
@@ -8,7 +8,7 @@ import type { ImageEntry, ImageStore } from './images';
 import { masterPageFor, masterToPage, type Item, type LayerInfo, type Model, type Page, type Spread } from './model';
 import { WebFonts } from './pdfFonts';
 import { BLENDS, dashFor, findEl, gradientSpec, outlinePath, pageOfItem, traceOutline, type GradientSpec, type TextSource } from './render';
-import type { EmbeddedFont } from '../vector/pdf/sfnt';
+import type { EmbeddedFont } from '@/shared/pdf/sfnt';
 
 /**
  * Export to PDF, drawing what the canvas draws in Preview but as PDF does

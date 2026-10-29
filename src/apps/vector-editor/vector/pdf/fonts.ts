@@ -1,7 +1,7 @@
 import type { FontEntry, FontRef } from '../model';
-import { ENCODINGS, glyphNameToText, STANDARD } from './encodings';
-import { cmdsToPath, readGlyphFont, type GlyphFont } from './glyphs';
-import { decodeStream, latin1, PdfDoc, PdfName, PdfRef, PdfStream, type PdfDict, type PdfValue } from './objects';
+import { ENCODINGS, glyphNameToText, STANDARD } from '@/shared/pdf/encodings';
+import { cmdsToPath, readGlyphFont, type GlyphFont } from '@/shared/pdf/glyphs';
+import { decodeStream, latin1, PdfDoc, PdfName, PdfRef, PdfStream, type PdfDict, type PdfValue } from '@/shared/pdf/objects';
 
 /**
  * A PDF font as the editor uses it: which glyph each code draws, how wide it

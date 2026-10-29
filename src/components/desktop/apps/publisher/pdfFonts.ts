@@ -1,5 +1,5 @@
-import { EmbeddedFont, readSfnt } from '../vector/pdf/sfnt';
-import type { PdfWriter } from '../vector/pdf/writer';
+import { EmbeddedFont, readSfnt } from '@/shared/pdf/sfnt';
+import type { PdfWriter } from '@/shared/pdf/writer';
 
 /**
  * Which font file the canvas drew each character with, so a PDF can embed

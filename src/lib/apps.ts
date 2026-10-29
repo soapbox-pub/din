@@ -25,9 +25,6 @@ const FileBrowser = lazy(() =>
 const FileViewer = lazy(() =>
   import('@/components/desktop/apps/FileViewer').then((m) => ({ default: m.FileViewer })),
 );
-const VectorEditor = lazy(() =>
-  import('@/components/desktop/apps/VectorEditor').then((m) => ({ default: m.VectorEditor })),
-);
 const Publisher = lazy(() =>
   import('@/components/desktop/apps/Publisher').then((m) => ({ default: m.Publisher })),
 );
@@ -233,18 +230,11 @@ export const APPS: readonly AppDefinition[] = [
   dinApp('slides'),
   // A basic calculator and a graphing one (src/apps/calculator/).
   dinApp('calculator'),
-  {
-    // Vector art, Illustrator style: opens and saves .ai files (and PDF and
-    // SVG). Files opens Illustrator files here. Launch params `{ path }` open
-    // one; `{ width, height, units, mode, artboards, name }` start a new
-    // document (File > New from another window).
-    id: 'vector-editor',
-    name: 'Vector Editor',
-    icon: '/icons/apps/vector-editor.png',
-    component: VectorEditor,
-    defaultSize: { width: 1280, height: 820 },
-    keywords: ['illustrator', 'adobe illustrator', 'ai', 'inkscape', 'vector', 'svg', 'logo', 'illustration', 'drawing', 'pen tool', 'bezier'],
-  },
+  // Vector art, Illustrator style: opens and saves .ai files (and PDF and
+  // SVG). Files opens Illustrator files here. Launch params `{ path }` open
+  // one; `{ width, height, units, mode, artboards, name }` start a new
+  // document (File > New from another window).
+  dinApp('vector-editor'),
   {
     // Desktop publishing, InDesign style: opens Microsoft Publisher
     // documents (.pub), InDesign documents (.indd, .indt) and IDML, and saves

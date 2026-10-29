@@ -27,10 +27,10 @@ import {
   type SubPath,
   type TextItem,
 } from '../model';
-import { cmykToRgb, colorSpace, DEVICE_CMYK, DEVICE_GRAY, DEVICE_RGB, makeFunction, type Color, type ColorSpace } from './color';
+import { cmykToRgb, colorSpace, DEVICE_CMYK, DEVICE_GRAY, DEVICE_RGB, makeFunction, type Color, type ColorSpace } from '@/shared/pdf/color';
 import { itemBounds, visualBounds } from '../geom';
 import { loadFont } from './fonts';
-import { decodeStream, Lexer, Parser, PdfDoc, PdfName, PdfOp, PdfRef, PdfStream, textString, type PdfDict, type PdfValue } from './objects';
+import { decodeStream, Lexer, Parser, PdfDoc, PdfName, PdfOp, PdfRef, PdfStream, textString, type PdfDict, type PdfValue } from '@/shared/pdf/objects';
 
 /**
  * Open a PDF — and so a PDF-compatible Illustrator file, which is a PDF

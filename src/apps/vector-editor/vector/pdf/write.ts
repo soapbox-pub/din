@@ -18,10 +18,10 @@ import {
   type TextRun,
 } from '../model';
 import { cssAdvanceOf, embeddedFor, layoutText, type LaidGlyph } from '../text';
-import { toRgb, type Color } from './color';
-import { winAnsiCode } from './encodings';
-import { PdfRef, type PdfDict, type PdfValue } from './objects';
-import { fmt, hexString, imageXObject, matOps, N, PdfContent, pdfDate, pdfText, PdfWriter, splitRgba } from './writer';
+import { toRgb, type Color } from '@/shared/pdf/color';
+import { winAnsiCode } from '@/shared/pdf/encodings';
+import { PdfRef, type PdfDict, type PdfValue } from '@/shared/pdf/objects';
+import { fmt, hexString, imageXObject, matOps, N, PdfContent, pdfDate, pdfText, PdfWriter, splitRgba } from '@/shared/pdf/writer';
 
 /**
  * Write a document as a PDF — which is also what a PDF-compatible

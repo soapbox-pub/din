@@ -1,6 +1,6 @@
-import type { Color } from './pdf/color';
-import type { GlyphCmd } from './pdf/glyphs';
-import type { PdfDoc, PdfValue } from './pdf/objects';
+import type { Color } from '@/shared/pdf/color';
+import type { GlyphCmd } from '@/shared/pdf/glyphs';
+import type { PdfDoc, PdfValue } from '@/shared/pdf/objects';
 
 /**
  * Vector Editor's document, the way Illustrator thinks of one: artboards

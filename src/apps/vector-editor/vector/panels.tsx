@@ -34,7 +34,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { FOCUS, INPUT } from '@/shared/photo/styles';
 import { LengthField, PaintChip } from './bars';
 import { BLEND_OPTIONS, STROKE_WEIGHTS } from './units';
-import { hexColor, toHex, toRgb, type Color } from './pdf/color';
+import { hexColor, toHex, toRgb, type Color } from '@/shared/pdf/color';
 import { colorAt, cssPaint, CMYK_SWATCHES, gradientAngle, GRADIENT_SWATCHES, rgbToCmyk, RGB_SWATCHES, setGradientAngle } from './paint';
 import { itemLabel, type Artboard, type Blend, type Doc, type GradStop, type Gradient, type Item, type Layer, type Paint, type Rect, type Stroke, type TextItem, type Units } from './model';
 import type { AlignHow, DistributeHow } from './ops';

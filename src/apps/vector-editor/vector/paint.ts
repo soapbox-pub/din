@@ -1,4 +1,4 @@
-import { toCss, toHex, toRgb, type Color } from './pdf/color';
+import { toCss, toHex, toRgb, type Color } from '@/shared/pdf/color';
 import type { GradStop, Gradient, Mat, Paint, Rect } from './model';
 
 /** Paints as CSS (for swatches), Illustrator's default swatches, and gradient geometry. */

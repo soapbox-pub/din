@@ -21,7 +21,7 @@ import {
   type SubPath,
   type TextItem,
 } from './model';
-import type { GlyphCmd } from './pdf/glyphs';
+import type { GlyphCmd } from '@/shared/pdf/glyphs';
 import { layoutText } from './text';
 
 /**

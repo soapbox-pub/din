@@ -1,6 +1,5 @@
 import { ContextMenu as CM } from 'radix-ui';
 import { ChevronRight } from 'lucide-react';
-import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
 import type { Commands, MenuState } from './menus';
 
@@ -27,7 +26,7 @@ function Sub({ label, children, disabled }: { label: string; children: React.Rea
         {label}
         <ChevronRight className="ml-auto size-3.5" />
       </CM.SubTrigger>
-      <CM.Portal container={portalContainer()}>
+      <CM.Portal>
         <CM.SubContent className={CONTENT}>{children}</CM.SubContent>
       </CM.Portal>
     </CM.Sub>
@@ -41,7 +40,7 @@ export function CanvasMenu({ cmd, st, children }: { cmd: Commands; st: MenuState
   return (
     <CM.Root>
       <CM.Trigger asChild>{children}</CM.Trigger>
-      <CM.Portal container={portalContainer()}>
+      <CM.Portal>
         <CM.Content className={CONTENT}>
           <Item onSelect={cmd.undo} disabled={!st.canUndo}>
             Undo{st.undoLabel ? ` ${st.undoLabel}` : ''}

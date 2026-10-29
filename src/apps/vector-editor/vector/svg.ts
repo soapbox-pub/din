@@ -1,5 +1,5 @@
 import { defaultStroke, IDENTITY, mul, newId, newLayer, NONE, segments, UNIT_PT, type Artboard, type Doc, type GradStop, type Gradient, type Item, type Layer, type Mat, type Node, type Paint, type PathItem, type Rect, type Stroke, type SubPath, type TextItem, type Units } from './model';
-import { hexColor, toHex, type Color } from './pdf/color';
+import { hexColor, toHex, type Color } from '@/shared/pdf/color';
 import { transformPaths } from './geom';
 import { layoutText } from './text';
 import { ellipsePath, rectPath } from './ops';

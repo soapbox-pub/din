@@ -1,0 +1,40 @@
+{
+  "name": "Vector Editor",
+  "description": "Vector art, Illustrator style: opens and saves .ai files (and PDF and SVG).",
+  "icons": [
+    {
+      "src": "/icons/apps/vector-editor.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "window": {
+      "size": {
+        "width": 1280,
+        "height": 820
+      },
+      "frame": "standard"
+    },
+    "keywords": [
+      "illustrator",
+      "adobe illustrator",
+      "ai",
+      "inkscape",
+      "vector",
+      "svg",
+      "logo",
+      "illustration",
+      "drawing",
+      "pen tool",
+      "bezier"
+    ],
+    "migrateStorage": [
+      "din:vector-editor:*"
+    ]
+  }
+}

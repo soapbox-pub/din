@@ -1,4 +1,4 @@
-import { toCss, type Color } from './pdf/color';
+import { toCss, type Color } from '@/shared/pdf/color';
 import { quad, toPath2D } from './geom';
 import { invert, mul, type Doc, type GradStop, type Gradient, type Item, type Mat, type Paint, type PathItem, type Resources, type Stroke, type TextItem } from './model';
 import { cssFont, embeddedFor, layoutText } from './text';

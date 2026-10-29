@@ -25,7 +25,7 @@ import { useDin, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { AERO_CSS } from './aero';
 import { ACCENTS, AppContext, FIELD, FOCUS, keepFocus, refocusFrame, useOfficeApp, type OfficeApp } from './accent';
-import { FONT_CHOICES, fontStack } from './fonts';
+import { FONT_CHOICES, fontStack } from '@/shared/office/fonts';
 import { removeRecent } from './useOfficeFile';
 import { PICKER_NAMES, PICKER_THEME_ORDER, pickerVariants, STANDARD_COLORS, tintColor, type Theme, type ThemeColorName } from './theme';
 

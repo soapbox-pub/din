@@ -1,5 +1,5 @@
 import { defaultStroke, newId, newLayer, NONE, type Artboard, type Doc, type GroupItem, type Item, type Layer, type Node, type Paint, type PathItem, type Stroke, type SubPath, type TextItem } from './model';
-import type { Color } from './pdf/color';
+import type { Color } from '@/shared/pdf/color';
 
 /**
  * Illustrator files from before PDF compatibility (versions 3 to 8, and

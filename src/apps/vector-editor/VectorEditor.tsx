@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, FilePlus, FolderOpen } from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
-import { cleanFsError, formatBytes, getFsBridge, parentPath } from '@/lib/fs';
-import { setCloseGuard } from '@/lib/closeGuards';
-import { invalidateListings } from '@/hooks/useFileSystem';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
+import { cleanFsError, formatBytes } from '@/lib/fs';
+import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import { Button, Dialog, NumberField, Select } from '@/shared/photo/chrome';
 import { Panel } from '@/shared/photo/panels';
 import { FOCUS, INPUT } from '@/shared/photo/styles';
@@ -67,7 +62,7 @@ import {
   TransparencyPanel,
   type TypeStyle,
 } from './vector/panels';
-import { sameColor } from './vector/pdf/color';
+import { sameColor } from '@/shared/pdf/color';
 import { drawDoc, drawItem, viewMat, type View } from './vector/render';
 import { drawOverlay, drawRulers, emptyOverlay, handlePoint, HANDLES, type Handle, type Overlay } from './vector/overlay';
 import { indexAt, layoutText, textOf } from './vector/text';
@@ -133,7 +128,6 @@ function readSettings(): Settings {
   }
 }
 
-const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const fmtZoom = (z: number) => `${z >= 1 ? Math.round(z * 100) : Math.round(z * 1000) / 10}%`;
 const editable = (t: EventTarget | null) =>
   t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
@@ -181,14 +175,14 @@ interface TextEditing {
  * Vector Editor - vector art, Illustrator style: opens and saves .ai files
  * (and PDF and SVG), with Illustrator's tools, menus, panels and shortcuts.
  *
- * Launch params: `{ path?: string }` (absolute).
+ * Launched with a file, it opens that; launch params `{ width, height,
+ * units, mode, artboards, name }` start a new document (File > New from
+ * another window).
  */
-export function VectorEditor({ windowId, params }: AppComponentProps) {
-  const initial = typeof params?.path === 'string' ? params.path : null;
-  const fs = getFsBridge();
-  const { open, close, focus } = useWindowActions();
-  const { pickFile, pickFiles } = useFilePicker();
-  const queryClient = useQueryClient();
+export function VectorEditor() {
+  const din = useDin();
+  const params = din.app.launch.params;
+  const initial = din.app.launch.files[0] ?? null;
 
   const [settings, setSettings] = useState(readSettings);
   const { panels } = settings;
@@ -206,9 +200,9 @@ export function VectorEditor({ windowId, params }: AppComponentProps) {
   const [sel, setSelState] = useState<Set<number>>(new Set());
   const [nodeSel, setNodeSel] = useState<Set<string>>(new Set());
   const [lastSel, setLastSel] = useState<number[]>([]);
-  const [path, setPath] = useState<string | null>(null);
+  const [file, setFile] = useState<DinFileHandle | null>(null);
   const [docName, setDocName] = useState(boot?.name ?? 'Untitled-1');
-  const [loading, setLoading] = useState(initial !== null && fs !== undefined);
+  const [loading, setLoading] = useState(initial !== null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -521,13 +515,13 @@ export function VectorEditor({ windowId, params }: AppComponentProps) {
   );
 
   const startDoc = useCallback(
-    (d: Doc, name: string, p: string | null) => {
-      const entry: Entry = { label: p ? 'Open' : 'New Document', doc: d, sel: [] };
+    (d: Doc, name: string, f: DinFileHandle | null) => {
+      const entry: Entry = { label: f ? 'Open' : 'New Document', doc: d, sel: [] };
       setHist({ entries: [entry], index: 0 });
       setSavedEntry(entry);
       docRef.current = d;
       setSel(new Set());
-      setPath(p);
+      setFile(f);
       setDocName(name);
       setError(null);
       setEditing(null);
@@ -551,35 +545,26 @@ export function VectorEditor({ windowId, params }: AppComponentProps) {
   // ---- Files ------------------------------------------------------------------------------------
 
   const load = useCallback(
-    (p: string) => {
-      if (!fs) return;
+    (f: DinFileHandle) => {
       const seq = ++loadSeq.current;
       (async () => {
         try {
-          const r = await fs.readFile(p, MAX_BYTES);
-          if (r.truncated) throw new Error(`It’s too big to open (${formatBytes(r.size ?? r.data.length)}; up to 1 GB).`);
-          const d = await readDoc(r.data, p);
+          const blob = await f.getFile();
+          if (blob.size > MAX_BYTES) throw new Error(`It’s too big to open (${formatBytes(blob.size)}; up to 1 GB).`);
+          const d = await readDoc(new Uint8Array(await blob.arrayBuffer()), f.name);
           if (seq !== loadSeq.current) return;
-          startDoc(d, basename(p), p);
+          startDoc(d, f.name, f);
         } catch (err) {
           if (seq !== loadSeq.current) return;
-          setError(`Couldn’t open ${basename(p)}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
+          setError(`Couldn’t open ${f.name}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
         } finally {
           if (seq === loadSeq.current) setLoading(false);
         }
       })();
     },
-    [fs, startDoc],
+    [startDoc],
   );
 
-  const [prevInitial, setPrevInitial] = useState<string | null>(null);
-  if (initial !== prevInitial) {
-    setPrevInitial(initial);
-    if (initial && fs) {
-      setLoading(true);
-      setError(null);
-    }
-  }
   useEffect(() => {
     if (initial) load(initial);
   }, [initial, load]);
@@ -591,111 +576,114 @@ export function VectorEditor({ windowId, params }: AppComponentProps) {
   }, [dialog, editing]);
 
   const writeTo = useCallback(
-    async (p: string, copy = false): Promise<boolean> => {
+    async (f: DinFileHandle, copy = false): Promise<boolean> => {
       const d = docRef.current;
-      if (!fs || !d || !hist) return false;
+      if (!d || !hist) return false;
       setBusy(true);
       setStatus('Saving…');
       try {
         await new Promise((r) => setTimeout(r, 30));
-        const { bytes, notes } = await encodeDoc(d, p, { title: basename(p).replace(/\.[^.]*$/, '') });
-        await fs.writeFile(p, bytes);
-        if (!copy && savesAs(p)) {
+        const { bytes, notes } = await encodeDoc(d, f.name, { title: f.name.replace(/\.[^.]*$/, '') });
+        await f.write(bytes);
+        if (!copy && savesAs(f.name)) {
           setSavedEntry(hist.entries[hist.index]);
-          setPath(p);
-          setDocName(basename(p));
+          setFile(f);
+          setDocName(f.name);
         }
-        setStatus(notes.length ? `Saved ${basename(p)}. ${notes.join(' ')}` : `Saved ${basename(p)}`);
-        void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', p] });
-        void invalidateListings(queryClient, p);
+        setStatus(notes.length ? `Saved ${f.name}. ${notes.join(' ')}` : `Saved ${f.name}`);
         return true;
       } catch (err) {
-        setStatus(`Couldn’t save ${basename(p)}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
+        setStatus(`Couldn’t save ${f.name}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
         return false;
       } finally {
         setBusy(false);
       }
     },
-    [fs, hist, queryClient],
+    [hist],
   );
 
   const saveAs = useCallback(
     async (copy = false): Promise<boolean> => {
       const stem = docName.replace(/\.[^.]*$/, '');
-      const result = await pickFiles({
-        mode: 'save',
+      const t = await din.files.save({
         title: copy ? 'Save a Copy' : 'Save As',
-        currentName: `${stem}${copy ? ' copy' : ''}.ai`,
-        initialPath: path ? parentPath(path) : undefined,
-        filters: SAVE_TYPES,
+        suggestedName: `${stem}${copy ? ' copy' : ''}.ai`,
+        startIn: file ?? undefined,
+        types: typesFromFilters(SAVE_TYPES),
       });
-      if (!result) return false;
-      let t = result.paths[0];
-      if (!savesAs(t)) {
-        const filter = SAVE_TYPES[result.filter ?? 0] ?? SAVE_TYPES[0];
-        t += filter.patterns[0].slice(1);
+      if (!t) return false;
+      if (!savesAs(t.name)) {
+        setStatus(`Couldn’t save ${t.name}: choose Illustrator, PDF or SVG.`);
+        return false;
       }
       return writeTo(t, copy);
     },
-    [pickFiles, docName, path, writeTo],
+    [din, docName, file, writeTo],
   );
 
   const save = useCallback((): Promise<boolean> => {
-    if (path && isNative(path)) return writeTo(path);
+    if (file?.writable && isNative(file.name)) return writeTo(file);
     return saveAs();
-  }, [path, writeTo, saveAs]);
+  }, [file, writeTo, saveAs]);
 
   const exportAs = useCallback(
     async (o: { format: 'png' | 'jpg' | 'svg' | 'pdf'; artboard: number | null; scale: number }) => {
       const d = docRef.current;
-      if (!d || !fs) return;
+      if (!d) return;
       const stem = docName.replace(/\.[^.]*$/, '');
       const filters = EXPORT_TYPES.filter((t) => t.patterns[0] === `*.${o.format}`);
-      const result = await pickFiles({ mode: 'save', title: 'Export As', currentName: `${stem}.${o.format}`, initialPath: path ? parentPath(path) : undefined, filters });
-      if (!result) return;
-      let t = result.paths[0];
-      if (extOf(t) !== o.format && !(o.format === 'jpg' && extOf(t) === 'jpeg')) t += `.${o.format}`;
+      const t = await din.files.save({ title: 'Export As', suggestedName: `${stem}.${o.format}`, startIn: file ?? undefined, types: typesFromFilters(filters) });
+      if (!t) return;
+      if (extOf(t.name) !== o.format && !(o.format === 'jpg' && extOf(t.name) === 'jpeg')) {
+        setStatus(`Couldn’t export ${t.name}: its name should end in .${o.format}.`);
+        return;
+      }
       setBusy(true);
       try {
-        const { bytes } = await encodeDoc(d, t, { title: stem, artboard: o.artboard, scale: o.scale });
-        await fs.writeFile(t, bytes);
-        setStatus(`Exported ${basename(t)}`);
-        void invalidateListings(queryClient, t);
+        const { bytes } = await encodeDoc(d, t.name, { title: stem, artboard: o.artboard, scale: o.scale });
+        await t.write(bytes);
+        setStatus(`Exported ${t.name}`);
       } catch (err) {
         setStatus(`Couldn’t export: ${err instanceof Error ? err.message : cleanFsError(err)}`);
       } finally {
         setBusy(false);
       }
     },
-    [fs, docName, path, pickFiles, queryClient],
+    [din, docName, file],
+  );
+
+  const pick = useCallback(
+    async (title: string, extensions: string[]) =>
+      (await din.files.open({ title, types: [{ description: 'Artwork', extensions }], startIn: file ?? undefined }))[0] ?? null,
+    [din, file],
   );
 
   const openFile = useCallback(async () => {
-    const t = await pickFile({ title: 'Open', extensions: OPEN_EXTENSIONS, initialPath: path ? parentPath(path) : undefined });
+    const t = await pick('Open', OPEN_EXTENSIONS);
     if (!t) return;
-    if (docRef.current && (dirty || path)) {
-      open('vector-editor', { path: t });
+    if (docRef.current && (dirty || file)) {
+      void din.app.open('vector-editor', {}, [t]);
       return;
     }
     setLoading(true);
+    setError(null);
     load(t);
-  }, [pickFile, path, dirty, open, load]);
+  }, [din, pick, file, dirty, load]);
 
-  useEffect(() => {
-    if (!dirty) return;
-    setCloseGuard(windowId, () => {
-      focus(windowId);
-      setDialog({ kind: 'unsaved' });
-      return true;
-    });
-    return () => setCloseGuard(windowId, null);
-  }, [dirty, windowId, focus]);
+  useCloseGuard(
+    dirty
+      ? () => {
+          din.window.focus();
+          setDialog({ kind: 'unsaved' });
+          return true;
+        }
+      : null,
+  );
 
   const closeNow = useCallback(() => {
-    setCloseGuard(windowId, null);
     setDialog(null);
-    close(windowId);
-  }, [windowId, close]);
+    din.window.close();
+  }, [din]);
 
   // ---- Selection info -----------------------------------------------------------------------
 
@@ -1100,28 +1088,30 @@ export function VectorEditor({ windowId, params }: AppComponentProps) {
   const cmd: Commands = {
     newDoc: () => setDialog({ kind: 'new' }),
     open: () => void openFile(),
-    close: () => close(windowId),
+    close: () => din.window.requestClose(),
     save: () => void save(),
     saveAs: () => void saveAs(),
     saveCopy: () => void saveAs(true),
     place: async () => {
-      if (!fs || !need()) return;
-      const t = await pickFile({ title: 'Place', extensions: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ai', '.pdf'], initialPath: path ? parentPath(path) : undefined });
+      if (!need()) return;
+      const t = await pick('Place', ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ai', '.pdf']);
       if (!t) return;
       try {
-        const r = await fs.readFile(t, MAX_BYTES);
-        if (isImage(t)) placeAtCenter(await imageEntry(r.data, t), 'Place');
+        const f = await t.getFile();
+        if (f.size > MAX_BYTES) throw new Error(`It’s too big (${formatBytes(f.size)}; up to 1 GB).`);
+        const data = new Uint8Array(await f.arrayBuffer());
+        if (isImage(t.name)) placeAtCenter(await imageEntry(data, t.name), 'Place');
         else {
-          const placed = await readDoc(r.data, t);
+          const placed = await readDoc(data, t.name);
           const d = need()!;
           for (const [k, v] of placed.res.images) d.res.images.set(k, v);
           for (const [k, v] of placed.res.fonts) d.res.fonts.set(k, v);
           const items = placed.layers.flatMap((l) => l.children);
-          const g: Item = { id: newId(), type: 'group', name: basename(t), opacity: 1, blend: 'normal', clip: false, children: items };
+          const g: Item = { id: newId(), type: 'group', name: t.name, opacity: 1, blend: 'normal', clip: false, children: items };
           addToLayer(centerItems(d, [g]), 'Place');
         }
       } catch (err) {
-        say(`Couldn’t place ${basename(t)}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
+        say(`Couldn’t place ${t.name}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
       }
     },
     exportAs: () => setDialog({ kind: 'export' }),
@@ -2849,10 +2839,6 @@ export function VectorEditor({ windowId, params }: AppComponentProps) {
 
   // ---- Rendering ----------------------------------------------------------------------------------------
 
-  if (!fs) {
-    return <p className="grid h-full place-items-center bg-[#323232] p-6 text-sm text-[#cfcfcf]">Vector Editor needs the Electron shell to read and save files.</p>;
-  }
-
   const cursor = (() => {
     if (spaceDown || tool === 'hand') return panning ? 'grabbing' : 'grab';
     if (tool === 'zoom') return altDown ? 'zoom-out' : 'zoom-in';
@@ -3184,7 +3170,7 @@ export function VectorEditor({ windowId, params }: AppComponentProps) {
         <div className="relative flex min-w-0 flex-1 flex-col">
           {doc && (
             <div className="flex h-7 shrink-0 items-end border-b border-[#1c1c1c] bg-[#2b2b2b] px-1">
-              <div className="flex h-6 max-w-full items-center gap-2 truncate rounded-t-[3px] bg-[#383838] px-3 text-[11px] text-[#e6e6e6]" title={path ?? docName}>
+              <div className="flex h-6 max-w-full items-center gap-2 truncate rounded-t-[3px] bg-[#383838] px-3 text-[11px] text-[#e6e6e6]" title={docName}>
                 {title}
               </div>
             </div>
@@ -3329,7 +3315,7 @@ export function VectorEditor({ windowId, params }: AppComponentProps) {
           onCreate={(s) => {
             setDialog(null);
             if (docRef.current) {
-              open('vector-editor', { width: s.w, height: s.h, units: s.units, mode: s.mode, artboards: s.artboards, name: s.name });
+              void din.app.open('vector-editor', { width: s.w, height: s.h, units: s.units, mode: s.mode, artboards: s.artboards, name: s.name });
               return;
             }
             startDoc(newDoc(s.w, s.h, s.mode, s.units, s.artboards), s.name || 'Untitled-1', null);
