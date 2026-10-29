@@ -174,6 +174,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const [popup, setPopup] = useState<{ at: { x: number; y: number }; items?: MenuItem[]; resolve?: (id: string | null) => void; windowMenu?: boolean } | null>(null);
   const [frameMode, setFrameMode] = useState<WindowChrome['frame']>(manifest.din.window?.frame ?? 'standard');
   const [moving, setMoving] = useState(false);
+  /** Apps waiting on the move or resize they began to end. */
+  const moveEnded = useRef<(() => void)[]>([]);
   const [loadKey, setLoadKey] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
@@ -452,11 +454,16 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           .join('');
         section.style.clipPath = `path('${d}')`;
       },
+      // Answered when the gesture ends, which the app never sees itself.
       'window.beginMove': ({ at }) => {
-        if (live.current.chrome.beginMove(toDesktop(at))) setMoving(true);
+        if (!live.current.chrome.beginMove(toDesktop(at))) return;
+        setMoving(true);
+        return new Promise<void>((resolve) => moveEnded.current.push(resolve));
       },
       'window.beginResize': ({ edge, at }) => {
-        if (live.current.chrome.beginResize(edge, toDesktop(at))) setMoving(true);
+        if (!live.current.chrome.beginResize(edge, toDesktop(at))) return;
+        setMoving(true);
+        return new Promise<void>((resolve) => moveEnded.current.push(resolve));
       },
       'window.setBounds': (b) => {
         const w = live.current.win;
@@ -1124,6 +1131,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     setMoving(false);
     live.current.chrome.gestureEnd();
     push({ type: 'moveEnd' });
+    for (const resolve of moveEnded.current.splice(0)) resolve();
   };
 
   const forceQuit = () => {

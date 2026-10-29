@@ -229,10 +229,12 @@ export interface DinWindow {
    * Start moving the window from a pointerdown inside the app (what
    * `<WindowDragRegion>` does). The desktop follows the pointer until it's
    * released, with the same snapping, tear-off and wobble as the title bar.
+   * Resolves when it's released (the app never sees that release itself),
+   * or at once if the window can't move now.
    */
-  beginMove(e: PointerEvent): void;
+  beginMove(e: PointerEvent): Promise<void>;
   /** Start resizing from an edge, as `beginMove` (skins with their own grips). */
-  beginResize(edge: Edge, e: PointerEvent): void;
+  beginResize(edge: Edge, e: PointerEvent): Promise<void>;
   /** Move or resize; clamped to the work area and the min/max size. */
   setBounds(bounds: Partial<Rect>): void;
 
