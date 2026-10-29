@@ -3,11 +3,11 @@
     "deckmon": {
       "flake": false,
       "locked": {
-        "lastModified": 1793311836,
-        "narHash": "sha256-MO5Sfldn1A7Mfe/5VTcmNoWTcHv58xSByDbgbQw04lI=",
+        "lastModified": 1793314456,
+        "narHash": "sha256-0iF8xx53FhwZMjVzqfMQZYdtWtE8V8/htFBNOtHQ9jo=",
         "ref": "refs/heads/main",
-        "rev": "72cde73c300d4c1d38e0e16bb1977704ee246a56",
-        "revCount": 52,
+        "rev": "504b1533dc97662061c4646b284a79343baa2d69",
+        "revCount": 53,
         "type": "git",
         "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/deckmon.git"
       },
