@@ -63,6 +63,11 @@ interface IconTheme {
   name: string;
   /** A few of its icons as data URLs; empty for the Din theme, whose look is Din's bundled icons. */
   preview: string[];
+  /**
+   * Listed only because it's the session's theme: it has too few app icons
+   * to restyle Din's apps (Adwaita, a base theme for GTK's symbolic icons).
+   */
+  limited: boolean;
 }
 
 interface IconThemeStatus {
@@ -503,11 +508,11 @@ async function lookup(requests: { names: string[]; kind: IconKind }[]): Promise<
 
 /** Names whose icons show what a theme looks like, in Settings. */
 const PREVIEW: { names: string[]; kind: IconKind }[] = [
-  { names: ['folder'], kind: 'files' },
   { names: ['system-file-manager', 'org.gnome.Nautilus'], kind: 'apps' },
   { names: ['utilities-terminal', 'org.gnome.Terminal'], kind: 'apps' },
   { names: ['web-browser', 'internet-web-browser'], kind: 'apps' },
   { names: ['preferences-system', 'org.gnome.Settings'], kind: 'apps' },
+  { names: ['folder'], kind: 'files' },
   { names: ['image-x-generic'], kind: 'files' },
   { names: ['text-x-generic'], kind: 'files' },
 ];
@@ -527,10 +532,42 @@ function preview(theme: string): string[] {
   return urls;
 }
 
+/**
+ * Standard names of apps Din has counterparts for (THEMED_APP_ICONS in
+ * src/lib/appIcons.ts), by which a theme shows it restyles Din's apps.
+ */
+const APP_PROBES = [
+  'system-file-manager', 'utilities-terminal', 'web-browser', 'preferences-system',
+  'accessories-calculator', 'accessories-text-editor', 'utilities-system-monitor',
+  'applets-screenshooter', 'multimedia-video-player', 'image-viewer',
+];
+
+/** App icons a theme needs to be offered: fewer, and picking it would hardly change the Dock. */
+const MIN_APP_ICONS = 3;
+
+function restylesApps(theme: string): boolean {
+  const chain = lookupChain(theme);
+  let found = 0;
+  for (const name of APP_PROBES) {
+    if (findIcon(chain, [name], 'apps') && ++found >= MIN_APP_ICONS) return true;
+  }
+  return false;
+}
+
+/**
+ * The themes Settings offers: Din's, and those that restyle Din's apps.
+ * Base themes other themes build on (Adwaita, hicolor) don't, and stay out,
+ * unless one is the session's theme, which is listed so the picker shows
+ * what's in use.
+ */
 async function themes(): Promise<IconTheme[]> {
+  const current = await currentIconTheme();
   const list: IconTheme[] = [];
   for (const theme of installedThemes()) {
-    list.push({ ...theme, preview: preview(theme.id) });
+    const offered = theme.id === DIN_THEME || restylesApps(theme.id);
+    if (offered || theme.id === current) {
+      list.push({ ...theme, preview: preview(theme.id), limited: !offered });
+    }
     await breathe();
   }
   return list;

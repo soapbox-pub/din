@@ -47,6 +47,17 @@ export function IconThemePicker() {
     if (id !== theme) setTheme.mutate(id);
   };
 
+  // Nothing to pick between: only Din's own icons are installed.
+  if (themes.data.every((option) => option.id === DIN_ICON_THEME) && theme === DIN_ICON_THEME) {
+    return (
+      <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+        <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+          Din is using its own icons. Add an icon theme to ~/.local/share/icons to change them.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
       {themes.data.length === 0 ? (
@@ -124,6 +135,9 @@ function IconThemeOption({
             )}
           </span>
           <span className="w-full truncate text-sm">{option.name}</span>
+          {option.limited && (
+            <span className="text-xs text-muted-foreground">Your system’s. Din’s apps keep their icons.</span>
+          )}
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent>

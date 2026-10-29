@@ -16,6 +16,8 @@ export interface IconThemeInfo {
   name: string;
   /** A few of its icons as data URLs; empty for the Din theme. */
   preview: string[];
+  /** Listed only because it's the system's theme; it has too few app icons to restyle Din's apps. */
+  limited: boolean;
 }
 
 export interface IconThemeStatus {
