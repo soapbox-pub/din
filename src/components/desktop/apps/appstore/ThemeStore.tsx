@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, Copy, Eye, Info, Plus, X } from 'lucide-react';
+import { Check, Copy, Info, Paintbrush, Undo2, X } from 'lucide-react';
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
 import { ThemeSwatch } from '@/components/desktop/ThemeSwatch';
@@ -13,11 +13,11 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useDesktopThemeEditor } from '@/hooks/useDesktopTheme';
 import { useToast } from '@/hooks/useToast';
 import { useThemeActions, useThemeCatalog, useThemeDefinition } from '@/hooks/useThemes';
+import { sameThemeLook } from '@/lib/profileTheme';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import {
   parseThemeNaddr,
@@ -25,7 +25,6 @@ import {
   themeNaddr,
   type ThemeDefinition,
 } from '@/lib/themeDefinition';
-import { clearThemePreview, startThemePreview } from '@/lib/themePreview';
 import { cn } from '@/lib/utils';
 
 export type ThemeAddress = { pubkey: string; identifier: string };
@@ -35,18 +34,25 @@ type ThemeCatalog = ReturnType<typeof useThemeCatalog>;
 /** What a card or detail page can do with a theme; shared by its buttons and right-click menu. */
 interface ThemeHandlers {
   select: (theme: ThemeDefinition) => void;
-  tryOn: (theme: ThemeDefinition) => void;
+  use: (theme: ThemeDefinition) => void;
+  isWorn: (theme: ThemeDefinition) => boolean;
+}
+
+/** What was worn before a run of themes was put on, and what that run added to the user's themes. */
+interface Streak {
+  previous: ReturnType<ReturnType<typeof useDesktopThemeEditor>['snapshot']>;
+  added: ThemeDefinition[];
+  current: ThemeDefinition;
 }
 
 /**
  * The App Store's Themes: named themes (kind 36767) from the catalog's
  * publishers, the people the user follows, and the user (useThemeCatalog).
  *
- * "Try" paints the desktop in a theme without saving anything (themePreview)
- * and shows a bar to keep it or go back; the preview ends with Cancel,
- * Escape, going back from a theme's page, switching to Apps, or closing the
- * store. "Get" adds someone else's theme to the user's themes, which
- * Settings → Appearance lists.
+ * Clicking a theme wears it at once and adds it to the user's themes, which
+ * Settings → Appearance lists. A bar then offers Revert, which puts back
+ * what was worn before the first theme clicked and takes back what the
+ * clicks added.
  */
 export function ThemeStore({
   catalog,
@@ -59,24 +65,59 @@ export function ThemeStore({
   selected: ThemeAddress | null;
   onSelect: (address: ThemeAddress | null) => void;
 }) {
-  // A preview belongs to the page it was started on, and ends with the store.
-  const page = selected ? themeCoordinate(selected) : null;
-  const [trial, setTrial] = useState<{ theme: ThemeDefinition; page: string | null } | null>(null);
-  const trying = trial && trial.page === page ? trial.theme : null;
-  useEffect(() => {
-    if (!trying) clearThemePreview();
-  }, [trying]);
-  useEffect(() => clearThemePreview, []);
+  const editor = useDesktopThemeEditor();
+  const actions = useThemeActions();
+  const { toast } = useToast();
+  const [streak, setStreak] = useState<Streak | null>(null);
 
-  const tryOn = (theme: ThemeDefinition) => {
-    setTrial({ theme, page });
-    startThemePreview(theme.theme);
+  const isWorn = (theme: ThemeDefinition) =>
+    !!editor.theme &&
+    editor.theme.source?.pubkey === theme.pubkey &&
+    editor.theme.source.identifier === theme.identifier &&
+    sameThemeLook(editor.theme, theme.theme);
+
+  const use = (theme: ThemeDefinition) => {
+    if (isWorn(theme)) return;
+    const previous = editor.snapshot();
+    try {
+      editor.apply(theme.theme);
+    } catch (error) {
+      toast({
+        title: 'Couldn’t use this theme',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+      return;
+    }
+    const adds = !actions.isAdded(theme);
+    if (adds) actions.add(theme);
+    setStreak((prev) => ({
+      previous: prev?.previous ?? previous,
+      added: adds ? [...(prev?.added ?? []), theme] : (prev?.added ?? []),
+      current: theme,
+    }));
   };
-  const stopTrying = () => setTrial(null);
+
+  const revert = () => {
+    if (!streak) return;
+    try {
+      editor.restore(streak.previous);
+    } catch (error) {
+      toast({
+        title: 'Couldn’t revert',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+      return;
+    }
+    for (const theme of streak.added) actions.removeFromLibrary(theme);
+    setStreak(null);
+  };
 
   const handlers: ThemeHandlers = {
     select: (theme) => onSelect({ pubkey: theme.pubkey, identifier: theme.identifier }),
-    tryOn,
+    use,
+    isWorn,
   };
 
   const query = search.trim();
@@ -99,14 +140,9 @@ export function ThemeStore({
     <div
       className="flex min-h-0 flex-1 flex-col"
       onKeyDown={(e) => {
-        if (e.key !== 'Escape') return;
-        if (trying) {
-          e.stopPropagation();
-          stopTrying();
-        } else if (selected) {
-          e.stopPropagation();
-          onSelect(null);
-        }
+        if (e.key !== 'Escape' || !selected) return;
+        e.stopPropagation();
+        onSelect(null);
       }}
     >
       {selected ? (
@@ -150,7 +186,7 @@ export function ThemeStore({
               <section className="flex flex-col gap-4" aria-label="Themes">
                 <SectionHeader
                   title="Themes"
-                  subtitle="Colors, fonts and pictures for your desktop, from Din’s publishers and the people you follow. Try one on before you keep it."
+                  subtitle="Colors, fonts and pictures for your desktop, from Din’s publishers and the people you follow. Click one to wear it."
                 />
                 {catalog.isLoading ? (
                   <ThemeGridSkeleton />
@@ -174,7 +210,7 @@ export function ThemeStore({
           </div>
         </div>
       )}
-      {trying && <PreviewBar theme={trying} onDone={stopTrying} />}
+      {streak && <RevertBar theme={streak.current} onRevert={revert} onDone={() => setStreak(null)} />}
     </div>
   );
 }
@@ -211,8 +247,8 @@ function ThemeCard({ theme, handlers }: { theme: ThemeDefinition; handlers: Them
       >
         <button
           type="button"
-          onClick={() => handlers.select(theme)}
-          aria-label={`View details for ${theme.title}`}
+          onClick={() => handlers.use(theme)}
+          aria-label={`Use ${theme.title}`}
           className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         />
         {seen ? (
@@ -229,17 +265,7 @@ function ThemeCard({ theme, handlers }: { theme: ThemeDefinition; handlers: Them
               {author.name ? `by ${author.name}` : 'Theme'}
             </p>
           </div>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => handlers.tryOn(theme)}
-            aria-label={`Try ${theme.title}`}
-            title="Try"
-            className="relative z-10 size-8 shrink-0 rounded-full"
-          >
-            <Eye aria-hidden />
-          </Button>
-          <GetThemePill theme={theme} />
+          <UseThemePill theme={theme} handlers={handlers} />
         </div>
       </div>
     </ThemeContextMenu>
@@ -258,33 +284,26 @@ function ThemeContextMenu({
 }) {
   const actions = useThemeActions();
   const copy = useCopyThemeAddress();
-  const own = actions.isOwn(theme);
-  const added = actions.isAdded(theme);
+  const removable = !actions.isOwn(theme) && actions.isAdded(theme);
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-52">
+        <ContextMenuItem onSelect={() => handlers.use(theme)} disabled={handlers.isWorn(theme)}>
+          <Paintbrush aria-hidden />
+          Use
+        </ContextMenuItem>
         <ContextMenuItem onSelect={() => handlers.select(theme)}>
           <Info aria-hidden />
           View Details
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => handlers.tryOn(theme)}>
-          <Eye aria-hidden />
-          Try
-        </ContextMenuItem>
-        {!own &&
-          (added ? (
-            <ContextMenuItem onSelect={() => actions.removeFromLibrary(theme)}>
-              <X aria-hidden />
-              Remove from My Themes
-            </ContextMenuItem>
-          ) : (
-            <ContextMenuItem onSelect={() => actions.add(theme)}>
-              <Plus aria-hidden />
-              Get
-            </ContextMenuItem>
-          ))}
+        {removable && (
+          <ContextMenuItem onSelect={() => actions.removeFromLibrary(theme)}>
+            <X aria-hidden />
+            Remove from My Themes
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => copy(theme)}>
           <Copy aria-hidden />
@@ -304,43 +323,24 @@ function useCopyThemeAddress() {
   };
 }
 
-/**
- * "Get" adds someone else's theme to the user's themes; "Added" once it's
- * there, and "Yours" on the user's own.
- */
-function GetThemePill({ theme, className }: { theme: ThemeDefinition; className?: string }) {
-  const actions = useThemeActions();
-  const { toast } = useToast();
-  const { open } = useWindowActions();
-  const own = actions.isOwn(theme);
-  const added = actions.isAdded(theme);
-
-  const get = () => {
-    actions.add(theme);
-    toast({
-      title: `${theme.title} added`,
-      description: 'Find it under Your Themes in Settings → Appearance.',
-      actions: [{ id: 'settings', label: 'Open Settings' }],
-      onAction: () => open('settings', { section: 'appearance' }),
-    });
-  };
-
+/** "Use" wears a theme; "In Use" on the one worn. */
+function UseThemePill({ theme, handlers }: { theme: ThemeDefinition; handlers: ThemeHandlers }) {
+  const worn = handlers.isWorn(theme);
   return (
     <Button
       size="sm"
       variant="secondary"
-      onClick={added ? undefined : get}
-      aria-disabled={added}
-      aria-label={own ? `${theme.title} is yours` : added ? `${theme.title} added` : `Get ${theme.title}`}
+      onClick={worn ? undefined : () => handlers.use(theme)}
+      aria-disabled={worn}
+      aria-label={worn ? `${theme.title} is in use` : `Use ${theme.title}`}
       className={cn(
         'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold',
         'bg-secondary text-primary hover:bg-secondary/80',
-        added && 'cursor-default text-muted-foreground hover:bg-secondary',
-        className,
+        worn && 'cursor-default text-muted-foreground hover:bg-secondary',
       )}
     >
-      {added && <Check aria-hidden />}
-      {own ? 'Yours' : added ? 'Added' : 'Get'}
+      {worn && <Check aria-hidden />}
+      {worn ? 'In Use' : 'Use'}
     </Button>
   );
 }
@@ -399,10 +399,14 @@ function ThemeDetailPage({
     >
       <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
-          <ThemeSwatch
-            theme={theme.theme}
-            className="w-full max-w-2xl shrink-0 rounded-2xl border border-border shadow-md lg:w-3/5"
-          />
+          <button
+            type="button"
+            onClick={() => handlers.use(theme)}
+            aria-label={`Use ${theme.title}`}
+            className="w-full max-w-2xl shrink-0 overflow-hidden rounded-2xl border border-border shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:w-3/5"
+          >
+            <ThemeSwatch theme={theme.theme} />
+          </button>
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             <div className="min-w-0">
               <h1 className="break-words text-3xl font-bold tracking-tight">{theme.title}</h1>
@@ -419,11 +423,7 @@ function ThemeDetailPage({
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={() => handlers.tryOn(theme)} className="h-8 rounded-full px-4">
-                <Eye aria-hidden />
-                Try
-              </Button>
-              <GetThemePill theme={theme} />
+              <UseThemePill theme={theme} handlers={handlers} />
               <Button
                 size="sm"
                 variant="ghost"
@@ -490,52 +490,35 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/**
- * Shown while a theme is tried on: keep it (with Undo in the notification)
- * or go back to the one worn.
- */
-function PreviewBar({ theme, onDone }: { theme: ThemeDefinition; onDone: () => void }) {
-  const editor = useDesktopThemeEditor();
-  const { toast } = useToast();
+/** Shown once a theme is put on: Revert goes back to what was worn before. */
+function RevertBar({
+  theme,
+  onRevert,
+  onDone,
+}: {
+  theme: ThemeDefinition;
+  onRevert: () => void;
+  onDone: () => void;
+}) {
   const author = useThemeAuthor(theme.pubkey);
-
-  const keep = () => {
-    const previous = editor.snapshot();
-    try {
-      editor.apply(theme.theme);
-    } catch (error) {
-      toast({
-        title: 'Couldn’t use this theme',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-      return;
-    }
-    onDone();
-    toast({
-      title: `Now using ${theme.title}`,
-      description: editor.syncing ? 'It’s your profile theme too.' : undefined,
-      actions: [{ id: 'undo', label: 'Undo' }],
-      onAction: () => editor.restore(previous),
-    });
-  };
 
   return (
     <div
       role="region"
-      aria-label="Theme preview"
+      aria-label="Theme in use"
       className="flex flex-wrap items-center gap-3 border-t border-border bg-card px-4 py-3 shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.2)]"
     >
-      <Eye className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <Paintbrush className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <p className="min-w-0 flex-1 truncate text-sm">
-        Trying <span className="font-semibold">{theme.title}</span>
+        Now using <span className="font-semibold">{theme.title}</span>
         {author.name && <span className="text-muted-foreground"> by {author.name}</span>}
       </p>
-      <Button size="sm" variant="ghost" onClick={onDone}>
-        Cancel
+      <Button size="sm" variant="secondary" onClick={onRevert}>
+        <Undo2 aria-hidden />
+        Revert
       </Button>
-      <Button size="sm" onClick={keep}>
-        Use This Theme
+      <Button size="icon" variant="ghost" onClick={onDone} aria-label="Dismiss" className="size-8">
+        <X aria-hidden />
       </Button>
     </div>
   );

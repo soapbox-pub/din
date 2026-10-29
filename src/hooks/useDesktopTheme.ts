@@ -4,7 +4,6 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useProfileTheme } from '@/hooks/useProfileTheme';
 import { toast } from '@/hooks/useToast';
-import { useThemePreview } from '@/lib/themePreview';
 import {
   ACTIVE_PROFILE_THEME_KIND,
   PRESET_THEME_COLORS,
@@ -25,16 +24,6 @@ export function useDesktopTheme(): DesktopTheme | null {
   const { config } = useAppContext();
   if (!config.customThemeEnabled) return null;
   return config.syncProfileTheme ? profileTheme : config.localTheme;
-}
-
-/**
- * The theme the desktop paints: one being tried on (see themePreview), else
- * the one worn. Only for painting; anything that saves uses useDesktopTheme.
- */
-export function usePaintedTheme(): DesktopTheme | null {
-  const preview = useThemePreview();
-  const theme = useDesktopTheme();
-  return preview ?? theme;
 }
 
 export type AppearanceMode = 'light' | 'dark' | 'custom';

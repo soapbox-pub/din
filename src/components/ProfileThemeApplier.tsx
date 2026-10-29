@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { usePaintedTheme } from '@/hooks/useDesktopTheme';
+import { useDesktopTheme } from '@/hooks/useDesktopTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getColorSchemeBridge } from '@/lib/colorScheme';
 import { deriveThemeTokens, isDarkTheme } from '@/lib/profileTheme';
@@ -13,8 +13,7 @@ const FONT_SANS_FALLBACK =
 /**
  * ProfileThemeApplier - applies the desktop's custom theme to the entire OS:
  * the logged-in user's active profile theme (kind 16767, Profile Themes NIP),
- * or the one kept on this computer (see useDesktopTheme), or one being
- * tried on (see themePreview).
+ * or the one kept on this computer (see useDesktopTheme).
  *
  * Colors are written as inline CSS custom properties on <html>, which take
  * precedence over both the `:root` and `.dark` token sets in index.css, so
@@ -27,7 +26,7 @@ const FONT_SANS_FALLBACK =
  * and URLs are https-only (a local theme's background may be a local file).
  */
 export function ProfileThemeApplier() {
-  const theme = usePaintedTheme();
+  const theme = useDesktopTheme();
   const { config } = useAppContext();
   const configuredTheme = config.theme;
 
