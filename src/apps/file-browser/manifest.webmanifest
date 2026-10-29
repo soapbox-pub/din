@@ -16,6 +16,7 @@
     "permissions": [
       "fs",
       "volumes",
+      "notifications",
       "printing",
       "wallpaper"
     ],
