@@ -353,8 +353,8 @@ export interface OpenFileOptions {
 export interface SaveFileOptions {
   title?: string;
   /**
-   * The types to save as. A name typed without one of the chosen type's
-   * extensions gets its first one.
+   * The types to save as. A name typed without any of these types'
+   * extensions gets the chosen type's first one.
    */
   types?: FileTypeFilter[];
   suggestedName?: string;

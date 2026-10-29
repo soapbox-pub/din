@@ -59,9 +59,11 @@ have. A handle from `open` is writable unless the app asked for
 
 ## Recent files
 
-`din.files.addRecent(handle)` adds a file to Din's recent list (Files'
-Recent, the app's Dock tile menu). The desktop keeps the grant for it, so
-opening it from there launches the app with the handle.
+An app keeps its own recent list: `handle.persist()` gives a token, kept
+in the app's storage, that `din.files.restore(token)` turns back into a
+handle after a restart (or null if the file is gone). The office apps do
+this. Din's own Recent (Files', the Dock's) doesn't take entries from apps
+yet.
 
 ## The file clipboard
 

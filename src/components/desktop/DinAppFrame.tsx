@@ -25,6 +25,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { appForFile } from '@/lib/fileTypes';
+import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { getFsBridge } from '@/lib/fs';
 import { notify } from '@/lib/notificationCenter';
 import { printFile, printHtml } from '@/lib/printing';
@@ -318,7 +319,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       },
       'app.openUrl': ({ url }) => {
         if (typeof url !== 'string' || !/^(https?|nsite):\/\//i.test(url)) return;
-        live.current.actions.open('web-browser', { url });
+        // A tab in the open browser, else a new browser window (the bus
+        // keeps the command until it's up).
+        if (!hasTabConsumer()) live.current.actions.open('web-browser');
+        publishTabCommand({ type: 'open', url });
       },
       'storage.migrated': () => {
         const entries = storageToMigrate(manifest);
@@ -450,10 +454,12 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         });
         let path = result?.paths[0];
         if (!path) return null;
-        // A name typed without the chosen type's extension gets it.
-        const type = o.types?.[result?.filter ?? 0];
-        const extensions = (type?.extensions ?? []).map((e) => (e.startsWith('.') ? e : `.${e}`).toLowerCase());
-        if (extensions.length > 0 && !extensions.some((e) => path!.toLowerCase().endsWith(e))) path += extensions[0];
+        // A name typed without the chosen type's extension (or any offered
+        // type's) gets the chosen one.
+        const dotted = (list: string[] | undefined) => (list ?? []).map((e) => (e.startsWith('.') ? e : `.${e}`).toLowerCase());
+        const chosen = dotted(o.types?.[result?.filter ?? 0]?.extensions);
+        const offered = (o.types ?? []).flatMap((t) => dotted(t.extensions));
+        if (chosen.length > 0 && !offered.some((e) => path!.toLowerCase().endsWith(e))) path += chosen[0];
         return grantFile(path, 'file', true);
       },
       'files.read': async ({ handle }) => {
