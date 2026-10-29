@@ -118,42 +118,28 @@ Staying in the desktop, as its own system UI rather than apps:
   Isolating them would buy a process of their own and little else; they
   stay with the desktop, as Din's control panel.
 
-## What moving changed, and what's still owed
+## What moving changed, and how it was put back
 
-Behavior that changed when apps moved, to fix or to live with:
+Nothing an app did in the desktop should be lost by moving. What the moves
+first broke, and what restored it:
 
-- **Terminal tabs don't move between windows.** Each window's ptys belong
-  to its own bridge port, and main lets a port touch only the ptys it
-  spawned. Owed: a pty hand-over between windows of the same app (a
-  transfer token main honors), carried by `din.drag.startTab`.
-- **Office apps' Recent lists** hold `persist()` tokens, not paths, so
-  older entries were dropped and "Show in Files"/"Copy Path" are gone.
-  Tokens are never released yet.
-- **Links from apps open in the Web Browser**, not in an installed web app
-  that owns the site, as `useOpenUrl` did on the desktop.
-- **Photo Editor's Quick Export** asks where to save the first time, since
-  it can't write beside the document by path.
-- **Moving a window from inside an app** ends without the app hearing the
-  pointer's release; a `beginMove` that resolves when the move ends would
-  let tab strips settle at once.
-- **Media Player's play key while stopped** no longer starts it: a session
-  can't yet say "play me when idle" without being listed.
-- **Files' undo history** lasts while a Files window is open (the windows
-  share it over a BroadcastChannel), not as long as the desktop runs.
-  Dropping a torn-off tab onto another Files window picks the window by
-  position, so overlapping windows can take it in the wrong order.
-- **The Assistant's notifications are approximate.** The desktop can't
-  tell which conversation the app shows, so it holds back requests while
-  the Assistant is in front and "done" notifications while it's open; a
-  conversation the app started that finishes after its window closed
-  isn't announced. Owed: main recording Din's sessions, and the app
-  reporting what it views, so the desktop owns these again.
-- **Din's assistant settings** ("Start conversations in", colorful
-  replies) don't reach the apps yet, and the model chosen in the app is
-  its own.
-- **Preview, Media Player and Publisher have `fs`**: Preview steps through
-  the file's folder and lists archives, Media Player's library and
-  playlists are paths, Publisher links placed pictures by path.
+| Lost | Restored by |
+|---|---|
+| Terminal tabs moving between windows | `din.system.pty.release`/`adopt` (main holds the pty's output meanwhile), the screen carried with `@xterm/addon-serialize`, `useDinTabTransfer` |
+| Files' tab drops picking the right window, the drop marker | `din.window.tabDragMove`/`tabDragEnd` (the desktop finds the frontmost window of the app, shows the label), `onTabHover` |
+| Files' undo history outliving its windows | `din.app.session` |
+| Office and CAD Recent lists from before the move, Show in Files, Copy Path | `migrateRecentFiles`, `handle.path` for every app, `din.files.release` |
+| Links from apps opening in installed web apps, `nostr:` links | `din.app.openUrl` answered with the desktop's `useOpenUrl` |
+| Photo Editor's Quick Export beside the document | `file-folders` |
+| A drag out of an app showing what's dragged | The desktop's drag overlay (`drag.over`) |
+| Settling after a move begun in an app | `din.window.beginMove` resolves when the move ends |
+| Media Player's play key while stopped | `MediaSession.idle` |
+| The Assistant's notifications (quiet only while you look at that conversation), its settings and model | `din.assistant` (`follow`, `setViewing`, settings) |
+| Preview, Publisher, Media Player and CAD holding the whole filesystem | Scoped `fs`: `file-folders`, the manifest's `folders`; `requestAccess` and `migrateFiles` for paths their old state named |
+
+Apps that keep the whole filesystem, because working on any folder by path
+is their job: Files, Text Editor, Terminal (through its shell), the
+Assistant.
 
 ## Checklist per app
 
