@@ -223,12 +223,10 @@ export function localFileUrl(path: string): string {
   return `din-file://localhost${path.split('/').map(encodeURIComponent).join('/')}`;
 }
 
-
 /**
  * A URL this document can load a local file from: `localFileUrl` on the
- * desktop, a handle's streamed URL in an app with `fs` (din-file://localhost
- * doesn't exist in the apps' session). Cached for the page's life, as the
- * app's URLs last that long.
+ * desktop, `din.files.pathUrl` in an app with `fs` (din-file://localhost
+ * doesn't exist in the apps' session).
  */
 export function fileUrl(path: string): Promise<string> {
   const din = typeof window === 'undefined' ? undefined : window.din;
