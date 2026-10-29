@@ -166,10 +166,15 @@ since QEMU provides no GPU), with boot logs mirrored to the serial console
 ## Layout
 
 - `src/` — the Din desktop environment (React, Tailwind, shadcn/ui)
+- `src/apps/` — the built-in apps, each a page of its own at `din://<id>/`
+  in its own process, reaching the desktop only through `window.din`
+  (`src/sdk/`); code they share is in `src/shared/`. See `docs/README.md`.
 - `electron/main.mts` — the Electron host; serves `dist/` over a custom
   `app://` protocol (real origin, SPA fallback for BrowserRouter)
-- `electron/preload.cjs`, `electron/pty-host.py` — the fs/pty/wifi bridges
-  behind Din's Files, Terminal, and Settings apps
+- `electron/din-apps.mts` — the built-in apps' `din://` protocol, session
+  and ports
+- `electron/preload.cjs`, `electron/pty-host.py` — `window.dinos`, the
+  desktop's bridges to the system (fs, pty, wifi, …)
 - `electron/native-*.mts`, `electron/wayland-bridge.mts`, `native/` — the
   embedded display that runs native Linux apps inside Din windows (see
   "Native Linux apps" below)

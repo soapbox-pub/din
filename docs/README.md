@@ -1,9 +1,9 @@
 # Din's app platform
 
-> **Status: in place, apps moving over.** The layers, the host and the SDK
-> exist; built-in apps move out of the desktop one at a time
-> ([migrating-builtin-apps.md](migrating-builtin-apps.md) says which have).
-> Each page's status note says what of it is built.
+> **Status: in place.** Every built-in app runs at `din://` except the
+> desktop's own system UI ([migrating-builtin-apps.md](migrating-builtin-apps.md)
+> says which and why, and what moving still owes). Each page's status
+> note says what of it is built.
 
 Din used to run every built-in app inside the desktop's own page, in one
 React tree at one origin. That's quick to build on, but one app's busy loop
@@ -93,5 +93,5 @@ Where a page and the types disagree, the types win and the page is a bug.
    stays as it is: apps get their own, `din.window.frameStyle`.)
 4. ~~The app host~~ (done): the `din:` scheme and session, `DinAppFrame`,
    the SDK, a multi-page build.
-5. Move apps over one at a time
-   ([migrating-builtin-apps.md](migrating-builtin-apps.md) has the order).
+5. ~~Move apps over one at a time~~ (done; see
+   [migrating-builtin-apps.md](migrating-builtin-apps.md)).

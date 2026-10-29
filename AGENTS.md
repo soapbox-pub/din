@@ -31,6 +31,7 @@ Runtime instrumentation exists only in profiling builds, gated on the compile-ti
 
 ## Project Structure
 
+- `/src/apps/` — the built-in apps (`din://<id>/`), each with `index.html`, `manifest.webmanifest`, `main.tsx` and its code; `/src/shared/` — code apps share (with each other or the desktop); `/src/sdk/` — `window.din` and its React pieces; `/src/platform/` — `GuestSurface`, the only code that knows `<webview>`.
 - `/src/components/` — UI components. `ui/` holds shadcn/ui primitives; `auth/` holds login components (`LoginArea`, `AuthDialog`, `AccountSwitcher`).
 - `/src/hooks/` — custom hooks. Discover the full set with `ls src/hooks/`. Key ones: `useNostr`, `useAuthor`, `useCurrentUser`, `useNostrPublish`, `useUploadFile`, `useAppContext`, `useTheme`, `useToast`, `useLoggedInAccounts`, `useLoginActions`, `useIsMobile`.
 - `/src/pages/` — page components wired into React Router (`Index`, `NotFound`, `NIP19Page`).
@@ -47,7 +48,15 @@ Runtime instrumentation exists only in profiling builds, gated on the compile-ti
 
 ## The App Platform
 
-Built-in apps are moving out of the desktop's React tree into their own origins (`din://<id>/`), each in its own webview and process, talking to the desktop only through `window.din`; the desktop alone reaches Electron, through `window.dinos`. **Read `docs/README.md` before working on app hosting, window chrome, `<webview>`, the preload bridges, or any built-in app**, and the `docs/din/` page for the area you're touching. The API's types are `src/sdk/din.d.ts`; keep the docs and types in step with each other and with the code, and flip a page's "Status" note when what it describes lands.
+Din has three layers, and each talks only to the one below it (`docs/README.md`):
+
+- **Electron main** (`electron/`): the system. It answers IPC from the desktop alone (`assertShellSender`), plus the bridge ports the desktop grants apps.
+- **The desktop** (`src/`, at `app://din`): the window manager, Dock, menu bar, signer, and Din's system UI (Settings, System Monitor, App Store, the Web Browser, Screenshot, the Installer). It reaches the system only through **`window.dinos`**, by way of its `src/lib/` wrappers (`getFsBridge()`, …).
+- **Built-in apps** (`src/apps/<id>/`, at `din://<id>/`): each window its own webview and process, reaching anything outside itself only through **`window.din`** (`@/sdk`, `@/sdk/react`).
+
+**Application code never uses Electron IPC.** `ipcRenderer`, `contextBridge` and the `electron` module belong to the preloads in `electron/` and nowhere in `src/`: desktop code uses `window.dinos`, app code uses `window.din`. To give either something new, add it the layered way: a handler in main (checking `assertShellSender`), a namespace on `window.dinos` in `electron/preload.cjs` with its typed wrapper in `src/lib/`, and, if apps need it, a `window.din` API that `DinAppFrame` answers (or a bridge permission in `electron/din-apps.mts` for a direct port, like `fs` and `pty`). Lint enforces the boundaries: `src/` can't import `electron`; `src/apps/`, `src/shared/` and `src/sdk/` can't reach the desktop's internals or `window.dinos`; only `src/platform/` knows `<webview>`.
+
+**Read `docs/README.md` before working on app hosting, window chrome, `<webview>`, the preload bridges, or any built-in app**, and the `docs/din/` page for the area you're touching. A new or moved app follows `docs/building-an-app.md` and `docs/migrating-builtin-apps.md`; code shared by apps (or apps and the desktop) goes in `src/shared/`, and must work in both documents. The API's types are `src/sdk/din.d.ts`; keep the docs and types in step with each other and with the code.
 
 ## UI Components
 

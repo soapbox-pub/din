@@ -41,6 +41,11 @@ export default defineConfig(
       "custom/no-placeholder-comments": "error",
       "no-warning-comments": ["error", { terms: ["fixme"] }],
       "custom/no-guest-engine": "error",
+      // Electron IPC is the preloads' (electron/); the desktop uses
+      // window.dinos and apps window.din (AGENTS.md, docs/README.md).
+      "no-restricted-imports": ["error", {
+        paths: [{ name: "electron", message: "Electron IPC belongs to the preloads: use window.dinos (desktop) or window.din (apps)." }],
+      }],
     },
   },
   {
@@ -50,6 +55,7 @@ export default defineConfig(
     files: ["src/apps/**/*.{ts,tsx}", "src/shared/**/*.{ts,tsx}", "src/sdk/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": ["error", {
+        paths: [{ name: "electron", message: "Electron IPC belongs to the preloads: apps use window.din." }],
         patterns: [
           { group: ["@/components/desktop/*"], message: "Apps run in their own document: use window.din (@/sdk), or move shared code to src/shared/." },
           { group: ["@/contexts/Window*", "@/contexts/FilePickerContext", "@/contexts/MonitorsContext", "@/hooks/useWindows", "@/lib/apps", "@/lib/dinApps", "@/lib/closeGuards", "@/lib/menuBarSlot", "@/lib/portalContainer", "@/platform/*"], message: "That's the desktop's; apps use window.din (@/sdk)." },

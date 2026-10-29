@@ -1,6 +1,6 @@
 # Moving built-in apps out of the desktop
 
-> **Status: under way.** Moved: Calculator, Paint, Word Processor,
+> **Status: done.** Moved: Calculator, Paint, Word Processor,
 > Spreadsheet, Slides, Photo Editor, Vector Editor, Publisher, Text Editor,
 > Terminal, Media Player, Preview, Assistant, CAD, Files.
 
@@ -102,16 +102,21 @@ a time.
 | 6 | Media Player ✓ | `frame: 'none'`, transparency, shapes, the menu bar, media session |
 | 7 | Text Editor, Terminal ✓ | `custom` headers with tabs, `fs` and `pty`, tab drags |
 | 8 | Files ✓ | Drag sources, the file clipboard, `wallpaper` |
-| 9 | CAD ✓, Assistant ✓, App Store | The `assistant` and `account`/`nostr` permissions |
-| 10 | System Monitor, Settings | The most of `window.dinos`; last, while their design settles |
+| 9 | CAD ✓, Assistant ✓ | The `assistant` permission |
 
-Staying in the desktop for now:
+Staying in the desktop, as its own system UI rather than apps:
 
-- **Web Browser, its pop-ups, Developer Tools**: they host webviews
-  themselves, and need `GuestSurface` from inside an app first.
-- **Native windows**: input injection into the embedded display.
+- **Web Browser, its pop-ups, Developer Tools**: they host guests
+  themselves (`GuestSurface`), and an app can't embed a guest.
+- **Native windows**: input injection into the embedded display; they're
+  part of the window manager.
 - **Screenshot**: draws over the whole desktop.
 - **Installer**: runs before anyone is signed in.
+- **Settings, System Monitor, App Store**: they manage the computer and
+  the desktop itself (Wi-Fi, displays, sound, power, processes, installed
+  apps, the signer and relays), so they'd need most of `window.dinos`.
+  Isolating them would buy a process of their own and little else; they
+  stay with the desktop, as Din's control panel.
 
 ## What moving changed, and what's still owed
 
