@@ -1,5 +1,4 @@
 import { Popover as PopoverPrimitive } from 'radix-ui';
-import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
 import { FOCUS } from '@/shared/photo/styles';
 import { css, swatchLabel, type Swatch, type Swatches } from './colors';
@@ -51,7 +50,7 @@ export function SwatchButton({
           <path d="M1 2.5h6L4 6Z" fill="currentColor" />
         </svg>
       </PopoverPrimitive.Trigger>
-      <PopoverPrimitive.Portal container={portalContainer()}>
+      <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content
           sideOffset={4}
           align="start"

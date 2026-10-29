@@ -1,4 +1,3 @@
-import { getFsBridge } from '@/lib/fs';
 import { fromBase64, propEl } from './idml';
 import { decodeTiff } from './tiff';
 
@@ -125,7 +124,7 @@ export class ImageStore {
     }
     // Linked.
     const p = linkPath(link);
-    const fs = getFsBridge();
+    const fs = window.din?.system.fs;
     if (p && fs) {
       const name = basename(p);
       const tries = [p, ...(this.docDir ? [`${this.docDir}/Links/${name}`, `${this.docDir}/${name}`] : [])].filter((x) => x.startsWith('/'));

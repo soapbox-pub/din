@@ -25,9 +25,6 @@ const FileBrowser = lazy(() =>
 const FileViewer = lazy(() =>
   import('@/components/desktop/apps/FileViewer').then((m) => ({ default: m.FileViewer })),
 );
-const Publisher = lazy(() =>
-  import('@/components/desktop/apps/Publisher').then((m) => ({ default: m.Publisher })),
-);
 const CAD = lazy(() =>
   import('@/components/desktop/apps/CAD').then((m) => ({ default: m.CAD })),
 );
@@ -235,17 +232,10 @@ export const APPS: readonly AppDefinition[] = [
   // one; `{ width, height, units, mode, artboards, name }` start a new
   // document (File > New from another window).
   dinApp('vector-editor'),
-  {
-    // Desktop publishing, InDesign style: opens Microsoft Publisher
-    // documents (.pub), InDesign documents (.indd, .indt) and IDML, and saves
-    // IDML. Files opens them here. Launch params `{ path }` open one.
-    id: 'publisher',
-    name: 'Publisher',
-    icon: '/icons/apps/publisher.png',
-    component: Publisher,
-    defaultSize: { width: 1280, height: 840 },
-    keywords: ['indesign', 'adobe indesign', 'indd', 'idml', 'microsoft publisher', 'pub', 'scribus', 'publisher', 'desktop publishing', 'layout', 'magazine', 'brochure', 'flyer'],
-  },
+  // Desktop publishing, InDesign style: opens Microsoft Publisher
+  // documents (.pub), InDesign documents (.indd, .indt) and IDML, and saves
+  // IDML. Files opens them here. Launch params `{ path }` open one.
+  dinApp('publisher'),
   {
     // 2D drafting, AutoCAD style: opens DWGs (R14 to 2018) and saves
     // AutoCAD 2000 DWGs. Files opens .dwg files here. Launch params

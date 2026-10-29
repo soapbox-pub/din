@@ -1,0 +1,47 @@
+{
+  "name": "Publisher",
+  "description": "Desktop publishing, InDesign style: opens Microsoft Publisher documents (.pub), InDesign documents (.indd, .indt) and IDML, and saves IDML.",
+  "icons": [
+    {
+      "src": "/icons/apps/publisher.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "permissions": [
+      "fs",
+      "printing",
+      "indd"
+    ],
+    "window": {
+      "size": {
+        "width": 1280,
+        "height": 840
+      },
+      "frame": "standard"
+    },
+    "keywords": [
+      "indesign",
+      "adobe indesign",
+      "indd",
+      "idml",
+      "microsoft publisher",
+      "pub",
+      "scribus",
+      "publisher",
+      "desktop publishing",
+      "layout",
+      "magazine",
+      "brochure",
+      "flyer"
+    ],
+    "migrateStorage": [
+      "din:publisher:*"
+    ]
+  }
+}

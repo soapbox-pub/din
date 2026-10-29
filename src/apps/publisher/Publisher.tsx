@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, FilePlus, FolderOpen } from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
-import { cleanFsError, formatBytes, getFsBridge, parentPath } from '@/lib/fs';
-import { getInddBridge } from '@/lib/indd';
+import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
+import { type DinFileHandle } from '@/sdk';
+import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import { looksLikePub, readPub } from './publisher/pub';
 import { rasterizeMetafile } from './publisher/pub/raster';
 import { pubToIdml } from './publisher/pub/toIdml';
-import { printHtml } from '@/lib/printing';
-import { setCloseGuard } from '@/lib/closeGuards';
-import { invalidateListings } from '@/hooks/useFileSystem';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
 import '@/shared/office/fonts';
 import { Button, Dialog } from '@/shared/photo/chrome';
 import { Panel } from '@/shared/photo/panels';
@@ -130,14 +123,15 @@ const zoomStep = (z: number, dir: 1 | -1) => (dir > 0 ? (ZOOMS.find((s) => s > z
  * text with paragraph and character styles, placed images, master pages and
  * layers. Saves IDML, which InDesign opens.
  *
- * Launch params: `{ path?: string }` (absolute).
+ * Launched with a file, it opens that; launch params `{ newDoc }` start a
+ * new document (File > New from another window). It has the `fs`
+ * permission because placed graphics are links to files by path, found
+ * beside the document as InDesign finds them.
  */
-export function Publisher({ windowId, params }: AppComponentProps) {
-  const initial = typeof params?.path === 'string' ? params.path : null;
-  const fs = getFsBridge();
-  const { open, close, focus } = useWindowActions();
-  const { pickFile, pickFiles } = useFilePicker();
-  const queryClient = useQueryClient();
+export function Publisher() {
+  const din = useDin();
+  const params = din.app.launch.params;
+  const initial = din.app.launch.files[0] ?? null;
 
   const [settings, setSettings] = useState<Settings>(readSettings);
   const { panels } = settings;
@@ -151,10 +145,10 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   });
   const [hist, setHist] = useState<Hist | null>(() => (boot ? { entries: [boot], index: 0 } : null));
   const [savedEntry, setSavedEntry] = useState<Entry | null>(boot);
-  const [path, setPath] = useState<string | null>(null);
+  const [file, setFile] = useState<DinFileHandle | null>(null);
   const [docName, setDocName] = useState('Untitled-1');
   const [converted, setConverted] = useState<Converted>(null);
-  const [loading, setLoading] = useState(initial !== null && fs !== undefined);
+  const [loading, setLoading] = useState(initial !== null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -698,9 +692,9 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   );
 
   const startDoc = useCallback(
-    (p: Pkg, name: string, file: string | null, from: Converted, previews: Map<string, Uint8Array>) => {
+    (p: Pkg, name: string, f: DinFileHandle | null, from: Converted, previews: Map<string, Uint8Array>) => {
       const m0 = buildModel(p);
-      const entry: Entry = { label: file ? 'Open' : 'New', pkg: p, sel: [], direct: null };
+      const entry: Entry = { label: f ? 'Open' : 'New', pkg: p, sel: [], direct: null };
       previewsRef.current = previews;
       const store = new ImageStore(
         () => {
@@ -708,14 +702,14 @@ export function Publisher({ windowId, params }: AppComponentProps) {
           setImagesVersion((v) => v + 1);
         },
         previews,
-        file ? parentPath(file) : null,
+        f?.path ? parentPath(f.path) : null,
       );
       imagesRef.current = store;
       setImages(store);
       storiesRef.current = new Stories();
       setHist({ entries: [entry], index: 0 });
       setSavedEntry(entry);
-      setPath(file);
+      setFile(f);
       setDocName(name);
       setConverted(from);
       setTyping(null);
@@ -739,55 +733,47 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   // ---- Files ------------------------------------------------------------------------------------
 
   const load = useCallback(
-    (p: string) => {
-      if (!fs) return;
+    (f: DinFileHandle) => {
       const seq = ++loadSeq.current;
       (async () => {
         try {
-          const r = await fs.readFile(p, MAX_BYTES);
-          if (r.truncated) throw new Error(`It’s too big to open (${formatBytes(r.size ?? r.data.length)}; up to 1 GB).`);
+          const blob = await f.getFile();
+          if (blob.size > MAX_BYTES) throw new Error(`It’s too big to open (${formatBytes(blob.size)}; up to 1 GB).`);
+          const data = new Uint8Array(await blob.arrayBuffer());
           let pk: Pkg;
           const previews = new Map<string, Uint8Array>();
           let warn: string[] = [];
           let from: Converted = null;
-          if (isPub(p) || looksLikePub(r.data)) {
+          if (isPub(f.name) || looksLikePub(data)) {
             from = 'pub';
-            const doc = readPub(r.data);
+            const doc = readPub(data);
             pk = await pubToIdml(doc, rasterizeMetafile);
             warn = [...doc.warnings];
-          } else if (isIndd(p) || !looksLikeIdml(r.data)) {
+          } else if (isIndd(f.name) || !looksLikeIdml(data)) {
             from = 'indd';
-            const bridge = getInddBridge();
-            if (!bridge) throw new Error('Reading InDesign documents needs the Din shell.');
-            const conv = await bridge.convert(r.data, basename(p));
+            const bridge = din.system.indd;
+            if (!bridge) throw new Error('Publisher can’t read InDesign documents outside Din.');
+            const conv = await bridge.convert(data, f.name);
             for (const pr of conv.previews) for (const g of pr.graphics) previews.set(g, pr.data);
             warn = conv.warnings;
             pk = readPackage(conv.idml);
-          } else pk = readPackage(r.data);
+          } else pk = readPackage(data);
           if (seq !== loadSeq.current) return;
-          startDoc(pk, basename(p), p, from, previews);
+          startDoc(pk, f.name, f, from, previews);
           setWarnings(warn);
           if (warn.length && from === 'pub') setStatus(warn.length === 1 ? warn[0] : `Opened with ${warn.length} things that look different from Publisher.`);
           else if (warn.length) setStatus(`Opened with ${warn.length} ${warn.length === 1 ? 'thing' : 'things'} InDesign keeps that couldn’t be read.`);
         } catch (err) {
           if (seq !== loadSeq.current) return;
-          setError(`Couldn’t open ${basename(p)}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
+          setError(`Couldn’t open ${f.name}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
         } finally {
           if (seq === loadSeq.current) setLoading(false);
         }
       })();
     },
-    [fs, startDoc],
+    [din, startDoc],
   );
 
-  const [prevInitial, setPrevInitial] = useState<string | null>(null);
-  if (initial !== prevInitial) {
-    setPrevInitial(initial);
-    if (initial && fs) {
-      setLoading(true);
-      setError(null);
-    }
-  }
   useEffect(() => {
     if (initial) load(initial);
   }, [initial, load]);
@@ -800,79 +786,92 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   }, [dialog, typing]);
 
   const writeTo = useCallback(
-    async (p: string): Promise<boolean> => {
-      if (!fs || !hist) return false;
+    async (f: DinFileHandle): Promise<boolean> => {
+      if (!hist) return false;
       const entry = hist.entries[hist.index];
       setBusy(true);
       setStatus('Saving…');
       try {
         await new Promise((r) => setTimeout(r, 30));
-        const bytes = writePackage(entry.pkg);
-        await fs.writeFile(p, bytes);
+        await f.write(writePackage(entry.pkg));
         setSavedEntry(entry);
-        setPath(p);
-        setDocName(basename(p));
+        setFile(f);
+        setDocName(f.name);
         setConverted(null);
-        setStatus(`Saved ${basename(p)}`);
-        void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', p] });
-        void invalidateListings(queryClient, p);
+        setStatus(`Saved ${f.name}`);
         return true;
       } catch (err) {
-        setStatus(`Couldn’t save ${basename(p)}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
+        setStatus(`Couldn’t save ${f.name}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
         return false;
       } finally {
         setBusy(false);
       }
     },
-    [fs, hist, queryClient],
+    [hist],
+  );
+
+  /** Din's save dialog for one type; false when the name it comes back with doesn't end in it. */
+  const saveTarget = useCallback(
+    async (title: string, suggestedName: string, type: { description: string; extension: string }) => {
+      const t = await din.files.save({ title, suggestedName, startIn: file ?? undefined, types: [{ description: type.description, extensions: [type.extension] }] });
+      if (t && !t.name.toLowerCase().endsWith(type.extension)) {
+        setStatus(`Couldn’t save ${t.name}: its name should end in ${type.extension}.`);
+        return null;
+      }
+      return t;
+    },
+    [din, file],
   );
 
   const saveAs = useCallback(async (): Promise<boolean> => {
     const stem = docName.replace(/\.[^.]*$/, '');
-    const result = await pickFiles({ mode: 'save', title: 'Save As', currentName: `${stem}.idml`, initialPath: path ? parentPath(path) : undefined, filters: [IDML_FILTER] });
-    if (!result) return false;
-    let t = result.paths[0];
-    if (!/\.idml$/i.test(t)) t += '.idml';
-    return writeTo(t);
-  }, [pickFiles, docName, path, writeTo]);
+    const t = await saveTarget('Save As', `${stem}.idml`, { description: IDML_FILTER.name, extension: '.idml' });
+    return t ? writeTo(t) : false;
+  }, [docName, saveTarget, writeTo]);
 
   const save = useCallback((): Promise<boolean> => {
     if (!hist) return Promise.resolve(false);
-    if (path && !converted && /\.idml$/i.test(path)) return writeTo(path);
+    if (file?.writable && !converted && /\.idml$/i.test(file.name)) return writeTo(file);
     if (converted) {
       setDialog({ kind: 'saveNote' });
       return Promise.resolve(false);
     }
     return saveAs();
-  }, [hist, path, converted, writeTo, saveAs]);
+  }, [hist, file, converted, writeTo, saveAs]);
+
+  const pick = useCallback(
+    async (title: string, description: string, extensions: string[]) =>
+      (await din.files.open({ title, types: [{ description, extensions }], startIn: file ?? undefined }))[0] ?? null,
+    [din, file],
+  );
 
   const openFile = useCallback(async () => {
-    const t = await pickFile({ title: 'Open', extensions: OPEN_EXTENSIONS, initialPath: path ? parentPath(path) : undefined });
+    const t = await pick('Open', 'Documents', OPEN_EXTENSIONS);
     if (!t) return;
     if (modelRef.current) {
-      open('publisher', { path: t });
+      void din.app.open('publisher', {}, [t]);
       return;
     }
     setLoading(true);
+    setError(null);
     load(t);
-  }, [pickFile, path, open, load]);
+  }, [din, pick, load]);
 
   // Closing with unsaved changes asks first.
-  useEffect(() => {
-    if (!dirty) return;
-    setCloseGuard(windowId, () => {
-      focus(windowId);
-      setDialog({ kind: 'unsaved' });
-      return true;
-    });
-    return () => setCloseGuard(windowId, null);
-  }, [dirty, windowId, focus]);
+  useCloseGuard(
+    dirty
+      ? () => {
+          din.window.focus();
+          setDialog({ kind: 'unsaved' });
+          return true;
+        }
+      : null,
+  );
 
   const closeNow = useCallback(() => {
-    setCloseGuard(windowId, null);
     setDialog(null);
-    close(windowId);
-  }, [windowId, close]);
+    din.window.close();
+  }, [din]);
 
   // ---- Rendering pages to pictures (export, print, thumbnails) -----------------------------------------
 
@@ -929,12 +928,10 @@ export function Publisher({ windowId, params }: AppComponentProps) {
 
   const exportPng = async () => {
     const t = currentPageObj();
-    if (!t || !fs) return;
+    if (!t) return;
     const stem = docName.replace(/\.[^.]*$/, '');
-    const result = await pickFiles({ mode: 'save', title: 'Export', currentName: `${stem}-${t.page.name}.png`, initialPath: path ? parentPath(path) : undefined, filters: [{ name: 'PNG', patterns: ['*.png'], mimeTypes: ['image/png'] }] });
-    if (!result) return;
-    let out = result.paths[0];
-    if (!/\.png$/i.test(out)) out += '.png';
+    const out = await saveTarget('Export', `${stem}-${t.page.name}.png`, { description: 'PNG', extension: '.png' });
+    if (!out) return;
     setBusy(true);
     setStatus('Exporting…');
     try {
@@ -943,9 +940,8 @@ export function Publisher({ windowId, params }: AppComponentProps) {
       if (!c) return;
       const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
       if (!blob) throw new Error('The page couldn’t be drawn.');
-      await fs.writeFile(out, new Uint8Array(await blob.arrayBuffer()));
-      setStatus(`Exported page ${t.page.name} to ${basename(out)}`);
-      void invalidateListings(queryClient, out);
+      await out.write(blob);
+      setStatus(`Exported page ${t.page.name} to ${out.name}`);
     } catch (err) {
       setStatus(`Couldn’t export: ${err instanceof Error ? err.message : cleanFsError(err)}`);
     } finally {
@@ -956,12 +952,10 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   const exportPdf = async () => {
     const m = modelRef.current;
     const images = imagesRef.current;
-    if (!m || !fs || !images) return;
+    if (!m || !images) return;
     const stem = docName.replace(/\.[^.]*$/, '');
-    const result = await pickFiles({ mode: 'save', title: 'Export', currentName: `${stem}.pdf`, initialPath: path ? parentPath(path) : undefined, filters: [PDF_FILTER] });
-    if (!result) return;
-    let out = result.paths[0];
-    if (!/\.pdf$/i.test(out)) out += '.pdf';
+    const out = await saveTarget('Export', `${stem}.pdf`, { description: PDF_FILTER.name, extension: '.pdf' });
+    if (!out) return;
     setBusy(true);
     setStatus('Exporting…');
     try {
@@ -988,9 +982,8 @@ export function Publisher({ windowId, params }: AppComponentProps) {
       resetMeasures();
       storiesRef.current.clear();
       const { bytes, notes } = await writePublisherPdf({ model: m, images, text: textSource, title: stem });
-      await fs.writeFile(out, bytes);
-      setStatus(`Exported ${basename(out)}${notes.length ? ` (${notes.join(' ')})` : ''}`);
-      void invalidateListings(queryClient, out);
+      await out.write(bytes);
+      setStatus(`Exported ${out.name}${notes.length ? ` (${notes.join(' ')})` : ''}`);
     } catch (err) {
       setStatus(`Couldn’t export: ${err instanceof Error ? err.message : cleanFsError(err)}`);
     } finally {
@@ -1015,7 +1008,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
         }
       }
       const html = `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:${w}pt ${h}pt;margin:0}html,body{margin:0}img{display:block;width:${w}pt;height:${h}pt;page-break-after:always}</style></head><body>${parts.join('')}</body></html>`;
-      await printHtml(docName, html);
+      await din.print.html(docName, html);
       setStatus('Choose “Save as PDF” in the print dialog to export a PDF.');
     } catch (err) {
       setStatus(`Couldn’t print: ${err instanceof Error ? err.message : String(err)}`);
@@ -1581,14 +1574,16 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   };
 
   const placeFile = async (into: Item | null) => {
-    if (!fs) return;
-    const t = await pickFile({ title: 'Place', extensions: PLACE_EXTENSIONS, initialPath: path ? parentPath(path) : undefined });
+    const t = await pick('Place', 'Graphics', PLACE_EXTENSIONS);
     if (!t) return;
     try {
-      const r = await fs.readFile(t, 256 * 1024 * 1024);
+      // Placed graphics are linked by path, as in InDesign.
+      if (!t.path) throw new Error('Din didn’t say where it is.');
+      const f = await t.getFile();
+      if (f.size > 256 * 1024 * 1024) throw new Error(`It’s too big (${formatBytes(f.size)}).`);
       const { decodeBytes } = await import('./publisher/images');
-      const bmp = await decodeBytes(r.data);
-      const gun: PlaceGun = { path: t, w: bmp.width, h: bmp.height, size: r.size || r.data.length };
+      const bmp = await decodeBytes(new Uint8Array(await f.arrayBuffer()));
+      const gun: PlaceGun = { path: t.path, w: bmp.width, h: bmp.height, size: f.size };
       bmp.close();
       if (into && into.kind !== 'text' && into.kind !== 'group' && into.kind !== 'line') {
         edit('Place', (d) => {
@@ -1599,9 +1594,9 @@ export function Publisher({ windowId, params }: AppComponentProps) {
       }
       setPlaceGun(gun);
       setTool('select');
-      say(`Click to place ${basename(t)} at 100%, drag to size it, or click a frame to put it in.`);
+      say(`Click to place ${t.name} at 100%, drag to size it, or click a frame to put it in.`);
     } catch (err) {
-      say(`Couldn’t place ${basename(t)}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
+      say(`Couldn’t place ${t.name}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
     }
   };
 
@@ -2563,7 +2558,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
       const frame = selItems.length === 1 && selItems[0].kind !== 'text' && selItems[0].kind !== 'group' && selItems[0].kind !== 'line' ? (selItems[0].kind === 'graphic' ? modelRef.current.items.get(selItems[0].parent ?? '') ?? null : selItems[0]) : null;
       void placeFile(frame);
     },
-    close: () => close(windowId),
+    close: () => din.window.requestClose(),
     save: () => void save(),
     saveAs: () => void saveAs(),
     exportPng: () => void exportPng(),
@@ -2918,7 +2913,8 @@ export function Publisher({ windowId, params }: AppComponentProps) {
     const m = modelRef.current;
     const it = m?.items.get(self);
     if (!m || !it) return;
-    const t = await pickFile({ title: 'Relink', extensions: PLACE_EXTENSIONS, initialPath: path ? parentPath(path) : undefined });
+    const f = await pick('Relink', 'Graphics', PLACE_EXTENSIONS);
+    const t = f?.path;
     if (!t) return;
     edit('Relink', (d) => {
       const e = ops.itemEl(d, it);
@@ -2932,10 +2928,6 @@ export function Publisher({ windowId, params }: AppComponentProps) {
   };
 
   // ---- Rendering ---------------------------------------------------------------------------------------
-
-  if (!fs) {
-    return <p className="grid h-full place-items-center bg-[#323232] p-6 text-sm text-[#cfcfcf]">Publisher needs the Electron shell to read and save files.</p>;
-  }
 
   const cursor = (() => {
     if (spaceDown) return panning ? 'grabbing' : 'grab';
@@ -3211,7 +3203,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
         <div className="relative flex min-w-0 flex-1 flex-col">
           {model && (
             <div className="flex h-7 shrink-0 items-end border-b border-[#1c1c1c] bg-[#2b2b2b] px-1">
-              <div className="flex h-6 max-w-full items-center gap-2 truncate rounded-t-[3px] bg-[#383838] px-3 text-[11px] text-[#e6e6e6]" title={path ?? docName}>
+              <div className="flex h-6 max-w-full items-center gap-2 truncate rounded-t-[3px] bg-[#383838] px-3 text-[11px] text-[#e6e6e6]" title={file?.path ?? docName}>
                 {dirty ? '• ' : ''}
                 {tabTitle}
               </div>
@@ -3388,7 +3380,7 @@ export function Publisher({ windowId, params }: AppComponentProps) {
             const pk = newDocument(s);
             if (modelRef.current) {
               // A document of its own window, as InDesign opens another tab.
-              open('publisher', { newDoc: { ...s, margins: { ...s.margins }, bleed: { ...s.bleed } } });
+              void din.app.open('publisher', { newDoc: { ...s, margins: { ...s.margins }, bleed: { ...s.bleed } } });
               return;
             }
             startDoc(pk, 'Untitled-1', null, null, new Map());
