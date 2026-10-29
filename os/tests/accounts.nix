@@ -1,5 +1,23 @@
 { pkgs, modules, din, deckmon }:
 
+let
+  # Din's end of din-askpass (electron/askpass.mts): answers each connection
+  # with the next reply named, and writes down the command sudo was running.
+  askpassStub = pkgs.writeText "askpass-stub.py" ''
+    import json, socket, sys
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(sys.argv[1])
+    server.listen()
+    for answer in sys.argv[2:]:
+        conn, _ = server.accept()
+        pid = json.loads(conn.makefile().readline())["pid"]
+        with open(f"/proc/{pid}/cmdline") as cmdline, open(sys.argv[1] + ".asked", "a") as asked:
+            asked.write(cmdline.read().replace("\0", " ").strip() + "\n")
+        conn.sendall((json.dumps({"password": answer} if answer != "-" else {}) + "\n").encode())
+        conn.close()
+  '';
+in
+
 # The computer's accounts and password: nostrd holds the Nostr keys as its
 # own user, Din's user reaches it through the link in its home, sudo asks for
 # a password exactly when `din` has one, and the disk passphrase systemd
@@ -126,6 +144,26 @@ pkgs.testers.runNixOSTest {
 
     password = machine.succeed("grep -o '/nix/store/[^ ,]*-din-password/bin/din-password' /etc/sudoers | head -1").strip()
     script = machine.succeed(f"grep -o '/nix/store/[^ ]*din-password.py' {password}").strip()
+
+    with subtest("sudo stops asking given the password, and asks again"):
+        machine.fail(f"su - din -c \"printf 'nope\\n' | sudo -n {password} sudo skip\"")
+        machine.fail("su - din -c 'sudo -n true'")
+        as_din(f"printf 'hunter22\\n' | sudo -n {password} sudo skip")
+        assert as_din(f"sudo -n {password} sudo status").strip() == "skip"
+        as_din("sudo -n true")
+        as_din(f"sudo -n {password} sudo ask")
+        assert as_din(f"sudo -n {password} sudo status").strip() == "ask"
+        machine.fail("su - din -c 'sudo -n true'")
+
+    with subtest("without a terminal, sudo asks Din"):
+        as_din("mkdir -m 700 /tmp/rt")
+        machine.succeed("su - din -c '${pkgs.python3}/bin/python3 ${askpassStub} /tmp/rt/din-askpass.sock hunter22 - >/dev/null 2>&1 &'")
+        machine.wait_until_succeeds("test -S /tmp/rt/din-askpass.sock")
+        no_tty = "XDG_RUNTIME_DIR=/tmp/rt setsid -w sudo -A -k true </dev/null"
+        as_din(no_tty)
+        machine.fail("su - din -c " + shlex.quote(no_tty))
+        asked = machine.succeed("cat /tmp/rt/din-askpass.sock.asked").split("\n")[0]
+        assert asked.split(" ", 1)[0].endswith("sudo") and asked.endswith(" -A -k true"), asked
 
     with subtest("changing the password needs the old one"):
         machine.fail(f"su - din -c \"printf 'nope\\nbattery-staple\\n' | sudo -n {password} change\"")

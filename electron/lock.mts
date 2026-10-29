@@ -9,7 +9,8 @@
 //
 // The password itself - the disk's, sudo's, the lock screen's and nostrd's,
 // all one - is changed by os/din-password.py (DIN_PASSWORD), which checks
-// the old one before changing anything. Both go to it on stdin.
+// the old one before changing anything. Both go to it on stdin. It also says
+// whether sudo asks for the password, and stops it asking given the password.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -27,9 +28,10 @@ function isUsablePassword(value: unknown): value is string {
     /^[\x20-\x7e]+$/.test(value);
 }
 
-function changePassword(helper: string, old: string, next: string): Promise<void> {
+/** din-password with `args`, `input` on its stdin. */
+function runPasswordHelper(helper: string, args: string[], input: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn('sudo', ['-n', helper, 'change'], { stdio: ['pipe', 'ignore', 'pipe'] });
+    const child = spawn('sudo', ['-n', helper, ...args], { stdio: ['pipe', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
@@ -37,7 +39,7 @@ function changePassword(helper: string, old: string, next: string): Promise<void
     child.stdin.on('error', () => {
       // The helper exited before reading it; its stderr says why.
     });
-    child.stdin.end(`${old}\n${next}\n`);
+    child.stdin.end(input);
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) resolve();
@@ -73,6 +75,24 @@ export function registerLockHandlers(options: {
     if (!PASSWORD_HELPER) throw new Error('The password can\'t be changed here');
     if (typeof old !== 'string' || old.includes('\n')) throw new Error('Not a password');
     if (!isUsablePassword(next)) throw new Error('Not a usable password');
-    await changePassword(PASSWORD_HELPER, old, next);
+    await runPasswordHelper(PASSWORD_HELPER, ['change'], `${old}\n${next}\n`);
+  });
+
+  ipcMain.handle('lock:sudo-asks', async (event) => {
+    assertShellSender(event);
+    if (!PASSWORD_HELPER) return true;
+    const { stdout } = await runCommand('sudo', ['-n', PASSWORD_HELPER, 'sudo', 'status'], { timeout: 10_000 });
+    return stdout.trim() !== 'skip';
+  });
+
+  ipcMain.handle('lock:set-sudo-asks', async (event, ask: unknown, password: unknown) => {
+    assertShellSender(event);
+    if (!PASSWORD_HELPER) throw new Error('This is for DinOS');
+    if (ask === true) {
+      await runPasswordHelper(PASSWORD_HELPER, ['sudo', 'ask'], '');
+      return;
+    }
+    if (typeof password !== 'string' || password.includes('\n')) throw new Error('Not a password');
+    await runPasswordHelper(PASSWORD_HELPER, ['sudo', 'skip'], `${password}\n`);
   });
 }

@@ -7,6 +7,10 @@ export interface LockBridge {
   available(): Promise<boolean>;
   lock(): Promise<void>;
   changePassword(oldPassword: string, newPassword: string): Promise<void>;
+  /** Whether sudo asks for the password. */
+  sudoAsks(): Promise<boolean>;
+  /** Make sudo ask for the password, or stop it asking, which takes the password. */
+  setSudoAsks(ask: boolean, password?: string): Promise<void>;
 }
 
 declare global {

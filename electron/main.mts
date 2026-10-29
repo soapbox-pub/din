@@ -114,6 +114,7 @@ import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
+import { registerAskpass } from './askpass.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
 import { airplayDisplays, airplayNetworkChanged, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
@@ -5327,6 +5328,11 @@ app.whenReady().then(() => {
   registerDictationHandlers({ assertShellSender, guestFromId: shellGuestFromId });
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
+  registerAskpass({
+    sendToShell,
+    hasShell: () => !!shellWindow && !shellWindow.webContents.isDestroyed(),
+    assertShellSender,
+  });
   registerUpdaterHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
   registerFirmwareHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
   registerAirPlayHandlers({

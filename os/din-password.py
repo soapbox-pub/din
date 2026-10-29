@@ -7,11 +7,17 @@ GPG key that had it. This changes all five, after checking the old one itself,
 so Din can run it through sudo without a password.
 
     din-password change    old and new password on stdin, one per line
+    din-password sudo status|ask|skip
+                           whether sudo asks for it: `skip` takes the password
+                           on stdin, so nothing `din` runs can turn it off
 
 Passwords never go on a command line, where other users could read them:
 cryptsetup gets them through pipes, nostrd over its socket, din-keyring,
 din-gpg and chpasswd on stdin. The disk goes first, since it's the one that can't be got around:
 if a later step fails, the message says what still has the old password.
+
+sudo skips the password with a rule in /var/lib/din/sudoers.d, which sudoers
+includes (os/configuration.nix); /etc/sudoers.d stays the owner's own.
 """
 
 import ctypes
@@ -24,6 +30,7 @@ import sys
 
 USER = "din"
 NOSTRD_SOCKET = "/run/nostrd/signer.sock"
+SKIP_RULE = "/var/lib/din/sudoers.d/no-password"
 
 
 def fail(message):
@@ -174,11 +181,39 @@ def change():
              "the lock screen still take the old one. " + result.stderr.strip())
 
 
+def sudo_skip():
+    password = sys.stdin.read().split("\n")[0]
+    hashed = password_hash()
+    if not hashed:
+        fail("This computer has no password.")
+    if not password_matches(password, hashed):
+        fail("That isn't the password.")
+    os.makedirs(os.path.dirname(SKIP_RULE), mode=0o750, exist_ok=True)
+    temporary = SKIP_RULE + ".tmp"
+    with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o440), "w") as rule:
+        rule.write(f"{USER} ALL=(ALL:ALL) NOPASSWD: ALL\n")
+    os.rename(temporary, SKIP_RULE)
+
+
+def sudo_ask():
+    try:
+        os.remove(SKIP_RULE)
+    except FileNotFoundError:
+        pass
+
+
 def main():
-    if sys.argv[1:] == ["change"]:
+    args = sys.argv[1:]
+    if args == ["change"]:
         change()
+    elif args == ["sudo", "status"]:
+        print("skip" if os.path.exists(SKIP_RULE) else "ask")
+    elif args == ["sudo", "skip"]:
+        sudo_skip()
+    elif args == ["sudo", "ask"]:
+        sudo_ask()
     else:
-        fail("usage: din-password change")
+        fail("usage: din-password change | sudo status|ask|skip")
 
 
 if __name__ == "__main__":

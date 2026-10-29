@@ -137,6 +137,8 @@ function findBinary(): string | null {
  * its place, fullscreen; the server outlives the embedded display apps get,
  * so it gets neither. Chromium's own edits come out too (see
  * native-display.mts's launchEnvironment), and the session bus goes back.
+ * Without a display, sudo wouldn't ask for its password in Din by itself;
+ * DinOS's sudo shim (DIN_SUDO_SHIM) has it ask (electron/askpass.mts).
  */
 async function serverEnvironment(): Promise<NodeJS.ProcessEnv> {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -155,7 +157,7 @@ async function serverEnvironment(): Promise<NodeJS.ProcessEnv> {
   const bus = await sessionBusAddress().catch(() => undefined);
   if (bus) env.DBUS_SESSION_BUS_ADDRESS = bus;
   else delete env.DBUS_SESSION_BUS_ADDRESS;
-  env.PATH = [INSTALL_DIR, env.PATH].filter(Boolean).join(path.delimiter);
+  env.PATH = [process.env.DIN_SUDO_SHIM, INSTALL_DIR, env.PATH].filter(Boolean).join(path.delimiter);
   return env;
 }
 

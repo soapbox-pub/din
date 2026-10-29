@@ -1585,6 +1585,58 @@ expose('lock', {
    */
   changePassword: (oldPassword, newPassword) =>
     ipcRenderer.invoke('lock:change-password', oldPassword, newPassword),
+
+  /** Whether sudo asks for the password. */
+  sudoAsks: () => ipcRenderer.invoke('lock:sudo-asks'),
+
+  /**
+   * Make sudo ask for the password, or stop it asking, which takes the
+   * password.
+   * @param {boolean} ask
+   * @param {string} [password]
+   */
+  setSudoAsks: (ask, password) => ipcRenderer.invoke('lock:set-sudo-asks', ask, password),
+});
+
+// Askpass bridge (window.dinos.askpass), backed by electron/askpass.mts: sudo
+// asking for the password with no terminal to ask on.
+expose('askpass', {
+  /**
+   * Subscribe to requests. Returns an unsubscribe fn.
+   * @param {(request: { requestId: number, requester: string, command: string }) => void} callback
+   */
+  onRequest: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number, requester: string, command: string }} request
+     */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('askpass:request', listener);
+    return () => ipcRenderer.removeListener('askpass:request', listener);
+  },
+
+  /**
+   * Subscribe to requests that went away (sudo stopped, or it timed out).
+   * Returns an unsubscribe fn.
+   * @param {(requestId: number) => void} callback
+   */
+  onCancel: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number }} d
+     */
+    const listener = (_event, d) => callback(d.requestId);
+    ipcRenderer.on('askpass:cancel', listener);
+    return () => ipcRenderer.removeListener('askpass:cancel', listener);
+  },
+
+  /**
+   * Answer with the password, or null to cancel. Resolves `{ ok: false }`
+   * when the password isn't right.
+   * @param {number} requestId
+   * @param {string | null} password
+   */
+  answer: (requestId, password) => ipcRenderer.invoke('askpass:answer', requestId, password),
 });
 
 // Updater bridge (window.dinos.updater), backed by electron/updater.mts: stages

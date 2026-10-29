@@ -106,6 +106,7 @@ import {
 import { VolumeGlyph, VolumeSlider } from '@/components/desktop/VolumeIndicator';
 import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
 import { cleanLockError, getLockBridge } from '@/lib/lock';
+import { AdminPasswordDialog } from '@/components/desktop/AdminPrompt';
 import { useQuery } from '@tanstack/react-query';
 import {
   describeZone,
@@ -314,7 +315,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     group: 'Account',
     name: 'Password',
     icon: KeyRound,
-    search: ['Current password', 'New password', 'Changing it here changes it everywhere.', 'lock screen', 'login', 'security', 'disk encryption', 'passphrase'],
+    search: ['Current password', 'New password', 'Changing it here changes it everywhere.', 'lock screen', 'login', 'security', 'disk encryption', 'passphrase', 'Require password for sudo', 'administrator', 'admin', 'root'],
   },
   {
     id: 'nostr',
@@ -4034,7 +4035,82 @@ function PasswordSection() {
           </Button>
         </div>
       </form>
+      <SudoPasswordSetting />
     </SectionShell>
+  );
+}
+
+/** Whether sudo asks for the computer's password. Turning it off takes the password. */
+function SudoPasswordSetting() {
+  const bridge = getLockBridge();
+  const { data: asks, isLoading, refetch } = useQuery({
+    queryKey: ['lock', 'sudo-asks'],
+    queryFn: () => bridge?.sudoAsks() ?? true,
+    enabled: !!bridge,
+  });
+  const [confirming, setConfirming] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!bridge) return null;
+
+  const turnOn = () => {
+    setError(null);
+    bridge
+      .setSudoAsks(true)
+      .catch((e: unknown) => setError(cleanLockError(e)))
+      .finally(() => void refetch());
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <div className="min-w-0">
+          <Label htmlFor="sudo-asks" className="cursor-pointer text-sm">
+            Require password for sudo
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Programs that run as administrator, like the Assistant, ask for it first.
+          </p>
+        </div>
+        <Switch
+          id="sudo-asks"
+          checked={asks ?? true}
+          disabled={isLoading}
+          onCheckedChange={(checked) => {
+            if (checked) {
+              turnOn();
+            } else {
+              setAttempt((n) => n + 1);
+              setConfirming(true);
+            }
+          }}
+        />
+      </div>
+      {error && (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+      <AdminPasswordDialog
+        key={attempt}
+        open={confirming}
+        title="Stop asking for the password for sudo?"
+        confirmLabel="Stop asking"
+        onCancel={() => setConfirming(false)}
+        onSubmit={async (password) => {
+          try {
+            await bridge.setSudoAsks(false, password);
+          } catch (e) {
+            return cleanLockError(e);
+          }
+          setConfirming(false);
+          setError(null);
+          void refetch();
+          return null;
+        }}
+      />
+    </div>
   );
 }
 
