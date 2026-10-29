@@ -1,9 +1,10 @@
 # din-keyboard: the privileged half of DinOS's keyboard layout setting.
 #
 # DinOS's layout lives in one file, LAYOUT_FILE, as XKB_DEFAULT_* lines. The
-# cage unit reads it as its EnvironmentFile (configuration.nix): cage applies
-# it to everything on screen, and Din inherits it, so native apps get the
-# same one (electron/keyboard.mts). cage only reads it when it starts. A copy
+# din-shell unit reads it as its EnvironmentFile (configuration.nix): its
+# compositor applies it to everything on screen, and Din inherits it, so
+# native apps get the same one (electron/keyboard.mts). The compositor only
+# reads it when it starts. A copy
 # goes on the boot partition, for the password prompt (din-boot-screen).
 #
 # Din runs this through sudo from electron/keyboard.mts.
@@ -12,7 +13,7 @@
 #       Make <layout>, or its <variant>, the system layout. Any other
 #       XKB_DEFAULT_* lines (model, options) are kept.
 #   din-keyboard restart
-#       Restart Din's session, so cage picks the layout up.
+#       Restart Din's session, so its compositor picks the layout up.
 #   din-keyboard remap
 #       Where the layout makes Caps Lock a Backspace (Colemak), make the key
 #       one, for every keyboard (REMAP_FILE, which a udev rule in
@@ -28,7 +29,7 @@ LAYOUT_FILE=/var/lib/din/keyboard
 REMAP_FILE=/var/lib/din/keyboard-remap
 CONSOLE_CONF=/var/lib/din/console.conf
 CONSOLE_MAP=/var/lib/din/console.map
-SESSION_UNIT=cage-tty1.service
+SESSION_UNIT=din-shell.service
 
 die() {
   echo "$*" >&2

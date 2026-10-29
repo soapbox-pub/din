@@ -2,7 +2,7 @@
  * Typed access to the OS display bridge exposed by the Electron preload
  * (`window.dinos.display`, see electron/preload.cjs + electron/main.cjs).
  *
- * Backed by wlr-randr under cage (DinOS) and by xrandr on a bare X11 session
+ * Backed by wlr-randr under din-shell (DinOS) and by xrandr on a bare X11 session
  * (the os/x11 standalone launcher) - wherever Din is the whole desktop and
  * nothing else manages the outputs. Elsewhere, or in a plain browser, the
  * bridge is absent or `status()` resolves with `available: false`; callers
@@ -12,7 +12,7 @@
  * resolution, a position in the shared virtual screen, an on/off state and a
  * primary flag (the monitor with the menu bar and Dock). `applyLayout`
  * commits an entire desired arrangement in one atomic call, so the desktop
- * never passes through a half-configured state. Under cage, the arrangement
+ * never passes through a half-configured state. Under din-shell, the arrangement
  * is remembered and reapplied when the same displays are connected again.
  */
 

@@ -3,7 +3,7 @@
 # NixOS/DinOS required.
 #
 # This runs the *production* Electron shell (fullscreen kiosk) against a
-# pre-built dist/. It is the hand-rolled equivalent of what DinOS's cage
+# pre-built dist/. It is the hand-rolled equivalent of what DinOS's din-shell
 # service does: start exactly one fullscreen app - Din - and nothing else.
 # Din does all window management itself inside that single window, so no
 # external window manager is needed. Works under an X11 or Wayland session;

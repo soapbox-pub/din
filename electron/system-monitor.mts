@@ -29,7 +29,7 @@
 //
 // Ending: SIGTERM, or SIGKILL to force quit, and only Din's own user's
 // processes. Din itself is refused - the main process, what it runs on
-// (cage), the desktop's renderer, the GPU process and Electron's helpers -
+// (din-shell), the desktop's renderer, the GPU process and Electron's helpers -
 // since losing any of them ends the session. A page renderer is crashed
 // through its WebContents instead of signalled, so Electron knows what
 // happened and the window shows the page stopped (BrowserView's crashed
@@ -162,7 +162,7 @@ let cmdlines = new Map<string, string[]>();
 let users: Map<number, string> | null = null;
 /** WebContents whose page is hung, by id. */
 const unresponsive = new Set<number>();
-/** Din's own ancestors (cage, the session), found once. */
+/** Din's own ancestors (din-shell, the session), found once. */
 let hostPids: Promise<Set<number>> | null = null;
 
 function processKey(entry: ProcEntry): string {

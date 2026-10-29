@@ -362,7 +362,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
  * disconnect and forget networks. Outside the Electron shell it renders an
  * explanatory fallback. The Bluetooth section pairs, connects and forgets
  * devices through `window.dinos.bluetooth` (BlueZ over D-Bus). The Display section arranges the monitors through
- * `window.dinos.display` (wlr-randr under cage, xrandr on bare X11), falling back
+ * `window.dinos.display` (wlr-randr under din-shell, xrandr on bare X11), falling back
  * where neither can manage them. Battery & Power reads the battery through
  * `window.dinos.power` (/sys/class/power_supply), leaving it out on machines with
  * no battery, and switches the system power profile through the same bridge
@@ -1078,7 +1078,7 @@ function DisplayZoomControl({
 
 /**
  * The whole multi-output arrangement, via the display bridge (window.dinos.display:
- * wlr-randr under cage, xrandr on bare X11), where Din is the whole desktop:
+ * wlr-randr under din-shell, xrandr on bare X11), where Din is the whole desktop:
  * drag displays to position them, pick a resolution, choose the primary (the
  * one with the menu bar and Dock), and switch any output on or off; "Apply"
  * commits the layout in one atomic call. Where the outputs can't be managed,

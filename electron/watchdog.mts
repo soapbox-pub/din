@@ -4,9 +4,9 @@
 // Din is the desktop: when this process's main thread stops (Chromium's
 // find-in-page looping forever did it, electron/electron#54199), no window
 // draws or takes input, and Ctrl+Alt+F2 is the only way out. On DinOS,
-// os/configuration.nix gives cage's unit a WatchdogSec; systemd passes it down
+// os/configuration.nix gives din-shell's unit a WatchdogSec; systemd passes it down
 // as WATCHDOG_USEC, and this pings from the main thread's event loop at half
-// that. A stuck loop stops the pings, and systemd restarts cage and Din.
+// that. A stuck loop stops the pings, and systemd restarts din-shell and Din.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.

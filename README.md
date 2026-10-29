@@ -30,8 +30,15 @@ straight into Din fullscreen. No X11, no display manager, no traditional
 desktop — just:
 
 ```
-Linux kernel -> systemd -> cage (Wayland kiosk compositor) -> Electron -> Din
+Linux kernel -> systemd -> din-shell (Din's own Wayland compositor) -> Electron -> Din
 ```
+
+din-shell is `din-compositor session` (`native/din-compositor/src/session`), a
+Smithay compositor that drives the displays through DRM/KMS and input through
+libinput, shows Din's one window across every display, and speaks the wlroots
+protocols the rest of the system uses: output management (`wlr-randr`, Din's
+display settings), screencopy (`grim`, AirPlay) and gamma control (night
+light).
 
 ## Requirements
 
@@ -184,8 +191,9 @@ since QEMU provides no GPU), with boot logs mirrored to the serial console
   - `os/flake.nix` — entry point; exposes the installable disk image as
     `./os#image` (the default) and the QEMU demo as `./os#vm`, and pulls in
     the Din source tree (the repo root) as an input
-  - `os/configuration.nix` — the whole OS definition: cage + Electron
-    launcher + Nix build of Din (`buildNpmPackage`)
+  - `os/configuration.nix` — the whole OS definition: the din-shell service
+    (Din's compositor) + Electron launcher + Nix build of Din
+    (`buildNpmPackage`)
   - `os/din-install.sh` — the Installer app's privileged helper (see
     `electron/installer.mts`)
 
@@ -233,7 +241,7 @@ from `XKB_DEFAULT_*`, GNOME or KDE settings, the host X server, or the system
 keyboard config). Din sends them physical keys and both servers apply the
 layout; the Xvfb fallback needs `setxkbmap` for it. Settings → Keyboard shows
 the layout and changes it on DinOS and GNOME. DinOS keeps it in
-`/var/lib/din/keyboard`, which cage reads when it starts (`os/din-keyboard.sh`
+`/var/lib/din/keyboard`, which Din's compositor reads when it starts (`os/din-keyboard.sh`
 writes it as root), so Din's own windows switch after Din restarts.
 
 Settings → Date & Time shows the system's time zone and clock, read from
@@ -276,7 +284,7 @@ that is remembered (`airplay.json` in Din's config). Sound goes to the
 receiver too. The
 sending is [deckmon](https://git.shakespeare.diy)'s, a daemon DinOS runs as a
 user service (the flake's `deckmon` input) and Din talks to over its socket
-(`electron/airplay.mts`). It captures cage through wlroots screencopy, and a
+(`electron/airplay.mts`). It captures the screen through din-shell's wlroots screencopy, and a
 separate display is a spare DisplayPort connector forced on with an EDID,
 through a sudo rule for those writes. Elsewhere Din uses a `deckmon` on PATH.
 
@@ -293,8 +301,8 @@ default, prints a test page, and adds older USB printers with the best
 driver installed (gutenprint, brlaser).
 
 The print dialog is Din's own (`src/components/desktop/PrintDialog.tsx`):
-Chromium's would open a GTK window, which under cage replaces the whole
-screen. `electron/print-preload.cjs` sends every page's `print()`, frames'
+Chromium's would open a GTK window, which DinOS's compositor wouldn't
+show. `electron/print-preload.cjs` sends every page's `print()`, frames'
 included, there, and so do Ctrl+P, the browser's menu and right-click menu,
 and Print in Files and Preview. Whatever is printed goes to CUPS as a PDF
 laid out by Chromium, and the dialog previews that PDF's pages, drawn by

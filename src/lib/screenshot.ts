@@ -4,7 +4,7 @@
  *
  * Backed by webContents.capturePage() in the main process, which snapshots the
  * shell window's rendered contents - the whole Din desktop. It works on any
- * Linux session (cage/Wayland or bare X11) with no external dependency. In a
+ * Linux session (din-shell/Wayland or bare X11) with no external dependency. In a
  * plain browser the bridge is absent; callers must feature-detect via
  * getScreenshotBridge() and render a fallback.
  */

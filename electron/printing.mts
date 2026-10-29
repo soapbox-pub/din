@@ -24,7 +24,7 @@
 // window with JavaScript off and laid out the same way; a PDF is printed as
 // it is. The dialog shows the PDF's pages, drawn by poppler's pdftoppm, so
 // what it previews is what's sent. Chromium's own print path is never used:
-// it would open a GTK dialog, which under cage replaces the whole screen.
+// it would open a GTK dialog, which under din-shell replaces the whole screen.
 //
 // Pages that call window.print() reach here through print-preload.cjs; the
 // shell is told (`printing:open`) and shows the dialog. Jobs Din sends are

@@ -3,7 +3,7 @@
 // installed web apps - sending window.print() to Din's print dialog (see
 // electron/printing.mts).
 //
-// Chromium's own print() opens a GTK print dialog, which under cage takes
+// Chromium's own print() opens a GTK print dialog, which under din-shell takes
 // over the whole screen with no way back to Din. This swaps in a print() that
 // asks the main process instead, without blocking the page. A frame prints
 // just itself: sites often print a receipt or a ticket by writing it into a

@@ -838,7 +838,7 @@ async function appEnvironment(display: EmbeddedDisplay): Promise<NodeJS.ProcessE
 /**
  * The environment for the Terminal's shells: the apps' own, so a program
  * started from a shell opens as a window in Din like any launched app, not
- * on the display Din itself is drawn to (under cage, that put it in Din's
+ * on the display Din itself is drawn to (under din-shell, that put it in Din's
  * place, fullscreen). Din's own environment where the embedded display
  * can't run.
  */

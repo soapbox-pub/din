@@ -2,7 +2,7 @@
 //
 // Native apps used to be left to the host window manager, stacked above the
 // shell, which made them strangers on the desktop: no Din chrome, no Dock
-// grouping, no Alt+Tab, and nothing at all under DinOS's cage, which has no
+// grouping, no Alt+Tab, and nothing at all under DinOS's din-shell, which has no
 // window manager. Instead, Din now runs its own X server (Xvfb) that only it
 // can see, launches apps against it, and composites their windows into its
 // own (native-display-worker.mts does the window management and compositing;
@@ -466,7 +466,7 @@ function systemctlUser(args: string[]): Promise<void> {
  * The user manager starts services like the desktop portal, which draws the
  * file chooser Flatpak apps (and Chromium, for Din's own) ask it for. They
  * start with its environment, and without a display there GTK falls back to
- * wayland-0, which under cage is Din's own compositor: a Save dialog took
+ * wayland-0, which under din-shell is Din's own compositor: a Save dialog took
  * Din's place, fullscreen and with all the input, and couldn't be left.
  * Here they open as Din windows instead. A portal already running is
  * restarted onto it, and one that failed is started: the portal asks for

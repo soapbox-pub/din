@@ -636,11 +636,11 @@ async function tool(
 // Display bridge (window.dinos.display): the arrangement of the outputs Din's one
 // window spans - resolution, position, on/off and which output is primary -
 // applied as a whole desired layout at once. Two backends:
-//   - wlr-randr on Wayland (cage on DinOS), through the compositor's
+//   - wlr-randr on Wayland (din-shell on DinOS), through the compositor's
 //     wlr-output-management protocol. "Primary" isn't a Wayland notion: it's
 //     Din's own (the monitor with the menu bar and Dock), so it's saved with
 //     the arrangement, and the arrangement is reapplied whenever the same set
-//     of outputs is connected again - cage itself forgets, laying outputs out
+//     of outputs is connected again - din-shell itself forgets, laying outputs out
 //     left to right at their preferred modes.
 //   - xrandr on a bare X11 session (the os/x11 standalone launcher), where
 //     Din is the whole desktop and nothing else manages the outputs.
@@ -845,7 +845,7 @@ async function queryOutputs(probe = false): Promise<DisplayOutput[]> {
   const outputs = parseWlrRandr(await displayTool(['--json']));
   // No saved choice: the laptop's own panel, so plugging a display in (an
   // AirPlay receiver's, say) doesn't take the menu bar and windows with it.
-  // Under cage, Electron calls the newest output primary. Without a panel,
+  // Under din-shell, Electron calls the newest output primary. Without a panel,
   // Electron's choice, else the first on.
   const primaryBounds = screen.getPrimaryDisplay().bounds;
   const primary =
@@ -1363,7 +1363,7 @@ function dispatchGuestDrag(
 // ---------------------------------------------------------------------------
 // Monitors bridge (window.dinos.monitors): where each display sits inside the shell
 // window, for the desktop's layout (src/lib/monitors.ts). The production
-// window spans every display - cage stretches it over all outputs, and on bare
+// window spans every display - din-shell stretches it over all outputs, and on bare
 // X11 it's sized to their union below - so positions are relative to the
 // union's top-left. Reports null for a single display, or in the windowed dev
 // shell, where the viewport is the one monitor.
@@ -1570,7 +1570,7 @@ function registerLidWatch(): void {
 
 // ---------------------------------------------------------------------------
 // Power bridge (window.dinos.power), backed by /sys/class/power_supply. Read-only
-// sysfs, so it needs no external binary and works on any Linux session (cage
+// sysfs, so it needs no external binary and works on any Linux session (din-shell
 // on DinOS or the bare-X11 standalone launcher). Reports `available: false`
 // where there's no battery (desktops, the QEMU VM) so the menu-bar indicator
 // hides and the Settings panel shows a fallback. Sender-guarded like the
@@ -1806,7 +1806,7 @@ function registerPowerHandlers(): void {
 
   // Log out: quit cleanly. din-session.sh treats exit 0 as "the user quit"
   // and ends the login session, returning to the display manager; on DinOS
-  // the cage service brings a fresh Din back up.
+  // the din-shell service brings a fresh Din back up.
   ipcMain.on('shell:endSession', (event) => {
     if (!isShellSender(event)) return;
     app.quit();
@@ -2489,7 +2489,7 @@ function pushInputOsd(statusPromise: Promise<AudioState>): void {
 
 /**
  * Global volume keys (VolumeUp/Down/Mute) under X11. Wayland has no global
- * key grabs (cage offers no GlobalShortcuts portal), so there these calls
+ * key grabs (din-shell offers no GlobalShortcuts portal), so there these calls
  * would silently fail; the keys reach Din as ordinary input instead and
  * attachMediaKeys handles them. Harmless when wpctl is absent (the adjust
  * rejects and no OSD is shown).
@@ -2827,7 +2827,7 @@ function registerBrightnessHandlers(): void {
 // below. Captures the shell window's rendered contents - the whole Din desktop
 // (wallpaper, open windows, menu bar, dock) - as a PNG via Electron's
 // compositor (webContents.capturePage). No display-server capture API, so it
-// works on any session (cage/Wayland or bare X11) with no external tool.
+// works on any session (din-shell/Wayland or bare X11) with no external tool.
 // Absent in a plain browser, where the Screenshot app feature-detects and
 // shows a fallback. Same trust boundary as the other bridges: sender guard.
 // ---------------------------------------------------------------------------
@@ -4272,7 +4272,7 @@ function registerSitePermissionHandlers(): void {
 // unlock bubble) as a separate native frameless BrowserWindow positioned
 // next to the action button. That suits a windowing desktop, but Din is a
 // single-window kiosk: a popup toplevel detaches from the shell (under a
-// kiosk compositor like cage it can't be positioned at all) instead of
+// kiosk compositor like din-shell it can't be positioned at all) instead of
 // hugging the toolbar the way Chrome's in-window bubble does. So the
 // browserAction activateClick handler is overridden to route popup requests
 // to the shell renderer, which hosts the popup page in an overlay <webview>
@@ -4712,7 +4712,7 @@ function registerBrowserPreconnectHandler(): void {
 
 // ---------------------------------------------------------------------------
 // Color scheme. Chromium answers `prefers-color-scheme` from the host
-// desktop's setting, which under cage doesn't exist, so every page saw light.
+// desktop's setting, which under din-shell doesn't exist, so every page saw light.
 // Din is the desktop here: the shell reports its own light/dark mode and
 // nativeTheme passes it on to every web contents, browser tabs included.
 //
@@ -4850,8 +4850,8 @@ function registerCrxHandlers(): void {
 // ---------------------------------------------------------------------------
 // DevTools for the web browser app (window.dinos.devtools - see preload.cjs).
 //
-// Din runs fullscreen with a single native window (cage shows exactly one
-// surface), so Electron's default detached-devtools window is unusable.
+// Din runs fullscreen with a single native window (din-shell shows exactly one
+// window), so Electron's default detached-devtools window is unusable.
 // Instead, devtools dock inside the browser tab: the shell renders a second
 // <webview> (the "host") below the page, and the host loads the bundled
 // DevTools frontend connected to the inspected tab over a loopback CDP
@@ -5442,8 +5442,8 @@ app.whenReady().then(() => {
   // Route chrome.action popups into the shell instead of native windows.
   overrideActionPopup();
 
-  // Production runs with no window manager (cage on DinOS, or a bare X11
-  // login session via os/x11). cage force-fills the one app across every
+  // Production runs with no window manager (din-shell on DinOS, or a bare X11
+  // login session via os/x11). din-shell force-fills the one app across every
   // output, but bare X11 has nothing to honor the EWMH fullscreen hint, so
   // the window would sit at its default size letterboxed on a black screen.
   // Size it to cover every display explicitly and drop the frame;
@@ -5455,7 +5455,7 @@ app.whenReady().then(() => {
   const spanX11 = DISPLAY_TOOL === 'xrandr' && screen.getAllDisplays().length > 1;
   // Fullscreen and kiosk are applied when the window is revealed (below),
   // not here: asking for them at construction maps the window at once on
-  // Wayland, show: false or not, and cage then presents Chromium's white
+  // Wayland, show: false or not, and din-shell then presents Chromium's white
   // surface before the page's first frame.
   const fullscreen = production && !spanX11;
   const win = new BrowserWindow({
@@ -5467,7 +5467,7 @@ app.whenReady().then(() => {
     autoHideMenuBar: true,
     backgroundColor: '#0b0f14',
     // Stay hidden until the renderer reports its first frame is ready (the
-    // shell:bootReady gate below). With no window manager (cage on DinOS,
+    // shell:bootReady gate below). With no window manager (din-shell on DinOS,
     // bare X11 otherwise), showing early presents an unpainted surface — a
     // white/pixelated glitch frame. The renderer then fades in from black.
     show: false,
@@ -5569,7 +5569,7 @@ app.whenReady().then(() => {
     }
     // Every frame of a web page needs PRINT_PRELOAD: a frame from another
     // origin calling its own print() would otherwise open Chromium's GTK
-    // print dialog, which takes over the whole screen under cage. The other
+    // print dialog, which takes over the whole screen under din-shell. The other
     // session preloads guard themselves to the top document.
     if (ephemeralTab) {
       webPreferences.nodeIntegrationInSubFrames = true;
@@ -6051,7 +6051,7 @@ app.on('web-contents-created', (_event, contents) => {
   // switches desktop windows. Keyboard focus lives in the guest then, so
   // the shell can't see the keys itself - forward them. Private and Tor tabs
   // too: left to Chromium, the devtools toggle opens DevTools in a window of
-  // its own, which cage can't show next to Din.
+  // its own, which din-shell can't show next to Din.
   if (isAnyBrowserTab) {
     contents.on('before-input-event', (event, input) => {
       if (isDevtoolsToggleInput(input)) {

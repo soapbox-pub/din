@@ -1,7 +1,7 @@
 /**
  * XCursor themes as a source: a directory with a cursors/ directory of
  * XCursor files, and maybe an index.theme. Every file is decoded into
- * frames and written anew, so what cage, Chromium and libXcursor end up
+ * frames and written anew, so what din-shell, Chromium and libXcursor end up
  * reading is always a file Din made.
  */
 

@@ -1,4 +1,8 @@
-//! din-compositor: a headless Wayland compositor for Din's embedded display.
+//! din-compositor: Din's Wayland compositors.
+//!
+//! `din-compositor session -- PROGRAM` is the screen's compositor, which DinOS
+//! runs Din itself under (session/). Without arguments it is the headless
+//! compositor for Din's embedded display, described here.
 //!
 //! Native Linux apps connect to it like to any Wayland desktop; nothing
 //! reaches a screen. Each toplevel and popup is composited offscreen with
@@ -18,6 +22,7 @@ mod constraints;
 mod frames;
 mod gpu;
 mod logic;
+mod session;
 mod state;
 mod stats;
 mod wire;
@@ -43,6 +48,11 @@ fn env_size(name: &str, fallback: i32) -> i32 {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("session") {
+        std::process::exit(session::run(&args[1..]));
+    }
+
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("event loop");
     let display: Display<State> = Display::new().expect("wayland display");
     let dh = display.handle();

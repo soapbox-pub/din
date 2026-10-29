@@ -622,7 +622,7 @@ expose('siteLocations', {
 });
 
 // Display bridge (window.dinos.display), backed by the display:* handlers in
-// main.mts (wlr-randr under cage, xrandr on bare X11). Used by the Settings
+// main.mts (wlr-randr under din-shell, xrandr on bare X11). Used by the Settings
 // app to arrange the outputs: resolution, position, on/off and which one is
 // primary. `available: false` where the outputs can't be managed, so the
 // panel can render a fallback.

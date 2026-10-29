@@ -1,7 +1,7 @@
 // The pointer: its theme and size, which Settings → Appearance shows and
 // changes, and the themes the user imports (electron/cursorImport.mts).
 //
-// Chromium on Wayland draws its own cursors (cage has no cursor-shape
+// Chromium on Wayland draws its own cursors (din-shell has no cursor-shape
 // protocol), loading them from the XCursor theme GTK names. GTK takes the
 // name and size from GSettings (org.gnome.desktop.interface cursor-theme and
 // cursor-size), and tells Chromium when they change, so a new theme or size

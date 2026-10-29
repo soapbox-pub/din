@@ -120,16 +120,19 @@ let
     filter = path: _type: baseNameOf path != "target";
   };
 
-  # The headless Wayland compositor native apps run on. libEGL is dlopen()ed
-  # rather than linked, so glvnd goes on its rpath; glvnd finds the real
-  # driver under /run/opengl-driver (hardware.graphics).
+  # Din's Wayland compositors: the screen's (`din-compositor session`, which
+  # Din runs under; see din-shell below) and the headless one native apps
+  # run on. The screen's takes its seat through libseat (logind), its
+  # displays and input from udev and libinput. libEGL is dlopen()ed rather
+  # than linked, so glvnd goes on its rpath; glvnd finds the real driver
+  # under /run/opengl-driver (hardware.graphics).
   din-compositor = pkgs.rustPlatform.buildRustPackage {
     pname = "din-compositor";
     version = "0.1.0";
     src = native-src "din-compositor";
     cargoLock.lockFile = din-root + "/native/din-compositor/Cargo.lock";
     nativeBuildInputs = [ pkgs.pkg-config ];
-    buildInputs = with pkgs; [ libgbm libdrm pixman libxkbcommon ];
+    buildInputs = with pkgs; [ libgbm libdrm pixman libxkbcommon libinput seatd systemdLibs ];
     postFixup = ''
       patchelf --add-rpath ${pkgs.libglvnd}/lib $out/bin/din-compositor
     '';
@@ -145,7 +148,7 @@ let
 
   # deckmon, the AirPlay sender behind screen sharing (electron/airplay.mts),
   # from its repository (the flake's `deckmon` input). It captures the screen
-  # through cage's wlroots screencopy and encodes with GStreamer: VA-API on
+  # through din-shell's wlroots screencopy and encodes with GStreamer: VA-API on
   # the GPU, x264 or OpenH264 without one. pactl gives the receiver its sound
   # output, wlr-randr sets the size of the display it adds to extend the
   # desktop, and tee writes that display's EDID (through sudo, below).
@@ -362,8 +365,8 @@ let
     [ -n "$1" ] && [ "$loader" = "$(echo "$1" | ${pkgs.coreutils}/bin/tr A-F a-f)" ]
   '';
 
-  # Launcher: Electron running the Din host on Wayland (cage provides the
-  # compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
+  # Launcher: Electron running the Din host on Wayland (din-shell provides
+  # the compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
   # variant below can swap in software rendering.
   # python3 must be on PATH for the Terminal app's pty host (pty-host.py),
   # nmcli for the Settings app's WiFi bridge, brightnessctl + gammastep for the
@@ -371,7 +374,7 @@ let
   # (wireplumber) for the Settings sound bridge's device/stream control and
   # pw-play (pipewire) for its test tone, pactl (pulseaudio's client, talking
   # to pipewire-pulse) for its change monitor and card profiles, wlr-randr
-  # for the Settings display bridge's monitor arrangement (via cage),
+  # for the Settings display bridge's monitor arrangement (via din-shell),
   # Xwayland for X11 apps on the
   # embedded display native Linux apps run on (electron/native-display.mts)
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
@@ -410,18 +413,11 @@ let
     # file chooser) open their windows on its embedded display
     # (electron/native-display.mts).
     export DIN_DESKTOP_SESSION=1
-    # cage shows its newest window fullscreen with all the input, so anything
-    # that opens a window on it takes Din's place, and there's no way back.
-    # Wayland clients without a WAYLAND_DISPLAY look for wayland-0, which is
-    # cage's; moving its socket aside leaves them failing to connect instead.
-    # Only Din (and what it starts with its own environment, like wlr-randr
-    # and gammastep) knows the new name. cage's lock file stays, so no other
-    # compositor takes wayland-0 either.
-    if [ -n "$WAYLAND_DISPLAY" ] && [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then
-      ${pkgs.coreutils}/bin/mv -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$XDG_RUNTIME_DIR/din-shell"
-      export WAYLAND_DISPLAY=din-shell
-    fi
-    # Chromium logging into the journal (via cage), for diagnosing real hardware.
+    # WAYLAND_DISPLAY is din-shell, the screen's compositor, which only Din
+    # (and what it starts with its own environment, like wlr-randr and
+    # gammastep) is told about: clients that guess wayland-0 don't open
+    # windows on the screen.
+    # Chromium logging into the journal (via din-shell), for diagnosing real hardware.
     export ELECTRON_ENABLE_LOGGING=1
     # Chromium dlopens libva for hardware video decoding (VA-API), and
     # Electron's wrapper doesn't put it on the library path, so without this
@@ -460,9 +456,9 @@ let
   din-launcher = makeDinLauncher "";
 
   # Pointer themes for Settings → Appearance → Cursor (electron/cursor.mts).
-  # Without any, Chromium and cage fall back to the tiny X11 arrow and
+  # Without any, Chromium and din-shell fall back to the tiny X11 arrow and
   # Chromium's own bitmaps, with no resize cursors at all. A `default` theme
-  # points X11 apps and cage's own cursor at Capitaine, DinOS's default. Only a
+  # points X11 apps and din-shell's own cursor at Capitaine, DinOS's default. Only a
   # few of each family are copied in: all of Bibata is over 300 MB.
   din-cursor-themes = pkgs.runCommand "din-cursor-themes" { } ''
     mkdir -p $out/share/icons/default
@@ -472,35 +468,13 @@ let
     printf '[Icon Theme]\nInherits=capitaine-cursors\n' > $out/share/icons/default/index.theme
   '';
 
-  # cage creates the gamma-control protocol but never hands it to its scene,
-  # so gamma ramps (night light's gammastep) are accepted and then silently
-  # dropped. And it draws the pointer, until Din sets its own, from the
-  # `default` theme at 24px whatever the user picked; patched, it takes
-  # XCURSOR_THEME and XCURSOR_SIZE, which the wrapper reads from dconf (the
-  # GSettings Din's Settings writes, electron/cursor.mts), so the pointer is
-  # the same from the first frame. Din inherits them too. Until Din's window
-  # maps it shows the boot screen's background and no pointer, so there's no
-  # black screen with a cursor between the boot screen and Din. And cage shows
-  # its newest window fullscreen with all the input, so a second window from
-  # Din (Chromium's own detached DevTools, a native dialog) would take its
-  # place with no way back; patched, only the first window is ever shown, and
-  # any other is asked to close. And cage commits each frame as soon as the
-  # last one is on screen, so a frame Din finishes a moment later waits a
-  # whole refresh to be queued, and reaches the screen up to two refreshes
-  # after Din drew it; patched, like sway's max_render_time, it commits
-  # CAGE_MAX_RENDER_TIME ms before the refresh instead. Din's frames are
-  # scanned out as they are (cage barely touches the GPU), so a commit is
-  # quick, and the launcher sets 4 ms: about 12 ms off every frame at 60 Hz.
-  cage-patched = pkgs.cage.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [
-      ./patches/cage-gamma-control.patch
-      ./patches/cage-xcursor-env.patch
-      ./patches/cage-boot-handover.patch
-      ./patches/cage-single-window.patch
-      ./patches/cage-max-render-time.patch
-    ];
-  });
-  cage-launcher = pkgs.writeShellScriptBin "cage" ''
+  # The screen: din-compositor's session mode, Din's own compositor
+  # (native/din-compositor/src/session), running Din's launcher. It takes
+  # XCURSOR_THEME and XCURSOR_SIZE, which this reads from dconf (the
+  # GSettings Din's Settings writes, electron/cursor.mts), so the pointer it
+  # draws before Din sets its own is the user's. Din inherits them too.
+  # `launcher` exists so the QEMU demo can run Din with software rendering.
+  makeShellLauncher = launcher: pkgs.writeShellScriptBin "din-shell" ''
     key=/org/gnome/desktop/interface
     theme=$(${pkgs.dconf}/bin/dconf read $key/cursor-theme 2>/dev/null || true)
     theme=''${theme#\'}
@@ -512,8 +486,7 @@ let
       ""|*[!0-9]*) ;;
       *) export XCURSOR_SIZE="$size" ;;
     esac
-    export CAGE_MAX_RENDER_TIME=''${CAGE_MAX_RENDER_TIME:-4}
-    exec ${cage-patched}/bin/cage "$@"
+    exec ${din-compositor}/bin/din-compositor session -- ${launcher}/bin/din
   '';
 in
 {
@@ -844,7 +817,7 @@ in
 
   # Desktop, Documents, Downloads, Music, Pictures, Videos, ... in the home
   # directory, and ~/.config/user-dirs.dirs naming them for other apps.
-  # xdg-user-dirs' unit waits for a graphical session target that cage never
+  # xdg-user-dirs' unit waits for a graphical session target that din-shell never
   # reaches, so it runs at login instead.
   systemd.packages = [ pkgs.xdg-user-dirs ];
   systemd.user.services.xdg-user-dirs.wantedBy = [ "default.target" ];
@@ -897,34 +870,104 @@ in
     ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TEST=="/var/lib/din/keyboard-remap", IMPORT{file}="/var/lib/din/keyboard-remap", IMPORT{builtin}="keyboard"
   '';
 
-  # cage: a Wayland compositor that runs exactly one fullscreen application.
-  # This is the entire graphical stack - no X11, no display manager, no desktop.
-  # With several monitors, cage's default "extend" mode stretches Din's one
-  # window across all of them; Din lays itself out per monitor from there.
-  services.cage = {
-    enable = true;
-    user = "din";
-    program = "${din-launcher}/bin/din";
-    # cage swallows Ctrl+Alt+Fn unless told otherwise. Without it there is no
-    # way to reach a text login on another VT when Din hangs.
-    extraArguments = [ "-s" ];
-    package = cage-launcher;
+  # din-shell: Din on the screen. This is the entire graphical stack - no
+  # X11, no display manager, no desktop: Din's own compositor (see
+  # makeShellLauncher) on tty1, running Din. With several monitors, Din's one
+  # window covers them all, and Din lays itself out per monitor from there.
+  # Ctrl+Alt+Fn reaches a text login on another VT when Din hangs.
+  #
+  # The unit logs `din` in the way a getty would, with a PAM session that
+  # gives it a logind session on the seat, which its compositor takes the
+  # GPU and input devices through.
+  systemd.services.din-shell = {
+    description = "Din, on the screen";
+    after = [
+      "systemd-user-sessions.service"
+      "plymouth-start.service"
+      "plymouth-quit.service"
+      "systemd-logind.service"
+      "getty@tty1.service"
+    ];
+    before = [ "graphical.target" ];
+    wants = [ "dbus.socket" "systemd-logind.service" "plymouth-quit.service" ];
+    wantedBy = [ "graphical.target" ];
+    conflicts = [ "getty@tty1.service" ];
+    # A system switch must never restart it: that's Din, and everything in it.
+    restartIfChanged = false;
+    unitConfig = {
+      ConditionPathExists = "/dev/tty1";
+      # A GPU whose driver isn't in the initrd (amdgpu, i915 and xe are) gets
+      # it after the disk unlocks, and the compositor can start before it
+      # has: it finds no GPU and exits. It tries again until the driver is
+      # there.
+      StartLimitIntervalSec = 60;
+      StartLimitBurst = 10;
+    };
+    serviceConfig = {
+      ExecStart = "${makeShellLauncher din-launcher}/bin/din-shell";
+      User = "din";
+      PAMName = "din-shell";
+      IgnoreSIGPIPE = "no";
+      # Logged in utmp, for `w` and `who`, as a getty would.
+      UtmpIdentifier = "%n";
+      UtmpMode = "user";
+      TTYPath = "/dev/tty1";
+      TTYReset = "yes";
+      TTYVHangup = "yes";
+      TTYVTDisallocate = "yes";
+      StandardInput = "tty-fail";
+      StandardOutput = "journal";
+      StandardError = "journal";
+      # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
+      # writes (os/din-keyboard.sh). The compositor applies it, and Din
+      # inherits it.
+      EnvironmentFile = "-/var/lib/din/keyboard";
+      Restart = "on-failure";
+      RestartSec = 1;
+    };
   };
-  # The keyboard layout, as XKB_DEFAULT_* lines that Settings → Keyboard
-  # writes (os/din-keyboard.sh). cage applies it, and Din inherits it.
-  systemd.services.cage-tty1.serviceConfig.EnvironmentFile = "-/var/lib/din/keyboard";
-  # A GPU whose driver isn't in the initrd (amdgpu, i915 and xe are) gets it
-  # after the disk unlocks, and cage can start before it has: it finds no
-  # GPU and exits, leaving a black screen. It tries again until the driver
-  # is there.
-  systemd.services.cage-tty1.serviceConfig.Restart = "on-failure";
-  systemd.services.cage-tty1.serviceConfig.RestartSec = 1;
-  systemd.services.cage-tty1.unitConfig.StartLimitIntervalSec = 60;
-  systemd.services.cage-tty1.unitConfig.StartLimitBurst = 10;
+  security.pam.services.din-shell = {
+    useDefaultRules = false;
+    rules = {
+      auth.unix = {
+        order = 10000;
+        control = "required";
+        modulePath = "${config.security.pam.package}/lib/security/pam_unix.so";
+        settings.nullok = true;
+      };
+      account.unix = {
+        order = 10000;
+        control = "required";
+        modulePath = "${config.security.pam.package}/lib/security/pam_unix.so";
+      };
+      session = {
+        unix = {
+          order = 10000;
+          control = "required";
+          modulePath = "${config.security.pam.package}/lib/security/pam_unix.so";
+        };
+        env = {
+          order = 10100;
+          control = "required";
+          modulePath = "${config.security.pam.package}/lib/security/pam_env.so";
+          settings.conffile = "/etc/pam/environment";
+          settings.readenv = 0;
+        };
+        systemd = {
+          order = 10200;
+          control = "required";
+          modulePath = "${config.systemd.package}/lib/security/pam_systemd.so";
+        };
+      };
+    };
+  };
+  security.polkit.enable = true;
+  systemd.targets.graphical.wants = [ "din-shell.service" ];
+  systemd.defaultUnit = "graphical.target";
 
-  # cage's unit conflicts with the console login on tty1 (autovt@tty1), which
-  # getty.target still wants. A system switch re-starts both targets, and
-  # whichever job runs last wins: Din was restarted or stopped on every
+  # din-shell's unit conflicts with the console login on tty1 (autovt@tty1),
+  # which getty.target still wants. A system switch re-starts both targets,
+  # and whichever job runs last wins: Din was restarted or stopped on every
   # switch. Other VTs still get a login on demand.
   systemd.targets.getty.wants = lib.mkForce [ ];
 
@@ -1012,8 +1055,8 @@ in
     ]
     # Not on a Mac, but what developers install first.
     ++ [ ripgrep fd bat htop tree wget gh ]
-    # Screenshots of the whole screen. Cage's socket is renamed to din-shell
-    # (see the launcher above), so: WAYLAND_DISPLAY=din-shell grim x.png
+    # Screenshots of the whole screen, from din-shell's screencopy:
+    # WAYLAND_DISPLAY=din-shell grim x.png
     ++ [ grim slurp ]
     # The clipboard from the command line (wl-copy, wl-paste, xclip). Native
     # apps' clipboard is Din's, so these reach the whole desktop.
@@ -1152,7 +1195,7 @@ in
   # Plymouth covers the rest with the boot screen. And no text console on
   # tty1, where the boot screen and Din are: it took the screen whenever
   # something printed while neither had it, like between the boot screen
-  # and cage, or "reboot: Restarting system", which `quiet` doesn't stop.
+  # and Din, or "reboot: Restarting system", which `quiet` doesn't stop.
   # The other terminals (Ctrl+Alt+F2) still have one.
   boot.loader.timeout = 0;
   boot.consoleLogLevel = 3;
@@ -1186,12 +1229,12 @@ in
   # password is typed through the console's US keymap.
   boot.initrd.systemd.storePaths = [ pkgs.xkeyboard_config ];
   boot.initrd.kernelModules = [ "evdev" ];
-  # Handing the screen to cage. When plymouthd exits, the kernel takes its
-  # last frame off the screen, and it's black until cage lights it. So, as
-  # GDM does, Plymouth is only deactivated before cage starts: it gives up
-  # the GPU but stays, and its frame stays up. It quits once cage has the
-  # screen, which is when cage starts Din's launcher, and the launcher moves
-  # cage's socket to din-shell; or after 20 seconds, if that never happens.
+  # Handing the screen to din-shell. When plymouthd exits, the kernel takes
+  # its last frame off the screen, and it's black until din-shell lights it.
+  # So, as GDM does, Plymouth is only deactivated before din-shell starts: it
+  # gives up the GPU but stays, and its frame stays up. It quits once
+  # din-shell has the screen, which is when its socket (din-shell) appears;
+  # or after 20 seconds, if that never happens.
   systemd.services.plymouth-quit.serviceConfig.ExecStart = [
     ""
     "${config.boot.plymouth.package}/bin/plymouth deactivate"
@@ -1199,7 +1242,7 @@ in
   systemd.services.dinos-boot-screen-quit = {
     description = "Close the boot screen once Din's compositor has the screen";
     wantedBy = [ "multi-user.target" ];
-    after = [ "plymouth-quit.service" "cage-tty1.service" ];
+    after = [ "plymouth-quit.service" "din-shell.service" ];
     serviceConfig = {
       Type = "oneshot";
       # Once a boot: later, Plymouth may be the lock screen (os/din-lock.py).
@@ -1592,7 +1635,7 @@ in
   systemd.services.dinos-live-caches = {
     description = "Keep Din's caches in memory on a USB stick";
     wantedBy = [ "multi-user.target" ];
-    before = [ "systemd-user-sessions.service" "cage-tty1.service" ];
+    before = [ "systemd-user-sessions.service" "din-shell.service" ];
     after = [ "dinos-live.service" "local-fs.target" ];
     unitConfig.ConditionPathExists = "/run/din/live";
     path = [ pkgs.util-linux pkgs.coreutils ];
@@ -1622,7 +1665,7 @@ in
     "vfat" "nls_cp437" "nls_iso8859_1"
     # The GPU's driver, which udev loads for the hardware there is. Loaded
     # after root, it takes the screen from the firmware's framebuffer and
-    # leaves the panel off until cage lights it again; here it's up early
+    # leaves the panel off until din-shell lights it again; here it's up early
     # and the boot screen moves onto it. On AMD the panel still goes off for
     # about a second then, wherever it supports VSC SDP colorimetry: amdgpu
     # won't keep the firmware's picture for those (dc_validate_boot_timing).
@@ -1630,7 +1673,7 @@ in
     "amdgpu" "i915" "xe"
   ];
 
-  # GPU acceleration for cage/Electron, plus the firmware real WiFi and
+  # GPU acceleration for din-shell/Electron, plus the firmware real WiFi and
   # graphics hardware needs.
   hardware.graphics.enable = true;
   hardware.enableRedistributableFirmware = true;
@@ -1655,7 +1698,7 @@ in
   # PipeWire + WirePlumber back Din's sound panel (wpctl/pw-play via the
   # Electron audio bridge): output/input device selection, per-app volume, and
   # the test tone. rtkit lets the audio threads run at real-time priority.
-  # Socket-activated per user session, so the `din` cage session gets its own
+  # Socket-activated per user session, so the `din` session gets its own
   # instance with no extra configuration.
   security.rtkit.enable = true;
   services.pipewire = {
@@ -1668,7 +1711,7 @@ in
   # the sessions; it runs in the user manager rather than under Din, so that
   # `deckmon` in the Terminal reaches the same one (one it started itself
   # would capture the Terminal's nested display, not the screen). It finds
-  # cage by the socket name Din's launcher gives it. Receivers are found over
+  # din-shell by its socket's name. Receivers are found over
   # mDNS, and send timing and sound control back to airplayPorts.
   systemd.user.services.deckmon = {
     description = "AirPlay sender";
@@ -1705,8 +1748,8 @@ in
     # the Terminal app needs WebGL for crisp box-drawing glyphs ("unsafe" =
     # SwiftShader is not security-maintained against untrusted WebGL content;
     # acceptable for a demo).
-    services.cage.program = lib.mkForce
-      "${makeDinLauncher "--disable-gpu --enable-unsafe-swiftshader"}/bin/din";
+    systemd.services.din-shell.serviceConfig.ExecStart = lib.mkForce
+      "${makeShellLauncher (makeDinLauncher "--disable-gpu --enable-unsafe-swiftshader")}/bin/din-shell";
 
     # Serial console so `npm run os:run` shows boot logs in the terminal too.
     # Plymouth would draw on the serial console instead of the window.

@@ -10,7 +10,7 @@ pkgs.testers.runNixOSTest {
   node.specialArgs = { inherit din deckmon; };
   nodes.machine = {
     imports = modules;
-    services.cage.enable = pkgs.lib.mkForce false;
+    systemd.services.din-shell.enable = pkgs.lib.mkForce false;
     fonts.packages = [ pkgs.inter ];
     virtualisation.memorySize = 2048;
     virtualisation.resolution = { x = 1280; y = 800; };

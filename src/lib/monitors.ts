@@ -2,9 +2,9 @@
  * The physical monitors Din's one window spans, and the geometry the desktop
  * derives from them.
  *
- * On DinOS, cage stretches the shell window over every connected output (its
- * default "extend" mode), and on a bare X11 session the host sizes the
- * window to the union of the outputs itself. Either way the renderer sees one
+ * On DinOS, din-shell stretches the shell window over every connected
+ * output, and on a bare X11 session the host sizes the window to the union
+ * of the outputs itself. Either way the renderer sees one
  * big viewport; this module says where each monitor sits inside it, so the
  * desktop can keep the menu bar and Dock on the primary monitor, maximize
  * windows to the monitor they're on, and keep them out of the dead areas

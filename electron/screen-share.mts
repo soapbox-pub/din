@@ -2,7 +2,7 @@
 // browser tab or an installed web app (Meet, Jitsi, Discord in the browser).
 //
 // Electron refuses getDisplayMedia unless the session has a display-media
-// handler, and there is no desktop picker to fall back on under cage. Din is
+// handler, and there is no desktop picker to fall back on under din-shell. Din is
 // one shell window with every page a <webview> inside it, so nothing outside
 // Electron is needed: the whole screen is the shell's own main frame (every
 // window, native apps, the menu bar and the dock, as Screenshot sees it), and

@@ -3,7 +3,7 @@
  * (`window.dinos.devtools`, see electron/preload.cjs + electron/main.cjs).
  *
  * The bridge lets the Web Browser app dock Chrome DevTools inside a tab.
- * Din runs as a single native window (fullscreen kiosk under cage), so the
+ * Din runs as a single native window (fullscreen kiosk under din-shell), so the
  * default detached devtools window is unusable; instead the browser renders
  * a devtools host <webview> below the page, and the main process loads the
  * bundled DevTools frontend in it, connected to the inspected tab over a

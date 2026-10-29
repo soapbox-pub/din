@@ -133,7 +133,7 @@ function findBinary(): string | null {
 
 /**
  * What OpenCode and the agent's commands run with: Din's own environment,
- * minus the displays. Under cage, a window opened on Din's display takes
+ * minus the displays. Under din-shell, a window opened on Din's display takes
  * its place, fullscreen; the server outlives the embedded display apps get,
  * so it gets neither. Chromium's own edits come out too (see
  * native-display.mts's launchEnvironment), and the session bus goes back.

@@ -385,9 +385,9 @@ export function Dock({
     if (!intersecting) setRevealed(false);
   }
   //
-  // The pointer can also leave the window entirely: cage parks a cursor
-  // shoved into the bottom edge on the row just past the last one Din covers,
-  // and from there Din gets no pointer events at all - not for a fast throw
+  // The pointer can also leave the window entirely: a compositor may park a
+  // cursor shoved into the bottom edge on the row just past the last one Din
+  // covers (cage did), and from there Din gets no pointer events at all - not for a fast throw
   // that skips the hot zone, nor for a slide along the edge. A mouse leaving
   // the window near the primary monitor's bottom edge therefore counts as
   // reaching it.

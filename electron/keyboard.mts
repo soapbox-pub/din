@@ -13,7 +13,7 @@
 // Settings changes the system's layout where Din knows how. On DinOS that's
 // os/din-keyboard.sh, which DinOS's launcher names in DIN_KEYBOARD and the
 // shell's user runs through sudo without a password, like the updater's
-// helper. cage reads the layout when it starts, so native apps switch at
+// helper. din-shell reads the layout when it starts, so native apps switch at
 // once and Din's own windows after Din restarts. On GNOME it's the desktop's
 // input sources, which switch everything at once. Elsewhere the layout is
 // shown but not changed.
@@ -83,7 +83,7 @@ function isGnome(): boolean {
   return /gnome/i.test(process.env.XDG_CURRENT_DESKTOP ?? '');
 }
 
-/** XKB_DEFAULT_*: how cage, sway and other wlroots compositors are told. */
+/** XKB_DEFAULT_*: how din-shell, sway and other wlroots compositors are told. */
 function fromEnvironment(): Keymap | null {
   const env = process.env;
   return toKeymap({
@@ -254,7 +254,7 @@ async function fromLayoutFile(): Promise<Keymap | null> {
 
 /**
  * The OS's layout, from the most specific place that has one. On DinOS
- * that's the layout file, which is newer than what cage was started with
+ * that's the layout file, which is newer than what din-shell was started with
  * when Settings has changed it since. Elsewhere it's what Din's own
  * compositor was told, then the desktop's settings, the live X server, and
  * the system-wide defaults.
@@ -451,7 +451,7 @@ export function registerKeyboardHandlers(options: {
     return {
       layout: await describe(current),
       canChange: canChange(),
-      // cage still has the layout it started with (and passed down to Din).
+      // din-shell still has the layout it started with (and passed down to Din).
       restartNeeded: Boolean(HELPER) && !sameLayout(current, fromEnvironment() ?? DEFAULT_KEYMAP),
     };
   });

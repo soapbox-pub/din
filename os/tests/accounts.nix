@@ -30,7 +30,7 @@ pkgs.testers.runNixOSTest {
   nodes.machine = {
     imports = modules;
     # Din itself isn't under test, and has no GPU here.
-    services.cage.enable = pkgs.lib.mkForce false;
+    systemd.services.din-shell.enable = pkgs.lib.mkForce false;
     users.users.stranger.isNormalUser = true;
     environment.systemPackages = [ pkgs.keyutils pkgs.cryptsetup pkgs.libsecret ];
     virtualisation.memorySize = 2048;

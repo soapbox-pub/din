@@ -10,7 +10,7 @@ pkgs.testers.runNixOSTest {
   node.specialArgs = { inherit din deckmon; };
   nodes.machine = {
     imports = modules;
-    services.cage.enable = pkgs.lib.mkForce false;
+    systemd.services.din-shell.enable = pkgs.lib.mkForce false;
     virtualisation.memorySize = 2048;
     services.fwupd.daemonSettings.TestDevices = true;
   };

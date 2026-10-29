@@ -3,7 +3,7 @@
  * (`window.dinos.power`, see electron/preload.cjs + electron/main.cjs).
  *
  * Backed by /sys/class/power_supply in the main process, so it works on any
- * Linux session (cage/Wayland or bare X11) with no external dependency. On
+ * Linux session (din-shell/Wayland or bare X11) with no external dependency. On
  * machines with no battery (desktops, the QEMU VM) or in a plain browser the
  * bridge is absent or `status()` resolves with `available: false`; callers
  * must feature-detect and render nothing / a fallback.
