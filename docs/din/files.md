@@ -117,6 +117,18 @@ only from those folders.
 
 `din.permissions.has('fs')` is false for these; `din.system.fs` is there.
 
+### Paths nothing granted
+
+Some state names files by path that the user never handed over this time:
+songs a playlist lists elsewhere, the folders a library watches.
+`din.files.requestAccess(paths, reason)` asks for them and resolves with
+handles for those granted (with `file-folders`, their folders come into
+reach). Paths the app's own saved state named when it moved out of the
+desktop are granted without asking, on that first launch (the state it
+kept in the desktop's storage, and files its manifest's `migrateFiles`
+copied in): the app had them then. Anything else, the desktop asks the
+user, showing the paths and `reason`.
+
 Apps with `fs` reach files by path through `din.system.fs` anyway.
 `din.files.fromPath(path)` gives one of them a handle for a path, to hand
 the file to another app with `din.app.open`. To load a file by path,

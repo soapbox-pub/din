@@ -391,6 +391,8 @@ export interface OpenFileOptions {
   writable?: boolean;
   /** Start in this folder, beside this file, or in a named folder of home. */
   startIn?: DinFileHandle | 'documents' | 'pictures' | 'music' | 'videos' | 'downloads';
+  /** The button that picks ("Add"); Open or Select by default. */
+  confirmLabel?: string;
 }
 
 export interface SaveFileOptions {
@@ -413,6 +415,16 @@ export interface DinFiles {
   restore(token: string): Promise<DinFileHandle | null>;
   /** Forget a `persist()` token the app no longer keeps (a Recent entry removed). */
   release(token: string): void;
+  /**
+   * Files and folders by path that nothing granted the app: songs a playlist
+   * names elsewhere, folders its saved state lists. Resolves with handles for
+   * those it may have (and, with `file-folders`, their folders come into
+   * reach). On an app's first launch after it moved out of the desktop,
+   * paths its own saved state named then are granted without asking;
+   * otherwise the desktop asks the user, giving `reason`. Missing paths are
+   * left out.
+   */
+  requestAccess(paths: string[], reason?: string): Promise<DinFileHandle[]>;
   /**
    * A handle for a path, for apps with `fs`, which reach files by path
    * anyway (`din.system.fs`) but want a handle's `url()` or to hand the
@@ -823,5 +835,12 @@ export interface DinManifest {
      * token) in the app's storage, once.
      */
     migrateRecentFiles?: string[];
+    /**
+     * Files the app kept elsewhere before it moved, to copy once into its
+     * folders: `{ "~/.local/share/din/x.json": "~/.local/share/din/app/x.json" }`.
+     * Copied on a launch when the destination is missing; paths they name
+     * count as the app's saved state for `din.files.requestAccess`.
+     */
+    migrateFiles?: Record<string, string>;
   };
 }

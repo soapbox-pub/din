@@ -527,6 +527,7 @@ async function start(): Promise<Din> {
       return wrap(await request('files.fromPath', { path }));
     },
     release: (token) => tell('files.release', { token }),
+    requestAccess: async (paths, reason) => (await request('files.requestAccess', { paths, reason })).map(wrap),
     pathUrl: (path) => {
       needFs();
       if (!h.fsUrlBase) throw new Error('File URLs are only available inside Din');

@@ -101,6 +101,7 @@ export interface Requests {
   'window.tabDragEnd': [{ at: Point }, { windowId: string; at: Point } | null];
   'files.parent': [{ handle: string }, HandleData | null];
   'files.release': [{ token: string }, void];
+  'files.requestAccess': [{ paths: string[]; reason?: string }, HandleData[]];
   'assistant.setSettings': [Partial<Pick<AssistantSettings, 'enabled' | 'model'>>, void];
   'assistant.follow': [{ sessionID: string }, void];
   'assistant.viewing': [{ sessionID: string | null }, void];

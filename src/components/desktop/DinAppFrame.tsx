@@ -3,6 +3,16 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Hourglass, RotateCw, Unplug } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { DataMenuBar, PointMenu } from '@/components/desktop/dinHost/DataMenus';
 import { onThemeChange, themeSnapshot } from '@/components/desktop/dinHost/theme';
@@ -174,6 +184,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const [popup, setPopup] = useState<{ at: { x: number; y: number }; items?: MenuItem[]; resolve?: (id: string | null) => void; windowMenu?: boolean } | null>(null);
   const [frameMode, setFrameMode] = useState<WindowChrome['frame']>(manifest.din.window?.frame ?? 'standard');
   const [moving, setMoving] = useState(false);
+  const [accessRequest, setAccessRequest] = useState<{ paths: string[]; reason: string; resolve: (allowed: boolean) => void } | null>(null);
   /** Apps waiting on the move or resize they began to end. */
   const moveEnded = useRef<(() => void)[]>([]);
   const [loadKey, setLoadKey] = useState(0);
@@ -203,6 +214,12 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     fsGranted: boolean;
     /** Roots on their way to main: replies wait for them. */
     scoping: Promise<unknown>;
+    /**
+     * On the launch that moved the app's state out of the desktop: that
+     * state (and files migrated with it), whose paths requestAccess grants
+     * without asking. Empty otherwise.
+     */
+    carryOver: string;
   } | null>(null);
 
   /** What the app is playing, among the desktop's media sources (registered below). */
@@ -545,6 +562,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           directory: o.directory,
           filters: o.types?.map((t) => ({ name: t.description, patterns: t.extensions.map((e) => `*${e.startsWith('.') ? e : `.${e}`}`), mimeTypes: [] })),
           initialPath: start,
+          confirmLabel: typeof o.confirmLabel === 'string' ? o.confirmLabel.slice(0, 40) : undefined,
         });
         return result ? grantPaths(result.paths, o.writable !== false) : [];
       },
@@ -619,6 +637,23 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       },
       'files.persist': ({ handle }) => persistGrant({ appId, ...grantOf(handle) }),
       'files.release': ({ token }) => releaseGrant(appId, String(token)),
+      'files.requestAccess': async ({ paths, reason }) => {
+        const s = session.current;
+        const wanted = [...new Set((Array.isArray(paths) ? paths : []).filter((p): p is string => typeof p === 'string' && p.startsWith('/')))].slice(0, 5000);
+        if (!s || wanted.length === 0) return [];
+        // Named by its own saved state from before it moved (as written, or
+        // JSON-escaped), or within reach already: no need to ask.
+        const known = (p: string) => s.carryOver.includes(p) || s.carryOver.includes(JSON.stringify(p).slice(1, -1));
+        const ask = wanted.filter((p) => !known(p) && !inScope(p));
+        if (ask.length > 0) {
+          const allowed = await new Promise<boolean>((resolve) =>
+            setAccessRequest({ paths: ask, reason: typeof reason === 'string' ? reason.slice(0, 300) : '', resolve }),
+          );
+          setAccessRequest(null);
+          if (!allowed) return grantPaths(wanted.filter((p) => !ask.includes(p)));
+        }
+        return grantPaths(wanted);
+      },
       'files.parent': ({ handle }) => {
         if (!fileFolders && !permissions.includes('fs')) return null;
         // A file's folder only: a folder's parent would let file-folders
@@ -833,6 +868,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       fsRoots: scopedFs ? new Set<string>() : null,
       fsGranted: false,
       scoping: Promise.resolve() as Promise<unknown>,
+      carryOver: Object.values(storageToMigrate(manifest) ?? {}).join('\n'),
     };
     session.current = s;
     setReady(false);
@@ -872,6 +908,25 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     const apps = getAppsBridge();
     const fs = getFsBridge();
     let fsUrlBase: string | null = null;
+    // Files it kept elsewhere before it moved, copied in once.
+    if (fs && manifest.din.migrateFiles) {
+      const home = (await fs.homedir()).replace(/\/$/, '');
+      const expand = (p: string) => (p.startsWith('~/') ? `${home}/${p.slice(2)}` : p);
+      for (const [from, to] of Object.entries(manifest.din.migrateFiles)) {
+        const [src, dst] = [expand(from), expand(to)];
+        if (!src.startsWith('/') || !dst.startsWith('/')) continue;
+        const exists = (p: string) => fs.stat(p).then(() => true, () => false);
+        if ((await exists(dst)) || !(await exists(src))) continue;
+        try {
+          const { data } = await fs.readFile(src, 256 * 1024 * 1024);
+          await fs.mkdir(dirname(dst)).catch(() => {});
+          await fs.writeFile(dst, data);
+          s.carryOver += `\n${new TextDecoder().decode(data)}`;
+        } catch (error) {
+          console.error(`din: migrating ${src} for ${appId}:`, error);
+        }
+      }
+    }
     if (scopedFs && s.fsRoots && fs) {
       const home = (await fs.homedir()).replace(/\/$/, '');
       for (const folder of fixedFolders) {
@@ -1208,6 +1263,30 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         </div>
       )}
       {overlay}
+      {accessRequest && (
+        <AlertDialog open onOpenChange={(open) => !open && accessRequest.resolve(false)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Let {appName} open {accessRequest.paths.length === 1 ? basename(accessRequest.paths[0]) : `${accessRequest.paths.length} files and folders`}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {accessRequest.reason || `${appName} asks for files you haven’t given it.`}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <ul className="max-h-40 overflow-auto rounded-md bg-muted/50 px-3 py-2 font-mono text-xs text-muted-foreground">
+              {accessRequest.paths.slice(0, 50).map((p) => (
+                <li key={p} className="truncate">{p}</li>
+              ))}
+              {accessRequest.paths.length > 50 && <li>…and {accessRequest.paths.length - 50} more</li>}
+            </ul>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => accessRequest.resolve(false)}>Don’t Allow</AlertDialogCancel>
+              <AlertDialogAction onClick={() => accessRequest.resolve(true)}>Allow</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
       {menus && <DataMenuBar menus={menus} onAction={(id) => push({ type: 'menuAction', id })} />}
       {popup && (
         <PointMenu
