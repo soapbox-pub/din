@@ -72,7 +72,7 @@ export function useNostrLinks() {
       const parsed = parseNostrUri(uri);
       if (!parsed || !app.nostr) return;
       if (app.native) {
-        launchNativeApp(app.id, parsed.uri);
+        launchNativeApp(app, parsed.uri);
         return;
       }
       if (app.nostr.url) open(app.id, { url: handlerUrl(app.nostr.url, parsed.uri) });

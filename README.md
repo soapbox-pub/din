@@ -50,6 +50,8 @@ light).
   packages:
   - Fedora: `sudo dnf install xorg-x11-server-Xvfb xorg-x11-server-Xwayland pixman-devel mesa-libgbm-devel libxkbcommon-devel`
   - Debian/Ubuntu: `sudo apt install xvfb xwayland libpixman-1-dev libgbm-dev libxkbcommon-dev`
+  - Void: `sudo xbps-install xorg-server-xvfb xorg-server-xwayland pixman-devel libgbm-devel libxkbcommon-devel`
+    (a plain `xorg` install doesn't include Xvfb)
 - Wine, for Windows programs
 - Nix (with flakes enabled; the Determinate installer does this by default) —
   only needed for the DinOS `os:*` commands

@@ -6,12 +6,14 @@
  * whose windows Din composites into its own (see src/lib/nativeDisplay.ts) -
  * so launching one ends with an ordinary Din window, not a foreign toplevel.
  *
- * Outside the Electron shell (`npm run dev:browser`), or where the embedded
- * display can't run (no Xvfb), the bridge is absent or reports
- * `available: false` and the desktop simply shows no native apps.
+ * Outside the Electron shell (`npm run dev:browser`) the bridge is absent and
+ * the desktop shows no native apps. Where the embedded display can't run (no
+ * Xvfb) the bridge reports `available: false` but still lists the apps, and
+ * launching one notifies the user why it can't start.
  */
 
 import { endLaunching, startLaunching } from '@/lib/appLaunches';
+import { notify } from '@/lib/notificationCenter';
 
 /** Registry id prefix for native apps, e.g. `native:org.gnome.Calculator`. */
 export const NATIVE_APP_PREFIX = 'native:';
@@ -95,17 +97,31 @@ export function getNativeAppsBridge(): NativeAppsBridge | undefined {
   return window.dinos?.nativeApps;
 }
 
+/** Strip Electron's IPC error prefix so users see just the underlying message. */
+function cleanNativeAppError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
+}
+
 /**
- * Launch a native app, ignoring failures.
+ * Launch a native app, notifying the user when it can't start.
  *
  * Launching is fire-and-forget by design: the app's window arrives on its
  * own, through the embedded display, and an app that fails to start
- * (uninstalled since the last scan) shouldn't take down the click handler
- * that asked for it.
+ * (uninstalled since the last scan, no Xvfb) shouldn't take down the click
+ * handler that asked for it.
  */
-export function launchNativeApp(appId: string, uri?: string): void {
+export function launchNativeApp(app: { id: string; name: string }, uri?: string): void {
   const bridge = getNativeAppsBridge();
   if (!bridge) return;
-  startLaunching(appId);
-  void bridge.launch(appId, uri).catch(() => endLaunching(appId));
+  startLaunching(app.id);
+  void bridge.launch(app.id, uri).catch((error: unknown) => {
+    endLaunching(app.id);
+    notify({
+      source: { name: 'Din' },
+      title: `Couldn’t open ${app.name}`,
+      body: cleanNativeAppError(error),
+      history: true,
+    });
+  });
 }

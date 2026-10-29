@@ -528,7 +528,7 @@ export function useWindows(
     // desktop - Dock, apps menu, search - launches it without knowing the
     // difference.
     if (app.native && typeof params?.xid !== 'number') {
-      launchNativeApp(appId);
+      launchNativeApp(app);
       return undefined;
     }
 

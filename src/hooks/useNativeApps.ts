@@ -25,8 +25,8 @@ function requireBridge() {
 }
 
 /**
- * Installed Linux applications. Empty outside the Electron shell, and
- * where Din's embedded display can't run.
+ * Installed Linux applications. Empty outside the Electron shell; listed
+ * even where Din's embedded display can't run (`available` is then false).
  */
 export function useNativeApps(): { apps: NativeApp[]; available: boolean } {
   const bridge = getNativeAppsBridge();

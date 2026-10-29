@@ -15,8 +15,8 @@
 // Windows programs ride on both: Wine's Start-menu shortcuts are desktop
 // entries, and opening an .exe launches Wine (see windows-apps.mts).
 //
-// Everything degrades to "unavailable" where the embedded display can't run
-// (no Xvfb installed).
+// Where the embedded display can't run (no Xvfb installed), apps are still
+// listed, and launching one fails with a message saying why.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -501,6 +501,19 @@ async function entryFor(appId: string): Promise<DesktopEntry> {
   return entry;
 }
 
+/**
+ * The embedded display, or a throw saying why it can't run, for a user who
+ * clicked an app and got nothing.
+ */
+async function requireDisplay(): Promise<EmbeddedDisplay> {
+  if (!embeddedDisplayAvailable()) {
+    throw new Error('Linux apps need Xvfb, which isn’t installed. Install it with your package manager, then try again.');
+  }
+  const display = await embeddedDisplay();
+  if (!display) throw new Error('Din’s display for Linux apps didn’t start.');
+  return display;
+}
+
 /** Where an entry's program runs: its Path=, else home. */
 function entryCwd(entry: DesktopEntry): string {
   return entry.cwd && fs.existsSync(entry.cwd) ? entry.cwd : os.homedir();
@@ -520,8 +533,7 @@ async function launch(appId: string, uri?: string): Promise<void> {
   if (uri !== undefined && (entry.urlIndex === null || !scheme || !entry.schemes.includes(scheme))) {
     throw new Error(`${entry.name} doesn't open ${scheme ?? ''}: links`);
   }
-  const display = await embeddedDisplay();
-  if (!display) throw new Error('The embedded display is unavailable');
+  const display = await requireDisplay();
 
   const argv =
     uri !== undefined && entry.urlIndex !== null
@@ -595,8 +607,7 @@ export async function runWindowsProgram(file: string): Promise<void> {
   if (!path.isAbsolute(file) || !isWindowsProgram(file) || !fs.statSync(file).isFile()) {
     throw new Error('Not a Windows program');
   }
-  const display = await embeddedDisplay();
-  if (!display) throw new Error('The embedded display is unavailable');
+  const display = await requireDisplay();
   const env = await appEnvironment(display);
   const command = await windowsProgramCommand(file, env);
   spawnDetached(command.argv, path.dirname(file), { ...env, ...command.env });
@@ -738,10 +749,12 @@ export function registerNativeAppHandlers(options: {
 
   watchUserApplications(() => options.shell()?.send('native-apps:changed'));
 
+  // Apps are listed even where the display can't run: terminal apps don't
+  // need it, and launching any other says what's missing, where an empty
+  // list would leave the user guessing.
   ipcMain.handle('native-apps:list', async (event) => {
     assertShellSender(event);
-    const available = embeddedDisplayAvailable();
-    return { available, apps: available ? await listApps() : [] };
+    return { available: embeddedDisplayAvailable(), apps: await listApps() };
   });
 
   ipcMain.handle('native-apps:launch', async (event, appId, uri) => {
