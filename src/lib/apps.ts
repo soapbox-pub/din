@@ -22,9 +22,6 @@ const WebPopup = lazy(() =>
 const FileBrowser = lazy(() =>
   import('@/components/desktop/apps/FileBrowser').then((m) => ({ default: m.FileBrowser })),
 );
-const FileViewer = lazy(() =>
-  import('@/components/desktop/apps/FileViewer').then((m) => ({ default: m.FileViewer })),
-);
 const CAD = lazy(() =>
   import('@/components/desktop/apps/CAD').then((m) => ({ default: m.CAD })),
 );
@@ -338,17 +335,10 @@ export const APPS: readonly AppDefinition[] = [
     hidden: true,
     dockAs: 'web-browser',
   },
-  {
-    // One file opened from Files (a picture, a video, some text). Hidden
-    // from the launcher; Files opens it with the file's path in its launch
-    // params. Pictures and videos give their windows icons of their own.
-    id: 'preview',
-    name: 'Preview',
-    icon: '/icons/apps/preview.png',
-    component: FileViewer,
-    defaultSize: { width: 820, height: 600 },
-    hidden: true,
-  },
+  // One file opened from Files (a picture, a video, some text). Hidden
+  // from the launcher; Files opens it with the file's path in its launch
+  // params. Pictures and videos give their windows icons of their own.
+  dinApp('preview'),
   {
     // Puts DinOS on the computer's disk. Hidden except on a live USB boot,
     // where InstalledAppsProvider shows it and the desktop opens it.

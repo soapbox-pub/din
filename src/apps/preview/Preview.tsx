@@ -1,45 +1,69 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer, Wallpaper } from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cleanFsError, extractionWarning, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
 import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
-import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } from '@/lib/printing';
+import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useDesktopBackground } from '@/contexts/DesktopBackgroundContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useWindowIcon } from '@/contexts/WindowIconContext';
-import { FileViewerBody } from './files/FileViewerBody';
+import type { Din } from '@/sdk';
+import { useDin, useWindowTitle } from '@/sdk/react';
+import { FileViewerBody } from '@/shared/FileViewerBody';
 
 const isMedia = (name: string) => isViewableImage(name) || isPlayableVideo(name);
+
+/** Open an app on a path, as a handle it's granted (paths in params are dropped). */
+async function openWith(din: Din, appId: string, path: string, params: Record<string, unknown> = {}): Promise<void> {
+  await din.app.open(appId, params, [await din.files.fromPath(path)]);
+}
+
+/** Show an icon from Din's public files on the window (setIcon takes data: URLs). */
+function useWindowIcon(din: Din, src: string | null): void {
+  useEffect(() => {
+    if (!src) {
+      din.window.setIcon(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const blob = await (await fetch(src)).blob();
+      const url = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+      if (live) din.window.setIcon(url);
+    })().catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [din, src]);
+}
 
 /**
  * Preview - a window for one file, opened from Files: pictures and video
  * (with the arrow keys stepping through the rest of the folder's), music,
  * archives' contents, and text, which can be edited and saved.
  *
- * Launch params: `{ path: string }` (absolute).
+ * It has `fs`: stepping through the folder, listing and extracting
+ * archives and Show in Files all work on the file's folder by path.
  */
-export function FileViewer({ windowId, params }: AppComponentProps) {
-  const initial = typeof params?.path === 'string' ? params.path : null;
-  const [path, setPath] = useState(initial);
+export function Preview() {
+  const din = useDin();
+  const [path, setPath] = useState(() => din.app.launch.files[0]?.path ?? null);
   const [dirty, setDirty] = useState(false);
-  const { open, close } = useWindowActions();
-  const { setBackground } = useDesktopBackground();
 
-  // A new file asked of this window (launch params merged in).
-  const [prevInitial, setPrevInitial] = useState(initial);
-  if (initial !== prevInitial) {
-    setPrevInitial(initial);
-    if (initial) setPath(initial);
-  }
+  // A new file asked of this window.
+  useEffect(() => din.app.onLaunch(({ files }) => {
+    if (files[0]?.path) setPath(files[0].path);
+  }), [din]);
 
   const name = path ? path.slice(path.lastIndexOf('/') + 1) : '';
   useWindowTitle(path ? `${dirty ? '• ' : ''}${name}` : null);
   useWindowIcon(
+    din,
     isViewableImage(name) ? '/icons/apps/preview-photo.png'
       : isPlayableVideo(name) ? '/icons/apps/preview-video.png'
         : null,
@@ -76,12 +100,14 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
   const [extractError, setExtractError] = useState<string | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
   // What's printed is what's saved: edits in progress aren't.
-  const printable = !!getPrintingBridge() && isPrintableFile(name);
+  const printable = din.permissions.has('printing') && isPrintableFile(name);
   const print = useCallback(() => {
     if (!path || !printable) return;
     setPrintError(null);
-    printFile(path).catch((error) => setPrintError(cleanPrintingError(error)));
-  }, [path, printable]);
+    din.files.fromPath(path)
+      .then((handle) => din.print.file(handle))
+      .catch((error) => setPrintError(cleanPrintingError(error)));
+  }, [din, path, printable]);
   const extract = useCallback(async () => {
     if (!path || !dir) return;
     setExtractError(null);
@@ -90,19 +116,23 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
       void invalidateListings(queryClient, out.path);
       const warning = extractionWarning(out);
       if (warning) setExtractError(warning);
-      open('file-browser', { path: dir, select: out.path.slice(out.path.lastIndexOf('/') + 1) });
+      await openWith(din, 'file-browser', dir, { select: out.path.slice(out.path.lastIndexOf('/') + 1) });
     } catch (error) {
       setExtractError(`Couldn’t extract: ${cleanFsError(error)}`);
     }
-  }, [path, dir, open, queryClient]);
+  }, [din, path, dir, queryClient]);
 
   const image = isViewableImage(name);
   const tools: { label: string; icon: React.ReactNode; run: () => void }[] = path ? [
-    ...(image ? [{ label: 'Edit in Paint', icon: <Paintbrush className="size-4" />, run: () => open('paint', { path }) }] : []),
-    ...(isPhotoEditable(name) ? [{ label: 'Edit in Photo Editor', icon: <Layers className="size-4" />, run: () => open('photo-editor', { path }) }] : []),
-    ...(image ? [{ label: 'Set as Desktop Background', icon: <Wallpaper className="size-4" />, run: () => void setBackground({ path }) }] : []),
+    ...(image ? [{ label: 'Edit in Paint', icon: <Paintbrush className="size-4" />, run: () => void openWith(din, 'paint', path) }] : []),
+    ...(isPhotoEditable(name) ? [{ label: 'Edit in Photo Editor', icon: <Layers className="size-4" />, run: () => void openWith(din, 'photo-editor', path) }] : []),
+    ...(image ? [{
+      label: 'Set as Desktop Background',
+      icon: <Wallpaper className="size-4" />,
+      run: () => void din.files.fromPath(path).then((handle) => din.desktop.setWallpaper(handle)),
+    }] : []),
     ...(printable ? [{ label: 'Print…', icon: <Printer className="size-4" />, run: print }] : []),
-    { label: 'Show in Files', icon: <FolderOpen className="size-4" />, run: () => dir && open('file-browser', { path: dir, select: name }) },
+    { label: 'Show in Files', icon: <FolderOpen className="size-4" />, run: () => void (dir && openWith(din, 'file-browser', dir, { select: name })) },
   ] : [];
 
   if (!getFsBridge()) {
@@ -129,7 +159,7 @@ export function FileViewer({ windowId, params }: AppComponentProps) {
         if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && (key === 'w' || key === 'q')) {
           e.preventDefault();
           e.stopPropagation();
-          close(windowId);
+          din.window.requestClose();
           return;
         }
         if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && key === 'p' && printable) {

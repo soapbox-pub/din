@@ -223,6 +223,18 @@ export function localFileUrl(path: string): string {
   return `din-file://localhost${path.split('/').map(encodeURIComponent).join('/')}`;
 }
 
+
+/**
+ * A URL this document can load a local file from: `localFileUrl` on the
+ * desktop, a handle's streamed URL in an app with `fs` (din-file://localhost
+ * doesn't exist in the apps' session). Cached for the page's life, as the
+ * app's URLs last that long.
+ */
+export function fileUrl(path: string): Promise<string> {
+  const din = typeof window === 'undefined' ? undefined : window.din;
+  return Promise.resolve(din ? din.files.pathUrl(path) : localFileUrl(path));
+}
+
 declare global {
   interface Dinos {
     /** Present only inside the Electron shell. */
@@ -230,7 +242,10 @@ declare global {
   }
 }
 
-/** The fs bridge, or undefined when running outside the Electron shell. */
+/**
+ * The fs bridge, or undefined when running outside the Electron shell: the
+ * desktop's, or in an app with the `fs` permission its `din.system.fs`.
+ */
 export function getFsBridge(): FsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
   // An app granted it has it through window.din; the desktop, through window.dinos.

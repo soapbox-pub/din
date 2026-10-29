@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileArchive, Folder } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { cleanFsError, formatBytes, getFsBridge, localFileUrl } from '@/lib/fs';
+import { cleanFsError, fileUrl, formatBytes, getFsBridge } from '@/lib/fs';
 import {
   fileCategory,
   isExtractable,
@@ -47,11 +47,13 @@ export function FileViewerBody({
   onExtract,
 }: FileViewerBodyProps) {
   const name = path.slice(path.lastIndexOf('/') + 1);
+  const base = useFileUrl(isViewableImage(name) || isPlayableVideo(name) || isPlayableAudio(name) ? path : null);
   // Bust Chromium's media cache when the file changes under the same name.
-  const url = `${localFileUrl(path)}${mtimeMs ? `?v=${Math.floor(mtimeMs)}` : ''}`;
+  const url = base && `${base}${mtimeMs ? `?v=${Math.floor(mtimeMs)}` : ''}`;
 
-  if (isViewableImage(name)) return <ImageView key={url} url={url} name={name} />;
+  if (isViewableImage(name)) return url ? <ImageView key={url} url={url} name={name} /> : null;
   if (isPlayableVideo(name)) {
+    if (!url) return <div className="h-full bg-black" />;
     return (
       <div className="grid h-full place-items-center bg-black">
         <video key={url} src={url} controls autoPlay className="max-h-full max-w-full" />
@@ -63,7 +65,7 @@ export function FileViewerBody({
       <div className="flex h-full flex-col items-center justify-center gap-6 p-6">
         <FileIcon path={path} name={name} kind="file" size={size} mtimeMs={mtimeMs} px={96} />
         <p className="max-w-full truncate text-lg font-medium text-foreground">{name}</p>
-        <audio key={url} src={url} controls autoPlay className="w-full max-w-md" />
+        {url && <audio key={url} src={url} controls autoPlay className="w-full max-w-md" />}
       </div>
     );
   }
@@ -82,6 +84,21 @@ export function FileViewerBody({
       onDirtyChange={onDirtyChange}
     />
   );
+}
+
+/** A URL to load the file at `path` from, once there is one (fileUrl). */
+function useFileUrl(path: string | null): string | null {
+  const [got, setGot] = useState<{ path: string; url: string } | null>(null);
+  useEffect(() => {
+    if (!path) return;
+    let live = true;
+    // A file that can't be reached gets a URL that fails, so the view says so.
+    fileUrl(path).then((url) => live && setGot({ path, url }), () => live && setGot({ path, url: 'din-file://invalid/' }));
+    return () => {
+      live = false;
+    };
+  }, [path]);
+  return got && got.path === path ? got.url : null;
 }
 
 /** Each press of + or - zooms by this factor. */

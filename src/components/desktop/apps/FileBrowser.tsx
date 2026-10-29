@@ -93,7 +93,7 @@ import { GRID_ZOOMS } from './files/layout';
 import type { SortKey, SortOrder, ViewMode } from './files/EntryViews';
 import { Sidebar } from './files/Sidebar';
 import { CompressDialog, ConfirmDialog, PropertiesDialog, ShortcutsDialog } from './files/Dialogs';
-import { FileViewerBody } from './files/FileViewerBody';
+import { FileViewerBody } from '@/shared/FileViewerBody';
 import { endFileDrag, startFileDrag } from './files/dnd';
 
 let nextTabId = 0;

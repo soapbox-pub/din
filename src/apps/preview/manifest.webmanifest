@@ -1,0 +1,37 @@
+{
+  "name": "Preview",
+  "description": "A window for one file opened from Files: a picture, a video, a song, an archive's contents, or text to read and edit.",
+  "icons": [
+    {
+      "src": "/icons/apps/preview.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "permissions": [
+      "fs",
+      "printing",
+      "wallpaper"
+    ],
+    "window": {
+      "size": {
+        "width": 820,
+        "height": 600
+      },
+      "frame": "standard"
+    },
+    "hidden": true,
+    "keywords": [
+      "viewer",
+      "quick look",
+      "pictures",
+      "photos",
+      "images"
+    ]
+  }
+}

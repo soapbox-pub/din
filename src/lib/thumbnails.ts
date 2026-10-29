@@ -1,4 +1,4 @@
-import { localFileUrl } from '@/lib/fs';
+import { fileUrl } from '@/lib/fs';
 import { extensionOf, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 
 /**
@@ -57,8 +57,8 @@ async function encode(source: CanvasImageSource, width: number, height: number):
 async function imageThumb(src: ThumbSource): Promise<string | null> {
   if (src.size !== null && src.size > MAX_IMAGE_BYTES) return null;
   // SVGs are vectors: the file itself is the best thumbnail.
-  if (extensionOf(src.path) === 'svg') return localFileUrl(src.path);
-  const response = await fetch(localFileUrl(src.path));
+  if (extensionOf(src.path) === 'svg') return fileUrl(src.path);
+  const response = await fetch(await fileUrl(src.path));
   if (!response.ok) return null;
   const bitmap = await createImageBitmap(await response.blob());
   try {
@@ -93,7 +93,7 @@ function videoThumb(src: ThumbSource): Promise<string | null> {
       encode(video, video.videoWidth, video.videoHeight).then(finish, () => finish(null));
     };
     video.onerror = () => finish(null);
-    video.src = localFileUrl(src.path);
+    fileUrl(src.path).then((url) => (video.src = url), () => finish(null));
   });
 }
 
