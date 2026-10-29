@@ -3751,7 +3751,7 @@ function SystemCursorPicker() {
     return <FallbackCard>Could not read the cursor settings.</FallbackCard>;
   }
 
-  const { canChange, sizes, fixedSize } = status.data;
+  const { canChange, shared, sizes, fixedSize } = status.data;
   // While a change is in flight, show the requested choice.
   const { theme, size } = setCursor.isPending ? setCursor.variables : status.data;
   const busy = importCursor.isPending || removeCursor.isPending;
@@ -3919,6 +3919,9 @@ function SystemCursorPicker() {
         <p className="text-xs text-muted-foreground">
           Din uses your system’s cursor. Change it in your desktop’s settings.
         </p>
+      )}
+      {shared && (
+        <p className="text-xs text-muted-foreground">This changes your desktop’s cursor too.</p>
       )}
       {setCursor.isError && (
         <p role="alert" className="text-sm text-destructive">

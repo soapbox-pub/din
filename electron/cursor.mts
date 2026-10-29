@@ -10,8 +10,9 @@
 // anything else that only knows XCURSOR_THEME and XCURSOR_SIZE get those in
 // their environment, from Din's.
 //
-// Din only changes them where it is the desktop (DinOS, DIN_DESKTOP_SESSION);
-// on GNOME and the like they're the desktop's settings, not Din's.
+// Din changes them where GSettings is what the desktop reads: DinOS, and
+// GNOME and its kin, where that changes the desktop's pointer too
+// (desktop-settings.mts). Elsewhere (KDE) it only shows them.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -21,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app, ipcMain } from 'electron';
 import { listEffects, readEffects, removeEffects } from './cursorEffects.mts';
+import { settingsOwner } from './desktop-settings.mts';
 import { FALLBACK_THEME, IMPORTED_KEY, importCursorThemes } from './cursorImport.mts';
 import { runCommand } from './system.mts';
 import { decodeXcursor, xcursorSizes } from './xcursor.mts';
@@ -49,6 +51,8 @@ interface CursorStatus {
   /** Whether the theme has one size only, whatever size is asked for. */
   fixedSize: boolean;
   canChange: boolean;
+  /** Whether a change is the desktop's too, Din not being the desktop. */
+  shared: boolean;
 }
 
 /** One cursor of a theme, as straight (not premultiplied) RGBA. */
@@ -189,7 +193,7 @@ async function hasFixedSize(id: string): Promise<boolean> {
 }
 
 function canChange(): boolean {
-  return process.env.DIN_DESKTOP_SESSION === '1';
+  return settingsOwner() !== 'other';
 }
 
 /** Tell what Din starts from now on (Terminal, native apps) about the cursor. */
@@ -253,7 +257,7 @@ export function registerCursorHandlers(options: {
   ipcMain.handle('cursor:status', async (event): Promise<CursorStatus> => {
     assertShellSender(event);
     const { theme, size } = await current();
-    return { theme, size, sizes: SIZES, fixedSize: await hasFixedSize(theme), canChange: canChange() };
+    return { theme, size, sizes: SIZES, fixedSize: await hasFixedSize(theme), canChange: canChange(), shared: settingsOwner() === 'shared' };
   });
 
   ipcMain.handle('cursor:themes', async (event) => {

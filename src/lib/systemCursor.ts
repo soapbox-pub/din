@@ -4,8 +4,9 @@
  *
  * The pointer's theme and size are the system's (XCursor themes, named in
  * GSettings): they apply to Din's own windows, web pages and native apps
- * alike, and change at once. Din can change them on DinOS, and import
- * themes from other formats as XCursor ones; elsewhere they're only shown.
+ * alike, and change at once. Din can change them on DinOS and GSettings
+ * desktops like GNOME, and import themes from other formats as XCursor
+ * ones; on others (KDE) they're only shown.
  * In a plain browser the bridge is absent.
  */
 
@@ -29,6 +30,8 @@ export interface SystemCursorStatus {
   fixedSize: boolean;
   /** Whether Din can change the cursor here. */
   canChange: boolean;
+  /** Whether a change is the desktop's too (GNOME and the like), Din not being the desktop. */
+  shared: boolean;
 }
 
 export interface SystemCursorPreview {

@@ -37,8 +37,7 @@ other; apps don't need to know.
 keyed by freedesktop icon name (`folder`, `image-x-generic`,
 `text-x-generic`, …; the list is `FILE_ICON_NAMES` in
 `src/shared/themeIcons.ts`). It's empty while Din shows its own icons (the
-"Din" theme, which is DinOS's default, or any desktop that isn't Din's),
-and leaves out names the theme doesn't have, so draw your own icon when a
+"Din" theme, which is DinOS's default), and leaves out names the theme doesn't have, so draw your own icon when a
 name is missing. `FileIcon` (`src/shared/FileIcon.tsx`) already does.
 
 ## `din.account` (permission `account`)

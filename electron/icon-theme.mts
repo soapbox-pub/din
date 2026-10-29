@@ -1,6 +1,6 @@
 // Icon themes, per the freedesktop Icon Theme spec: the session's theme,
 // which native apps' icons, tray items and notifications come from, and
-// which Settings → Appearance shows and, on DinOS, changes.
+// which Settings → Appearance shows and changes.
 //
 // GTK takes the theme from GSettings (org.gnome.desktop.interface
 // icon-theme), so that's where Din reads and writes it. Din's own icons
@@ -9,9 +9,11 @@
 // Din's own look: there Din keeps its bundled icons and native apps fall
 // through to Adwaita.
 //
-// Din only changes the theme where it is the desktop (DinOS,
-// DIN_DESKTOP_SESSION); on GNOME and the like it's the desktop's setting,
-// and Din keeps its own icons.
+// Din follows the theme wherever it runs, and changes it where GSettings
+// is what the desktop reads: DinOS, and GNOME and its kin, where that
+// changes the desktop's icons too (desktop-settings.mts). Elsewhere (KDE)
+// it only reads it, from GTK's settings files, which KDE keeps in step with
+// its own; GSettings there usually holds nothing but a default.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -20,6 +22,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ipcMain, nativeImage } from 'electron';
+import { settingsOwner } from './desktop-settings.mts';
 import { runCommand } from './system.mts';
 
 const SCHEMA = 'org.gnome.desktop.interface';
@@ -62,6 +65,8 @@ interface IconThemeStatus {
   /** Whether the theme is Din's own icons rather than a system theme's. */
   din: boolean;
   canChange: boolean;
+  /** Whether a change is the desktop's too, Din not being the desktop. */
+  shared: boolean;
 }
 
 /** `$XDG_DATA_HOME`, per the base-directory spec. */
@@ -99,7 +104,7 @@ function breathe(): Promise<void> {
 }
 
 function canChange(): boolean {
-  return process.env.DIN_DESKTOP_SESSION === '1';
+  return settingsOwner() !== 'other';
 }
 
 // ---------------------------------------------------------------------------
@@ -130,12 +135,18 @@ function settingsFileTheme(): string | null {
 
 let themeRead: Promise<string> | null = null;
 
-/** The session's icon theme: GSettings', else GTK's settings files', else hicolor. */
+/**
+ * The session's icon theme: GSettings', else GTK's settings files', else
+ * hicolor. On a desktop that doesn't keep it in GSettings, the files first.
+ */
 export function currentIconTheme(): Promise<string> {
-  themeRead ??= gsettings('get', SCHEMA, 'icon-theme')
-    .then((raw) => raw.replace(/^'(.*)'$/, '$1'))
-    .catch(() => '')
-    .then((theme) => theme || settingsFileTheme() || 'hicolor');
+  const fromFile = settingsOwner() === 'other' ? settingsFileTheme() : null;
+  themeRead ??= fromFile
+    ? Promise.resolve(fromFile)
+    : gsettings('get', SCHEMA, 'icon-theme')
+        .then((raw) => raw.replace(/^'(.*)'$/, '$1'))
+        .catch(() => '')
+        .then((theme) => theme || settingsFileTheme() || 'hicolor');
   return themeRead;
 }
 
@@ -461,12 +472,12 @@ function findIcon(chain: string[], names: string[], kind: IconKind): string | nu
 /**
  * Look icons up in the session's theme: each request's first name the theme
  * has, as a data URL, keyed by the request's first name. Nothing under the
- * Din theme, or where Din isn't the desktop.
+ * Din theme.
  */
 async function lookup(requests: { names: string[]; kind: IconKind }[]): Promise<Record<string, string>> {
   const theme = await currentIconTheme();
   const found: Record<string, string> = {};
-  if (theme === DIN_THEME || !canChange()) return found;
+  if (theme === DIN_THEME) return found;
   const chain = themeChain(theme);
   for (const { names, kind } of requests) {
     const file = findIcon(chain, names, kind);
@@ -523,7 +534,8 @@ export function registerIconThemeHandlers(options: {
   ipcMain.handle('icon-theme:status', async (event): Promise<IconThemeStatus> => {
     assertShellSender(event);
     const theme = await currentIconTheme();
-    return { theme, din: theme === DIN_THEME || !canChange(), canChange: canChange() };
+    const owner = settingsOwner();
+    return { theme, din: theme === DIN_THEME, canChange: owner !== 'other', shared: owner === 'shared' };
   });
 
   ipcMain.handle('icon-theme:themes', async (event) => {

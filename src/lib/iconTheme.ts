@@ -5,8 +5,8 @@
  * The icon theme is the system's (a freedesktop icon theme, named in
  * GSettings): native apps take their icons from it, and Din's own apps and
  * file types follow it too, unless it's the "Din" theme, Din's own look.
- * Din can change it on DinOS; elsewhere it's only shown, and Din keeps its
- * own icons. In a plain browser the bridge is absent.
+ * Din can change it on DinOS and GSettings desktops like GNOME; on others
+ * (KDE) it's only shown. In a plain browser the bridge is absent.
  */
 
 export interface IconThemeInfo {
@@ -21,10 +21,12 @@ export interface IconThemeInfo {
 export interface IconThemeStatus {
   /** The current theme's id. */
   theme: string;
-  /** Whether Din shows its own icons (the Din theme, or a desktop that isn't Din's). */
+  /** Whether Din shows its own icons (the Din theme). */
   din: boolean;
   /** Whether Din can change the theme here. */
   canChange: boolean;
+  /** Whether a change is the desktop's too (GNOME and the like), Din not being the desktop. */
+  shared: boolean;
 }
 
 /** Names to look an icon up by, best first, and what it's for. */

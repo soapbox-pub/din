@@ -22,7 +22,7 @@ const DIN_PREVIEW = [
 /**
  * The system's icon theme (electron/icon-theme.mts): native apps' icons, and
  * those of Din's own apps and file types unless it's Din's own. Shown
- * everywhere, changed only on DinOS.
+ * everywhere, changed where Din can (DinOS, GNOME and the like).
  */
 export function IconThemePicker() {
   const status = useIconThemeStatus();
@@ -40,7 +40,7 @@ export function IconThemePicker() {
     );
   }
 
-  const { canChange } = status.data;
+  const { canChange, shared } = status.data;
   // While a change is in flight, show the requested theme.
   const theme = setTheme.isPending ? setTheme.variables : status.data.theme;
   const choose = (id: string) => {
@@ -71,7 +71,8 @@ export function IconThemePicker() {
       <p className="text-xs text-muted-foreground">
         {canChange
           ? 'Icons for apps in the Dock and menus, and for files and folders. Apps with nothing in a theme keep Din’s icon.'
-          : 'Linux apps use your desktop’s icon theme, and Din keeps its own icons. Change it in your desktop’s settings.'}
+          : 'Din uses your desktop’s icon theme. Change it in your desktop’s settings.'}
+        {shared && ' This changes your desktop’s icons too.'}
       </p>
       {setTheme.isError && (
         <p role="alert" className="text-sm text-destructive">
