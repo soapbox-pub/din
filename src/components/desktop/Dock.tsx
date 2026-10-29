@@ -22,6 +22,7 @@ import { useDragReorder } from '@/hooks/useDragReorder';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
 import { DRAG_MIME, acceptDrag, currentDrag, subscribeDrag } from '@/lib/dinDrag';
 import { dockTakes, openDropped, type DroppedItem } from '@/lib/dockDrop';
+import { poof } from '@/lib/dockPoof';
 import { getFsBridge } from '@/lib/fs';
 import { registerDockTile } from '@/lib/dockTiles';
 import { cn } from '@/lib/utils';
@@ -358,7 +359,8 @@ export function Dock({
       pinned.includes(appId) ? Math.min(to, pinnedIds.length - 1) : to,
     relayout: magnifies ? paint : undefined,
     // As on macOS, a pinned tile dragged well up off the Dock is unpinned
-    // when it's let go; one with windows open stays on as a running app.
+    // when it's let go, in a puff of smoke; one with windows open stays on as
+    // a running app.
     tearOff: {
       enabled: (appId) => pinned.includes(appId),
       // Clear of a magnified icon, which reaches above the strip.
@@ -373,6 +375,7 @@ export function Dock({
         }
       },
       onDrop: (appId) => setPinned((prev) => prev.filter((id) => id !== appId)),
+      dismissGhost: poof,
     },
   });
   const dragging = reorder.draggingId !== null;

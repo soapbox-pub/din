@@ -97,6 +97,8 @@ export interface TearOff {
   onHover?: (id: string, point: DragPoint | null) => void;
   /** The item was released away from the row. */
   onDrop: (id: string, point: DragPoint) => void;
+  /** Takes the ghost away after a drop, instead of removing it at once. */
+  dismissGhost?: (ghost: HTMLElement) => void;
 }
 
 function tearable(tearOff: TearOff | undefined, id: string): boolean {
@@ -281,8 +283,9 @@ export function useDragReorder({
         settle(el, el.getBoundingClientRect().left - naturalLeft(el));
       }
       if (d.ghost) {
-        d.ghost.remove();
         const tearOff = latest.current.tearOff;
+        if (!cancelled && tearOff?.dismissGhost) tearOff.dismissGhost(d.ghost);
+        else d.ghost.remove();
         tearOff?.onHover?.(d.id, null);
         if (!cancelled) tearOff?.onDrop(d.id, { x: d.lastX, y: d.lastY });
       }
