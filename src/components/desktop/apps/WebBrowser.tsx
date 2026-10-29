@@ -2065,7 +2065,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         {/* Tab surfaces: all stay mounted so background tabs keep their state;
             only the active one is visible. (visibility, not display:none -
             Electron <webview>s misbehave when display is toggled.) */}
-        <div className="relative min-w-0 flex-1 overflow-hidden bg-white">
+        <div className="relative min-w-0 flex-1 overflow-hidden bg-background">
         {surfaceTabs.filter((tab) => !tab.dormant || tab.id === activeId).map((tab) => (
           <TabSurface
             key={tab.tor ? `${tab.id}:tor` : tab.id}
@@ -3785,7 +3785,7 @@ const TabSurface = memo(function TabSurface({
       <div
         className={cn(
           device
-            ? 'overflow-hidden rounded-[1.75rem] border-4 border-foreground/80 bg-white shadow-2xl'
+            ? 'overflow-hidden rounded-[1.75rem] border-4 border-foreground/80 bg-background shadow-2xl'
             : 'absolute inset-0',
         )}
         style={

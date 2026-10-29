@@ -319,6 +319,16 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // what happened and offer a reload (which starts a fresh renderer).
     const [gone, setGone] = useState(false);
 
+    // A blank document (a fresh guest, or the about:blank a new tab parks on)
+    // paints Chromium's default white, and the engine keeps that frame up
+    // until the next page draws. Until a real page is ready, the theme's
+    // background covers it instead.
+    const [blank, setBlank] = useState(true);
+    const onRealPage = useRef(false);
+    const pageReady = () => {
+      if (onRealPage.current) setBlank(false);
+    };
+
     return (
       <div className="relative h-full w-full" style={{ display: 'flex' }}>
         <GuestSurface
@@ -328,7 +338,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           webpreferences={installedApp ? APP_GUEST_MARK : undefined}
           // Guest-initiated popups, which main routes into tabs and apps.
           allowPopups
-          guestClassName="h-full w-full bg-white"
+          guestClassName="h-full w-full bg-background"
           pageZoom={pageZoom}
           hidden={hidden}
           acceptFileDrops
@@ -337,27 +347,36 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
             setGone(false);
             onLoadStart?.();
           }}
-          onLoadEnd={onLoadEnd}
-          onLoadError={onLoadError && ((error) => onLoadError({ ...error, url: shownUrl(error.url) }))}
+          onDomReady={pageReady}
+          onLoadEnd={() => {
+            pageReady();
+            onLoadEnd?.();
+          }}
+          onLoadError={(error) => {
+            // Never hide an error page.
+            onRealPage.current = true;
+            onLoadError?.({ ...error, url: shownUrl(error.url) });
+          }}
           onTitle={onTitleChange}
           onFavicons={onFaviconChange}
           onThemeColor={onThemeColorChange}
-          onNavigate={
-            onNavigate &&
-            ((url, current, canBack, canForward) =>
-              // A page-source view commits its inner URL; only the current URL
-              // has the `view-source:` prefix the tab must keep.
-              onNavigate(
-                current === `view-source:${url}` ? `view-source:${shownUrl(url)}` : shownUrl(url),
-                canBack,
-                canForward,
-              ))
-          }
+          onNavigate={(url, current, canBack, canForward) => {
+            onRealPage.current = url !== 'about:blank';
+            if (!onRealPage.current) setBlank(true);
+            // A page-source view commits its inner URL; only the current URL
+            // has the `view-source:` prefix the tab must keep.
+            onNavigate?.(
+              current === `view-source:${url}` ? `view-source:${shownUrl(url)}` : shownUrl(url),
+              canBack,
+              canForward,
+            );
+          }}
           onGone={() => {
             setGone(true);
             onLoadEnd?.();
           }}
         />
+        {blank && <div aria-hidden className="pointer-events-none absolute inset-0 bg-background" />}
         {gone && <PageGone onReload={() => surface.current?.reload()} />}
       </div>
     );
