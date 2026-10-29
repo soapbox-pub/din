@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { invalidateListings, useDirectory, useWatchDirectory } from '@/hooks/useFileSystem';
 import { cleanFsError, getFsBridge, isValidEntryName, joinPath, parentPath, sortEntries, type FsEntry } from '@/lib/fs';
 import { cn } from '@/lib/utils';
-import { FileIcon } from '../files/FileIcon';
+import { FileIcon } from '@/shared/FileIcon';
 
 /** Entries a project never needs to see. */
 const HIDDEN = new Set(['.git', '.hg', '.svn', '.DS_Store']);

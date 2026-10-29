@@ -31,20 +31,17 @@ import {
   Search,
   WrapText,
 } from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
 import { cleanFsError, getFsBridge, parentPath, type FsBridge, type FsSearchOptions, type FsSearchResult } from '@/lib/fs';
-import { setCloseGuard } from '@/lib/closeGuards';
 import { invalidateListings } from '@/hooks/useFileSystem';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
+import type { Din, DinFileHandle } from '@/sdk';
+import { useCloseGuard, useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
-import { TabStrip } from '@/components/desktop/TabStrip';
-import { DialogButton, Overlay } from './files/Dialogs';
-import { FileIcon } from './files/FileIcon';
+import { TabStrip } from '@/shared/TabStrip';
+import { dinWindowMove } from '@/shared/dinWindowMove';
+import { DialogButton, Overlay } from '@/shared/dialogs';
+import { FileIcon } from '@/shared/FileIcon';
 import { IconButton } from './code/controls';
 import { openFind } from './code/findPanel';
 import { FileTree, type FileTreeActions } from './code/FileTree';
@@ -104,6 +101,19 @@ const isWorkspace = (v: unknown): v is Workspace => {
 };
 
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+
+/** A handle to start Din's file picker in, for a folder the editor knows by path. */
+async function startIn(din: Din, dir: string | null | undefined): Promise<DinFileHandle | undefined> {
+  return dir ? din.files.fromPath(dir).catch(() => undefined) : undefined;
+}
+
+/** Show a file (selected in its folder) or a folder in Files. */
+function revealInFiles(din: Din, path: string, select?: string): void {
+  void din.files.fromPath(path).then(
+    (dir) => din.app.open('file-browser', select ? { select } : {}, [dir]),
+    () => {},
+  );
+}
 
 /** A file's text, or why it can't be edited here. */
 async function readText(fs: FsBridge, path: string): Promise<{ text: string } | { error: string }> {
@@ -196,29 +206,33 @@ type Asking = { kind: 'tab'; id: string } | { kind: 'window' } | null;
  * Files changed on disk reload unless they have unsaved changes; closing
  * with unsaved changes asks about them first.
  *
- * Launch params: `{ path?: string }` opens a file, `{ folder?: string }` a
- * folder, `{ blank: true }` an empty window. None reopens the last folder.
+ * It works on the filesystem by path (`fs`). Files it's launched with
+ * (Files' `{ path }`, as handles) open in tabs, a folder among them in the
+ * sidebar; launch params `{ folder?: string }` open a folder, `{ blank: true }`
+ * an empty window. None reopens the last folder.
  */
-export function TextEditor({ windowId, params }: AppComponentProps) {
-  const initialPath = typeof params?.path === 'string' ? params.path : null;
-  const initialFolder = typeof params?.folder === 'string' ? params.folder : null;
+export function TextEditor() {
+  const din = useDin();
+  const params = din.app.launch.params;
+  const launchFiles = din.app.launch.files;
+  const initialPaths = launchFiles.flatMap((f) => (f.kind === 'file' && f.path ? [f.path] : []));
+  const launchFolder = launchFiles.find((f) => f.kind === 'directory')?.path ?? null;
+  const initialPath = initialPaths[0] ?? null;
+  const initialFolder = typeof params.folder === 'string' ? params.folder : launchFolder;
   const fs = getFsBridge();
-  const { open, close, focus } = useWindowActions();
-  const { pickFiles } = useFilePicker();
   const queryClient = useQueryClient();
-  const setTitlebar = useWindowTitlebar();
   const dark = useIsDark();
 
   // What to open first: a file, a folder, or the last folder with its files.
   const [launch] = useState(() => {
-    const workspace = initialPath || initialFolder || params?.blank
+    const workspace = initialPath || initialFolder || params.blank
       ? null
       : readSetting(WORKSPACE_KEY, null, (v): v is Workspace | null => v === null || isWorkspace(v));
     return {
       folder: initialFolder ?? workspace?.folder ?? null,
       expanded: workspace?.expanded ?? [],
       files: initialPath
-        ? [initialPath]
+        ? initialPaths
         : workspace ? [...workspace.files, ...(workspace.active ? [workspace.active] : [])] : [],
     };
   });
@@ -273,11 +287,10 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
   const activeTab = tabs.find((t) => t.id === activeId) ?? null;
   const tabName = (tab: Tab) => (tab.path ? basename(tab.path) : `Untitled-${tab.untitled}`);
 
-  useWindowTitle(
-    activeTab
-      ? `${activeTab.dirty ? '• ' : ''}${tabName(activeTab)}${folder ? ` — ${basename(folder)}` : ''}`
-      : folder ? basename(folder) : 'Text Editor',
-  );
+  const windowTitle = activeTab
+    ? `${activeTab.dirty ? '• ' : ''}${tabName(activeTab)}${folder ? ` — ${basename(folder)}` : ''}`
+    : folder ? basename(folder) : 'Text Editor';
+  useWindowTitle(windowTitle);
 
   // -------------------------------------------------------------------------
   // Tab states.
@@ -469,13 +482,13 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
   }, [fs, activeId, addTab, patchTab, makeState, detectLanguage, applyReveal, stateOf]);
 
   const openFileDialog = useCallback(async () => {
-    const result = await pickFiles({
+    const files = await din.files.open({
       title: 'Open',
       multiple: true,
-      initialPath: activeTab?.path ? parentPath(activeTab.path) : folder ?? undefined,
+      startIn: await startIn(din, activeTab?.path ? parentPath(activeTab.path) : folder),
     });
-    for (const path of result?.paths ?? []) await openPath(path);
-  }, [pickFiles, activeTab, folder, openPath]);
+    for (const file of files) if (file.path) await openPath(file.path);
+  }, [din, activeTab, folder, openPath]);
 
   const openFolder = useCallback((path: string) => {
     setFolder(path);
@@ -486,14 +499,13 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
   }, []);
 
   const openFolderDialog = useCallback(async () => {
-    const result = await pickFiles({
+    const [dir] = await din.files.open({
       title: 'Open Folder',
       directory: true,
-      confirmLabel: 'Open',
-      initialPath: folder ? parentPath(folder) : undefined,
+      startIn: await startIn(din, folder ? parentPath(folder) : null),
     });
-    if (result) openFolder(result.paths[0]);
-  }, [pickFiles, folder, openFolder]);
+    if (dir?.path) openFolder(dir.path);
+  }, [din, folder, openFolder]);
 
   const saveTab = useCallback(async (id: string, as = false): Promise<boolean> => {
     const tab = tabsRef.current.find((t) => t.id === id);
@@ -501,14 +513,13 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
     if (!fs || !tab || !state || tab.loading) return false;
     let target = tab.path;
     if (as || !target || tab.error) {
-      const result = await pickFiles({
-        mode: 'save',
+      const handle = await din.files.save({
         title: 'Save As',
-        currentName: tab.path ? basename(tab.path) : `Untitled-${tab.untitled}.txt`,
-        initialPath: tab.path ? parentPath(tab.path) : folder ?? undefined,
+        suggestedName: tab.path ? basename(tab.path) : `Untitled-${tab.untitled}.txt`,
+        startIn: await startIn(din, tab.path ? parentPath(tab.path) : folder),
       });
-      if (!result) return false;
-      target = result.paths[0];
+      if (!handle?.path) return false;
+      target = handle.path;
     }
     const doc = stateOf(id)!.doc;
     setSaving(true);
@@ -531,7 +542,7 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
     } finally {
       setSaving(false);
     }
-  }, [fs, pickFiles, folder, stateOf, patchTab, detectLanguage, queryClient]);
+  }, [fs, din, folder, stateOf, patchTab, detectLanguage, queryClient]);
 
   const saveAll = useCallback(async (): Promise<boolean> => {
     for (const tab of tabsRef.current.filter((t) => t.dirty)) {
@@ -569,21 +580,16 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
   }, [closeTabNow]);
 
   const anyDirty = tabs.some((t) => t.dirty);
-  useEffect(() => {
-    if (!anyDirty) return;
-    setCloseGuard(windowId, () => {
-      focus(windowId);
-      setAsking({ kind: 'window' });
-      return true;
-    });
-    return () => setCloseGuard(windowId, null);
-  }, [anyDirty, windowId, focus]);
+  useCloseGuard(anyDirty ? () => {
+    din.window.focus();
+    setAsking({ kind: 'window' });
+    return true;
+  } : null);
 
   const closeWindowNow = useCallback(() => {
-    setCloseGuard(windowId, null);
     setAsking(null);
-    close(windowId);
-  }, [windowId, close]);
+    din.window.close();
+  }, [din]);
 
   const launched = useRef(false);
   useEffect(() => {
@@ -760,11 +766,11 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
         }
       }
     },
-    revealInFiles: (path) => open('file-browser', { path: parentPath(path), select: basename(path) }),
-    openTerminal: (dir) => open('terminal', { cwd: dir }),
+    revealInFiles: (path) => revealInFiles(din, parentPath(path), basename(path)),
+    openTerminal: (dir) => void din.app.open('terminal', { cwd: dir }),
     copyText: (text) => void navigator.clipboard?.writeText(text).catch(() => {}),
     status: setStatus,
-  }), [openPath, open, stateOf, syncDirty]);
+  }), [openPath, din, stateOf, syncDirty]);
 
   // -------------------------------------------------------------------------
   // Commands.
@@ -868,7 +874,7 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
     const path = activeTab?.path;
     return [
       { id: 'file.new', title: 'File: New File', shortcut: 'Ctrl+N', run: newFile },
-      { id: 'file.newWindow', title: 'File: New Window', shortcut: 'Ctrl+Shift+N', run: () => open('text-editor', { blank: true }) },
+      { id: 'file.newWindow', title: 'File: New Window', shortcut: 'Ctrl+Shift+N', run: () => void din.app.open('text-editor', { blank: true }) },
       { id: 'file.open', title: 'File: Open File…', shortcut: 'Ctrl+O', run: () => void openFileDialog() },
       { id: 'file.openFolder', title: 'File: Open Folder…', shortcut: 'Ctrl+K Ctrl+O', run: () => void openFolderDialog() },
       { id: 'file.save', title: 'File: Save', shortcut: 'Ctrl+S', run: () => activeId && void saveTab(activeId) },
@@ -877,7 +883,7 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
       { id: 'file.revert', title: 'File: Revert File', run: () => void revert() },
       { id: 'file.close', title: 'View: Close Editor', shortcut: 'Ctrl+W', run: () => activeId && requestCloseTab(activeId) },
       { id: 'file.closeSaved', title: 'View: Close Saved Editors', run: () => tabsRef.current.filter((t) => !t.dirty).forEach((t) => closeTabNow(t.id)) },
-      { id: 'window.close', title: 'View: Close Window', shortcut: 'Ctrl+Shift+W', run: () => close(windowId) },
+      { id: 'window.close', title: 'View: Close Window', shortcut: 'Ctrl+Shift+W', run: () => din.window.requestClose() },
       { id: 'go.file', title: 'Go to File…', shortcut: 'Ctrl+P', run: () => setPalette({ kind: 'quick', initial: '' }) },
       { id: 'go.line', title: 'Go to Line…', shortcut: 'Ctrl+G', run: () => setPalette({ kind: 'quick', initial: ':' }) },
       { id: 'go.nextTab', title: 'View: Open Next Editor', shortcut: 'Ctrl+PageDown', run: () => cycleTab(1) },
@@ -918,18 +924,18 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
       ...(folder ? [
         { id: 'folder.close', title: 'File: Close Folder', run: () => { setFolder(null); localStorage.removeItem(WORKSPACE_KEY); } },
         { id: 'folder.refresh', title: 'Explorer: Refresh', run: () => void invalidateListings(queryClient, folder) },
-        { id: 'folder.terminal', title: 'Open Folder in Terminal', run: () => open('terminal', { cwd: folder }) },
-        { id: 'folder.files', title: 'Reveal Folder in Files', run: () => open('file-browser', { path: folder }) },
+        { id: 'folder.terminal', title: 'Open Folder in Terminal', run: () => void din.app.open('terminal', { cwd: folder }) },
+        { id: 'folder.files', title: 'Reveal Folder in Files', run: () => revealInFiles(din, folder) },
       ] : []),
       ...(path ? [
-        { id: 'file.reveal', title: 'Reveal Active File in Files', run: () => open('file-browser', { path: parentPath(path), select: basename(path) }) },
+        { id: 'file.reveal', title: 'Reveal Active File in Files', run: () => revealInFiles(din, parentPath(path), basename(path)) },
         { id: 'file.copyPath', title: 'Copy Path of Active File', run: () => void navigator.clipboard?.writeText(path).catch(() => {}) },
-        { id: 'file.terminal', title: 'Open Containing Folder in Terminal', run: () => open('terminal', { cwd: parentPath(path) }) },
+        { id: 'file.terminal', title: 'Open Containing Folder in Terminal', run: () => void din.app.open('terminal', { cwd: parentPath(path) }) },
       ] : []),
     ];
   }, [
-    newFile, open, openFileDialog, openFolderDialog, activeId, saveTab, saveAll, revert, requestCloseTab, closeTabNow,
-    close, windowId, cycleTab, exec, showSearch, zoom, pickLanguage, pickIndent, sortLines, transformCase, folder,
+    newFile, din, openFileDialog, openFolderDialog, activeId, saveTab, saveAll, revert, requestCloseTab, closeTabNow,
+    cycleTab, exec, showSearch, zoom, pickLanguage, pickIndent, sortLines, transformCase, folder,
     queryClient, activeTab,
   ]);
 
@@ -963,8 +969,8 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
     else if (ctrl && shift && key === 'n') run('file.newWindow');
     else if (ctrl && !shift && key === 'w') {
       if (activeId) requestCloseTab(activeId);
-      else close(windowId);
-    } else if (ctrl && shift && key === 'w') close(windowId);
+      else din.window.requestClose();
+    } else if (ctrl && shift && key === 'w') din.window.requestClose();
     else if (ctrl && !shift && key === 'p') setPalette({ kind: 'quick', initial: '' });
     else if ((ctrl && shift && key === 'p') || e.key === 'F1') setPalette({ kind: 'quick', initial: '>' });
     else if (ctrl && !shift && key === 'g') setPalette({ kind: 'quick', initial: ':' });
@@ -992,63 +998,69 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
   // Tabs in the title bar.
   // -------------------------------------------------------------------------
 
-  useEffect(() => {
-    if (tabs.length === 0) {
-      setTitlebar(null);
-      return;
-    }
-    // Two files of one name say which folder each is in.
-    const counts = new Map<string, number>();
-    for (const t of tabs) counts.set(tabName(t), (counts.get(tabName(t)) ?? 0) + 1);
-    setTitlebar(
-      <TabStrip
-        tabs={tabs.map((t) => {
-          const name = tabName(t);
-          const parent = t.path && (counts.get(name) ?? 0) > 1 ? ` — ${basename(parentPath(t.path))}` : '';
-          return {
-            id: t.id,
-            title: `${t.dirty ? '• ' : ''}${name}${parent}`,
-            icon: <FileIcon path="" name={name} kind="file" size={null} mtimeMs={null} px={14} thumbnail={false} />,
-          };
-        })}
-        activeId={activeId ?? ''}
-        label="Open files"
-        newTabLabel="New file (Ctrl+N)"
-        onActivate={setActiveId}
-        onClose={requestCloseTab}
-        onNew={newFile}
-        newTabMenuLabel="New file"
-        tabMenuItems={(id) => {
-          const path = tabs.find((t) => t.id === id)?.path;
-          if (!path) return null;
-          return (
-            <>
-              <ContextMenuItem onSelect={() => treeActions.revealInFiles(path)}>Reveal in Files</ContextMenuItem>
-              <ContextMenuItem onSelect={() => treeActions.openTerminal(parentPath(path))}>Open in Terminal</ContextMenuItem>
-              <ContextMenuSeparator />
-              <ContextMenuItem onSelect={() => treeActions.copyText(path)}>Copy Path</ContextMenuItem>
-              {folder && path.startsWith(`${folder}/`) && (
-                <ContextMenuItem onSelect={() => treeActions.copyText(path.slice(folder.length + 1))}>
-                  Copy Relative Path
-                </ContextMenuItem>
-              )}
-            </>
-          );
-        }}
-        onMove={(id, to) =>
-          setTabs((ts) => {
-            const from = ts.findIndex((t) => t.id === id);
-            if (from === -1) return ts;
-            const next = [...ts];
-            const [moved] = next.splice(from, 1);
-            next.splice(to, 0, moved);
-            return next;
-          })
-        }
-      />,
-    );
-  }, [tabs, activeId, setTitlebar, requestCloseTab, newFile, treeActions, folder]);
-  useEffect(() => () => setTitlebar(null), [setTitlebar]);
+  // Two files of one name say which folder each is in.
+  const nameCounts = new Map<string, number>();
+  for (const t of tabs) nameCounts.set(tabName(t), (nameCounts.get(tabName(t)) ?? 0) + 1);
+  const header = (
+    <WindowDragRegion className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 bg-background/60 pr-3 pl-2">
+      {tabs.length > 0 ? (
+        <div className="flex min-w-0 flex-1 items-center self-stretch">
+          <TabStrip
+            tabs={tabs.map((t) => {
+              const name = tabName(t);
+              const parent = t.path && (nameCounts.get(name) ?? 0) > 1 ? ` — ${basename(parentPath(t.path))}` : '';
+              return {
+                id: t.id,
+                title: `${t.dirty ? '• ' : ''}${name}${parent}`,
+                icon: <FileIcon path="" name={name} kind="file" size={null} mtimeMs={null} px={14} thumbnail={false} />,
+              };
+            })}
+            activeId={activeId ?? ''}
+            label="Open files"
+            newTabLabel="New file (Ctrl+N)"
+            onActivate={setActiveId}
+            onClose={requestCloseTab}
+            onNew={newFile}
+            newTabMenuLabel="New file"
+            moveWindow={tabs.length === 1 ? dinWindowMove(din) : undefined}
+            tabMenuItems={(id) => {
+              const path = tabs.find((t) => t.id === id)?.path;
+              if (!path) return null;
+              return (
+                <>
+                  <ContextMenuItem onSelect={() => treeActions.revealInFiles(path)}>Reveal in Files</ContextMenuItem>
+                  <ContextMenuItem onSelect={() => treeActions.openTerminal(parentPath(path))}>Open in Terminal</ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => treeActions.copyText(path)}>Copy Path</ContextMenuItem>
+                  {folder && path.startsWith(`${folder}/`) && (
+                    <ContextMenuItem onSelect={() => treeActions.copyText(path.slice(folder.length + 1))}>
+                      Copy Relative Path
+                    </ContextMenuItem>
+                  )}
+                </>
+              );
+            }}
+            onMove={(id, to) =>
+              setTabs((ts) => {
+                const from = ts.findIndex((t) => t.id === id);
+                if (from === -1) return ts;
+                const next = [...ts];
+                const [moved] = next.splice(from, 1);
+                next.splice(to, 0, moved);
+                return next;
+              })
+            }
+          />
+        </div>
+      ) : (
+        <>
+          <img src="/icons/apps/text-editor.png" alt="" className="size-4 shrink-0" />
+          <span className="flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium">{windowTitle}</span>
+        </>
+      )}
+      <WindowControls />
+    </WindowDragRegion>
+  );
 
   // -------------------------------------------------------------------------
   // Sidebar resizing.
@@ -1072,9 +1084,12 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
 
   if (!fs) {
     return (
-      <p className="grid h-full place-items-center p-6 text-sm text-muted-foreground">
-        The Text Editor needs the Electron shell to read and save files.
-      </p>
+      <div className="flex h-full w-full flex-col">
+        {header}
+        <p className="grid flex-1 place-items-center p-6 text-sm text-muted-foreground">
+          The Text Editor needs the Electron shell to read and save files.
+        </p>
+      </div>
     );
   }
 
@@ -1087,6 +1102,7 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
 
   return (
     <div className="relative flex h-full w-full flex-col" onKeyDownCapture={onKeyDownCapture}>
+      {header}
       <div className="flex min-h-0 flex-1">
         {sidebarOpen && (
           <>
@@ -1151,6 +1167,7 @@ export function TextEditor({ windowId, params }: AppComponentProps) {
                   focusToken={searchFocus}
                   onOpenMatch={(path, line, column, length) => void openPath(path, { line, column, length })}
                   onReplaceAll={replaceInFiles}
+                  onRevealInFiles={treeActions.revealInFiles}
                 />
               )}
             </aside>

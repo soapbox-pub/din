@@ -233,7 +233,8 @@ declare global {
 /** The fs bridge, or undefined when running outside the Electron shell. */
 export function getFsBridge(): FsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.dinos?.fs;
+  // An app granted it has it through window.din; the desktop, through window.dinos.
+  return window.din?.system.fs ?? window.dinos?.fs;
 }
 
 /**

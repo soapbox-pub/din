@@ -13,7 +13,7 @@ import {
 } from '@/lib/fileTypes';
 import { useFileContent } from '@/hooks/useFileSystem';
 import { Skeleton } from '@/components/ui/skeleton';
-import { FileIcon } from './FileIcon';
+import { FileIcon } from '@/shared/FileIcon';
 
 /** Cap for text reads; bigger files show read-only, truncated. */
 const TEXT_MAX_BYTES = 1024 * 1024;

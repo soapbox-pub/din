@@ -25,9 +25,6 @@ const FileBrowser = lazy(() =>
 const FileViewer = lazy(() =>
   import('@/components/desktop/apps/FileViewer').then((m) => ({ default: m.FileViewer })),
 );
-const TextEditor = lazy(() =>
-  import('@/components/desktop/apps/TextEditor').then((m) => ({ default: m.TextEditor })),
-);
 const PhotoEditor = lazy(() =>
   import('@/components/desktop/apps/PhotoEditor').then((m) => ({ default: m.PhotoEditor })),
 );
@@ -220,18 +217,11 @@ export const APPS: readonly AppDefinition[] = [
     component: Terminal,
     defaultSize: { width: 760, height: 480 },
   },
-  {
-    // Plain text and code, VS Code style: a folder, tabs, quick open and
-    // search across files. Files opens text files here; launch params
-    // `{ path }` open one, `{ folder }` a folder, `{ blank: true }` nothing;
-    // none reopens the last folder.
-    id: 'text-editor',
-    name: 'Text Editor',
-    icon: '/icons/apps/text-editor.png',
-    component: TextEditor,
-    defaultSize: { width: 1120, height: 720 },
-    keywords: ['notepad', 'gedit', 'editor', 'text', 'code', 'notes', 'write', 'ide', 'vscode', 'vs code', 'programming', 'develop'],
-  },
+  // Plain text and code, VS Code style: a folder, tabs, quick open and
+  // search across files. Files opens text files here; launch params
+  // `{ path }` open one, `{ folder }` a folder, `{ blank: true }` nothing;
+  // none reopens the last folder.
+  dinApp('text-editor'),
   // Pictures and pixel art, MS Paint style with Kid Pix's toys. Launch
   // params `{ path }` open a picture; `{ width, height, transparent, zoom }`
   // start a new one.

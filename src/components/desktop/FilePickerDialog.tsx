@@ -32,7 +32,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { useVolumes } from '@/hooks/useVolumes';
 import type { FilePickerOptions, FilePickerResult } from '@/contexts/FilePickerContext';
-import { FileIcon } from '@/components/desktop/apps/files/FileIcon';
+import { FileIcon } from '@/shared/FileIcon';
 import { USER_DIRS } from '@/components/desktop/apps/files/layout';
 import { Button } from '@/components/ui/button';
 import {

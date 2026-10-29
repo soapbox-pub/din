@@ -6,7 +6,7 @@ import { cleanFsError, formatBytes, getFsBridge, isValidEntryName, joinPath, par
 import type { FsEntry } from '@/lib/fs';
 import { typeLabel } from '@/lib/fileTypes';
 import { useDiskUsage, useFsDetails } from '@/hooks/useFileSystem';
-import { FileIcon } from './FileIcon';
+import { FileIcon } from '@/shared/FileIcon';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 
 export { DialogButton, Overlay };

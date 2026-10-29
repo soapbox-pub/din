@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Ellipsis, Loader2, Replace } from 'lucide-react';
-import { cleanFsError, getFsBridge, parentPath, type FsSearchMatch, type FsSearchOptions, type FsSearchResult } from '@/lib/fs';
+import { cleanFsError, getFsBridge, type FsSearchMatch, type FsSearchOptions, type FsSearchResult } from '@/lib/fs';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { cn } from '@/lib/utils';
-import { FileIcon } from '../files/FileIcon';
+import { FileIcon } from '@/shared/FileIcon';
 import { FieldBox, IconButton, OptionToggle, TextButton, fieldInputClass } from './controls';
 import { searchRegExp, type SearchState } from './search';
 
@@ -23,6 +22,7 @@ export function SearchView({
   focusToken,
   onOpenMatch,
   onReplaceAll,
+  onRevealInFiles,
 }: {
   root: string;
   state: SearchState;
@@ -32,9 +32,10 @@ export function SearchView({
   onOpenMatch: (path: string, line: number, column: number, length: number) => void;
   /** Replace in every file of `result`; resolves when done. */
   onReplaceAll: (result: FsSearchResult, options: FsSearchOptions, replacement: string) => Promise<void>;
+  /** Show a file in Files. */
+  onRevealInFiles: (path: string) => void;
 }) {
   const fs = getFsBridge();
-  const { open } = useWindowActions();
   const inputRef = useRef<HTMLInputElement>(null);
   const [outcome, setOutcome] = useState<{ key: string; result: FsSearchResult | null; error: string | null } | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -268,7 +269,7 @@ export function SearchView({
                   {file.matches[0] && <ContextMenuItem onSelect={() => openAt(file.matches[0])}>Open</ContextMenuItem>}
                   <ContextMenuItem onSelect={toggle}>{isCollapsed ? 'Expand' : 'Collapse'}</ContextMenuItem>
                   <ContextMenuSeparator />
-                  <ContextMenuItem onSelect={() => open('file-browser', { path: parentPath(full), select: name })}>Reveal in Files</ContextMenuItem>
+                  <ContextMenuItem onSelect={() => onRevealInFiles(full)}>Reveal in Files</ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem onSelect={() => copyText(full)}>Copy Path</ContextMenuItem>
                   <ContextMenuItem onSelect={() => copyText(file.path)}>Copy Relative Path</ContextMenuItem>

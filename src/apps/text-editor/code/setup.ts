@@ -30,7 +30,7 @@ import {
 import { indentationMarkers } from '@replit/codemirror-indentation-markers';
 import { showMinimap } from '@replit/codemirror-minimap';
 import { createFindPanel } from './findPanel';
-import { editorChrome, fontSizeTheme, syntaxTheme } from './theme';
+import { editorChrome, fontSizeTheme, syntaxTheme } from '@/shared/codeTheme';
 
 export interface EditorPrefs {
   wrap: boolean;

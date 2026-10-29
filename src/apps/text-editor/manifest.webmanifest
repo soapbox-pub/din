@@ -1,0 +1,44 @@
+{
+  "name": "Text Editor",
+  "description": "Plain text and code, VS Code style: a folder, tabs, quick open and search across files.",
+  "icons": [
+    {
+      "src": "/icons/apps/text-editor.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "permissions": [
+      "fs"
+    ],
+    "window": {
+      "size": {
+        "width": 1120,
+        "height": 720
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "notepad",
+      "gedit",
+      "editor",
+      "text",
+      "code",
+      "notes",
+      "write",
+      "ide",
+      "vscode",
+      "vs code",
+      "programming",
+      "develop"
+    ],
+    "migrateStorage": [
+      "din:text-editor:*"
+    ]
+  }
+}

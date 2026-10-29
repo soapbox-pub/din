@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { LanguageDescription, type LanguageSupport, type TagStyle } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import { highlightTree, tagHighlighter, type Highlighter } from '@lezer/highlight';
-import { DARK_SYNTAX, LIGHT_SYNTAX } from '@/components/desktop/apps/code/theme';
+import { DARK_SYNTAX, LIGHT_SYNTAX } from '@/shared/codeTheme';
 import { useIsDark } from '@/hooks/useIsDark';
 
 /**

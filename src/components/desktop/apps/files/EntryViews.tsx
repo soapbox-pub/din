@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { formatBytes, isValidEntryName, joinPath } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
 import { typeLabel } from '@/lib/fileTypes';
-import { FileIcon } from './FileIcon';
+import { FileIcon } from '@/shared/FileIcon';
 import { activeFileDrag, dropCopies } from './dnd';
 import { GRID_ZOOMS, ROW_HEIGHT } from './layout';
 
