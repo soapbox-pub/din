@@ -321,8 +321,11 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
 
     // A blank document (a fresh guest, or the about:blank a new tab parks on)
     // paints Chromium's default white, and the engine keeps that frame up
-    // until the next page draws. Until a real page is ready, the theme's
-    // background covers it instead.
+    // until the next page draws. Until a real page draws, the theme's
+    // background covers it instead. The first paint lifts it, not dom-ready:
+    // that waits for the page's deferred scripts, and would hide a page
+    // that's already showing for hundreds of milliseconds. dom-ready and the
+    // load's end are the fallbacks.
     const [blank, setBlank] = useState(true);
     const onRealPage = useRef(false);
     const pageReady = () => {
@@ -347,6 +350,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
             setGone(false);
             onLoadStart?.();
           }}
+          onFirstPaint={pageReady}
           onDomReady={pageReady}
           onLoadEnd={() => {
             pageReady();

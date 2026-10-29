@@ -95,6 +95,7 @@ interface Dinos {
   // Guest plumbing (used only inside src/platform/)
   pageFullscreen: PageFullscreenBridge;
   guestVisibility: GuestVisibilityBridge;
+  guestPaint: GuestPaintBridge;
   guestFileDrop: GuestFileDropBridge;
   guestInput: GuestInputBridge;
   highlightHost: HighlightHostBridge;
@@ -147,7 +148,7 @@ directly by components.
 | Nostr | `nostrd`, `nostrHost`, `bunkerHost` |
 | The browser | `browser`, `crx`, `userscripts`, `adblock`, `popups`, `devtools`, `screenShare` |
 | nsites and napps | `nsiteHost`, `nsiteStore`, `nappHost`, `webPushHost` |
-| Guest plumbing | `pageFullscreen`, `guestVisibility`, `guestFileDrop`, `guestInput`, `highlightHost`, `filePickerHost`, `promptHost` |
+| Guest plumbing | `pageFullscreen`, `guestVisibility`, `guestPaint`, `guestFileDrop`, `guestInput`, `highlightHost`, `filePickerHost`, `promptHost` |
 | The Assistant | `assistant` |
 
 Pages per namespace are added here as each one's types are tidied up;

@@ -26,6 +26,7 @@ talks about guests by element or by id:
   acceptFileDrops                    // Files drags arrive as real files (web pages)
   onAttach={(id) => …}               // the guest id, once attached
   onDomReady onLoadStart onLoadEnd onLoadError onTitle onFavicons onThemeColor onNavigate onGone
+  onFirstPaint                       // a document's first frame with content, from main (dinos.guestPaint)
 />
 ```
 
