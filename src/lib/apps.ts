@@ -40,9 +40,6 @@ const CAD = lazy(() =>
 const MediaPlayer = lazy(() =>
   import('@/components/desktop/apps/MediaPlayer').then((m) => ({ default: m.MediaPlayer })),
 );
-const Terminal = lazy(() =>
-  import('@/components/desktop/apps/Terminal').then((m) => ({ default: m.Terminal })),
-);
 const Settings = lazy(() =>
   import('@/components/desktop/apps/Settings').then((m) => ({ default: m.Settings })),
 );
@@ -210,13 +207,7 @@ export const APPS: readonly AppDefinition[] = [
     component: FileBrowser,
     defaultSize: { width: 880, height: 600 },
   },
-  {
-    id: 'terminal',
-    name: 'Terminal',
-    icon: '/icons/apps/terminal.png',
-    component: Terminal,
-    defaultSize: { width: 760, height: 480 },
-  },
+  dinApp('terminal'),
   // Plain text and code, VS Code style: a folder, tabs, quick open and
   // search across files. Files opens text files here; launch params
   // `{ path }` open one, `{ folder }` a folder, `{ blank: true }` nothing;

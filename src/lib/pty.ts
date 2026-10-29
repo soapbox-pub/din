@@ -63,5 +63,6 @@ declare global {
 /** The pty bridge, or undefined when running outside the Electron shell. */
 export function getPtyBridge(): PtyBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.dinos?.pty;
+  // An app granted it has it through window.din; the desktop, through window.dinos.
+  return window.din?.system.pty ?? window.dinos?.pty;
 }

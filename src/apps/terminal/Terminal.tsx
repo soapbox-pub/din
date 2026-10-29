@@ -1,19 +1,15 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm, type ILink } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { SquareTerminal } from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
 import { getPtyBridge, type PtyBridge } from '@/lib/pty';
-import { parkedTab } from '@/lib/tabTransfer';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useWindowIsTop } from '@/contexts/WindowFocusContext';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { moveItem } from '@/hooks/useDragReorder';
-import { TabStrip } from '@/components/desktop/TabStrip';
+import type { Din } from '@/sdk';
+import { useDin, useDinTheme, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { TabStrip } from '@/shared/TabStrip';
+import { dinWindowMove } from '@/shared/dinWindowMove';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -22,7 +18,6 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
-import { registerDictationTarget } from '@/lib/dictation';
 import '@xterm/xterm/css/xterm.css';
 
 /**
@@ -84,30 +79,18 @@ const LIGHT_THEME = {
 const terminalTheme = (dark: boolean) => (dark ? DARK_THEME : LIGHT_THEME);
 
 /**
- * Whether Din is dark right now: the class on <html>, which follows the
- * Light/Dark/System setting and a custom theme's own background alike.
- * Sessions live outside React, so they subscribe here and repaint when it
- * changes.
+ * Whether Din is dark right now (din.theme, which follows the Light/Dark/System
+ * setting and a custom theme's own background alike). Sessions live outside
+ * React, so the window sets it here and they repaint when it changes.
  */
-const isDinDark = () => document.documentElement.classList.contains('dark');
-let currentDark = isDinDark();
+let currentDark = window.din?.theme.current.scheme === 'dark';
 const darkListeners = new Set<(dark: boolean) => void>();
 
-new MutationObserver(() => {
-  const dark = isDinDark();
+function setDinDark(dark: boolean) {
   if (dark === currentDark) return;
   currentDark = dark;
   for (const listener of darkListeners) listener(dark);
-}).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-
-function subscribeDark(onChange: () => void) {
-  darkListeners.add(onChange);
-  return () => {
-    darkListeners.delete(onChange);
-  };
 }
-
-const useDinDark = () => useSyncExternalStore(subscribeDark, () => currentDark);
 
 let nextSessionId = 0;
 const newSessionId = () => `term-${nextSessionId++}`;
@@ -244,10 +227,6 @@ function paneTitle(label: PaneLabel | undefined): string {
   return 'Terminal';
 }
 
-function isTermTab(value: unknown): value is TermTab {
-  return typeof value === 'object' && value !== null && 'layout' in value && 'activePaneId' in value;
-}
-
 /** Replace the leaf `paneId` with a split of itself and a new pane. */
 /**
  * xterm's WebGL renderer calls generateMipmap() after every glyph-atlas
@@ -377,9 +356,9 @@ function flattenLayout(
 /**
  * Terminal - a real interactive shell on the underlying OS.
  *
- * Rendered with xterm.js; each pane owns one pty session over the `window.dinos.pty`
- * bridge (see src/lib/pty.ts). Sessions run as the unprivileged OS user and
- * die with the window. Multiple tabs share one window: all sessions stay
+ * Rendered with xterm.js; each pane owns one pty session over `din.system.pty`
+ * (the `pty` permission; see src/lib/pty.ts). Sessions run as the
+ * unprivileged OS user and die with the window. Multiple tabs share one window: all sessions stay
  * mounted (their xterm state survives) and only the active tab is visible.
  * Ctrl+PageUp/PageDown switch tabs, Ctrl+(Shift+)T opens one and Ctrl+Shift+W
  * closes one (gnome-terminal/Tilix bindings); when a shell exits its pane
@@ -389,17 +368,19 @@ function flattenLayout(
  * down into a tree of terminals with draggable dividers.
  * Outside the Electron shell (plain-browser dev) there is no bridge, so a
  * fallback notice renders instead.
+ *
+ * Launch params: `{ cwd }` starts the first shell in a folder, `{ app,
+ * appName }` runs a terminal app (htop) in the first pane.
  */
-export function Terminal({ windowId, params }: AppComponentProps) {
+export function Terminal() {
+  const din = useDin();
+  const params = din.app.launch.params;
   const bridge = getPtyBridge();
-  const { close: closeWindow, focus: focusWindow } = useWindowActions();
-  const setTitlebar = useWindowTitlebar();
-  const dark = useDinDark();
+  const dark = useDinTheme().scheme === 'dark';
+  useLayoutEffect(() => setDinDark(dark), [dark]);
+  const closeWindow = useCallback(() => din.window.close(), [din]);
 
   const [tabs, setTabs] = useState<TermTab[]>(() => {
-    // A window opened for a tab dragged out of another one.
-    const adopted = parkedTab(params);
-    if (isTermTab(adopted)) return [adopted];
     const paneId = newSessionId();
     // Files' "Open in Terminal" starts the first shell in a given folder.
     const initialCwd = typeof params?.cwd === 'string' ? params.cwd : undefined;
@@ -461,7 +442,7 @@ export function Terminal({ windowId, params }: AppComponentProps) {
         const next = ts.filter((t) => t.id !== id);
         // Closing the last tab closes the terminal window.
         if (next.length === 0) {
-          closeWindow(windowId);
+          closeWindow();
           return ts;
         }
         setActiveId((current) =>
@@ -470,30 +451,8 @@ export function Terminal({ windowId, params }: AppComponentProps) {
         return next;
       });
     },
-    [closeWindow, windowId],
+    [closeWindow],
   );
-
-  /** Hand a tab to another window, its shells still running. */
-  const takeTab = useCallback(
-    (id: string) => {
-      const tab = tabsRef.current.find((t) => t.id === id);
-      if (tab) {
-        markMoving(tab.layout);
-        closeTab(id);
-      }
-      return tab;
-    },
-    [closeTab],
-  );
-
-  const receiveTab = useCallback((payload: unknown, index: number) => {
-    if (!isTermTab(payload)) return;
-    setTabs((ts) => {
-      const rest = ts.filter((t) => t.id !== payload.id);
-      return [...rest.slice(0, index), payload, ...rest.slice(index)];
-    });
-    setActiveId(payload.id);
-  }, []);
 
   const splitPane = useCallback((tabId: string, paneId: string, dir: SplitDir) => {
     const newPaneId = newSessionId();
@@ -517,7 +476,7 @@ export function Terminal({ windowId, params }: AppComponentProps) {
         if (layout === null) {
           const next = ts.filter((t) => t.id !== tabId);
           if (next.length === 0) {
-            closeWindow(windowId);
+            closeWindow();
             return ts;
           }
           setActiveId((current) =>
@@ -537,7 +496,7 @@ export function Terminal({ windowId, params }: AppComponentProps) {
         );
       });
     },
-    [closeWindow, windowId],
+    [closeWindow],
   );
 
   // Tab shortcuts originate inside xterm sessions (which swallow every
@@ -579,9 +538,9 @@ export function Terminal({ windowId, params }: AppComponentProps) {
     (tabId: string, paneId: string) => {
       setActiveId(tabId);
       focusPane(tabId, paneId);
-      focusWindow(windowId);
+      din.window.focus();
     },
-    [focusPane, focusWindow, windowId],
+    [focusPane, din],
   );
 
   const resizeSplit = useCallback((tabId: string, splitId: string, ratio: number) => {
@@ -597,75 +556,84 @@ export function Terminal({ windowId, params }: AppComponentProps) {
   const title = activeTab ? paneTitle(labels[activeTab.activePaneId]) : null;
   useWindowTitle(title);
 
-  // Publish the tab strip into the window title bar (Chrome-style), so tabs
-  // share a line with the window controls. Cleared on unmount.
-  useEffect(() => {
-    if (!bridge) return;
-    setTitlebar(
-      <TabStrip
-        tabs={tabs.map((t) => ({
-          id: t.id,
-          title: paneTitle(labels[t.activePaneId]),
-          icon: <SquareTerminal className="size-3.5" />,
-        }))}
-        activeId={activeId}
-        label="Terminal tabs"
-        newTabLabel="New terminal"
-        onActivate={setActiveId}
-        onClose={closeTab}
-        onNew={openTab}
-        onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
-        transfer={{
-          windowId,
-          appId: 'terminal',
-          group: 'terminal',
-          title: title ?? 'Terminal',
-          take: takeTab,
-          receive: receiveTab,
-        }}
-      />,
-    );
-    return () => setTitlebar(null);
-  }, [bridge, tabs, labels, activeId, title, windowId, closeTab, openTab, takeTab, receiveTab, setTitlebar]);
+  // The tab strip shares a line with the window controls (Chrome-style), in
+  // the window's own header (a `custom` frame).
+  const headerRef = useRef<HTMLDivElement>(null);
+  const header = (
+    <WindowDragRegion
+      ref={headerRef}
+      className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 bg-background/60 pr-3 pl-2"
+    >
+      {bridge ? (
+        <div className="flex min-w-0 flex-1 items-center self-stretch">
+          <TabStrip
+            tabs={tabs.map((t) => ({
+              id: t.id,
+              title: paneTitle(labels[t.activePaneId]),
+              icon: <SquareTerminal className="size-3.5" />,
+            }))}
+            activeId={activeId}
+            label="Terminal tabs"
+            newTabLabel="New terminal"
+            onActivate={setActiveId}
+            onClose={closeTab}
+            onNew={openTab}
+            onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+            moveWindow={tabs.length === 1 ? dinWindowMove(din) : undefined}
+          />
+        </div>
+      ) : (
+        <span className="flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium">Terminal</span>
+      )}
+      <WindowControls />
+    </WindowDragRegion>
+  );
 
   if (!bridge) {
     return (
-      <div className="grid h-full w-full place-items-center p-6">
-        <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
-          <SquareTerminal className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
-          <p className="text-sm text-muted-foreground">
-            Terminal needs the Electron shell to run an OS shell. Run{' '}
-            <code className="rounded bg-foreground/10 px-1 py-0.5">make dev</code> or
-            boot the VM; the bridge is not available in a plain browser.
-          </p>
+      <div className="flex h-full w-full flex-col">
+        {header}
+        <div className="grid flex-1 place-items-center p-6">
+          <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+            <SquareTerminal className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
+            <p className="text-sm text-muted-foreground">
+              Terminal needs the Electron shell to run an OS shell. Run{' '}
+              <code className="rounded bg-foreground/10 px-1 py-0.5">make dev</code> or
+              boot the VM; the bridge is not available in a plain browser.
+            </p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    // overflow-clip: background tabs park outside it (see TerminalTab).
-    <div
-      className="relative h-full w-full overflow-clip"
-      style={{ background: terminalTheme(dark).background }}
-    >
-      {/* All tabs stay mounted so background tabs keep their scrollback
-          and running programs; only the active one is visible. */}
-      {tabs.map((tab) => (
-        <TerminalTab
-          key={tab.id}
-          tab={tab}
-          active={tab.id === activeId}
-          onSplit={splitPane}
-          onClosePane={closePane}
-          onFocusPane={focusPane}
-          onRevealPane={revealPane}
-          onResizeSplit={resizeSplit}
-          onCwdChange={handleCwdChange}
-          onLabel={updateLabel}
-          onTabShortcut={onTabShortcut}
-        />
-      ))}
+    <div className="flex h-full w-full flex-col">
+      {header}
+      {/* overflow-clip: background tabs park outside it (see TerminalTab). */}
+      <div
+        className="relative min-h-0 w-full flex-1 overflow-clip rounded-b-[inherit]"
+        style={{ background: terminalTheme(dark).background }}
+      >
+        {/* All tabs stay mounted so background tabs keep their scrollback
+            and running programs; only the active one is visible. */}
+        {tabs.map((tab) => (
+          <TerminalTab
+            key={tab.id}
+            tab={tab}
+            active={tab.id === activeId}
+            onSplit={splitPane}
+            onClosePane={closePane}
+            onFocusPane={focusPane}
+            onRevealPane={revealPane}
+            onResizeSplit={resizeSplit}
+            onCwdChange={handleCwdChange}
+            onLabel={updateLabel}
+            onTabShortcut={onTabShortcut}
+            header={headerRef}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -686,6 +654,7 @@ const TerminalTab = memo(function TerminalTab({
   onCwdChange,
   onLabel,
   onTabShortcut,
+  header,
 }: {
   tab: TermTab;
   active: boolean;
@@ -697,6 +666,8 @@ const TerminalTab = memo(function TerminalTab({
   onCwdChange: (paneId: string, cwd: string) => void;
   onLabel: (paneId: string, label: PaneLabel | null) => void;
   onTabShortcut: (action: TabShortcut) => void;
+  /** The window's header, whose clicks hand focus back to the terminal. */
+  header: React.RefObject<HTMLDivElement | null>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -785,6 +756,7 @@ const TerminalTab = memo(function TerminalTab({
             onCwdChange={onCwdChange}
             onLabel={onLabel}
             onTabShortcut={onTabShortcut}
+            header={header}
           />
         </div>
       ))}
@@ -839,38 +811,21 @@ interface PaneHost {
 }
 
 /**
- * A pane's terminal: one xterm instance bound to one pty. It lives outside
- * React so its tab can move to another window without the shell noticing:
- * the tab's panes are marked `moving`, the old window's panes detach without
- * killing them, and the new window's panes attach the same sessions.
+ * A pane's terminal: one xterm instance bound to one pty, kept outside React
+ * so re-renders never touch the shell. Detaching it kills the shell.
  */
 interface PaneSession {
   term: XTerm;
   fit: FitAddon;
-  /** Keep the session alive through its next detach: its tab is moving. */
-  moving: boolean;
   /** Show the terminal in a pane's container. Returns the detach fn. */
   attach: (container: HTMLElement, host: { current: PaneHost }) => () => void;
 }
 
 const paneSessions = new Map<string, PaneSession>();
 
-/** How long a moving pane waits to be picked up before its shell is killed. */
-const MOVE_GRACE_MS = 10_000;
-
-/** Mark a tab's sessions as moving to another window. */
-function markMoving(node: LayoutNode): void {
-  if (node.type === 'split') {
-    markMoving(node.a);
-    markMoving(node.b);
-    return;
-  }
-  const session = paneSessions.get(node.paneId);
-  if (session) session.moving = true;
-}
-
 /** The session for a pane: the one it already has, or a new shell (or app). */
 function paneSession(
+  din: Din,
   bridge: PtyBridge,
   paneId: string,
   initialCwd: string | undefined,
@@ -883,7 +838,6 @@ function paneSession(
   let sessionId: number | null = null;
   let exited = false;
   let host: { current: PaneHost } | null = null;
-  let disposeTimer: number | undefined;
   /** Output that raced ahead of the spawn() ack, keyed by session id. */
   const pending: Array<{ id: number; data: Uint8Array }> = [];
   /** Tracks the shell's current working directory via OSC 7. */
@@ -1156,7 +1110,6 @@ function paneSession(
       command = started;
       host?.current.onLabel(paneId, { command });
     }) ?? (() => {});
-  let finished: Notification | null = null;
   const offCommandDone = bridge.onCommandDone((id, done) => {
     if (id !== sessionId) return;
     if (done.command) {
@@ -1164,12 +1117,13 @@ function paneSession(
       host?.current.onLabel(paneId, { command });
     }
     if (done.seconds < NOTIFY_AFTER_SECONDS || host?.current.visible) return;
-    finished = new Notification(done.command || 'Command', {
-      app: 'terminal',
+    void din.notifications.show(done.command || 'Command', {
       body: `Finished after ${formatDuration(done.seconds)}`,
       tag: paneId,
-    });
-    finished.onclick = () => host?.current.onReveal(paneId);
+    }).catch(() => {});
+  });
+  const offNotification = din.notifications.onAction(({ tag }) => {
+    if (tag === paneId) host?.current.onReveal(paneId);
   });
 
   term.onData((data) => {
@@ -1209,7 +1163,7 @@ function paneSession(
     offExit();
     offCommandStart();
     offCommandDone();
-    finished?.close();
+    offNotification();
     oscHandler.dispose();
     clipboardHandler.dispose();
     linkProvider.dispose();
@@ -1220,23 +1174,18 @@ function paneSession(
   const session: PaneSession = {
     term,
     fit,
-    moving: false,
     attach(container, h) {
-      window.clearTimeout(disposeTimer);
-      session.moving = false;
       host = h;
       if (term.element) {
         container.appendChild(term.element);
         fit.fit();
       } else {
         term.open(container);
-        // Dictated text goes in as a paste, so a shell doesn't run it.
-        if (term.element) registerDictationTarget(term.element, (text) => term.paste(text));
         loadWebgl();
         fit.fit();
         spawn();
       }
-      // The window it moved to learns what the old one knew.
+      // A pane mounted again (development's double effects) learns what it knew.
       if (cwd) h.current.onCwdChange(paneId, cwd);
       if (command) h.current.onLabel(paneId, { command });
       if (exited) h.current.onClose(paneId);
@@ -1275,13 +1224,8 @@ function paneSession(
         container.removeEventListener('wheel', onWheel, { capture: true });
         container.removeEventListener('mousedown', focus);
         container.removeEventListener('webglcontextrestored', onContextRestored, true);
-        // Another window's pane already took the session over.
         if (host !== h) return;
         host = null;
-        if (session.moving) {
-          disposeTimer = window.setTimeout(dispose, MOVE_GRACE_MS);
-          return;
-        }
         h.current.onLabel(paneId, null);
         dispose();
       };
@@ -1309,6 +1253,7 @@ const TerminalSession = memo(function TerminalSession({
   onCwdChange,
   onLabel,
   onTabShortcut,
+  header,
 }: {
   paneId: string;
   /** Whether the owning tab is visible. */
@@ -1326,15 +1271,17 @@ const TerminalSession = memo(function TerminalSession({
   onCwdChange: (paneId: string, cwd: string) => void;
   onLabel: (paneId: string, label: PaneLabel | null) => void;
   onTabShortcut: (action: TabShortcut) => void;
+  header: React.RefObject<HTMLDivElement | null>;
 }) {
+  const din = useDin();
   const bridge = getPtyBridge();
-  const openUrl = useOpenUrl();
+  const openUrl = useCallback((url: string) => void din.app.openUrl(url), [din]);
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<XTerm | null>(null);
   const initialCwdRef = useRef(initialCwd);
   const appRef = useRef(app);
-  const isTop = useWindowIsTop();
+  const isTop = useWindowState().focused;
   const isTopRef = useRef(isTop);
   // Always-fresh callbacks for the (long-lived) session.
   const host = useRef<PaneHost>({
@@ -1362,7 +1309,7 @@ const TerminalSession = memo(function TerminalSession({
   useEffect(() => {
     const container = containerRef.current;
     if (!bridge || !container) return;
-    const session = paneSession(bridge, paneId, initialCwdRef.current, appRef.current);
+    const session = paneSession(din, bridge, paneId, initialCwdRef.current, appRef.current);
     termRef.current = session.term;
     fitRef.current = session.fit;
     const detach = session.attach(container, host);
@@ -1371,7 +1318,7 @@ const TerminalSession = memo(function TerminalSession({
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [bridge, paneId]);
+  }, [din, bridge, paneId]);
 
   // When this pane's tab becomes active, refit (its container had zero size
   // while hidden, so xterm's cached dimensions are stale).
@@ -1394,16 +1341,16 @@ const TerminalSession = memo(function TerminalSession({
   // Skipped if the click minimized or closed the window.
   useEffect(() => {
     if (!active || !focused) return;
-    const header = containerRef.current?.closest('section')?.querySelector(':scope > header');
-    if (!header) return;
+    const el = header.current;
+    if (!el) return;
     const onPointerUp = () => {
       requestAnimationFrame(() => {
         if (isTopRef.current) termRef.current?.focus();
       });
     };
-    header.addEventListener('pointerup', onPointerUp);
-    return () => header.removeEventListener('pointerup', onPointerUp);
-  }, [active, focused]);
+    el.addEventListener('pointerup', onPointerUp);
+    return () => el.removeEventListener('pointerup', onPointerUp);
+  }, [active, focused, header]);
 
   const copySelection = useCallback(() => {
     const text = termRef.current?.getSelection();

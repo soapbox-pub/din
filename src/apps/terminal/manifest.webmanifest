@@ -1,0 +1,40 @@
+{
+  "name": "Terminal",
+  "description": "A shell on this computer, in tabs and split panes.",
+  "icons": [
+    {
+      "src": "/icons/apps/terminal.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "permissions": [
+      "pty",
+      "notifications"
+    ],
+    "window": {
+      "size": {
+        "width": 760,
+        "height": 480
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "shell",
+      "console",
+      "command line",
+      "cli",
+      "bash",
+      "zsh",
+      "tty"
+    ],
+    "migrateStorage": [
+      "din.terminal.fontSize"
+    ]
+  }
+}
