@@ -450,10 +450,16 @@ export async function resolveIcon(iconName: string | null): Promise<string | nul
 //
 // Din asks for a few dozen names (its apps' standard equivalents, file
 // types) by probing a theme's directories for the context they belong to.
-// Only the theme and the themes it names as parents count: falling through
-// to hicolor would swap Din's icon for whatever app happens to be installed
-// under that name, which isn't the theme's look.
+// Only the theme and the themes it names as parents count, less hicolor,
+// which most name: falling through to it would swap Din's icon for whatever
+// app happens to be installed under that name (GIMP's for Paint), which
+// isn't the theme's look.
 // ---------------------------------------------------------------------------
+
+/** The themes Din's own icons may come from, for `theme`. */
+function lookupChain(theme: string): string[] {
+  return themeChain(theme).filter((name) => name !== 'hicolor');
+}
 
 /** Find the first of `names` a theme (or a parent) has, as a file path. */
 function findIcon(chain: string[], names: string[], kind: IconKind): string | null {
@@ -485,7 +491,7 @@ async function lookup(requests: { names: string[]; kind: IconKind }[]): Promise<
   const theme = await currentIconTheme();
   const found: Record<string, string> = {};
   if (theme === DIN_THEME) return found;
-  const chain = themeChain(theme);
+  const chain = lookupChain(theme);
   for (const { names, kind } of requests) {
     const file = findIcon(chain, names, kind);
     const url = file && iconDataUrl(file);
@@ -510,7 +516,7 @@ const PREVIEW_COUNT = 4;
 
 function preview(theme: string): string[] {
   if (theme === DIN_THEME) return [];
-  const chain = themeChain(theme);
+  const chain = lookupChain(theme);
   const urls: string[] = [];
   for (const { names, kind } of PREVIEW) {
     const file = findIcon(chain, names, kind);
