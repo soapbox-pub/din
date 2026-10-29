@@ -6,6 +6,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useSystemCursorStatus } from '@/hooks/useSystemCursor';
 import { cursorEffects } from '@/lib/cursorEffects';
 import type { CursorImage } from '@/lib/cursorEffects/scene';
+import { portalContainer } from '@/lib/portalContainer';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 
@@ -52,6 +53,8 @@ function useCursorImage(wanted: boolean, zoom: number): CursorImage | null {
  * The layer cursor effects draw on (src/lib/cursorEffects): over the whole
  * screen, above everything, taking no input. Feeds the engine the user's
  * choices, the screen's size, and whether the system asks for less motion.
+ * It's in the desktop's layer, not <body>, so it stays on top while that
+ * layer is a modal dialog for something fullscreen on another monitor.
  */
 export function CursorEffectsLayer() {
   const { config } = useAppContext();
@@ -91,6 +94,6 @@ export function CursorEffectsLayer() {
 
   return createPortal(
     <ScreenLayer ref={host} aria-hidden className="pointer-events-none z-[2147483000] overflow-hidden" style={{ contain: 'strict' }} />,
-    document.body,
+    portalContainer(),
   );
 }
