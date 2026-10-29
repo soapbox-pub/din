@@ -6,10 +6,10 @@
  */
 
 import { DAMAGED } from './bytes';
-import { type ConvertRequest, type ConvertedTheme, ImportError, convertCursors } from './convert';
+import { type ConvertRequest, type ConvertedEffects, type ConvertedTheme, ImportError, convertImport } from './convert';
 import { chromiumDecoder } from './decoder';
 
-type Outcome = { ok: true; themes: ConvertedTheme[] } | { ok: false; error: string };
+type Outcome = { ok: true; themes: ConvertedTheme[]; effects: ConvertedEffects[] } | { ok: false; error: string };
 
 declare global {
   interface Window {
@@ -22,8 +22,8 @@ declare global {
 }
 
 window.cursorConverterHost?.onJob((job) => {
-  convertCursors(job, chromiumDecoder).then(
-    (themes) => window.cursorConverterHost?.done({ ok: true, themes }),
+  convertImport(job, chromiumDecoder).then(
+    ({ themes, effects }) => window.cursorConverterHost?.done({ ok: true, themes, effects }),
     (error) => window.cursorConverterHost?.done({ ok: false, error: error instanceof ImportError ? error.message : DAMAGED }),
   );
 });

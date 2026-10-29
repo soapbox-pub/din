@@ -1,0 +1,96 @@
+import { useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { useQuery } from '@tanstack/react-query';
+import { MonitorsContext } from '@/contexts/MonitorsContext';
+import { useAppContext } from '@/hooks/useAppContext';
+import { useSystemCursorStatus } from '@/hooks/useSystemCursor';
+import { cursorEffects } from '@/lib/cursorEffects';
+import type { CursorImage } from '@/lib/cursorEffects/scene';
+import { getSystemCursorBridge } from '@/lib/systemCursor';
+import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
+
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+function subscribeReducedMotion(onChange: () => void): () => void {
+  const query = window.matchMedia(REDUCED_MOTION);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+/** The pointer's own arrow, for Mouse Trails to copy; null until it's known, or outside the shell. */
+function useCursorImage(wanted: boolean, zoom: number): CursorImage | null {
+  const status = useSystemCursorStatus();
+  const theme = status.data?.theme;
+  const size = status.data?.size;
+  const { data } = useQuery({
+    queryKey: ['cursor', 'effect-image', theme, size],
+    queryFn: async () => {
+      const bridge = getSystemCursorBridge();
+      if (!bridge || !theme || !size) return null;
+      const arrow = (await bridge.preview(theme, size)).find((p) => p.role === 'default');
+      if (!arrow) return null;
+      const pixels = new Uint8ClampedArray(arrow.rgba.length);
+      pixels.set(arrow.rgba);
+      const bitmap = await createImageBitmap(new ImageData(pixels, arrow.width, arrow.height));
+      return { bitmap, hotX: arrow.hotX, hotY: arrow.hotY };
+    },
+    enabled: wanted && !!theme && !!size,
+    staleTime: Infinity,
+    retry: false,
+  });
+  return useMemo(() => {
+    if (!data || !size) return null;
+    const { bitmap, hotX, hotY } = data;
+    // The pointer is drawn `size` device-independent pixels big whatever the
+    // interface zoom; this layer's pixels are zoomed ones.
+    const scale = size / Math.max(bitmap.width, bitmap.height, 1) / zoom;
+    return { source: bitmap, width: bitmap.width * scale, height: bitmap.height * scale, hotX: hotX * scale, hotY: hotY * scale };
+  }, [data, size, zoom]);
+}
+
+/**
+ * The layer cursor effects draw on (src/lib/cursorEffects): over the whole
+ * screen, above everything, taking no input. Feeds the engine the user's
+ * choices, the screen's size, and whether the system asks for less motion.
+ */
+export function CursorEffectsLayer() {
+  const { config } = useAppContext();
+  const layout = useContext(MonitorsContext);
+  const host = useRef<HTMLDivElement>(null);
+  const reduced = useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia(REDUCED_MOTION).matches, () => false);
+  const cursor = useCursorImage(config.cursorTrail === 'mouse-trails', config.zoomLevel / 100);
+
+  useEffect(() => {
+    const el = host.current;
+    return el ? cursorEffects.mount(el) : undefined;
+  }, []);
+
+  useEffect(() => {
+    cursorEffects.setEnabled(!reduced);
+  }, [reduced]);
+
+  useEffect(() => {
+    cursorEffects.setSettings({
+      trail: config.cursorTrail,
+      click: config.cursorClick,
+      showMouse: config.cursorShowMouse,
+      firePaint: config.cursorFirePaint,
+      water: config.cursorWater,
+    });
+  }, [config.cursorTrail, config.cursorClick, config.cursorShowMouse, config.cursorFirePaint, config.cursorWater]);
+
+  useEffect(() => {
+    cursorEffects.setCursorImage(cursor);
+  }, [cursor]);
+
+  const width = layout?.width ?? window.innerWidth;
+  const height = layout?.height ?? window.innerHeight;
+  useEffect(() => {
+    cursorEffects.setViewport(width, height);
+  }, [width, height]);
+
+  return createPortal(
+    <ScreenLayer ref={host} aria-hidden className="pointer-events-none z-[2147483000] overflow-hidden" style={{ contain: 'strict' }} />,
+    document.body,
+  );
+}

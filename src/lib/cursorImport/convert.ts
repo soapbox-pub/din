@@ -10,13 +10,15 @@
  *
  * Reads: CursorXP (.CurXPTheme), CursorFX (.CursorFX), Mousecape (.cape),
  * Hyprcursor, Windows .cur/.ani packs, and XCursor themes; as a single file,
- * a folder, or a ZIP, tar or gzipped tar of them.
+ * a folder, or a ZIP, tar or gzipped tar of them. A CursorFX file's on-click
+ * effects and trail come out as an effect package beside its cursors.
  */
 
 import { Budget, DAMAGED, ImportError, LIMITS, TOO_BIG } from './bytes';
 import { type Tree, baseOf, cleanPath, dirOf, isGzip, isTar, isZip, readArchive, readZip, resolve } from './archive';
 import { curxpTheme } from './curxp';
-import { cursorFXTheme, isCursorFX } from './cursorfx';
+import { isCursorFX, readCursorFX } from './cursorfx';
+import type { ConvertedEffects } from './effects';
 import { hyprcursorTheme } from './hyprcursor';
 import type { Decoder } from './image';
 import { mousecapeTheme } from './mousecape';
@@ -26,6 +28,7 @@ import { xcursorRoots, xcursorTheme } from './xcursor';
 
 export { ImportError } from './bytes';
 export type { ConvertedTheme } from './theme';
+export type { ConvertedEffects } from './effects';
 export type { Decoder, Rgba } from './image';
 
 /** One file or symlink of what's being imported. */
@@ -44,7 +47,22 @@ export interface ConvertRequest {
 /** File name extensions that say what a picked file is. */
 const EXTENSIONS = /\.(curxptheme|cursorfx|cape|zip|tar(\.(gz|xz|bz2))?|tgz|txz|tbz2?|cur|ani|inf)$/i;
 
+export interface Converted {
+  themes: ConvertedTheme[];
+  effects: ConvertedEffects[];
+}
+
+/** The cursor themes in what was picked; throws if there are none. */
 export async function convertCursors(request: ConvertRequest, decoder: Decoder): Promise<ConvertedTheme[]> {
+  const { themes } = await convertImport(request, decoder);
+  if (!themes.length) throw new ImportError(NO_THEMES);
+  return themes;
+}
+
+const NO_THEMES = 'No cursor themes were found in it.';
+
+/** The cursor themes and effect packages in what was picked; throws if there's neither. */
+export async function convertImport(request: ConvertRequest, decoder: Decoder): Promise<Converted> {
   const budget = new Budget();
   const fallbackName = request.name.replace(EXTENSIONS, '').trim().slice(0, 80) || 'Imported cursors';
 
@@ -84,6 +102,7 @@ export async function convertCursors(request: ConvertRequest, decoder: Decoder):
   }
 
   const found: ConvertedTheme[] = [];
+  const effects: ConvertedEffects[] = [];
   let failure: unknown = null;
   const attempt = async (make: () => Promise<ConvertedTheme | null>) => {
     if (found.length >= LIMITS.themes) return;
@@ -97,6 +116,13 @@ export async function convertCursors(request: ConvertRequest, decoder: Decoder):
     }
   };
 
+  // A CursorFX file can be effects alone, so its package is kept whether or not it has cursors.
+  const cursorFX = async (data: Uint8Array, name: string) => {
+    const read = await readCursorFX(data, budget, name);
+    if (read.effects && effects.length < LIMITS.themes) effects.push(read.effects);
+    return read.theme;
+  };
+
   const keys = [...tree.keys()].sort();
   const xcursor = xcursorRoots(tree);
   const windowsDirs = new Set<string>();
@@ -107,7 +133,7 @@ export async function convertCursors(request: ConvertRequest, decoder: Decoder):
       await attempt(() => curxpTheme(tree, key, budget, decoder, dir ? baseOf(dir).replace(/\.contents$/, '').replace(EXTENSIONS, '') : fallbackName));
     } else if (base.endsWith('.cursorfx')) {
       const file = resolve(tree, key);
-      if (file && isCursorFX(file.data)) await attempt(() => cursorFXTheme(file.data, budget, baseOf(key).replace(EXTENSIONS, '')));
+      if (file && isCursorFX(file.data)) await attempt(() => cursorFX(file.data, baseOf(key).replace(EXTENSIONS, '')));
     } else if (base.endsWith('.cape')) {
       const file = resolve(tree, key);
       if (file) await attempt(() => mousecapeTheme(file.data, budget, decoder, baseOf(key).replace(EXTENSIONS, '')));
@@ -122,16 +148,16 @@ export async function convertCursors(request: ConvertRequest, decoder: Decoder):
   for (const root of xcursor) await attempt(async () => xcursorTheme(tree, root, budget, fallbackName));
 
   // A lone file without a telling name: try it as each single-file format.
-  if (!found.length && request.entries.length === 1 && tree.size === 1) {
+  if (!found.length && !effects.length && request.entries.length === 1 && tree.size === 1) {
     const [[key]] = tree;
     const file = resolve(tree, key);
-    if (file && isCursorFX(file.data)) await attempt(() => cursorFXTheme(file.data, budget, fallbackName));
+    if (file && isCursorFX(file.data)) await attempt(() => cursorFX(file.data, fallbackName));
   }
 
-  if (!found.length) {
+  if (!found.length && !effects.length) {
     if (failure instanceof ImportError) throw failure;
-    throw new ImportError('No cursor themes were found in it.');
+    throw new ImportError(NO_THEMES);
   }
-  return found;
+  return { themes: found, effects };
 }
 

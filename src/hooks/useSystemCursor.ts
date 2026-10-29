@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getSystemCursorBridge, previewToDataUrl } from '@/lib/systemCursor';
-import type { SystemCursorStatus, SystemCursorTheme } from '@/lib/systemCursor';
+import type { CursorEffectPackageInfo, SystemCursorStatus, SystemCursorTheme } from '@/lib/systemCursor';
 
 /** TanStack Query hooks over the cursor bridge (window.dinos.cursor). */
 
@@ -71,5 +71,25 @@ export function useRemoveSystemCursor() {
   return useMutation({
     mutationFn: (id: string) => requireBridge().removeTheme(id),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['cursor'] }),
+  });
+}
+
+/** The imported effect packages (CursorFX effects and trails). */
+export function useCursorEffectPackages() {
+  return useQuery<CursorEffectPackageInfo[]>({
+    queryKey: ['cursor', 'effects'],
+    queryFn: () => requireBridge().effects(),
+    enabled: getSystemCursorBridge() !== undefined,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** Delete an imported effect package. */
+export function useRemoveCursorEffectPackage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => requireBridge().removeEffect(id),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['cursor', 'effects'] }),
   });
 }

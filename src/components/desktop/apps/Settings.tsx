@@ -185,6 +185,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { WindowEffectPicker } from '@/components/desktop/apps/WindowEffectPicker';
+import { CursorEffectsSettings } from '@/components/desktop/apps/CursorEffectPicker';
+import { PACKAGE_PREFIX, forgetPackage, forgetThumbnails } from '@/lib/cursorEffects';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { getUpdaterBridge, UPDATE_STEP_LABELS } from '@/lib/updater';
@@ -3546,6 +3548,9 @@ function AppearanceSection({ windowId }: { windowId: string }) {
           <FallbackCard>The cursor is your browser’s.</FallbackCard>
         )}
       </div>
+
+      <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor effects</p>
+      <CursorEffectsSettings />
     </SectionShell>
   );
 }
@@ -3737,6 +3742,7 @@ function SystemCursorPicker() {
   const removeCursor = useRemoveSystemCursor();
   const { pickFiles } = useFilePicker();
   const { toast } = useToast();
+  const { updateConfig } = useAppContext();
 
   if (status.isLoading || themes.isLoading) {
     return <Skeleton className="h-40 w-full bg-foreground/10" aria-hidden />;
@@ -3763,11 +3769,41 @@ function SystemCursorPicker() {
     const source = picked?.paths[0];
     if (!source) return;
     importCursor.mutate(source, {
-      onSuccess: (ids) => {
-        const names = ids.map((id) => themes.data.find((t) => t.id === id)?.name ?? id);
+      onSuccess: async (ids) => {
+        // A file's effects and trail, newly imported: forget any older ones by the same name.
+        for (const id of ids.effects) {
+          forgetPackage(`${PACKAGE_PREFIX}${id}`);
+          forgetThumbnails(`${PACKAGE_PREFIX}${id}`);
+        }
+        const packages = ids.effects.length ? ((await getSystemCursorBridge()?.effects()) ?? []) : [];
+        const first = packages.find((p) => ids.effects.includes(p.id));
+        const applyEffects = () => {
+          if (!first) return;
+          updateConfig((current) => ({
+            ...current,
+            cursorTrail: first.trail ? `${PACKAGE_PREFIX}${first.id}` : current.cursorTrail,
+            cursorClick: first.effects.length ? `${PACKAGE_PREFIX}${first.id}` : current.cursorClick,
+          }));
+        };
+        if (!ids.themes.length) {
+          // Effects alone: they're what was wanted, so they're used at once.
+          applyEffects();
+          toast({
+            title: 'Cursor effects imported',
+            description: first ? `${first.name} is now your ${first.trail ? 'trail' : 'click effect'}.` : undefined,
+          });
+          return;
+        }
+        const names = ids.themes.map((id) => themes.data.find((t) => t.id === id)?.name ?? id);
         toast({
-          title: ids.length === 1 ? 'Cursor imported' : `${ids.length} cursor styles imported`,
-          description: ids.length === 1 ? 'It’s now your pointer.' : `Using ${names[0]}.`,
+          title: ids.themes.length === 1 ? 'Cursor imported' : `${ids.themes.length} cursor styles imported`,
+          description: first
+            ? 'It came with its own cursor effects too.'
+            : ids.themes.length === 1 ? 'It’s now your pointer.' : `Using ${names[0]}.`,
+          actions: first ? [{ id: 'use-effects', label: 'Use them' }] : undefined,
+          onAction: (action) => {
+            if (action === 'use-effects') applyEffects();
+          },
         });
       },
       onError: (error) => {
@@ -3844,7 +3880,8 @@ function SystemCursorPicker() {
           </div>
           <p className="text-xs text-muted-foreground">
             CursorXP (.CurXPTheme), CursorFX (.CursorFX), Mousecape (.cape), Windows (.cur, .ani), Hyprcursor
-            and Linux cursor themes, as a file, a folder or an archive. Animated cursors play everywhere.
+            and Linux cursor themes, as a file, a folder or an archive. Animated cursors play everywhere, and a
+            CursorFX file’s effects and trails join the cursor effects below.
           </p>
         </div>
       )}

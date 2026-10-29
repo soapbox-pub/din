@@ -16,6 +16,7 @@ import { isWindowSwitcherActive } from '@/lib/windowSwitcherState';
 import { focusedWindow, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
 import { wmCommandFor, type WmCommand } from '@/lib/wmBindings';
+import { cursorEffects } from '@/lib/cursorEffects';
 
 /** The built-in Web Browser's app id (see src/lib/apps.ts). */
 const WEB_BROWSER_APP_ID = 'web-browser';
@@ -185,6 +186,10 @@ export function DesktopHotkeys() {
         case 'help':
           a.open(SETTINGS_APP_ID, { section: 'windows' });
           return;
+        case 'show-mouse':
+          return cursorEffects.toggleShowMouse();
+        case 'clear-fire-paint':
+          return cursorEffects.clearPaint();
       }
     };
   }, [updateConfig]);

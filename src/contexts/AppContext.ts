@@ -80,6 +80,20 @@ export interface AppConfig {
   /** The effect a window closes with: an id from src/lib/effects, `random`, `pop` or `none`. */
   closeEffect: string;
   /**
+   * What the pointer leaves behind as it moves: a trail's id from
+   * src/lib/cursorEffects, `cursorfx:…` for an imported one, or `none`.
+   * Imported ones are this computer's, like everything here.
+   */
+  cursorTrail: string;
+  /** What a click sets off: an id from src/lib/cursorEffects, `cursorfx:…`, or `none`. */
+  cursorClick: string;
+  /** Compiz's Show Mouse: Super+Shift+K, or shaking the mouse, rings the pointer with light. */
+  cursorShowMouse: boolean;
+  /** Compiz's Fire Paint: Super+Shift and drag to draw in fire; Super+Shift+C puts it out. */
+  cursorFirePaint: boolean;
+  /** Compiz's Water: hold Super+Ctrl and move the mouse to stir the screen like a pond. */
+  cursorWater: boolean;
+  /**
    * Whether windows tile, Hyprland style, instead of floating: they share
    * each monitor's workspace between them (see src/lib/tiling.ts). Kept on
    * this device, like wobbly windows.

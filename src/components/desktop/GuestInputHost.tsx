@@ -68,6 +68,10 @@ export function GuestInputHost() {
         el.dispatchEvent(new PointerEvent('pointermove', init));
         return;
       }
+      // Releases are for cursor effects, which listen to the bridge
+      // themselves: a replayed pointerup would end drags the shell is
+      // tracking with pointer capture of its own.
+      if (input.type === 'up') return;
       el.dispatchEvent(new PointerEvent('pointerdown', {
         ...init,
         button: BUTTONS[input.button],

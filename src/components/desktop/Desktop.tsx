@@ -16,6 +16,7 @@ import { ScreenDimmer } from './ScreenDimmer';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
 import { GuestInputHost } from './GuestInputHost';
+import { CursorEffectsLayer } from './CursorEffectsLayer';
 import { DinDragOverlay } from './DinDragOverlay';
 import { Window } from './Window';
 import { WindowSwitcher } from './WindowSwitcher';
@@ -214,6 +215,7 @@ function DesktopSession() {
                 <LaunchHost />
                 <SystemNotificationsHost />
                 <GuestInputHost />
+                <CursorEffectsLayer />
                 <DinDragOverlay />
                 <InstallerAutoOpen />
                 <UpdateNotifier />

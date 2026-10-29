@@ -28,7 +28,9 @@ export type WmCommand =
   | { type: 'minimize' }
   | { type: 'resize'; dx: number; dy: number }
   | { type: 'terminal' }
-  | { type: 'help' };
+  | { type: 'help' }
+  | { type: 'show-mouse' }
+  | { type: 'clear-fire-paint' };
 
 /** A key press with Super held, as the bindings see it. */
 export interface WmKey {
@@ -76,7 +78,13 @@ export function wmCommandFor({ code, shift, ctrl, alt }: WmKey): WmCommand | nul
     return shift ? { type: 'resize', dx: 0, dy: step } : { type: 'resize', dx: step, dy: 0 };
   }
   if (ctrl || alt) return null;
-  if (shift) return code === 'KeyT' ? { type: 'toggle-tiling' } : null;
+  if (shift) {
+    if (code === 'KeyT') return { type: 'toggle-tiling' };
+    // Compiz's Show Mouse and Fire Paint (src/lib/cursorEffects), when they're on.
+    if (code === 'KeyK') return { type: 'show-mouse' };
+    if (code === 'KeyC') return { type: 'clear-fire-paint' };
+    return null;
+  }
   switch (code) {
     case 'KeyW':
     case 'KeyQ':
@@ -138,6 +146,15 @@ export const WM_BINDING_HELP: { group: string; bindings: { keys: string[]; label
       { keys: ['Super', 'Enter'], label: 'Open a terminal' },
       { keys: ['Super', 'Space'], label: 'Search apps' },
       { keys: ['Super', 'K'], label: 'Show these shortcuts' },
+    ],
+  },
+  {
+    group: 'Cursor effects (when turned on in Appearance)',
+    bindings: [
+      { keys: ['Super', 'Shift', 'K'], label: 'Show where the pointer is (or shake the mouse)' },
+      { keys: ['Super', 'Shift', 'Drag'], label: 'Paint with fire' },
+      { keys: ['Super', 'Shift', 'C'], label: 'Put out the fire' },
+      { keys: ['Super', 'Ctrl', 'Move'], label: 'Stir the water' },
     ],
   },
 ];

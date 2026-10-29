@@ -2839,8 +2839,10 @@ function registerScreenshotHandlers(): void {
   // re-rasterizes every frame), so the renderer snapshots the window to a
   // bitmap and warps that cheap <img> instead (see src/components/desktop/
   // Window.tsx). The rect is in CSS pixels relative to the shell content's
-  // top-left; capturePage returns it at device resolution.
-  ipcMain.handle('screenshot:captureRegion', async (event, rect) => {
+  // top-left; capturePage returns it at device resolution. Asked for a
+  // smaller `scale` (cursor effects' water wants the whole screen, fast), it
+  // comes back shrunk and as a JPEG, which is far quicker to encode.
+  ipcMain.handle('screenshot:captureRegion', async (event, rect, options) => {
     assertShellSender(event);
     if (!shellWindow || shellWindow.webContents.isDestroyed()) {
       throw new Error('Shell window unavailable');
@@ -2855,10 +2857,16 @@ function registerScreenshotHandlers(): void {
     const y = clamp(rect?.y, 0, contentH);
     const width = clamp(rect?.width, 1, contentW - x);
     const height = clamp(rect?.height, 1, contentH - y);
-    const image = undimCapture(await shellWindow.webContents.capturePage({ x, y, width, height }));
-    const size = image.getSize();
+    let image = undimCapture(await shellWindow.webContents.capturePage({ x, y, width, height }));
+    let size = image.getSize();
     if (size.width === 0 || size.height === 0) {
       throw new Error('Captured an empty image');
+    }
+    const scale = Number(options?.scale);
+    if (Number.isFinite(scale) && scale >= 0.1 && scale < 1) {
+      image = image.resize({ width: Math.max(1, Math.round(size.width * scale)), quality: 'good' });
+      size = image.getSize();
+      return { dataUrl: `data:image/jpeg;base64,${image.toJPEG(85).toString('base64')}`, width: size.width, height: size.height };
     }
     return { dataUrl: image.toDataURL(), width: size.width, height: size.height };
   });
@@ -3178,8 +3186,9 @@ const GUEST_MOVE_INTERVAL_MS = 16;
  * never reaches the shell's, so the shell can't react to it: popovers and
  * menus stay open over a click into the page, and the dock can't tell the
  * pointer moved over one. Forward what the shell reacts to - button presses
- * and moves (at most one per frame) - so GuestInputHost can replay it on the
- * guest's <webview> element. Coordinates are in DIPs, in the guest's view
+ * and releases, and moves (at most one per frame) - so GuestInputHost can
+ * replay it on the guest's <webview> element, and cursor effects can follow
+ * the pointer over pages. Coordinates are in DIPs, in the guest's view
  * (x, y) and, where the event has a screen position, the shell's (sx, sy)
  * (verified on Electron 41: the shell's interface zoom isn't applied).
  *
@@ -3221,6 +3230,9 @@ function forwardGuestInput(contents: Electron.WebContents): void {
       // Keep the order the guest saw: the move that led here comes first.
       flushMove();
       sendToShell('guest:input', { wcId, type: 'down', x: mouse.x, y: mouse.y, ...inShell(mouse), button: mouse.button ?? 'left', meta });
+    } else if (mouse.type === 'mouseUp') {
+      flushMove();
+      sendToShell('guest:input', { wcId, type: 'up', x: mouse.x, y: mouse.y, ...inShell(mouse), button: mouse.button ?? 'left', meta });
     }
   });
   contents.once('destroyed', () => {
@@ -4975,7 +4987,7 @@ type ShellShortcut =
  * The physical keys Super may bind for window management, with any of
  * Shift, Ctrl and Alt. Keep in step with wmCommandFor in src/lib/wmBindings.ts.
  */
-const WM_KEY_CODES = /^(?:Arrow(?:Left|Right|Up|Down)|Digit\d|Tab|Minus|Equal|Enter|Key[WQTFJMK])$/;
+const WM_KEY_CODES = /^(?:Arrow(?:Left|Right|Up|Down)|Digit\d|Tab|Minus|Equal|Enter|Key[WQTFJMKC])$/;
 
 /**
  * Map a guest before-input-event to a shell shortcut payload, or null.

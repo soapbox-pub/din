@@ -7,20 +7,46 @@
  * pointer record has a header (which of 20 cursors it is, normal or
  * pressed, frame count, image size, interval, animation type, hotspot), an
  * optional frame script (UTF-16), and its frames side by side as straight
- * BGRA, bottom row first. Pressed images, trails and effects have no XCursor
- * equivalent and are skipped.
+ * BGRA, bottom row first. Pressed images have no XCursor equivalent and are
+ * skipped.
  *
- * The layout follows the description published with cfx2xc
+ * Effects (type 4) and trails (type 8) aren't cursors: they become an
+ * effect package (`ConvertedEffects`) that Din's cursor effects play. Their
+ * records are laid out like a pointer's, without the pointer's index and
+ * status, and stand alone in "effects packages" and "trails packages" or
+ * come with a theme's cursors. After the common type, header size and record
+ * size, the words are:
+ *
+ *   effect: unknown (2), event, frame count, strip width, height, interval,
+ *           animation, unknown, hot spot x, y, header + script size, image
+ *           size, header size, script size
+ *   trail:  unknown (3), mode, frame count, strip width, height, interval,
+ *           animation, unknown, hot spot x, y, header + script size, image
+ *           size, header size, script size, trails per second, 8 unused
+ *
+ * An effect's event is an index into CursorFX's list: left, middle and right
+ * button, each down, up and double-click (0 is left down). A trail's mode
+ * is 0 for always, 1 while a button is down, 2 while none is. Both play
+ * their frames once, wherever the hot spot lands, then go. Worked out from
+ * the packages CursorFX 4 ships (Blue pings, Smoke trail, Gyroscopic, ...).
+ *
+ * The pointer layout follows the description published with cfx2xc
  * (github.com/coolwanglu/cfx2xc, CursorFXFileFormat.md).
  */
 
 import { Budget, DAMAGED, ImportError, LIMITS, TOO_BIG, clamp, inflate, slice, text, u32le } from './bytes';
 import { type Bitmap, contentBox, crop, makeFrame, premultiplyBgra, splitStrip } from './image';
+import { type ConvertedEffects, type EffectSprite, type TrailMode, EFFECT_EVENTS } from './effects';
 import { type ConvertedTheme, type CursorSpec, HOLD_MS, themeFrom } from './theme';
 
 const POINTER = 2;
+const EFFECT = 4;
+const TRAIL = 8;
 const NORMAL = 1;
 const RECORD_HEADER = 12 + 16 * 4;
+const EFFECT_HEADER = 12 + 14 * 4;
+const TRAIL_HEADER = 12 + 15 * 4;
+const TRAIL_MODES: TrailMode[] = ['always', 'down', 'up'];
 
 /** CursorFX's 20 cursors, by index. */
 const SLOTS: { name: string; aliases: string[] }[] = [
@@ -116,7 +142,70 @@ function defaultOrder(frameCount: number, interval: number, type: number): { ind
   return steps.slice(0, LIMITS.framesPerCursor);
 }
 
-export async function cursorFXTheme(data: Uint8Array, budget: Budget, fallbackName: string): Promise<ConvertedTheme | null> {
+/** An effect's or a trail's frames, straight RGBA, and the order they play in once. */
+function readSprite(record: Uint8Array, field: (i: number) => number, budget: Budget): EffectSprite | null {
+  const frameCount = field(2);
+  const stripWidth = field(3);
+  const height = field(4);
+  const interval = field(5);
+  const animation = field(6);
+  const hotX = field(8);
+  const hotY = field(9);
+  const headerAndScript = field(10);
+  const imageSize = field(11);
+  const recordHeader = field(12);
+  const scriptSize = field(13);
+  if (frameCount < 1 || frameCount > LIMITS.framesPerCursor || recordHeader + scriptSize !== headerAndScript) {
+    throw new ImportError(DAMAGED);
+  }
+  budget.image(stripWidth, height);
+  if (imageSize !== stripWidth * height * 4 || headerAndScript + imageSize > record.length || stripWidth % frameCount) {
+    throw new ImportError(DAMAGED);
+  }
+  const width = stripWidth / frameCount;
+  // Bigger than Din draws a frame: left out, not the whole import.
+  if (width > LIMITS.frameDimension || height > LIMITS.frameDimension) return null;
+  budget.frame(imageSize);
+
+  // Bottom row first, BGRA: turned the right way up, as RGBA.
+  const raw = slice(record, headerAndScript, imageSize);
+  const pixels = new Uint8Array(imageSize);
+  const row = stripWidth * 4;
+  for (let y = 0; y < height; y++) {
+    const from = (height - 1 - y) * row;
+    const to = y * row;
+    for (let x = 0; x < row; x += 4) {
+      pixels[to + x] = raw[from + x + 2];
+      pixels[to + x + 1] = raw[from + x + 1];
+      pixels[to + x + 2] = raw[from + x];
+      pixels[to + x + 3] = raw[from + x + 3];
+    }
+  }
+
+  const script = scriptSize ? text(slice(record, recordHeader, scriptSize - (scriptSize % 2)), 'utf-16le').replace(/\0/g, '') : '';
+  const delay = Math.min(HOLD_MS, Math.max(1, interval));
+  let steps = script ? runScript(script, frameCount, interval) : null;
+  if (!steps) {
+    steps = Array.from({ length: frameCount }, (_, index) => ({ index, delay }));
+    if (animation === 3) steps.push(...steps.slice(0, -1).reverse().map((s) => ({ ...s })));
+  }
+  return {
+    width,
+    height,
+    hotX: clamp(hotX, 0, width - 1),
+    hotY: clamp(hotY, 0, height - 1),
+    frameCount,
+    pixels,
+    steps: steps.slice(0, LIMITS.framesPerCursor).map((s) => ({ index: s.index, delay: Math.min(HOLD_MS, Math.max(1, s.delay)) })),
+  };
+}
+
+/** A .CursorFX file's theme, if it has cursors, and its effect package, if it has effects or a trail. */
+export async function readCursorFX(
+  data: Uint8Array,
+  budget: Budget,
+  fallbackName: string,
+): Promise<{ theme: ConvertedTheme | null; effects: ConvertedEffects | null }> {
   const headerSize = u32le(data, 4);
   const dataSize = u32le(data, 8);
   if (headerSize < 20 || headerSize > 4096) throw new ImportError(DAMAGED);
@@ -132,6 +221,7 @@ export async function cursorFXTheme(data: Uint8Array, budget: Budget, fallbackNa
   const name = info[0]?.trim() || fallbackName;
 
   const specs: CursorSpec[] = [];
+  const effects: ConvertedEffects = { name, effects: [], trail: null };
   let p = infoSize;
   while (p < body.length) {
     const type = u32le(body, p);
@@ -139,9 +229,24 @@ export async function cursorFXTheme(data: Uint8Array, budget: Budget, fallbackNa
     if (recordSize < 12 || p + recordSize > body.length) throw new ImportError(DAMAGED);
     const record = body.subarray(p, p + recordSize);
     p += recordSize;
+    const field = (i: number) => u32le(record, 12 + i * 4);
+
+    if (type === EFFECT && recordSize >= EFFECT_HEADER) {
+      const event = field(1);
+      if (event >= EFFECT_EVENTS.length || effects.effects.some((e) => e.event === event)) continue;
+      const sprite = readSprite(record, field, budget);
+      if (sprite) effects.effects.push({ ...sprite, event });
+      continue;
+    }
+    if (type === TRAIL && recordSize >= TRAIL_HEADER) {
+      const mode = TRAIL_MODES[field(1)];
+      if (!mode || effects.trail) continue;
+      const sprite = readSprite(record, field, budget);
+      if (sprite) effects.trail = { ...sprite, mode, rate: clamp(field(14), 1, 100) };
+      continue;
+    }
     if (type !== POINTER || recordSize < RECORD_HEADER) continue;
 
-    const field = (i: number) => u32le(record, 12 + i * 4);
     const index = field(1);
     const status = field(2);
     const frameCount = field(4);
@@ -190,5 +295,8 @@ export async function cursorFXTheme(data: Uint8Array, budget: Budget, fallbackNa
       })),
     });
   }
-  return themeFrom(name, specs);
+  return {
+    theme: specs.length ? themeFrom(name, specs) : null,
+    effects: effects.effects.length || effects.trail ? effects : null,
+  };
 }

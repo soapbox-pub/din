@@ -12,7 +12,7 @@
 import { joinPath, type FsBridge } from '@/lib/fs';
 
 export interface Screenshot {
-  /** The captured image, PNG-encoded as a `data:` URL. */
+  /** The captured image as a `data:` URL: a PNG, or a JPEG when shrunk. */
   dataUrl: string;
   /** Pixel dimensions of the capture. */
   width: number;
@@ -34,8 +34,9 @@ export interface ScreenshotBridge {
    * Capture just one window's on-screen rectangle as a PNG, for the genie
    * minimize/restore animation (see src/components/desktop/Window.tsx). Older
    * shell builds predate this method, so callers must feature-detect it.
+   * A `scale` below 1 shrinks it, as a JPEG, for speed over sharpness.
    */
-  captureRegion?(rect: CaptureRegion): Promise<Screenshot>;
+  captureRegion?(rect: CaptureRegion, options?: { scale?: number }): Promise<Screenshot>;
   /**
    * Put a capture on the system clipboard. Older shell builds predate this
    * method; copyScreenshot() falls back to navigator.clipboard.

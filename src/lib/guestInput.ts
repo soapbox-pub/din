@@ -35,8 +35,8 @@ export type GuestInput =
       meta: boolean;
     })
   | (GuestPoint & {
-      /** A mouse button went down in the guest. */
-      type: 'down';
+      /** A mouse button went down, or came up, in the guest. */
+      type: 'down' | 'up';
       wcId: number;
       button: 'left' | 'middle' | 'right';
       /** Whether Super (Meta) was held. */

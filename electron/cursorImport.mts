@@ -13,7 +13,9 @@
 // counts against limits, every frame's pixels against its size. Only then
 // are the XCursor files written, by Din, into a staging directory that
 // takes the theme's place in one rename, with an index.theme marking it as
-// Din's so that it can be removed again.
+// Din's so that it can be removed again. A CursorFX file's effects and trail
+// come back as an effect package, kept apart for Din's cursor effects
+// (cursorEffects.mts).
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -22,6 +24,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { convertInSandbox } from './cursorConverter.mts';
+import { type EffectPackage, checkEffects, installEffects } from './cursorEffects.mts';
 import { runCommand } from './system.mts';
 import { encodeXcursor, type XcursorFrame } from './xcursor.mts';
 
@@ -181,17 +184,28 @@ function checkFrame(value: unknown): XcursorFrame {
 }
 
 /** The converter's answer, every field checked; throws its error, or DAMAGED for anything amiss. */
-function checkOutcome(outcome: unknown): ImportedTheme[] {
+function checkOutcome(outcome: unknown): { themes: ImportedTheme[]; effects: Omit<EffectPackage, 'id'>[] } {
   if (!isRecord(outcome)) throw new ImportError(DAMAGED);
   if (outcome.ok !== true) {
     const message = typeof outcome.error === 'string' && CONVERTER_MESSAGES.has(outcome.error) ? outcome.error : DAMAGED;
     throw new ImportError(message);
   }
-  if (!Array.isArray(outcome.themes) || outcome.themes.length < 1 || outcome.themes.length > MAX_THEMES) {
+  if (!Array.isArray(outcome.themes) || outcome.themes.length > MAX_THEMES) {
     throw new ImportError(DAMAGED);
   }
   let total = 0;
-  return outcome.themes.map((theme: unknown): ImportedTheme => {
+  const charge = (bytes: number) => {
+    total += bytes;
+    if (total > MAX_OUTPUT_BYTES) throw new ImportError(TOO_BIG);
+  };
+  let effects: Omit<EffectPackage, 'id'>[];
+  try {
+    effects = checkEffects(outcome.effects, charge);
+  } catch (error) {
+    throw error instanceof ImportError ? error : new ImportError(DAMAGED);
+  }
+  if (!outcome.themes.length && !effects.length) throw new ImportError(DAMAGED);
+  const themes = outcome.themes.map((theme: unknown): ImportedTheme => {
     if (!isRecord(theme) || typeof theme.name !== 'string') throw new ImportError(DAMAGED);
     const { cursors, links, inherits } = theme;
     if (!Array.isArray(cursors) || cursors.length < 1 || cursors.length > MAX_CURSORS) throw new ImportError(DAMAGED);
@@ -207,8 +221,7 @@ function checkOutcome(outcome: unknown): ImportedTheme[] {
         throw new ImportError(DAMAGED);
       }
       const frames = cursor.frames.map(checkFrame);
-      total += frames.reduce((sum, f) => sum + f.pixels.length, 0);
-      if (total > MAX_OUTPUT_BYTES) throw new ImportError(TOO_BIG);
+      charge(frames.reduce((sum, f) => sum + f.pixels.length, 0));
       files.set(cursor.name, encodeXcursor(frames));
     }
 
@@ -229,6 +242,7 @@ function checkOutcome(outcome: unknown): ImportedTheme[] {
       links: aliases,
     };
   });
+  return { themes, effects };
 }
 
 // ---------------------------------------------------------------------------
@@ -284,14 +298,15 @@ async function install(theme: ImportedTheme, base: string, id: string): Promise<
 }
 
 /**
- * Import the cursor themes in `source` (a file or a folder) into `base`,
- * returning their ids. `taken` says whether an id belongs to a theme that
- * mustn't be replaced; Din's own earlier imports of the same name are.
+ * Import the cursor themes in `source` (a file or a folder) into `base`, and
+ * its effect packages into `effectsBase`, returning their ids. `taken` says
+ * whether an id belongs to a theme that mustn't be replaced; Din's own
+ * earlier imports of the same name are.
  */
 export async function importCursorThemes(
   source: string,
-  options: { base: string; taken: (id: string) => Promise<boolean> },
-): Promise<string[]> {
+  options: { base: string; effectsBase: string; taken: (id: string) => Promise<boolean> },
+): Promise<{ themes: string[]; effects: string[] }> {
   // A Windows pack's install.inf stands for its folder.
   if (/\.inf$/i.test(source)) source = path.dirname(source);
   const stat = await fs.stat(source);
@@ -303,7 +318,7 @@ export async function importCursorThemes(
   } catch (error) {
     throw new ImportError(error instanceof Error ? error.message : DAMAGED);
   }
-  const themes = checkOutcome(outcome);
+  const { themes, effects } = checkOutcome(outcome);
 
   const ids: string[] = [];
   for (const theme of themes) {
@@ -313,5 +328,5 @@ export async function importCursorThemes(
     await install(theme, options.base, id);
     ids.push(id);
   }
-  return ids;
+  return { themes: ids, effects: await installEffects(effects, options.effectsBase) };
 }

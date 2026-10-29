@@ -949,7 +949,8 @@ expose('datetime', {
 
 // Cursor bridge (window.dinos.cursor), backed by the cursor:* handlers in
 // electron/cursor.mts: the pointer's XCursor theme and size, which Settings
-// shows and, on DinOS, changes, and the themes the user imports.
+// shows and, on DinOS, changes, the themes the user imports, and the effect
+// packages that come in CursorFX files.
 expose('cursor', {
   /** { theme, size, sizes, canChange }. */
   status: () => ipcRenderer.invoke('cursor:status'),
@@ -958,7 +959,7 @@ expose('cursor', {
   themes: () => ipcRenderer.invoke('cursor:themes'),
 
   /**
-   * A few of a theme's cursors as RGBA: { role, width, height, rgba }[].
+   * A few of a theme's cursors as RGBA: { role, width, height, hotX, hotY, rgba }[].
    * @param {string} id
    * @param {number} size
    */
@@ -971,8 +972,9 @@ expose('cursor', {
   set: (choice) => ipcRenderer.invoke('cursor:set', choice),
 
   /**
-   * Import the cursor themes in a file or folder and make the first the
-   * pointer's; resolves with their ids.
+   * Import the cursor themes and effect packages in a file or folder and
+   * make the first theme the pointer's; resolves with { themes, effects },
+   * their ids.
    * @param {string} source absolute path
    */
   importTheme: (source) => ipcRenderer.invoke('cursor:import', source),
@@ -982,6 +984,21 @@ expose('cursor', {
    * @param {string} id
    */
   removeTheme: (id) => ipcRenderer.invoke('cursor:remove', id),
+
+  /** The imported effect packages, without their pixels. */
+  effects: () => ipcRenderer.invoke('cursor:effects'),
+
+  /**
+   * One effect package with its pixels, or null.
+   * @param {string} id
+   */
+  effect: (id) => ipcRenderer.invoke('cursor:effect', id),
+
+  /**
+   * Delete an effect package.
+   * @param {string} id
+   */
+  removeEffect: (id) => ipcRenderer.invoke('cursor:remove-effect', id),
 });
 
 // Icon theme bridge (window.dinos.iconTheme), backed by the icon-theme:*
@@ -2121,10 +2138,12 @@ expose('screenshot', {
   /**
    * Capture just one window's on-screen rectangle (CSS pixels, relative to
    * the shell content's top-left), for the genie minimize/restore animation.
-   * Resolves to { dataUrl, width, height } (PNG at device resolution).
+   * Resolves to { dataUrl, width, height } (PNG at device resolution, or a
+   * JPEG shrunk by `options.scale`).
    * @param {{ x: number, y: number, width: number, height: number }} rect
+   * @param {{ scale?: number }} [options]
    */
-  captureRegion: (rect) => ipcRenderer.invoke('screenshot:captureRegion', rect),
+  captureRegion: (rect, options) => ipcRenderer.invoke('screenshot:captureRegion', rect, options),
 
   /**
    * Put a PNG capture on the system clipboard.
@@ -2675,7 +2694,7 @@ expose('guestInput', {
   /**
    * Subscribe to forwarded guest input. Returns an unsubscribe fn. Payloads:
    *   { wcId, type: 'move', x, y, sx?, sy?, meta }
-   *   { wcId, type: 'down', x, y, sx?, sy?, button, meta }
+   *   { wcId, type: 'down' | 'up', x, y, sx?, sy?, button, meta }
    * @param {(data: { wcId: number, type: string, x: number, y: number, sx?: number, sy?: number, button?: string, meta: boolean }) => void} callback
    */
   onInput: (callback) => {

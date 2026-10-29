@@ -109,7 +109,7 @@ export function xcursorSizes(data: Buffer): number[] {
 export function decodeXcursor(
   data: Buffer,
   want: number,
-): { width: number; height: number; rgba: Uint8Array } | null {
+): { width: number; height: number; hotX: number; hotY: number; rgba: Uint8Array } | null {
   let best: ImageEntry | null = null;
   for (const entry of imageEntries(data) ?? []) {
     if (!best || Math.abs(entry.size - want) < Math.abs(best.size - want)) best = entry;
@@ -118,6 +118,8 @@ export function decodeXcursor(
   const width = data.readUInt32LE(best.position + 16);
   const height = data.readUInt32LE(best.position + 20);
   if (width > 512 || height > 512) return null;
+  const hotX = Math.min(width - 1, data.readUInt32LE(best.position + 24));
+  const hotY = Math.min(height - 1, data.readUInt32LE(best.position + 28));
   const pixels = best.position + IMAGE_HEADER;
 
   const rgba = new Uint8Array(width * height * 4);
@@ -130,5 +132,5 @@ export function decodeXcursor(
     rgba[i * 4 + 2] = unpremultiply(argb & 0xff);
     rgba[i * 4 + 3] = a;
   }
-  return { width, height, rgba };
+  return { width, height, hotX, hotY, rgba };
 }

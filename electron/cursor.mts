@@ -19,7 +19,8 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
+import { listEffects, readEffects, removeEffects } from './cursorEffects.mts';
 import { FALLBACK_THEME, IMPORTED_KEY, importCursorThemes } from './cursorImport.mts';
 import { runCommand } from './system.mts';
 import { decodeXcursor, xcursorSizes } from './xcursor.mts';
@@ -55,6 +56,8 @@ interface CursorPreview {
   role: string;
   width: number;
   height: number;
+  hotX: number;
+  hotY: number;
   rgba: Uint8Array;
 }
 
@@ -62,6 +65,11 @@ interface CursorPreview {
 function importBase(): string {
   const data = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share');
   return path.join(data, 'icons');
+}
+
+/** Where imported effect packages go: Din's own data, since nothing else plays them. */
+function effectsBase(): string {
+  return path.join(app.getPath('userData'), 'cursor-effects');
 }
 
 /** XCursor's search path, as libXcursor and libwayland-cursor walk it. */
@@ -270,18 +278,40 @@ export function registerCursorHandlers(options: {
     await apply(theme, size);
   });
 
-  // Import the themes in a file or folder and make the first one the pointer's.
-  ipcMain.handle('cursor:import', async (event, source: unknown): Promise<string[]> => {
+  // Import the themes and effect packages in a file or folder, and make the
+  // first theme the pointer's.
+  ipcMain.handle('cursor:import', async (event, source: unknown): Promise<{ themes: string[]; effects: string[] }> => {
     assertShellSender(event);
     if (!canChange()) throw new Error('Din can\'t change the cursor on this system');
     if (typeof source !== 'string' || !path.isAbsolute(source)) throw new Error('Choose a file to import');
-    const ids = await importCursorThemes(path.normalize(source), { base: importBase(), taken });
-    const { theme, size } = await current();
-    // The same name again (a theme imported anew) isn't a change GTK passes
-    // on, so the old cursors would stay; go through another theme first.
-    if (theme === ids[0]) await apply(FALLBACK_THEME, size);
-    await apply(ids[0], size);
+    const ids = await importCursorThemes(path.normalize(source), { base: importBase(), effectsBase: effectsBase(), taken });
+    if (ids.themes.length) {
+      const { theme, size } = await current();
+      // The same name again (a theme imported anew) isn't a change GTK passes
+      // on, so the old cursors would stay; go through another theme first.
+      if (theme === ids.themes[0]) await apply(FALLBACK_THEME, size);
+      await apply(ids.themes[0], size);
+    }
     return ids;
+  });
+
+  // Effect packages, for the cursor effects Din plays. Listing and playing
+  // them works wherever Din runs; only importing needs DinOS.
+  ipcMain.handle('cursor:effects', async (event) => {
+    assertShellSender(event);
+    return listEffects(effectsBase());
+  });
+
+  ipcMain.handle('cursor:effect', async (event, id: unknown) => {
+    assertShellSender(event);
+    if (typeof id !== 'string') throw new Error('Not a cursor effect');
+    return readEffects(effectsBase(), id);
+  });
+
+  ipcMain.handle('cursor:remove-effect', async (event, id: unknown) => {
+    assertShellSender(event);
+    if (typeof id !== 'string') throw new Error('Not a cursor effect');
+    await removeEffects(effectsBase(), id);
   });
 
   ipcMain.handle('cursor:remove', async (event, id: unknown) => {

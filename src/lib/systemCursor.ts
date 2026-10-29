@@ -36,8 +36,46 @@ export interface SystemCursorPreview {
   role: string;
   width: number;
   height: number;
+  /** The point that lands on the pointer's position. */
+  hotX: number;
+  hotY: number;
   /** Straight RGBA pixels. */
   rgba: Uint8Array;
+}
+
+/** An animation of an effect package, played once where the pointer is. */
+export interface EffectSpriteInfo {
+  /** One frame's size. */
+  width: number;
+  height: number;
+  /** The point in a frame that lands on the pointer. */
+  hotX: number;
+  hotY: number;
+  frameCount: number;
+  /** The frames in the order they play, each with how long it shows, in ms. */
+  steps: { index: number; delay: number }[];
+}
+
+export interface EffectSprite extends EffectSpriteInfo {
+  /** Straight RGBA, the frames side by side. */
+  pixels: Uint8Array;
+}
+
+/**
+ * The on-click effects and trail that came in a CursorFX file. An effect's
+ * event is CursorFX's (src/lib/cursorImport/effects.ts); a trail is laid
+ * `rate` times a second while the pointer moves, when `mode` says.
+ */
+export interface CursorEffectPackageInfo {
+  id: string;
+  name: string;
+  effects: (EffectSpriteInfo & { event: number })[];
+  trail: (EffectSpriteInfo & { mode: 'always' | 'down' | 'up'; rate: number }) | null;
+}
+
+export interface CursorEffectPackage extends CursorEffectPackageInfo {
+  effects: (EffectSprite & { event: number })[];
+  trail: (EffectSprite & { mode: 'always' | 'down' | 'up'; rate: number }) | null;
 }
 
 export interface SystemCursorBridge {
@@ -45,10 +83,19 @@ export interface SystemCursorBridge {
   themes(): Promise<SystemCursorTheme[]>;
   preview(id: string, size: number): Promise<SystemCursorPreview[]>;
   set(choice: { theme: string; size: number }): Promise<void>;
-  /** Import the themes in a file or folder (absolute path) and use the first; resolves with their ids. */
-  importTheme(source: string): Promise<string[]>;
+  /**
+   * Import the themes and effect packages in a file or folder (absolute
+   * path) and use the first theme; resolves with their ids.
+   */
+  importTheme(source: string): Promise<{ themes: string[]; effects: string[] }>;
   /** Delete a theme Din imported. */
   removeTheme(id: string): Promise<void>;
+  /** The imported effect packages, without their pixels. */
+  effects(): Promise<CursorEffectPackageInfo[]>;
+  /** One effect package with its pixels, or null if it's gone. */
+  effect(id: string): Promise<CursorEffectPackage | null>;
+  /** Delete an effect package. */
+  removeEffect(id: string): Promise<void>;
 }
 
 declare global {
