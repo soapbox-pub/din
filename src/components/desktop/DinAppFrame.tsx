@@ -644,7 +644,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         // Named by its own saved state from before it moved (as written, or
         // JSON-escaped), or within reach already: no need to ask.
         const known = (p: string) => s.carryOver.includes(p) || s.carryOver.includes(JSON.stringify(p).slice(1, -1));
-        const ask = wanted.filter((p) => !known(p) && !inScope(p));
+        // Only what's there is worth asking about.
+        const fs = getFsBridge();
+        const there = await Promise.all(wanted.map((p) => (fs ? fs.stat(p).then(() => true, () => false) : Promise.resolve(true))));
+        const ask = wanted.filter((p, i) => there[i] && !known(p) && !inScope(p));
         if (ask.length > 0) {
           const allowed = await new Promise<boolean>((resolve) =>
             setAccessRequest({ paths: ask, reason: typeof reason === 'string' ? reason.slice(0, 300) : '', resolve }),
