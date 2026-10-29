@@ -2,7 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { APPS, NativeWindowView } from '@/lib/apps';
-import { NATIVE_APP_ICON, WEB_APP_ICON } from '@/lib/appIcons';
+import { NATIVE_APP_ICON, nsiteIconName, WEB_APP_ICON, webIconName } from '@/lib/appIcons';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { useIsLiveBoot } from '@/hooks/useInstaller';
@@ -37,6 +37,8 @@ import {
   type InstalledAppsManager,
 } from '@/contexts/InstalledAppsContext';
 import { WebAppFrame } from '@/components/desktop/apps/WebAppFrame';
+import { requestThemeIcons } from '@/lib/iconTheme';
+import { themeIcon, useThemeIcons } from '@/shared/themeIcons';
 
 /**
  * Per-web-app window components, cached so a given app keeps the same
@@ -102,9 +104,14 @@ function webAppToDefinition(webApp: WebApp, favicon?: string, nsiteHost?: string
 /**
  * Convert an installed nsite into a launchable desktop app. It runs in the
  * same frame as a web app, on its canonical host; its name, icon, and color
- * come from the nsite store, derived from the site's own files.
+ * come from the nsite store, derived from the site's own files, unless the
+ * icon theme has an icon for it (`themed`).
  */
-function nsiteAppToDefinition(entry: NsiteAppEntry, summary: NsiteSummary | undefined): AppDefinition {
+function nsiteAppToDefinition(
+  entry: NsiteAppEntry,
+  summary: NsiteSummary | undefined,
+  themed: string | null,
+): AppDefinition {
   const definition = webAppToDefinition({
     id: nsiteAppId(entry.host),
     name:
@@ -113,9 +120,9 @@ function nsiteAppToDefinition(entry: NsiteAppEntry, summary: NsiteSummary | unde
       summary?.title ??
       `${entry.host.slice(0, 12)}…`,
     url: nsiteAppUrl(entry.host),
-    icon: summary?.app?.icon ?? undefined,
+    icon: themed ?? summary?.app?.icon ?? undefined,
     themeColor: summary?.app?.themeColor ?? undefined,
-  }, summary?.app?.favicon ?? undefined, entry.host);
+  }, themed ?? summary?.app?.favicon ?? undefined, entry.host);
   const handler = summary?.app?.nostr;
   return {
     ...definition,
@@ -216,12 +223,30 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
     for (const site of storedSites) void ensureNsiteAppInfo(store, site);
   }, [store, storedSites, nsiteApps]);
 
+  // An icon theme can replace installed nsites' and websites' icons, by
+  // names Din gives them (nsiteIconName, webIconName).
+  const themeIcons = useThemeIcons();
+  useEffect(() => {
+    requestThemeIcons([
+      ...nsiteApps.map((entry) => nsiteIconName(entry.host)),
+      ...webApps.map((webApp) => webIconName(webApp.url)),
+    ].filter((name): name is string => name !== null));
+  }, [nsiteApps, webApps]);
+
   const value = useMemo<InstalledAppsManager>(() => {
+    const themed = (name: string | null) => (name ? themeIcon(themeIcons, [name]) : null);
     const apps: AppDefinition[] = [
       ...APPS.map((app) => (app.id === 'installer' && live ? { ...app, hidden: false } : app)),
-      ...webApps.map((webApp) => webAppToDefinition(webApp)),
+      ...webApps.map((webApp) => {
+        const icon = themed(webIconName(webApp.url));
+        return webAppToDefinition(icon ? { ...webApp, icon } : webApp, icon ?? undefined);
+      }),
       ...nsiteApps.map((entry) =>
-        nsiteAppToDefinition(entry, storedSites?.find((site) => site.host === entry.host)),
+        nsiteAppToDefinition(
+          entry,
+          storedSites?.find((site) => site.host === entry.host),
+          themed(nsiteIconName(entry.host)),
+        ),
       ),
       ...nativeApps.map(nativeAppToDefinition),
       ...launched.map((app) => app.definition),
@@ -289,7 +314,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         setWebApps((prev) => prev.filter((webApp) => webApp.id !== id));
       },
     };
-  }, [webApps, setWebApps, nsiteApps, setNsiteEntries, storedSites, store, nativeApps, live, launched]);
+  }, [webApps, setWebApps, nsiteApps, setNsiteEntries, storedSites, store, nativeApps, live, launched, themeIcons]);
 
   return (
     <InstalledAppsContext.Provider value={value}>

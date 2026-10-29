@@ -1,3 +1,6 @@
+import { nip19 } from 'nostr-tools';
+import { parseCanonicalNsiteHost } from '@/lib/nsite';
+
 /** Icon for a web app with no favicon, or one that fails to load. */
 export const WEB_APP_ICON = '/icons/apps/web-app.png';
 
@@ -37,3 +40,30 @@ export const THEMED_APP_ICONS: Record<string, string[]> = {
   '/icons/apps/web-browser.png': ['web-browser', 'internet-web-browser'],
   '/icons/apps/word-processor.png': ['libreoffice-writer', 'x-office-document'],
 };
+
+/**
+ * What an icon theme calls an installed nsite's icon: `nsite-<npub>` for a
+ * root site, `nsite-<npub>-<d-tag>` for a named one. A theme that has it
+ * replaces the site's own icon.
+ */
+export function nsiteIconName(host: string): string | null {
+  const site = parseCanonicalNsiteHost(host);
+  if (!site) return null;
+  const npub = nip19.npubEncode(site.pubkey);
+  return site.dtag ? `nsite-${npub}-${site.dtag}` : `nsite-${npub}`;
+}
+
+/**
+ * What an icon theme calls an installed website's icon: `web-<hostname>`,
+ * lowercase and without `www.`, e.g. `web-github.com`. Null for a host no
+ * icon could be named after (an IP address in brackets, say).
+ */
+export function webIconName(url: string): string | null {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+  return /^[a-z0-9.-]+$/.test(host) ? `web-${host}` : null;
+}

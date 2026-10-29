@@ -59,3 +59,28 @@ export function getIconThemeBridge(): IconThemeBridge | undefined {
   if (typeof window === 'undefined') return undefined;
   return window.dinos?.iconTheme;
 }
+
+/** App icons asked for beyond Din's own (installed nsites' and websites'), by name. */
+const extraRequests = new Map<string, IconRequest>();
+const requestListeners = new Set<() => void>();
+
+/** Look these app icons up in the icon theme too, from now on (IconThemeSync does). */
+export function requestThemeIcons(names: string[]): void {
+  let added = false;
+  for (const name of names) {
+    if (extraRequests.has(name)) continue;
+    extraRequests.set(name, { names: [name], kind: 'apps' });
+    added = true;
+  }
+  if (added) for (const listener of requestListeners) listener();
+}
+
+export function extraThemeIconRequests(): IconRequest[] {
+  return [...extraRequests.values()];
+}
+
+/** Hear when more icons are asked for. */
+export function onThemeIconRequest(listener: () => void): () => void {
+  requestListeners.add(listener);
+  return () => requestListeners.delete(listener);
+}

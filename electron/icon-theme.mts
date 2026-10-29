@@ -34,7 +34,7 @@ const DIN_THEME = 'Din';
 const THEME_NAME = /^(?![-.])[A-Za-z0-9_ .+-]+$/;
 
 /** An icon name, as Din asks for them. */
-const ICON_NAME = /^[A-Za-z0-9_.+-]{1,128}$/;
+const ICON_NAME = /^[A-Za-z0-9_.+-]{1,160}$/;
 
 /** Icon size Din renders at, in the launcher and Dock (logical px, 2x). */
 const TARGET_ICON_SIZE = 96;
