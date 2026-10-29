@@ -13,6 +13,7 @@ import {
   Clock,
   Cloud,
   Cpu,
+  Dock,
   FolderOpen,
   Link2,
   CloudOff,
@@ -194,6 +195,8 @@ import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSet
 import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
+import { DockPreview } from '@/components/desktop/Dock';
+import { DOCK_STYLES } from '@/lib/dockStyles';
 import { WM_BINDING_HELP } from '@/lib/wmBindings';
 
 type SectionId =
@@ -213,6 +216,7 @@ type SectionId =
   | 'assistant'
   | 'appearance'
   | 'windows'
+  | 'dock'
   | 'developers'
   | 'about';
 
@@ -253,6 +257,13 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     name: 'Windows',
     icon: LayoutDashboard,
     search: ['Tiling', 'Tile windows', 'Gaps', 'Keyboard shortcuts', 'Workspaces', ...WM_BINDING_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
+  },
+  {
+    id: 'dock',
+    group: 'Personal',
+    name: 'Dock',
+    icon: Dock,
+    search: ['Magnification', 'Background', 'None', 'Modern', 'Classic', 'magnify', 'zoom', 'taskbar', 'launcher', 'shelf', 'macOS'],
   },
   {
     id: 'notifications',
@@ -384,6 +395,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
  * (ThemeSettings), and toggles desktop effects like wobbly windows.
  * Windows turns Hyprland-style tiling on or off, sets its gaps, and lists the
  * Super-key shortcuts for windows and workspaces (src/lib/wmBindings.ts).
+ * Dock turns its magnification on or off and picks its backdrop, as its own
+ * right-click menu does.
  * Developers holds debug utilities such as intentionally crashing the shell
  * to test the error boundary. About shows Din's logo and DinOS's version, and
  * the update it's staging through `window.dinos.updater`, and offers the restart
@@ -496,6 +509,8 @@ export function Settings({ params }: AppComponentProps) {
       <AppearanceSection />
     ) : id === 'windows' ? (
       <WindowsSection />
+    ) : id === 'dock' ? (
+      <DockSection />
     ) : id === 'developers' ? (
       <DevelopersSection />
     ) : (
@@ -3575,6 +3590,54 @@ function WindowsSection() {
           </div>
         </div>
       ))}
+    </SectionShell>
+  );
+}
+
+/** The Dock's magnification and backdrop, as its own right-click menu offers them. */
+function DockSection() {
+  const { config, updateConfig } = useAppContext();
+
+  return (
+    <SectionShell title="Dock">
+      <SettingSwitchRow
+        id="dock-magnification"
+        icon={ZoomIn}
+        label="Magnification"
+        description="Icons grow as the pointer passes over them. Always off while your system prefers reduced motion."
+        checked={config.dockMagnification}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockMagnification: checked }))}
+      />
+      <SubHeading>Background</SubHeading>
+      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Dock background">
+        {DOCK_STYLES.map((option) => {
+          const active = config.dockStyle === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => updateConfig((current) => ({ ...current, dockStyle: option.value }))}
+              className={cn(
+                'flex min-w-0 flex-col items-center gap-2 rounded-xl border p-2',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                active
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+              )}
+            >
+              <span className="relative flex h-16 w-full items-end justify-center overflow-hidden rounded-lg bg-linear-to-br from-sky-400 via-indigo-500 to-fuchsia-500">
+                <DockPreview variant={option.value} />
+              </span>
+              <span className="text-xs">{option.name}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Modern is the frosted panel of macOS today, and Classic the glass shelf of Mac OS X Leopard. You can also right-click the Dock between its icons to change these.
+      </p>
     </SectionShell>
   );
 }

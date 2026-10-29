@@ -44,6 +44,8 @@ const AppConfigSchema = z.object({
   wobblyWindows: z.boolean(),
   tilingEnabled: z.boolean(),
   tilingGap: z.number().min(0).max(64),
+  dockMagnification: z.boolean(),
+  dockStyle: z.enum(['none', 'modern', 'classic']),
   zoomLevel: z.number(),
   clockFormat: z.enum(['auto', '12', '24']),
   clockShowDate: z.boolean(),

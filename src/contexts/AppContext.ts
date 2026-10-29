@@ -6,6 +6,9 @@ export type Theme = "dark" | "light" | "system";
 /** 12- or 24-hour time, or whichever the locale uses. */
 export type ClockFormat = "auto" | "12" | "24";
 
+/** What the Dock sits on: nothing, or a macOS Dock's backdrop of today or of old. */
+export type DockStyle = "none" | "modern" | "classic";
+
 export interface RelayMetadata {
   /** List of relays with read/write permissions */
   relays: { url: string; read: boolean; write: boolean }[];
@@ -75,6 +78,13 @@ export interface AppConfig {
   tilingEnabled: boolean;
   /** Pixels between tiled windows, and between them and the screen's edges. */
   tilingGap: number;
+  /** Whether Dock icons grow as the pointer sweeps across them. */
+  dockMagnification: boolean;
+  /**
+   * The Dock's backdrop: none (icons over the wallpaper), modern (macOS's
+   * frosted panel since Big Sur) or classic (Leopard's glass shelf).
+   */
+  dockStyle: DockStyle;
   /**
    * Interface zoom level, as a percentage (100 = native size). Applied via
    * Chromium page zoom in the Electron shell (DPI-style scaling of the whole

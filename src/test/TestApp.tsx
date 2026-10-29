@@ -45,6 +45,8 @@ export function TestApp({ children }: TestAppProps) {
     wobblyWindows: true,
     tilingEnabled: false,
     tilingGap: 8,
+    dockMagnification: true,
+    dockStyle: 'none',
     zoomLevel: 100,
     clockFormat: 'auto',
     clockShowDate: true,

@@ -1,15 +1,22 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isGuestElement } from '@/platform/guest';
 import { Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
 import { z } from 'zod';
 import {
   ContextMenu,
+  ContextMenuCheckboxItem,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { useAppContext } from '@/hooks/useAppContext';
 import { useAppData } from '@/hooks/useAppData';
 import { useDragReorder } from '@/hooks/useDragReorder';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
@@ -21,6 +28,8 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
 import { focusedWindow, windowRect, type WindowState } from '@/hooks/useWindows';
+import type { DockStyle } from '@/contexts/AppContext';
+import { DOCK_STYLES } from '@/lib/dockStyles';
 
 /** One window in a Dock tile. */
 interface DockWindow {
@@ -69,6 +78,19 @@ function magnify(distance: number): number {
  */
 const MAGNIFIED_HEIGHT = BASE_WIDTH * MAX_SCALE + 8;
 
+/**
+ * How each backdrop pads the strip of tiles: room around the icons for the
+ * backdrop to show, and `lift`, how far the tiles sit above the strip's
+ * bottom edge, in px.
+ */
+const STYLE_LAYOUT: Record<DockStyle, { padding: string; lift: number }> = {
+  none: { padding: '', lift: 0 },
+  // A floating panel, a little off the bottom edge of the screen.
+  modern: { padding: 'px-1.5 pt-2 pb-1', lift: 4 },
+  // The shelf flares out past the outermost icons.
+  classic: { padding: 'px-6', lift: 0 },
+};
+
 /** Height of the hot zone at the screen's bottom edge that reveals a hidden dock, in px. */
 const REVEAL_ZONE = 8;
 /** Extra slack above the dock before a hot-edge reveal retracts, in px. */
@@ -86,8 +108,9 @@ const WHEEL_COOLDOWN = 120;
 const MAX_DOTS = 4;
 
 /**
- * macOS-style Dock: a centered, backgroundless strip of app tiles that
- * magnify as the pointer sweeps across them.
+ * macOS-style Dock: a centered strip of app tiles that magnify as the
+ * pointer sweeps across them, over nothing or over a macOS backdrop
+ * (AppConfig's dockMagnification and dockStyle).
  *
  * The dock overlays the bottom edge of the primary monitor and hides itself
  * intelligently: whenever the focused window intersects its footprint
@@ -101,7 +124,9 @@ const MAX_DOTS = 4;
  * a dot under it per window: click launches, toggles, or cycles through
  * them, the scroll wheel cycles too, middle-click always opens a new window,
  * right-click offers pin/unpin, close, and uninstall, and dragging an
- * unpinned tile left among the pinned ones pins it.
+ * unpinned tile left among the pinned ones pins it. A divider separates the
+ * pinned apps from the rest, and right-clicking it or the Dock's backdrop
+ * between tiles offers the Dock's own settings, as on macOS.
  */
 export function Dock({
   workspaceRef,
@@ -193,6 +218,10 @@ export function Dock({
       window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     [],
   );
+  const { config } = useAppContext();
+  const magnifies = config.dockMagnification && !reduceMotion;
+  const dockStyle = config.dockStyle;
+  const layout = STYLE_LAYOUT[dockStyle];
 
   // Cursor-driven magnification bypasses React entirely: pointer moves are
   // coalesced to one requestAnimationFrame tick, which computes each tile's
@@ -231,9 +260,7 @@ export function Dock({
   const paint = useCallback(() => {
     const strip = stripRef.current;
     if (!strip) return;
-    const tiles = [...strip.children].filter(
-      (el): el is HTMLElement => el instanceof HTMLElement && el !== hoverPadRef.current,
-    );
+    const tiles = [...strip.querySelectorAll<HTMLElement>(':scope > [data-dock-tile]')];
     // Cursor position in "slot" units (fractional index into the tiles), or
     // null when the pointer is off the dock. While a tile is dragged, it's
     // the dragged tile's slot: the tile rides the pointer and overlaps its
@@ -242,19 +269,24 @@ export function Dock({
     // reorder hook relies on that: it measures layout right after a reorder.
     // Otherwise it comes from the tile under the pointer, so the math stays
     // stable while widths animate; rects are read before the width writes
-    // below, so the frame does one layout, not many.
+    // below, so the frame does one layout, not many. Between two tiles (over
+    // the divider) it's halfway from one to the other.
     let cursor: number | null = null;
     const dragged = tiles.findIndex((el) => el.dataset.reorderDragging !== undefined);
     const clientX = pointerX.current;
     if (dragged !== -1) {
       cursor = dragged + grabFrac.current;
     } else if (clientX !== null) {
+      let prevRight: number | null = null;
       tiles.forEach((el, i) => {
         const rect = el.getBoundingClientRect();
         if (clientX >= rect.left && clientX < rect.right) {
           grabFrac.current = (clientX - rect.left) / rect.width - 0.5;
           cursor = i + grabFrac.current;
+        } else if (prevRight !== null && clientX >= prevRight && clientX < rect.left) {
+          cursor = i - 0.5;
         }
+        prevRight = rect.right;
       });
     }
     tiles.forEach((el, i) => {
@@ -267,7 +299,7 @@ export function Dock({
 
   const scheduleMagnify = useCallback(
     (clientX: number | null) => {
-      if (reduceMotion) return;
+      if (!magnifies) return;
       pointerX.current = clientX;
       if (rafId.current) return;
       rafId.current = requestAnimationFrame(() => {
@@ -275,10 +307,17 @@ export function Dock({
         paint();
       });
     },
-    [reduceMotion, paint],
+    [magnifies, paint],
   );
 
   useEffect(() => () => cancelAnimationFrame(rafId.current), []);
+
+  // Turning magnification off puts every tile back at rest.
+  useEffect(() => {
+    if (magnifies) return;
+    pointerX.current = null;
+    paint();
+  }, [magnifies, paint]);
 
   // Any tile can be dragged. Among the pinned tiles the new order is the pin
   // order, so it roams with the pins; pins for apps that aren't installed
@@ -303,7 +342,7 @@ export function Dock({
     },
     constrain: (appId, to) =>
       pinned.includes(appId) ? Math.min(to, pinnedIds.length - 1) : to,
-    relayout: reduceMotion ? undefined : paint,
+    relayout: magnifies ? paint : undefined,
   });
   const dragging = reorder.draggingId !== null;
 
@@ -412,7 +451,7 @@ export function Dock({
       setRevealed((prev) => {
         if (!prev) return fromBottom <= REVEAL_ZONE;
         const dockHeight = magnified.current
-          ? MAGNIFIED_HEIGHT
+          ? MAGNIFIED_HEIGHT + layout.lift
           : (stripRef.current?.offsetHeight ?? 80);
         return fromBottom <= dockHeight + REVEAL_SLACK;
       });
@@ -436,7 +475,7 @@ export function Dock({
       window.removeEventListener('pointermove', onPointerMove);
       document.removeEventListener('pointerout', onPointerOut);
     };
-  }, [intersecting, primary]);
+  }, [intersecting, primary, layout.lift]);
 
   // A swiped-up dock stays until the user touches somewhere else, the way a
   // tablet's does. Capture phase, so windows that stop propagation still
@@ -568,10 +607,17 @@ export function Dock({
       >
         <div
           ref={stripRef}
+          data-hidden={hidden || undefined}
+          data-style={dockStyle}
           // Explicit auto punches through the footer's none; while hidden the
           // strip goes inert itself (a parent's none no longer covers it), so
-          // a mid-slide dock can't catch clicks.
-          className={cn('relative flex items-end', hidden ? 'pointer-events-none' : 'pointer-events-auto')}
+          // a mid-slide dock can't catch clicks. Tiles take their clicks on
+          // their buttons alone, so the backdrop between them gets its own.
+          className={cn(
+            'group/dock relative flex items-end',
+            layout.padding,
+            hidden ? 'pointer-events-none' : 'pointer-events-auto',
+          )}
           onMouseMove={(e) => scheduleMagnify(e.clientX)}
           onMouseLeave={() => scheduleMagnify(null)}
         >
@@ -582,9 +628,15 @@ export function Dock({
             aria-hidden
             hidden
             className="absolute inset-x-0 bottom-0"
-            style={{ height: MAGNIFIED_HEIGHT }}
+            style={{ height: MAGNIFIED_HEIGHT + layout.lift }}
           />
-          {entryIds.map((appId) => {
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <DockSurface variant={dockStyle} />
+            </ContextMenuTrigger>
+            <DockMenuContent />
+          </ContextMenu>
+          {entryIds.map((appId, i) => {
             const app = getApp(appId);
             if (!app) return null;
             // Launch order, so cycling visits windows in a fixed sequence.
@@ -593,19 +645,21 @@ export function Dock({
               .filter((w) => tileOf(w.appId) === appId && !w.closing)
               .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon }));
             return (
-              <DockItem
-                key={appId}
-                app={app}
-                registerRef={registerRef}
-                appWindows={appWindows}
-                activeWindowId={activeWindow?.id ?? null}
-                controls={dinControls}
-                isPinned={pinned.includes(appId)}
-                reordering={dragging}
-                onTogglePin={togglePin}
-                onDragPointerDown={reorder.onPointerDown}
-                onUninstall={canUninstall(appId) ? uninstall : undefined}
-              />
+              <Fragment key={appId}>
+                {i === pinnedIds.length && i > 0 && <DockDivider variant={dockStyle} />}
+                <DockItem
+                  app={app}
+                  registerRef={registerRef}
+                  appWindows={appWindows}
+                  activeWindowId={activeWindow?.id ?? null}
+                  controls={dinControls}
+                  isPinned={pinned.includes(appId)}
+                  reordering={dragging}
+                  onTogglePin={togglePin}
+                  onDragPointerDown={reorder.onPointerDown}
+                  onUninstall={canUninstall(appId) ? uninstall : undefined}
+                />
+              </Fragment>
             );
           })}
         </div>
@@ -743,7 +797,8 @@ const DockItem = memo(function DockItem({
         if (e.button === 1) open(app.id);
       }}
       className={cn(
-        'absolute inset-x-1 bottom-2.5 grid aspect-square place-items-center rounded-xl',
+        'pointer-events-auto absolute inset-x-1 bottom-2.5 grid aspect-square place-items-center rounded-xl',
+        'group-data-hidden/dock:pointer-events-none',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         'motion-reduce:hover:-translate-y-1 motion-reduce:transition-transform',
       )}
@@ -847,8 +902,11 @@ const DockItem = memo(function DockItem({
 
   const wrapperProps = {
     ref: tileRef,
+    'data-dock-tile': '',
+    // Clicks go to the button; around it they fall through to the Dock's
+    // backdrop and its menu.
     className: cn(
-      'group/dock-item relative h-20',
+      'group/dock-item pointer-events-none relative h-20',
       !reordering && 'motion-safe:transition-[width] motion-safe:duration-150 motion-safe:ease-out',
     ),
     // Rest width only; magnification writes widths directly onto the node
@@ -866,7 +924,8 @@ const DockItem = memo(function DockItem({
   // painted from its own backdrop instead: blurred to one tone, thresholded
   // on luminance to black or white, then inverted - black over light
   // content, white over dark. It works over <webview> guests too, since the
-  // compositor applies the filter.
+  // compositor applies the filter. On the classic shelf they're Leopard's
+  // glowing lights instead.
   const activeIndex = appWindows.findIndex((w) => w.id === activeWindowId);
   const dotCount = Math.min(appWindows.length, MAX_DOTS);
   const runningDots = dotCount > 0 && (
@@ -879,6 +938,8 @@ const DockItem = memo(function DockItem({
           key={i}
           className={cn(
             'size-1.5 rounded-full [backdrop-filter:blur(4px)_grayscale(1)_contrast(100)_invert(1)]',
+            'group-data-[style=classic]/dock:bg-sky-50 group-data-[style=classic]/dock:[backdrop-filter:none]',
+            'group-data-[style=classic]/dock:shadow-[0_0_4px_2px_rgb(125_211_252/0.9)]',
             !(isAppActive && Math.min(activeIndex, dotCount - 1) === i) && 'opacity-50',
           )}
         />
@@ -910,3 +971,143 @@ const DockItem = memo(function DockItem({
     const n = next.appWindows[i];
     return w.id === n.id && w.z === n.z && w.minimized === n.minimized && w.title === n.title && w.icon === n.icon;
   }));
+
+
+/**
+ * What the Dock's tiles sit on, filling the strip behind them. It's also what
+ * a right-click between the tiles lands on, so it spreads its props and ref
+ * onto its root.
+ */
+function DockSurface({
+  variant,
+  className,
+  ...props
+}: { variant: DockStyle } & React.ComponentProps<'div'>) {
+  if (variant === 'modern') {
+    // macOS since Big Sur: a frosted, rounded panel with a hairline edge.
+    return (
+      <div
+        {...props}
+        className={cn(
+          'absolute inset-x-0 top-0 bottom-1 rounded-[22px]',
+          'border border-white/30 bg-white/25 ring-1 ring-black/10 backdrop-blur-2xl backdrop-saturate-150',
+          'shadow-[0_8px_32px_rgb(0_0_0/0.2)] dark:border-white/15 dark:bg-neutral-900/40 dark:ring-black/40',
+          className,
+        )}
+      />
+    );
+  }
+  if (variant === 'classic') {
+    // Leopard's glass shelf, seen from above: a frosted floor whose far edge
+    // recedes to a bright rim, and a lit front lip.
+    return (
+      <div {...props} className={cn('absolute inset-x-0 bottom-0 h-9', className)}>
+        <div
+          className={cn(
+            'absolute inset-x-0 top-0 bottom-1.5 backdrop-blur-md',
+            'bg-[linear-gradient(to_bottom,rgb(255_255_255/0.3),rgb(255_255_255/0.6))]',
+            '[clip-path:polygon(32px_0,calc(100%-32px)_0,100%_100%,0_100%)]',
+          )}
+        />
+        <div className="absolute inset-x-8 top-0 h-px bg-white/90" />
+        <div
+          className={cn(
+            'absolute inset-x-0 bottom-0 h-1.5 border-t border-white/90 backdrop-blur-md',
+            'bg-[linear-gradient(to_bottom,rgb(255_255_255/0.7),rgb(255_255_255/0.35))]',
+            'shadow-[0_1px_3px_rgb(0_0_0/0.35)]',
+          )}
+        />
+      </div>
+    );
+  }
+  return <div {...props} className={cn('absolute inset-0', className)} />;
+}
+
+/**
+ * The line between the pinned apps and the others. As on macOS,
+ * right-clicking it offers the Dock's settings.
+ */
+function DockDivider({ variant }: { variant: DockStyle }) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div role="separator" aria-orientation="vertical" className="relative h-20 w-4 shrink-0">
+          <span
+            aria-hidden
+            className={cn(
+              'absolute left-1/2 -translate-x-1/2',
+              variant === 'classic'
+                ? 'top-5 bottom-1 border-l-2 border-dashed border-white/80'
+                : 'top-3 bottom-3 w-px',
+              variant === 'modern' && 'bg-black/20 dark:bg-white/25',
+              // Over the wallpaper, painted from its backdrop like the dots.
+              variant === 'none' && 'opacity-50 [backdrop-filter:blur(4px)_grayscale(1)_contrast(100)_invert(1)]',
+            )}
+          />
+        </div>
+      </ContextMenuTrigger>
+      <DockMenuContent />
+    </ContextMenu>
+  );
+}
+
+/** The Dock's own menu: magnification, its backdrop, and the rest in Settings. */
+function DockMenuContent() {
+  const { config, updateConfig } = useAppContext();
+  const { open } = useWindowActions();
+  return (
+    <ContextMenuContent className="z-[10000] w-52">
+      <ContextMenuCheckboxItem
+        checked={config.dockMagnification}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockMagnification: checked }))}
+      >
+        Magnification
+      </ContextMenuCheckboxItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>Background</ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-40">
+          <ContextMenuRadioGroup
+            value={config.dockStyle}
+            onValueChange={(value) => {
+              const style = DOCK_STYLES.find((s) => s.value === value);
+              if (style) updateConfig((current) => ({ ...current, dockStyle: style.value }));
+            }}
+          >
+            {DOCK_STYLES.map((s) => (
+              <ContextMenuRadioItem key={s.value} value={s.value}>
+                {s.name}
+              </ContextMenuRadioItem>
+            ))}
+          </ContextMenuRadioGroup>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={() => open('settings', { section: 'dock' })}>
+        Dock Settings…
+      </ContextMenuItem>
+    </ContextMenuContent>
+  );
+}
+
+/** Colors of the stand-in icons in a DockPreview. */
+const PREVIEW_ICONS = ['bg-sky-500', 'bg-amber-400', 'bg-emerald-500'];
+
+/**
+ * A small Dock of stand-in icons over the given backdrop, for Settings to
+ * show its choices with. Laid out at full size like the real one, then
+ * scaled down from its bottom center.
+ */
+export function DockPreview({ variant }: { variant: DockStyle }) {
+  return (
+    <div aria-hidden className={cn('relative flex shrink-0 origin-bottom scale-[0.4] items-end', STYLE_LAYOUT[variant].padding)}>
+      <DockSurface variant={variant} />
+      {PREVIEW_ICONS.map((color) => (
+        <div key={color} className="relative h-20" style={{ width: BASE_WIDTH }}>
+          <div className="absolute inset-x-1 bottom-2.5 grid aspect-square place-items-center">
+            <div className={cn('size-[82%] rounded-[22%] shadow-md', color)} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
