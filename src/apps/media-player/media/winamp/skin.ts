@@ -39,8 +39,6 @@ export interface WinampSkin {
   regions: { normal?: number[][]; equalizer?: number[][]; windowshade?: number[][]; equalizerws?: number[][] };
   /** EQ_GRAPH_LINE_COLORS, top to bottom. */
   graphColors: string[];
-  /** Release object URLs. */
-  dispose(): void;
 }
 
 export const DEFAULT_VIS_COLORS = [
@@ -164,11 +162,13 @@ async function decodeBitmap(data: Uint8Array, name: string): Promise<{ canvas: H
   }
 }
 
-async function canvasSheet(canvas: HTMLCanvasElement, urls: string[]): Promise<Sheet> {
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-  const url = blob ? URL.createObjectURL(blob) : canvas.toDataURL();
-  if (blob) urls.push(url);
-  return { url, width: canvas.width, height: canvas.height };
+/**
+ * A sheet as a data: URL. toBlob waits for an idle moment, which a busy page
+ * (the library scanning, a visualization drawing) may not have for a second
+ * at a time, so a skin's dozen sheets took a dozen seconds.
+ */
+function canvasSheet(canvas: HTMLCanvasElement): Sheet {
+  return { url: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
 }
 
 /** The colors down EQ_GRAPH_LINE_COLORS (eqmain.bmp at 115,294, 1×19). */
@@ -182,7 +182,6 @@ function graphColors(canvas: HTMLCanvasElement | null): string[] {
 export async function loadWinampSkin(bytes: Uint8Array | null, name: string): Promise<WinampSkin> {
   const files = bytes ? unzipSync(bytes) : {};
   const find = finder(files);
-  const urls: string[] = [];
   const defaults = makeDefaultSheets();
   const sheets = {} as Record<SheetName, Sheet | null>;
   let eqCanvas: HTMLCanvasElement | null = null;
@@ -203,7 +202,7 @@ export async function loadWinampSkin(bytes: Uint8Array | null, name: string): Pr
       canvas = padded;
     }
     if (sheet === 'eqmain') eqCanvas = canvas;
-    sheets[sheet] = canvas ? await canvasSheet(canvas, urls) : null;
+    sheets[sheet] = canvas ? canvasSheet(canvas) : null;
   }
   const vis = find('viscolor.txt');
   const pledit = find('pledit.txt');
@@ -215,7 +214,6 @@ export async function loadWinampSkin(bytes: Uint8Array | null, name: string): Pr
     playlist: pledit ? parsePlaylistColors(decodeText(pledit)) : DEFAULT_PLAYLIST,
     regions: region ? parseRegions(decodeText(region)) : {},
     graphColors: graphColors(eqCanvas),
-    dispose: () => urls.forEach((u) => URL.revokeObjectURL(u)),
   };
 }
 

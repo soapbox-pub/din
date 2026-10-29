@@ -3,13 +3,13 @@ import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
   DropdownMenuShortcut, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useWindowIsTop } from '@/contexts/WindowFocusContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
+import { useWindowState } from '@/sdk/react';
 import { cleanFsError, getFsBridge } from '@/lib/fs';
 import { displayTitle, formatTime, player, usePlaybackTime, usePlayer } from '../engine';
 import { EQ_PRESETS, parseEqf, writeEqf } from '../eq';
 import { setPrefs, setWinampPrefs, usePrefs } from '../prefs';
 import type { Commands } from '../useCommands';
+import { pickPaths, pickSavePath } from '../host';
 import { regionClip, type WinampSkin } from './skin';
 import { SkinText, Sprite, SpriteButton, WinampVis } from './parts';
 import { SkinContext, spriteStyle, useSkin, useSliderDrag, useWindowDrag } from './hooks';
@@ -182,7 +182,7 @@ function Position({ setOverride }: { setOverride: (t: string | null) => void }) 
 
 function MainWindow({ y, commands, onMenu }: { y: number; commands: Commands; onMenu: (e: React.MouseEvent) => void }) {
   const skin = useSkin();
-  const focused = useWindowIsTop();
+  const focused = useWindowState().focused;
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const status = usePlayer((s) => s.status);
@@ -374,7 +374,6 @@ function EqGraph() {
 }
 
 function EqPresetsMenu({ children }: { children: ReactNode }) {
-  const { pickFile, pickFiles } = useFilePicker();
   const bands = usePlayer((s) => s.bands);
   const preamp = usePlayer((s) => s.preamp);
   const [error, setError] = useState<string | null>(null);
@@ -392,7 +391,7 @@ function EqPresetsMenu({ children }: { children: ReactNode }) {
         </DropdownMenuSub>
         <DropdownMenuItem
           onSelect={async () => {
-            const path = await pickFile({ title: 'Load EQ Preset', extensions: ['.eqf', '.q1'] });
+            const [path] = await pickPaths({ title: 'Load EQ Preset', types: [{ description: 'Equalizer presets', extensions: ['.eqf', '.q1'] }] });
             const fs = getFsBridge();
             if (!path || !fs) return;
             try {
@@ -407,10 +406,9 @@ function EqPresetsMenu({ children }: { children: ReactNode }) {
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={async () => {
-            const result = await pickFiles({ mode: 'save', title: 'Save EQ Preset', currentName: 'Preset.eqf', extensions: ['.eqf'] });
+            const path = await pickSavePath({ title: 'Save EQ Preset', suggestedName: 'Preset.eqf', types: [{ description: 'Winamp EQ preset', extensions: ['.eqf'] }] });
             const fs = getFsBridge();
-            if (!result || !fs) return;
-            const path = /\.eqf$/i.test(result.paths[0]) ? result.paths[0] : `${result.paths[0]}.eqf`;
+            if (!path || !fs) return;
             await fs.writeFile(path, writeEqf([{ name: path.slice(path.lastIndexOf('/') + 1, -4), preamp, bands }]));
           }}
         >
@@ -426,7 +424,7 @@ function EqPresetsMenu({ children }: { children: ReactNode }) {
 
 function EqWindow({ y, commands }: { y: number; commands: Commands }) {
   const skin = useSkin();
-  const focused = useWindowIsTop();
+  const focused = useWindowState().focused;
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const eqOn = usePlayer((s) => s.eqOn);
@@ -545,7 +543,7 @@ function PlMenu({ which, x, y, actions }: { which: keyof typeof PL_MENUS; x: num
 
 function PlaylistWindow({ y, width, height, commands }: { y: number; width: number; height: number; commands: Commands }) {
   const skin = useSkin();
-  const focused = useWindowIsTop();
+  const focused = useWindowState().focused;
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const queue = usePlayer((s) => s.queue);

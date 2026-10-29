@@ -1,45 +1,42 @@
 import { useCallback, useMemo, useState } from 'react';
-import { useFilePicker } from '@/contexts/FilePickerContext';
-import { getFsBridge } from '@/lib/fs';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useDin } from '@/sdk/react';
 import { installSkin, OPEN_EXTENSIONS, openPaths, SKIN_EXTENSIONS } from './actions';
 import { makeTrack, player } from './engine';
 import { library } from './library';
 import { askText } from './din/askText';
+import { pickPaths } from './host';
 import { useSavePlaylist } from './din/useSavePlaylist';
 
 /** File and window commands shared by every skin's menus and buttons. */
-export function useCommands(windowId: string) {
-  const { pickFiles } = useFilePicker();
-  const { close, minimize } = useWindowActions();
+export function useCommands() {
+  const din = useDin();
   const savePlaylistAs = useSavePlaylist();
   const [message, setMessage] = useState<string | null>(null);
 
   const openFiles = useCallback(
     async (how: 'play' | 'enqueue' = 'play') => {
-      const home = await getFsBridge()?.homedir();
-      const result = await pickFiles({
+      const paths = await pickPaths({
         title: how === 'play' ? 'Open' : 'Add to Now Playing',
         multiple: true,
-        initialPath: home ? `${home}/Music` : undefined,
-        filters: [
-          { name: 'Media and playlists', patterns: OPEN_EXTENSIONS.map((e) => `*${e}`), mimeTypes: [] },
-          { name: 'Skins', patterns: SKIN_EXTENSIONS.map((e) => `*${e}`), mimeTypes: [] },
+        startIn: 'music',
+        types: [
+          { description: 'Media and playlists', extensions: OPEN_EXTENSIONS },
+          { description: 'Skins', extensions: SKIN_EXTENSIONS },
         ],
       });
-      if (!result) return;
-      setMessage(await openPaths(result.paths, how));
+      if (paths.length === 0) return;
+      setMessage(await openPaths(paths, how));
     },
-    [pickFiles],
+    [],
   );
 
   const openFolder = useCallback(
     async (how: 'play' | 'enqueue' = 'enqueue') => {
-      const result = await pickFiles({ title: 'Add Folder', directory: true, confirmLabel: 'Add' });
-      if (!result) return;
-      setMessage(await openPaths(result.paths, how));
+      const paths = await pickPaths({ title: 'Add Folder', directory: true });
+      if (paths.length === 0) return;
+      setMessage(await openPaths(paths, how));
     },
-    [pickFiles],
+    [],
   );
 
   const openUrl = useCallback(async () => {
@@ -61,19 +58,19 @@ export function useCommands(windowId: string) {
   }, [savePlaylistAs]);
 
   const loadSkin = useCallback(async () => {
-    const result = await pickFiles({ title: 'Choose a Skin', extensions: SKIN_EXTENSIONS });
-    if (!result) return;
+    const [path] = await pickPaths({ title: 'Choose a Skin', types: [{ description: 'Skins', extensions: SKIN_EXTENSIONS }] });
+    if (!path) return;
     try {
-      await installSkin(result.paths[0]);
+      await installSkin(path);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     }
-  }, [pickFiles]);
+  }, []);
 
   const addLibraryFolder = useCallback(async () => {
-    const result = await pickFiles({ title: 'Add Folder to Library', directory: true, confirmLabel: 'Add' });
-    if (result?.paths[0]) library.addFolder(result.paths[0]);
-  }, [pickFiles]);
+    const [path] = await pickPaths({ title: 'Add Folder to Library', directory: true });
+    if (path) library.addFolder(path);
+  }, []);
 
   return useMemo(
     () => ({
@@ -83,13 +80,13 @@ export function useCommands(windowId: string) {
       savePlaylist,
       loadSkin,
       addLibraryFolder,
-      close: () => close(windowId),
-      minimize: () => minimize(windowId),
+      close: () => din.window.requestClose(),
+      minimize: () => din.window.minimize(),
       message,
       clearMessage: () => setMessage(null),
       setMessage,
     }),
-    [openFiles, openFolder, openUrl, savePlaylist, loadSkin, addLibraryFolder, close, minimize, windowId, message],
+    [din, openFiles, openFolder, openUrl, savePlaylist, loadSkin, addLibraryFolder, message],
   );
 }
 

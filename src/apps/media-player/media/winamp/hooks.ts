@@ -1,5 +1,5 @@
 import { createContext, useContext, useRef, useState, type CSSProperties } from 'react';
-import { useWindowChrome } from '@/contexts/WindowChromeContext';
+import { useDin } from '@/sdk/react';
 import type { WinampSkin } from './skin';
 import type { SpriteDef } from './sprites';
 
@@ -25,25 +25,34 @@ export function spriteStyle(skin: WinampSkin, def: SpriteDef | readonly [SpriteD
   };
 }
 
-/** Drag the whole Din window from a skin's title bar. */
+/**
+ * Drag the whole Din window from a skin's title bar. The move is handed to
+ * the desktop only once the pointer has moved a little: from then on the app
+ * sees no more of the gesture, so a click or double-click (Winamp's shade
+ * mode, a WMP skin's buttons) must stay the skin's.
+ */
 export function useWindowDrag() {
-  const chrome = useWindowChrome();
-  const moving = useRef(false);
+  const din = useDin();
+  const start = useRef<{ x: number; y: number } | null>(null);
   return {
     onPointerDown: (e: React.PointerEvent) => {
       if (e.button !== 0) return;
-      if (chrome.beginMove({ clientX: e.clientX, clientY: e.clientY })) {
-        moving.current = true;
-        e.currentTarget.setPointerCapture(e.pointerId);
-      }
+      start.current = { x: e.clientX, y: e.clientY };
+      e.currentTarget.setPointerCapture(e.pointerId);
     },
     onPointerMove: (e: React.PointerEvent) => {
-      if (moving.current) chrome.gestureMove({ clientX: e.clientX, clientY: e.clientY });
+      const from = start.current;
+      if (!from) return;
+      if ((e.buttons & 1) === 0) {
+        start.current = null;
+        return;
+      }
+      if (Math.hypot(e.clientX - from.x, e.clientY - from.y) < 3) return;
+      start.current = null;
+      din.window.beginMove(e.nativeEvent);
     },
     onPointerUp: () => {
-      if (!moving.current) return;
-      moving.current = false;
-      chrome.gestureEnd();
+      start.current = null;
     },
   };
 }

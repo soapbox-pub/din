@@ -4,12 +4,11 @@ import { cn } from '@/lib/utils';
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { parentPath } from '@/lib/fs';
 import { formatTime, player, usePlayer } from '../engine';
 import { isUrl } from '../metadata';
 import { Cover, IconButton } from './common';
 import { useSavePlaylist } from './useSavePlaylist';
+import { showFileInFiles } from '../host';
 
 const NOW_PLAYING_MIME = 'application/x-din-now-playing';
 
@@ -21,7 +20,6 @@ export function ListPane() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
-  const { open } = useWindowActions();
   const savePlaylist = useSavePlaylist();
   const listRef = useRef<HTMLDivElement>(null);
   const track = queue[current] ?? null;
@@ -173,7 +171,7 @@ export function ListPane() {
               </ContextMenuSub>
               <ContextMenuSeparator />
               {!isUrl(t.location) && (
-                <ContextMenuItem onSelect={() => open('file-browser', { path: parentPath(t.location), select: t.location.slice(t.location.lastIndexOf('/') + 1) })}>
+                <ContextMenuItem onSelect={() => void showFileInFiles(t.location)}>
                   Show in Files
                 </ContextMenuItem>
               )}

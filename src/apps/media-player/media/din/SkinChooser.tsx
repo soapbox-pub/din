@@ -4,7 +4,6 @@ import { Check, ExternalLink, Palette, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { cleanFsError, getFsBridge, joinPath } from '@/lib/fs';
 import { skinKindOf, skinsDir } from '../actions';
 import { setPrefs, usePrefs, type SkinChoice } from '../prefs';
@@ -12,6 +11,7 @@ import { winampPreview } from '../winamp/skin';
 import { wmpPreview } from '../wmp/preview';
 import { BUILTIN_WMP_SKINS, builtinSkinBytes, isBuiltinSkin } from '../wmp/builtin';
 import type { Commands } from '../useCommands';
+import { openUrl } from '../host';
 
 interface SkinEntry {
   id: string;
@@ -73,7 +73,6 @@ function Preview({ entry }: { entry: SkinEntry }) {
 export function SkinChooser({ commands }: { commands: Commands }) {
   const current = usePrefs((p) => p.skin);
   const queryClient = useQueryClient();
-  const openUrl = useOpenUrl();
   const skins = useQuery({ queryKey: ['music', 'skins'], queryFn: listSkins });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

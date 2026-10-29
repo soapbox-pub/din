@@ -1,0 +1,84 @@
+{
+  "name": "Media Player",
+  "description": "Music and video, Windows Media Player style with Winamp's soul: a library of your Music and Videos folders, internet radio, the equalizer, visualizations, and Winamp and Windows Media Player skins.",
+  "icons": [
+    {
+      "src": "/icons/apps/media-player.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "shortcuts": [
+    {
+      "name": "Library",
+      "url": "/",
+      "din": {
+        "id": "library",
+        "params": {
+          "show": "library"
+        }
+      }
+    },
+    {
+      "name": "Mini Player",
+      "url": "/",
+      "din": {
+        "id": "mini",
+        "params": {
+          "show": "mini"
+        }
+      }
+    },
+    {
+      "name": "Use Din's Own Skin",
+      "url": "/",
+      "din": {
+        "id": "din-skin",
+        "params": {
+          "show": "din-skin"
+        }
+      }
+    }
+  ],
+  "din": {
+    "permissions": [
+      "fs",
+      "media-session"
+    ],
+    "window": {
+      "size": {
+        "width": 1040,
+        "height": 680
+      },
+      "frame": "standard"
+    },
+    "keywords": [
+      "music player",
+      "video player",
+      "windows media player",
+      "wmp",
+      "winamp",
+      "itunes",
+      "vlc",
+      "music",
+      "mp3",
+      "audio",
+      "songs",
+      "playlist",
+      "radio",
+      "equalizer",
+      "visualization",
+      "skins",
+      "video",
+      "movies",
+      "media"
+    ],
+    "migrateStorage": [
+      "din:media-player:*"
+    ]
+  }
+}

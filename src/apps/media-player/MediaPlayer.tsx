@@ -1,14 +1,9 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { AppComponentProps } from '@/lib/apps';
 import { getFsBridge, cleanFsError } from '@/lib/fs';
-import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useWorkAreas } from '@/contexts/MonitorsContext';
-import { areaFor } from '@/lib/monitors';
-import { MIN_HEIGHT, MIN_WIDTH } from '@/hooks/useWindows';
-import { FILES_MIME } from './files/dnd';
+import { DRAG_MIME, type FrameMode, type LaunchContext, type Rect } from '@/sdk';
+import { useCurrentDrag, useDin, useWindowState, useWindowTitle } from '@/sdk/react';
 import { openPaths } from './media/actions';
-import { player, usePlayer } from './media/engine';
+import { connectMediaSession, player, usePlayer } from './media/engine';
 import { getPrefs, setPrefs, setWinampPrefs, usePrefs, type SkinChoice } from './media/prefs';
 import { useCommands, type Commands } from './media/useCommands';
 import { AppMenus } from './media/din/AppMenus';
@@ -16,7 +11,7 @@ import { DinSkin } from './media/din/DinSkin';
 import { TextPromptHost } from './media/din/TextPrompt';
 import { loadWinampSkin, type WinampSkin } from './media/winamp/skin';
 import { WinampPlayer } from './media/winamp/WinampPlayer';
-import { winampLayout } from './media/winamp/layout';
+import { W, winampLayout } from './media/winamp/layout';
 import { WmpPlayer } from './media/wmp/WmpPlayer';
 import { openWmz, type WmzPackage } from './media/wmp/wms';
 import { builtinSkinBytes, isBuiltinSkin } from './media/wmp/builtin';
@@ -25,6 +20,9 @@ import './media/din/player.css';
 /** The Din skin's window size in full mode, and the Mini Player's. */
 const FULL_SIZE = { width: 1040, height: 680 };
 const MINI_SIZE = { width: 460, height: 168 };
+/** The smallest a framed window gets (the desktop's own minimum). */
+const MIN_WIDTH = 280;
+const MIN_HEIGHT = 160;
 
 type LoadedSkin =
   | { kind: 'din' }
@@ -44,16 +42,14 @@ function useLoadedSkin(choice: SkinChoice, onError: (message: string) => void): 
   useEffect(() => {
     if (choice.kind === 'din') return;
     let live = true;
-    let made: WinampSkin | null = null;
     void (async () => {
       try {
         const bytes = !choice.path ? null
           : isBuiltinSkin(choice.path) ? await builtinSkinBytes(choice.path)
             : (await getFsBridge()!.readFile(choice.path, 64 * 1024 * 1024)).data;
         if (choice.kind === 'winamp') {
-          made = await loadWinampSkin(bytes, choice.path ? choice.path.slice(choice.path.lastIndexOf('/') + 1) : 'Din Classic');
+          const made = await loadWinampSkin(bytes, choice.path ? choice.path.slice(choice.path.lastIndexOf('/') + 1) : 'Din Classic');
           if (live) setLoaded({ key, skin: { kind: 'winamp', skin: made } });
-          else made.dispose();
         } else {
           if (!bytes) throw new Error('No skin file');
           const pkg = openWmz(bytes);
@@ -67,7 +63,6 @@ function useLoadedSkin(choice: SkinChoice, onError: (message: string) => void): 
     })();
     return () => {
       live = false;
-      made?.dispose();
     };
   }, [key, choice]);
   if (choice.kind === 'din') return DIN_SKIN;
@@ -80,27 +75,26 @@ function useLoadedSkin(choice: SkinChoice, onError: (message: string) => void): 
  * of its own because it follows every window change.
  */
 function FitWindow({
-  windowId, frameless, width: wantWidth, height: wantHeight, remember,
+  frame, width: wantWidth, height: wantHeight, remember,
 }: {
-  windowId: string;
-  frameless: boolean;
+  frame: FrameMode;
   width: number;
   height: number;
   /** Keep the size the user drags it to (Din's full mode). */
   remember: boolean;
 }) {
-  const { windows } = useWindowManager();
-  const { resize, setFrameless } = useWindowActions();
-  const areas = useWorkAreas();
-  const current = useRef({ windows, areas });
+  const din = useDin();
+  const state = useWindowState();
+  const chrome = useRef<FrameMode | null>(null);
   const target = useRef<{ width: number; height: number; settled: boolean } | null>(null);
   useEffect(() => {
-    current.current = { windows, areas };
-  }, [windows, areas]);
-  useEffect(() => {
-    const { windows, areas } = current.current;
-    const win = windows.find((w) => w.id === windowId);
-    if (!win || win.maximized || win.snapped) return;
+    const frameless = frame === 'none';
+    if (chrome.current !== frame) {
+      chrome.current = frame;
+      din.window.setChrome({ frame });
+    }
+    const { bounds, workArea: area, maximized, snapped } = din.window.state;
+    if (maximized || snapped) return;
     let width = Math.round(wantWidth);
     let height = Math.round(wantHeight);
     // A framed window is never smaller than the window manager allows.
@@ -108,31 +102,27 @@ function FitWindow({
       width = Math.max(MIN_WIDTH, width);
       height = Math.max(MIN_HEIGHT, height);
     }
-    let { x, y } = win;
-    if (areas.length > 0) {
-      const area = areaFor(areas, win);
-      // No bigger than the monitor it's on.
+    // No bigger than the monitor it's on.
+    if (area.width > 0 && area.height > 0) {
       width = Math.min(width, Math.max(frameless ? 1 : MIN_WIDTH, area.width));
       height = Math.min(height, Math.max(frameless ? 1 : MIN_HEIGHT, area.height));
     }
-    const fits = win.frameless === frameless && win.width === width && win.height === height;
+    const fits = bounds.width === width && bounds.height === height;
     target.current = { width, height, settled: fits };
     if (fits) return;
-    if (areas.length > 0) {
-      const area = areaFor(areas, win);
+    let { x, y } = bounds;
+    if (area.width > 0 && area.height > 0) {
       x = Math.max(area.x, Math.min(x, area.x + area.width - Math.min(width, area.width)));
       y = Math.max(area.y, Math.min(y, area.y + area.height - Math.min(height, area.height)));
     }
-    if (win.frameless !== frameless) setFrameless(windowId, frameless, { x, y, width, height });
-    else resize(windowId, { x, y, width, height });
-  }, [windowId, frameless, wantWidth, wantHeight, resize, setFrameless]);
+    din.window.setBounds({ x, y, width, height });
+  }, [din, frame, wantWidth, wantHeight]);
 
   // Once the window has reached the size asked for, later changes are the
   // user's: remember them. (Before then they're the window manager's.)
-  const win = windows.find((w) => w.id === windowId);
-  const free = !!win && !win.frameless && !win.maximized && !win.snapped;
-  const width = win ? Math.round(win.width) : 0;
-  const height = win ? Math.round(win.height) : 0;
+  const free = frame !== 'none' && !state.maximized && !state.snapped;
+  const width = Math.round(state.bounds.width);
+  const height = Math.round(state.bounds.height);
   useEffect(() => {
     const t = target.current;
     if (!t || !free) return;
@@ -215,49 +205,53 @@ function useShortcuts(commands: Commands, winamp: boolean) {
   };
 }
 
+/** Open what Files (or a Dock shortcut) asked for. */
+function useLaunches(setMessage: (message: string) => void) {
+  const din = useDin();
+  useEffect(() => {
+    const take = ({ params, files, shortcut }: LaunchContext) => {
+      const paths = files.flatMap((f) => (f.path ? [f.path] : []));
+      if (paths.length > 0) {
+        void openPaths(paths, params.how === 'enqueue' ? 'enqueue' : 'play').then((message) => message && setMessage(message));
+      }
+      // A jump-list shortcut from the Dock or the apps menu.
+      const show = shortcut ?? (typeof params.show === 'string' ? params.show : null);
+      if (show === 'din-skin') setPrefs({ skin: { kind: 'din' } });
+      else if (show === 'mini') setPrefs({ skin: { kind: 'din' }, mini: true });
+      else if (show === 'library') setPrefs({ skin: { kind: 'din' }, mini: false, tab: 'library' });
+    };
+    take(din.app.launch);
+    return din.app.onLaunch(take);
+  }, [din, setMessage]);
+}
+
 /**
  * Media Player: Windows Media Player's look and library with Winamp's
  * soul. Plays music and video, internet radio and playlists, and wears
  * Winamp (.wsz) and Windows Media Player (.wmz) skins.
  *
- * Launch params: `{ paths: string[] }` or `{ path }` (songs, videos,
- * playlists, folders or skin files) with `how: 'play' | 'enqueue'`, and
- * `at` to repeat an identical request.
+ * Opened with files (songs, videos, playlists, folders or skin files) and
+ * `how: 'play' | 'enqueue'`. It has `fs`: the library is the Music and
+ * Videos folders, playlists name songs by path, skins live in a folder.
  */
-export function MediaPlayer({ windowId, params }: AppComponentProps) {
-  const commands = useCommands(windowId);
+export function MediaPlayer() {
+  const din = useDin();
+  const commands = useCommands();
   const choice = usePrefs((p) => p.skin);
   const mini = usePrefs((p) => p.mini);
   const dinSize = usePrefs((p) => p.dinSize);
   const winampPrefs = usePrefs((p) => p.winamp);
   const skin = useLoadedSkin(choice, commands.setMessage);
-  const [wmpSize, setWmpSize] = useState<{ width: number; height: number } | null>(null);
+  const [wmpSize, setWmpSize] = useState<{ width: number; height: number; shape: Rect[] } | null>(null);
   const track = usePlayer((s) => s.queue[s.current] ?? null);
   const playing = usePlayer((s) => s.status === 'playing');
   const rootRef = useRef<HTMLDivElement>(null);
+  const drag = useCurrentDrag();
   const [dragOver, setDragOver] = useState(false);
   useWindowTitle(track && playing ? `${track.title}${track.artist ? ` – ${track.artist}` : ''}` : null);
+  useLaunches(commands.setMessage);
 
-  // Files asked this window to open something.
-  const paths = Array.isArray(params?.paths) ? (params.paths as string[]) : typeof params?.path === 'string' ? [params.path] : [];
-  const request = paths.length > 0 ? JSON.stringify({ paths, how: params?.how === 'enqueue' ? 'enqueue' : 'play', at: params?.at ?? null }) : null;
-  const setMessage = commands.setMessage;
-  useEffect(() => {
-    if (!request) return;
-    const { paths, how } = JSON.parse(request) as { paths: string[]; how: 'play' | 'enqueue' };
-    void openPaths(paths, how).then((message) => message && setMessage(message));
-  }, [request, setMessage]);
-
-  // A jump-list action from the Dock or the apps menu.
-  const show = typeof params?.show === 'string' ? params.show : null;
-  const showRequest = show ? `${show}:${String(params?.actionAt ?? '')}` : null;
-  useEffect(() => {
-    if (!showRequest) return;
-    const what = showRequest.slice(0, showRequest.indexOf(':'));
-    if (what === 'din-skin') setPrefs({ skin: { kind: 'din' } });
-    else if (what === 'mini') setPrefs({ skin: { kind: 'din' }, mini: true });
-    else if (what === 'library') setPrefs({ skin: { kind: 'din' }, mini: false, tab: 'library' });
-  }, [showRequest]);
+  useEffect(() => connectMediaSession(din), [din]);
 
   useEffect(() => {
     rootRef.current?.focus({ preventScroll: true });
@@ -266,13 +260,23 @@ export function MediaPlayer({ windowId, params }: AppComponentProps) {
 
   const onKeyDown = useShortcuts(commands, skin?.kind === 'winamp');
 
-  let size: { width: number; height: number; frameless: boolean } | null = null;
-  if (skin?.kind === 'din') size = { ...(mini ? MINI_SIZE : (dinSize ?? FULL_SIZE)), frameless: false };
+  let size: { width: number; height: number; frame: FrameMode; shape?: Rect[] } | null = null;
+  if (skin?.kind === 'din') size = { ...(mini ? MINI_SIZE : (dinSize ?? FULL_SIZE)), frame: mini ? 'standard' : 'custom' };
   else if (skin?.kind === 'winamp') {
     const layout = winampLayout(winampPrefs, skin.skin);
     const scale = winampPrefs.double ? 2 : 1;
-    size = { width: layout.width * scale, height: layout.height * scale, frameless: true };
-  } else if (skin?.kind === 'wmp' && wmpSize) size = { ...wmpSize, frameless: true };
+    // Main window, equalizer and playlist, stacked; a playlist wider than
+    // the others leaves a gap beside them.
+    const shape = [
+      { x: 0, y: 0, width: W, height: layout.mainH + layout.eqH },
+      { x: 0, y: layout.mainH + layout.eqH, width: layout.plW, height: layout.plH },
+    ].filter((r) => r.width > 0 && r.height > 0).map((r) => ({ x: r.x * scale, y: r.y * scale, width: r.width * scale, height: r.height * scale }));
+    size = { width: layout.width * scale, height: layout.height * scale, frame: 'none', shape };
+  } else if (skin?.kind === 'wmp' && wmpSize) size = { ...wmpSize, frame: 'none' };
+  const shapeKey = JSON.stringify(size?.shape ?? null);
+  useEffect(() => {
+    din.window.setShape(JSON.parse(shapeKey) as Rect[] | null);
+  }, [din, shapeKey]);
 
   return (
     <div
@@ -280,7 +284,7 @@ export function MediaPlayer({ windowId, params }: AppComponentProps) {
       tabIndex={-1}
       onKeyDown={onKeyDown}
       onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(FILES_MIME)) return;
+        if (drag?.kind !== 'files' && !e.dataTransfer.types.includes(DRAG_MIME)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
         setDragOver(true);
@@ -290,15 +294,17 @@ export function MediaPlayer({ windowId, params }: AppComponentProps) {
       }}
       onDrop={(e) => {
         setDragOver(false);
-        const raw = e.dataTransfer.getData(FILES_MIME);
-        if (!raw) return;
+        if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
         e.preventDefault();
-        const dropped = JSON.parse(raw) as string[];
-        void openPaths(dropped, player.getState().queue.length === 0 ? 'play' : 'enqueue').then((m) => m && commands.setMessage(m));
+        void din.drag.accept(e.nativeEvent, 'copy').then((result) => {
+          if (result?.kind !== 'files') return;
+          const dropped = result.files.flatMap((f) => (f.path ? [f.path] : []));
+          return openPaths(dropped, player.getState().queue.length === 0 ? 'play' : 'enqueue').then((m) => m && commands.setMessage(m));
+        });
       }}
       className="relative size-full outline-none"
     >
-      {size && <FitWindow windowId={windowId} frameless={size.frameless} width={size.width} height={size.height} remember={skin?.kind === 'din' && !mini} />}
+      {size && <FitWindow frame={size.frame} width={size.width} height={size.height} remember={skin?.kind === 'din' && !mini} />}
       {skin?.kind === 'din' && <DinSkin commands={commands} />}
       {skin?.kind === 'winamp' && (
         <SkinBoundary key={`winamp:${skin.skin.name}`} onError={commands.setMessage}>

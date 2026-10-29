@@ -8,14 +8,13 @@ import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
-import { getFsBridge, parentPath } from '@/lib/fs';
+import { getFsBridge } from '@/lib/fs';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { makeTrack, formatTime, player, usePlayer, type Track } from '../engine';
 import { library, useLibrary, type LibraryItem } from '../library';
 import { readPlaylistFile } from '../actions';
 import { setPrefs } from '../prefs';
+import { pickPaths, showFileInFiles, showInFiles } from '../host';
 import { Cover, Stars } from './common';
 
 type View =
@@ -47,10 +46,6 @@ async function playPlaylist(path: string, how: 'play' | 'next' | 'enqueue') {
   if (how !== 'play') return player.enqueue(tracks, { next: how === 'next' });
   player.setQueue(tracks, 0, true);
   setPrefs({ tab: 'now-playing' });
-}
-
-function showInFiles(open: ReturnType<typeof useWindowActions>['open'], path: string) {
-  open('file-browser', { path: parentPath(path), select: path.slice(path.lastIndexOf('/') + 1) });
 }
 
 function NavItem({ icon, label, active, onClick, count, ...props }: Omit<ComponentProps<'button'>, 'children' | 'onClick'> & { icon: ReactNode; label: string; active: boolean; onClick: () => void; count?: number }) {
@@ -88,7 +83,6 @@ const ROW = 28;
 function SongTable({ items, ordered }: { items: LibraryItem[]; ordered?: boolean }) {
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const { open } = useWindowActions();
   const currentLocation = usePlayer((s) => s.queue[s.current]?.location);
   const rows = useMemo(() => {
     if (!sort) return items;
@@ -174,7 +168,7 @@ function SongTable({ items, ordered }: { items: LibraryItem[]; ordered?: boolean
                       ))}
                     </ContextMenuSubContent>
                   </ContextMenuSub>
-                  <ContextMenuItem onSelect={() => showInFiles(open, item.location)}>Show in Files</ContextMenuItem>
+                  <ContextMenuItem onSelect={() => void showFileInFiles(item.location)}>Show in Files</ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem onSelect={() => library.forget(targets(item.location).map((t) => t.location))}>Remove from Library</ContextMenuItem>
                 </ContextMenuContent>
@@ -302,8 +296,6 @@ function PlaylistView({ path }: { path: string }) {
 
 function FoldersView() {
   const folders = useLibrary((s) => s.folders);
-  const { pickFiles } = useFilePicker();
-  const { open } = useWindowActions();
   return (
     <div className="mp-scroll min-h-0 flex-1 overflow-y-auto p-4">
       <p className="mb-3 max-w-prose text-[var(--mp-ink-dim)]">
@@ -321,7 +313,7 @@ function FoldersView() {
               </li>
             </ContextMenuTrigger>
             <ContextMenuContent>
-              <ContextMenuItem onSelect={() => open('file-browser', { path: f })}>Show in Files</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void showInFiles(f)}>Show in Files</ContextMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem onSelect={() => library.removeFolder(f)}>Stop Watching</ContextMenuItem>
             </ContextMenuContent>
@@ -332,8 +324,8 @@ function FoldersView() {
         type="button"
         className="mp-btn"
         onClick={async () => {
-          const result = await pickFiles({ title: 'Add Folder to Library', directory: true, confirmLabel: 'Add' });
-          if (result?.paths[0]) library.addFolder(result.paths[0]);
+          const [path] = await pickPaths({ title: 'Add Folder to Library', directory: true });
+          if (path) library.addFolder(path);
         }}
       >
         <FolderPlus className="size-4" /> Add Folder…
@@ -355,7 +347,6 @@ export function LibraryView() {
   const loaded = useLibrary((s) => s.loaded);
   const [view, setView] = useState<View>({ kind: 'albums' });
   const [search, setSearch] = useState('');
-  const { open } = useWindowActions();
 
   useEffect(() => {
     void library.load();
@@ -477,7 +468,7 @@ export function LibraryView() {
               <ContextMenuItem onSelect={() => void playPlaylist(p, 'next')}>Play Next</ContextMenuItem>
               <ContextMenuItem onSelect={() => void playPlaylist(p, 'enqueue')}>Add to Now Playing</ContextMenuItem>
               <ContextMenuSeparator />
-              <ContextMenuItem onSelect={() => showInFiles(open, p)}>Show in Files</ContextMenuItem>
+              <ContextMenuItem onSelect={() => void showFileInFiles(p)}>Show in Files</ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
         ))}

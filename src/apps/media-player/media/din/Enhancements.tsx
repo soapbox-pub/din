@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useFilePicker } from '@/contexts/FilePickerContext';
 import { getFsBridge, cleanFsError } from '@/lib/fs';
+import { pickPaths, pickSavePath } from '../host';
 import { player, usePlayer } from '../engine';
 import { EQ_BANDS, EQ_PRESETS, parseEqf, writeEqf, type EqPreset } from '../eq';
 import { setPrefs } from '../prefs';
@@ -31,7 +31,6 @@ function Equalizer() {
   const presetName = usePlayer((s) => s.eqPreset);
   const [custom, setCustom] = useState(loadCustom);
   const [message, setMessage] = useState<string | null>(null);
-  const { pickFile, pickFiles } = useFilePicker();
   const all = [...EQ_PRESETS, ...custom];
 
   const saveCustom = (list: EqPreset[]) => {
@@ -40,7 +39,7 @@ function Equalizer() {
   };
 
   const importEqf = async () => {
-    const path = await pickFile({ title: 'Load Winamp Presets', extensions: ['.eqf', '.q1'] });
+    const [path] = await pickPaths({ title: 'Load Winamp Presets', types: [{ description: 'Equalizer presets', extensions: ['.eqf', '.q1'] }] });
     const fs = getFsBridge();
     if (!path || !fs) return;
     try {
@@ -55,10 +54,9 @@ function Equalizer() {
   };
 
   const exportEqf = async () => {
-    const result = await pickFiles({ mode: 'save', title: 'Save Preset', currentName: `${presetName ?? 'Custom'}.eqf`, extensions: ['.eqf'] });
+    const path = await pickSavePath({ title: 'Save Preset', suggestedName: `${presetName ?? 'Custom'}.eqf`, types: [{ description: 'Winamp EQ preset', extensions: ['.eqf'] }] });
     const fs = getFsBridge();
-    if (!result || !fs) return;
-    const path = result.paths[0].toLowerCase().endsWith('.eqf') ? result.paths[0] : `${result.paths[0]}.eqf`;
+    if (!path || !fs) return;
     try {
       await fs.writeFile(path, writeEqf([{ name: presetName ?? 'Custom', preamp, bands }]));
       setMessage('Saved.');

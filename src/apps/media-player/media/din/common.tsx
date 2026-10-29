@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { Music } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useWindowVisible } from '@/contexts/WindowVisibleContext';
+import { useWindowState } from '@/sdk/react';
 import { useCover } from './useCover';
 import { readFrame, visualizationById } from '../visualizations';
 
@@ -90,7 +90,7 @@ export function Cover({ location, className, iconClassName }: { location: string
  */
 export function VisCanvas({ vis, className, pixelScale = 1 }: { vis: string; className?: string; pixelScale?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const visible = useWindowVisible();
+  const visible = useWindowState().visible;
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas || !visible) return;

@@ -1,5 +1,5 @@
 import { extensionOf, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
-import { getFsBridge, joinPath, localFileUrl, parentPath } from '@/lib/fs';
+import { fileUrl, getFsBridge, joinPath, parentPath } from '@/lib/fs';
 import { fileSource, readTags, type TrackTags } from './tags';
 
 /**
@@ -31,8 +31,9 @@ export function baseTitle(location: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
-export function mediaUrl(location: string): string {
-  return isUrl(location) ? location : localFileUrl(location);
+/** Where to load a song from: a stream as it is, a local file through the URL Din gives for it. */
+export function mediaUrl(location: string): Promise<string> {
+  return isUrl(location) ? Promise.resolve(location) : fileUrl(location);
 }
 
 export function isVideoLocation(location: string): boolean {
@@ -90,7 +91,7 @@ function folderCover(dir: string): Promise<string | null> {
           .map((e) => ({ e, r: rank(e.name) }))
           .filter((x): x is { e: typeof x.e; r: number } => x.r !== null)
           .sort((a, b) => a.r - b.r)[0];
-        return best ? localFileUrl(joinPath(dir, best.e.name)) : null;
+        return best ? await fileUrl(joinPath(dir, best.e.name)) : null;
       } catch {
         return null;
       }

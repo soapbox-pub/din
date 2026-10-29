@@ -25,9 +25,6 @@ const FileBrowser = lazy(() =>
 const CAD = lazy(() =>
   import('@/components/desktop/apps/CAD').then((m) => ({ default: m.CAD })),
 );
-const MediaPlayer = lazy(() =>
-  import('@/components/desktop/apps/MediaPlayer').then((m) => ({ default: m.MediaPlayer })),
-);
 const Settings = lazy(() =>
   import('@/components/desktop/apps/Settings').then((m) => ({ default: m.Settings })),
 );
@@ -244,25 +241,12 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 1360, height: 860 },
     keywords: ['autocad', 'dwg', 'dxf', 'drafting', 'drawing', 'cad', 'draftsight', 'librecad', 'blueprint', 'floor plan', 'technical drawing'],
   },
-  {
-    // Music and video, Windows Media Player style with Winamp's soul: the
-    // Now Playing list, a library of the Music and Videos folders, internet
-    // radio, the equalizer and visualizations, and Winamp (.wsz) and Windows
-    // Media Player (.wmz) skins. Files opens songs, playlists and skins here.
-    // Launch params `{ paths, how: 'play' | 'enqueue' }` (or `{ path }`).
-    id: 'media-player',
-    name: 'Media Player',
-    icon: '/icons/apps/media-player.png',
-    component: MediaPlayer,
-    defaultSize: { width: 1040, height: 680 },
-    keywords: ['music player', 'video player', 'windows media player', 'wmp', 'winamp', 'itunes', 'vlc', 'music', 'mp3', 'audio', 'songs', 'playlist', 'radio', 'equalizer', 'visualization', 'skins', 'video', 'movies', 'media'],
-    singleInstance: true,
-    actions: [
-      { label: 'Library', params: { show: 'library' } },
-      { label: 'Mini Player', params: { show: 'mini' } },
-      { label: 'Use Din’s Own Skin', params: { show: 'din-skin' } },
-    ],
-  },
+  // Music and video, Windows Media Player style with Winamp's soul: the
+  // Now Playing list, a library of the Music and Videos folders, internet
+  // radio, the equalizer and visualizations, and Winamp (.wsz) and Windows
+  // Media Player (.wmz) skins. Files opens songs, playlists and skins here.
+  // Launch params `{ paths, how: 'play' | 'enqueue' }` (or `{ path }`).
+  dinApp('media-player'),
   {
     // Conversations with OpenCode, the coding agent. One window, which
     // notifications and the menu bar's robot point at a conversation by

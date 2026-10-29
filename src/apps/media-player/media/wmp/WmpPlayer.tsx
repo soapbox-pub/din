@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { makeTrack, player, type PlayerState } from '../engine';
 import { EQ_PRESETS } from '../eq';
 import { isUrl } from '../metadata';
 import { setPrefs } from '../prefs';
+import type { Rect } from '@/sdk';
 import type { Commands } from '../useCommands';
+import { openUrl } from '../host';
 import { useCover } from '../din/useCover';
 import { Element } from './elements';
 import { WMP_EFFECTS } from './effects';
@@ -84,7 +85,6 @@ async function playSkinSound(pkg: WmzPackage, name: string) {
 
 /** Perform what a skin's script asked for. */
 function useCallHandler(pkg: WmzPackage, commands: Commands, views: { open: (id: string, l?: number, t?: number) => void; close: (id: string) => void; switchTo: (id: string) => void }, viewId: string, main: boolean) {
-  const openUrl = useOpenUrl();
   return useCallback(
     (msg: Extract<VmToHost, { type: 'call' }>) => {
       const [a0, a1] = msg.args;
@@ -157,7 +157,7 @@ function useCallHandler(pkg: WmzPackage, commands: Commands, views: { open: (id:
         case 'automenu.show': void commands.openFiles('play'); break;
       }
     },
-    [pkg, commands, views, viewId, main, openUrl],
+    [pkg, commands, views, viewId, main],
   );
 }
 
@@ -339,7 +339,7 @@ function useTrackLocation(): string | null {
  * A Windows Media Player skin: its first view (or the one theme.currentViewID
  * names), plus any views it opens beside it, all in one frameless window.
  */
-export function WmpPlayer({ pkg, commands, onSize }: { pkg: WmzPackage; commands: Commands; onSize: (size: { width: number; height: number }) => void }) {
+export function WmpPlayer({ pkg, commands, onSize }: { pkg: WmzPackage; commands: Commands; onSize: (size: { width: number; height: number; shape: Rect[] }) => void }) {
   const all = useMemo(() => themeViews(pkg.theme), [pkg]);
   const [mainIndex, setMainIndex] = useState(0);
   const [extra, setExtra] = useState<{ index: number; x: number; y: number }[]>([]);
@@ -391,9 +391,15 @@ export function WmpPlayer({ pkg, commands, onSize }: { pkg: WmzPackage; commands
   const maxY = Math.max(mainSize?.height ?? 0, ...placed.map((p) => p.y + (sizes[p.index]?.height ?? 0)));
   const width = maxX - minX;
   const height = maxY - minY;
+  // The window is the views' boxes; the gaps between them are the desktop's.
+  const shape: Rect[] = [
+    { x: -minX, y: -minY, width: mainSize?.width ?? 0, height: mainSize?.height ?? 0 },
+    ...placed.map((p) => ({ x: p.x - minX, y: p.y - minY, width: sizes[p.index]?.width ?? 0, height: sizes[p.index]?.height ?? 0 })),
+  ].filter((r) => r.width > 0 && r.height > 0);
+  const shapeKey = JSON.stringify(shape);
   useEffect(() => {
-    if (width > 0 && height > 0) onSize({ width, height });
-  }, [width, height, onSize]);
+    if (width > 0 && height > 0) onSize({ width, height, shape: JSON.parse(shapeKey) as Rect[] });
+  }, [width, height, shapeKey, onSize]);
 
   const sizeSetter = useCallback((index: number) => (size: { width: number; height: number }) => setSizes((s) => (s[index]?.width === size.width && s[index]?.height === size.height ? s : { ...s, [index]: size })), []);
   const mainSetter = useMemo(() => sizeSetter(mainIndex), [sizeSetter, mainIndex]);

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { registerMediaSource } from '@/lib/nowPlaying';
+import type { Din, MediaSession } from '@/sdk';
 import { EQ_BANDS, EQ_MAX_DB } from './eq';
 import { baseTitle, coverFor, isUrl, isVideoLocation, mediaUrl, trackInfo } from './metadata';
 
@@ -618,21 +618,37 @@ class MusicEngine {
       if (deck.gain && this.ctx) deck.gain.gain.setValueAtTime(1, this.ctx.currentTime);
       for (const other of this.decks) if (other !== deck && other.gain && this.ctx) other.gain.gain.setValueAtTime(0, this.ctx.currentTime);
       deck.key = track.key;
-      deck.el.src = mediaUrl(track.location);
-      if (startAt > 0) {
-        const at = startAt;
-        deck.el.addEventListener('loadedmetadata', () => (deck.el.currentTime = at), { once: true });
-      }
+      this.setSource(deck, track.location, () => {
+        if (startAt > 0) {
+          const at = startAt;
+          deck.el.addEventListener('loadedmetadata', () => (deck.el.currentTime = at), { once: true });
+        }
+        if (autoplay) {
+          void this.ctx?.resume();
+          void deck.el.play().catch(() => {});
+        }
+      });
       this.set({ direct: false, waiting: autoplay, error: null, info: { bitrate: null, sampleRate: null, channels: null } });
       this.applySettings();
-      if (autoplay) {
-        void this.ctx?.resume();
-        void deck.el.play().catch(() => {});
-      }
     }
     this.setTime(startAt, track.duration ?? 0);
     void this.fillInfo(track.key);
     void this.updateMediaSession();
+  }
+
+  /** Point a deck at a location, then go on, unless it's been given another meanwhile. */
+  private setSource(deck: Deck, location: string, then: () => void): void {
+    const key = deck.key;
+    void mediaUrl(location).then(
+      (url) => {
+        if (deck.key !== key) return;
+        deck.el.src = url;
+        then();
+      },
+      () => {
+        if (deck.key === key) this.onError(key, null);
+      },
+    );
   }
 
   /** Stream URLs that turned out to need the plain element. */
@@ -869,14 +885,13 @@ class MusicEngine {
     const length = Math.max(0.5, duration - position);
     this.fading = true;
     to.key = track.key;
-    to.el.src = mediaUrl(track.location);
+    this.setSource(to, track.location, () => void to.el.play().catch(() => {}));
     to.gain!.gain.cancelScheduledValues(now);
     to.gain!.gain.setValueAtTime(0, now);
     to.gain!.gain.linearRampToValueAtTime(1, now + length);
     from.gain!.gain.cancelScheduledValues(now);
     from.gain!.gain.setValueAtTime(from.gain!.gain.value, now);
     from.gain!.gain.linearRampToValueAtTime(0, now + length);
-    void to.el.play().catch(() => {});
     this.active = toIndex;
     this.set({ current: next, error: null });
     if (s.shuffle && !this.shuffleOrder.includes(next)) this.reshuffle();
@@ -1100,36 +1115,51 @@ class MusicEngine {
 export const player = new MusicEngine();
 export type { MusicEngine };
 
-// The volume menu's media controls.
-{
+/** Longest edge of the cover sent to the desktop's media controls. */
+const ARTWORK_SIZE = 256;
+
+/** A cover as a small data: URL, the only kind the desktop can load from an app. */
+async function artworkDataUrl(src: string): Promise<string | null> {
+  try {
+    const bitmap = await createImageBitmap(await (await fetch(src)).blob());
+    const scale = Math.min(1, ARTWORK_SIZE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } catch {
+    return null;
+  }
+}
+
+/** What's playing, in Din's media controls (the volume menu's) and for the media keys. */
+export function connectMediaSession(din: Din): () => void {
   let cover: { location: string; url: string | null } | null = null;
-  let since = 0;
   let listed = false;
-  const listeners = new Set<() => void>();
-  registerMediaSource({
-    current() {
-      const { status } = player.getState();
-      const track = player.currentTrack;
-      // Once it's been playing it stays: Next while paused stops the player
-      // (as Winamp does), and its controls mustn't vanish for that.
-      if (!track || (status === 'stopped' && !listed)) {
-        listed = false;
-        return null;
-      }
-      if (!listed) since = Date.now();
+  let sent = '';
+  const update = () => {
+    const { status } = player.getState();
+    const track = player.currentTrack;
+    // Once it's been playing it stays: Next while paused stops the player
+    // (as Winamp does), and its controls mustn't vanish for that.
+    let session: MediaSession | null = null;
+    if (!track || (status === 'stopped' && !listed)) {
+      listed = false;
+    } else {
       listed = true;
       if (cover?.location !== track.location) {
         const location = track.location;
         cover = { location, url: null };
-        void coverFor(location).then((url) => {
+        void coverFor(location).then(async (src) => {
+          const url = src && (await artworkDataUrl(src));
           if (cover?.location !== location || !url) return;
           cover = { location, url };
-          for (const listener of listeners) listener();
+          update();
         });
       }
-      return {
-        id: 'player',
-        kind: 'player',
+      session = {
         title: track.title,
         subtitle: track.artist || 'Media Player',
         artwork: cover.url,
@@ -1137,29 +1167,26 @@ export type { MusicEngine };
         canPlay: true,
         canPrevious: true,
         canNext: true,
-        since,
       };
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      const unsubscribe = player.subscribe(listener);
-      return () => {
-        listeners.delete(listener);
-        unsubscribe();
-      };
-    },
-    control(action) {
-      if (action === 'play') player.play();
-      else if (action === 'pause') player.pause();
-      else if (action === 'nexttrack') player.next();
-      else player.previous();
-    },
-    playIdle() {
-      if (player.getState().queue.length === 0) return false;
-      player.play();
-      return true;
-    },
+    }
+    const json = JSON.stringify(session);
+    if (json === sent) return;
+    sent = json;
+    din.media.setSession(session);
+  };
+  const unsubscribe = player.subscribe(update);
+  const offAction = din.media.onAction((action) => {
+    if (action === 'play') player.play();
+    else if (action === 'pause') player.pause();
+    else if (action === 'nexttrack') player.next();
+    else player.previous();
   });
+  update();
+  return () => {
+    unsubscribe();
+    offAction();
+    din.media.setSession(null);
+  };
 }
 
 /** Subscribe a component to part of the player's state. */
