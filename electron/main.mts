@@ -97,6 +97,7 @@ import {
 } from './night-light.mts';
 import { registerTrayHandlers } from './tray.mts';
 import { registerOpenUri } from './open-uri.mts';
+import { attachLaunchedGuest, registerDinLaunch, serveLaunched } from './din-launch.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { registerGeolocationHandlers } from './geolocation.mts';
 import { forgetNappSite, nappPermissionChanged, registerNappHandlers } from './napp.mts';
@@ -5202,9 +5203,16 @@ app.whenReady().then(() => {
       assertShellSender,
       isShellSender,
       protectedPaths: () => [app.getPath('userData')],
+      serveLaunched,
     },
     DIN_APP_PRELOAD,
   );
+  registerDinLaunch({
+    sendToShell,
+    hasShell: () => !!shellWindow && !shellWindow.webContents.isDestroyed(),
+    assertShellSender,
+    protectedPaths: () => [app.getPath('userData')],
+  });
 
   registerFsHandlers();
   registerFileOpsHandlers({ assertShellSender, sendToShell });
@@ -5738,6 +5746,7 @@ app.on('web-contents-created', (_event, contents) => {
   // which is for web pages.
   if (isDinAppGuest(contents)) {
     attachAppGuest(contents, attachingGuestSrc, sendToShell);
+    attachLaunchedGuest(contents, attachingGuestSrc);
     attachingGuestSrc = '';
     contents.on('before-input-event', (event, input) => {
       const shortcut = shellShortcutForInput(input);

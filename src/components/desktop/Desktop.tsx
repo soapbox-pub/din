@@ -34,6 +34,7 @@ import { ScreenSharePicker } from './ScreenShareHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
 import { SystemEventsHost } from './SystemEventsHost';
 import { NativeLinksHost } from './NativeLinksHost';
+import { LaunchHost } from './LaunchHost';
 import { InstallerAutoOpen } from './InstallerAutoOpen';
 import { UpdateNotifier } from './UpdateNotifier';
 import { AirPlayOsd, AirPlayPromptHost } from './AirPlayIndicator';
@@ -208,6 +209,7 @@ function DesktopSession() {
                 <ScreenshotHost />
                 <SystemEventsHost />
                 <NativeLinksHost />
+                <LaunchHost />
                 <SystemNotificationsHost />
                 <GuestInputHost />
                 <DinDragOverlay />

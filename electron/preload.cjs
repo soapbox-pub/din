@@ -3087,4 +3087,50 @@ expose('apps', {
   },
 });
 
+// Launch bridge (window.dinos.launch): apps the `din` command runs from a
+// folder or a dev server (electron/din-launch.mts, src/lib/launchedApps.ts).
+expose('launch', {
+  /**
+   * Hear launches: open a window for each, then answer with opened().
+   * @param {(request: unknown) => void} callback
+   * @returns {() => void}
+   */
+  onOpen: (callback) => {
+    /** @param {unknown} _event @param {unknown} request */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('dinos-launch:open', listener);
+    return () => ipcRenderer.removeListener('dinos-launch:open', listener);
+  },
+  /**
+   * Hear that a launch's command went away (Ctrl-C): close its window.
+   * @param {(launchId: string) => void} callback
+   * @returns {() => void}
+   */
+  onClose: (callback) => {
+    /** @param {unknown} _event @param {string} launchId */
+    const listener = (_event, launchId) => callback(launchId);
+    ipcRenderer.on('dinos-launch:close', listener);
+    return () => ipcRenderer.removeListener('dinos-launch:close', listener);
+  },
+  /**
+   * A launch's window is open, or (with an error) won't be.
+   * @param {string} launchId
+   * @param {string | null} error
+   * @returns {Promise<void>}
+   */
+  opened: (launchId, error) => ipcRenderer.invoke('dinos-launch:opened', launchId, error),
+  /**
+   * A launch's window closed.
+   * @param {string} launchId
+   * @returns {Promise<void>}
+   */
+  ended: (launchId) => ipcRenderer.invoke('dinos-launch:ended', launchId),
+  /**
+   * A launched app's last window closed: main may forget it.
+   * @param {string} appId
+   * @returns {Promise<void>}
+   */
+  release: (appId) => ipcRenderer.invoke('dinos-launch:release', appId),
+});
+
 contextBridge.exposeInMainWorld('dinos', dinos);

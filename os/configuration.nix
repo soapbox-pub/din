@@ -80,6 +80,8 @@ let
       # The cursor converter's sandboxed page, bundled above.
       install -m444 electron/cursor-converter.js $out/share/din/cursor-converter.js
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
+      # The `din` command's client (din-cli below).
+      install -m444 electron/din-cli.py $out/share/din/din-cli.py
       # Publisher's INDD reader (electron/indd.mts), committed prebuilt.
       install -m444 electron/indd.wasm $out/share/din/indd.wasm
       # The ad blocker's extension, with its engine bundle built above.
@@ -248,6 +250,16 @@ let
     text = ''
       export DIN_LIBCRYPT=${pkgs.libxcrypt}/lib/libcrypt.so.2
       exec python3 ${./din-lock.py} "$@"
+    '';
+  };
+
+  # The `din` command: runs a built web app (or a dev server) in a Din
+  # window at din://<origin>/ (electron/din-launch.mts).
+  din-cli = pkgs.writeShellApplication {
+    name = "din";
+    runtimeInputs = [ pkgs.python3 ];
+    text = ''
+      exec python3 ${din-app}/share/din/din-cli.py "$@"
     '';
   };
 
@@ -930,7 +942,7 @@ in
   # distrobox is the escape hatch for anything else: a full Ubuntu/Fedora/Arch
   # userland with its own package manager, sharing $HOME, in rootless podman
   # (also answering to `docker`).
-  environment.systemPackages = with pkgs; [ git unzip distrobox din-keyring ]
+  environment.systemPackages = with pkgs; [ git unzip distrobox din-keyring din-cli ]
     # The command-line userland a Mac ships with, so nobody who sits down at a
     # terminal finds their usual tools missing.
     ++ [

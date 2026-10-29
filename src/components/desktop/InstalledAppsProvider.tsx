@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { APPS, NativeWindowView } from '@/lib/apps';
@@ -29,6 +29,7 @@ import {
   type NsiteAppEntry,
 } from '@/lib/nsiteApps';
 import { getNsiteStore, type NsiteSummary } from '@/lib/nsiteStore';
+import { launchedApp, launchedApps, subscribeLaunchedApps } from '@/lib/launchedApps';
 import { ensureNsiteAppInfo } from '@/lib/nsiteAppInfo';
 import { parseCanonicalNsiteHost } from '@/lib/nsite';
 import {
@@ -163,8 +164,8 @@ function nativeAppToDefinition(app: NativeApp): AppDefinition {
 /**
  * Provides the desktop app registry: the static built-in apps, the user's
  * installed web apps and nsites (persisted + roamed via encrypted app data;
- * an nsite's files live in the OS-level nsite store), and the Linux apps
- * installed on the host system.
+ * an nsite's files live in the OS-level nsite store), the Linux apps
+ * installed on the host system, and the apps the `din` command is running.
  */
 export function InstalledAppsProvider({ children }: { children: ReactNode }) {
   const [webApps, setWebApps] = useAppData<WebApp[]>(
@@ -186,6 +187,8 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
     NO_NSITE_APPS,
   );
   const nsiteApps = store ? nsiteEntries : NO_NSITE_APPS;
+  // Apps the `din` command is running (src/lib/launchedApps.ts).
+  const launched = useSyncExternalStore(subscribeLaunchedApps, launchedApps);
   const queryClient = useQueryClient();
   const { data: storedSites } = useQuery({
     queryKey: NSITE_INSTALLED_QUERY_KEY,
@@ -221,6 +224,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         nsiteAppToDefinition(entry, storedSites?.find((site) => site.host === entry.host)),
       ),
       ...nativeApps.map(nativeAppToDefinition),
+      ...launched.map((app) => app.definition),
     ];
 
     const nsiteEntryFor = (id: string) =>
@@ -230,7 +234,8 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
       apps,
       webApps,
       nsiteApps,
-      getApp: (id) => apps.find((app) => app.id === id),
+      // A launch opens its window as soon as it's registered, before this list has it.
+      getApp: (id) => apps.find((app) => app.id === id) ?? launchedApp(id)?.definition,
       findWebAppByUrl: (url) => webApps.find((webApp) => webApp.url === url),
       findNsiteApp: (host) => nsiteApps.find((entry) => entry.host === host),
       findAppIdForUrl: (url) => {
@@ -284,7 +289,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         setWebApps((prev) => prev.filter((webApp) => webApp.id !== id));
       },
     };
-  }, [webApps, setWebApps, nsiteApps, setNsiteEntries, storedSites, store, nativeApps, live]);
+  }, [webApps, setWebApps, nsiteApps, setNsiteEntries, storedSites, store, nativeApps, live, launched]);
 
   return (
     <InstalledAppsContext.Provider value={value}>

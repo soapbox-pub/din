@@ -63,6 +63,7 @@ So Din is splitting into three layers, each trusting only the one below it:
 | [guest-surfaces.md](guest-surfaces.md) | The `GuestSurface` abstraction over `<webview>` |
 | [building-an-app.md](building-an-app.md) | A built-in app from scratch |
 | [migrating-builtin-apps.md](migrating-builtin-apps.md) | Old desktop hooks and their `window.din` replacements, app by app |
+| [din-command.md](din-command.md) | The `din` command: an app from a folder or a dev server in a window |
 
 The types are the reference: [`src/sdk/din.d.ts`](../src/sdk/din.d.ts).
 Where a page and the types disagree, the types win and the page is a bug.
@@ -79,6 +80,7 @@ Where a page and the types disagree, the types win and the page is a bug.
 | `src/platform/` | `GuestSurface` and the guest helpers ([guest-surfaces.md](guest-surfaces.md)) |
 | `src/components/desktop/DinAppFrame.tsx` | The desktop's end of every app window's port; `dinHost/` beside it |
 | `src/lib/dinApps.ts`, `src/lib/dinDrag.ts` | Apps' manifests and ports; the drag broker |
+| `electron/din-launch.mts`, `electron/din-cli.py`, `src/lib/launchedApps.ts` | The `din` command: its socket and files, its client, and the desktop's side |
 | `src/apps/<id>/` | Each built-in app: `index.html`, `manifest.webmanifest`, `main.tsx`, its code |
 | `src/shared/` | Code apps and the desktop both use (it must not reach the desktop's internals) |
 

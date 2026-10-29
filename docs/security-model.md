@@ -26,6 +26,7 @@ still apply, and moving apps out shrinks what code runs there.
 |---|---|---|---|---|
 | The desktop | `app://din` | default | `preload.cjs` → `window.dinos` | the shell window's renderer |
 | Built-in apps | `din://<id>` | `persist:din-apps` | `din-app-preload.cjs` → ports only | one per app window |
+| Apps the `din` command runs | `din://<origin>` | `persist:din-apps` | `din-app-preload.cjs` → ports only | one per app window |
 | Browser tabs, installed web apps, nsites | their own | `persist:webbrowser` | nostr, napp, web push, … | one per site |
 | Private and Tor tabs | their own | in-memory sessions | fewer | one per site |
 
@@ -35,6 +36,11 @@ still apply, and moving apps out shrinks what code runs there.
   is `dist/src/apps/<id>/index.html`, other paths the app's own built
   files or the build's shared assets and public files, never the
   desktop's page. In development it proxies the Vite server instead.
+- **Apps the `din` command runs** ([din-command.md](din-command.md)) are
+  served from the folder (or dev server) named, never past it, at an
+  origin no built-in app has. Their manifests aren't reviewed, so the
+  desktop drops the members that reach past the app (storage and file
+  migration) and asks the user before granting permissions or folders.
 - **Each built-in app is its own origin**, so its `localStorage`,
   IndexedDB and caches are its own. `din://paint` can't read
   `din://terminal`'s storage.

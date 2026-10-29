@@ -81,6 +81,15 @@ export function appIdOf(url: string): string | null {
   }
 }
 
+/** Whether a built-in app has this id. */
+export function isBuiltInApp(id: string): boolean {
+  if (!options || !APP_ID.test(id)) return false;
+  const dir = options.devUrl
+    ? path.resolve(import.meta.dirname, '..', 'src', 'apps', id)
+    : path.join(options.distDir, 'src', 'apps', id);
+  return fs.existsSync(path.join(dir, 'index.html'));
+}
+
 /** Whether a WebContents is a built-in app's window. */
 export function isAppGuest(contents: Electron.WebContents | null | undefined): boolean {
   return !!contents && !contents.isDestroyed() && contents.getType() === 'webview' && contents.session === appsSession();
@@ -97,6 +106,8 @@ interface Options {
   isShellSender: (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) => boolean;
   /** Paths no granted fs bridge may touch (Din's own profile, with the desktop's storage). */
   protectedPaths: () => string[];
+  /** An app the `din` command runs (electron/din-launch.mts) answers for its own files; null for any other id. */
+  serveLaunched: (appId: string, request: Request) => Promise<Response> | null;
 }
 
 let options: Options | null = null;
@@ -233,6 +244,8 @@ async function serve(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const appId = appIdOf(request.url);
   if (!opts || !appId) return notFound();
+  const launched = opts.serveLaunched(appId, request);
+  if (launched) return launched;
   const pathname = decodeURIComponent(url.pathname);
 
   if (opts.devUrl) {

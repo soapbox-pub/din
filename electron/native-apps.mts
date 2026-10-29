@@ -830,6 +830,8 @@ async function appEnvironment(display: EmbeddedDisplay): Promise<NodeJS.ProcessE
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.NODE_OPTIONS;
   delete env.CHROME_DESKTOP;
+  // Where the `din` command finds this Din (electron/din-launch.mts).
+  if (process.env.DIN_SOCKET) env.DIN_SOCKET = process.env.DIN_SOCKET;
   return env;
 }
 
