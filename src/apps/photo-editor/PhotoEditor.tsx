@@ -252,8 +252,6 @@ export function PhotoEditor() {
   const [selectedState, setSelectedIds] = useState<Set<number>>(new Set());
   const [editMask, setEditMask] = useState(false);
   const [file, setFile] = useState<DinFileHandle | null>(null);
-  // Where File > Quick Export last wrote, so the next one goes there without asking.
-  const [exportFile, setExportFile] = useState<DinFileHandle | null>(null);
   const fileName = file?.name ?? null;
   const [docName, setDocName] = useState(boot?.name ?? 'Untitled-1');
   const [savedEntry, setSavedEntry] = useState<Entry | null>(boot?.entry ?? null);
@@ -542,7 +540,6 @@ export function PhotoEditor() {
       setSelectedIds(new Set(top ? [top.id] : []));
       setEditMask(false);
       setFile(f);
-      setExportFile(null);
       setDocName(name);
       setFloat(null);
       setCropRect(null);
@@ -653,33 +650,24 @@ export function PhotoEditor() {
 
   const quickExport = useCallback(async () => {
     const d = docRef.current;
-    if (!d) return;
+    const fs = din.system.fs;
+    if (!d || !fs) return;
     if (!file) {
       void saveAs(true);
       return;
     }
-    // The first Quick Export asks where the PNG goes (beside the document); later ones write there again.
-    let t = exportFile;
-    if (!t) {
-      t = await din.files.save({
-        title: 'Quick Export as PNG',
-        suggestedName: `${file.name.replace(/\.[^.]*$/, '')}.png`,
-        startIn: file,
-        types: typesFromFilters(SAVE_TYPES.filter((f) => extOf(f.patterns[0]) === 'png')),
-      });
-      if (!t) return;
-      setExportFile(t);
-    }
+    // Beside the document, as name.png (its folder is in reach: file-folders).
+    const p = `${file.path.replace(/\.[^./]*$/, '')}.png`;
     setBusy(true);
     try {
-      await t.write(await encodeDoc(d, t.name));
-      setStatus(`Exported ${t.name}`);
+      await fs.writeFile(p, await encodeDoc(d, p));
+      setStatus(`Exported ${p.slice(p.lastIndexOf('/') + 1)}`);
     } catch (err) {
       setStatus(`Couldn’t export: ${cleanFsError(err)}`);
     } finally {
       setBusy(false);
     }
-  }, [din, file, exportFile, saveAs]);
+  }, [din, file, saveAs]);
 
   const pick = useCallback(
     async (title: string, extensions: string[]) =>
