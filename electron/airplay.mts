@@ -35,9 +35,11 @@
 // The receivers found are remembered for the network they were found on
 // (NetworkManager's connection, by UUID, so two networks that share a name
 // aren't confused), and listed again as soon as the computer is back on it,
-// before any scan has answered. One that turns out not to be there any more
-// fails to connect, said as much; one not seen on its network for a month
-// is forgotten.
+// until a scan there answers; from then on only what scans find is listed,
+// so one that's gone drops off the list (and one tapped before the scan fails
+// to connect, said as much). One not seen on its network for a month is
+// forgotten. A receiver on this computer itself (a test one, on 127.0.0.1)
+// or at a link-local address is never remembered.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -245,6 +247,12 @@ function saveMode(target: string, mode: AirPlayMode): void {
   writeConfig();
 }
 
+/** Whether a host is this computer or link-local, so not a receiver to remember for a network. */
+function isLocalHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return h === '' || h === 'localhost' || h === '::1' || /^127\./.test(h) || /^169\.254\./.test(h) || /^fe[89ab][0-9a-f]:/.test(h);
+}
+
 /** The networks the computer is on: NetworkManager's active Wi-Fi and wired connections, by UUID. */
 async function activeNetworks(): Promise<string[]> {
   try {
@@ -430,13 +438,16 @@ export function registerAirPlayHandlers(options: {
 
   /** The networks the computer is on, as activeNetworks gives them. */
   let networks: string[] = [];
+  /** A scan has answered on these networks, so what it found stands in for what's remembered. */
+  let scannedHere = false;
 
-  /** The receivers scans found, then those remembered for these networks. */
+  /** The receivers scans found, and until one answers, those remembered for these networks. */
   const listReceivers = (): AirPlayReceiver[] => {
     const receivers = new Map<string, AirPlayReceiver>();
     const { networks: remembered } = readConfig();
     for (const network of networks) {
       for (const [name, r] of Object.entries(remembered[network] ?? {})) {
+        if (scannedHere && !sessions.has(name)) continue;
         if (Date.now() - r.seen < REMEMBER_FOR_MS) receivers.set(name, { name, host: r.host, model: r.model });
       }
     }
@@ -452,6 +463,8 @@ export function registerAirPlayHandlers(options: {
     for (const network of on) {
       const saved = (remembered[network] ??= {});
       for (const r of found) {
+        // A receiver on this computer (a test one) isn't the network's.
+        if (isLocalHost(r.host)) continue;
         const old = saved[r.name];
         if (old && old.host === r.host && old.model === r.model && now - old.seen < SEEN_SAVE_MS) continue;
         saved[r.name] = { host: r.host, model: r.model, seen: now };
@@ -505,7 +518,10 @@ export function registerAirPlayHandlers(options: {
           if (entry.misses > SCAN_MISSES && !sessions.has(name)) seen.delete(name);
         }
         // Not if the computer changed networks while it looked.
-        if (on === networks) remember([...found.values()], on);
+        if (on === networks) {
+          scannedHere = true;
+          remember([...found.values()], on);
+        }
       } catch (error) {
         console.warn('airplay: scan failed:', messageOf(error));
       } finally {
@@ -531,6 +547,7 @@ export function registerAirPlayHandlers(options: {
       .then((now) => {
         if (now.join() === networks.join()) return;
         networks = now;
+        scannedHere = false;
         for (const name of seen.keys()) if (!sessions.has(name)) seen.delete(name);
         update({ receivers: listReceivers() });
         if (now.length === 0) return;
