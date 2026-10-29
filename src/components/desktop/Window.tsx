@@ -165,6 +165,23 @@ const RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
 ];
 
 /**
+ * A frameless window's handles: an 8px band wholly outside it. The window is
+ * all app (a native app drawing its own title bar), whose edges are its own;
+ * but Din tells native apps they're tiled, and tiled toolkits (Chromium,
+ * GTK) leave themselves no resize border, so without these there's none.
+ */
+const FRAMELESS_RESIZE_HANDLES: { dir: ResizeDir; className: string }[] = [
+  { dir: 'n', className: '-top-2 inset-x-0 h-2 cursor-ns-resize' },
+  { dir: 's', className: '-bottom-2 inset-x-0 h-2 cursor-ns-resize' },
+  { dir: 'w', className: '-left-2 inset-y-0 w-2 cursor-ew-resize' },
+  { dir: 'e', className: '-right-2 inset-y-0 w-2 cursor-ew-resize' },
+  { dir: 'nw', className: '-top-2 -left-2 size-3 cursor-nwse-resize' },
+  { dir: 'ne', className: '-top-2 -right-2 size-3 cursor-nesw-resize' },
+  { dir: 'sw', className: '-bottom-2 -left-2 size-3 cursor-nesw-resize' },
+  { dir: 'se', className: '-bottom-2 -right-2 size-3 cursor-nwse-resize' },
+];
+
+/**
  * Memo boundary between window chrome and app content.
  *
  * Drag/resize gestures bypass React entirely (see Window below), but geometry
@@ -1324,7 +1341,8 @@ export const Window = memo(function Window({
   // square corners, no floating shadow/ring.
   const flush = win.maximized || win.snapped !== null;
   // A window whose app draws its own title bar (or none) is just the app:
-  // no title bar, border, shadow, background or resize handles.
+  // no title bar, border, shadow or background, and resize handles only
+  // outside it.
   const frameless = win.frameless;
 
   // Sanitized chrome accent. Theme tokens can't guarantee contrast against
@@ -1496,9 +1514,8 @@ export const Window = memo(function Window({
 
       {/* Tiled windows are sized by the layout (Super+- / Super+=). */}
       {!flush &&
-        !frameless &&
         !win.tiled &&
-        RESIZE_HANDLES.map(({ dir, className }) => (
+        (frameless ? FRAMELESS_RESIZE_HANDLES : RESIZE_HANDLES).map(({ dir, className }) => (
           <div
             key={dir}
             onPointerDown={onResizePointerDown(dir)}
