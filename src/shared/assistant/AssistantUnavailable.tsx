@@ -1,9 +1,9 @@
 import { CircleAlert, Loader2, Power } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useAssistantStatus, useSetAssistantEnabled } from '@/hooks/useAssistant';
+import { useAssistantStatus } from '@/hooks/useAssistant';
 import { getAssistantBridge } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
+import { useAssistantHost } from '@/shared/assistant/host';
 
 /**
  * Why the assistant can't answer yet, and what to do about it: it's off,
@@ -11,9 +11,8 @@ import { cn } from '@/lib/utils';
  */
 export function AssistantUnavailable({ className, compact = false }: { className?: string; compact?: boolean }) {
   const { data: status, isLoading } = useAssistantStatus();
-  const setEnabled = useSetAssistantEnabled();
-  const { open } = useWindowActions();
-  const openSettings = () => open('settings', { section: 'assistant' });
+  const { setEnabled, openApp } = useAssistantHost();
+  const openSettings = () => openApp('settings', { section: 'assistant' });
 
   if (!getAssistantBridge()) {
     return (
@@ -31,9 +30,15 @@ export function AssistantUnavailable({ className, compact = false }: { className
       <Shell className={className} compact={compact} icon={<Power className="size-6" aria-hidden />}>
         <p className="font-medium">The assistant is off</p>
         <p className="text-sm text-muted-foreground">Turn it on to ask OpenCode to do things on this computer.</p>
-        <Button size="sm" onClick={() => setEnabled(true)} className="mt-2">
-          Turn on
-        </Button>
+        {setEnabled ? (
+          <Button size="sm" onClick={() => setEnabled(true)} className="mt-2">
+            Turn on
+          </Button>
+        ) : (
+          <Button size="sm" onClick={openSettings} className="mt-2">
+            Turn on in Settings
+          </Button>
+        )}
       </Shell>
     );
   }

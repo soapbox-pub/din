@@ -11,8 +11,8 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ManageProvidersDialog } from '@/components/desktop/assistant/Providers';
-import { ModelPrice, ProviderIcon } from '@/components/desktop/assistant/ProviderIcon';
+import { ManageProvidersDialog } from '@/shared/assistant/Providers';
+import { ModelPrice, ProviderIcon } from '@/shared/assistant/ProviderIcon';
 import { useAssistantIntegrations } from '@/hooks/useAssistant';
 import { modelKey, type ModelInfo, type ModelRef } from '@/lib/assistant';
 import { cn } from '@/lib/utils';

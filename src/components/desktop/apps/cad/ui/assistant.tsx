@@ -1,11 +1,11 @@
 import { useLayoutEffect, useRef } from 'react';
 import { CircleAlert, Plus, X } from 'lucide-react';
-import { AssistantUnavailable } from '@/components/desktop/assistant/AssistantUnavailable';
-import { Composer } from '@/components/desktop/assistant/Composer';
-import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
-import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
-import { Transcript } from '@/components/desktop/assistant/Transcript';
-import { useQuestionHandoff } from '@/components/desktop/assistant/useQuestionHandoff';
+import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
+import { Composer } from '@/shared/assistant/Composer';
+import { ModelPicker } from '@/shared/assistant/ModelPicker';
+import { FormCard, PermissionCard } from '@/shared/assistant/RequestCards';
+import { Transcript } from '@/shared/assistant/Transcript';
+import { useQuestionHandoff } from '@/shared/assistant/useQuestionHandoff';
 import {
   useAssistantReady,
   useAssistantSession,
@@ -18,8 +18,8 @@ import {
   useSessionPermissions,
   useSwitchModel,
 } from '@/hooks/useAssistant';
-import { useToast } from '@/hooks/useToast';
 import { cleanAssistantError, modelKey } from '@/lib/assistant';
+import { useAssistantHost } from '@/shared/assistant/host';
 import { cn } from '@/lib/utils';
 import type { CadAssistant } from '../useCadAssistant';
 import { FOCUS } from './style';
@@ -40,7 +40,7 @@ export function AssistantPalette({ assistant, onClose }: { assistant: CadAssista
   const interrupt = useInterruptSession();
   const cancelQueued = useCancelQueued();
   const switchModel = useSwitchModel();
-  const { toast } = useToast();
+  const { notify } = useAssistantHost();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messages = transcript?.messages;
 
@@ -51,7 +51,7 @@ export function AssistantPalette({ assistant, onClose }: { assistant: CadAssista
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages, queued, permissions.length, forms.length, running, problem]);
 
-  const fail = (title: string) => (error: unknown) => toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
+  const fail = (title: string) => (error: unknown) => notify({ title, description: cleanAssistantError(error), destructive: true });
 
   return (
     <aside aria-label="Assistant" className="dark flex w-[360px] shrink-0 flex-col border-l border-[#15191e] bg-[#262c35] text-[#e3e8ef] select-text" style={{ colorScheme: 'dark' }}>

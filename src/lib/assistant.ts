@@ -56,7 +56,8 @@ declare global {
 /** The assistant bridge, or undefined outside the Electron shell. */
 export function getAssistantBridge(): AssistantBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.dinos?.assistant;
+  // An app granted it has it through window.din; the desktop, through window.dinos.
+  return window.din?.system.assistant ?? window.dinos?.assistant;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

@@ -25,6 +25,7 @@ import { getFsBridge, localFileUrl, type FsEntry } from '@/lib/fs';
 import { agentColor } from '@/lib/agentColors';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useIsDark } from '@/hooks/useIsDark';
+import { useAssistantHost } from '@/shared/assistant/host';
 
 const STATUS_KEY = ['assistant', 'status'] as const;
 const MODEL_STORAGE_KEY = 'din.assistant.model';
@@ -50,6 +51,25 @@ function requireBridge() {
   return bridge;
 }
 
+const statusListeners = new Set<(status: AssistantStatus) => void>();
+let unsubscribeStatus: (() => void) | null = null;
+
+/** Hear the status as it changes. One bridge subscription feeds every listener. */
+function subscribeAssistantStatus(listener: (status: AssistantStatus) => void): () => void {
+  statusListeners.add(listener);
+  unsubscribeStatus ??=
+    getAssistantBridge()?.onStatus((status) => {
+      for (const l of [...statusListeners]) l(status);
+    }) ?? null;
+  return () => {
+    statusListeners.delete(listener);
+    if (statusListeners.size === 0 && unsubscribeStatus) {
+      unsubscribeStatus();
+      unsubscribeStatus = null;
+    }
+  };
+}
+
 /** Whether OpenCode is installed, running, and connected. Pushed, never polled. */
 export function useAssistantStatus() {
   const bridge = getAssistantBridge();
@@ -57,7 +77,7 @@ export function useAssistantStatus() {
 
   useEffect(() => {
     if (!bridge) return;
-    return bridge.onStatus((status) => queryClient.setQueryData(STATUS_KEY, status));
+    return subscribeAssistantStatus((status) => queryClient.setQueryData(STATUS_KEY, status));
   }, [bridge, queryClient]);
 
   return useQuery<AssistantStatus>({
@@ -406,6 +426,11 @@ export function useMainCheckouts(directories: string[]): Map<string, string> {
   });
 }
 
+/** A URL to load a local file from: an app's own (it has `fs`), or the desktop's. */
+function fileUrl(path: string): string {
+  return window.din ? window.din.files.pathUrl(path) : localFileUrl(path);
+}
+
 /**
  * For each project folder with a favicon, a URL for it: the icon its
  * `package.json` names, else the one its `index.html` links, else the first
@@ -452,7 +477,7 @@ export function useProjectIcons(roots: string[]): Map<string, string> {
         const linked = page ? linkedIconPaths(page) : [];
         for (const path of [...new Set([...(named ? [named] : []), ...linked, ...PROJECT_ICON_PATHS])]) {
           const found = await entry(path);
-          if (found?.kind === 'file' && found.size) return localFileUrl(`${dir}/${path}`);
+          if (found?.kind === 'file' && found.size) return fileUrl(`${dir}/${path}`);
         }
         return null;
       },
@@ -480,9 +505,9 @@ export function useDirectoryIcons(directories: string[]): Map<string, string> {
 
 /** The folder new conversations work in. */
 export function useAssistantDirectory(): string | undefined {
-  const { config } = useAppContext();
+  const { directory } = useAssistantHost();
   const home = useHomeDirectory();
-  return config.assistantDirectory.trim() || home;
+  return directory.trim() || home;
 }
 
 // ---------------------------------------------------------------------------

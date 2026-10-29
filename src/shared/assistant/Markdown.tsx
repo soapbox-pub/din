@@ -2,9 +2,9 @@ import { memo, useContext, useRef, type ComponentProps, type ReactNode } from 'r
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, FolderOpen, SquareArrowOutUpRight } from 'lucide-react';
-import { CopyButton } from '@/components/desktop/assistant/CopyButton';
-import { FileLinkBaseContext, filePathOfHref } from '@/components/desktop/assistant/fileLinks';
-import { useHighlightedCode } from '@/components/desktop/assistant/highlight';
+import { CopyButton } from '@/shared/assistant/CopyButton';
+import { FileLinkBaseContext, filePathOfHref } from '@/shared/assistant/fileLinks';
+import { useHighlightedCode } from '@/shared/assistant/highlight';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -12,14 +12,10 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useAppContext } from '@/hooks/useAppContext';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
-import { useToast } from '@/hooks/useToast';
-import { appForFile } from '@/lib/fileTypes';
-import { cleanFsError, getFsBridge, parentPath } from '@/lib/fs';
+import { cleanFsError, getFsBridge } from '@/lib/fs';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
+import { useAssistantHost } from '@/shared/assistant/host';
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -36,10 +32,8 @@ const urlTransform = (url: string) => (/^file:/i.test(url) ? url : defaultUrlTra
  * terminal UI.
  */
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
-  const openUrl = useOpenUrl();
+  const { openUrl, colorfulReplies: c } = useAssistantHost();
   const base = useContext(FileLinkBaseContext);
-  const { config } = useAppContext();
-  const c = config.assistantColorfulReplies;
   const link = cn(
     'font-medium underline underline-offset-2',
     c ? 'text-md-link hover:text-md-link/80' : 'text-primary hover:text-primary/80',
@@ -129,19 +123,17 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
  * use (a folder opens in Files), and right-clicking can show it in its folder.
  */
 function FileLink({ path, className, children }: { path: string; className: string; children: ReactNode }) {
-  const { open } = useWindowActions();
-  const { toast } = useToast();
+  const { openPath, showInFolder, notify } = useAssistantHost();
   const fs = getFsBridge();
   if (!fs) return <span className="underline decoration-dotted" title={path}>{children}</span>;
 
   const name = path.slice(path.lastIndexOf('/') + 1);
   const openFile = () => {
     fs.stat(path).then(
-      ({ kind }) => open(kind === 'directory' ? 'file-browser' : appForFile(name), { path }),
-      (error: unknown) => toast({ title: `Couldn’t open ${name}`, description: cleanFsError(error), variant: 'destructive' }),
+      ({ kind }) => openPath(path, kind === 'directory' ? 'directory' : 'file'),
+      (error: unknown) => notify({ title: `Couldn’t open ${name}`, description: cleanFsError(error), destructive: true }),
     );
   };
-  const showInFolder = () => open('file-browser', { path: parentPath(path), select: name });
 
   return (
     <ContextMenu>
@@ -162,7 +154,7 @@ function FileLink({ path, className, children }: { path: string; className: stri
         <ContextMenuItem onSelect={openFile}>
           <SquareArrowOutUpRight aria-hidden /> Open
         </ContextMenuItem>
-        <ContextMenuItem onSelect={showInFolder}>
+        <ContextMenuItem onSelect={() => showInFolder(path)}>
           <FolderOpen aria-hidden /> Show in Folder
         </ContextMenuItem>
         <ContextMenuSeparator />

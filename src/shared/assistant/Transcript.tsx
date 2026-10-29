@@ -24,8 +24,8 @@ import {
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { CopyButton } from '@/components/desktop/assistant/CopyButton';
-import { Markdown } from '@/components/desktop/assistant/Markdown';
+import { CopyButton } from '@/shared/assistant/CopyButton';
+import { Markdown } from '@/shared/assistant/Markdown';
 import {
   tildify,
   type AssistantContent,

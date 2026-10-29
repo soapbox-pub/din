@@ -2,14 +2,13 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { CornerDownLeft } from 'lucide-react';
-import { AssistantUnavailable } from '@/components/desktop/assistant/AssistantUnavailable';
-import { Composer } from '@/components/desktop/assistant/Composer';
-import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
+import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
+import { Composer } from '@/shared/assistant/Composer';
+import { ModelPicker } from '@/shared/assistant/ModelPicker';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import {
   assistantKeys,
-  getViewedSession,
   isDinSession,
   subscribeAssistantEvents,
   useAssistantDirectory,
@@ -49,9 +48,10 @@ const SOURCE = { appId: ASSISTANT_APP_ID, name: 'Assistant' };
  *   Assistant), which starts OpenCode's server and follows its events.
  * - Keeps the assistant's queries current from those events.
  * - Notifies when the agent needs an answer (a permission request, with
- *   Allow and Deny right on the notification, or a question), and when a
- *   conversation started in Din finishes - unless that conversation is on
- *   screen already.
+ *   Allow and Deny right on the notification, or a question) - unless the
+ *   Assistant is the window in front - and when a conversation started here
+ *   finishes while the Assistant isn't open (when it is, it says so itself:
+ *   src/apps/assistant).
  * - The prompt: Super+A anywhere opens a box to ask the assistant something;
  *   Enter starts a conversation and shows it in the Assistant window.
  */
@@ -79,17 +79,20 @@ function AssistantNotifications() {
   return null;
 }
 
-/** Whether the user is looking at this conversation right now. */
-function useIsWatching(): (sessionID: string) => boolean {
+/**
+ * Whether the user is in the Assistant now, and whether it's open at all.
+ * It runs in a process of its own, so which conversation it shows isn't
+ * known here.
+ */
+function useAssistantWindow(): { focused: () => boolean; open: () => boolean } {
   const { windows } = useWindowManager();
   const windowsRef = useRef<WindowState[]>(windows);
   useEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
-  return (sessionID) => {
-    if (getViewedSession() !== sessionID || !document.hasFocus()) return false;
-    const top = focusedWindow(windowsRef.current);
-    return top?.appId === ASSISTANT_APP_ID;
+  return {
+    focused: () => document.hasFocus() && focusedWindow(windowsRef.current)?.appId === ASSISTANT_APP_ID,
+    open: () => windowsRef.current.some((w) => w.appId === ASSISTANT_APP_ID),
   };
 }
 
@@ -99,13 +102,13 @@ function useAssistantNotifications() {
   const { open } = useWindowActions();
   const reply = useReplyPermission();
   const queryClient = useQueryClient();
-  const isWatching = useIsWatching();
+  const assistantWindow = useAssistantWindow();
 
   const show = (sessionID: string) => open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce: Date.now() });
   // The latest of each for callbacks that outlive a render.
-  const latest = useRef({ show, reply: reply.mutate, isWatching });
+  const latest = useRef({ show, reply: reply.mutate, assistantWindow });
   useEffect(() => {
-    latest.current = { show, reply: reply.mutate, isWatching };
+    latest.current = { show, reply: reply.mutate, assistantWindow };
   });
 
   // Permission requests and questions: one notification each, gone once
@@ -114,11 +117,11 @@ function useAssistantNotifications() {
   useEffect(() => {
     if (!ready) return;
     const pending = new Set<string>();
-    const announce = (key: string, sessionID: string, make: () => string) => {
+    const announce = (key: string, make: () => string) => {
       pending.add(key);
       if (shown.current.has(key)) return;
-      if (latest.current.isWatching(sessionID)) {
-        // On screen already; don't announce it later either.
+      if (latest.current.assistantWindow.focused()) {
+        // In front of the user already (its tab says so); don't announce it later either.
         shown.current.set(key, '');
         return;
       }
@@ -126,10 +129,10 @@ function useAssistantNotifications() {
     };
 
     for (const request of permissions) {
-      announce(`permission:${request.id}`, request.sessionID, () => notifyPermission(request));
+      announce(`permission:${request.id}`, () => notifyPermission(request));
     }
     for (const form of forms) {
-      announce(`form:${form.id}`, form.sessionID, () =>
+      announce(`form:${form.id}`, () =>
         notify({
           source: SOURCE,
           title: 'The assistant has a question',
@@ -168,12 +171,12 @@ function useAssistantNotifications() {
     }
   }, [ready, permissions, forms]);
 
-  // A conversation started here finishing, or failing.
+  // A conversation started here finishing, or failing, with the Assistant closed.
   useEffect(
     () =>
       subscribeAssistantEvents((event) => {
         const sessionID = event.sessionID;
-        if (!sessionID || !isDinSession(sessionID) || latest.current.isWatching(sessionID)) return;
+        if (!sessionID || !isDinSession(sessionID) || latest.current.assistantWindow.open()) return;
         const failed = event.type === 'session.execution.failed';
         if (event.type !== 'session.execution.succeeded' && !failed) return;
         const error = event.data?.error as { message?: unknown } | undefined;

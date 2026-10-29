@@ -1,0 +1,39 @@
+{
+  "name": "Assistant",
+  "description": "Conversations with OpenCode, the coding agent that works on this computer.",
+  "icons": [
+    {
+      "src": "/icons/apps/assistant.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "din": {
+    "permissions": [
+      "assistant",
+      "fs",
+      "notifications"
+    ],
+    "window": {
+      "size": {
+        "width": 920,
+        "height": 640
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "AI",
+      "agent",
+      "OpenCode",
+      "chat",
+      "robot"
+    ],
+    "migrateStorage": [
+      "din.assistant.*"
+    ]
+  }
+}

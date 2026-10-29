@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, SquarePen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
@@ -13,26 +14,27 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { AssistantUnavailable } from '@/components/desktop/assistant/AssistantUnavailable';
-import { ConversationTitleInput, DeleteConversationDialog } from '@/components/desktop/assistant/ConversationActions';
-import { Composer, type SlashCommand } from '@/components/desktop/assistant/Composer';
-import { ModelPicker } from '@/components/desktop/assistant/ModelPicker';
-import { FileLinkBaseContext } from '@/components/desktop/assistant/fileLinks';
-import { FindBar, type FindBarHandle } from '@/components/desktop/assistant/FindBar';
-import { ForkDialog, type UserMessage } from '@/components/desktop/assistant/ForkDialog';
-import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
-import { SessionList } from '@/components/desktop/assistant/SessionList';
-import { Transcript } from '@/components/desktop/assistant/Transcript';
-import { useQuestionHandoff } from '@/components/desktop/assistant/useQuestionHandoff';
-import { ProjectIcon } from '@/components/desktop/assistant/ProjectIcon';
-import { TabStrip } from '@/components/desktop/TabStrip';
-import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
-import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
+import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
+import { Composer, type SlashCommand } from '@/shared/assistant/Composer';
+import { ModelPicker } from '@/shared/assistant/ModelPicker';
+import { FileLinkBaseContext } from '@/shared/assistant/fileLinks';
+import { FindBar, type FindBarHandle } from '@/shared/assistant/FindBar';
+import { ForkDialog, type UserMessage } from '@/shared/assistant/ForkDialog';
+import { FormCard, PermissionCard } from '@/shared/assistant/RequestCards';
+import { SessionList } from '@/shared/assistant/SessionList';
+import { Transcript } from '@/shared/assistant/Transcript';
+import { useQuestionHandoff } from '@/shared/assistant/useQuestionHandoff';
+import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
+import { AppAssistantHost } from '@/shared/assistant/appHost';
+import { useAssistantHost } from '@/shared/assistant/host';
+import { TabStrip } from '@/shared/TabStrip';
+import { dinWindowMove } from '@/shared/dinWindowMove';
+import { useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import type { LaunchContext } from '@/sdk';
 import { moveItem } from '@/hooks/useDragReorder';
 import {
+  assistantKeys,
   useActiveSessions,
   useAgentColor,
   useAssistantAgents,
@@ -41,6 +43,7 @@ import {
   useAssistantReady,
   useAssistantSession,
   useAssistantSessions,
+  useAssistantStatus,
   useBackgroundSession,
   useDirectoryIcons,
   useCancelQueued,
@@ -49,6 +52,9 @@ import {
   useHomeDirectory,
   useInterruptSession,
   useMainCheckouts,
+  getViewedSession,
+  isDinSession,
+  subscribeAssistantEvents,
   useMarkViewedSession,
   usePendingRequests,
   usePreferredModel,
@@ -63,9 +69,8 @@ import {
   useSwitchAgent,
   useSwitchModel,
 } from '@/hooks/useAssistant';
-import { useToast } from '@/hooks/useToast';
-import type { AppComponentProps } from '@/lib/apps';
 import {
+  assistantApi,
   cleanAssistantError,
   contextUsage,
   directoryName,
@@ -182,30 +187,52 @@ function initialTabs(sessionID: string | null, directory: string | null): TabsSt
 
 /**
  * Assistant - conversations with OpenCode, the coding agent, through its
- * background server (see src/lib/assistant.ts).
+ * background server (see src/lib/assistant.ts), reached over
+ * `din.system.assistant`.
  *
  * Conversations are OpenCode's sessions, so the list includes the ones
  * started from a Terminal too, and they keep working with the window
  * closed: the menu bar's robot shows what's running, and Din notifies when
- * the agent finishes or needs an answer (AssistantHost). The agent asks
- * before what its rules say to ask about; the request shows above the
- * composer.
+ * the agent needs an answer (the desktop's AssistantHost). While the window
+ * is open it says itself when a conversation finishes out of sight
+ * (useTurnNotifications). The agent asks before what its rules say to ask
+ * about; the request shows above the composer.
  *
  * The conversation list runs to the top of the window, GNOME-style, and the
- * app draws the title bar on either side of it (WindowHeader).
+ * app draws the title bar on either side of it (a `custom` frame).
  * Conversations open in tabs, in the title bar over them, kept across closing
  * the window and restarts (lib/assistantTabs). Only the selected tab is
- * mounted: each conversation polls the server while it is. Opened with
- * `sessionID` (and a fresh `nonce`) in its launch params, it selects that
+ * mounted: each conversation polls the server while it is. Launched with
+ * `sessionID` (and a fresh `nonce`) in its params, it selects that
  * conversation's tab; with `directory` instead (Files' "Open in Assistant"),
- * it opens a new conversation in that folder.
+ * it opens a new conversation in that folder. One window: launching it again
+ * comes through `din.app.onLaunch`.
  */
-export function Assistant({ windowId, params }: AppComponentProps) {
+export function Assistant() {
+  return (
+    <AppAssistantHost>
+      <AssistantWindow />
+    </AppAssistantHost>
+  );
+}
+
+/** What a launch asks for: a conversation, or a new one (in a folder). */
+function launchRequest({ params }: LaunchContext): { sessionID: string | null; directory: string | null } {
+  return {
+    sessionID: typeof params.sessionID === 'string' ? params.sessionID : null,
+    directory: typeof params.directory === 'string' ? params.directory : null,
+  };
+}
+
+function AssistantWindow() {
+  const din = useDin();
+  const host = useAssistantHost();
   const ready = useAssistantReady();
-  const requested = typeof params?.sessionID === 'string' ? params.sessionID : null;
-  const requestedDirectory = typeof params?.directory === 'string' ? params.directory : null;
-  const { close: closeWindow } = useWindowActions();
-  const [{ tabs, activeId }, setState] = useState(() => initialTabs(requested, requestedDirectory));
+  const { data: status } = useAssistantStatus();
+  const [{ tabs, activeId }, setState] = useState(() => {
+    const { sessionID, directory } = launchRequest(din.app.launch);
+    return initialTabs(sessionID, directory);
+  });
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   const [closed, setClosed] = useState<AssistantTab[]>([]);
   // The conversation whose title is being edited (Rename, or /rename).
@@ -218,18 +245,18 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   const [listWidth, setListWidth] = useState(loadListWidth);
   useEffect(() => localStorage.setItem(LIST_WIDTH_KEY, String(listWidth)), [listWidth]);
 
-  // Single-instance: a relaunch (a notification, the menu bar) brings new
-  // params without remounting. One with no session asks for a new one.
-  // Launch params are merged into the window's old ones, so launchers name
-  // both `sessionID` and `directory`, clearing whichever they don't use.
-  const nonce = params?.nonce;
-  const [launch, setLaunch] = useState({ requested, nonce });
-  if (launch.requested !== requested || launch.nonce !== nonce) {
-    setLaunch({ requested, nonce });
-    setState((prev) =>
-      requested ? showSession(prev, requested) : placeTab(prev, newAssistantTab(null, requestedDirectory)),
-    );
-  }
+  // Single instance: a relaunch (a notification, the menu bar) brings new
+  // params. One with no session asks for a new one. Launch params are merged
+  // into the window's old ones, so launchers name both `sessionID` and
+  // `directory`, clearing whichever they don't use, and a fresh `nonce`.
+  useEffect(
+    () =>
+      din.app.onLaunch((launch) => {
+        const { sessionID, directory } = launchRequest(launch);
+        setState((prev) => (sessionID ? showSession(prev, sessionID) : placeTab(prev, newAssistantTab(null, directory))));
+      }),
+    [din],
+  );
 
   useEffect(() => saveAssistantTabs(tabs, activeId), [tabs, activeId]);
 
@@ -259,6 +286,8 @@ export function Assistant({ windowId, params }: AppComponentProps) {
     removeSessions(new Set(gone.split(' ')));
   }
 
+  useTurnNotifications(sessionIDs, (sessionID) => setState((prev) => showSession(prev, sessionID)));
+
   const { data: running = [] } = useActiveSessions();
   const pending = usePendingRequests();
   const waiting = new Set([...pending.permissions.map((p) => p.sessionID), ...pending.forms.map((f) => f.sessionID)]);
@@ -277,7 +306,9 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   );
   const stripTabs = useMemo((): TabInfo[] => JSON.parse(infoKey), [infoKey]);
   const icons = useDirectoryIcons([...new Set(stripTabs.flatMap((t) => (t.directory ? [t.directory] : [])))]);
-  useOwnWindowHeader(ready);
+  // Din's title bar while there's only a message to show; the app's own, with its tabs, once it's up.
+  const ownHeader = ready || !status;
+  useEffect(() => din.window.setChrome({ frame: ownHeader ? 'custom' : 'standard' }), [din, ownHeader]);
   useWindowTitle(activeTab.sessionID ? (stripTabs.find((t) => t.id === activeTab.id)?.title ?? null) : null);
 
   const select = (id: string) => setState((prev) => ({ ...prev, activeId: id }));
@@ -298,7 +329,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
     // Closing the last tab closes the window, which opens fresh next time.
     if (tabs.length === 1) {
       saveAssistantTabs([], '');
-      closeWindow(windowId);
+      din.window.close();
       return;
     }
     setState((prev) => {
@@ -362,7 +393,6 @@ export function Assistant({ windowId, params }: AppComponentProps) {
   const renamingSession = renaming ? sessions[sessionIDs.indexOf(renaming)]?.session : undefined;
 
   const fork = useForkSession();
-  const { toast } = useToast();
   /**
    * Fork a conversation into a tab beside its own: all of it, or what came
    * before `message`, which waits in the new one's composer (as in OpenCode).
@@ -377,7 +407,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
           setListOpen(false);
         },
         onError: (error) =>
-          toast({ title: 'Couldn’t fork the conversation', description: cleanAssistantError(error), variant: 'destructive' }),
+          host.notify({ title: 'Couldn’t fork the conversation', description: cleanAssistantError(error), destructive: true }),
       },
     );
 
@@ -496,6 +526,7 @@ export function Assistant({ windowId, params }: AppComponentProps) {
             onNew={openTab}
             onMove={move}
             onReopen={closed.length > 0 ? reopen : undefined}
+            moveWindow={tabs.length === 1 ? dinWindowMove(din) : undefined}
             tabMenuItems={(id) => {
               const sessionID = tabs.find((t) => t.id === id)?.sessionID;
               return (
@@ -557,6 +588,53 @@ export function Assistant({ windowId, params }: AppComponentProps) {
         onDeleted={() => deleting && removeSessions(new Set([deleting]))}
       />
     </div>
+  );
+}
+
+/**
+ * Says when a conversation finishes, or fails, out of sight: one this window
+ * started or wrote in, or has a tab for (the menu bar's and Super+A's open
+ * here). Clicking the notification shows it. With the window closed, the
+ * desktop says so for the ones it started.
+ */
+function useTurnNotifications(followed: string[], show: (sessionID: string) => void) {
+  const din = useDin();
+  const queryClient = useQueryClient();
+  // The latest of each for callbacks that outlive a render.
+  const latest = useRef({ followed, show });
+  useEffect(() => {
+    latest.current = { followed, show };
+  });
+
+  useEffect(
+    () =>
+      subscribeAssistantEvents((event) => {
+        const sessionID = event.sessionID;
+        const failed = event.type === 'session.execution.failed';
+        if (!sessionID || (event.type !== 'session.execution.succeeded' && !failed)) return;
+        if (!isDinSession(sessionID) && !latest.current.followed.includes(sessionID)) return;
+        const { focused, visible } = din.window.state;
+        if (focused && visible && getViewedSession() === sessionID) return;
+        const error = event.data?.error as { message?: unknown } | undefined;
+        void queryClient
+          .fetchQuery({ queryKey: assistantKeys.session(sessionID), queryFn: () => assistantApi.session(sessionID) })
+          .catch(() => null)
+          .then((session) =>
+            din.notifications.show(failed ? 'The assistant stopped with an error' : 'The assistant is done', {
+              body: failed && typeof error?.message === 'string' ? error.message : session ? sessionTitle(session) : '',
+              tag: `done:${sessionID}`,
+            }),
+          );
+      }),
+    [din, queryClient],
+  );
+
+  useEffect(
+    () =>
+      din.notifications.onAction(({ tag }) => {
+        if (tag?.startsWith('done:')) latest.current.show(tag.slice('done:'.length));
+      }),
+    [din],
   );
 }
 
@@ -623,7 +701,7 @@ function Conversation({
   const switchAgent = useSwitchAgent();
   const compact = useCompactSession();
   const rename = useRenameSession();
-  const { toast } = useToast();
+  const { notify } = useAssistantHost();
   const [forking, setForking] = useState(false);
   const [finding, setFinding] = useState(false);
   const findBarRef = useRef<FindBarHandle>(null);
@@ -677,7 +755,7 @@ function Conversation({
   };
 
   const fail = (title: string) => (error: unknown) =>
-    toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
+    notify({ title, description: cleanAssistantError(error), destructive: true });
 
   // The one being switched to, so a quick second Shift+Tab goes on from there.
   const agent = (switchAgent.isPending ? switchAgent.variables?.agent : session?.agent) ?? 'build';
@@ -900,8 +978,7 @@ function NewConversation({
   const { model, setModel, models } = usePreferredModel();
   const { data: recent } = useRecentModelKeys();
   const start = useStartConversation();
-  const { pickFile } = useFilePicker();
-  const { toast } = useToast();
+  const { notify, pickFolder } = useAssistantHost();
   const folder = directory ?? defaultDirectory;
   const commands = useSlashCommands(folder, NO_COMMANDS);
 
@@ -911,14 +988,12 @@ function NewConversation({
       {
         onSuccess: (session) => onStarted(session.id),
         onError: (error) =>
-          toast({ title: 'Couldn’t start the conversation', description: cleanAssistantError(error), variant: 'destructive' }),
+          notify({ title: 'Couldn’t start the conversation', description: cleanAssistantError(error), destructive: true }),
       },
     );
 
   const chooseFolder = async () => {
-    const picked = await pickFile({ title: 'Work in a folder', confirmLabel: 'Choose', directory: true, initialPath: folder }).catch(
-      () => null,
-    );
+    const picked = await pickFolder({ title: 'Work in a folder', confirmLabel: 'Choose', initialPath: folder }).catch(() => null);
     if (picked) setDirectory(picked);
   };
 

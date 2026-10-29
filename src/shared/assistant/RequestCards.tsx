@@ -17,8 +17,6 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useReplyForm, useReplyPermission } from '@/hooks/useAssistant';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
-import { useToast } from '@/hooks/useToast';
 import {
   cleanAssistantError,
   describePermission,
@@ -31,11 +29,12 @@ import {
 } from '@/lib/assistant';
 import { formDraftStorageKey } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
+import { useAssistantHost } from '@/shared/assistant/host';
 
 /** The agent asking before it does something its rules say to ask about. */
 export function PermissionCard({ request, className }: { request: PermissionRequest; className?: string }) {
   const reply = useReplyPermission();
-  const { toast } = useToast();
+  const { notify } = useAssistantHost();
   const [picked, setPicked] = useState<PermissionDecision | null>(null);
   const { title } = describePermission(request);
   const save = request.save ?? [];
@@ -47,7 +46,7 @@ export function PermissionCard({ request, className }: { request: PermissionRequ
       {
         onError: (error) => {
           setPicked(null);
-          toast({ title: 'Couldn’t answer', description: cleanAssistantError(error), variant: 'destructive' });
+          notify({ title: 'Couldn’t answer', description: cleanAssistantError(error), destructive: true });
         },
       },
     );
@@ -168,7 +167,7 @@ function isMissing(field: FormField, answers: Record<string, FormValue | undefin
  */
 export function FormCard({ form, className }: { form: FormInfo; className?: string }) {
   const reply = useReplyForm();
-  const { toast } = useToast();
+  const { notify } = useAssistantHost();
   const [{ answers, step }, setDraft, forgetDraft] = useFormDraft(form);
   const stepRef = useRef<HTMLDivElement>(null);
   const moved = useRef(false);
@@ -200,7 +199,7 @@ export function FormCard({ form, className }: { form: FormInfo; className?: stri
       {
         onSuccess: forgetDraft,
         onError: (error) =>
-          toast({ title: 'Couldn’t answer', description: cleanAssistantError(error), variant: 'destructive' }),
+          notify({ title: 'Couldn’t answer', description: cleanAssistantError(error), destructive: true }),
       },
     );
 
@@ -315,7 +314,7 @@ function FormFieldInput({
   onPick?: () => void;
 }) {
   const id = useId();
-  const openUrl = useOpenUrl();
+  const { openUrl } = useAssistantHost();
   const pointer = useRef(false);
   const label = field.title || field.key;
   const description = field.description && (

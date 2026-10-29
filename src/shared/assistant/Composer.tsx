@@ -1,12 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, FileText, ImageIcon, Mic, Paperclip, Square, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useFilePicker } from '@/contexts/FilePickerContext';
-import { useIsDictatingInto } from '@/hooks/useDictation';
 import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
 import { draftStorageKey } from '@/lib/assistantTabs';
-import { elementTarget, finishDictation, hasDictationBridge, startDictation } from '@/lib/dictation';
 import { cn } from '@/lib/utils';
+import { useAssistantHost } from '@/shared/assistant/host';
 
 /** Pasted pictures past this size are left out; the request would be too big. */
 const MAX_PASTE_BYTES = 8 * 1024 * 1024;
@@ -118,8 +116,9 @@ export function Composer({
   const [files, setFiles] = useState<PromptAttachment[]>([]);
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const ref = textareaRef ?? ownRef;
-  const { pickFiles } = useFilePicker();
-  const dictating = useIsDictatingInto(ref);
+  const host = useAssistantHost();
+  const dictation = host.useDictation(ref);
+  const dictating = dictation.active;
 
   const menuID = useId();
   // The text Escape put the menu away for; typing on brings it back.
@@ -208,26 +207,15 @@ export function Composer({
   };
 
   const attach = async () => {
-    const result = await pickFiles({ title: 'Attach files', confirmLabel: 'Attach', multiple: true }).catch(() => null);
-    if (!result) return;
+    const paths = await host.pickFiles({ title: 'Attach files', confirmLabel: 'Attach' }).catch(() => []);
+    if (paths.length === 0) return;
     setFiles((current) => [
       ...current,
-      ...result.paths
+      ...paths
         .filter((path) => !current.some((f) => f.uri === fileUri(path)))
         .map((path) => ({ uri: fileUri(path), name: path.split('/').pop() || path })),
     ]);
     ref.current?.focus();
-  };
-
-  const dictate = () => {
-    const textarea = ref.current;
-    if (!textarea) return;
-    if (dictating) {
-      void finishDictation();
-      return;
-    }
-    textarea.focus();
-    void startDictation(elementTarget(textarea));
   };
 
   const onPaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -352,14 +340,14 @@ export function Composer({
           <Paperclip className="size-4" aria-hidden />
         </Button>
         <div className="flex min-w-0 flex-1 items-center gap-1">{toolbar}</div>
-        {hasDictationBridge() && (
+        {dictation.available && (
           <Button
             type="button"
             variant="ghost"
             size="icon"
             // Keeps focus in the message, where the text goes.
             onMouseDown={(event) => event.preventDefault()}
-            onClick={dictate}
+            onClick={dictation.toggle}
             disabled={disabled}
             aria-label={dictating ? 'Stop dictating' : 'Dictate'}
             aria-pressed={dictating}

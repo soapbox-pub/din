@@ -14,11 +14,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ProviderIcon } from '@/components/desktop/assistant/ProviderIcon';
+import { ProviderIcon } from '@/shared/assistant/ProviderIcon';
 import { assistantKeys, useAssistantIntegrations, useAssistantModels, useAssistantReady } from '@/hooks/useAssistant';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
-import { useToast } from '@/hooks/useToast';
 import { assistantApi, cleanAssistantError, type IntegrationInfo, type OAuthAttempt } from '@/lib/assistant';
+import { useAssistantHost } from '@/shared/assistant/host';
 
 /** Each provider's base URL, from its models, for its icon. */
 function useProviderBaseURLs(): Map<string, string> {
@@ -57,7 +56,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
   const { data: integrations, isLoading } = useAssistantIntegrations();
   const baseURLs = useProviderBaseURLs();
   const refresh = useRefreshProviders();
-  const { toast } = useToast();
+  const { notify } = useAssistantHost();
   const [dialog, setDialog] = useState<{ open: boolean; integration: IntegrationInfo | null }>({
     open: false,
     integration: null,
@@ -65,7 +64,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
   const remove = useMutation({
     mutationFn: (ids: string[]) => Promise.all(ids.map((id) => assistantApi.removeCredential(id))),
     onSuccess: refresh,
-    onError: (error) => toast({ title: 'Couldn’t remove it', description: cleanAssistantError(error), variant: 'destructive' }),
+    onError: (error) => notify({ title: 'Couldn’t remove it', description: cleanAssistantError(error), destructive: true }),
   });
 
   const connected = (integrations ?? []).filter((i) => i.connections.length > 0);
@@ -244,8 +243,7 @@ function ProviderDialog({
  */
 function ConnectProvider({ integration, onDone }: { integration: IntegrationInfo; onDone: () => void }) {
   const refresh = useRefreshProviders();
-  const { toast } = useToast();
-  const openUrl = useOpenUrl();
+  const { notify, openUrl } = useAssistantHost();
   const [key, setKey] = useState('');
   const [attempt, setAttempt] = useState<OAuthAttempt | null>(null);
   const [code, setCode] = useState('');
@@ -260,11 +258,11 @@ function ConnectProvider({ integration, onDone }: { integration: IntegrationInfo
     // The new credential is in; the ones it replaces go.
     await Promise.allSettled(replacing.map((id) => assistantApi.removeCredential(id)));
     refresh();
-    toast({ title: replacing.length > 0 ? `${integration.name} is updated` : `${integration.name} is connected` });
+    notify({ title: replacing.length > 0 ? `${integration.name} is updated` : `${integration.name} is connected` });
     onDone();
   };
   const fail = (title: string) => (error: unknown) =>
-    toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
+    notify({ title, description: cleanAssistantError(error), destructive: true });
 
   const connectKey = useMutation({
     mutationFn: async () => {

@@ -11,9 +11,9 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { useDeleteSession, useRenameSession } from '@/hooks/useAssistant';
-import { useToast } from '@/hooks/useToast';
 import { cleanAssistantError, sessionTitle, type SessionInfo } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
+import { useAssistantHost } from '@/shared/assistant/host';
 
 /**
  * A conversation's title, editable in place: Enter or leaving the field
@@ -30,7 +30,7 @@ export function ConversationTitleInput({
   className?: string;
 }) {
   const rename = useRenameSession();
-  const { toast } = useToast();
+  const { notify } = useAssistantHost();
   const [title, setTitle] = useState(() => sessionTitle(session));
 
   const save = () => {
@@ -39,7 +39,7 @@ export function ConversationTitleInput({
     if (!next || next === session.title) return;
     rename.mutate(
       { sessionID: session.id, title: next },
-      { onError: (error) => toast({ title: 'Couldn’t rename', description: cleanAssistantError(error), variant: 'destructive' }) },
+      { onError: (error) => notify({ title: 'Couldn’t rename', description: cleanAssistantError(error), destructive: true }) },
     );
   };
 
@@ -73,7 +73,7 @@ export function DeleteConversationDialog({
   onDeleted?: () => void;
 }) {
   const remove = useDeleteSession();
-  const { toast } = useToast();
+  const { notify } = useAssistantHost();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -92,7 +92,7 @@ export function DeleteConversationDialog({
               remove.mutate(session.id, {
                 onSuccess: onDeleted,
                 onError: (error) =>
-                  toast({ title: 'Couldn’t delete', description: cleanAssistantError(error), variant: 'destructive' }),
+                  notify({ title: 'Couldn’t delete', description: cleanAssistantError(error), destructive: true }),
               })
             }
           >

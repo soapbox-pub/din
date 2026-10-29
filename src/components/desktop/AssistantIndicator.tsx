@@ -2,10 +2,10 @@ import { memo, useState } from 'react';
 import { Bot, Loader2, Maximize2, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { AssistantUnavailable } from '@/components/desktop/assistant/AssistantUnavailable';
-import { Composer } from '@/components/desktop/assistant/Composer';
-import { ProjectIcon } from '@/components/desktop/assistant/ProjectIcon';
-import { FormCard, PermissionCard } from '@/components/desktop/assistant/RequestCards';
+import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
+import { Composer } from '@/shared/assistant/Composer';
+import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
+import { FormCard, PermissionCard } from '@/shared/assistant/RequestCards';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import {

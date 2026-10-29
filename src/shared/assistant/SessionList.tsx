@@ -10,9 +10,9 @@ import {
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ConversationTitleInput, DeleteConversationDialog } from '@/components/desktop/assistant/ConversationActions';
-import { ProjectIcon } from '@/components/desktop/assistant/ProjectIcon';
-import { WindowDragRegion } from '@/components/desktop/WindowHeader';
+import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
+import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
+import { WindowDragRegion } from '@/sdk/react';
 import {
   useActiveSessions,
   useAssistantSessions,

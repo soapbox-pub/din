@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
-import { ProviderList } from '@/components/desktop/assistant/Providers';
+import { ProviderList } from '@/shared/assistant/Providers';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useAssistantStatus, useHomeDirectory, useSetAssistantEnabled } from '@/hooks/useAssistant';
