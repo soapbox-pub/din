@@ -2,7 +2,7 @@
 
 > **Status: under way.** Moved: Calculator, Paint, Word Processor,
 > Spreadsheet, Slides, Photo Editor, Vector Editor, Publisher, Text Editor,
-> Terminal.
+> Terminal, Media Player, Preview.
 
 Each app moves in its own commit: its folder goes from
 `src/components/desktop/apps/` to `src/apps/<id>/`, it gets an
@@ -72,8 +72,9 @@ desktop) or splits:
   tabs between windows are props (`moveWindow`, from
   `src/shared/dinWindowMove.ts` in an app; `transfer`), so the strip itself
   touches neither host.
-- `src/shared/FileIcon.tsx`, `src/shared/codeTheme.ts`: Text Editor, Files,
-  the file picker, the Assistant.
+- `src/shared/FileIcon.tsx`, `src/shared/codeTheme.ts`,
+  `src/shared/FileViewerBody.tsx`: Text Editor, Preview, Files (and its
+  quick look), the file picker, the Assistant.
 - Lib getters that work in both documents: `getFsBridge()` and
   `getPtyBridge()` return `window.din?.system.fs` in an app and
   `window.dinos?.fs` on the desktop, so code shared by both reaches the
@@ -91,8 +92,8 @@ a time.
 | 2 | Paint ✓ | Files by handle, close requests, the title |
 | 3 | Word Processor, Spreadsheet, Slides ✓ | Shared office code, accent, printing, opening URLs |
 | 4 | Photo Editor, Vector Editor, Publisher ✓ | Shared `photo/` code |
-| 5 | Preview | Launch files, icon, wallpaper |
-| 6 | Media Player | `frame: 'none'`, transparency, shapes, the menu bar, media session |
+| 5 | Preview ✓ | Launch files, icon, wallpaper |
+| 6 | Media Player ✓ | `frame: 'none'`, transparency, shapes, the menu bar, media session |
 | 7 | Text Editor, Terminal ✓ | `custom` headers with tabs, `fs` and `pty`, tab drags |
 | 8 | Files | Drag sources, the file clipboard, `wallpaper` |
 | 9 | CAD, Assistant, App Store | The `assistant` and `account`/`nostr` permissions |
@@ -124,6 +125,11 @@ Behavior that changed when apps moved, to fix or to live with:
 - **Moving a window from inside an app** ends without the app hearing the
   pointer's release; a `beginMove` that resolves when the move ends would
   let tab strips settle at once.
+- **Media Player's play key while stopped** no longer starts it: a session
+  can't yet say "play me when idle" without being listed.
+- **Preview, Media Player and Publisher have `fs`**: Preview steps through
+  the file's folder and lists archives, Media Player's library and
+  playlists are paths, Publisher links placed pictures by path.
 
 ## Checklist per app
 

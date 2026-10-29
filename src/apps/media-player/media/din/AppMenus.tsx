@@ -121,7 +121,9 @@ export function AppMenus({ commands }: { commands: Commands }) {
     },
   ];
 
-  useMenuBar(menus, (id) => {
+  // As before it moved, the player's keys are left to a focused text field
+  // (the library's search, Open URL).
+  useMenuBar(menus.map((m) => ({ ...m, items: leaveFields(m.items) })), (id) => {
     const [head, ...rest] = id.split(':');
     const arg = rest.join(':');
     const p = prefs;
@@ -168,4 +170,12 @@ export function AppMenus({ commands }: { commands: Commands }) {
     }
   });
   return null;
+}
+
+function leaveFields(items: MenuItem[]): MenuItem[] {
+  return items.map((item) => {
+    if (item.type === 'separator' || item.type === 'label') return item;
+    if (item.type === 'submenu') return { ...item, items: leaveFields(item.items) };
+    return item.accelerator ? { ...item, notInFields: true } : item;
+  });
 }
