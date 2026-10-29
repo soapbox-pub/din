@@ -40,6 +40,11 @@ const ICON_NAME = /^[A-Za-z0-9_.+-]{1,160}$/;
 const TARGET_ICON_SIZE = 96;
 /** Cap on an inlined icon; larger PNGs are downscaled before encoding. */
 const MAX_ICON_BYTES = 128 * 1024;
+/**
+ * Cap on an inlined SVG, which can't be downscaled. Some apps' only icon is
+ * a detailed SVG of most of a megabyte (HandBrake's); it's encoded once.
+ */
+const MAX_SVG_BYTES = 1024 * 1024;
 
 /** Extensions Din can inline, best first (SVG scales; XPM can't be rendered). */
 const ICON_EXTENSIONS = ['.svg', '.png'];
@@ -231,11 +236,13 @@ function themeIndex(theme: string): ParsedTheme | null {
 }
 
 /**
- * A theme's directories across every root holding a copy of it (a user
- * override plus the system copy), each with the roots it's found under.
+ * A theme's directories, as every copy of its index.theme lists them (a
+ * user override plus the system copy), each to be searched under every
+ * root. A root needn't have an index.theme of its own: Nix profiles and
+ * the like install apps' icons into a bare hicolor/<size>/apps.
  */
 function themeDirs(theme: string): { dir: ThemeDir; roots: string[] }[] {
-  const roots = iconRoots().filter((root) => fs.existsSync(path.join(root, theme, 'index.theme')));
+  const roots = iconRoots();
   const dirs: ThemeDir[] = [];
   for (const root of roots) {
     for (const dir of parseIndexTheme(path.join(root, theme, 'index.theme'))?.dirs ?? []) {
@@ -325,7 +332,7 @@ function iconDataUrl(file: string): string | null {
     if (ext === '.svg') {
       const data = fs.readFileSync(file);
       url =
-        data.length <= MAX_ICON_BYTES
+        data.length <= MAX_SVG_BYTES
           ? `data:image/svg+xml;base64,${data.toString('base64')}`
           : null;
     } else {
