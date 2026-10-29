@@ -497,14 +497,33 @@ async function start(): Promise<Din> {
     if (p.type === 'drag') {
       currentDrag = p.drag;
       drags.emit(currentDrag);
+      reportDragOver(currentDrag !== null);
     } else if (p.type === 'dragEnd') {
       dragEnds.emit({ token: p.token, dropped: p.dropped, operation: p.operation });
     } else if (p.type === 'tabDetached') {
       detached.emit({ tabType: p.tabType, state: p.state, at: p.at });
     }
   });
+  // While a Din drag is on, say where it is over this window, at most once a
+  // frame, for the desktop's drag overlay.
+  let overFrame = 0;
+  let overAt: { x: number; y: number } | null = null;
+  const onDragOver = (e: DragEvent) => {
+    overAt = point(e);
+    if (overFrame) return;
+    overFrame = requestAnimationFrame(() => {
+      overFrame = 0;
+      if (overAt) tell('drag.over', { at: overAt });
+    });
+  };
+  function reportDragOver(on: boolean) {
+    window.removeEventListener('dragover', onDragOver, true);
+    if (on) window.addEventListener('dragover', onDragOver, true);
+  }
+  reportDragOver(h.drag !== null);
+
   /** Put a new drag's token on the event, register it, and report the drag's end. */
-  function beginDrag(e: DragEvent, register: (token: string) => Promise<void>, label: string, text: string) {
+  function beginDrag(e: DragEvent, register: (token: string) => Promise<void>, text: string) {
     // The DataTransfer must be filled now, during dragstart, so the token is
     // minted here; it's random, so no other app can guess it.
     const token = crypto.randomUUID();
@@ -512,15 +531,14 @@ async function start(): Promise<Din> {
     e.dataTransfer?.setData(DRAG_MIME, token);
     if (text) e.dataTransfer?.setData('text/plain', text);
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copyMove';
-    const ghost = document.createElement('div');
-    ghost.textContent = label;
-    ghost.style.cssText =
-      'position:fixed;top:-100px;left:-100px;padding:4px 10px;border-radius:8px;' +
-      'font:500 13px system-ui,sans-serif;background:var(--primary);color:var(--primary-foreground);' +
-      'box-shadow:0 4px 12px rgb(0 0 0 / .25);white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis';
-    document.body.appendChild(ghost);
-    e.dataTransfer?.setDragImage(ghost, -12, -12);
-    requestAnimationFrame(() => ghost.remove());
+    // A drag image from a guest doesn't reach the screen, so the desktop
+    // draws the drag's label where the pointer is (reported below); the
+    // engine's own image is made empty so the two can't double up.
+    const blank = document.createElement('div');
+    blank.style.cssText = 'position:fixed;top:-10px;left:-10px;width:1px;height:1px;opacity:0';
+    document.body.appendChild(blank);
+    e.dataTransfer?.setDragImage(blank, 0, 0);
+    requestAnimationFrame(() => blank.remove());
     e.target?.addEventListener(
       'dragend',
       (end) => {
@@ -534,14 +552,14 @@ async function start(): Promise<Din> {
   const drag: DinDrag = {
     startFiles(e, list, label) {
       const handles = list.map(idOf);
-      beginDrag(e, (token) => request('drag.startFiles', { token, handles }), label, list.map((f) => f.name).join('\n'));
+      beginDrag(e, (token) => request('drag.startFiles', { token, handles, label }), list.map((f) => f.name).join('\n'));
     },
     startPaths(e, paths, label) {
       need('fs');
-      beginDrag(e, (token) => request('drag.startPaths', { token, paths }), label, paths.join('\n'));
+      beginDrag(e, (token) => request('drag.startPaths', { token, paths, label }), paths.join('\n'));
     },
     startTab(e, tabType, tabState, label) {
-      beginDrag(e, (token) => request('drag.startTab', { token, tabType, state: tabState }), label, label);
+      beginDrag(e, (token) => request('drag.startTab', { token, tabType, state: tabState, label }), label);
     },
     get current() {
       return currentDrag;

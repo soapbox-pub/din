@@ -37,7 +37,11 @@ din.drag.onEnd(({ dropped, operation }) => {
 
 `startFiles` sets the DataTransfer: the token under
 `application/x-din-drag`, the names as `text/plain` for targets that only
-take text, and a compact drag image ("3 items") like today's. The
+take text, and the label ("3 items") the desktop shows following the
+pointer. A drag image set in a webview guest never reaches the screen, so
+the SDK makes the engine's image empty and the desktop draws the label
+itself (`DinDragOverlay`): while a drag from an app is on, each app reports
+where it's over it (`drag.over`) and the desktop watches its own surfaces. The
 DataTransfer has to be filled during `dragstart`, so the SDK mints the
 token itself (a random UUID, which no other app can guess) and registers
 it with the desktop alongside; the desktop refuses a token already in use.

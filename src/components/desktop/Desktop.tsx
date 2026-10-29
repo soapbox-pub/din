@@ -16,6 +16,7 @@ import { ScreenDimmer } from './ScreenDimmer';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
 import { GuestInputHost } from './GuestInputHost';
+import { DinDragOverlay } from './DinDragOverlay';
 import { Window } from './Window';
 import { WindowSwitcher } from './WindowSwitcher';
 import { FilePickerProvider } from './FilePickerProvider';
@@ -209,6 +210,7 @@ function DesktopSession() {
                 <NativeLinksHost />
                 <SystemNotificationsHost />
                 <GuestInputHost />
+                <DinDragOverlay />
                 <InstallerAutoOpen />
                 <UpdateNotifier />
                 <AirPlayPromptHost />

@@ -58,7 +58,7 @@ import {
   onAppPort,
   storageToMigrate,
 } from '@/lib/dinApps';
-import { acceptDrag, dragInfo, finishDrag, registerDrag, subscribeDrag, currentDrag } from '@/lib/dinDrag';
+import { acceptDrag, dragInfo, finishDrag, registerDrag, setDragPoint, subscribeDrag, currentDrag } from '@/lib/dinDrag';
 import { guestsAvailable } from '@/platform/guest';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
@@ -586,19 +586,20 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'dictation.finish': () => finishDictation(),
       'dictation.cancel': () => cancelDictation(),
 
-      'drag.startFiles': ({ token, handles }) => {
+      'drag.startFiles': ({ token, handles, label }) => {
         const grants = handles.map(grantOf);
         const ok = registerDrag({
           token,
           kind: 'files',
           source: appId,
+          label: typeof label === 'string' ? label.slice(0, 200) : '',
           paths: grants.map((g) => g.path),
           folders: grants.length > 0 && grants.every((g) => g.kind === 'directory'),
           onEnd: ({ dropped, operation }) => push({ type: 'dragEnd', token, dropped, operation }),
         });
         if (!ok) throw new Error('That drag token is taken');
       },
-      'drag.startPaths': async ({ token, paths }) => {
+      'drag.startPaths': async ({ token, paths, label }) => {
         need('fs');
         const fs = getFsBridge();
         const clean = paths.filter((p): p is string => typeof p === 'string' && p.startsWith('/'));
@@ -607,17 +608,19 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           token,
           kind: 'files',
           source: appId,
+          label: typeof label === 'string' ? label.slice(0, 200) : '',
           paths: clean,
           folders: clean.length > 0 && kinds.every((k) => k === 'directory'),
           onEnd: ({ dropped, operation }) => push({ type: 'dragEnd', token, dropped, operation }),
         });
         if (!ok) throw new Error('That drag token is taken');
       },
-      'drag.startTab': ({ token, tabType, state }) => {
+      'drag.startTab': ({ token, tabType, state, label }) => {
         const ok = registerDrag({
           token,
           kind: 'tab',
           source: appId,
+          label: typeof label === 'string' ? label.slice(0, 200) : '',
           paths: [],
           folders: false,
           tabType,
@@ -637,6 +640,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         // Without fs an app can only receive copies: it can't delete the originals.
         const op = permissions.includes('fs') ? operation : 'copy';
         return { kind: 'files', files: await grantPaths(entry.paths), operation: op };
+      },
+      'drag.over': ({ at }) => {
+        const p = toDesktop(at);
+        if (currentDrag()) setDragPoint({ x: p.clientX, y: p.clientY });
       },
       'drag.finish': ({ token, dropEffect, at }) => {
         const entry = finishDrag(token, dropEffect);

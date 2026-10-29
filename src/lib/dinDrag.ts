@@ -19,6 +19,12 @@ export interface DinDragEntry {
   folders: boolean;
   tabType?: string;
   tabState?: unknown;
+  /**
+   * What the desktop's overlay shows following the pointer ("3 items"), for
+   * a drag started in an app: a guest's own drag image doesn't reach the
+   * screen. Unset for the desktop's own drags, whose drag image does.
+   */
+  label?: string;
   /** Hears how it ended, for the source's onEnd / onTabDetached. */
   onEnd?: (result: { dropped: boolean; operation: 'copy' | 'move' | 'link' | null }) => void;
   /** Set once a target took it. */
@@ -64,6 +70,7 @@ export function finishDrag(token: string, dropEffect: string): DinDragEntry | nu
   entry.onEnd?.({ dropped: operation !== null, operation });
   if (current === entry) {
     current = null;
+    setDragPoint(null);
     changed();
   }
   // A drop can arrive after the source's dragend (another process), so the
@@ -87,6 +94,26 @@ export function dragInfo(entry: DinDragEntry | null): DragInfo | null {
     folders: entry.folders,
     tabType: entry.tabType,
   };
+}
+
+/** Where the current drag is, in the desktop's viewport, as its surfaces last saw it. */
+let point: { x: number; y: number } | null = null;
+const pointListeners = new Set<() => void>();
+
+export function setDragPoint(next: { x: number; y: number } | null): void {
+  if (point?.x === next?.x && point?.y === next?.y) return;
+  point = next;
+  for (const l of pointListeners) l();
+}
+
+export function useDragPoint(): { x: number; y: number } | null {
+  return useSyncExternalStore(
+    (l) => {
+      pointListeners.add(l);
+      return () => pointListeners.delete(l);
+    },
+    () => point,
+  );
 }
 
 export function subscribeDrag(listener: () => void): () => void {
