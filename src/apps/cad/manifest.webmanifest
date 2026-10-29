@@ -14,8 +14,7 @@
   },
   "din": {
     "permissions": [
-      "assistant",
-      "fs"
+      "assistant"
     ],
     "window": {
       "size": {
@@ -39,6 +38,12 @@
     ],
     "migrateStorage": [
       "din:cad:*"
+    ],
+    "folders": [
+      "~/.cache/din/cad-assistant"
+    ],
+    "migrateRecentFiles": [
+      "din:cad:recent"
     ]
   }
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { FolderOpen, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
-import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { typesFromFilters, type Din, type DinFileHandle } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AppAssistantHost } from '@/shared/assistant/appHost';
 import '@fontsource/arimo/400.css';
@@ -129,24 +129,46 @@ function readSettings(): Settings {
   }
 }
 
+/** A drawing opened or saved lately: its grant kept with a persist() token, and its path to show. */
 interface Recent {
+  token: string;
+  key: string;
   path: string;
   time: number;
 }
 
+const RECENT_MAX = 12;
+
 function readRecent(): Recent[] {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
-    return Array.isArray(v) ? v.filter((r): r is Recent => typeof r?.path === 'string' && typeof r?.time === 'number') : [];
+    return Array.isArray(v)
+      ? v.filter((r): r is Recent => typeof r?.token === 'string' && typeof r?.key === 'string' && typeof r?.path === 'string' && typeof r?.time === 'number')
+      : [];
   } catch {
     return [];
   }
 }
 
-function addRecent(path: string): Recent[] {
-  const list = [{ path, time: Date.now() }, ...readRecent().filter((r) => r.path !== path)].slice(0, 12);
-  localStorage.setItem(RECENT_KEY, JSON.stringify(list));
-  return list;
+function writeRecent(din: Din, list: Recent[], keep: Recent[]): Recent[] {
+  // Tokens of entries that left the list are let go.
+  const kept = new Set(keep.map((r) => r.token));
+  for (const r of list) if (!kept.has(r.token)) din.files.release(r.token);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(keep));
+  return keep;
+}
+
+async function addRecent(din: Din, file: DinFileHandle): Promise<Recent[]> {
+  const list = readRecent();
+  const same = list.find((r) => r.key === file.key);
+  const token = same?.token ?? (await file.persist());
+  const entry = { token, key: file.key, path: file.path, time: Date.now() };
+  return writeRecent(din, list, [entry, ...list.filter((r) => r.key !== file.key)].slice(0, RECENT_MAX));
+}
+
+function removeRecent(din: Din, token: string): Recent[] {
+  const list = readRecent();
+  return writeRecent(din, list, list.filter((r) => r.token !== token));
 }
 
 const basename = (p: string) => p.slice(p.lastIndexOf('/') + 1);
@@ -685,7 +707,7 @@ function CADWindow() {
           versionRef.current = dxf ? `DXF ${res.version}` : res.version;
           dropped.current = res.dropped;
           startDoc(res.drawing, f.name, f);
-          if (f.path) setRecent(addRecent(f.path));
+          void addRecent(din, f).then(setRecent);
           const n = Object.values(res.dropped).reduce((a, b) => a + b, 0);
           setStatus(`Opened ${versionName(res.version)} ${dxf ? 'DXF' : 'drawing'}`);
           if (n) {
@@ -702,7 +724,7 @@ function CADWindow() {
         }
       })();
     },
-    [startDoc],
+    [din, startDoc],
   );
 
   const openHandle = useCallback(
@@ -713,10 +735,20 @@ function CADWindow() {
     },
     [load],
   );
-  /** A recent drawing, by the path it was kept under. */
-  const openPath = useCallback(
-    (p: string) =>
-      void din.files.fromPath(p).then(openHandle, (err: unknown) => setError(`Couldn’t open ${basename(p)}. ${cleanFsError(err)}`)),
+  /** A recent drawing, by the grant it was kept with; one that's gone leaves the list. */
+  const openRecent = useCallback(
+    (r: Recent) =>
+      void din.files.restore(r.token).then(
+        (handle) => {
+          if (handle) {
+            openHandle(handle);
+            return;
+          }
+          setRecent(removeRecent(din, r.token));
+          setError(`${basename(r.path)} isn’t there anymore.`);
+        },
+        (err: unknown) => setError(`Couldn’t open ${basename(r.path)}. ${cleanFsError(err)}`),
+      ),
     [din, openHandle],
   );
   const launched = useRef(false);
@@ -753,7 +785,7 @@ function CADWindow() {
         setSavedEntry(h.entries[h.index]);
         setFile(f);
         setDocName(f.name);
-        if (f.path) setRecent(addRecent(f.path));
+        void addRecent(din, f).then(setRecent);
         const was = versionRef.current;
         const now = SAVED_AS[format];
         setStatus(was && was !== now.version ? `Saved as ${now.name}` : `Saved ${f.name}`);
@@ -766,7 +798,7 @@ function CADWindow() {
         setBusy(false);
       }
     },
-    [encode],
+    [din, encode],
   );
 
   const saveAs = useCallback(
@@ -1913,7 +1945,7 @@ function CADWindow() {
             )}
             {textEditor}
             {!doc && !loading && (
-              <StartPage error={error} recent={recent} onNew={(m) => newFile(m)} onOpen={() => void openFile()} onOpenPath={openPath} />
+              <StartPage error={error} recent={recent} onNew={(m) => newFile(m)} onOpen={() => void openFile()} onOpenRecent={openRecent} />
             )}
             {loading && (
               <div className="absolute inset-0 grid place-items-center" role="status" aria-label="Opening">
@@ -2279,7 +2311,7 @@ function ContextMenu({ at, last, hasSelection, onClose, run }: { at: Vec; last: 
   );
 }
 
-function StartPage({ error, recent, onNew, onOpen, onOpenPath }: { error: string | null; recent: Recent[]; onNew: (metric: boolean) => void; onOpen: () => void; onOpenPath: (p: string) => void }) {
+function StartPage({ error, recent, onNew, onOpen, onOpenRecent }: { error: string | null; recent: Recent[]; onNew: (metric: boolean) => void; onOpen: () => void; onOpenRecent: (r: Recent) => void }) {
   return (
     <div className="absolute inset-0 overflow-y-auto bg-[#212830]">
       <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-8 p-8">
@@ -2314,8 +2346,8 @@ function StartPage({ error, recent, onNew, onOpen, onOpenPath }: { error: string
           {recent.length ? (
             <ul className="divide-y divide-[#2b313a] overflow-hidden rounded-[3px] border border-[#2b313a]">
               {recent.map((r) => (
-                <li key={r.path}>
-                  <button type="button" onClick={() => onOpenPath(r.path)} className={cn('flex w-full items-center gap-3 bg-[#262c35] px-3 py-2.5 text-left hover:bg-[#2f3742]', FOCUS)}>
+                <li key={r.key}>
+                  <button type="button" onClick={() => onOpenRecent(r)} className={cn('flex w-full items-center gap-3 bg-[#262c35] px-3 py-2.5 text-left hover:bg-[#2f3742]', FOCUS)}>
                     <Icons.model className="size-5 shrink-0 text-[#7fd4ff]" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[14px] text-white">{basename(r.path)}</span>
