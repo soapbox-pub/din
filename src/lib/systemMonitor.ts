@@ -47,6 +47,8 @@ export interface ProcessInfo {
   state: string;
   /** Percent of the whole machine's CPU since the last snapshot. */
   cpu: number;
+  /** Percent of the GPU's time since the last snapshot, or null when it can't be read (another user's). */
+  gpu: number | null;
   /** Resident memory, in bytes. */
   memory: number;
   /** Start time, in ms since the epoch. */
@@ -63,6 +65,17 @@ export interface MemoryTotals {
   swapUsed: number;
 }
 
+export interface GpuTotals {
+  /** Percent of the time it's busy. */
+  busy: number;
+  /** Its own memory (on an integrated GPU, RAM set aside for it), in bytes. */
+  memoryUsed: number;
+  memoryTotal: number;
+  /** System memory it's borrowed on top, in bytes. */
+  sharedUsed: number;
+  sharedTotal: number;
+}
+
 export interface SystemSnapshot {
   /** When it was taken, in ms since the epoch. */
   at: number;
@@ -70,6 +83,8 @@ export interface SystemSnapshot {
   cpu: number;
   cpuCount: number;
   memory: MemoryTotals;
+  /** Null without a GPU whose driver says how busy it is (only amdgpu does). */
+  gpu: GpuTotals | null;
   /** Seconds since boot. */
   uptime: number;
   /** 1, 5 and 15-minute load averages. */

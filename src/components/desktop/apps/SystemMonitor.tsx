@@ -58,7 +58,7 @@ const DIN_ICON = '/din-logo.svg';
 /** Background programs Din can't put a face to. */
 const PROCESS_ICON: LucideIcon = Cog;
 
-type SortKey = 'name' | 'cpu' | 'memory' | 'pid' | 'user';
+type SortKey = 'name' | 'cpu' | 'gpu' | 'memory' | 'pid' | 'user';
 interface SortOrder {
   key: SortKey;
   descending: boolean;
@@ -91,6 +91,8 @@ interface Row {
   detail: string;
   icon: LucideIcon | string | null;
   cpu: number;
+  /** Null when it can't be read. */
+  gpu: number | null;
   memory: number;
   /** Null for a group of several processes. */
   pid: number | null;
@@ -225,6 +227,7 @@ function memberRow(groupKey: string, member: Member): Row {
     detail: note ?? (member.detail === member.label ? '' : member.detail),
     icon: null,
     cpu: process.cpu,
+    gpu: process.gpu,
     memory: process.memory,
     pid: process.pid,
     user: process.user,
@@ -252,6 +255,10 @@ function groupRow(group: Group, members: Member[], expanded: boolean): Row {
     detail,
     icon: group.icon,
     cpu: members.reduce((sum, m) => sum + m.process.cpu, 0),
+    gpu: members.reduce<number | null>(
+      (sum, m) => (m.process.gpu === null ? sum : (sum ?? 0) + m.process.gpu),
+      null,
+    ),
     memory: members.reduce((sum, m) => sum + m.process.memory, 0),
     pid: single ? single.process.pid : null,
     user: users.join(', '),
@@ -269,6 +276,7 @@ const NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base', numeri
 function compareRows(a: Row, b: Row, sort: SortOrder): number {
   let order = 0;
   if (sort.key === 'cpu') order = a.cpu - b.cpu;
+  else if (sort.key === 'gpu') order = (a.gpu ?? -1) - (b.gpu ?? -1);
   else if (sort.key === 'memory') order = a.memory - b.memory;
   else if (sort.key === 'pid') order = (a.pid ?? Math.min(...a.pids)) - (b.pid ?? Math.min(...b.pids));
   else if (sort.key === 'user') order = NAME_COLLATOR.compare(a.user, b.user);
@@ -376,10 +384,12 @@ function SystemHeader({
   snapshot,
   cpuHistory,
   memoryHistory,
+  gpuHistory,
 }: {
   snapshot: SystemSnapshot | null;
   cpuHistory: number[];
   memoryHistory: number[];
+  gpuHistory: number[];
 }) {
   if (!snapshot) {
     return (
@@ -397,11 +407,11 @@ function SystemHeader({
       </div>
     );
   }
-  const { memory } = snapshot;
+  const { memory, gpu } = snapshot;
   const swap =
     memory.swapTotal > 0 ? ` · swap ${formatBytes(memory.swapUsed)} of ${formatBytes(memory.swapTotal)}` : '';
   return (
-    <div className="grid grid-cols-2 gap-3 p-3 pb-2">
+    <div className={cn('grid grid-cols-2 gap-3 p-3 pb-2', gpu && '@2xl:grid-cols-3')}>
       <StatCard
         label="CPU"
         value={formatPercent(snapshot.cpu)}
@@ -416,6 +426,19 @@ function SystemHeader({
         history={memoryHistory}
         tone="text-chart-2"
       />
+      {gpu && (
+        <div className="col-span-2 grid @2xl:col-span-1">
+          <StatCard
+            label="GPU"
+            value={formatPercent(gpu.busy)}
+            detail={`${formatBytes(gpu.memoryUsed)} of ${formatBytes(gpu.memoryTotal)}${
+              gpu.sharedUsed > 0 ? ` · ${formatBytes(gpu.sharedUsed)} shared` : ''
+            }`}
+            history={gpuHistory}
+            tone="text-chart-3"
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -423,18 +446,27 @@ function SystemHeader({
 const COLUMNS: { key: SortKey; label: string; className: string; align?: 'right' }[] = [
   { key: 'name', label: 'Name', className: 'min-w-0 flex-1' },
   { key: 'cpu', label: 'CPU', className: 'w-16 shrink-0', align: 'right' },
+  { key: 'gpu', label: 'GPU', className: 'hidden w-16 shrink-0 @md:flex', align: 'right' },
   { key: 'memory', label: 'Memory', className: 'w-20 shrink-0', align: 'right' },
   { key: 'pid', label: 'PID', className: 'hidden w-16 shrink-0 @lg:flex', align: 'right' },
   { key: 'user', label: 'User', className: 'hidden w-24 shrink-0 @2xl:flex' },
 ];
 
-function TableHeader({ sort, onSort }: { sort: SortOrder; onSort: (key: SortKey) => void }) {
+function TableHeader({
+  sort,
+  onSort,
+  showGpu,
+}: {
+  sort: SortOrder;
+  onSort: (key: SortKey) => void;
+  showGpu: boolean;
+}) {
   return (
     <div
       role="row"
       className="flex h-8 shrink-0 items-stretch gap-3 border-y border-border/60 bg-background/95 pl-4 pr-5 text-xs text-muted-foreground"
     >
-      {COLUMNS.map((col) => {
+      {COLUMNS.filter((col) => showGpu || col.key !== 'gpu').map((col) => {
         const active = sort.key === col.key;
         return (
           <button
@@ -474,6 +506,7 @@ const TableRow = memo(function TableRow({
   index,
   selected,
   focused,
+  showGpu,
   onSelect,
   onToggle,
 }: {
@@ -481,6 +514,7 @@ const TableRow = memo(function TableRow({
   index: number;
   selected: boolean;
   focused: boolean;
+  showGpu: boolean;
   onSelect: (key: string) => void;
   onToggle: (key: string) => void;
 }) {
@@ -547,6 +581,11 @@ const TableRow = memo(function TableRow({
       <span role="gridcell" className="w-16 shrink-0 text-right text-xs tabular-nums">
         {formatPercent(row.cpu)}
       </span>
+      {showGpu && (
+        <span role="gridcell" className="hidden w-16 shrink-0 text-right text-xs tabular-nums @md:block">
+          {row.gpu === null ? '–' : formatPercent(row.gpu)}
+        </span>
+      )}
       <span role="gridcell" className="w-20 shrink-0 text-right text-xs tabular-nums">
         {formatBytes(row.memory)}
       </span>
@@ -583,10 +622,10 @@ function TableSkeleton() {
  * The System Monitor: what's running, what it costs, and a way to stop what
  * won't stop. Apps are listed with everything they started folded under
  * them; CPU is a share of the whole machine, so the column adds up to the
- * total in the header.
+ * total in the header. GPU shows where the driver says how busy it is.
  */
 export function SystemMonitor() {
-  const { available, snapshot, cpuHistory, memoryHistory } = useSystemMonitor();
+  const { available, snapshot, cpuHistory, memoryHistory, gpuHistory } = useSystemMonitor();
   const { getApp, findAppIdForUrl } = useInstalledApps();
   const { toast } = useToast();
 
@@ -620,7 +659,7 @@ export function SystemMonitor() {
       prev.key === key
         ? { key, descending: !prev.descending }
         : // Numbers read best biggest first; names and users A to Z.
-          { key, descending: key === 'cpu' || key === 'memory' },
+          { key, descending: key === 'cpu' || key === 'gpu' || key === 'memory' },
     );
   }, []);
 
@@ -731,6 +770,7 @@ export function SystemMonitor() {
     );
   }
 
+  const showGpu = Boolean(snapshot?.gpu);
   const endLabel = selected ? `End ${selected.label}` : 'End';
   const canEnd = selected !== null && selected.blocked === null;
   const processCount = snapshot
@@ -741,7 +781,12 @@ export function SystemMonitor() {
 
   return (
     <div className="@container flex h-full w-full flex-col bg-background text-foreground">
-      <SystemHeader snapshot={snapshot} cpuHistory={cpuHistory} memoryHistory={memoryHistory} />
+      <SystemHeader
+        snapshot={snapshot}
+        cpuHistory={cpuHistory}
+        memoryHistory={memoryHistory}
+        gpuHistory={gpuHistory}
+      />
 
       <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
         <div className="relative min-w-40 flex-1">
@@ -829,7 +874,7 @@ export function SystemMonitor() {
         aria-multiselectable={false}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <TableHeader sort={sort} onSort={onSort} />
+        <TableHeader sort={sort} onSort={onSort} showGpu={showGpu} />
         <ContextMenu>
           <ContextMenuTrigger asChild disabled={!selected}>
             <div
@@ -868,6 +913,7 @@ export function SystemMonitor() {
                       index={start + i}
                       selected={row.key === selectedKey}
                       focused={gridFocused}
+                      showGpu={showGpu}
                       onSelect={setSelectedKey}
                       onToggle={toggle}
                     />

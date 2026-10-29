@@ -11,6 +11,15 @@
 // total. Both come from the same clock: a process's ticks over every CPU's
 // ticks since the last sample (/proc/stat).
 //
+// GPU: the whole GPU's busy share and memory come from its driver
+// (/sys/class/drm/card*/device, amdgpu only), a process's from the GPU time
+// its DRM clients report (/proc/<pid>/fdinfo, as nvtop reads it) over the
+// time since the last sample. Walking every fd of every process each sample
+// is thousands of readlinks, so which fds are on the GPU is remembered and
+// only looked for again every FD_RESCAN samples. A client open in several
+// processes (a child inherits its parent's fds) counts for the oldest.
+// Other users' fds are unreadable, so their GPU use is unknown (null).
+//
 // Processes are labelled with what the user sees. Electron's own processes
 // come from app.getAppMetrics(), and each page renderer from the
 // WebContents it hosts (a browser tab, an installed web app). Native apps
@@ -36,6 +45,9 @@ import {
   displayName,
   readCmdline,
   readCpuTimes,
+  readDrmClients,
+  readDrmFds,
+  readGpu,
   readMemory,
   readOwner,
   readProcesses,
@@ -43,6 +55,8 @@ import {
   readUsers,
   startedAt,
   type CpuTimes,
+  type DrmClient,
+  type GpuTotals,
   type MemoryTotals,
   type ProcEntry,
 } from './proc-stats.mts';
@@ -57,6 +71,8 @@ const FIRST_SAMPLE_MS = 500;
  * crash dump is written); force quit means now.
  */
 const CRASH_GRACE_MS = 1000;
+/** How many samples a process's GPU fds are remembered for before they're looked for again. */
+const FD_RESCAN = 10;
 
 const SYSTEM_MESSAGE = 'This belongs to the system.';
 const DIN_MESSAGE = 'Din needs this to keep running.';
@@ -99,6 +115,8 @@ export interface ProcessInfo {
   state: string;
   /** Percent of the whole machine's CPU since the last sample. */
   cpu: number;
+  /** Percent of the GPU's time since the last sample, or null when it can't be read. */
+  gpu: number | null;
   /** Resident memory, in bytes. */
   memory: number;
   /** Start time, in ms since the epoch. */
@@ -115,6 +133,8 @@ export interface SystemSnapshot {
   cpu: number;
   cpuCount: number;
   memory: MemoryTotals;
+  /** Null without a GPU whose driver says how busy it is. */
+  gpu: GpuTotals | null;
   /** Seconds since boot. */
   uptime: number;
   /** 1, 5 and 15-minute load averages. */
@@ -132,7 +152,11 @@ let running = false;
 let generation = 0;
 let timer: NodeJS.Timeout | null = null;
 /** The last sample's counters, which the next one's CPU use is measured from. */
-let previous: { cpu: CpuTimes; ticks: Map<string, number> } | null = null;
+let previous: { cpu: CpuTimes; ticks: Map<string, number>; at: bigint; gpuNs: Map<string, number> } | null =
+  null;
+/** Each process's fds on the GPU, as last looked for. */
+let drmFds = new Map<string, number[]>();
+let samples = 0;
 /** Command lines by process (pid, start time, comm: exec changes the last). */
 let cmdlines = new Map<string, string[]>();
 let users: Map<number, string> | null = null;
@@ -245,10 +269,43 @@ async function underMain(pid: number): Promise<boolean> {
   return false;
 }
 
+/**
+ * The GPU time each of our processes has used so far, in ns, by process key.
+ * A client open in several processes counts once, for the oldest of them.
+ */
+async function gpuTimes(entries: ProcEntry[], me: number): Promise<Map<string, number>> {
+  const rescan = samples % FD_RESCAN === 0;
+  const mine = entries.filter((entry) => entry.uid === me).sort((a, b) => a.startTicks - b.startTicks);
+  const fds = new Map<string, number[]>();
+  const clients = await Promise.all(
+    mine.map(async (entry): Promise<DrmClient[]> => {
+      const key = processKey(entry);
+      const known = rescan ? undefined : drmFds.get(key);
+      const open = known ?? (await readDrmFds(entry.pid));
+      fds.set(key, open);
+      return open.length > 0 ? readDrmClients(entry.pid, open) : [];
+    }),
+  );
+  drmFds = fds;
+  const claimed = new Set<string>();
+  const times = new Map<string, number>();
+  mine.forEach((entry, i) => {
+    let ns = 0;
+    for (const client of clients[i]) {
+      if (claimed.has(client.id)) continue;
+      claimed.add(client.id);
+      ns += client.engineNs;
+    }
+    times.set(processKey(entry), ns);
+  });
+  return times;
+}
+
 async function sample(): Promise<SystemSnapshot | null> {
-  const [cpu, memory, entries, { uptime, load }] = await Promise.all([
+  const [cpu, memory, gpu, entries, { uptime, load }] = await Promise.all([
     readCpuTimes(),
     readMemory(),
+    readGpu(),
     readProcesses(),
     readUptimeAndLoad(),
   ]);
@@ -256,6 +313,10 @@ async function sample(): Promise<SystemSnapshot | null> {
   users ??= await readUsers();
   const host = await hosts();
   const me = process.getuid?.() ?? -1;
+  const at = process.hrtime.bigint();
+  const gpuNs = await gpuTimes(entries, me);
+  const wallNs = previous ? Number(at - previous.at) : 0;
+  samples += 1;
 
   // Command lines don't change without the comm changing too (exec), so
   // each process's is read once.
@@ -306,6 +367,14 @@ async function sample(): Promise<SystemSnapshot | null> {
     ticks.set(key, entry.ticks);
     const before = previous?.ticks.get(key);
     const used = before !== undefined && elapsed > 0 ? ((entry.ticks - before) / elapsed) * 100 : 0;
+    const gpuNow = gpuNs.get(key);
+    const gpuBefore = previous?.gpuNs.get(key);
+    const gpuUsed =
+      gpuNow === undefined
+        ? null
+        : gpuBefore !== undefined && wallNs > 0
+          ? Math.min(100, Math.max(0, ((gpuNow - gpuBefore) / wallNs) * 100))
+          : 0;
     const argv = argvOf(entry);
     const mine = entry.uid === me;
     let own = electronRole(entry.pid, electron);
@@ -326,6 +395,7 @@ async function sample(): Promise<SystemSnapshot | null> {
       mine,
       state: entry.state,
       cpu: Math.max(0, used),
+      gpu: gpuUsed,
       memory: entry.rss,
       startedAt: startedAt(entry.startTicks, cpu),
       role,
@@ -334,12 +404,13 @@ async function sample(): Promise<SystemSnapshot | null> {
   });
 
   const busy = previous && elapsed > 0 ? 1 - (cpu.idle - previous.cpu.idle) / elapsed : 0;
-  previous = { cpu, ticks };
+  previous = { cpu, ticks, at, gpuNs };
   return {
     at: Date.now(),
     cpu: Math.min(100, Math.max(0, busy * 100)),
     cpuCount: cpu.cpuCount,
     memory,
+    gpu,
     uptime,
     load,
     processes,
@@ -380,6 +451,8 @@ function stop(): void {
   timer = null;
   previous = null;
   cmdlines = new Map();
+  drmFds = new Map();
+  samples = 0;
   users = null;
 }
 

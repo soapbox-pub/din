@@ -1,6 +1,6 @@
 // What's running and what it costs, read straight from /proc for the System
 // Monitor (system-monitor.mts): each process's CPU time, memory, owner and
-// command line, and the machine's CPU and memory totals.
+// command line and GPU time, and the machine's CPU, memory and GPU totals.
 //
 // Nothing is spawned. `ps` would fork Electron's main process on every
 // sample (see system-worker.mts for what that costs), and everything it
@@ -57,6 +57,39 @@ export interface MemoryTotals {
   used: number;
   swapTotal: number;
   swapUsed: number;
+}
+
+/** The GPU's own figures, from its driver's files in /sys. */
+export interface GpuTotals {
+  /** Percent of the time it's busy, as the driver measures it. */
+  busy: number;
+  /** Its own memory (on an integrated GPU, RAM set aside for it), in bytes. */
+  memoryUsed: number;
+  memoryTotal: number;
+  /** System memory it's borrowed on top (GTT), in bytes. */
+  sharedUsed: number;
+  sharedTotal: number;
+}
+
+/** One open handle on a GPU, from /proc/<pid>/fdinfo. */
+export interface DrmClient {
+  /** The device and the driver's client id: the same client can be open on several fds, and in several processes. */
+  id: string;
+  /** GPU time used so far, every engine together, in ns. */
+  engineNs: number;
+}
+
+/** Parse /proc/<pid>/fdinfo/<fd>. Null when the fd isn't a GPU client. */
+export function parseDrmFdinfo(text: string): DrmClient | null {
+  const client = /^drm-client-id:\s+(\d+)/m.exec(text);
+  if (!client) return null;
+  const pdev = /^drm-pdev:\s+(\S+)/m.exec(text)?.[1] ?? '';
+  let engineNs = 0;
+  // drm-engine-<name>: <n> ns, and drm-engine-capacity-<name> (Intel), which isn't time.
+  for (const match of text.matchAll(/^drm-engine-(?!capacity-)[\w-]+:\s+(\d+) ns/gm)) {
+    engineNs += Number(match[1]);
+  }
+  return { id: `${pdev}/${client[1]}`, engineNs };
 }
 
 /** Parse /proc/<pid>/stat. Null for kernel threads and unreadable lines. */
@@ -202,6 +235,64 @@ export async function readUptimeAndLoad(): Promise<{ uptime: number; load: numbe
     uptime: Number(uptime.split(' ')[0]) || 0,
     load: loadavg.split(' ').slice(0, 3).map((n) => Number(n) || 0),
   };
+}
+
+/** The first GPU whose driver reports how busy it is (amdgpu does), found once. */
+let gpuDevice: Promise<string | null> | null = null;
+function findGpuDevice(): Promise<string | null> {
+  gpuDevice ??= (async () => {
+    const cards = await fsp.readdir('/sys/class/drm').catch(() => [] as string[]);
+    for (const card of cards.filter((name) => /^card\d+$/.test(name)).sort()) {
+      const device = `/sys/class/drm/${card}/device`;
+      try {
+        await fsp.access(`${device}/gpu_busy_percent`);
+        return device;
+      } catch {
+        // Not one that says.
+      }
+    }
+    return null;
+  })();
+  return gpuDevice;
+}
+
+/** The GPU's totals, or null on a machine without one Din can read. */
+export async function readGpu(): Promise<GpuTotals | null> {
+  const device = await findGpuDevice();
+  if (!device) return null;
+  const read = async (name: string) => Number(await fsp.readFile(`${device}/${name}`, 'utf8').catch(() => '0')) || 0;
+  const [busy, memoryUsed, memoryTotal, sharedUsed, sharedTotal] = await Promise.all([
+    read('gpu_busy_percent'),
+    read('mem_info_vram_used'),
+    read('mem_info_vram_total'),
+    read('mem_info_gtt_used'),
+    read('mem_info_gtt_total'),
+  ]);
+  return { busy, memoryUsed, memoryTotal, sharedUsed, sharedTotal };
+}
+
+/**
+ * The fds a process has open on a GPU (/dev/dri/*). [] when it has none, or
+ * isn't ours to look at.
+ */
+export async function readDrmFds(pid: number): Promise<number[]> {
+  const dir = `/proc/${pid}/fd`;
+  const fds = await fsp.readdir(dir).catch(() => [] as string[]);
+  const targets = await Promise.all(fds.map((fd) => fsp.readlink(`${dir}/${fd}`).catch(() => '')));
+  return fds.filter((_, i) => targets[i].startsWith('/dev/dri/')).map(Number);
+}
+
+/** The GPU clients open on a process's fds, one per client. */
+export async function readDrmClients(pid: number, fds: number[]): Promise<DrmClient[]> {
+  const infos = await Promise.all(
+    fds.map((fd) => fsp.readFile(`/proc/${pid}/fdinfo/${fd}`, 'utf8').catch(() => '')),
+  );
+  const clients = new Map<string, DrmClient>();
+  for (const info of infos) {
+    const client = parseDrmFdinfo(info);
+    if (client) clients.set(client.id, client);
+  }
+  return [...clients.values()];
 }
 
 export async function readUsers(): Promise<Map<number, string>> {
