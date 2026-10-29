@@ -49,6 +49,11 @@ export interface Rect extends Point, Size {}
 export interface Din {
   /** Which version of this API the desktop speaks. */
   readonly version: 1;
+  /**
+   * Resolves once the desktop has said hello: until then the launch, window
+   * state, theme, account and permissions read as empty, and calls queue.
+   */
+  readonly ready: Promise<void>;
   app: DinApp;
   window: DinWindow;
   menus: DinMenus;
@@ -70,7 +75,7 @@ export interface Din {
 
 declare global {
   interface Window {
-    /** Present in apps Din hosts (din:// apps, later nsites). */
+    /** Defined by Din, before any of the page's scripts run, in every app it hosts (din:// apps, later nsites). */
     din?: Din;
   }
 }

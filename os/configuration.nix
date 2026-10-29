@@ -31,12 +31,14 @@ let
       # The ad blocker's engine bundle is built from these two
       # (electron/adblock.mts), the Electron host is compiled by
       # build-electron.mjs, and the cursor converter (electron/cursorConverter.mts)
-      # is bundled by build-cursor-converter.mjs. `scripts` itself must pass for its files to.
+      # is bundled by build-cursor-converter.mjs, and window.din's runtime into
+      # the app preload by build-din-runtime.mjs. `scripts` itself must pass for its files to.
       || rel == "scripts"
       || rel == "scripts/build-electron.mjs"
       || rel == "scripts/build-adblock-engine.mjs"
       || rel == "scripts/adblock-engine-entry.js"
-      || rel == "scripts/build-cursor-converter.mjs";
+      || rel == "scripts/build-cursor-converter.mjs"
+      || rel == "scripts/build-din-runtime.mjs";
   };
 
   # The release this system is (os/version), which a release's tag repeats
@@ -65,6 +67,7 @@ let
       node scripts/build-electron.mjs
       node scripts/build-adblock-engine.mjs
       node scripts/build-cursor-converter.mjs
+      node scripts/build-din-runtime.mjs
       runHook postBuild
     '';
 

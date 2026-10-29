@@ -75,8 +75,8 @@ Where a page and the types disagree, the types win and the page is a bug.
 | `electron/main.mts` | Schemes (`app:`, `din:`, `nsite:`), sessions, webview attach policy |
 | `electron/din-apps.mts` | The `din:` scheme's files, the apps' session, port handshakes, granted bridge ports, app guests' policy |
 | `electron/preload.cjs` | The desktop's preload: `window.dinos` |
-| `electron/din-app-preload.cjs` | Apps' preload: holds the ports and exposes them as functions, nothing else |
-| `src/sdk/` | `din.d.ts` (the API), `index.ts` (`connect()`), `react/` (hooks and title-bar pieces), `start.tsx` (an app's entry point), `protocol.ts` (the port's messages) |
+| `electron/din-app-preload.cjs` | Apps' preload: holds the ports and defines `window.din` over them (bundled with the runtime into `din-app-preload.built.cjs`) |
+| `src/sdk/` | `din.d.ts` (the API), `runtime.ts` (`window.din` itself, which the app preload runs), `frame.ts` (the same outside Electron), `index.ts` (`connect()`), `react/` (hooks and title-bar pieces), `start.tsx` (an app's entry point), `protocol.ts` (the port's messages) |
 | `src/platform/` | `GuestSurface` and the guest helpers ([guest-surfaces.md](guest-surfaces.md)) |
 | `src/components/desktop/DinAppFrame.tsx` | The desktop's end of every app window's port; `dinHost/` beside it |
 | `src/lib/dinApps.ts`, `src/lib/dinDrag.ts` | Apps' manifests and ports; the drag broker |

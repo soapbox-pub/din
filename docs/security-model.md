@@ -25,8 +25,8 @@ still apply, and moving apps out shrinks what code runs there.
 | Who | Origin | Session (partition) | Preload | Process |
 |---|---|---|---|---|
 | The desktop | `app://din` | default | `preload.cjs` → `window.dinos` | the shell window's renderer |
-| Built-in apps | `din://<id>` | `persist:din-apps` | `din-app-preload.cjs` → ports only | one per app window |
-| Apps the `din` command runs | `din://<origin>` | `persist:din-apps` | `din-app-preload.cjs` → ports only | one per app window |
+| Built-in apps | `din://<id>` | `persist:din-apps` | `din-app-preload.cjs` → `window.din` over ports it keeps | one per app window |
+| Apps the `din` command runs | `din://<origin>` | `persist:din-apps` | `din-app-preload.cjs` → `window.din` over ports it keeps | one per app window |
 | Browser tabs, installed web apps, nsites | their own | `persist:webbrowser` | nostr, napp, web push, … | one per site |
 | Private and Tor tabs | their own | in-memory sessions | fewer | one per site |
 
@@ -58,7 +58,8 @@ still apply, and moving apps out shrinks what code runs there.
 **Electron main trusts the desktop, and ports the desktop asked for.**
 Every `window.dinos` handler checks `assertShellSender` (the shell's main
 frame at `app://din`), as today. Apps never get an `ipcRenderer` channel
-of their own; the app preload's only job is to receive ports. The one
+of their own; the app preload's only jobs are to receive ports and to
+define `window.din` over them. The one
 exception to "everything goes through the desktop" is `din.system`: for an
 app with the `fs` or `pty` permission, the desktop asks main for a port
 straight from that app to that bridge (below), so terminal output and file
@@ -94,9 +95,13 @@ resolves to nothing.
    channel, sends one end to the app's preload and keeps the other, bound
    to that app and permission.
 
-The preload keeps the ports. It exposes only functions through
-`contextBridge` (send a message, hear messages), so page script never
-holds a raw `MessagePort` it could transfer elsewhere. The app can't
+The preload keeps the ports. It hands the `window.din` runtime
+(`src/sdk/runtime.ts`, run in the page's world with
+`contextBridge.executeInMainWorld`) only functions over them (send a
+message, hear messages), and exposes no global of its own, so page script
+never holds a raw `MessagePort` it could transfer elsewhere. The runtime
+has no more power than the page: it's the page's own code that Din
+supplies, and everything it asks still goes through the desktop's checks. The app can't
 choose its id, can't get a second port, and can't reach another app's
 port. A reload repeats the handshake (the webContents id survives it and
 the preload reconnects, as the spike showed) and invalidates the old

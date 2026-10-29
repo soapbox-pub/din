@@ -166,7 +166,7 @@ din.window.setBounds({ width: 1160, height: 720 });  // Calculator switching to 
 - `beginMove` and `beginResize` hand the gesture to the desktop, which
   runs it exactly as its own title bar does: snapping to edges, tearing a
   maximized window off, workspaces, wobble. The app gets no more pointer
-  events for the gesture (not even its `pointerup`); the SDK resolves the
+  events for the gesture (not even its `pointerup`); `window.din` resolves the
   gesture when the desktop says it ended, and the window's `state`
   changes.
 

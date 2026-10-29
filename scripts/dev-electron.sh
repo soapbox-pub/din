@@ -27,6 +27,10 @@ node scripts/build-adblock-engine.mjs
 # The cursor converter bundle (electron/cursorConverter.mts).
 node scripts/build-cursor-converter.mjs
 
+# The app preload with window.din's runtime (electron/din-app-preload.cjs).
+# Rerun it after changing src/sdk/runtime.ts: it isn't hot-reloaded.
+node scripts/build-din-runtime.mjs
+
 ELECTRON="${ROOT_DIR}/node_modules/.bin/electron"
 if [ ! -x "${ELECTRON}" ]; then
   echo "Electron binary not found at ${ELECTRON}." >&2

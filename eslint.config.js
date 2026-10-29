@@ -9,7 +9,7 @@ import htmlEslint from "@html-eslint/eslint-plugin";
 import customRules from "./eslint-rules/index.js";
 
 export default defineConfig(
-  globalIgnores(["dist", "dist-perf", "perf-reports", ".agents", "electron/adblock-extension/engine.js", "electron/cursor-converter.js", "electron/*.mjs"]),
+  globalIgnores(["dist", "dist-perf", "perf-reports", ".agents", "electron/adblock-extension/engine.js", "electron/cursor-converter.js", "electron/din-app-preload.built.cjs", "electron/*.mjs"]),
   {
     name: "app/ts",
     files: ["**/*.{ts,tsx}"],

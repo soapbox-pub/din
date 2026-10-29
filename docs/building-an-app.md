@@ -76,9 +76,9 @@ import { Stopwatch } from './Stopwatch';
 void startApp(() => <Stopwatch />);
 ```
 
-`startApp` loads Din's base styles and polyfills, waits for `connect()`
-(which resolves once the desktop has said hello, with the theme already
-applied) and renders the app inside `<DinProvider>`, React Query and the
+`startApp` loads Din's base styles and polyfills, waits for `din.ready`
+(`window.din` is Din's, there before the app's scripts run; `ready`
+resolves once the desktop has said hello, with the theme already applied) and renders the app inside `<DinProvider>`, React Query and the
 tooltip provider. An app that needs something else can call `connect()`
 from `@/sdk` and render itself.
 

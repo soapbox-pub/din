@@ -31,7 +31,8 @@ const PROFILE_REACT = PROFILE_BUILD && process.env.VITE_PROFILE_REACT === "1";
  * development their pages come from this server, through din:// in Electron
  * and from <id>.localhost here in a plain browser, so the HMR client is
  * pointed at localhost, and their CSP (and the desktop's, for framing them
- * outside Electron) lets it through.
+ * outside Electron) lets it through. Each app page's first script is
+ * src/sdk/frame.ts, window.din where no preload provides it.
  */
 function dinApps(): Plugin {
   const appsDir = path.resolve(__dirname, "src/apps");
@@ -53,10 +54,13 @@ function dinApps(): Plugin {
     transformIndexHtml: {
       order: "pre",
       handler(html, ctx) {
-        if (!ctx.server) return html;
-        if (ctx.path.startsWith("/src/apps/")) {
-          return html.replace("connect-src ", "connect-src ws://localhost:* ");
-        }
+        const app = ctx.path.startsWith("/src/apps/");
+        // window.din where no preload provides it (src/sdk/frame.ts), ahead of the app's own scripts.
+        const tags = app
+          ? [{ tag: "script", attrs: { type: "module", src: "/src/sdk/frame.ts" }, injectTo: "head-prepend" as const }]
+          : [];
+        if (!ctx.server) return { html, tags };
+        if (app) return { html: html.replace("connect-src ", "connect-src ws://localhost:* "), tags };
         return html.replace("frame-src ", "frame-src http://*.localhost:* ");
       },
     },

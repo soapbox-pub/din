@@ -3087,7 +3087,8 @@ const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
  */
 const NAPP_PRELOAD = path.join(import.meta.dirname, 'napp-preload.cjs');
 // Built-in apps' preload: their ports to the desktop and main, nothing else.
-const DIN_APP_PRELOAD = path.join(import.meta.dirname, 'din-app-preload.cjs');
+// din-app-preload.cjs with window.din's runtime bundled in (scripts/build-din-runtime.mjs).
+const DIN_APP_PRELOAD = path.join(import.meta.dirname, 'din-app-preload.built.cjs');
 
 /**
  * Absolute path to the session preload that gives websites Web Push and what

@@ -1,8 +1,8 @@
 # `window.din`: the app platform
 
 > **Status: in place.** The types are
-> [`src/sdk/din.d.ts`](../../src/sdk/din.d.ts), the client
-> `src/sdk/index.ts`, the desktop's side `DinAppFrame`. Apps still in the
+> [`src/sdk/din.d.ts`](../../src/sdk/din.d.ts), the runtime
+> `src/sdk/runtime.ts`, the desktop's side `DinAppFrame`. Apps still in the
 > desktop's tree use the desktop's hooks until they move
 > ([../migrating-builtin-apps.md](../migrating-builtin-apps.md)).
 
@@ -12,10 +12,12 @@ fills in what a page in a desktop needs that the web platform doesn't give
 it (its window, a menu bar, files from the user, drag and drop with other
 apps, the desktop's theme).
 
-```ts
-import { connect } from '@/sdk';
+Din defines `window.din` in every app page before the page's own scripts
+run, the way a browser provides `navigator` (and Din provides
+`window.nostr` and `window.napp` to web pages). No library is needed:
 
-const din = await connect();
+```ts
+await din.ready;
 
 din.window.setTitle('Untitled.png');
 din.window.onCloseRequest(() => {
@@ -44,19 +46,22 @@ din.app.ready();
 | `din.permissions`, `din.system` | [permissions.md](permissions.md) |
 | The manifest | [manifest.md](manifest.md) |
 
-## The SDK
+## The runtime, and the SDK
 
-Apps don't use the raw port. `src/sdk/` is a small client bundled into
-each app. An app's `main.tsx` is usually one line,
-`startApp(() => <App />)` from `@/sdk/start`, which loads the desktop's
-polyfills and base styles (`src/sdk/app.css`: Din's Tailwind and tokens
-on a transparent page), connects, and renders with React Query, tooltips
-and `<DinProvider>` around the app. The client:
+`window.din` is `src/sdk/runtime.ts`. In Electron the app preload
+(`electron/din-app-preload.cjs`) runs it in the page's world with
+`contextBridge.executeInMainWorld`, handing it only functions over the
+ports it keeps, as `napp-preload.cjs` does for `window.napp`. A sandboxed
+preload can't load other files, so `scripts/build-din-runtime.mjs` bundles
+the runtime into it (`din-app-preload.built.cjs`, which Electron loads;
+rerun it after changing the runtime in development). Framed outside
+Electron (`npm run dev:browser`), `src/sdk/frame.ts` installs it, as the
+first script the `din-apps` Vite plugin puts in each app page. The
+runtime:
 
-- waits for the port and the desktop's `hello`: an app's entry point
-  starts with `const din = await connect()` (from `@/sdk`), which also sets
-  `window.din`, so `din.window.state` and `din.theme.current` are always
-  filled in by the time app code reads them;
+- is there at once; what the desktop's `hello` carries (the launch, the
+  window's state, the theme, the account, the permissions) reads as empty
+  until `din.ready` resolves, and calls made before then queue;
 - keeps a copy of pushed state and calls `onChange` listeners;
 - applies the theme's tokens to `:root` and keeps them current, so
   Tailwind classes and shadcn/ui components look as they do on the
@@ -65,6 +70,14 @@ and `<DinProvider>` around the app. The client:
 - wraps `din.system` bridges, which talk to Electron main over ports of
   their own ([permissions.md](permissions.md#dinsystem)), including their
   callbacks.
+
+`src/sdk/` is optional sugar over the global, never the source of it:
+`connect()` (from `@/sdk`) is `din.ready` then `window.din`, and an
+app's `main.tsx` is usually one line, `startApp(() => <App />)` from
+`@/sdk/start`, which loads the desktop's polyfills and base styles
+(`src/sdk/app.css`: Din's Tailwind and tokens on a transparent page),
+waits for `din.ready`, and renders with React Query, tooltips and
+`<DinProvider>` around the app.
 
 For React apps, `src/sdk/react` adds:
 
@@ -100,7 +113,7 @@ its own header (Assistant, Settings) should move over by changing imports.
 - Messages are structured-cloned objects (`src/sdk/protocol.ts`): the
   desktop's `hello`, requests `{ type: 'request', id, method, params }`,
   replies `{ type: 'reply', id, result | error }`, and pushes `{ type, … }`.
-  The protocol is internal to the SDK and versioned by `din.version`.
+  The protocol is internal to the runtime and versioned by `din.version`.
 - **Where the port comes from.** In Electron the app's preload asks main,
   which checks the frame and hands one end to the preload and the other to
   the desktop ([../security-model.md](../security-model.md#how-a-port-is-made)).

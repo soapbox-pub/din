@@ -7,8 +7,8 @@
 
 ## `din.theme`
 
-An app should look like part of the desktop. The SDK takes care of it:
-on connect and on every change it writes the desktop's design tokens onto
+An app should look like part of the desktop. `window.din` takes care of it:
+on the hello and on every change it writes the desktop's design tokens onto
 the app's `:root` as the same CSS custom properties Din uses
 (`--background`, `--foreground`, `--primary`, `--radius`, …), sets
 `color-scheme` and the `dark` class, and loads the fonts. Tailwind classes
@@ -46,7 +46,7 @@ Without the permission, `pubkey` is null and the lists are empty.
 ### Signing (permission `nostr`)
 
 `din.account.nostr` is a NIP-07 signer backed by Din's: `getPublicKey`,
-`signEvent`, `nip04` and `nip44`. The SDK also installs it as
+`signEvent`, `nip04` and `nip44`. `window.din` also installs it as
 `window.nostr`, so Nostrify and other NIP-07 libraries work unchanged.
 For built-in apps, whose code is Din's own and reviewed, requests go
 straight to the signed-in user's signer, as they did when the apps lived

@@ -36,5 +36,5 @@
   /* dinos.ts declares window.dinos for the src/lib types the preload imports. */
   "include": ["electron", "src/lib/dinos.ts"],
   /* The ad blocker's extension runs in an extension page, not Node. */
-  "exclude": ["electron/adblock-extension", "electron/*.mjs", "electron/cursor-converter.js"]
+  "exclude": ["electron/adblock-extension", "electron/*.mjs", "electron/cursor-converter.js", "electron/din-app-preload.built.cjs"]
 }

@@ -2,14 +2,23 @@
 // Preload for built-in apps (din://<id>/, the persist:din-apps session; see
 // electron/din-apps.mts and docs/security-model.md).
 //
-// It does one thing: connect the page to the desktop, and for apps granted
-// fs or pty, to main. It keeps the ports itself and gives the page functions
-// over them (window.__dinTransport), so page script never holds a port it
-// could hand elsewhere. src/sdk/ turns this into window.din.
+// It connects the page to the desktop, and for apps granted fs or pty, to
+// main, and defines window.din over those ports before any of the page's
+// scripts run, the way napp-preload.cjs defines window.napp. It keeps the
+// ports itself and hands the runtime only functions over them, so page
+// script never holds a port it could hand elsewhere.
+//
+// The runtime is src/sdk/runtime.ts, run in the page's world: a sandboxed
+// preload can't load a sibling file, so scripts/build-din-runtime.mjs bundles
+// it into the function below and writes this file out with it as
+// din-app-preload.built.cjs, which is what Electron loads.
 //
 // Plain CommonJS: sandboxed preloads can't be ESM or TypeScript.
 
 const { contextBridge, ipcRenderer } = require('electron');
+
+/** @type {((transport: object) => void) | null} */
+const installDin = /* @din-runtime */ null;
 
 if (process.isMainFrame && location.protocol === 'din:') {
   /** @type {MessagePort | null} */
@@ -75,7 +84,7 @@ if (process.isMainFrame && location.protocol === 'din:') {
 
   ipcRenderer.send('din-app:connect');
 
-  contextBridge.exposeInMainWorld('__dinTransport', {
+  const transport = {
     /** Send the desktop a message (structured-cloneable). */
     post(/** @type {unknown} */ message) {
       if (desktop) desktop.postMessage(message);
@@ -115,5 +124,8 @@ if (process.isMainFrame && location.protocol === 'din:') {
         return () => set.delete(listener);
       },
     },
-  });
+  };
+
+  if (installDin) contextBridge.executeInMainWorld({ func: installDin, args: [transport] });
+  else console.error('din-app-preload: no window.din runtime (run scripts/build-din-runtime.mjs)');
 }

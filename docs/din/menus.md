@@ -41,8 +41,8 @@ din.menus.onAction((id) => commands[id]?.());
   window has its own menu bar; an app with several windows sets it in
   each.
 - **Accelerators** work wherever focus is in the window, and they're shown
-  in the menu. Keys go to the app's document, not the desktop's, so the
-  SDK matches them there (`src/sdk/accelerators.ts`; Ctrl and Meta count
+  in the menu. Keys go to the app's document, not the desktop's, so
+  `window.din` matches them there (`src/sdk/accelerators.ts`; Ctrl and Meta count
   as one) and reports the item through `onAction`, before the page's own
   handlers see the key. An app that also handles the same key itself (a
   text field's Ctrl+A, a search box's Ctrl+F) marks the item

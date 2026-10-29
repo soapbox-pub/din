@@ -4,8 +4,10 @@
 > run `python3 electron/din-cli.py` against a running Din.
 
 `din` runs a web app in a Din window, at `din://<origin>/`, the way Din
-runs its built-in apps: in the apps' session, with `window.din` for an app
-built with the SDK. It's for developing apps outside Din's tree.
+runs its built-in apps: in the apps' session, with `window.din` defined
+before the page's scripts run, so a plain `index.html` can call
+`await din.ready; din.window.setTitle('…')` with no build step. It's for
+developing apps outside Din's tree.
 
 ```sh
 din ./dist                      # a build: a folder with an index.html

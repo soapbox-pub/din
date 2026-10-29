@@ -30,7 +30,7 @@ export function LaunchedAppFrame({ app, ...props }: Props) {
 
   if (answer) {
     const manifest = answer === 'allow' ? app.manifest : withoutAccess(app.manifest);
-    return <DinAppFrame {...props} appId={app.appId} manifest={manifest} splash={false} />;
+    return <DinAppFrame {...props} appId={app.appId} manifest={manifest} />;
   }
 
   return (

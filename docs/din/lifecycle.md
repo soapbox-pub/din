@@ -12,7 +12,7 @@ A window opens, the desktop creates its webview at the manifest's
 and the app's code starts with everything in place:
 
 ```ts
-const din = await connect();  // from @/sdk: resolves after the desktop's hello
+await din.ready;  // window.din is Din's; ready resolves after the desktop's hello
 const { reason, params, files, shortcut } = din.app.launch;
 ```
 
@@ -49,7 +49,7 @@ This replaces today's `actionAt` timestamps on dock action params.
 Until the app calls `din.app.ready()`, its window shows a splash in the
 manifest's `background_color` with its icon, as installed nsites' windows
 do today. Call it once the first useful frame is drawn (the document is
-loaded, the canvas sized). The SDK calls it on `load` if the app hasn't,
+loaded, the canvas sized). `window.din` calls it on `load` if the app hasn't,
 so a simple app needn't think about it.
 
 ## Opening other things

@@ -94,8 +94,6 @@ const CLOSE_ANSWER_MS = 5000;
 interface Props extends AppComponentProps {
   appId: string;
   manifest: DinManifest;
-  /** Cover the window with the app's icon until it's ready (apps without the SDK never say so). */
-  splash?: boolean;
 }
 
 /** A file an app was granted, by the id its port knows it as. */
@@ -196,7 +194,7 @@ const NAMED_FOLDERS: Record<string, string> = {
  * window.din call lands here and is answered with the window's own powers
  * (docs/din/README.md, docs/security-model.md).
  */
-export function DinAppFrame({ appId, manifest, windowId, params, splash = true }: Props) {
+export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const frame = useWindowFrame();
   const chrome = useWindowChrome();
   const actions = useWindowActions();
@@ -1347,7 +1345,7 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
           allow="clipboard-read; clipboard-write; fullscreen"
         />
       )}
-      {splash && !ready && !gone && (
+      {!ready && !gone && (
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 grid place-items-center motion-safe:animate-in motion-safe:fade-in-0"

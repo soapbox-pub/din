@@ -63,7 +63,7 @@ granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made))
 
 Bridges with ports of their own: `fs`, `pty`, `assistant`, `indd`, `volumes`
 (`SYSTEM_PERMISSIONS` in `electron/din-apps.mts`, mirrored in
-`src/lib/dinApps.ts` and the SDK). A bridge's pushes reach the apps
+`src/lib/dinApps.ts` and `src/sdk/runtime.ts`). A bridge's pushes reach the apps
 granted it: a pty's output goes to the app that spawned it, and what main
 sends the shell on `fs:changed` or `assistant:*` goes to granted apps too.
 
