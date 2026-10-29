@@ -43,9 +43,10 @@ const SECURITY: Record<Security, { title: string; detail: string; warn: boolean 
     detail: 'Information you send to this site is private to it.',
     warn: false,
   },
+  // An nsite's popover leads with who publishes it instead.
   verified: {
-    title: 'Verified site',
-    detail: "Every file is checked against the site's signed manifest before it loads.",
+    title: 'nsite',
+    detail: '',
     warn: false,
   },
   exception: {
@@ -182,37 +183,48 @@ export function SiteInfoButton({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} className="w-80 space-y-4">
-        {identity.nsite && identity.icon ? (
+        {identity.nsite ? (
           <div className="flex items-center gap-3">
-            <AppIcon icon={identity.icon} className="size-8 shrink-0 rounded-md" />
-            <p className="min-w-0 truncate text-sm font-semibold">{site}</p>
+            {identity.icon ? (
+              <AppIcon icon={identity.icon} className="size-8 shrink-0 rounded-md" />
+            ) : (
+              <span className={cn('grid size-8 shrink-0 place-items-center rounded-md bg-secondary', tint)}>
+                <NsiteIcon className="size-4" />
+              </span>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{site}</p>
+              {identity.publisher && (
+                <p className="truncate text-xs text-muted-foreground">by {identity.publisher}</p>
+              )}
+            </div>
           </div>
         ) : (
           <p className="truncate text-sm font-semibold">{site}</p>
         )}
 
-        <div className="flex items-start gap-3">
-          <span
-            className={cn(
-              'grid size-8 shrink-0 place-items-center rounded-md',
-              warn ? 'bg-destructive/15 text-destructive' : cn('bg-secondary', tint ?? 'text-muted-foreground'),
-            )}
-          >
-            {warn ? (
-              <TriangleAlert className="size-4" aria-hidden />
-            ) : security === 'verified' ? (
-              <NsiteIcon className="size-4" />
-            ) : security === 'onion' ? (
-              <OnionIcon className="size-4" />
-            ) : (
-              <Lock className="size-4" aria-hidden />
-            )}
-          </span>
-          <div className="min-w-0 space-y-0.5">
-            <p className={cn('text-sm font-medium', warn && 'text-destructive')}>{title}</p>
-            <p className="text-xs text-muted-foreground">{detail}</p>
+        {security !== 'verified' && (
+          <div className="flex items-start gap-3">
+            <span
+              className={cn(
+                'grid size-8 shrink-0 place-items-center rounded-md',
+                warn ? 'bg-destructive/15 text-destructive' : cn('bg-secondary', tint ?? 'text-muted-foreground'),
+              )}
+            >
+              {warn ? (
+                <TriangleAlert className="size-4" aria-hidden />
+              ) : security === 'onion' ? (
+                <OnionIcon className="size-4" />
+              ) : (
+                <Lock className="size-4" aria-hidden />
+              )}
+            </span>
+            <div className="min-w-0 space-y-0.5">
+              <p className={cn('text-sm font-medium', warn && 'text-destructive')}>{title}</p>
+              <p className="text-xs text-muted-foreground">{detail}</p>
+            </div>
           </div>
-        </div>
+        )}
 
         {bridge && (
           <div className="space-y-2 border-t border-border/60 pt-4">

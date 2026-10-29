@@ -14,7 +14,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useNsitePublisher } from '@/hooks/useSiteIdentity';
 import { getBrowserBridge } from '@/lib/browser';
+import { canonicalHostOfUrl } from '@/lib/nsiteApps';
 
 interface Site {
   origin: string;
@@ -99,8 +101,6 @@ function SiteRows({
   onSet: (origin: string, allow: boolean | null) => void;
 }) {
   const { findAppIdForUrl, getApp } = useInstalledApps();
-  const { open } = useWindowActions();
-
   const rows = sites
     .map((site) => {
       const appId = findAppIdForUrl(`${site.origin}/`);
@@ -111,62 +111,84 @@ function SiteRows({
 
   return (
     <ul className="flex flex-col gap-2">
-      {rows.map(({ origin, allow, app, name }) => {
-        const id = `notif-site-${origin}`;
-        return (
-          <ContextMenu key={origin}>
-            <ContextMenuTrigger asChild>
-              <li className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
-                {app ? (
-                  <AppIcon icon={app.icon} className="size-8 shrink-0 rounded-md" />
-                ) : (
-                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-foreground/5">
-                    <Globe className="size-4 text-muted-foreground" aria-hidden />
-                  </span>
-                )}
-                <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
-                  <span className="block truncate text-sm">{name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {allow ? 'Allowed' : 'Blocked'} · {originLabel(origin)}
-                  </span>
-                </label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
-                  aria-label={`Forget ${name}`}
-                  title="Forget (asks again next time)"
-                  onClick={() => onSet(origin, null)}
-                >
-                  <RotateCcw className="size-4" aria-hidden />
-                </Button>
-                <Switch id={id} checked={allow} onCheckedChange={(on) => onSet(origin, on)} />
-              </li>
-            </ContextMenuTrigger>
-            <ContextMenuContent className="w-56">
-              {app && <ContextMenuItem onSelect={() => open(app.id)}>Open {name}</ContextMenuItem>}
-              {allow ? (
-                <ContextMenuItem onSelect={() => onSet(origin, false)}>
-                  <BellOff />
-                  Turn off notifications
-                </ContextMenuItem>
-              ) : (
-                <ContextMenuItem onSelect={() => onSet(origin, true)}>
-                  <Bell />
-                  Turn on notifications
-                </ContextMenuItem>
-              )}
-              <ContextMenuSeparator />
-              <ContextMenuItem onSelect={() => onSet(origin, null)}>
-                <RotateCcw />
-                Forget
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-        );
-      })}
+      {rows.map(({ origin, allow, app, name }) => (
+        <SiteRow key={origin} origin={origin} allow={allow} app={app} name={name} onSet={onSet} />
+      ))}
     </ul>
+  );
+}
+
+function SiteRow({
+  origin,
+  allow,
+  app,
+  name,
+  onSet,
+}: {
+  origin: string;
+  allow: boolean;
+  app: ReturnType<ReturnType<typeof useInstalledApps>['getApp']>;
+  name: string;
+  onSet: (origin: string, allow: boolean | null) => void;
+}) {
+  const { open } = useWindowActions();
+  const nsiteHost = canonicalHostOfUrl(`${origin}/`);
+  const publisher = useNsitePublisher(nsiteHost);
+  // An nsite's host is a key nobody can read; it goes by who publishes it.
+  const detail = nsiteHost ? publisher && `by ${publisher}` : originLabel(origin);
+  const id = `notif-site-${origin}`;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
+          {app ? (
+            <AppIcon icon={app.icon} className="size-8 shrink-0 rounded-md" />
+          ) : (
+            <span className="grid size-8 shrink-0 place-items-center rounded-md bg-foreground/5">
+              <Globe className="size-4 text-muted-foreground" aria-hidden />
+            </span>
+          )}
+          <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
+            <span className="block truncate text-sm">{name}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {allow ? 'Allowed' : 'Blocked'}
+              {detail && ` · ${detail}`}
+            </span>
+          </label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label={`Forget ${name}`}
+            title="Forget (asks again next time)"
+            onClick={() => onSet(origin, null)}
+          >
+            <RotateCcw className="size-4" aria-hidden />
+          </Button>
+          <Switch id={id} checked={allow} onCheckedChange={(on) => onSet(origin, on)} />
+        </li>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-56">
+        {app && <ContextMenuItem onSelect={() => open(app.id)}>Open {name}</ContextMenuItem>}
+        {allow ? (
+          <ContextMenuItem onSelect={() => onSet(origin, false)}>
+            <BellOff />
+            Turn off notifications
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuItem onSelect={() => onSet(origin, true)}>
+            <Bell />
+            Turn on notifications
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => onSet(origin, null)}>
+          <RotateCcw />
+          Forget
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
