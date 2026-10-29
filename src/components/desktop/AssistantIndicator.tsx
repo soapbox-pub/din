@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { Composer } from '@/shared/assistant/Composer';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
-import { FormCard, PermissionCard } from '@/shared/assistant/RequestCards';
+import { FormCard, PasswordCard, PermissionCard } from '@/shared/assistant/RequestCards';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import {
@@ -47,7 +47,7 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
 
   if (!getAssistantBridge() || !config.assistantEnabled) return null;
 
-  const waiting = pending.permissions.length + pending.forms.length;
+  const waiting = pending.permissions.length + pending.forms.length + pending.passwords.length;
   const working = ready && active.length > 0;
   const label =
     waiting > 0
@@ -142,13 +142,16 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {(pending.permissions.length > 0 || pending.forms.length > 0) && (
+      {(pending.permissions.length > 0 || pending.forms.length > 0 || pending.passwords.length > 0) && (
         <section aria-label="Waiting for you" className="space-y-2 p-3">
           {pending.permissions.map((request) => (
             <PermissionCard key={request.id} request={request} className="p-3" />
           ))}
           {pending.forms.map((form) => (
             <FormCard key={form.id} form={form} className="p-3" />
+          ))}
+          {pending.passwords.map((request) => (
+            <PasswordCard key={request.requestId} request={request} className="p-3" />
           ))}
         </section>
       )}

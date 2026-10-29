@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  KeyRound,
   Loader2,
   MessageCircleQuestion,
   ShieldQuestion,
@@ -16,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { useReplyForm, useReplyPermission } from '@/hooks/useAssistant';
+import { useAnswerPassword, useReplyForm, useReplyPermission } from '@/hooks/useAssistant';
 import {
   cleanAssistantError,
   describePermission,
@@ -24,6 +25,7 @@ import {
   type FormField,
   type FormInfo,
   type FormValue,
+  type PasswordRequest,
   type PermissionDecision,
   type PermissionRequest,
 } from '@/lib/assistant';
@@ -95,6 +97,113 @@ export function PermissionCard({ request, className }: { request: PermissionRequ
           Allow
         </Button>
       </div>
+    </section>
+  );
+}
+
+/**
+ * A command of the agent's run with sudo, waiting on the computer's password.
+ * It doesn't take the keyboard when it appears; `focusKey` changing (opening
+ * it from its notification) puts the cursor in it, and `onFocused` says so.
+ */
+export function PasswordCard({
+  request,
+  focusKey,
+  onFocused,
+  className,
+}: {
+  request: PasswordRequest;
+  focusKey?: number;
+  onFocused?: () => void;
+  className?: string;
+}) {
+  const answer = useAnswerPassword();
+  const { notify } = useAssistantHost();
+  const [password, setPassword] = useState('');
+  const [wrong, setWrong] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const id = useId();
+
+  const focused = useRef(onFocused);
+  useEffect(() => {
+    focused.current = onFocused;
+  });
+  useEffect(() => {
+    if (!focusKey) return;
+    input.current?.focus();
+    focused.current?.();
+  }, [focusKey]);
+
+  const send = (value: string | null) => {
+    setCancelling(value === null);
+    answer.mutate(
+      { request, password: value },
+      {
+        onSuccess: ({ ok }) => {
+          if (ok) return;
+          setWrong(true);
+          setPassword('');
+          input.current?.focus();
+        },
+        onError: (error) => notify({ title: 'Couldn’t answer', description: cleanAssistantError(error), destructive: true }),
+      },
+    );
+  };
+
+  return (
+    <section
+      aria-label="Password request"
+      className={cn('rounded-xl border border-primary/40 bg-primary/5 p-4 shadow-sm', className)}
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (password && !answer.isPending) send(password);
+        }}
+      >
+        <div className="flex items-start gap-3">
+          <KeyRound className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
+          <div className="min-w-0 flex-1 space-y-2">
+            <p className="font-medium text-foreground">The assistant wants to run this as administrator</p>
+            <p className="max-h-32 overflow-y-auto break-all rounded-md bg-muted/60 px-2 py-1 font-mono text-xs text-foreground">
+              {request.command}
+            </p>
+            <Label htmlFor={id} className="sr-only">
+              Password
+            </Label>
+            <Input
+              ref={input}
+              id={id}
+              type="password"
+              autoComplete="current-password"
+              placeholder="Password"
+              value={password}
+              aria-invalid={wrong || undefined}
+              aria-describedby={wrong ? `${id}-error` : undefined}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setWrong(false);
+              }}
+            />
+            {wrong && (
+              <p id={`${id}-error`} className="text-sm text-destructive" role="alert">
+                That password isn’t right.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" disabled={answer.isPending} onClick={() => send(null)}>
+            {answer.isPending && cancelling && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={!password || answer.isPending}>
+            {answer.isPending && !cancelling && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+            Allow
+          </Button>
+        </div>
+      </form>
     </section>
   );
 }

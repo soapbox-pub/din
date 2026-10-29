@@ -132,7 +132,7 @@ function fsBridge(t: NonNullable<Transport['system']>): FsBridge {
 
 function assistantBridge(t: NonNullable<Transport['system']>): AssistantBridge {
   const bridge: Record<string, unknown> = {};
-  for (const m of ['status', 'setEnabled', 'install', 'restart', 'recentModels', 'request']) {
+  for (const m of ['status', 'setEnabled', 'install', 'restart', 'recentModels', 'request', 'passwords', 'answerPassword']) {
     bridge[m] = (...args: unknown[]) => t.call('assistant', `assistant:${m}`, args);
   }
   bridge.onStatus = (cb: (status: unknown) => void) => t.on('assistant', 'assistant:status', (s) => cb(s));

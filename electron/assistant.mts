@@ -137,8 +137,13 @@ function findBinary(): string | null {
  * its place, fullscreen; the server outlives the embedded display apps get,
  * so it gets neither. Chromium's own edits come out too (see
  * native-display.mts's launchEnvironment), and the session bus goes back.
- * Without a display, sudo wouldn't ask for its password in Din by itself;
- * DinOS's sudo shim (DIN_SUDO_SHIM) has it ask (electron/askpass.mts).
+ *
+ * DISPLAY names an X display that isn't there instead, though: with no
+ * terminal, sudo only turns to its askpass helper - which asks for the
+ * password in the conversation (electron/askpass.mts) - when it's set, and X
+ * clients just fail to connect, as they would without it. An environment
+ * variable reaches every command the agent runs, through the shells that
+ * rebuild PATH.
  */
 async function serverEnvironment(): Promise<NodeJS.ProcessEnv> {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -157,7 +162,8 @@ async function serverEnvironment(): Promise<NodeJS.ProcessEnv> {
   const bus = await sessionBusAddress().catch(() => undefined);
   if (bus) env.DBUS_SESSION_BUS_ADDRESS = bus;
   else delete env.DBUS_SESSION_BUS_ADDRESS;
-  env.PATH = [process.env.DIN_SUDO_SHIM, INSTALL_DIR, env.PATH].filter(Boolean).join(path.delimiter);
+  env.DISPLAY = ':din-none';
+  env.PATH = [INSTALL_DIR, env.PATH].filter(Boolean).join(path.delimiter);
   return env;
 }
 

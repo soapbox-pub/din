@@ -133,7 +133,7 @@ export function SessionList({
   const directories = useMemo(() => [...new Set(listed.map((s) => s.location.directory))], [listed]);
   const mains = useMainCheckouts(directories);
   const waitingNow = useMemo(
-    () => new Set([...pending.permissions.map((p) => p.sessionID), ...pending.forms.map((f) => f.sessionID)]),
+    () => new Set([...pending.permissions, ...pending.forms, ...pending.passwords].map((request) => request.sessionID)),
     [pending],
   );
 

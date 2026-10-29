@@ -3,10 +3,11 @@
 sudo runs it (sudo.conf's `Path askpass`) when it needs the password and has
 no terminal to read it from, as for the Assistant's commands. It asks Din over
 $XDG_RUNTIME_DIR/din-askpass.sock (electron/askpass.mts) with its parent's
-pid, which is sudo's, and Din shows who's asking and for what. Din tries the
-password before answering, so only the right one comes back, and it's printed
-for sudo to read. Cancel, or no Din to ask, prints nothing and sudo fails as if
-nothing was typed.
+pid, which is sudo's, and the OpenCode session its command runs in, if any
+($OPENCODE_SESSION_ID): Din asks in that conversation, else in a dialog, and
+shows who's asking and for what. Din tries the password before answering, so
+only the right one comes back, and it's printed for sudo to read. Cancel, or
+no Din to ask, prints nothing and sudo fails as if nothing was typed.
 """
 
 import json
@@ -20,7 +21,7 @@ def main():
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.connect(os.path.join(runtime, "din-askpass.sock"))
-            sock.sendall((json.dumps({"pid": os.getppid()}) + "\n").encode())
+            sock.sendall((json.dumps({"pid": os.getppid(), "session": os.environ.get("OPENCODE_SESSION_ID")}) + "\n").encode())
             reply = sock.makefile("r", encoding="utf-8").readline()
         password = json.loads(reply).get("password")
     except (OSError, ValueError, AttributeError):

@@ -300,8 +300,8 @@ let
     '';
   };
 
-  # sudo's askpass helper: asks for the password in Din's dialog when sudo
-  # has no terminal to ask on (see the script, and electron/askpass.mts).
+  # sudo's askpass helper: asks for the password in Din when sudo has no
+  # terminal to ask on (see the script, and electron/askpass.mts).
   din-askpass = pkgs.writeShellApplication {
     name = "din-askpass";
     runtimeInputs = [ pkgs.python3 ];
@@ -309,23 +309,6 @@ let
       exec python3 ${./din-askpass.py} "$@"
     '';
   };
-
-  # sudo for the Assistant's commands (electron/assistant.mts). Without a
-  # terminal, sudo turns to its askpass helper by itself only when there's a
-  # display, and they're kept off Din's; -A asks it anyway. Not alongside -S,
-  # which sudo refuses, and which reads the password from stdin instead.
-  din-sudo-shim = pkgs.writeShellScriptBin "sudo" ''
-    if ! { true </dev/tty; } 2>/dev/null; then
-      ask=-A
-      for arg in "$@"; do
-        case $arg in
-          --stdin | -S* | -[!-]*S*) ask= ;;
-        esac
-      done
-      [ -n "$ask" ] && set -- "$ask" "$@"
-    fi
-    exec /run/wrappers/bin/sudo "$@"
-  '';
 
   # The boot and unlock screen: a Plymouth script theme (boot-screen/), with
   # the images it draws with made here. Its ImageDir is under /run, where
@@ -387,7 +370,7 @@ let
   # and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, the time zone's,
   # Tor's and the WiFi reset's helpers, and for checking the password
-  # Din's sudo dialog takes (electron/askpass.mts).
+  # Din takes for sudo (electron/askpass.mts).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils ]}:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
@@ -403,7 +386,6 @@ let
     export DIN_FWUPDMGR=${config.services.fwupd.package}/bin/fwupdmgr
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
-    export DIN_SUDO_SHIM=${din-sudo-shim}/bin
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
     export DIN_WHISPER_SERVER=${whisper}/bin/whisper-server
     export DIN_WHISPER_MODEL=${whisper-model}
@@ -641,8 +623,9 @@ in
   # Settings → Password can stop it asking: din-password puts a rule saying
   # so in /var/lib/din/sudoers.d, after checking the password.
   #
-  # Without a terminal to ask on, as for the Assistant's commands, sudo asks
-  # in Din's dialog (din-askpass).
+  # Without a terminal to ask on, sudo asks in Din (din-askpass): in the
+  # Assistant's conversation for the agent's commands, else from a
+  # notification.
   #
   # /etc/sudoers.d is for the computer's own rules, as on other distros.
   security.sudo.extraRules = [{

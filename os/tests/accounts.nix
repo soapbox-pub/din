@@ -2,7 +2,8 @@
 
 let
   # Din's end of din-askpass (electron/askpass.mts): answers each connection
-  # with the next reply named, and writes down the command sudo was running.
+  # with the next reply named, and writes down the command sudo was running
+  # and the conversation it came from.
   askpassStub = pkgs.writeText "askpass-stub.py" ''
     import json, socket, sys
     server = socket.socket(socket.AF_UNIX)
@@ -10,9 +11,9 @@ let
     server.listen()
     for answer in sys.argv[2:]:
         conn, _ = server.accept()
-        pid = json.loads(conn.makefile().readline())["pid"]
-        with open(f"/proc/{pid}/cmdline") as cmdline, open(sys.argv[1] + ".asked", "a") as asked:
-            asked.write(cmdline.read().replace("\0", " ").strip() + "\n")
+        request = json.loads(conn.makefile().readline())
+        with open(f"/proc/{request['pid']}/cmdline") as cmdline, open(sys.argv[1] + ".asked", "a") as asked:
+            asked.write(f"{request['session']} {cmdline.read().replace(chr(0), ' ').strip()}\n")
         conn.sendall((json.dumps({"password": answer} if answer != "-" else {}) + "\n").encode())
         conn.close()
   '';
@@ -159,11 +160,12 @@ pkgs.testers.runNixOSTest {
         as_din("mkdir -m 700 /tmp/rt")
         machine.succeed("su - din -c '${pkgs.python3}/bin/python3 ${askpassStub} /tmp/rt/din-askpass.sock hunter22 - >/dev/null 2>&1 &'")
         machine.wait_until_succeeds("test -S /tmp/rt/din-askpass.sock")
-        no_tty = "XDG_RUNTIME_DIR=/tmp/rt setsid -w sudo -A -k true </dev/null"
+        no_tty = "XDG_RUNTIME_DIR=/tmp/rt DISPLAY=:din-none OPENCODE_SESSION_ID=ses_test1 setsid -w sudo -k true </dev/null"
         as_din(no_tty)
         machine.fail("su - din -c " + shlex.quote(no_tty))
-        asked = machine.succeed("cat /tmp/rt/din-askpass.sock.asked").split("\n")[0]
-        assert asked.split(" ", 1)[0].endswith("sudo") and asked.endswith(" -A -k true"), asked
+        asked_session, command = machine.succeed("cat /tmp/rt/din-askpass.sock.asked").split("\n")[0].split(" ", 1)
+        assert asked_session == "ses_test1", asked_session
+        assert command.split(" ", 1)[0].endswith("sudo") and command.endswith(" -k true"), command
 
     with subtest("changing the password needs the old one"):
         machine.fail(f"su - din -c \"printf 'nope\\nbattery-staple\\n' | sudo -n {password} change\"")

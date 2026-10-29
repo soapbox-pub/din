@@ -20,7 +20,7 @@ import { ModelPicker } from '@/shared/assistant/ModelPicker';
 import { FileLinkBaseContext } from '@/shared/assistant/fileLinks';
 import { FindBar, type FindBarHandle } from '@/shared/assistant/FindBar';
 import { ForkDialog, type UserMessage } from '@/shared/assistant/ForkDialog';
-import { FormCard, PermissionCard } from '@/shared/assistant/RequestCards';
+import { FormCard, PasswordCard, PermissionCard } from '@/shared/assistant/RequestCards';
 import { SessionList } from '@/shared/assistant/SessionList';
 import { Transcript } from '@/shared/assistant/Transcript';
 import { useQuestionHandoff } from '@/shared/assistant/useQuestionHandoff';
@@ -57,6 +57,7 @@ import {
   useRenameSession,
   useSendPrompt,
   useSessionForms,
+  useSessionPasswords,
   useSessionInbox,
   useSessionMessages,
   useSessionPermissions,
@@ -199,7 +200,9 @@ function initialTabs(sessionID: string | null, directory: string | null): TabsSt
  * the window and restarts (lib/assistantTabs). Only the selected tab is
  * mounted: each conversation polls the server while it is. Launched with
  * `sessionID` (and a fresh `nonce`) in its params, it selects that
- * conversation's tab; with `directory` instead (Files' "Open in Assistant"),
+ * conversation's tab (and with `focusPassword` equal to the nonce, puts the
+ * cursor in its sudo password request); with `directory` instead (Files'
+ * "Open in Assistant"),
  * it opens a new conversation in that folder. One window: launching it again
  * comes through `din.app.onLaunch`.
  */
@@ -212,11 +215,23 @@ export function Assistant() {
 }
 
 /** What a launch asks for: a conversation, or a new one (in a folder). */
-function launchRequest({ params }: LaunchContext): { sessionID: string | null; directory: string | null } {
+function launchRequest({ params }: LaunchContext): {
+  sessionID: string | null;
+  directory: string | null;
+  focusPassword: boolean;
+} {
   return {
     sessionID: typeof params.sessionID === 'string' ? params.sessionID : null,
     directory: typeof params.directory === 'string' ? params.directory : null,
+    // Params are merged into the last launch's, so only this launch's nonce counts.
+    focusPassword: params.focusPassword !== undefined && params.focusPassword === params.nonce,
   };
+}
+
+/** A password request to put the cursor in once it's shown. */
+interface PasswordFocus {
+  sessionID: string;
+  key: number;
 }
 
 function AssistantWindow() {
@@ -229,6 +244,10 @@ function AssistantWindow() {
     return initialTabs(sessionID, directory);
   });
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  const [passwordFocus, setPasswordFocus] = useState<PasswordFocus | null>(() => {
+    const { sessionID, focusPassword } = launchRequest(din.app.launch);
+    return sessionID && focusPassword ? { sessionID, key: 1 } : null;
+  });
   const [closed, setClosed] = useState<AssistantTab[]>([]);
   // The conversation whose title is being edited (Rename, or /rename).
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -247,7 +266,8 @@ function AssistantWindow() {
   useEffect(
     () =>
       din.app.onLaunch((launch) => {
-        const { sessionID, directory } = launchRequest(launch);
+        const { sessionID, directory, focusPassword } = launchRequest(launch);
+        setPasswordFocus((prev) => (sessionID && focusPassword ? { sessionID, key: (prev?.key ?? 0) + 1 } : null));
         setState((prev) => (sessionID ? showSession(prev, sessionID) : placeTab(prev, newAssistantTab(null, directory))));
       }),
     [din],
@@ -288,7 +308,9 @@ function AssistantWindow() {
 
   const { data: running = [] } = useActiveSessions();
   const pending = usePendingRequests();
-  const waiting = new Set([...pending.permissions.map((p) => p.sessionID), ...pending.forms.map((f) => f.sessionID)]);
+  const waiting = new Set(
+    [...pending.permissions, ...pending.forms, ...pending.passwords].map((request) => request.sessionID),
+  );
   // Stable while nothing shown changes, so the title bar isn't republished on every render.
   const infoKey = JSON.stringify(
     tabs.map((tab): TabInfo => {
@@ -565,6 +587,8 @@ function AssistantWindow() {
             key={activeTab.sessionID}
             ref={conversationRef}
             sessionID={activeTab.sessionID}
+            passwordFocus={passwordFocus?.sessionID === activeTab.sessionID ? passwordFocus.key : undefined}
+            onPasswordFocused={() => setPasswordFocus(null)}
             onRename={() => setRenaming(activeTab.sessionID)}
             onNew={startNew}
             onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
@@ -622,12 +646,17 @@ interface ConversationHandle {
 function Conversation({
   ref,
   sessionID,
+  passwordFocus,
+  onPasswordFocused,
   onRename,
   onNew,
   onFork,
 }: {
   ref?: Ref<ConversationHandle>;
   sessionID: string;
+  /** Put the cursor in its password request, when it has one (a notification asked to). */
+  passwordFocus?: number;
+  onPasswordFocused: () => void;
   /** Edit its title in its tab (/rename on its own). */
   onRename: () => void;
   onNew: (directory?: string) => void;
@@ -638,6 +667,7 @@ function Conversation({
   const { data: transcript, isLoading } = useSessionMessages(sessionID);
   const { data: permissions = [] } = useSessionPermissions(sessionID);
   const { data: forms = [] } = useSessionForms(sessionID);
+  const passwords = useSessionPasswords(sessionID);
   const composerRef = useQuestionHandoff(forms.length > 0);
   const { data: queued } = useSessionInbox(sessionID);
   const { data: active = [] } = useActiveSessions();
@@ -691,7 +721,7 @@ function Conversation({
       el.scrollTop = restoreTop.current;
       restoreTop.current = null;
     }
-  }, [messages, queued, permissions.length, forms.length, running]);
+  }, [messages, queued, permissions.length, forms.length, passwords.length, running]);
 
   useImperativeHandle(ref, () => ({
     find: () => {
@@ -815,6 +845,14 @@ function Conversation({
         ))}
         {forms.map((form) => (
           <FormCard key={form.id} form={form} />
+        ))}
+        {passwords.map((request, i) => (
+          <PasswordCard
+            key={request.requestId}
+            request={request}
+            focusKey={i === 0 ? passwordFocus : undefined}
+            onFocused={onPasswordFocused}
+          />
         ))}
         <div ref={composerRef} hidden={forms.length > 0}>
           <Composer

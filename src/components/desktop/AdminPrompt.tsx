@@ -12,6 +12,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getAskpassBridge, type AskpassRequest } from '@/lib/askpass';
+import { closeNotification, notify } from '@/lib/notificationCenter';
 
 interface AdminPasswordDialogProps {
   open: boolean;
@@ -121,29 +122,57 @@ export function AdminPasswordDialog({
 
 /**
  * Asks for the computer's password when sudo needs it and has no terminal to
- * ask on, as for the Assistant's commands (electron/askpass.mts). One request
- * at a time; a wrong password stays here, and only the right one goes to sudo.
+ * ask on (electron/askpass.mts), for programs other than the Assistant, which
+ * asks in its conversation. Each request is a notification first, so nothing
+ * takes the keyboard while the user is typing elsewhere; clicking it opens
+ * the dialog. A wrong password stays there, and only the right one goes to
+ * sudo.
  *
  * Renders nothing outside the Electron shell.
  */
 export function AdminPromptHost() {
-  const [queue, setQueue] = useState<AskpassRequest[]>([]);
+  const [requests, setRequests] = useState<AskpassRequest[]>([]);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const notifications = useRef(new Map<number, string>());
 
   useEffect(() => {
     const bridge = getAskpassBridge();
     if (!bridge) return;
-    const offRequest = bridge.onRequest((request) => setQueue((q) => [...q, request]));
-    const offCancel = bridge.onCancel((requestId) =>
-      setQueue((q) => q.filter((r) => r.requestId !== requestId)),
-    );
+    const shown = notifications.current;
+    const offRequest = bridge.onRequest((request) => {
+      setRequests((q) => [...q, request]);
+      shown.set(
+        request.requestId,
+        notify({
+          source: { name: 'Din', icon: ShieldCheck },
+          title: `${request.requester} needs your password`,
+          body: request.command,
+          urgency: 'critical',
+          replaceKey: `askpass:${request.requestId}`,
+          onActivate: () => setOpenId(request.requestId),
+        }),
+      );
+    });
+    const offCancel = bridge.onCancel((requestId) => {
+      setRequests((q) => q.filter((r) => r.requestId !== requestId));
+      const id = shown.get(requestId);
+      if (id) closeNotification(id, 'closed');
+      shown.delete(requestId);
+    });
     return () => {
       offRequest();
       offCancel();
     };
   }, []);
 
-  const current = queue[0] ?? null;
-  const done = (requestId: number) => setQueue((q) => q.filter((r) => r.requestId !== requestId));
+  const current = requests.find((r) => r.requestId === openId) ?? null;
+  const done = (requestId: number) => {
+    setRequests((q) => q.filter((r) => r.requestId !== requestId));
+    setOpenId(null);
+    const id = notifications.current.get(requestId);
+    if (id) closeNotification(id, 'closed');
+    notifications.current.delete(requestId);
+  };
 
   return (
     <AdminPasswordDialog

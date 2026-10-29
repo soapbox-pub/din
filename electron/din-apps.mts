@@ -34,7 +34,7 @@ const APP_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const SYSTEM_PERMISSIONS = {
   fs: /^fs:[a-zA-Z]+$/,
   pty: /^pty:(spawn|write|resize|kill|release|adopt)$/,
-  assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request)$/,
+  assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request|passwords|answerPassword)$/,
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|eject)$/,
 } as const;

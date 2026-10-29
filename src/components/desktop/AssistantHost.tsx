@@ -49,7 +49,8 @@ const SOURCE = { appId: ASSISTANT_APP_ID, name: 'Assistant' };
  *   Assistant), which starts OpenCode's server and follows its events.
  * - Keeps the assistant's queries current from those events.
  * - Notifies when the agent needs an answer (a permission request, with
- *   Allow and Deny right on the notification, or a question) - unless the
+ *   Allow and Deny right on the notification, a question, or the password
+ *   for a command it runs with sudo) - unless the
  *   Assistant is the window in front - and when a conversation started here
  *   finishes while the Assistant isn't open (when it is, it says so itself:
  *   src/apps/assistant).
@@ -99,17 +100,22 @@ function useIsWatching(): (sessionID: string) => boolean {
 
 function useAssistantNotifications() {
   const ready = useAssistantReady();
-  const { permissions, forms } = usePendingRequests();
+  const { permissions, forms, passwords } = usePendingRequests();
   const { open } = useWindowActions();
   const reply = useReplyPermission();
   const queryClient = useQueryClient();
   const isWatching = useIsWatching();
 
   const show = (sessionID: string) => open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce: Date.now() });
+  // A password is typed in the conversation, not the notification: there, with the cursor in it.
+  const showPassword = (sessionID: string) => {
+    const nonce = Date.now();
+    open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce, focusPassword: nonce });
+  };
   // The latest of each for callbacks that outlive a render.
-  const latest = useRef({ show, reply: reply.mutate, isWatching });
+  const latest = useRef({ show, showPassword, reply: reply.mutate, isWatching });
   useEffect(() => {
-    latest.current = { show, reply: reply.mutate, isWatching };
+    latest.current = { show, showPassword, reply: reply.mutate, isWatching };
   });
 
   // Permission requests and questions: one notification each, gone once
@@ -146,6 +152,18 @@ function useAssistantNotifications() {
         }),
       );
     }
+    for (const request of passwords) {
+      announce(`password:${request.requestId}`, request.sessionID, () =>
+        notify({
+          source: SOURCE,
+          title: 'The assistant needs your password',
+          body: request.command,
+          urgency: 'critical',
+          replaceKey: `assistant:password:${request.requestId}`,
+          onActivate: () => latest.current.showPassword(request.sessionID),
+        }),
+      );
+    }
     for (const [key, notificationId] of shown.current) {
       if (pending.has(key)) continue;
       if (notificationId) closeNotification(notificationId, 'closed');
@@ -170,7 +188,7 @@ function useAssistantNotifications() {
         },
       });
     }
-  }, [ready, permissions, forms]);
+  }, [ready, permissions, forms, passwords]);
 
   // A conversation Din follows finishing, or failing, out of sight.
   useEffect(

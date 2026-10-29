@@ -13,6 +13,7 @@ import {
   type ModelInfo,
   type ModelRef,
   type PermissionDecision,
+  type PasswordRequest,
   type PermissionRequest,
   type PromptAttachment,
   type SessionInfo,
@@ -39,6 +40,7 @@ export const assistantKeys = {
   permissions: (id: string) => ['assistant', 'permissions', id] as const,
   forms: (id: string) => ['assistant', 'forms', id] as const,
   inbox: (id: string) => ['assistant', 'inbox', id] as const,
+  passwords: ['assistant', 'passwords'] as const,
   models: ['assistant', 'models'] as const,
   agents: ['assistant', 'agents'] as const,
   commands: (directory: string) => ['assistant', 'commands', directory] as const,
@@ -153,6 +155,10 @@ export function useAssistantEventSync() {
     const off = subscribeAssistantEvents((event) => {
       if (event.type === 'din.connected' || event.type === 'din.disconnected') {
         void queryClient.invalidateQueries({ queryKey: assistantKeys.all });
+        return;
+      }
+      if (event.type === 'din.passwords') {
+        void queryClient.invalidateQueries({ queryKey: assistantKeys.passwords });
         return;
       }
       const { sessionID } = event;
@@ -293,11 +299,31 @@ export function useSessionInbox(sessionID: string | null) {
   });
 }
 
+/** sudo's password requests from the agent's commands, in every conversation. */
+export function usePasswordRequests() {
+  return useQuery({
+    queryKey: assistantKeys.passwords,
+    queryFn: () => requireBridge().passwords(),
+    enabled: !!getAssistantBridge(),
+    staleTime: Infinity,
+  });
+}
+
+/** One conversation's password requests. */
+export function useSessionPasswords(sessionID: string | null): PasswordRequest[] {
+  const { data } = usePasswordRequests();
+  return useMemo(() => (data ?? []).filter((p) => p.sessionID === sessionID), [data, sessionID]);
+}
+
 /**
  * Everything the agent is waiting on the user for, across the sessions
- * working now: permission requests and questions (forms).
+ * working now: permission requests, questions (forms) and sudo's passwords.
  */
-export function usePendingRequests(): { permissions: PermissionRequest[]; forms: FormInfo[] } {
+export function usePendingRequests(): {
+  permissions: PermissionRequest[];
+  forms: FormInfo[];
+  passwords: PasswordRequest[];
+} {
   const ready = useAssistantReady();
   const { data: active = [] } = useActiveSessions();
   const permissions = useQueries({
@@ -318,8 +344,11 @@ export function usePendingRequests(): { permissions: PermissionRequest[]; forms:
     })),
     combine: flatten<FormInfo>,
   });
-  return useMemo(() => ({ permissions, forms }), [permissions, forms]);
+  const { data: passwords = NO_PASSWORDS } = usePasswordRequests();
+  return useMemo(() => ({ permissions, forms, passwords }), [permissions, forms, passwords]);
 }
+
+const NO_PASSWORDS: PasswordRequest[] = [];
 
 /** One list from many queries' (structurally shared, so stable while unchanged). */
 function flatten<T>(results: { data?: T[] }[]): T[] {
@@ -781,6 +810,18 @@ export function useReplyPermission() {
     onSuccess: (_data, { request }) => {
       void queryClient.invalidateQueries({ queryKey: assistantKeys.permissions(request.sessionID) });
       void queryClient.invalidateQueries({ queryKey: assistantKeys.messages(request.sessionID) });
+    },
+  });
+}
+
+/** Answer a password request: `ok` is false when the password isn't right. */
+export function useAnswerPassword() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ request, password }: { request: PasswordRequest; password: string | null }) =>
+      requireBridge().answerPassword(request.requestId, password),
+    onSuccess: ({ ok }) => {
+      if (ok) void queryClient.invalidateQueries({ queryKey: assistantKeys.passwords });
     },
   });
 }

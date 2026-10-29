@@ -33,6 +33,14 @@ export interface AssistantEvent {
   data?: Record<string, unknown>;
 }
 
+/** A command of the agent's run with sudo, waiting on the computer's password (electron/askpass.mts). */
+export interface PasswordRequest {
+  requestId: number;
+  sessionID: string;
+  /** The sudo command line. */
+  command: string;
+}
+
 type Reply = { ok: true; status: number; data: unknown } | { ok: false; status: number; message: string };
 
 export interface AssistantBridge {
@@ -42,6 +50,10 @@ export interface AssistantBridge {
   restart(): Promise<void>;
   recentModels(): Promise<{ providerID: string; modelID: string }[]>;
   request(method: string, path: string, body?: unknown): Promise<Reply>;
+  /** sudo's password requests from the agent's commands. */
+  passwords(): Promise<PasswordRequest[]>;
+  /** The password, or null to cancel. `ok` is false when the password isn't right. */
+  answerPassword(requestId: number, password: string | null): Promise<{ ok: boolean }>;
   onStatus(callback: (status: AssistantStatus) => void): () => void;
   onEvent(callback: (event: AssistantEvent) => void): () => void;
 }

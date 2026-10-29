@@ -115,8 +115,9 @@ login keyring too, and any GPG key whose passphrase is the same, so signing
 commits doesn't ask (`os/din-gpg.py`). Without encryption there's no password,
 and `sudo` doesn't ask. Settings → Password changes it everywhere at once
 (`os/din-password.py`, disk first), and can stop `sudo` asking for it. With no
-terminal to ask on, as for the Assistant's commands, `sudo` asks in Din's own
-dialog (`os/din-askpass.py`, `electron/askpass.mts`).
+terminal to ask on, `sudo` asks in Din (`os/din-askpass.py`,
+`electron/askpass.mts`): the agent's commands in the Assistant's
+conversation, others from a notification.
 `os/tests/accounts.nix`
 checks all of this in a VM: `nix build ./os#checks.x86_64-linux.accounts`.
 

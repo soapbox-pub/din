@@ -1,16 +1,23 @@
-// sudo's password, asked for in Din (window.dinos.askpass, for the desktop's
-// AdminPromptHost).
+// sudo's password, asked for in Din: in the Assistant's conversation when the
+// agent's command asks (window.dinos.assistant / din.system.assistant's
+// passwords and answerPassword), else from a notification that opens the
+// desktop's dialog (window.dinos.askpass, AdminPromptHost). Nothing pops up
+// and takes the keyboard on its own.
 //
-// When sudo needs the password and has no terminal to read it from, as for
-// the Assistant's commands, it runs its askpass helper, os/din-askpass.py
-// (DinOS names it in sudo.conf). The helper connects to
-// $XDG_RUNTIME_DIR/din-askpass.sock with its parent's pid, sudo's, and this
-// module reads what sudo was asked to run, and who asked, from /proc for the
-// desktop to show. The password typed is tried with sudo before it's
-// answered, so a wrong one stays in the dialog and only the right one goes
-// back to the helper. Cancel, the helper going away (its command was
-// stopped), or two minutes without an answer send nothing back, and sudo
-// fails as though nothing was typed.
+// When sudo needs the password and has no terminal to read it from, it runs
+// its askpass helper, os/din-askpass.py (DinOS names it in sudo.conf). The
+// helper connects to $XDG_RUNTIME_DIR/din-askpass.sock with its parent's pid,
+// sudo's, and the OpenCode session its command runs in, if any
+// ($OPENCODE_SESSION_ID, which sudo passes on). This module reads what sudo
+// was asked to run, and who asked, from /proc for the user to see. The
+// password typed is tried with sudo before it's answered, so a wrong one
+// stays where it was typed and only the right one goes back to the helper.
+// Cancel, the helper going away (its command was stopped), or ten minutes
+// without an answer send nothing back, and sudo fails as though nothing was
+// typed.
+//
+// The session id is the asker's word, so a program could put its request in
+// a conversation; it gets no more than it would from the dialog.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -30,9 +37,19 @@ export interface AskpassRequest {
   command: string;
 }
 
+/** A password the Assistant's conversation is waiting on (src/lib/assistant.ts). */
+export interface AssistantPasswordRequest {
+  requestId: number;
+  sessionID: string;
+  command: string;
+}
+
 interface Pending {
   socket: net.Socket;
   timer: NodeJS.Timeout;
+  request: AskpassRequest;
+  /** The conversation it's asked in, or null for the dialog. */
+  sessionID: string | null;
 }
 
 interface Options {
@@ -43,8 +60,9 @@ interface Options {
 
 const MAX_REQUEST = 4096;
 const MAX_PASSWORD = 4096;
-const TIMEOUT_MS = 2 * 60_000;
+const TIMEOUT_MS = 10 * 60_000;
 const CHECK_TIMEOUT_MS = 15_000;
+const SESSION_ID = /^ses_[A-Za-z0-9]{1,64}$/;
 /** Programs that only pass a command on: the one that asked is above them. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'env', 'timeout', 'nohup']);
 
@@ -96,32 +114,38 @@ function reply(socket: net.Socket, password: string | null): void {
   socket.end(`${JSON.stringify(password === null ? {} : { password })}\n`);
 }
 
-function cancel(requestId: number): void {
-  const request = pending.get(requestId);
-  if (!request) return;
-  pending.delete(requestId);
-  clearTimeout(request.timer);
-  if (!request.socket.destroyed) reply(request.socket, null);
-  options?.sendToShell('askpass:cancel', { requestId });
+/** Tell the Assistant its password requests changed; it asks for the list again. */
+function passwordsChanged(): void {
+  options?.sendToShell('assistant:event', { type: 'din.passwords' });
 }
 
-function ask(socket: net.Socket, pid: unknown): void {
+function settle(requestId: number, password: string | null): void {
+  const entry = pending.get(requestId);
+  if (!entry) return;
+  pending.delete(requestId);
+  clearTimeout(entry.timer);
+  if (!entry.socket.destroyed) reply(entry.socket, password);
+  if (entry.sessionID) passwordsChanged();
+  else options?.sendToShell('askpass:cancel', { requestId });
+}
+
+function ask(socket: net.Socket, pid: unknown, session: unknown): void {
   const args = typeof pid === 'number' && Number.isInteger(pid) && pid > 1 ? argv(pid) : [];
   if (path.basename(args[0] ?? '') !== 'sudo' || !options?.hasShell()) {
     reply(socket, null);
     return;
   }
   const requestId = nextId++;
-  const timer = setTimeout(() => cancel(requestId), TIMEOUT_MS);
-  pending.set(requestId, { socket, timer });
-  socket.on('close', () => cancel(requestId));
   const request: AskpassRequest = {
     requestId,
     requester: requesterOf(pid as number),
-    // The sudo shim's -A is ours, not theirs.
-    command: ['sudo', ...args.slice(1).filter((arg, i) => !(i === 0 && arg === '-A'))].map(quote).join(' '),
+    command: ['sudo', ...args.slice(1)].map(quote).join(' '),
   };
-  options.sendToShell('askpass:request', request);
+  const sessionID = typeof session === 'string' && SESSION_ID.test(session) ? session : null;
+  pending.set(requestId, { socket, request, sessionID, timer: setTimeout(() => settle(requestId, null), TIMEOUT_MS) });
+  socket.on('close', () => settle(requestId, null));
+  if (sessionID) passwordsChanged();
+  else options.sendToShell('askpass:request', request);
 }
 
 /** Whether `password` is the one sudo takes. */
@@ -139,6 +163,23 @@ function check(password: string): Promise<boolean> {
   });
 }
 
+/** Answer a request with the password, or null to cancel. `ok` is false for a wrong password. */
+async function answer(entry: Pending | undefined, password: unknown): Promise<{ ok: boolean }> {
+  if (!entry) return { ok: true };
+  const { requestId } = entry.request;
+  if (password === null) {
+    settle(requestId, null);
+    return { ok: true };
+  }
+  if (typeof password !== 'string' || !password || password.length > MAX_PASSWORD || /[\n\r\0]/.test(password)) {
+    return { ok: false };
+  }
+  if (!(await check(password))) return { ok: false };
+  // It may have gone while the password was tried.
+  if (pending.get(requestId) === entry) settle(requestId, password);
+  return { ok: true };
+}
+
 function accept(socket: net.Socket): void {
   let buffer = '';
   let started = false;
@@ -153,13 +194,14 @@ function accept(socket: net.Socket): void {
       return;
     }
     started = true;
-    let request: unknown;
+    let request: { pid?: unknown; session?: unknown } = {};
     try {
-      request = JSON.parse(buffer.slice(0, newline));
+      const parsed: unknown = JSON.parse(buffer.slice(0, newline));
+      if (typeof parsed === 'object' && parsed !== null) request = parsed;
     } catch {
-      request = null;
+      // Answered as nothing, below.
     }
-    ask(socket, typeof request === 'object' && request !== null ? (request as { pid?: unknown }).pid : null);
+    ask(socket, request.pid, request.session);
   });
 }
 
@@ -191,27 +233,28 @@ async function listen(): Promise<void> {
   });
 }
 
+function forAssistant(requestId: unknown): Pending | undefined {
+  const entry = typeof requestId === 'number' ? pending.get(requestId) : undefined;
+  return entry?.sessionID ? entry : undefined;
+}
+
 /** Answer sudo's askpass helper. Call once the app is ready. */
 export function registerAskpass(opts: Options): void {
   options = opts;
-  ipcMain.handle('askpass:answer', async (event, requestId: unknown, password: unknown) => {
+  ipcMain.handle('askpass:answer', (event, requestId: unknown, password: unknown) => {
     opts.assertShellSender(event);
-    const request = typeof requestId === 'number' ? pending.get(requestId) : undefined;
-    if (!request) return { ok: true };
-    if (password === null) {
-      cancel(requestId as number);
-      return { ok: true };
-    }
-    if (typeof password !== 'string' || !password || password.length > MAX_PASSWORD || /[\n\r\0]/.test(password)) {
-      return { ok: false };
-    }
-    if (!(await check(password))) return { ok: false };
-    // It may have been cancelled while the password was tried.
-    if (pending.get(requestId as number) !== request) return { ok: true };
-    pending.delete(requestId as number);
-    clearTimeout(request.timer);
-    reply(request.socket, password);
-    return { ok: true };
+    const entry = typeof requestId === 'number' ? pending.get(requestId) : undefined;
+    return answer(entry?.sessionID ? undefined : entry, password);
+  });
+  ipcMain.handle('assistant:passwords', (event): AssistantPasswordRequest[] => {
+    opts.assertShellSender(event);
+    return [...pending.values()].flatMap(({ request, sessionID }) =>
+      sessionID ? [{ requestId: request.requestId, sessionID, command: request.command }] : [],
+    );
+  });
+  ipcMain.handle('assistant:answerPassword', (event, requestId: unknown, password: unknown) => {
+    opts.assertShellSender(event);
+    return answer(forAssistant(requestId), password);
   });
   void listen().catch((error: unknown) => console.error('askpass: listening:', error));
 }

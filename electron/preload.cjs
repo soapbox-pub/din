@@ -1819,6 +1819,17 @@ expose('assistant', {
    */
   request: (method, path, body) => ipcRenderer.invoke('assistant:request', method, path, body),
 
+  /** sudo's password requests from the agent's commands (electron/askpass.mts). */
+  passwords: () => ipcRenderer.invoke('assistant:passwords'),
+
+  /**
+   * Answer one with the password, or null to cancel. Resolves `{ ok: false }`
+   * when the password isn't right.
+   * @param {number} requestId
+   * @param {string | null} password
+   */
+  answerPassword: (requestId, password) => ipcRenderer.invoke('assistant:answerPassword', requestId, password),
+
   /**
    * Subscribe to status changes. Returns an unsubscribe fn.
    * @param {(status: unknown) => void} callback

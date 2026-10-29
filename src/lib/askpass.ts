@@ -1,8 +1,9 @@
 /**
  * Typed access to sudo's password requests (`window.dinos.askpass`, see
  * electron/preload.cjs + electron/askpass.mts): sudo asking for the
- * computer's password with no terminal to ask on, as for the Assistant's
- * commands. `AdminPromptHost` shows each one. Absent in a plain browser.
+ * computer's password with no terminal to ask on, for a program other than
+ * the Assistant (whose commands ask in their conversation). `AdminPromptHost`
+ * shows each one. Absent in a plain browser.
  */
 
 export interface AskpassRequest {
