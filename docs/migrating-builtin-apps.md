@@ -2,7 +2,7 @@
 
 > **Status: under way.** Moved: Calculator, Paint, Word Processor,
 > Spreadsheet, Slides, Photo Editor, Vector Editor, Publisher, Text Editor,
-> Terminal, Media Player, Preview, Assistant, CAD.
+> Terminal, Media Player, Preview, Assistant, CAD, Files.
 
 Each app moves in its own commit: its folder goes from
 `src/components/desktop/apps/` to `src/apps/<id>/`, it gets an
@@ -45,11 +45,11 @@ replaced as below. `src/apps/calculator/` is the model.
 | `files/dnd.ts` (`startFileDrag`, `activeFileDrag`, `FILES_MIME`) | `din.drag.startFiles`, `din.drag.current`, `din.drag.accept` |
 | `tabTransfer` | `din.drag.startTab`, `onTabDetached` |
 | `useToast()` / `notify()` | `din.notifications.show(…, { transient })` |
-| `useDesktopBackground().setBackground` | `wallpaper` permission (API to come with Files/Preview) |
+| `useDesktopBackground().setBackground` | `din.desktop.setWallpaper(handle)` with `wallpaper` |
 | `useOpenUrl()` | `din.app.openUrl(url)` |
 | `useAppContext().config` (theme, relays) | `din.theme`, `din.account` |
 | `useCurrentUser`, `useNostrPublish` | `window.nostr` (permission `nostr`) with the app's own Nostrify pool |
-| `registerMediaSource` (now playing) | `media-session` permission (API to come with Media Player) |
+| `registerMediaSource` (now playing) | `din.media.setSession` / `onAction` with `media-session` |
 | `registerDictationTarget` | Nothing: dictation reaches a guest's focused field with `insertText`, as for web pages, and that includes xterm's, so Terminal needed no hook. An app's own mic button uses `din.dictation` |
 | `useLocalStorage` | Unchanged; it's the app's own origin now. List old keys in `migrateStorage` |
 
@@ -101,7 +101,7 @@ a time.
 | 5 | Preview ✓ | Launch files, icon, wallpaper |
 | 6 | Media Player ✓ | `frame: 'none'`, transparency, shapes, the menu bar, media session |
 | 7 | Text Editor, Terminal ✓ | `custom` headers with tabs, `fs` and `pty`, tab drags |
-| 8 | Files | Drag sources, the file clipboard, `wallpaper` |
+| 8 | Files ✓ | Drag sources, the file clipboard, `wallpaper` |
 | 9 | CAD ✓, Assistant ✓, App Store | The `assistant` and `account`/`nostr` permissions |
 | 10 | System Monitor, Settings | The most of `window.dinos`; last, while their design settles |
 
@@ -133,6 +133,10 @@ Behavior that changed when apps moved, to fix or to live with:
   let tab strips settle at once.
 - **Media Player's play key while stopped** no longer starts it: a session
   can't yet say "play me when idle" without being listed.
+- **Files' undo history** lasts while a Files window is open (the windows
+  share it over a BroadcastChannel), not as long as the desktop runs.
+  Dropping a torn-off tab onto another Files window picks the window by
+  position, so overlapping windows can take it in the wrong order.
 - **The Assistant's notifications are approximate.** The desktop can't
   tell which conversation the app shows, so it holds back requests while
   the Assistant is in front and "done" notifications while it's open; a

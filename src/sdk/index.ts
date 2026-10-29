@@ -536,6 +536,10 @@ async function start(): Promise<Din> {
       const handles = list.map(idOf);
       beginDrag(e, (token) => request('drag.startFiles', { token, handles }), label, list.map((f) => f.name).join('\n'));
     },
+    startPaths(e, paths, label) {
+      need('fs');
+      beginDrag(e, (token) => request('drag.startPaths', { token, paths }), label, paths.join('\n'));
+    },
     startTab(e, tabType, tabState, label) {
       beginDrag(e, (token) => request('drag.startTab', { token, tabType, state: tabState }), label, label);
     },

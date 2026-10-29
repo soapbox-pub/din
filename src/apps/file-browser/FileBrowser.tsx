@@ -41,7 +41,7 @@ import { useVolumes } from '@/hooks/useVolumes';
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
 import { isWindowsProgram } from '@/lib/nativeApps';
 import { moveItem, type DragPoint } from '@/hooks/useDragReorder';
-import type { Din, DinFileHandle, LaunchContext } from '@/sdk';
+import type { Din, LaunchContext } from '@/sdk';
 import { useDin, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
 import type { TabTransfer } from '@/shared/TabContextMenu';
@@ -167,29 +167,6 @@ function isPlacement(value: unknown): value is { x: number; y: number; width: nu
 async function openWithPaths(din: Din, appId: string, paths: string[], params: Record<string, unknown> = {}): Promise<void> {
   const handles = await Promise.all(paths.map((p) => din.files.fromPath(p)));
   await din.app.open(appId, params, handles);
-}
-
-/** A drag needs handles the moment it starts; fetch them ahead for paths that may be dragged. */
-const handleCache = new Map<string, Promise<DinFileHandle | null>>();
-const readyHandles = new Map<string, DinFileHandle>();
-
-function prefetchHandles(din: Din, paths: string[]): void {
-  for (const path of paths) {
-    if (handleCache.has(path)) continue;
-    handleCache.set(
-      path,
-      din.files.fromPath(path).then(
-        (handle) => {
-          readyHandles.set(path, handle);
-          return handle;
-        },
-        () => {
-          handleCache.delete(path);
-          return null;
-        },
-      ),
-    );
-  }
 }
 
 /**
@@ -1196,16 +1173,13 @@ function FileBrowserTab({
 
   const onItemPointerDown = useCallback(
     (name: string, e: React.MouseEvent) => {
-      // A drag may follow, which leaves the window only with handles, and
-      // has to have them by the time it starts.
-      prefetchHandles(din, pathsOf(selected.has(name) ? selectedNames : [name]));
       if (renaming !== null && renaming !== name) setRenaming(null);
       if (e.shiftKey) selectRange(name, e.ctrlKey || e.metaKey);
       else if (e.ctrlKey || e.metaKey) setCursor(name);
       else if (!selected.has(name)) selectOnly(name);
       else setCursor(name);
     },
-    [din, pathsOf, selectedNames, renaming, selected, selectRange, selectOnly],
+    [renaming, selected, selectRange, selectOnly],
   );
 
   const onItemClick = useCallback(
@@ -1267,9 +1241,7 @@ function FileBrowserTab({
       const folders = new Set(
         names.filter((n) => entries[byName.get(n)!]?.kind === 'directory').map((n) => joinPath(cwd, n)),
       );
-      const paths = pathsOf(names);
-      const handles = paths.flatMap((p) => readyHandles.get(p) ?? []);
-      startFilesDrag(e, paths, folders, names.length === 1 ? names[0] : `${names.length} items`, handles.length === paths.length ? handles : null);
+      startFilesDrag(e, pathsOf(names), folders, names.length === 1 ? names[0] : `${names.length} items`);
     },
     [cwd, selected, selectedNames, selectOnly, entries, byName, pathsOf],
   );

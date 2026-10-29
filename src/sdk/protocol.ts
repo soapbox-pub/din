@@ -131,6 +131,7 @@ export interface Requests {
 
   /** The token is the app's own (random); the desktop refuses one already in use. */
   'drag.startFiles': [{ token: string; handles: string[] }, void];
+  'drag.startPaths': [{ token: string; paths: string[] }, void];
   'drag.startTab': [{ token: string; tabType: string; state: unknown }, void];
   'drag.accept': [{ token: string; operation: 'copy' | 'move' | 'link' }, DropResultData | null];
   /** The source's dragend: whether anything took the drop, and where it ended. */

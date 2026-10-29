@@ -417,6 +417,11 @@ export interface DinDrag {
    */
   startFiles(e: DragEvent, files: DinFileHandle[], label: string): void;
   /**
+   * The same, by path, for apps with `fs`: no handles to wait for, which a
+   * dragstart can't do.
+   */
+  startPaths(e: DragEvent, paths: string[], label: string): void;
+  /**
    * Call from `dragstart` to drag a tab out. `state` is what a window that
    * accepts it gets, structured-cloneable; if it's dropped outside every
    * window, `onTabDetached` asks the source to open it in a new window.

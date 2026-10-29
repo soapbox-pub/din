@@ -42,6 +42,9 @@ DataTransfer has to be filled during `dragstart`, so the SDK mints the
 token itself (a random UUID, which no other app can guess) and registers
 it with the desktop alongside; the desktop refuses a token already in use.
 
+Apps with `fs` can drag by path, `din.drag.startPaths(e, paths, label)`:
+a `dragstart` can't wait for `din.files.fromPath`. Files does.
+
 ## Taking a drop
 
 ```ts

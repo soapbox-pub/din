@@ -387,6 +387,12 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         if (!w || w.maximized || w.snapped || w.tiled) return;
         const next = { x: b.x ?? w.x, y: b.y ?? w.y, width: b.width ?? w.width, height: b.height ?? w.height };
         if (![next.x, next.y, next.width, next.height].every(Number.isFinite)) return;
+        // Kept on its monitor's work area, as far as it fits.
+        const area = live.current.windowState(w).workArea;
+        next.width = Math.min(next.width, area.width);
+        next.height = Math.min(next.height, area.height);
+        next.x = Math.max(area.x, Math.min(next.x, area.x + area.width - next.width));
+        next.y = Math.max(area.y, Math.min(next.y, area.y + area.height - next.height));
         live.current.actions.resize(windowId, next);
       },
       'window.minimize': () => live.current.frame?.minimize(),
@@ -592,6 +598,21 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         });
         if (!ok) throw new Error('That drag token is taken');
       },
+      'drag.startPaths': async ({ token, paths }) => {
+        need('fs');
+        const fs = getFsBridge();
+        const clean = paths.filter((p): p is string => typeof p === 'string' && p.startsWith('/'));
+        const kinds = await Promise.all(clean.map((p) => fs?.stat(p).then((st) => st.kind, () => 'file') ?? 'file'));
+        const ok = registerDrag({
+          token,
+          kind: 'files',
+          source: appId,
+          paths: clean,
+          folders: clean.length > 0 && kinds.every((k) => k === 'directory'),
+          onEnd: ({ dropped, operation }) => push({ type: 'dragEnd', token, dropped, operation }),
+        });
+        if (!ok) throw new Error('That drag token is taken');
+      },
       'drag.startTab': ({ token, tabType, state }) => {
         const ok = registerDrag({
           token,
@@ -631,7 +652,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         return { files: await grantPaths(clip.paths), cut: clip.op === 'cut' };
       },
       'clipboard.writeFiles': ({ handles, cut }) => {
-        setFileClipboard({ op: cut ? 'cut' : 'copy', paths: handles.map((id) => grantOf(id).path) });
+        // Nothing to hold clears it, and leaves the text clipboard alone.
+        setFileClipboard(handles.length === 0 ? null : { op: cut ? 'cut' : 'copy', paths: handles.map((id) => grantOf(id).path) });
       },
 
       'notifications.show': ({ title, options }) => {

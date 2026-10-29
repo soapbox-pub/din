@@ -31,21 +31,12 @@ export interface DraggedFiles {
   anyFolder: boolean;
 }
 
-/**
- * Start dragging files from this window. `handles` (the same files) let the
- * drag leave the window; without them, it can only land in this one.
- */
-export function startFilesDrag(
-  e: React.DragEvent,
-  paths: string[],
-  folders: Set<string>,
-  label: string,
-  handles: DinFileHandle[] | null,
-): void {
+/** Start dragging files from this window, to it, other windows or other apps. */
+export function startFilesDrag(e: React.DragEvent, paths: string[], folders: Set<string>, label: string): void {
   local = { paths, folders };
   const din = window.din;
-  if (din && handles && handles.length === paths.length) {
-    din.drag.startFiles(e.nativeEvent, handles, label);
+  if (din) {
+    din.drag.startPaths(e.nativeEvent, paths, label);
   } else {
     e.dataTransfer.setData('text/plain', paths.join('\n'));
     e.dataTransfer.effectAllowed = 'copyMove';
