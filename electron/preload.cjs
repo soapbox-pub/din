@@ -663,25 +663,6 @@ expose('guestVisibility', {
   set: (webContentsId, hidden) => ipcRenderer.send('guestVisibility:set', webContentsId, hidden),
 });
 
-// Guest first paint bridge (window.dinos.guestPaint), fed by main.mts's
-// watchGuestFirstPaint: a <webview> page has drawn something, which the
-// <webview> element itself never says.
-expose('guestPaint', {
-  /**
-   * Subscribe to first paints. Returns an unsubscribe function.
-   * @param {(webContentsId: number) => void} callback
-   */
-  onFirstPaint: (callback) => {
-    /**
-     * @param {Electron.IpcRendererEvent} _event
-     * @param {number} webContentsId
-     */
-    const handler = (_event, webContentsId) => callback(webContentsId);
-    ipcRenderer.on('guestPaint:first', handler);
-    return () => ipcRenderer.removeListener('guestPaint:first', handler);
-  },
-});
-
 // Guest file drop bridge (window.dinos.guestFileDrop), backed by the
 // guestFileDrop:* handler in main.mts: replays a drag of files from Files
 // into a <webview> page, so the page can take them as files.

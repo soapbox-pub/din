@@ -1263,22 +1263,6 @@ function registerGuestVisibilityHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Guest first paint (window.dinos.guestPaint). A <webview> reports no event
-// for a page's first paint, only dom-ready, which waits for the page's
-// deferred scripts: Reddit draws ~450 ms before it. The browser covers a new
-// tab's blank white frame until its page shows, so it hears of the paint
-// from here (see web-contents-created).
-// ---------------------------------------------------------------------------
-
-function watchGuestFirstPaint(guest: Electron.WebContents): void {
-  // Electron's name for a page's first visually non-empty paint, once per
-  // document. Missing from its typings, which only have it on BrowserWindow.
-  (guest as unknown as NodeJS.EventEmitter).on('ready-to-show', () => {
-    if (guest.hostWebContents?.id === shellContentsId) sendToShell('guestPaint:first', guest.id);
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Guest file drop bridge (window.dinos.guestFileDrop). Files dragged out of the
 // Files app are an in-page drag of paths, with no File objects a page could
 // read, and a drag over a <webview> goes to the guest instead of the shell.
@@ -5775,8 +5759,6 @@ app.on('web-contents-created', (_event, contents) => {
       if (input.type !== 'keyDown' && input.type !== 'keyUp') return;
       sendToShell('shortcut', { action: 'super-key', down: input.type === 'keyDown' } satisfies ShellShortcut);
     });
-
-    watchGuestFirstPaint(contents);
 
     contents.on('dom-ready', () => {
       if (!contents.getURL().startsWith('view-source:')) return;

@@ -15,17 +15,10 @@ export interface GuestFileDropBridge {
   send(webContentsId: number, type: 'over' | 'drop' | 'cancel', x: number, y: number, paths: string[]): void;
 }
 
-/** Hears from main when a guest's page first draws something (the engine's element never says). */
-export interface GuestPaintBridge {
-  onFirstPaint(callback: (webContentsId: number) => void): () => void;
-}
-
 declare global {
   interface Dinos {
     /** Present only inside the Electron shell. */
     guestVisibility?: GuestVisibilityBridge;
-    /** Present only inside the Electron shell. */
-    guestPaint?: GuestPaintBridge;
     /** Present only inside the Electron shell. */
     guestFileDrop?: GuestFileDropBridge;
   }
@@ -47,6 +40,7 @@ interface WebviewElement extends HTMLElement {
   getURL(): string;
   getWebContentsId(): number;
   executeJavaScript(code: string): Promise<unknown>;
+  insertCSS(css: string): Promise<string>;
 }
 
 const TAG = 'webview';
@@ -154,34 +148,9 @@ export const guest = {
   },
   /** Run script in the page. Only for Din's own probes of web pages (icons, selection, size). */
   executeJavaScript: (el: GuestElement, code: string) => engine(el).executeJavaScript(code),
+  /** Add a style sheet to the page's current document. Only Din's own styles, never page-supplied ones. */
+  insertCSS: (el: GuestElement, css: string) => engine(el).insertCSS(css),
 };
-
-const firstPaintListeners = new Map<number, Set<() => void>>();
-let firstPaintUnsubscribe: (() => void) | null = null;
-
-/**
- * Call `listener` each time the guest with this id draws a new document's
- * first frame with content in it. One bridge subscription serves them all.
- * Returns an unsubscribe function; a no-op outside Electron.
- */
-export function onGuestFirstPaint(id: number, listener: () => void): () => void {
-  const bridge = window.dinos?.guestPaint;
-  if (!bridge) return () => {};
-  firstPaintUnsubscribe ??= bridge.onFirstPaint((painted) => {
-    for (const fn of firstPaintListeners.get(painted) ?? []) fn();
-  });
-  let set = firstPaintListeners.get(id);
-  if (!set) firstPaintListeners.set(id, (set = new Set()));
-  set.add(listener);
-  return () => {
-    set.delete(listener);
-    if (set.size === 0) firstPaintListeners.delete(id);
-    if (firstPaintListeners.size === 0) {
-      firstPaintUnsubscribe?.();
-      firstPaintUnsubscribe = null;
-    }
-  };
-}
 
 /** The engine's events on the host element, by Din's names for them. */
 export const GUEST_EVENTS = {

@@ -3,7 +3,7 @@ import type { CSSProperties, Ref, RefObject } from 'react';
 import { activeFileDrag, fileDragActive, subscribeFileDrag } from '@/components/desktop/apps/files/dnd';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
-import { createGuest, guest, GUEST_EVENTS, guestId, onGuestFirstPaint, type GuestElement } from '@/platform/guest';
+import { createGuest, guest, GUEST_EVENTS, guestId, type GuestElement } from '@/platform/guest';
 
 /** Imperative controls of a guest surface. */
 export interface GuestSurfaceHandle {
@@ -19,6 +19,8 @@ export interface GuestSurfaceHandle {
   focus(): void;
   /** Run script in the page: Din's own probes of web pages only, never of apps. */
   executeJavaScript(code: string): Promise<unknown>;
+  /** Style the current document: Din's own styles only (the blank page's backdrop). */
+  insertCSS(css: string): Promise<void>;
 }
 
 /** A network-level load failure of the main frame. */
@@ -54,8 +56,6 @@ export interface GuestSurfaceProps {
   acceptFileDrops?: boolean;
   onAttach?: (id: number) => void;
   onDomReady?: () => void;
-  /** The page drew its first frame with content, which is often well before `onDomReady`. */
-  onFirstPaint?: () => void;
   onLoadStart?: () => void;
   onLoadEnd?: () => void;
   onLoadError?: (error: GuestLoadError) => void;
@@ -87,7 +87,6 @@ export function GuestSurface({
   acceptFileDrops = false,
   onAttach,
   onDomReady,
-  onFirstPaint,
   onLoadStart,
   onLoadEnd,
   onLoadError,
@@ -138,6 +137,9 @@ export function GuestSurface({
     focus: () => elRef.current?.focus(),
     executeJavaScript: (code) =>
       elRef.current ? guest.executeJavaScript(elRef.current, code) : Promise.reject(new Error('No guest')),
+    insertCSS: async (css) => {
+      if (elRef.current) await guest.insertCSS(elRef.current, css);
+    },
   }), []);
 
   useGuestEvent(elRef, GUEST_EVENTS.loadStart, onLoadStart && (() => onLoadStart()));
@@ -197,30 +199,6 @@ export function GuestSurface({
       el.removeEventListener(GUEST_EVENTS.domReady, attached);
     };
   }, [onAttach]);
-
-  // The page's first paint, which the engine's element doesn't report: main
-  // does, by the guest's id once it attaches.
-  const firstPaint = useRef(onFirstPaint);
-  useLayoutEffect(() => {
-    firstPaint.current = onFirstPaint;
-  });
-  const listensForPaint = !!onFirstPaint;
-  useEffect(() => {
-    const el = elRef.current;
-    if (!el || !listensForPaint) return;
-    let stop: (() => void) | null = null;
-    const subscribe = () => {
-      const id = guestId(el);
-      if (id === null || stop) return;
-      stop = onGuestFirstPaint(id, () => firstPaint.current?.());
-    };
-    subscribe();
-    el.addEventListener(GUEST_EVENTS.attach, subscribe);
-    return () => {
-      el.removeEventListener(GUEST_EVENTS.attach, subscribe);
-      stop?.();
-    };
-  }, [listensForPaint]);
 
   // The engine doesn't pass the shell frame's zoom on to guests, and a
   // mismatch also offsets the guest's hit-testing; it resets on navigation,

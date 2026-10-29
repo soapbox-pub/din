@@ -26,14 +26,15 @@ talks about guests by element or by id:
   acceptFileDrops                    // Files drags arrive as real files (web pages)
   onAttach={(id) => …}               // the guest id, once attached
   onDomReady onLoadStart onLoadEnd onLoadError onTitle onFavicons onThemeColor onNavigate onGone
-  onFirstPaint                       // a document's first frame with content, from main (dinos.guestPaint)
 />
 ```
 
 `GuestSurfaceHandle` has the imperative side: `element()`, `id()`,
 `loadURL`, `reload`, `reloadIgnoringCache`, `goBack`/`goForward`, `focus`,
-and `executeJavaScript` (for Din's own probes of web pages, like the
-browser's icon collection; never used on apps). The id is what the
+`executeJavaScript` (for Din's own probes of web pages, like the
+browser's icon collection; never used on apps), and `insertCSS` (Din's
+own styles only: the browser paints its parked blank page in the theme's
+background with it). The id is what the
 desktop passes to `window.dinos` calls that act on a guest (fullscreen,
 file drop, devtools, visibility, app ports).
 

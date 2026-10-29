@@ -319,17 +319,18 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // what happened and offer a reload (which starts a fresh renderer).
     const [gone, setGone] = useState(false);
 
-    // A blank document (a fresh guest, or the about:blank a new tab parks on)
-    // paints Chromium's default white, and the engine keeps that frame up
-    // until the next page draws. Until a real page draws, the theme's
-    // background covers it instead. The first paint lifts it, not dom-ready:
-    // that waits for the page's deferred scripts, and would hide a page
-    // that's already showing for hundreds of milliseconds. dom-ready and the
-    // load's end are the fallbacks.
-    const [blank, setBlank] = useState(true);
-    const onRealPage = useRef(false);
-    const pageReady = () => {
-      if (onRealPage.current) setBlank(false);
+    // The page loading next draws over whatever the guest showed last, and
+    // until it draws, the engine keeps that frame up: a backdrop, never a
+    // cover. Before a guest's first page that's the element's own theme
+    // background. The about:blank a new tab parks on would paint Chromium's
+    // blank color (white, or #121212 in dark mode), so it's painted the
+    // theme's background instead, and a page that leaves its canvas to the
+    // default gets white from its own first frame, not before.
+    const paintBlank = () => {
+      const el = surface.current?.element();
+      const color = el ? getComputedStyle(el).backgroundColor : '';
+      if (!/^[a-z]+\([\d\s.,%/a-z-]+\)$/i.test(color)) return;
+      surface.current?.insertCSS(`:root { background: ${color} !important; }`).catch(() => {});
     };
 
     return (
@@ -350,23 +351,15 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
             setGone(false);
             onLoadStart?.();
           }}
-          onFirstPaint={pageReady}
-          onDomReady={pageReady}
-          onLoadEnd={() => {
-            pageReady();
-            onLoadEnd?.();
-          }}
+          onLoadEnd={onLoadEnd}
           onLoadError={(error) => {
-            // Never hide an error page.
-            onRealPage.current = true;
             onLoadError?.({ ...error, url: shownUrl(error.url) });
           }}
           onTitle={onTitleChange}
           onFavicons={onFaviconChange}
           onThemeColor={onThemeColorChange}
           onNavigate={(url, current, canBack, canForward) => {
-            onRealPage.current = url !== 'about:blank';
-            if (!onRealPage.current) setBlank(true);
+            if (url === 'about:blank') paintBlank();
             // A page-source view commits its inner URL; only the current URL
             // has the `view-source:` prefix the tab must keep.
             onNavigate?.(
@@ -380,7 +373,6 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
             onLoadEnd?.();
           }}
         />
-        {blank && <div aria-hidden className="pointer-events-none absolute inset-0 bg-background" />}
         {gone && <PageGone onReload={() => surface.current?.reload()} />}
       </div>
     );
