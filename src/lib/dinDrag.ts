@@ -17,6 +17,8 @@ export interface DinDragEntry {
   source: string;
   paths: string[];
   folders: boolean;
+  /** A source that may read the files but not write them: a target gets copies, never a move. */
+  copyOnly?: boolean;
   tabType?: string;
   tabState?: unknown;
   /**
@@ -53,7 +55,7 @@ export function registerDrag(entry: Omit<DinDragEntry, 'accepted'>): boolean {
 export function acceptDrag(token: string, operation: 'copy' | 'move' | 'link'): DinDragEntry | null {
   const entry = drags.get(token);
   if (!entry || entry.accepted) return null;
-  entry.accepted = { operation };
+  entry.accepted = { operation: entry.copyOnly && operation === 'move' ? 'copy' : operation };
   return entry;
 }
 
@@ -83,11 +85,14 @@ export function currentDrag(): DinDragEntry | null {
   return current;
 }
 
-/** What apps see of a drag: no paths until they take it. */
+/**
+ * What apps see of a drag: no paths until they take it, and no token: that
+ * a target reads from the drop's DataTransfer, so only where it's dropped
+ * can take it.
+ */
 export function dragInfo(entry: DinDragEntry | null): DragInfo | null {
   if (!entry) return null;
   return {
-    token: entry.token,
     kind: entry.kind,
     source: entry.source,
     count: entry.paths.length,

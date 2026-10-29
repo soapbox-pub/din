@@ -445,8 +445,6 @@ export interface DinFiles {
 
 /** What's being dragged, as every app can see it during the drag. */
 export interface DragInfo {
-  /** Opaque, unique to this drag; also in the DataTransfer under `application/x-din-drag`. */
-  token: string;
   kind: 'files' | 'tab';
   /** The app it came from. */
   source: string;
@@ -499,7 +497,12 @@ export interface DinDrag {
 // ---------------------------------------------------------------------------
 
 export interface DinClipboard {
-  /** Files on Din's clipboard, as Cut or Copy left them. Text and images use navigator.clipboard. */
+  /**
+   * Files on Din's clipboard, as Cut or Copy left them. Text and images use
+   * navigator.clipboard. Without `fs`, only on a paste: within a few seconds
+   * of a key or click in the focused window, or a pick from its menus;
+   * otherwise it rejects with `NotAllowedError`.
+   */
   readFiles(): Promise<{ files: DinFileHandle[]; cut: boolean } | null>;
   writeFiles(files: DinFileHandle[], cut: boolean): void;
   /** Whether files are on the clipboard (for enabling Paste), and from now on when that changes. */

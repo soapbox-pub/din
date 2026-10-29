@@ -20,9 +20,13 @@ export interface AppsBridge {
    * For fs, resolves with the URL base the app loads files by path from.
    * `roots` scopes an fs grant to those folders.
    */
-  grant(webContentsId: number, permission: SystemPermission, roots?: string[]): Promise<string | null>;
+  grant(webContentsId: number, permission: SystemPermission, roots?: { path: string; writable: boolean }[]): Promise<string | null>;
   /** Another folder an app's scoped fs grant reaches. */
-  addFsRoot(webContentsId: number, root: string): Promise<void>;
+  addFsRoot(webContentsId: number, root: string, writable: boolean): Promise<void>;
+  /** Whether an app's fs grant reaches each path (to write it, with `write`), as main checks its calls. */
+  reaches(webContentsId: number, paths: string[], write: boolean): Promise<boolean[]>;
+  /** Milliseconds since the user last pressed a key or clicked in an app window, or null if never. */
+  sinceInput(webContentsId: number): Promise<number | null>;
   revoke(webContentsId: number, permission: SystemPermission): Promise<void>;
   fileUrl(webContentsId: number, path: string): Promise<string>;
   kill(webContentsId: number): Promise<void>;

@@ -122,6 +122,53 @@ function dirname(path: string): string {
   return i <= 0 ? '/' : path.slice(0, i);
 }
 
+/** An absolute path with `.`, `..` and repeated slashes resolved, or null if it isn't one. */
+function normalizePath(path: unknown): string | null {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.includes('\0')) return null;
+  const parts: string[] = [];
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') parts.pop();
+    else parts.push(part);
+  }
+  return `/${parts.join('/')}`;
+}
+
+/**
+ * Every string an app's saved state holds, as a whole value: JSON is looked
+ * into (and JSON within its strings), `~/` read as home. What requestAccess
+ * grants unasked must be named exactly, never just a prefix of something.
+ */
+function savedStrings(values: string[], home: string): Set<string> {
+  const out = new Set<string>();
+  const add = (s: string) => out.add(s.startsWith('~/') ? `${home}/${s.slice(2)}` : s);
+  const walk = (value: unknown, depth: number): void => {
+    if (depth > 64) return;
+    if (typeof value === 'string') {
+      add(value);
+      if (/^\s*[[{"]/.test(value)) {
+        try {
+          walk(JSON.parse(value), depth + 1);
+        } catch {
+          // Just a string.
+        }
+      }
+    } else if (Array.isArray(value)) {
+      for (const v of value) walk(v, depth + 1);
+    } else if (value && typeof value === 'object') {
+      for (const [k, v] of Object.entries(value)) {
+        add(k);
+        walk(v, depth + 1);
+      }
+    }
+  };
+  for (const value of values) walk(value, 0);
+  return out;
+}
+
+/** How recently the user must have pressed a key or clicked in the app (or picked from its menus) for it to read the file clipboard. */
+const GESTURE_MS = 3000;
+
 const MIME_BY_EXT: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
   svg: 'image/svg+xml', ico: 'image/x-icon', avif: 'image/avif', txt: 'text/plain', md: 'text/markdown',
@@ -210,8 +257,8 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
     closeRequests: Map<number, ReturnType<typeof setTimeout>>;
     watches: Map<string, { dir: string; id: number | null }>;
     webContentsId: number | null;
-    /** A scoped fs grant's folders, as granted so far; null when not scoped. */
-    fsRoots: Set<string> | null;
+    /** A scoped fs grant's folders and whether each is writable, as granted so far; null when not scoped. */
+    fsRoots: Map<string, boolean> | null;
     /** Whether main has the fs grant yet (later roots are added to it). */
     fsGranted: boolean;
     /** Roots on their way to main: replies wait for them. */
@@ -221,7 +268,9 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
      * state (and files migrated with it), whose paths requestAccess grants
      * without asking. Empty otherwise.
      */
-    carryOver: string;
+    carryOver: string[];
+    /** When the user last picked from the app's menus (a gesture main doesn't see). */
+    menuPickedAt: number;
   } | null>(null);
 
   /** What the app is playing, among the desktop's media sources (registered below). */
@@ -259,9 +308,9 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
       : { pubkey: null, relays: [], blossom: [] };
 
   // Everything a request handler reads, current as of the last render.
-  const live = useRef({ win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig });
+  const live = useRef({ win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig, isTop });
   useLayoutEffect(() => {
-    live.current = { win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig };
+    live.current = { win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig, isTop };
   });
 
   const push = useCallback((message: Push) => session.current?.port.postMessage(message), []);
@@ -284,15 +333,17 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
     if (!s) return null;
     const id = `h${s.nextHandle++}`;
     s.grants.set(id, { path, kind, writable });
-    // With file-folders, the folder of a file the user handed it comes along.
+    // With file-folders, the folder of a file the user handed it comes
+    // along, writable only if the file is (main refuses home and above).
     if (fileFolders && s.fsRoots) {
       const root = kind === 'directory' ? path : dirname(path);
-      if (!s.fsRoots.has(root)) {
-        s.fsRoots.add(root);
+      const had = s.fsRoots.get(root);
+      if (had === undefined || (writable && !had)) {
+        s.fsRoots.set(root, writable);
         const apps = getAppsBridge();
         if (s.fsGranted && apps && s.webContentsId !== null) {
           const wc = s.webContentsId;
-          s.scoping = s.scoping.then(() => apps.addFsRoot(wc, root)).catch(() => {});
+          s.scoping = s.scoping.then(() => apps.addFsRoot(wc, root, writable)).catch(() => {});
         }
       }
     }
@@ -359,10 +410,17 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
     return { clientX: (r?.left ?? 0) + at.x, clientY: (r?.top ?? 0) + at.y };
   };
   const sectionOf = () => container.current?.closest<HTMLElement>('[data-window-id]') ?? null;
-  /** Whether a path is within this window's scoped fs folders (symlinks aside: main resolves those). */
-  const inScope = (path: string): boolean => {
-    const roots = session.current?.fsRoots;
-    return !!roots && [...roots].some((r) => path === r || path.startsWith(`${r.replace(/\/$/, '')}/`));
+  /**
+   * Which of these paths the app's own fs grant reaches (to write, with
+   * `write`), as main checks its calls: symlinks resolved, Din's own files
+   * refused. Paths should be normalized first.
+   */
+  const reaches = async (paths: string[], write: boolean): Promise<boolean[]> => {
+    const s = session.current;
+    const apps = getAppsBridge();
+    if (!s || !apps || s.webContentsId === null || !s.fsGranted || paths.length === 0) return paths.map(() => false);
+    await s.scoping;
+    return apps.reaches(s.webContentsId, paths, write).catch(() => paths.map(() => false));
   };
   /** The frontmost window of this app at a point of the desktop, with the point in it. */
   const tabTarget = (x: number, y: number): { windowId: string; at: { x: number; y: number } } | null => {
@@ -641,15 +699,16 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
       'files.release': ({ token }) => releaseGrant(appId, String(token)),
       'files.requestAccess': async ({ paths, reason }) => {
         const s = session.current;
-        const wanted = [...new Set((Array.isArray(paths) ? paths : []).filter((p): p is string => typeof p === 'string' && p.startsWith('/')))].slice(0, 5000);
+        const wanted = [...new Set((Array.isArray(paths) ? paths : []).map(normalizePath).filter((p): p is string => p !== null))].slice(0, 5000);
         if (!s || wanted.length === 0) return [];
-        // Named by its own saved state from before it moved (as written, or
-        // JSON-escaped), or within reach already: no need to ask.
-        const known = (p: string) => s.carryOver.includes(p) || s.carryOver.includes(JSON.stringify(p).slice(1, -1));
-        // Only what's there is worth asking about.
         const fs = getFsBridge();
+        // Named exactly by its own saved state from before it moved, or
+        // within reach already: no need to ask.
+        const saved = s.carryOver.length > 0 && fs ? savedStrings(s.carryOver, (await fs.homedir()).replace(/\/$/, '')) : new Set<string>();
+        const reached = await reaches(wanted, true);
+        // Only what's there is worth asking about.
         const there = await Promise.all(wanted.map((p) => (fs ? fs.stat(p).then(() => true, () => false) : Promise.resolve(true))));
-        const ask = wanted.filter((p, i) => there[i] && !known(p) && !inScope(p));
+        const ask = wanted.filter((p, i) => there[i] && !saved.has(p) && !reached[i]);
         if (ask.length > 0) {
           const allowed = await new Promise<boolean>((resolve) =>
             setAccessRequest({ paths: ask, reason: typeof reason === 'string' ? reason.slice(0, 300) : '', resolve }),
@@ -683,10 +742,17 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
         if (!apps || guestId === null) throw new Error('File URLs are only available inside Din');
         return apps.fileUrl(guestId, g.path);
       },
-      'files.fromPath': async ({ path }) => {
-        if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('An absolute path is required');
-        if (!permissions.includes('fs') && !inScope(path)) need('fs');
-        const [handle] = await grantPaths([path]);
+      'files.fromPath': async ({ path: raw }) => {
+        const path = normalizePath(raw);
+        if (!path) throw new Error('An absolute path is required');
+        // Within a scoped grant, writable only where the grant writes.
+        let writable = true;
+        if (!permissions.includes('fs')) {
+          const [[canWrite], [canRead]] = await Promise.all([reaches([path], true), reaches([path], false)]);
+          if (!canRead) need('fs');
+          writable = canWrite;
+        }
+        const [handle] = await grantPaths([path], writable);
         if (!handle) throw new Error(`${path} doesn’t exist`);
         return handle;
       },
@@ -726,8 +792,13 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
       },
       'drag.startPaths': async ({ token, paths, label }) => {
         const fs = getFsBridge();
-        const clean = paths.filter((p): p is string => typeof p === 'string' && p.startsWith('/'));
-        if (!permissions.includes('fs') && !clean.every(inScope)) need('fs');
+        const clean = paths.map(normalizePath).filter((p): p is string => p !== null);
+        // Within a scoped grant: what it can't write, a target only copies.
+        let copyOnly = false;
+        if (!permissions.includes('fs')) {
+          if (!(await reaches(clean, false)).every(Boolean)) need('fs');
+          copyOnly = !(await reaches(clean, true)).every(Boolean);
+        }
         const kinds = await Promise.all(clean.map((p) => fs?.stat(p).then((st) => st.kind, () => 'file') ?? 'file'));
         const ok = registerDrag({
           token,
@@ -736,6 +807,7 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
           label: typeof label === 'string' ? label.slice(0, 200) : '',
           paths: clean,
           folders: clean.length > 0 && kinds.every((k) => k === 'directory'),
+          copyOnly,
           onEnd: ({ dropped, operation }) => push({ type: 'dragEnd', token, dropped, operation }),
         });
         if (!ok) throw new Error('That drag token is taken');
@@ -762,8 +834,9 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
           if (entry.source !== appId) return null;
           return { kind: 'tab', tabType: entry.tabType ?? '', state: entry.tabState };
         }
-        // Without fs an app can only receive copies: it can't delete the originals.
-        const op = permissions.includes('fs') ? operation : 'copy';
+        // Without fs an app can only receive copies: it can't delete the
+        // originals. Nor can it move what its source could only read.
+        const op = permissions.includes('fs') ? (entry.accepted?.operation ?? operation) : 'copy';
         return { kind: 'files', files: await grantPaths(entry.paths), operation: op };
       },
       'drag.over': ({ at }) => {
@@ -781,6 +854,20 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
       'clipboard.readFiles': async () => {
         const clip = getFileClipboard();
         if (!clip) return null;
+        // Files on the clipboard are the user's to hand over: an app without
+        // fs (which reaches them anyway) gets them only on a paste, just
+        // after a key or click in it or a pick from its menus.
+        if (!permissions.includes('fs')) {
+          const s = session.current;
+          const apps = getAppsBridge();
+          const since = apps && s?.webContentsId != null ? await apps.sinceInput(s.webContentsId).catch(() => null) : null;
+          const menu = s ? Date.now() - s.menuPickedAt : Infinity;
+          if (!live.current.isTop || ((since === null || since > GESTURE_MS) && menu > GESTURE_MS)) {
+            const error = new Error('The file clipboard is read on a paste');
+            error.name = 'NotAllowedError';
+            throw error;
+          }
+        }
         return { files: await grantPaths(clip.paths), cut: clip.op === 'cut' };
       },
       'clipboard.writeFiles': ({ handles, cut }) => {
@@ -870,10 +957,11 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
       closeRequests: new Map(),
       watches: new Map(),
       webContentsId,
-      fsRoots: scopedFs ? new Set<string>() : null,
+      fsRoots: scopedFs ? new Map<string, boolean>() : null,
       fsGranted: false,
       scoping: Promise.resolve() as Promise<unknown>,
-      carryOver: Object.values(storageToMigrate(manifest) ?? {}).join('\n'),
+      carryOver: Object.values(storageToMigrate(manifest) ?? {}),
+      menuPickedAt: 0,
     };
     session.current = s;
     setReady(false);
@@ -926,7 +1014,7 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
           const { data } = await fs.readFile(src, 256 * 1024 * 1024);
           await fs.mkdir(dirname(dst)).catch(() => {});
           await fs.writeFile(dst, data);
-          s.carryOver += `\n${new TextDecoder().decode(data)}`;
+          s.carryOver.push(new TextDecoder().decode(data));
         } catch (error) {
           console.error(`din: migrating ${src} for ${appId}:`, error);
         }
@@ -938,14 +1026,15 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
         const dir = folder.startsWith('~/') ? `${home}/${folder.slice(2)}` : folder;
         if (!dir.startsWith('/')) continue;
         await fs.mkdir(dir).catch(() => {});
-        s.fsRoots.add(dir.replace(/\/$/, ''));
+        s.fsRoots.set(dir.replace(/\/$/, ''), true);
       }
     }
     if (apps && webContentsId !== null) {
       for (const p of SYSTEM_PERMISSIONS) {
         const scoped = p === 'fs' && scopedFs;
         if (!permissions.includes(p) && !scoped) continue;
-        const granted = await apps.grant(webContentsId, p, scoped ? [...(s.fsRoots ?? [])] : undefined).catch((e: unknown) => {
+        const roots = scoped ? [...(s.fsRoots ?? [])].map(([path, writable]) => ({ path, writable })) : undefined;
+        const granted = await apps.grant(webContentsId, p, roots).catch((e: unknown) => {
           console.error(`din: granting ${p}:`, e);
           return null;
         });
@@ -1292,12 +1381,16 @@ export function DinAppFrame({ appId, manifest, windowId, params, splash = true }
           </AlertDialogContent>
         </AlertDialog>
       )}
-      {menus && <DataMenuBar menus={menus} onAction={(id) => push({ type: 'menuAction', id })} />}
+      {menus && <DataMenuBar menus={menus} onAction={(id) => {
+        if (session.current) session.current.menuPickedAt = Date.now();
+        push({ type: 'menuAction', id });
+      }} />}
       {popup && (
         <PointMenu
           at={popup.at}
           items={popup.items}
           onAction={(id) => {
+            if (session.current) session.current.menuPickedAt = Date.now();
             popup.resolve?.(id);
             setPopup(null);
           }}

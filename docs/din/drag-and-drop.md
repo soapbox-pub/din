@@ -15,7 +15,7 @@ and only then gets a grant to exactly those files.
 ```
  Files (source)                desktop                        Paint (target)
  dragstart ─ startFiles(e, handles) ─▶ registers token t, source, files
-                                       pushes DragInfo{t, files, 2} to all apps
+                                       pushes DragInfo{files, 2} to all apps (no token)
                                ◀────── (every app sees din.drag.current)
                                                               dragover: current.kind === 'files' → show drop zone
                                                               drop ─ accept(e) ─▶
@@ -67,6 +67,9 @@ zone.addEventListener('drop', async (e) => {
   whether they're all folders, the source app), which is what lets a
   target refuse early: a folder can't be dropped into itself, a sidebar
   favorite must be a folder. Names arrive only with the drop.
+- The token isn't in `din.drag.current`: a target reads it from the
+  drop's DataTransfer, which the engine shows only to where the drop
+  lands, so no other app can take the drag.
 - `accept` resolves to null when the drop isn't a Din drag; the
   DataTransfer then holds whatever the web gave (files from a page, text,
   URLs), read as usual.

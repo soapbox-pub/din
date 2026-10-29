@@ -3042,7 +3042,7 @@ expose('apps', {
    * Have main open a port from an app straight to a system bridge.
    * @param {number} webContentsId
    * @param {string} permission
-   * @param {string[]} [roots] for fs, the folders it's scoped to (none: the whole filesystem)
+   * @param {{ path: string, writable: boolean }[]} [roots] for fs, the folders it's scoped to (none: the whole filesystem)
    * @returns {Promise<string | null>} for fs, the URL base the app loads files by path from
    */
   grant: (webContentsId, permission, roots) => ipcRenderer.invoke('dinos-apps:grant', webContentsId, permission, roots),
@@ -3050,9 +3050,24 @@ expose('apps', {
    * Another folder an app's scoped fs grant reaches.
    * @param {number} webContentsId
    * @param {string} root
+   * @param {boolean} writable
    * @returns {Promise<void>}
    */
-  addFsRoot: (webContentsId, root) => ipcRenderer.invoke('dinos-apps:addFsRoot', webContentsId, root),
+  addFsRoot: (webContentsId, root, writable) => ipcRenderer.invoke('dinos-apps:addFsRoot', webContentsId, root, writable),
+  /**
+   * Whether an app's fs grant reaches each path (to write it, with `write`).
+   * @param {number} webContentsId
+   * @param {string[]} paths
+   * @param {boolean} write
+   * @returns {Promise<boolean[]>}
+   */
+  reaches: (webContentsId, paths, write) => ipcRenderer.invoke('dinos-apps:reaches', webContentsId, paths, write),
+  /**
+   * Milliseconds since the user last pressed a key or clicked in an app window, or null.
+   * @param {number} webContentsId
+   * @returns {Promise<number | null>}
+   */
+  sinceInput: (webContentsId) => ipcRenderer.invoke('dinos-apps:sinceInput', webContentsId),
   /**
    * Close that port.
    * @param {number} webContentsId

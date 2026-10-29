@@ -14,6 +14,7 @@
 // app and one permission, and every call on them is checked against both.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -146,9 +147,14 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
     if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
     // fs, scoped: only under these folders (and those added later).
-    const scope = permission === 'fs' && Array.isArray(roots)
-      ? new Set(roots.filter((r): r is string => typeof r === 'string' && path.isAbsolute(r)).map(realish))
-      : null;
+    let scope: Map<string, boolean> | null = null;
+    if (permission === 'fs' && Array.isArray(roots)) {
+      scope = new Map();
+      for (const r of roots) {
+        const { path: root, writable } = (r ?? {}) as { path?: unknown; writable?: unknown };
+        if (typeof root === 'string') addRoot(scope, root, writable === true);
+      }
+    }
     grant(contents, permission as SystemPermission, scope);
     // An app with fs reaches files by path anyway: it gets a URL base to
     // load any of them from (din-file://<token>/<absolute path>), so a
@@ -168,12 +174,22 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
   });
 
   // Another folder a scoped fs grant reaches (the folder of a file the user
-  // handed the app, for apps with file-folders).
-  ipcMain.handle('dinos-apps:addFsRoot', (event, wcId, root) => {
+  // handed the app, for apps with file-folders), writable or not.
+  ipcMain.handle('dinos-apps:addFsRoot', (event, wcId, root, writable) => {
     opts.assertShellSender(event);
     const entry = typeof wcId === 'number' ? grants.get(wcId)?.get('fs') : undefined;
-    if (!entry?.roots || typeof root !== 'string' || !path.isAbsolute(root)) return;
-    entry.roots.add(realish(root));
+    if (!entry?.roots || typeof root !== 'string') return;
+    addRoot(entry.roots, root, writable === true);
+  });
+
+  // Whether an app's fs grant reaches each of these paths (for writing, with
+  // `write`), as its own calls on the bridge would be checked: what the
+  // desktop asks before handing an app a path it named itself.
+  ipcMain.handle('dinos-apps:reaches', (event, wcId, paths, write) => {
+    opts.assertShellSender(event);
+    const entry = typeof wcId === 'number' ? grants.get(wcId)?.get('fs') : undefined;
+    if (!Array.isArray(paths)) return [];
+    return paths.map((p: unknown) => !!entry && typeof p === 'string' && path.isAbsolute(p) && !p.includes('\0') && reaches(entry, p, write === true));
   });
 
   // A URL an app can load a file it was granted from (media, big pictures),
@@ -187,6 +203,15 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     const token = randomUUID();
     fileUrls.set(token, { file: path.resolve(file), wcId: contents.id, appId });
     return `${LOCAL_FILE_SCHEME}://${token}/${encodeURIComponent(path.basename(file))}`;
+  });
+
+  // How long ago the user last pressed a key or clicked in an app window:
+  // what the desktop asks before handing over something only a gesture
+  // should (the file clipboard).
+  ipcMain.handle('dinos-apps:sinceInput', (event, wcId) => {
+    opts.assertShellSender(event);
+    const at = typeof wcId === 'number' ? lastInput.get(wcId) : undefined;
+    return at === undefined ? null : Date.now() - at;
   });
 
   // Force quit: SIGKILL reaches a renderer stuck in a loop at once, where
@@ -227,9 +252,19 @@ export function attachAppGuest(contents: Electron.WebContents, src: string, send
   contents.on('did-start-navigation', (event) => {
     if (event.isMainFrame && !event.isSameDocument) revokeAll(contents.id);
   });
+  contents.on('input-event', (_event, input) => {
+    if (GESTURES.has(input.type)) lastInput.set(contents.id, Date.now());
+  });
   const id = contents.id;
-  contents.once('destroyed', () => revokeAll(id));
+  contents.once('destroyed', () => {
+    revokeAll(id);
+    lastInput.delete(id);
+  });
 }
+
+/** When each app window last had a key pressed or a click, by webContents id. */
+const lastInput = new Map<number, number>();
+const GESTURES = new Set(['rawKeyDown', 'keyDown', 'mouseDown', 'contextMenu', 'gestureTap', 'touchStart']);
 
 // ---------------------------------------------------------------------------
 // Files
@@ -322,15 +357,15 @@ interface Grant {
   port: MessagePortMain;
   /** The pty sessions this app spawned (or adopted); it may touch no others. */
   ptys: Set<number>;
-  /** For a scoped fs grant, the folders it reaches; null for the whole filesystem. */
-  roots: Set<string> | null;
+  /** For a scoped fs grant, the folders it reaches, and whether it may write in each; null for the whole filesystem. */
+  roots: Map<string, boolean> | null;
   /** Where the port's pushes go, as the handlers' sender does. */
   send: (channel: string, ...args: unknown[]) => void;
 }
 
 const grants = new Map<number, Map<SystemPermission, Grant>>();
 
-function grant(contents: Electron.WebContents, permission: SystemPermission, roots: Set<string> | null = null): void {
+function grant(contents: Electron.WebContents, permission: SystemPermission, roots: Map<string, boolean> | null = null): void {
   revoke(contents.id, permission);
   const { port1, port2 } = new MessageChannelMain();
   const entry: Grant = { port: port1, ptys: new Set(), roots, send: () => {} };
@@ -413,13 +448,29 @@ function checkCall(permission: SystemPermission, channel: string, args: unknown[
     if (entry.roots && channel === 'fs:compress' && Array.isArray(args[1]) && args[1].some((n) => typeof n !== 'string' || n.includes('/'))) {
       return 'Names only, inside the folder';
     }
-    for (const arg of args) {
+    const written = WRITES[channel] ?? [];
+    for (const [i, arg] of args.entries()) {
       if (typeof arg !== 'string' || !path.isAbsolute(arg)) continue;
       if (isProtectedPath(arg)) return `${path.resolve(arg)} belongs to Din`;
-      if (entry.roots && !withinRoots(entry.roots, arg)) return `${path.resolve(arg)} is outside this app's folders`;
+      if (!entry.roots) continue;
+      if (!withinRoots(entry.roots, arg)) return `${path.resolve(arg)} is outside this app's folders`;
+      if (written.includes(i) && !withinRoots(entry.roots, arg, true)) return `${path.resolve(arg)} is read-only for this app`;
     }
   }
   return null;
+}
+
+/** For the fs calls that change files, which of their arguments name what they change. */
+const WRITES: Record<string, number[]> = {
+  'fs:writeFile': [0], 'fs:mkdir': [0], 'fs:rename': [0, 1], 'fs:copyFile': [1], 'fs:rm': [0],
+  'fs:copyInto': [1], 'fs:moveInto': [0, 1], 'fs:move': [0, 1], 'fs:trash': [0], 'fs:chmod': [0],
+  'fs:extract': [1], 'fs:compress': [0],
+};
+
+/** Whether an fs grant reaches a path (to write it, with `write`). */
+function reaches(entry: Grant, file: string, write: boolean): boolean {
+  if (isProtectedPath(file)) return false;
+  return !entry.roots || withinRoots(entry.roots, file, write);
 }
 
 /**
@@ -449,12 +500,30 @@ function realish(file: string): string {
   }
 }
 
-function withinRoots(roots: Set<string>, file: string): boolean {
+/** Whether a path is under one of a grant's roots (one it may write in, with `write`). */
+function withinRoots(roots: Map<string, boolean>, file: string, write = false): boolean {
   const resolved = realish(file);
-  for (const root of roots) {
+  for (const [root, writable] of roots) {
+    if (write && !writable) continue;
     if (resolved === root || resolved.startsWith(root + path.sep)) return true;
   }
   return false;
+}
+
+/**
+ * Add a folder to a scoped grant, writable or not (a folder added both ways
+ * is writable). Never the root, home or a folder holding home, nor one with
+ * Din's own files in or above it: a file handed over from there brings only
+ * itself.
+ */
+function addRoot(roots: Map<string, boolean>, folder: string, writable: boolean): void {
+  if (!path.isAbsolute(folder) || folder.includes('\0')) return;
+  const root = realish(folder);
+  const home = realish(os.homedir());
+  const holds = (outer: string, inner: string) => inner === outer || inner.startsWith(outer === path.sep ? outer : outer + path.sep);
+  if (holds(root, home) || isProtectedPath(root)) return;
+  if ((options?.protectedPaths() ?? []).some((p) => holds(root, realish(p)))) return;
+  roots.set(root, writable || roots.get(root) === true);
 }
 
 /** Terminals on their way between windows of an app, by hand-over token. */
@@ -504,8 +573,11 @@ function adoptPty(entry: Grant, token: unknown, appId: string): number {
 
 /** Whether a path is one no app may reach, even with fs (Din's own profile). */
 function isProtectedPath(file: string): boolean {
-  const resolved = path.resolve(file);
-  return (options?.protectedPaths() ?? []).some((p) => resolved === p || resolved.startsWith(p + path.sep));
+  const resolved = realish(file);
+  return (options?.protectedPaths() ?? []).some((p) => {
+    const real = realish(p);
+    return resolved === real || resolved.startsWith(real + path.sep);
+  });
 }
 
 function revoke(wcId: number, permission: SystemPermission): void {

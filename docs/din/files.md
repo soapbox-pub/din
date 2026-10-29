@@ -91,6 +91,13 @@ const pasted = await din.clipboard.readFiles();   // handles, granted on read
 Cut is a hint for the app that pastes: Files moves; an app without `fs`
 gets copies (it can't delete the originals).
 
+The clipboard holds files the user meant for wherever they paste, so an
+app without `fs` reads it only on a paste: its window must be focused, and
+the user must have pressed a key or clicked in it (main watches the
+guest's input) or picked from its menus in the last few seconds. Otherwise
+`readFiles` rejects with `NotAllowedError`. `onFilesChange` says whether
+anything is there at any time.
+
 ## Streaming and paths
 
 `handle.url()` asks main for an unguessable URL bound to that file and to
@@ -109,9 +116,13 @@ Trash's names, recent files, search) are refused, and change events come
 only from those folders.
 
 - **`file-folders`** (permission): the folders of the files the user
-  hands the app (opened, saved, dropped, launched with). Preview steps
-  through the folder of the picture it shows and lists archives beside it;
-  Publisher finds pictures linked next to its document.
+  hands the app (opened, saved, dropped, launched with), and what's below
+  them. Preview steps through the folder of the picture it shows and lists
+  archives beside it; Publisher finds pictures linked next to its
+  document. A folder is writable only if the file that brought it is (a
+  read-only handle, `handle.parent()`, brings it read-only). Never `/`,
+  home or a folder above it, nor one holding Din's own profile: a file
+  handed over from there brings only itself.
 - **`folders`** (manifest): fixed folders, made if missing: Media Player's
   `~/Music`, `~/Videos` and skins folder.
 
@@ -126,8 +137,17 @@ handles for those granted (with `file-folders`, their folders come into
 reach). Paths the app's own saved state named when it moved out of the
 desktop are granted without asking, on that first launch (the state it
 kept in the desktop's storage, and files its manifest's `migrateFiles`
-copied in): the app had them then. Anything else, the desktop asks the
-user, showing the paths and `reason`.
+copied in): the app had them then. That state must name the path
+exactly, as a whole string (JSON is looked into, `~/` read as home); a
+prefix of a longer path doesn't count. Anything else not already in the
+app's reach, the desktop asks the user, showing the paths and `reason`.
+
+The desktop doesn't decide what's in reach itself: it asks main
+(`dinos.apps.reaches`), which checks a path as it checks the app's own
+calls on `din.system.fs`, with `..` and symlinks resolved. The same goes
+for `din.files.fromPath` and `din.drag.startPaths` in an app with a scoped
+grant: a path from a read-only folder gives a read-only handle, and a drag
+of one can only be copied.
 
 Apps with `fs` reach files by path through `din.system.fs` anyway.
 `din.files.fromPath(path)` gives one of them a handle for a path, to hand
