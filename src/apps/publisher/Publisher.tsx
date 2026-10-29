@@ -30,6 +30,7 @@ import { about, apply, boundsOf, dist, invert, mul, rectCorners, rotate, scale, 
 import { hitTest, marqueeHits } from './publisher/hit';
 import { Draft, findSelf, looksLikeIdml, partRoot, readPackage, writePackage, type Pkg } from './publisher/idml';
 import { ImageStore, linkPath } from './publisher/images';
+import { keepLinks, reachLink } from './publisher/linkTokens';
 import { PublisherMenus, type Commands, type MenuState } from './publisher/menus';
 import { buildModel, itemBounds, pageAt, spreadAtY, walkItems, type Item, type Model, type Page, type Spread } from './publisher/model';
 import { newDocument, type NewDocSettings } from './publisher/newdoc';
@@ -124,9 +125,11 @@ const zoomStep = (z: number, dir: 1 | -1) => (dir > 0 ? (ZOOMS.find((s) => s > z
  * layers. Saves IDML, which InDesign opens.
  *
  * Launched with a file, it opens that; launch params `{ newDoc }` start a
- * new document (File > New from another window). It has the `fs`
- * permission because placed graphics are links to files by path, found
- * beside the document as InDesign finds them.
+ * new document (File > New from another window). Placed graphics are
+ * links to files by path, found where they were placed or beside the
+ * document as InDesign finds them: `file-folders` reaches the folders of
+ * the document and of pictures placed, and links elsewhere keep a handle
+ * across restarts (publisher/linkTokens).
  */
 export function Publisher() {
   const din = useDin();
@@ -703,6 +706,7 @@ export function Publisher() {
         },
         previews,
         f?.path ? parentPath(f.path) : null,
+        (path) => reachLink(din, path),
       );
       imagesRef.current = store;
       setImages(store);
@@ -727,7 +731,7 @@ export function Publisher() {
         if (s?.pages[0]) fitRect(pageRect(s, s.pages[0]));
       });
     },
-    [fitRect, scheduleScene],
+    [din, fitRect, scheduleScene],
   );
 
   // ---- Files ------------------------------------------------------------------------------------
@@ -794,6 +798,12 @@ export function Publisher() {
       try {
         await new Promise((r) => setTimeout(r, 30));
         await f.write(writePackage(entry.pkg));
+        const linked: string[] = [];
+        for (const it of buildModel(entry.pkg).items.values()) {
+          const p = it.kind === 'graphic' && it.graphic && !it.graphic.embedded ? linkPath(it.graphic.link) : null;
+          if (p) linked.push(p);
+        }
+        void keepLinks(din, f.key, parentPath(f.path), linked);
         setSavedEntry(entry);
         setFile(f);
         setDocName(f.name);
@@ -807,7 +817,7 @@ export function Publisher() {
         setBusy(false);
       }
     },
-    [hist],
+    [din, hist],
   );
 
   /** Din's save dialog for one type; false when the name it comes back with doesn't end in it. */

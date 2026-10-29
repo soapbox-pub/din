@@ -14,7 +14,7 @@
   },
   "din": {
     "permissions": [
-      "fs",
+      "file-folders",
       "printing",
       "indd"
     ],

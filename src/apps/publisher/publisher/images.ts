@@ -77,6 +77,8 @@ export class ImageStore {
     /** InDesign's previews by graphic Self, from an INDD. */
     private previews: Map<string, Uint8Array>,
     private docDir: string | null,
+    /** Brings a linked path's folder into reach, if Publisher kept a way to. */
+    private reach: (path: string) => Promise<void> = async () => {},
   ) {}
 
   /** The picture for a graphic element, starting to load it the first time. */
@@ -127,6 +129,7 @@ export class ImageStore {
     const fs = window.din?.system.fs;
     if (p && fs) {
       const name = basename(p);
+      await this.reach(p);
       const tries = [p, ...(this.docDir ? [`${this.docDir}/Links/${name}`, `${this.docDir}/${name}`] : [])].filter((x) => x.startsWith('/'));
       for (const t of tries) {
         try {
