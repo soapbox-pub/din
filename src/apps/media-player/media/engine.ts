@@ -1145,8 +1145,20 @@ export function connectMediaSession(din: Din): () => void {
     // Once it's been playing it stays: Next while paused stops the player
     // (as Winamp does), and its controls mustn't vanish for that.
     let session: MediaSession | null = null;
-    if (!track || (status === 'stopped' && !listed)) {
+    if (!track) {
       listed = false;
+    } else if (status === 'stopped' && !listed) {
+      // Stopped with something queued: not listed, but a play key starts it.
+      session = {
+        title: track.title,
+        subtitle: track.artist || 'Media Player',
+        artwork: null,
+        playing: false,
+        canPlay: true,
+        canPrevious: true,
+        canNext: true,
+        idle: true,
+      };
     } else {
       listed = true;
       if (cover?.location !== track.location) {
