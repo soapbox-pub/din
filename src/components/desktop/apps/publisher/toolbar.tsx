@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { FOCUS } from '../photo/styles';
+import { FOCUS } from '@/shared/photo/styles';
 import { css, type Swatch } from './colors';
 import { TOOL_GROUPS, toolInfo, type ToolId } from './tools';
 

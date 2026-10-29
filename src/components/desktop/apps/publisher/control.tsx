@@ -16,7 +16,7 @@ import {
   Unlink2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { IconButton, Select } from '../photo/chrome';
+import { IconButton, Select } from '@/shared/photo/chrome';
 import type { Swatches } from './colors';
 import { ComboField, LengthField, NumField } from './fields';
 import { ProxyIcon } from './icons';

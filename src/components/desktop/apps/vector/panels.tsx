@@ -29,9 +29,9 @@ import {
   Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button, IconButton, NumberField, Select } from '../photo/chrome';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../photo/contextMenu';
-import { FOCUS, INPUT } from '../photo/styles';
+import { Button, IconButton, NumberField, Select } from '@/shared/photo/chrome';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/shared/photo/contextMenu';
+import { FOCUS, INPUT } from '@/shared/photo/styles';
 import { LengthField, PaintChip } from './bars';
 import { BLEND_OPTIONS, STROKE_WEIGHTS } from './units';
 import { hexColor, toHex, toRgb, type Color } from './pdf/color';

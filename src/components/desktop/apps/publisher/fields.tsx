@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { INPUT } from '../photo/styles';
+import { INPUT } from '@/shared/photo/styles';
 import { fmtLength, parseLength, type Unit } from './units';
 
 /**

@@ -9,7 +9,7 @@ import {
   MenubarSubContent,
   MenubarSubTrigger,
   MenubarTrigger,
-} from '../photo/chrome';
+} from '@/shared/photo/chrome';
 import type { Arrange, Fitting } from './ops';
 import { PANEL_NAMES, type PanelId } from './state';
 

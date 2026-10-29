@@ -1,9 +1,9 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, FilePlus, FileImage, Link2Off, Lock, LockOpen, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { IconButton, Select, SliderRow } from '../photo/chrome';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuTrigger } from '../photo/contextMenu';
-import { FOCUS, INPUT } from '../photo/styles';
+import { IconButton, Select, SliderRow } from '@/shared/photo/chrome';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuTrigger } from '@/shared/photo/contextMenu';
+import { FOCUS, INPUT } from '@/shared/photo/styles';
 import { cmykToRgb, css, hex, rgbToCmyk, swatchLabel, type Swatch, type Swatches } from './colors';
 import type { ObjectInfo, TypeInfo } from './control';
 import { ComboField, LengthField, NumField } from './fields';

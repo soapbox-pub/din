@@ -9,7 +9,7 @@ import {
   MenubarSubContent,
   MenubarSubTrigger,
   MenubarTrigger,
-} from '../photo/chrome';
+} from '@/shared/photo/chrome';
 import type { AlignHow, Arrange } from './ops';
 
 export type PanelId = 'properties' | 'layers' | 'color' | 'swatches' | 'stroke' | 'gradient' | 'transparency' | 'character' | 'paragraph' | 'align' | 'artboards' | 'pathfinder';

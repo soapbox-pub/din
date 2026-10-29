@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Menubar as MenubarPrimitive } from 'radix-ui';
 import { Check, ChevronRight } from 'lucide-react';
-import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
 import { FOCUS, INPUT, RANGE } from './styles';
 
@@ -42,7 +41,7 @@ const CONTENT = 'z-50 min-w-56 rounded-md border border-[#1c1c1c] bg-[#3a3a3a] p
 
 export function MenubarContent({ className, ...props }: React.ComponentProps<typeof MenubarPrimitive.Content>) {
   return (
-    <MenubarPrimitive.Portal container={portalContainer()}>
+    <MenubarPrimitive.Portal>
       <MenubarPrimitive.Content align="start" sideOffset={2} className={cn(CONTENT, className)} {...props} />
     </MenubarPrimitive.Portal>
   );
@@ -50,7 +49,7 @@ export function MenubarContent({ className, ...props }: React.ComponentProps<typ
 
 export function MenubarSubContent({ className, ...props }: React.ComponentProps<typeof MenubarPrimitive.SubContent>) {
   return (
-    <MenubarPrimitive.Portal container={portalContainer()}>
+    <MenubarPrimitive.Portal>
       <MenubarPrimitive.SubContent alignOffset={-5} className={cn(CONTENT, 'max-h-[70vh] overflow-y-auto', className)} {...props} />
     </MenubarPrimitive.Portal>
   );

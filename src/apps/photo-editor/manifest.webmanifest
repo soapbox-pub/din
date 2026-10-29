@@ -1,0 +1,42 @@
+{
+  "name": "Photo Editor",
+  "description": "Layered pictures, Photoshop style: opens and saves PSDs and OpenRaster (.ora).",
+  "icons": [
+    {
+      "src": "/icons/apps/photo-editor.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "window": {
+      "size": {
+        "width": 1280,
+        "height": 800
+      },
+      "frame": "standard"
+    },
+    "keywords": [
+      "photoshop",
+      "psd",
+      "openraster",
+      "ora",
+      "krita",
+      "gimp",
+      "photopea",
+      "layers",
+      "photo",
+      "retouch",
+      "image",
+      "picture",
+      "editor"
+    ],
+    "migrateStorage": [
+      "din:photo-editor:*"
+    ]
+  }
+}

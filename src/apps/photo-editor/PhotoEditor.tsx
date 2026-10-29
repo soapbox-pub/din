@@ -1,19 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import type { AdjustmentLayer, LayerEffectsInfo } from 'ag-psd';
 import { FilePlus, FolderOpen } from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
-import { cleanFsError, formatBytes, getFsBridge, parentPath } from '@/lib/fs';
-import { setCloseGuard } from '@/lib/closeGuards';
-import { invalidateListings } from '@/hooks/useFileSystem';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
-import { ADJUSTMENT_NAMES, defaultAdjustment, FILTER_NAMES, type FilterSpec } from './photo/adjust';
-import { OptionsBar, Toolbar } from './photo/bars';
-import { Button, Dialog } from './photo/chrome';
-import { FOCUS, INPUT } from './photo/styles';
+import { cleanFsError, formatBytes } from '@/lib/fs';
+import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
+import { ADJUSTMENT_NAMES, defaultAdjustment, FILTER_NAMES, type FilterSpec } from '@/shared/photo/adjust';
+import { OptionsBar, Toolbar } from '@/shared/photo/bars';
+import { Button, Dialog } from '@/shared/photo/chrome';
+import { FOCUS, INPUT } from '@/shared/photo/styles';
 import {
   AdjustmentDialog,
   CanvasSizeDialog,
@@ -26,8 +21,8 @@ import {
   RadiusDialog,
   type BackgroundChoice,
   type FillContents,
-} from './photo/dialogs';
-import { PhotoMenus, type Commands, type MenuState, type PanelId } from './photo/menus';
+} from '@/shared/photo/dialogs';
+import { PhotoMenus, type Commands, type MenuState, type PanelId } from '@/shared/photo/menus';
 import {
   allLayers,
   blankLayer,
@@ -50,16 +45,16 @@ import {
   type Mask,
   type Rect,
   type TextData,
-} from './photo/model';
-import * as ops from './photo/ops';
-import { dab, drawGradient, fillRegion, hardDab, stampLine } from './photo/paint';
-import { ColorPanel, HistoryPanel, LayersPanel, Panel, PropertiesPanel, SwatchesPanel } from './photo/panels';
-import { decodeImage, encodeDoc, extOf, isLayered, LAYERED_EXTENSIONS, OPEN_EXTENSIONS, pngBlob, readDoc, SAVE_TYPES, savesAs } from './photo/psd';
-import { renderDoc, renderLayerAlone, renderLayers } from './photo/render';
-import * as selection from './photo/selection';
-import type { Point, SelectMode, Selection } from './photo/selection';
-import { DEFAULT_OPTIONS, PAINTS, TOOL_GROUPS, TOOLS, type ToolId, type ToolOptions } from './photo/tools';
-import { boxCorners, drawScene, HANDLES, handlePoint, rectHandles, zoomStep, type Box, type Overlay, type View } from './photo/view';
+} from '@/shared/photo/model';
+import * as ops from '@/shared/photo/ops';
+import { dab, drawGradient, fillRegion, hardDab, stampLine } from '@/shared/photo/paint';
+import { ColorPanel, HistoryPanel, LayersPanel, Panel, PropertiesPanel, SwatchesPanel } from '@/shared/photo/panels';
+import { decodeImage, encodeDoc, extOf, isLayered, LAYERED_EXTENSIONS, OPEN_EXTENSIONS, pngBlob, readDoc, SAVE_TYPES, savesAs } from '@/shared/photo/psd';
+import { renderDoc, renderLayerAlone, renderLayers } from '@/shared/photo/render';
+import * as selection from '@/shared/photo/selection';
+import type { Point, SelectMode, Selection } from '@/shared/photo/selection';
+import { DEFAULT_OPTIONS, PAINTS, TOOL_GROUPS, TOOLS, type ToolId, type ToolOptions } from '@/shared/photo/tools';
+import { boxCorners, drawScene, HANDLES, handlePoint, rectHandles, zoomStep, type Box, type Overlay, type View } from '@/shared/photo/view';
 
 const SETTINGS_KEY = 'din:photo-editor:settings';
 /** Bigger files than this aren't read. */
@@ -123,7 +118,6 @@ function readSettings(): Settings {
   }
 }
 
-const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const isHex = (s: unknown): s is string => typeof s === 'string' && /^#[0-9a-f]{6}$/i.test(s);
 const fmtZoom = (z: number) => `${z >= 1 ? Math.round(z * 100) : Math.round(z * 1000) / 10}%`;
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -232,14 +226,13 @@ function placeFloat(f: Float, layer: Layer): Layer {
  * saves OpenRaster (GIMP, Krita) with its layers, and opens PNG, JPEG and the
  * like, and exports them.
  *
- * Launch params: `{ path?: string }` (absolute).
+ * Launched with a file, it opens that; launch params `{ width, height,
+ * background, name }` start a new document (File > New from another window).
  */
-export function PhotoEditor({ windowId, params }: AppComponentProps) {
-  const initial = typeof params?.path === 'string' ? params.path : null;
-  const fs = getFsBridge();
-  const { open, close, focus } = useWindowActions();
-  const { pickFile, pickFiles } = useFilePicker();
-  const queryClient = useQueryClient();
+export function PhotoEditor() {
+  const din = useDin();
+  const params = din.app.launch.params;
+  const initial = din.app.launch.files[0] ?? null;
 
   const [settings, setSettings] = useState(readSettings);
   const { options, fg, bg, panels } = settings;
@@ -258,12 +251,15 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
   const [activeState, setActiveId] = useState<number | null>(null);
   const [selectedState, setSelectedIds] = useState<Set<number>>(new Set());
   const [editMask, setEditMask] = useState(false);
-  const [path, setPath] = useState<string | null>(null);
+  const [file, setFile] = useState<DinFileHandle | null>(null);
+  // Where File > Quick Export last wrote, so the next one goes there without asking.
+  const [exportFile, setExportFile] = useState<DinFileHandle | null>(null);
+  const fileName = file?.name ?? null;
   const [docName, setDocName] = useState(boot?.name ?? 'Untitled-1');
   const [savedEntry, setSavedEntry] = useState<Entry | null>(boot?.entry ?? null);
   const [lastSel, setLastSel] = useState<Selection | null>(null);
   const [panning, setPanning] = useState(false);
-  const [loading, setLoading] = useState(initial !== null && fs !== undefined);
+  const [loading, setLoading] = useState(initial !== null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -537,15 +533,16 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
   );
 
   const startDoc = useCallback(
-    (d: Doc, name: string, p: string | null) => {
+    (d: Doc, name: string, f: DinFileHandle | null) => {
       const top = d.layers[d.layers.length - 1];
-      const entry: Entry = { label: p ? 'Open' : 'New', doc: d, selection: null, activeId: top?.id ?? null };
+      const entry: Entry = { label: f ? 'Open' : 'New', doc: d, selection: null, activeId: top?.id ?? null };
       setHist({ entries: [entry], index: 0 });
       setSavedEntry(entry);
       setActiveId(top?.id ?? null);
       setSelectedIds(new Set(top ? [top.id] : []));
       setEditMask(false);
-      setPath(p);
+      setFile(f);
+      setExportFile(null);
       setDocName(name);
       setFloat(null);
       setCropRect(null);
@@ -567,25 +564,24 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
   // ---- Files ---------------------------------------------------------------------------------------
 
   const load = useCallback(
-    (p: string) => {
-      if (!fs) return;
+    (f: DinFileHandle) => {
       const seq = ++loadSeq.current;
       (async () => {
         try {
-          const r = await fs.readFile(p, MAX_BYTES);
-          if (r.truncated) throw new Error(`It’s too big to open (${formatBytes(r.size ?? r.data.length)}; up to 1 GB).`);
-          const d = await readDoc(r.data, p);
+          const blob = await f.getFile();
+          if (blob.size > MAX_BYTES) throw new Error(`It’s too big to open (${formatBytes(blob.size)}; up to 1 GB).`);
+          const d = await readDoc(new Uint8Array(await blob.arrayBuffer()), f.name);
           if (seq !== loadSeq.current) return;
-          startDoc(d, basename(p), p);
+          startDoc(d, f.name, f);
         } catch (err) {
           if (seq !== loadSeq.current) return;
-          setError(`Couldn’t open ${basename(p)}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
+          setError(`Couldn’t open ${f.name}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
         } finally {
           if (seq === loadSeq.current) setLoading(false);
         }
       })();
     },
-    [fs, startDoc],
+    [startDoc],
   );
 
   // Keys go to the editor: at first, and again once a dialog or the type box that had them goes away.
@@ -595,126 +591,130 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
     if (!a || a === document.body || !rootRef.current?.contains(a)) rootRef.current?.focus({ preventScroll: true });
   }, [dialog, typing]);
 
-  const [prevInitial, setPrevInitial] = useState<string | null>(null);
-  if (initial !== prevInitial) {
-    setPrevInitial(initial);
-    if (initial && fs) {
-      setLoading(true);
-      setError(null);
-    }
-  }
   useEffect(() => {
     if (initial) load(initial);
   }, [initial, load]);
 
   const writeTo = useCallback(
-    async (p: string): Promise<boolean> => {
+    async (f: DinFileHandle): Promise<boolean> => {
       const d = docRef.current;
-      if (!fs || !d || !hist) return false;
+      if (!d || !hist) return false;
       setBusy(true);
       setStatus('Saving…');
       try {
         // Let "Saving…" paint before the encoder holds the thread.
         await new Promise((r) => setTimeout(r, 30));
-        const bytes = await encodeDoc(d, p);
-        await fs.writeFile(p, bytes);
+        await f.write(await encodeDoc(d, f.name));
         const entry = hist.entries[hist.index];
-        if (isLayered(p) || allLayers(d.layers).length === 1) {
+        if (isLayered(f.name) || allLayers(d.layers).length === 1) {
           setSavedEntry(entry);
-          setPath(p);
-          setDocName(basename(p));
+          setFile(f);
+          setDocName(f.name);
         }
-        setStatus(`Saved ${basename(p)}`);
-        void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', p] });
-        void invalidateListings(queryClient, p);
+        setStatus(`Saved ${f.name}`);
         return true;
       } catch (err) {
-        setStatus(`Couldn’t save ${basename(p)}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
+        setStatus(`Couldn’t save ${f.name}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
         return false;
       } finally {
         setBusy(false);
       }
     },
-    [fs, hist, queryClient],
+    [hist],
   );
 
   const saveAs = useCallback(
     async (exporting = false): Promise<boolean> => {
       const stem = docName.replace(/\.[^.]*$/, '');
       const types = exporting ? SAVE_TYPES.filter((f) => !isLayered(f.patterns[0])) : SAVE_TYPES;
-      const result = await pickFiles({
-        mode: 'save',
+      const t = await din.files.save({
         title: exporting ? 'Export As' : 'Save As',
-        currentName: `${stem}.${exporting ? 'png' : path && isLayered(path) ? extOf(path) : 'psd'}`,
-        initialPath: path ? parentPath(path) : undefined,
-        filters: types,
+        suggestedName: `${stem}.${exporting ? 'png' : fileName && isLayered(fileName) ? extOf(fileName) : 'psd'}`,
+        startIn: file ?? undefined,
+        types: typesFromFilters(types),
       });
-      if (!result) return false;
-      let t = result.paths[0];
-      if (!savesAs(t) || (exporting && isLayered(t))) {
-        const filter = types[result.filter ?? 0] ?? types[0];
-        t += filter.patterns[0].slice(1);
+      if (!t) return false;
+      if (!savesAs(t.name) || (exporting && isLayered(t.name))) {
+        setStatus(`Couldn’t save ${t.name}: choose one of the types listed.`);
+        return false;
       }
       return writeTo(t);
     },
-    [pickFiles, docName, path, writeTo],
+    [din, docName, file, fileName, writeTo],
   );
 
   const save = useCallback((): Promise<boolean> => {
     const d = docRef.current;
     if (!d) return Promise.resolve(false);
     // Layers only survive in a PSD or OpenRaster file; a flat picture can go back where it came from.
-    if (path && (isLayered(path) || (savesAs(path) && allLayers(d.layers).length === 1))) return writeTo(path);
+    if (file?.writable && (isLayered(file.name) || (savesAs(file.name) && allLayers(d.layers).length === 1))) return writeTo(file);
     return saveAs();
-  }, [path, writeTo, saveAs]);
+  }, [file, writeTo, saveAs]);
 
   const quickExport = useCallback(async () => {
     const d = docRef.current;
-    if (!d || !fs) return;
-    if (!path) {
+    if (!d) return;
+    if (!file) {
       void saveAs(true);
       return;
     }
-    const p = `${path.replace(/\.[^./]*$/, '')}.png`;
+    // The first Quick Export asks where the PNG goes (beside the document); later ones write there again.
+    let t = exportFile;
+    if (!t) {
+      t = await din.files.save({
+        title: 'Quick Export as PNG',
+        suggestedName: `${file.name.replace(/\.[^.]*$/, '')}.png`,
+        startIn: file,
+        types: typesFromFilters(SAVE_TYPES.filter((f) => extOf(f.patterns[0]) === 'png')),
+      });
+      if (!t) return;
+      setExportFile(t);
+    }
     setBusy(true);
     try {
-      await fs.writeFile(p, await encodeDoc(d, p));
-      setStatus(`Exported ${basename(p)}`);
-      void invalidateListings(queryClient, p);
+      await t.write(await encodeDoc(d, t.name));
+      setStatus(`Exported ${t.name}`);
     } catch (err) {
       setStatus(`Couldn’t export: ${cleanFsError(err)}`);
     } finally {
       setBusy(false);
     }
-  }, [fs, path, saveAs, queryClient]);
+  }, [din, file, exportFile, saveAs]);
+
+  const pick = useCallback(
+    async (title: string, extensions: string[]) =>
+      (await din.files.open({ title, types: [{ description: 'Pictures', extensions }], startIn: file ?? undefined }))[0] ?? null,
+    [din, file],
+  );
 
   const openFile = useCallback(async () => {
-    const t = await pickFile({ title: 'Open', extensions: OPEN_EXTENSIONS, initialPath: path ? parentPath(path) : undefined });
+    const t = await pick('Open', OPEN_EXTENSIONS);
     if (!t) return;
     // Work in progress stays put; the file gets a window of its own.
-    if (docRef.current && (dirty || path)) {
-      open('photo-editor', { path: t });
+    if (docRef.current && (dirty || file)) {
+      void din.app.open('photo-editor', {}, [t]);
       return;
     }
+    setLoading(true);
+    setError(null);
     load(t);
-  }, [pickFile, path, dirty, open, load]);
+  }, [din, pick, file, dirty, load]);
 
   // Closing with unsaved changes asks first.
-  useEffect(() => {
-    if (!dirty) return;
-    setCloseGuard(windowId, () => {
-      focus(windowId);
-      setDialog({ kind: 'unsaved' });
-      return true;
-    });
-    return () => setCloseGuard(windowId, null);
-  }, [dirty, windowId, focus]);
+  useCloseGuard(
+    dirty
+      ? () => {
+          din.window.focus();
+          setDialog({ kind: 'unsaved' });
+          return true;
+        }
+      : null,
+  );
 
   const closeNow = useCallback(() => {
-    setCloseGuard(windowId, null);
     setDialog(null);
-    close(windowId);
-  }, [windowId, close]);
+    din.window.close();
+  }, [din]);
 
   // ---- Helpers for edits ----------------------------------------------------------------------------
 
@@ -1776,22 +1776,18 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
     newDoc: () => setDialog({ kind: 'new' }),
     open: () => void openFile(),
     place: async () => {
-      if (!fs) return;
-      const t = await pickFile({
-        title: 'Place Embedded',
-        extensions: OPEN_EXTENSIONS.filter((x) => !LAYERED_EXTENSIONS.includes(x)),
-        initialPath: path ? parentPath(path) : undefined,
-      });
+      const t = await pick('Place Embedded', OPEN_EXTENSIONS.filter((x) => !LAYERED_EXTENSIONS.includes(x)));
       if (!t) return;
       try {
-        const r = await fs.readFile(t, MAX_BYTES);
-        const c = await decodeImage(r.data, t);
-        pasteCanvas(c, null, basename(t).replace(/\.[^.]*$/, ''));
+        const f = await t.getFile();
+        if (f.size > MAX_BYTES) throw new Error(`It’s too big (${formatBytes(f.size)}; up to 1 GB).`);
+        const c = await decodeImage(new Uint8Array(await f.arrayBuffer()), t.name);
+        pasteCanvas(c, null, t.name.replace(/\.[^.]*$/, ''));
       } catch (err) {
-        say(`Couldn’t place ${basename(t)}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
+        say(`Couldn’t place ${t.name}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
       }
     },
-    close: () => close(windowId),
+    close: () => din.window.requestClose(),
     save: () => void save(),
     saveAs: () => void saveAs(),
     quickExport: () => void quickExport(),
@@ -2269,12 +2265,6 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
 
   // ---- Rendering ----------------------------------------------------------------------------------------
 
-  if (!fs) {
-    return (
-      <p className="grid h-full place-items-center bg-[#323232] p-6 text-sm text-[#cfcfcf]">Photo Editor needs the Electron shell to read and save files.</p>
-    );
-  }
-
   const cursor = (() => {
     if (spaceDown || tool === 'hand') return panning ? 'grabbing' : 'grab';
     if (float) return 'default';
@@ -2492,7 +2482,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
             <div className="flex h-7 shrink-0 items-end border-b border-[#1c1c1c] bg-[#2b2b2b] px-1">
               <div
                 className="flex h-6 max-w-full items-center gap-2 truncate rounded-t-[3px] bg-[#383838] px-3 text-[11px] text-[#e6e6e6]"
-                title={path ?? docName}
+                title={docName}
               >
                 {title}
               </div>
@@ -2644,7 +2634,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
             const color = b === 'white' ? '#ffffff' : b === 'black' ? '#000000' : b === 'background' ? bg : null;
             if (docRef.current) {
               // A new document gets a window of its own, as in Photoshop's tabs.
-              open('photo-editor', { width: w, height: h, background: color ?? 'transparent', name });
+              void din.app.open('photo-editor', { width: w, height: h, background: color ?? 'transparent', name });
               return;
             }
             startDoc(newDoc(w, h, color), name || 'Untitled-1', null);
@@ -2775,7 +2765,7 @@ export function PhotoEditor({ windowId, params }: AppComponentProps) {
         >
           <p className="text-sm text-[#e6e6e6]">Save changes to “{docName}” before closing?</p>
           <p className="mt-1 text-xs text-[#a0a0a0]">
-            {path && !isLayered(path) && allLayers(doc?.layers ?? []).length > 1
+            {fileName && !isLayered(fileName) && allLayers(doc?.layers ?? []).length > 1
               ? 'It has layers, so it will be saved as a Photoshop document.'
               : 'If you don’t, your changes will be lost.'}
           </p>

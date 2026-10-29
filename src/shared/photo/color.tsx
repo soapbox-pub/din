@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Popover as PopoverPrimitive } from 'radix-ui';
-import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
 import { hsvToRgb, rgbToHsv } from './adjust';
 import { NumberField } from './chrome';
@@ -122,7 +121,7 @@ export function ColorWell({ value, onChange, label, className }: { value: string
         className={cn('h-6 w-10 shrink-0 rounded-[3px] border border-[#1f1f1f] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.15)]', FOCUS, className)}
         style={{ background: value }}
       />
-      <PopoverPrimitive.Portal container={portalContainer()}>
+      <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content
           sideOffset={4}
           onKeyDown={(e) => e.stopPropagation()}

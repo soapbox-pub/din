@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link2, Unlink2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button, Checkbox, Dialog, IconButton, Select } from '../photo/chrome';
-import { ColorPicker } from '../photo/color';
-import { INPUT } from '../photo/styles';
+import { Button, Checkbox, Dialog, IconButton, Select } from '@/shared/photo/chrome';
+import { ColorPicker } from '@/shared/photo/color';
+import { INPUT } from '@/shared/photo/styles';
 import { cmykToRgb, fromHex, hex, rgbToCmyk } from './colors';
 import { LengthField, NumField } from './fields';
 import { PRESETS, type NewDocSettings } from './newdoc';

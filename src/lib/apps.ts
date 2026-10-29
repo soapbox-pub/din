@@ -25,9 +25,6 @@ const FileBrowser = lazy(() =>
 const FileViewer = lazy(() =>
   import('@/components/desktop/apps/FileViewer').then((m) => ({ default: m.FileViewer })),
 );
-const PhotoEditor = lazy(() =>
-  import('@/components/desktop/apps/PhotoEditor').then((m) => ({ default: m.PhotoEditor })),
-);
 const VectorEditor = lazy(() =>
   import('@/components/desktop/apps/VectorEditor').then((m) => ({ default: m.VectorEditor })),
 );
@@ -217,18 +214,11 @@ export const APPS: readonly AppDefinition[] = [
   // params `{ path }` open a picture; `{ width, height, transparent, zoom }`
   // start a new one.
   dinApp('paint'),
-  {
-    // Layered pictures, Photoshop style: opens and saves PSDs and OpenRaster
-    // (.ora). Files opens both here. Launch params `{ path }` open one;
-    // `{ width, height, background, name }` start a new document (File > New
-    // from another window).
-    id: 'photo-editor',
-    name: 'Photo Editor',
-    icon: '/icons/apps/photo-editor.png',
-    component: PhotoEditor,
-    defaultSize: { width: 1280, height: 800 },
-    keywords: ['photoshop', 'psd', 'openraster', 'ora', 'krita', 'gimp', 'photopea', 'layers', 'photo', 'retouch', 'image', 'picture', 'editor'],
-  },
+  // Layered pictures, Photoshop style: opens and saves PSDs and OpenRaster
+  // (.ora). Files opens both here. Launch params `{ path }` open one;
+  // `{ width, height, background, name }` start a new document (File > New
+  // from another window).
+  dinApp('photo-editor'),
   // Documents, Microsoft Word style: opens and saves .docx and .odt. Files
   // opens Word and OpenDocument text documents here. Launch params
   // `{ path }` open one.

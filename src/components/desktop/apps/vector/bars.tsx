@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link2, Link2Off } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { NumberField, Select } from '../photo/chrome';
-import { FOCUS } from '../photo/styles';
+import { NumberField, Select } from '@/shared/photo/chrome';
+import { FOCUS } from '@/shared/photo/styles';
 import { cssPaint } from './paint';
 import { SwapIcon } from './icons';
 import type { Paint, Units } from './model';

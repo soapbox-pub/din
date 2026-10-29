@@ -1,7 +1,7 @@
 import { Popover as PopoverPrimitive } from 'radix-ui';
 import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
-import { FOCUS } from '../photo/styles';
+import { FOCUS } from '@/shared/photo/styles';
 import { css, swatchLabel, type Swatch, type Swatches } from './colors';
 
 /** A swatch's little square: its color, None's red slash, a gradient's ramp. */

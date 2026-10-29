@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { Button, Checkbox, Dialog, NumberField, Select } from '../photo/chrome';
-import { INPUT } from '../photo/styles';
+import { Button, Checkbox, Dialog, NumberField, Select } from '@/shared/photo/chrome';
+import { INPUT } from '@/shared/photo/styles';
 import { LengthField } from './bars';
 import { UNIT_PT, type Units } from './model';
 import type { TransformDialog } from './menus';
