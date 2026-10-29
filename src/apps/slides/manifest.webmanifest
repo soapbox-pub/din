@@ -1,0 +1,39 @@
+{
+  "name": "Slides",
+  "description": "Presentations, Microsoft PowerPoint style: opens and saves .pptx and .odp and plays slide shows.",
+  "icons": [
+    {
+      "src": "/icons/apps/slides.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "window": {
+      "size": {
+        "width": 1280,
+        "height": 800
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "powerpoint",
+      "microsoft powerpoint",
+      "office",
+      "pptx",
+      "ppt",
+      "odp",
+      "opendocument",
+      "keynote",
+      "impress",
+      "libreoffice",
+      "presentation",
+      "slideshow",
+      "deck"
+    ]
+  }
+}

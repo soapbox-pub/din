@@ -1,4 +1,4 @@
-import '../office/fonts';
+import '@/shared/office/fonts';
 import type { FontEntry, Resources, TextItem, TextRun } from './model';
 
 /**

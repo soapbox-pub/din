@@ -1,0 +1,44 @@
+{
+  "name": "Word Processor",
+  "description": "Documents, Microsoft Word style: opens and saves .docx and .odt.",
+  "icons": [
+    {
+      "src": "/icons/apps/word-processor.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "permissions": [
+      "printing"
+    ],
+    "window": {
+      "size": {
+        "width": 1200,
+        "height": 840
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "word",
+      "microsoft word",
+      "office",
+      "docx",
+      "doc",
+      "odt",
+      "opendocument",
+      "writer",
+      "libreoffice",
+      "document",
+      "letter",
+      "write"
+    ],
+    "migrateStorage": [
+      "din:word:*"
+    ]
+  }
+}

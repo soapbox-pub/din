@@ -14,7 +14,7 @@ import { invalidateListings } from '@/hooks/useFileSystem';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useFilePicker } from '@/contexts/FilePickerContext';
-import '@/components/desktop/apps/office/fonts';
+import '@/shared/office/fonts';
 import { Button, Dialog } from './photo/chrome';
 import { Panel } from './photo/panels';
 import { FOCUS, INPUT } from './photo/styles';

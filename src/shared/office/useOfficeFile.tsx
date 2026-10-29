@@ -1,0 +1,342 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
+import type { FileFilter } from '@/lib/fileFilters';
+import { ACCENTS, type OfficeApp } from './accent';
+import { OfficeButton, OfficeDialog, type RecentFile } from './chrome';
+
+/** Bigger files than this aren't read. */
+const MAX_BYTES = 512 * 1024 * 1024;
+const RECENT_MAX = 20;
+
+export const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+export const stem = (name: string) => (name.lastIndexOf('.') > 0 ? name.slice(0, name.lastIndexOf('.')) : name);
+export const extOf = (path: string) => {
+  const name = basename(path);
+  const i = name.lastIndexOf('.');
+  return i > 0 ? name.slice(i + 1).toLowerCase() : '';
+};
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+const untitledCounters: Partial<Record<OfficeApp, number>> = {};
+
+function recentKey(app: OfficeApp) {
+  return `din:office:recent:${app}`;
+}
+
+/** Files opened or saved lately, newest first. Each keeps its grant with a `persist()` token. */
+export function readRecent(app: OfficeApp): RecentFile[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(recentKey(app)) ?? '[]');
+    return Array.isArray(v)
+      ? v.filter((r): r is RecentFile => typeof r?.token === 'string' && typeof r?.key === 'string' && typeof r?.name === 'string' && typeof r?.time === 'number')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function addRecent(app: OfficeApp, handle: DinFileHandle): Promise<RecentFile[]> {
+  const list = readRecent(app);
+  const token = list.find((r) => r.key === handle.key)?.token ?? (await handle.persist());
+  const next = [{ token, key: handle.key, name: handle.name, time: Date.now() }, ...list.filter((r) => r.key !== handle.key)].slice(0, RECENT_MAX);
+  localStorage.setItem(recentKey(app), JSON.stringify(next));
+  return next;
+}
+
+const RECENT_CHANGED = 'din:office:recent';
+
+export function removeRecent(app: OfficeApp, key: string) {
+  localStorage.setItem(recentKey(app), JSON.stringify(readRecent(app).filter((r) => r.key !== key)));
+  window.dispatchEvent(new CustomEvent(RECENT_CHANGED, { detail: app }));
+}
+
+export interface OfficeFileOptions {
+  app: OfficeApp;
+  /** "Document", "Book", "Presentation": new files are Document1, Document2... */
+  untitled: string;
+  openExtensions: string[];
+  /** Save As choices; the first is the app's own format. */
+  saveTypes: FileFilter[];
+  /** Read a file's bytes into the app. Throw (with a message for people) if it can't be. */
+  onLoad: (bytes: Uint8Array, name: string) => Promise<void> | void;
+  /** The bytes to write for a file name; its extension says which format. */
+  onSave: (name: string) => Promise<Uint8Array> | Uint8Array;
+}
+
+/**
+ * A document window's file: which file it is, whether it has unsaved
+ * changes, Open / Save / Save As through Din's file picker, the recent
+ * files list, and asking before closing over unsaved work, Office's way.
+ * The window opens the file it was launched with, if any.
+ */
+export function useOfficeFile(opts: OfficeFileOptions) {
+  const { app, untitled, openExtensions, saveTypes } = opts;
+  const din = useDin();
+  const optsRef = useRef(opts);
+  useEffect(() => {
+    optsRef.current = opts;
+  });
+
+  const [initialFile] = useState<DinFileHandle | null>(() => din.app.launch.files[0] ?? null);
+  const [untitledName] = useState(() => {
+    const n = (untitledCounters[app] ?? 0) + 1;
+    untitledCounters[app] = n;
+    return `${untitled}${n}`;
+  });
+  const [handle, setHandle] = useState<DinFileHandle | null>(null);
+  const [dirty, setDirtyState] = useState(false);
+  const [loading, setLoading] = useState(initialFile !== null);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [recent, setRecent] = useState(() => readRecent(app));
+  const dirtyRef = useRef(false);
+  const loadSeq = useRef(0);
+
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      if ((e as CustomEvent<OfficeApp>).detail === app) setRecent(readRecent(app));
+    };
+    window.addEventListener(RECENT_CHANGED, onChange);
+    return () => window.removeEventListener(RECENT_CHANGED, onChange);
+  }, [app]);
+
+  const remember = useCallback(
+    (target: DinFileHandle) => {
+      addRecent(app, target).then(setRecent, () => {});
+    },
+    [app],
+  );
+
+  const name = handle ? handle.name : untitledName;
+  const docName = handle ? stem(handle.name) : untitledName;
+  useWindowTitle(`${dirty ? '• ' : ''}${name}`);
+
+  const setDirty = useCallback((v: boolean) => {
+    dirtyRef.current = v;
+    setDirtyState(v);
+  }, []);
+
+  const load = useCallback(
+    (target: DinFileHandle) => {
+      const seq = ++loadSeq.current;
+      target
+        .getFile()
+        .then(async (blob) => {
+          if (blob.size > MAX_BYTES) throw new Error('It’s too big to open (over 512 MB).');
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          if (seq !== loadSeq.current) return;
+          await optsRef.current.onLoad(bytes, target.name);
+          if (seq !== loadSeq.current) return;
+          setHandle(target);
+          setError(null);
+          setDirty(false);
+          setStatus(null);
+          remember(target);
+          setLoading(false);
+        })
+        .catch((err: unknown) => {
+          if (seq !== loadSeq.current) return;
+          setHandle(target);
+          setError(errorText(err));
+          setLoading(false);
+        });
+    },
+    [remember, setDirty],
+  );
+
+  useEffect(() => {
+    if (initialFile) load(initialFile);
+  }, [initialFile, load]);
+
+  const writeTo = useCallback(
+    async (target: DinFileHandle): Promise<boolean> => {
+      setSaving(true);
+      setStatus('Saving…');
+      try {
+        const bytes = await optsRef.current.onSave(target.name);
+        await target.write(bytes);
+        setHandle(target);
+        setDirty(false);
+        setError(null);
+        setStatus('Saved');
+        remember(target);
+        return true;
+      } catch (err) {
+        setStatus(`Couldn’t save: ${errorText(err)}`);
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [remember, setDirty],
+  );
+
+  const saveAs = useCallback(
+    async (filterIndex = 0): Promise<boolean> => {
+      const filter = saveTypes[filterIndex] ?? saveTypes[0];
+      const target = await din.files.save({
+        title: filterIndex === 0 ? 'Save As' : `Export as ${filter.name}`,
+        suggestedName: `${docName}${filter.patterns[0].slice(1)}`,
+        startIn: handle ?? undefined,
+        types: typesFromFilters(filterIndex === 0 ? saveTypes : [filter]),
+      });
+      return target ? writeTo(target) : false;
+    },
+    [din, saveTypes, docName, handle, writeTo],
+  );
+
+  /** Export writes a copy without making it this window's file. */
+  const exportCopy = useCallback(
+    async (filterIndex: number): Promise<boolean> => {
+      const filter = saveTypes[filterIndex];
+      const target = await din.files.save({
+        title: `Export as ${filter.name}`,
+        suggestedName: `${docName}${filter.patterns[0].slice(1)}`,
+        startIn: handle ?? undefined,
+        types: typesFromFilters([filter]),
+      });
+      if (!target) return false;
+      try {
+        const bytes = await optsRef.current.onSave(target.name);
+        await target.write(bytes);
+        setStatus(`Exported ${target.name}`);
+        return true;
+      } catch (err) {
+        setStatus(`Couldn’t export: ${errorText(err)}`);
+        return false;
+      }
+    },
+    [din, saveTypes, docName, handle],
+  );
+
+  const save = useCallback((): Promise<boolean> => (handle && !error ? writeTo(handle) : saveAs()), [handle, error, writeTo, saveAs]);
+
+  /** Open a file here if this window holds nothing yet, otherwise in a new window. */
+  const openFile = useCallback(
+    (target: DinFileHandle) => {
+      if (handle && target.key === handle.key && !error) return;
+      if (dirtyRef.current || handle) void din.app.open(din.app.id, {}, [target]);
+      else {
+        setLoading(true);
+        setError(null);
+        load(target);
+      }
+    },
+    [din, handle, error, load],
+  );
+
+  const openRecent = useCallback(
+    async (entry: RecentFile) => {
+      const target = await din.files.restore(entry.token).catch(() => null);
+      if (target) openFile(target);
+      else {
+        removeRecent(app, entry.key);
+        setStatus(`Couldn’t find ${entry.name}. It may have been moved or deleted.`);
+      }
+    },
+    [din, app, openFile],
+  );
+
+  const browse = useCallback(async () => {
+    const [target] = await din.files.open({
+      title: 'Open',
+      types: [{ description: ACCENTS[app].files, extensions: openExtensions.map((e) => (e.startsWith('.') ? e : `.${e}`)) }],
+      startIn: handle ?? undefined,
+    });
+    if (target) openFile(target);
+  }, [din, app, openExtensions, handle, openFile]);
+
+  /** A file picked to put into the document (a picture), read whole. */
+  const pickInsert = useCallback(
+    async (title: string, extensions: string[]): Promise<{ bytes: Uint8Array; name: string } | null> => {
+      const [target] = await din.files.open({
+        title,
+        types: [{ description: 'Pictures', extensions: extensions.map((e) => (e.startsWith('.') ? e : `.${e}`)) }],
+        writable: false,
+      });
+      if (!target) return null;
+      const blob = await target.getFile();
+      if (blob.size > 64 * 1024 * 1024) throw new Error(`${target.name} is too big to insert (over 64 MB).`);
+      return { bytes: new Uint8Array(await blob.arrayBuffer()), name: target.name };
+    },
+    [din],
+  );
+
+  // Closing with unsaved changes asks first.
+  useCloseGuard(
+    dirty
+      ? () => {
+          din.window.focus();
+          setAsking(true);
+          return true;
+        }
+      : null,
+  );
+
+  const closeNow = useCallback(() => {
+    setAsking(false);
+    din.window.close();
+  }, [din]);
+
+  const requestClose = useCallback(() => {
+    if (dirtyRef.current) setAsking(true);
+    else closeNow();
+  }, [closeNow]);
+
+  const prompt = asking ? (
+    <OfficeDialog
+      title={ACCENTS[app].name}
+      onCancel={() => setAsking(false)}
+      width={420}
+      footer={
+        <>
+          <OfficeButton
+            primary
+            autoFocus
+            disabled={saving}
+            onClick={() => {
+              setAsking(false);
+              void save().then((ok) => ok && closeNow());
+            }}
+          >
+            Save
+          </OfficeButton>
+          <OfficeButton onClick={closeNow} disabled={saving}>
+            Don’t Save
+          </OfficeButton>
+          <OfficeButton onClick={() => setAsking(false)}>Cancel</OfficeButton>
+        </>
+      }
+    >
+      <p className="text-[14px]">Want to save your changes to “{docName}”?</p>
+    </OfficeDialog>
+  ) : null;
+
+  return {
+    handle,
+    name,
+    docName,
+    dirty,
+    setDirty,
+    loading,
+    error,
+    status,
+    setStatus,
+    saving,
+    save,
+    saveAs,
+    exportCopy,
+    openFile,
+    openRecent,
+    browse,
+    pickInsert,
+    recent,
+    requestClose,
+    prompt,
+    newWindow: () => void din.app.open(din.app.id),
+  };
+}

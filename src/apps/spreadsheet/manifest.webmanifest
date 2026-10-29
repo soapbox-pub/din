@@ -1,0 +1,40 @@
+{
+  "name": "Spreadsheet",
+  "description": "Workbooks, Microsoft Excel style: opens and saves .xlsx, .ods and CSV.",
+  "icons": [
+    {
+      "src": "/icons/apps/spreadsheet.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "window": {
+      "size": {
+        "width": 1200,
+        "height": 800
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "excel",
+      "microsoft excel",
+      "office",
+      "xlsx",
+      "xls",
+      "ods",
+      "opendocument",
+      "csv",
+      "calc",
+      "libreoffice",
+      "sheets",
+      "workbook",
+      "formulas",
+      "budget"
+    ]
+  }
+}

@@ -31,15 +31,6 @@ const TextEditor = lazy(() =>
 const PhotoEditor = lazy(() =>
   import('@/components/desktop/apps/PhotoEditor').then((m) => ({ default: m.PhotoEditor })),
 );
-const WordProcessor = lazy(() =>
-  import('@/components/desktop/apps/WordProcessor').then((m) => ({ default: m.WordProcessor })),
-);
-const Spreadsheet = lazy(() =>
-  import('@/components/desktop/apps/Spreadsheet').then((m) => ({ default: m.Spreadsheet })),
-);
-const Slides = lazy(() =>
-  import('@/components/desktop/apps/Slides').then((m) => ({ default: m.Slides })),
-);
 const VectorEditor = lazy(() =>
   import('@/components/desktop/apps/VectorEditor').then((m) => ({ default: m.VectorEditor })),
 );
@@ -257,39 +248,18 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 1280, height: 800 },
     keywords: ['photoshop', 'psd', 'openraster', 'ora', 'krita', 'gimp', 'photopea', 'layers', 'photo', 'retouch', 'image', 'picture', 'editor'],
   },
-  {
-    // Documents, Microsoft Word style: opens and saves .docx and .odt. Files
-    // opens Word and OpenDocument text documents here. Launch params
-    // `{ path }` open one.
-    id: 'word-processor',
-    name: 'Word Processor',
-    icon: '/icons/apps/word-processor.png',
-    component: WordProcessor,
-    defaultSize: { width: 1200, height: 840 },
-    keywords: ['word', 'microsoft word', 'office', 'docx', 'doc', 'odt', 'opendocument', 'writer', 'libreoffice', 'document', 'letter', 'write'],
-  },
-  {
-    // Workbooks, Microsoft Excel style: opens and saves .xlsx, .ods and CSV.
-    // Files opens Excel and OpenDocument spreadsheets here. Launch params
-    // `{ path }` open one.
-    id: 'spreadsheet',
-    name: 'Spreadsheet',
-    icon: '/icons/apps/spreadsheet.png',
-    component: Spreadsheet,
-    defaultSize: { width: 1200, height: 800 },
-    keywords: ['excel', 'microsoft excel', 'office', 'xlsx', 'xls', 'ods', 'opendocument', 'csv', 'calc', 'libreoffice', 'sheets', 'workbook', 'formulas', 'budget'],
-  },
-  {
-    // Presentations, Microsoft PowerPoint style: opens and saves .pptx and
-    // .odp and plays slide shows. Files opens PowerPoint and OpenDocument
-    // decks here. Launch params `{ path }` open one.
-    id: 'slides',
-    name: 'Slides',
-    icon: '/icons/apps/slides.png',
-    component: Slides,
-    defaultSize: { width: 1280, height: 800 },
-    keywords: ['powerpoint', 'microsoft powerpoint', 'office', 'pptx', 'ppt', 'odp', 'opendocument', 'keynote', 'impress', 'libreoffice', 'presentation', 'slideshow', 'deck'],
-  },
+  // Documents, Microsoft Word style: opens and saves .docx and .odt. Files
+  // opens Word and OpenDocument text documents here. Launch params
+  // `{ path }` open one.
+  dinApp('word-processor'),
+  // Workbooks, Microsoft Excel style: opens and saves .xlsx, .ods and CSV.
+  // Files opens Excel and OpenDocument spreadsheets here. Launch params
+  // `{ path }` open one.
+  dinApp('spreadsheet'),
+  // Presentations, Microsoft PowerPoint style: opens and saves .pptx and
+  // .odp and plays slide shows. Files opens PowerPoint and OpenDocument
+  // decks here. Launch params `{ path }` open one.
+  dinApp('slides'),
   // A basic calculator and a graphing one (src/apps/calculator/).
   dinApp('calculator'),
   {
