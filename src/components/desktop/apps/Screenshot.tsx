@@ -67,12 +67,12 @@ async function awaitWindowHidden(root: HTMLElement | null): Promise<void> {
  * ~/Pictures/Screenshots, or downloaded. The Print Screen hotkeys don't come
  * here; they capture straight away (see ScreenshotHost).
  *
- * Selection happens BEFORE capture on the live desktop: the app minimizes
- * its own window, waits until it's verifiably hidden (not just until a
- * timer expires, which races the genie animation under load), then overlays
- * the desktop for the region drag. The delay counts down after the
- * selection, so menus and hover states can still be arranged before the
- * shot fires.
+ * The app minimizes its own window and waits until it's verifiably hidden
+ * (not just until a timer expires, which races the genie animation under
+ * load). The delay counts down next, so menus and hover states can still be
+ * arranged; then the desktop is captured. In area mode that capture goes up
+ * frozen over the screen and the region is dragged out on it, so nothing
+ * underneath moves or reacts to the drag.
  *
  * Capture is backed by the Electron shell's screenshot bridge
  * (webContents.capturePage). Outside the shell (a plain browser) there is
@@ -97,36 +97,41 @@ export function Screenshot({ windowId }: AppComponentProps) {
   // alone can't cover the gaps between the session's async steps.
   const activeRef = useRef(false);
 
-  const captureRegion = useCallback(
-    async (region: ViewportRect | null) => {
-      const b = getScreenshotBridge();
-      if (!b) return;
-      // Every overlay must be gone from the page before the snapshot.
-      setSession(null);
-      await paintSettled();
-      try {
-        const shot = await b.capture();
-        setImage(region ? await cropCapture(shot, region) : shot);
-      } catch (e) {
-        setError(cleanScreenshotError(e));
-      } finally {
-        activeRef.current = false;
-        setScreenshotSessionActive(false);
-        setBusy(false);
-        focus(windowId); // restore + raise our window to show the result
-      }
-    },
-    [focus, windowId],
-  );
-
-  const cancelSession = useCallback(() => {
-    if (!activeRef.current) return;
+  const endSession = useCallback(() => {
     activeRef.current = false;
     setScreenshotSessionActive(false);
     setBusy(false);
     setSession(null);
-    focus(windowId);
+    focus(windowId); // restore + raise our window to show the result
   }, [focus, windowId]);
+
+  // Snapshot the desktop. In area mode the snapshot then goes up, frozen,
+  // for the region to be dragged out on it.
+  const shoot = useCallback(
+    async (area: boolean) => {
+      const b = getScreenshotBridge();
+      if (!b) return endSession();
+      // The countdown must be gone from the page before the snapshot.
+      setSession(null);
+      await paintSettled();
+      try {
+        const shot = await b.capture();
+        if (area) {
+          setSession({ phase: 'select', frozen: shot });
+          return;
+        }
+        setImage(shot);
+      } catch (e) {
+        setError(cleanScreenshotError(e));
+      }
+      endSession();
+    },
+    [endSession],
+  );
+
+  const cancelSession = useCallback(() => {
+    if (activeRef.current) endSession();
+  }, [endSession]);
 
   const startSession = useCallback(
     async (m: Mode) => {
@@ -139,23 +144,25 @@ export function Screenshot({ windowId }: AppComponentProps) {
       // the area selection, and wait until it's actually gone.
       minimize(windowId);
       await awaitWindowHidden(rootRef.current);
-      if (m === 'area') {
-        setSession({ phase: 'select' });
-      } else if (delay > 0) {
-        setSession({ phase: 'countdown', left: delay, region: null });
-      } else {
-        await captureRegion(null);
-      }
+      if (delay > 0) setSession({ phase: 'countdown', left: delay });
+      else await shoot(m === 'area');
     },
-    [delay, minimize, windowId, captureRegion],
+    [delay, minimize, windowId, shoot],
   );
 
   const onRegionSelected = useCallback(
-    (region: ViewportRect) => {
-      if (delay > 0) setSession({ phase: 'countdown', left: delay, region });
-      else void captureRegion(region);
+    async (region: ViewportRect) => {
+      if (session?.phase !== 'select') return;
+      const shot = session.frozen;
+      setSession(null);
+      try {
+        setImage(await cropCapture(shot, region));
+      } catch (e) {
+        setError(cleanScreenshotError(e));
+      }
+      endSession();
     },
-    [delay, captureRegion],
+    [session, endSession],
   );
 
   // Tick the countdown down once a second; on the final tick, fire the
@@ -164,11 +171,11 @@ export function Screenshot({ windowId }: AppComponentProps) {
   useEffect(() => {
     if (session?.phase !== 'countdown') return;
     const t = setTimeout(() => {
-      if (session.left <= 1) void captureRegion(session.region);
-      else setSession({ phase: 'countdown', left: session.left - 1, region: session.region });
+      if (session.left <= 1) void shoot(mode === 'area');
+      else setSession({ phase: 'countdown', left: session.left - 1 });
     }, 1000);
     return () => clearTimeout(t);
-  }, [session, captureRegion]);
+  }, [session, mode, shoot]);
 
   // Esc backs out of a session at any point.
   useEffect(() => {

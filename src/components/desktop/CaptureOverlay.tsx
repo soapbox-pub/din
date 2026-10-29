@@ -4,19 +4,19 @@ import { cn } from '@/lib/utils';
 import { portalContainer } from '@/lib/portalContainer';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
-import type { ViewportRect } from '@/lib/screenshot';
+import type { Screenshot, ViewportRect } from '@/lib/screenshot';
 
 /** Ignore drags smaller than this on a side (a stray click, not a selection). */
 const MIN_DRAG_PX = 4;
 
 /**
- * The live capture session: dragging the region on the desktop, then (in the
- * Screenshot app, while its window sits minimized out of the shot) counting
- * down the chosen delay.
+ * The capture session: (in the Screenshot app, while its window sits
+ * minimized out of the shot) counting down the chosen delay, then dragging
+ * the region out on a frozen capture of the desktop.
  */
 export type Session =
-  | { phase: 'select' }
-  | { phase: 'countdown'; left: number; region: ViewportRect | null };
+  | { phase: 'select'; frozen: Screenshot }
+  | { phase: 'countdown'; left: number };
 
 /** The drag rectangle between two viewport points, clamped to the viewport. */
 function rectFrom(a: { x: number; y: number }, b: { x: number; y: number }): ViewportRect {
@@ -31,11 +31,13 @@ function rectFrom(a: { x: number; y: number }, b: { x: number; y: number }): Vie
  * The capture overlay, over every monitor and portaled to <body> so it floats
  * above every desktop layer (dock included), shared by the Screenshot app
  * (while its window is minimized) and the Print Screen hotkeys. The
- * 'select' phase dims the desktop and takes a drag rectangle (releasing a
- * sub-threshold drag just re-arms; Esc cancels). The 'countdown' phase is
- * pointer-transparent, so the user can keep arranging the desktop - hover
- * states, open menus - until the delayed shot fires. The overlay always
- * unmounts before capturePage runs, so it never appears in the shot.
+ * 'select' phase covers the desktop with a capture already taken, so the
+ * screen holds still and the drag can't reach (and close) the menu or
+ * popup being captured, the way GNOME and Pop!_OS do it; the region is cut
+ * from that capture (releasing a sub-threshold drag just re-arms; Esc
+ * cancels). The 'countdown' phase is pointer-transparent, so the user can
+ * keep arranging the desktop - hover states, open menus - until it freezes.
+ * The overlay is never up while capturePage runs, so it isn't in the shot.
  */
 export function CaptureOverlay({
   session,
@@ -53,18 +55,6 @@ export function CaptureOverlay({
   if (session.phase === 'countdown') {
     return createPortal(
       <ScreenLayer aria-live="polite" className="pointer-events-none z-[10000]">
-        {session.region && (
-          <div
-            aria-hidden
-            className="absolute rounded-sm border-2 border-primary"
-            style={{
-              left: session.region.x,
-              top: session.region.y,
-              width: session.region.width,
-              height: session.region.height,
-            }}
-          />
-        )}
         <div
           style={hintStyle}
           className="absolute -translate-x-1/2 rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur"
@@ -126,6 +116,14 @@ export function CaptureOverlay({
       onPointerCancel={onPointerCancel}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {/* The capture fills the viewport, which is what the shell window captured. */}
+      <img
+        src={session.frozen.dataUrl}
+        alt=""
+        draggable={false}
+        className="pointer-events-none absolute top-0 left-0 max-w-none"
+        style={{ width: window.innerWidth, height: window.innerHeight }}
+      />
       {/* Once a drag is live, the selection's oversized box-shadow dims
           everything BUT the rectangle, keeping the pick bright. */}
       {!drag && <div aria-hidden className="absolute inset-0 bg-black/25" />}

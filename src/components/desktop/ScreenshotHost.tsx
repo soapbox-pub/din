@@ -52,7 +52,8 @@ interface Thumbnail {
 /**
  * The Print Screen hotkeys, the way GNOME and macOS do them: no window and
  * no questions. Print Screen captures the whole desktop at once; Shift+Print
- * Screen (or the box-select key) puts up the area overlay first. Either way
+ * Screen (or the box-select key) freezes the screen and puts up the area
+ * overlay on it. Either way
  * the shutter sounds, the capture goes to the clipboard and to
  * ~/Pictures/Screenshots, and a thumbnail sits in the bottom-right corner
  * for a few seconds: click it to open the file, or drag it into Files.
@@ -64,7 +65,8 @@ export function ScreenshotHost() {
   const { toast } = useToast();
   const { open } = useWindowActions();
   const queryClient = useQueryClient();
-  const [selecting, setSelecting] = useState(false);
+  /** The desktop as it was when an area shot was asked for, up while the area is dragged. */
+  const [frozen, setFrozen] = useState<Screenshot | null>(null);
   const [thumbnail, setThumbnail] = useState<Thumbnail | null>(null);
   const thumbnailRef = useRef<Thumbnail | null>(null);
   const nextId = useRef(1);
@@ -90,23 +92,20 @@ export function ScreenshotHost() {
     [toast],
   );
 
-  const capture = useCallback(
-    async (region: ViewportRect | null) => {
-      const bridge = getScreenshotBridge();
-      if (!bridge) return finish();
-      let shot: Screenshot;
-      try {
-        shot = await bridge.capture();
-        if (region) shot = await cropCapture(shot, region);
-      } catch (e) {
-        finish();
-        toast({
-          title: 'Could not take a screenshot',
-          description: cleanScreenshotError(e),
-          variant: 'destructive',
-        });
-        return;
-      }
+  const failed = useCallback(
+    (e: unknown) => {
+      finish();
+      toast({
+        title: 'Could not take a screenshot',
+        description: cleanScreenshotError(e),
+        variant: 'destructive',
+      });
+    },
+    [finish, toast],
+  );
+
+  const deliver = useCallback(
+    async (shot: Screenshot) => {
       finish();
       playShutter();
       flashScreen();
@@ -135,7 +134,8 @@ export function ScreenshotHost() {
   useEffect(
     () =>
       onScreenshotRequest((request: ScreenshotRequest) => {
-        if (isScreenshotSessionActive() || !getScreenshotBridge()) return;
+        const bridge = getScreenshotBridge();
+        if (isScreenshotSessionActive() || !bridge) return;
         setScreenshotSessionActive(true);
         void (async () => {
           // The last capture's thumbnail mustn't end up in this one.
@@ -143,34 +143,47 @@ export function ScreenshotHost() {
             setThumbnail(null);
             await paintSettled();
           }
-          if (request === 'area') setSelecting(true);
-          else await capture(null);
+          let shot: Screenshot;
+          try {
+            shot = await bridge.capture();
+          } catch (e) {
+            return failed(e);
+          }
+          // An area is dragged out on this capture, not the live desktop.
+          if (request === 'area') setFrozen(shot);
+          else await deliver(shot);
         })();
       }),
-    [capture],
+    [deliver, failed],
   );
 
   const onSelect = useCallback(
     async (region: ViewportRect) => {
-      setSelecting(false);
-      await paintSettled();
-      await capture(region);
+      if (!frozen) return;
+      setFrozen(null);
+      let shot: Screenshot;
+      try {
+        shot = await cropCapture(frozen, region);
+      } catch (e) {
+        return failed(e);
+      }
+      await deliver(shot);
     },
-    [capture],
+    [frozen, deliver, failed],
   );
 
   // Esc backs out of the area selection.
   useEffect(() => {
-    if (!selecting) return;
+    if (!frozen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
-      setSelecting(false);
+      setFrozen(null);
       finish();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selecting, finish]);
+  }, [frozen, finish]);
 
   // Don't leave the desktop-wide flag set if the desktop goes away mid-session.
   useEffect(() => () => setScreenshotSessionActive(false), []);
@@ -181,7 +194,7 @@ export function ScreenshotHost() {
 
   return (
     <>
-      {selecting && <CaptureOverlay session={{ phase: 'select' }} onSelect={onSelect} />}
+      {frozen && <CaptureOverlay session={{ phase: 'select', frozen }} onSelect={onSelect} />}
       {thumbnail && (
         <CaptureThumbnail
           key={thumbnail.id}
