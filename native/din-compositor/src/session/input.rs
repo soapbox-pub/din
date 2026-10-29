@@ -6,7 +6,7 @@
 
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GestureBeginEvent, GestureEndEvent,
+        AbsolutePositionEvent, Axis, ButtonState, Event, GestureBeginEvent, GestureEndEvent,
         GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent,
         PointerButtonEvent, PointerMotionEvent, TouchEvent,
     },
@@ -274,7 +274,10 @@ impl State {
                     frame = frame.v120(axis, v120 as i32);
                 }
             }
-            if event.source() == AxisSource::Finger && event.amount(axis) == Some(0.0) {
+            // libinput ends finger and continuous (trackpoint button) scrolls
+            // with a zero; Chromium keeps a scroll latched to the page it
+            // started on until the axis_stop.
+            if event.amount(axis) == Some(0.0) {
                 frame = frame.stop(axis);
             }
         }
