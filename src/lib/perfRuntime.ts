@@ -16,12 +16,13 @@
  * with a local one that answers each REQ with EOSE (no network at all).
  *
  * Console: `__dinPerf.runtime(reset?)`, `.renders(true)`, `.json()`,
- * `.reset()`, `.memory()`. Reports strip URL queries and never include
+ * `.reset()`, `.memory()`, `.native(reset?)` (src/lib/nativeLatency.ts). Reports strip URL queries and never include
  * pubkeys, ids or event content.
  */
 
 import { isWebviewAvailable } from "@/lib/isElectron";
 import { readMemoryProbes } from "@/lib/memoryProbes";
+import { printNativeLatency } from "@/lib/nativeLatency";
 import { perfReport, perfReset, type PerfReport } from "@/lib/perf";
 
 function now(): number {
@@ -1255,5 +1256,6 @@ export function installRuntimeProfiler(): void {
     reader.json = () => JSON.stringify(fullPerfReport(), null, 2);
     reader.reset = resetRuntimeProfile;
     reader.memory = memoryCensus;
+    reader.native = printNativeLatency;
   }
 }

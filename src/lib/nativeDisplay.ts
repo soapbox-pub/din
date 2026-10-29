@@ -19,6 +19,7 @@
 
 import { keepAccelerated } from '@/lib/cpuCanvas';
 import { getFileClipboard, setFileClipboard } from '@/lib/fileClipboard';
+import { noteNativeFrame, noteNativeInput } from '@/lib/nativeLatency';
 
 /** One X window as the shell knows it. */
 export interface NativeSurface {
@@ -186,7 +187,10 @@ export function startNativeDisplay(): void {
     port.onmessage = (e: MessageEvent<WorkerMessage>) => onMessage(e.data);
   });
   // GPU frames are drawn by the preload; acking them is what paces the apps.
-  window.dinos?.nativeDisplay?.onPresented(() => ackOnNextFrame('wayland'));
+  window.dinos?.nativeDisplay?.onPresented(() => {
+    if (import.meta.env.VITE_PROFILE === '1') noteNativeFrame();
+    ackOnNextFrame('wayland');
+  });
   window.dinos?.nativeDisplay?.connect();
 }
 
@@ -266,6 +270,7 @@ function onMessage(message: WorkerMessage): void {
           new Uint8ClampedArray(update.data.buffer, update.data.byteOffset, update.data.byteLength),
         );
       }
+      if (import.meta.env.VITE_PROFILE === '1') noteNativeFrame();
       ackOnNextFrame(message.source);
       return;
     }
@@ -441,6 +446,7 @@ function connectFrameStream(url: string): void {
       drawUpdate(id, x, y, width, height, new Uint8ClampedArray(buffer, offset, length));
       offset += length;
     }
+    if (import.meta.env.VITE_PROFILE === '1') noteNativeFrame();
     ackOnNextFrame('wayland');
   };
   frameStream = ws;
@@ -682,7 +688,10 @@ export function sendNativeKey(event: KeyboardEvent, down: boolean): boolean {
     return true;
   }
   if (down && isPaste(event)) keyQueue = keyQueue.then(syncClipboard);
-  keyQueue = keyQueue.then(() => send({ type: 'key', keycode, down }));
+  keyQueue = keyQueue.then(() => {
+    if (import.meta.env.VITE_PROFILE === '1' && down) noteNativeInput('key', event.timeStamp);
+    send({ type: 'key', keycode, down });
+  });
   return true;
 }
 

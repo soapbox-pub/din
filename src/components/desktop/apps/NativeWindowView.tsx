@@ -32,6 +32,7 @@ import {
   type NativeSurface,
 } from '@/lib/nativeDisplay';
 import { registerDictationTarget } from '@/lib/dictation';
+import { noteNativeInput } from '@/lib/nativeLatency';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { contains } from '@/lib/monitors';
 
@@ -347,6 +348,24 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     return () => host.removeEventListener('wheel', onWheel);
   }, [xid]);
 
+  // Motion reaches the app as soon as Chromium has it: pointermove waits
+  // for the shell's next frame, up to a refresh late, before the app even
+  // starts on its own.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !xid || !RAW_POINTER) return;
+    // TypeScript's DOM types have it as a plain Event; it's a PointerEvent.
+    const onRawUpdate = (rawEvent: Event) => {
+      const event = rawEvent as PointerEvent;
+      pointerRef.current = { clientX: event.clientX, clientY: event.clientY, held: event.buttons !== 0 };
+      // A move or resize the app asked for runs on pointermove, at the
+      // shell's frame rate, which is all it draws at.
+      if (!gestureRef.current) forwardMotion(xid, host, event);
+    };
+    host.addEventListener('pointerrawupdate', onRawUpdate);
+    return () => host.removeEventListener('pointerrawupdate', onRawUpdate);
+  }, [xid]);
+
   if (!xid || !getNativeSurface(xid)) {
     return <div className="size-full bg-background" />;
   }
@@ -371,13 +390,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
           chrome.gestureMove(event);
           return;
         }
-        // Locked, the pointer stays put and only its movement counts.
-        if (document.pointerLockElement === event.currentTarget) {
-          sendNativeRelative(xid, event.movementX, event.movementY);
-          return;
-        }
-        const [x, y] = localPoint(event.currentTarget, event);
-        sendNativeMotion(xid, x, y, { dx: event.movementX, dy: event.movementY });
+        if (!RAW_POINTER) forwardMotion(xid, event.currentTarget, event.nativeEvent);
       }}
       onPointerDown={(event) => {
         pointerRef.current = { clientX: event.clientX, clientY: event.clientY, held: true };
@@ -386,6 +399,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         event.currentTarget.focus({ preventScroll: true });
         syncGeometry();
         const [x, y] = localPoint(event.currentTarget, event);
+        if (import.meta.env.VITE_PROFILE === '1') noteNativeInput('button', event.timeStamp);
         sendNativeButton(xid, x, y, event.button, true);
       }}
       onPointerUp={(event) => {
@@ -433,6 +447,24 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       }}
     />
   );
+}
+
+/**
+ * Whether Chromium has pointerrawupdate here (secure contexts only, which
+ * the shell is).
+ */
+const RAW_POINTER = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
+
+/** Pointer motion over the window, to the app. */
+function forwardMotion(xid: number, host: HTMLElement, event: PointerEvent): void {
+  // Locked, the pointer stays put and only its movement counts.
+  if (document.pointerLockElement === host) {
+    sendNativeRelative(xid, event.movementX, event.movementY);
+    return;
+  }
+  const [x, y] = localPoint(host, event);
+  if (import.meta.env.VITE_PROFILE === '1') noteNativeInput('motion', event.timeStamp);
+  sendNativeMotion(xid, x, y, { dx: event.movementX, dy: event.movementY });
 }
 
 /**
