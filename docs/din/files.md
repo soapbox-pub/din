@@ -87,5 +87,9 @@ closed window ends it. The app's CSP must allow `din-file:` where it
 loads it (`img-src`, `media-src`, `connect-src`).
 
 Apps with `fs` reach files by path through `din.system.fs` anyway.
-`din.files.fromPath(path)` gives one of them a handle for a path, for
-`url()` or to hand the file to another app with `din.app.open`.
+`din.files.fromPath(path)` gives one of them a handle for a path, to hand
+the file to another app with `din.app.open`. To load a file by path,
+`din.files.pathUrl(path)` costs no round trip, so a folder of thumbnails
+is cheap: when the desktop grants `fs`, main gives the window a URL base
+(`din-file://<token>`) that serves any path but Din's own profile, for as
+long as the grant lasts.

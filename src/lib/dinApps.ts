@@ -10,12 +10,13 @@ import { guestsAvailable } from '@/platform/guest';
 export const DIN_APPS_PARTITION = 'persist:din-apps';
 
 /** Permissions whose bridges get a port of their own to main (SYSTEM_PERMISSIONS in electron/din-apps.mts). */
-export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'indd'] as const;
+export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'indd', 'volumes'] as const;
 export type SystemPermission = (typeof SYSTEM_PERMISSIONS)[number];
 
 /** What the desktop's preload exposes for hosting apps (electron/preload.cjs). */
 export interface AppsBridge {
-  grant(webContentsId: number, permission: SystemPermission): Promise<void>;
+  /** For fs, resolves with the URL base the app loads files by path from. */
+  grant(webContentsId: number, permission: SystemPermission): Promise<string | null>;
   revoke(webContentsId: number, permission: SystemPermission): Promise<void>;
   fileUrl(webContentsId: number, path: string): Promise<string>;
   kill(webContentsId: number): Promise<void>;

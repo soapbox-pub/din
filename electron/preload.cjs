@@ -3024,14 +3024,14 @@ expose('apps', {
   /**
    * Have main open a port from an app straight to a system bridge.
    * @param {number} webContentsId
-   * @param {'fs' | 'pty'} permission
-   * @returns {Promise<void>}
+   * @param {string} permission
+   * @returns {Promise<string | null>} for fs, the URL base the app loads files by path from
    */
   grant: (webContentsId, permission) => ipcRenderer.invoke('dinos-apps:grant', webContentsId, permission),
   /**
    * Close that port.
    * @param {number} webContentsId
-   * @param {'fs' | 'pty'} permission
+   * @param {string} permission
    * @returns {Promise<void>}
    */
   revoke: (webContentsId, permission) => ipcRenderer.invoke('dinos-apps:revoke', webContentsId, permission),

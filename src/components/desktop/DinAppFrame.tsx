@@ -42,9 +42,14 @@ import {
   subscribeDictation,
 } from '@/lib/dictation';
 import { DesktopBackgroundContext } from '@/contexts/DesktopBackgroundContext';
+import { InstalledAppsContext } from '@/contexts/InstalledAppsContext';
+import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
+import { getAssistantBridge } from '@/lib/assistant';
+import { getPrintingBridge } from '@/lib/printing';
 import {
   appUrl,
   DIN_APPS_PARTITION,
+  SYSTEM_PERMISSIONS,
   forgetMigratedStorage,
   getAppsBridge,
   manifestIcon,
@@ -137,6 +142,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const publishAccent = useContext(WindowAccentContext);
   const picker = useContext(FilePickerContext);
   const background = useContext(DesktopBackgroundContext);
+  const installed = useContext(InstalledAppsContext);
   const areas = useWorkAreas();
   const { config } = useAppContext();
   const { user } = useCurrentUser();
@@ -295,11 +301,20 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };
         live.current.actions.open(target, { ...clean, ...files });
       },
-      'app.openFiles': ({ handles }) => {
+      'app.openFiles': async ({ handles }) => {
         for (const id of handles) {
           const g = grantOf(id);
-          live.current.actions.open(appForFile(basename(g.path)), { path: g.path });
+          const name = basename(g.path);
+          // A Windows program runs, through Wine, instead of opening.
+          const native = getNativeAppsBridge();
+          if (native && g.kind === 'file' && isWindowsProgram(name)) await native.runWindowsProgram(g.path);
+          else live.current.actions.open(appForFile(name), { path: g.path });
         }
+      },
+      'app.canOpen': ({ appId: target }) => {
+        if (typeof target !== 'string' || !installed?.getApp(target)) return false;
+        if (target === 'assistant') return getAssistantBridge() !== undefined && live.current.config.assistantEnabled !== false;
+        return true;
       },
       'app.openUrl': ({ url }) => {
         if (typeof url !== 'string' || !/^(https?|nsite):\/\//i.test(url)) return;
@@ -683,9 +698,15 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
 
     // The bridges it's granted get their own ports to main, before hello.
     const apps = getAppsBridge();
+    let fsUrlBase: string | null = null;
     if (apps && webContentsId !== null) {
-      for (const p of ['fs', 'pty'] as const) {
-        if (permissions.includes(p)) await apps.grant(webContentsId, p).catch((e: unknown) => console.error(`din: granting ${p}:`, e));
+      for (const p of SYSTEM_PERMISSIONS) {
+        if (!permissions.includes(p)) continue;
+        const granted = await apps.grant(webContentsId, p).catch((e: unknown) => {
+          console.error(`din: granting ${p}:`, e);
+          return null;
+        });
+        if (p === 'fs') fsUrlBase = granted;
       }
     }
 
@@ -703,6 +724,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       storage: storageToMigrate(manifest),
       drag: dragInfo(currentDrag()),
       dictation: { available: hasDictationBridge(), status: getDictationState().status },
+      fsUrlBase,
+      printAvailable: getPrintingBridge() !== undefined,
     };
     if (session.current === s) port.postMessage(hello);
     // eslint-disable-next-line react-hooks/exhaustive-deps

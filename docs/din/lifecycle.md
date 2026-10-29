@@ -58,7 +58,11 @@ so a simple app needn't think about it.
 await din.app.open('paint', { width: 800, height: 600 });   // a new window, or the running one
 await din.app.openFiles([handle]);                           // whichever app the desktop has for it
 await din.app.openUrl('https://example.com');                // the Web Browser
+await din.app.canOpen('assistant');                          // installed (and, the Assistant, switched on)?
 ```
+
+`openFiles` runs a Windows program (`.exe`) through Wine instead of
+opening it. `din.print.available` says whether there's a print service.
 
 Apps can't open hidden system apps (the Installer) or pass files they
 don't hold.

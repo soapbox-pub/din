@@ -71,6 +71,9 @@ export interface Hello {
   /** The drag going on, if one is. */
   drag: DragInfo | null;
   dictation: { available: boolean; status: DictationStatus };
+  /** For apps with fs: the URL base to load files from by path (din-file://<token>). */
+  fsUrlBase: string | null;
+  printAvailable: boolean;
 }
 
 /** What an app can ask, by method: the params, and what the reply carries. */
@@ -79,6 +82,7 @@ export interface Requests {
   'app.open': [{ appId: string; params?: Record<string, unknown>; handles?: string[] }, void];
   'app.openFiles': [{ handles: string[] }, void];
   'app.openUrl': [{ url: string }, void];
+  'app.canOpen': [{ appId: string }, boolean];
   'storage.migrated': [void, void];
 
   'window.setTitle': [{ title: string | null }, void];

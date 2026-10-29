@@ -26,6 +26,7 @@ import type { FsBridge } from '@/lib/fs';
 import type { PtyBridge } from '@/lib/pty';
 import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
+import type { VolumesBridge } from '@/lib/volumes';
 
 export type Unsubscribe = () => void;
 
@@ -110,8 +111,16 @@ export interface DinApp {
    * in its `launch.files`).
    */
   open(appId: string, params?: Record<string, unknown>, files?: DinFileHandle[]): Promise<void>;
-  /** Open files in whichever app the desktop has for them (Files' default). */
+  /**
+   * Open files in whichever app the desktop has for them (Files' default).
+   * A Windows program (.exe) runs, through Wine.
+   */
   openFiles(files: DinFileHandle[]): Promise<void>;
+  /**
+   * Whether an app can be opened now: it's installed, and (the Assistant)
+   * set up and switched on.
+   */
+  canOpen(appId: string): Promise<boolean>;
   /** Open a URL in the Web Browser (or the app that handles its scheme). */
   openUrl(url: string): Promise<void>;
   /**
@@ -365,6 +374,12 @@ export interface DinFiles {
    * file to another app.
    */
   fromPath(path: string): Promise<DinFileHandle>;
+  /**
+   * A URL to load a file from by path, for apps with `fs`: no round trip,
+   * so cheap enough for a folder of thumbnails. Throws without `fs`, and
+   * outside Electron.
+   */
+  pathUrl(path: string): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +596,8 @@ export interface DinDictation {
 // ---------------------------------------------------------------------------
 
 export interface DinPrint {
+  /** Whether this computer can print (has a print service). */
+  readonly available: boolean;
   /** Din's print dialog for a document, as HTML (with its own styles inline). */
   html(title: string, html: string): Promise<void>;
   /** Din's print dialog for a file the app holds (a PDF, a picture, text). */
@@ -616,7 +633,9 @@ export type Permission =
   /** The Assistant's OpenCode service (`din.system.assistant`). Assistant, CAD. */
   | 'assistant'
   /** InDesign conversion (`din.system.indd`). Publisher. */
-  | 'indd';
+  | 'indd'
+  /** Removable disks: list, mount, eject (`din.system.volumes`). Files. */
+  | 'volumes';
 
 export interface DinPermissions {
   /** Whether the manifest asked for it and the desktop granted it. */
@@ -635,6 +654,7 @@ export interface DinSystem {
   pty?: PtyBridge;
   assistant?: AssistantBridge;
   indd?: InddBridge;
+  volumes?: VolumesBridge;
 }
 
 // ---------------------------------------------------------------------------

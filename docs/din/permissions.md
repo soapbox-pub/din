@@ -34,6 +34,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
 | `assistant` | `din.system.assistant`: the Assistant's OpenCode service | Assistant, CAD |
 | `indd` | `din.system.indd`: InDesign conversion | Publisher |
+| `volumes` | `din.system.volumes`: removable disks, mounting and ejecting | Files |
 
 Check at runtime with `din.permissions.has('fs')`. Calling something
 without its permission rejects with `DinPermissionError`.
@@ -56,7 +57,7 @@ They don't go through the desktop. When the app connects, the desktop
 checks its grants and asks main for a port from the app straight to each
 granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made)):
 
-Bridges with ports of their own: `fs`, `pty`, `assistant`, `indd`
+Bridges with ports of their own: `fs`, `pty`, `assistant`, `indd`, `volumes`
 (`SYSTEM_PERMISSIONS` in `electron/din-apps.mts`, mirrored in
 `src/lib/dinApps.ts` and the SDK). A bridge's pushes reach the apps
 granted it: a pty's output goes to the app that spawned it, and what main

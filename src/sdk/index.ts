@@ -41,6 +41,7 @@ import type { FsBridge } from '@/lib/fs';
 import type { PtyBridge } from '@/lib/pty';
 import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
+import type { VolumesBridge } from '@/lib/volumes';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 
@@ -216,6 +217,19 @@ export function connect(): Promise<Din> {
 
 async function start(): Promise<Din> {
   const transport = window.__dinTransport ?? (await frameTransport());
+  // Bridge calls answer `{ result }` or `{ error }` (errors cross the
+  // preload's contextBridge as data, keeping their names).
+  const raw = transport.system;
+  const bridges: Transport['system'] = raw && {
+    ready: (permission) => raw.ready(permission),
+    send: (permission, channel, args) => raw.send(permission, channel, args),
+    on: (permission, channel, listener) => raw.on(permission, channel, listener),
+    call: async (permission, channel, args) => {
+      const reply = (await raw.call(permission, channel, args)) as { result?: unknown; error?: { name: string; message: string } };
+      if (reply.error) throw rename(reply.error);
+      return reply.result;
+    },
+  };
 
   let nextId = 1;
   const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -343,6 +357,7 @@ async function start(): Promise<Din> {
     open: (appId, params, files) => request('app.open', { appId, params, handles: files?.map(idOf) }),
     openFiles: (files) => request('app.openFiles', { handles: files.map(idOf) }),
     openUrl: (url) => request('app.openUrl', { url }),
+    canOpen: (appId) => request('app.canOpen', { appId }),
   };
   if (document.readyState === 'complete') queueMicrotask(() => app.ready());
   else window.addEventListener('load', () => app.ready(), { once: true });
@@ -457,6 +472,11 @@ async function start(): Promise<Din> {
     fromPath: async (path) => {
       need('fs');
       return wrap(await request('files.fromPath', { path }));
+    },
+    pathUrl: (path) => {
+      need('fs');
+      if (!h.fsUrlBase) throw new Error('File URLs are only available inside Din');
+      return `${h.fsUrlBase}${path.split('/').map(encodeURIComponent).join('/')}`;
     },
   };
 
@@ -607,6 +627,7 @@ async function start(): Promise<Din> {
     setBadge: (count) => tell('notifications.setBadge', { count }),
   };
   const print: DinPrint = {
+    available: h.printAvailable,
     html: async (title, html) => {
       need('printing');
       await request('print.html', { title, html });
@@ -656,7 +677,7 @@ async function start(): Promise<Din> {
 
   // ---- system bridges, over their own ports to main ----
   const system: DinSystem = {};
-  const sys = transport.system;
+  const sys = bridges;
   if (sys) {
     if (permissions.has('fs')) {
       await sys.ready('fs');
@@ -669,6 +690,14 @@ async function start(): Promise<Din> {
     if (permissions.has('assistant')) {
       await sys.ready('assistant');
       system.assistant = assistantBridge(sys);
+    }
+    if (permissions.has('volumes')) {
+      await sys.ready('volumes');
+      const v: Record<string, unknown> = {};
+      for (const m of ['state', 'mount', 'eject']) v[m] = (...args: unknown[]) => sys.call('volumes', `volumes:${m}`, args);
+      v.onChanged = (cb: (state: unknown) => void) => sys.on('volumes', 'volumes:changed', (s) => cb(s));
+      v.onEvent = (cb: (event: unknown) => void) => sys.on('volumes', 'volumes:event', (e) => cb(e));
+      system.volumes = v as unknown as VolumesBridge;
     }
     if (permissions.has('indd')) {
       await sys.ready('indd');

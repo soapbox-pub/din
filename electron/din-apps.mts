@@ -34,6 +34,7 @@ const SYSTEM_PERMISSIONS = {
   pty: /^pty:(spawn|write|resize|kill)$/,
   assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request)$/,
   indd: /^indd:convert$/,
+  volumes: /^volumes:(state|mount|eject)$/,
 } as const;
 export type SystemPermission = keyof typeof SYSTEM_PERMISSIONS;
 
@@ -44,6 +45,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   pty: null,
   assistant: /^assistant:(status|event)$/,
   indd: null,
+  volumes: /^volumes:(changed|event)$/,
 };
 
 /**
@@ -132,6 +134,16 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
     if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
     grant(contents, permission as SystemPermission);
+    // An app with fs reaches files by path anyway: it gets a URL base to
+    // load any of them from (din-file://<token>/<absolute path>), so a
+    // folder of thumbnails costs no round trip each.
+    if (permission === 'fs') {
+      const token = randomUUID();
+      const appId = appIdOf(contents.getURL());
+      if (appId) fsUrlBases.set(token, { wcId: contents.id, appId });
+      return `${LOCAL_FILE_SCHEME}://${token}`;
+    }
+    return null;
   });
 
   ipcMain.handle('dinos-apps:revoke', (event, wcId, permission) => {
@@ -254,9 +266,21 @@ function serveFileUrl(request: Request): Promise<Response> | Response {
     return notFound();
   }
   const grant = fileUrls.get(token);
-  if (!grant) return notFound();
-  return serveLocalFile(request, grant.file, { 'access-control-allow-origin': `${DIN_SCHEME}://${grant.appId}` });
+  if (grant) return serveLocalFile(request, grant.file, { 'access-control-allow-origin': `${DIN_SCHEME}://${grant.appId}` });
+  const base = fsUrlBases.get(token);
+  if (!base || !grants.get(base.wcId)?.has('fs')) return notFound();
+  let file: string;
+  try {
+    file = path.resolve(decodeURIComponent(new URL(request.url).pathname));
+  } catch {
+    return notFound();
+  }
+  if (isProtectedPath(file)) return notFound();
+  return serveLocalFile(request, file, { 'access-control-allow-origin': `${DIN_SCHEME}://${base.appId}` });
 }
+
+/** Apps granted fs, by the token of the URL base they load files from. */
+const fsUrlBases = new Map<string, { wcId: number; appId: string }>();
 
 // ---------------------------------------------------------------------------
 // System bridge ports
@@ -339,16 +363,18 @@ function checkCall(permission: SystemPermission, channel: string, args: unknown[
     return 'Not one of this app\'s terminals';
   }
   if (permission === 'fs') {
-    const protectedPaths = options?.protectedPaths() ?? [];
     for (const arg of args) {
       if (typeof arg !== 'string' || !path.isAbsolute(arg)) continue;
-      const resolved = path.resolve(arg);
-      if (protectedPaths.some((p) => resolved === p || resolved.startsWith(p + path.sep))) {
-        return `${resolved} belongs to Din`;
-      }
+      if (isProtectedPath(arg)) return `${path.resolve(arg)} belongs to Din`;
     }
   }
   return null;
+}
+
+/** Whether a path is one no app may reach, even with fs (Din's own profile). */
+function isProtectedPath(file: string): boolean {
+  const resolved = path.resolve(file);
+  return (options?.protectedPaths() ?? []).some((p) => resolved === p || resolved.startsWith(p + path.sep));
 }
 
 function revoke(wcId: number, permission: SystemPermission): void {
@@ -375,6 +401,9 @@ function revokeAll(wcId: number): void {
   for (const permission of Object.keys(SYSTEM_PERMISSIONS) as SystemPermission[]) revoke(wcId, permission);
   for (const [token, grant] of fileUrls) {
     if (grant.wcId === wcId) fileUrls.delete(token);
+  }
+  for (const [token, base] of fsUrlBases) {
+    if (base.wcId === wcId) fsUrlBases.delete(token);
   }
 }
 

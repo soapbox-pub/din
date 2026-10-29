@@ -32,7 +32,7 @@ if (process.isMainFrame && location.protocol === 'din:') {
 
   /**
    * Bridge ports by permission, with their pending calls and listeners.
-   * @type {Map<string, { port: MessagePort | null, waiting: Array<() => void>, next: number, calls: Map<number, { resolve: (v: unknown) => void, reject: (e: Error) => void }>, listeners: Map<string, Set<(...args: unknown[]) => void>> }>}
+   * @type {Map<string, { port: MessagePort | null, waiting: Array<() => void>, next: number, calls: Map<number, { resolve: (v: unknown) => void }>, listeners: Map<string, Set<(...args: unknown[]) => void>> }>}
    */
   const bridges = new Map();
   /** @param {string} permission */
@@ -60,13 +60,9 @@ if (process.isMainFrame && location.protocol === 'din:') {
       const call = b.calls.get(data.id);
       if (!call) return;
       b.calls.delete(data.id);
-      if (data.error) {
-        const error = new Error(data.error.message);
-        error.name = data.error.name;
-        call.reject(error);
-      } else {
-        call.resolve(data.result);
-      }
+      // Errors travel as data: a rejection crossing contextBridge loses its
+      // name, which the SDK rethrows with.
+      call.resolve(data.error ? { error: { name: String(data.error.name), message: String(data.error.message) } } : { result: data.result });
     };
     for (const resume of b.waiting.splice(0)) resume();
   });
@@ -94,14 +90,14 @@ if (process.isMainFrame && location.protocol === 'din:') {
     system: {
       /** Resolves once the desktop has granted the permission and its port has arrived. */
       ready,
-      /** Call a bridge method (an invoke channel), resolving with its result. */
+      /** Call a bridge method (an invoke channel), resolving with `{ result }` or `{ error }`. */
       call(/** @type {string} */ permission, /** @type {string} */ channel, /** @type {unknown[]} */ args) {
         return ready(permission).then(
           () =>
-            new Promise((resolve, reject) => {
+            new Promise((resolve) => {
               const b = bridge(permission);
               const id = b.next++;
-              b.calls.set(id, { resolve, reject });
+              b.calls.set(id, { resolve });
               b.port?.postMessage({ id, channel, args });
             }),
         );
