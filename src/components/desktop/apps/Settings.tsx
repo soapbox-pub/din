@@ -181,10 +181,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { EFFECT_GROUPS, effectsFor, type EffectEvent } from '@/lib/effects';
-import { previewEffect } from '@/lib/effects/preview';
-import { getScreenshotBridge } from '@/lib/screenshot';
+import { WindowEffectPicker } from '@/components/desktop/apps/WindowEffectPicker';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { getUpdaterBridge, UPDATE_STEP_LABELS } from '@/lib/updater';
@@ -3513,7 +3510,7 @@ function AppearanceSection({ windowId }: { windowId: string }) {
         />
       </div>
       <div className="mt-3 flex flex-col gap-3">
-        <WindowEffectRow
+        <WindowEffectPicker
           event="minimize"
           label="Minimize effect"
           description="How a window goes into the Dock. It plays backwards when the window comes back."
@@ -3521,7 +3518,7 @@ function AppearanceSection({ windowId }: { windowId: string }) {
           value={config.minimizeEffect}
           onChange={(minimizeEffect) => updateConfig((current) => ({ ...current, minimizeEffect }))}
         />
-        <WindowEffectRow
+        <WindowEffectPicker
           event="close"
           label="Close effect"
           description="How a window leaves when it closes."
@@ -3540,84 +3537,6 @@ function AppearanceSection({ windowId }: { windowId: string }) {
         )}
       </div>
     </SectionShell>
-  );
-}
-
-/**
- * Choose a window effect for one event, from the Compiz animation plugins'
- * (src/lib/effects), and preview it on the Settings window. Effects other
- * than the genie and the pop need the shell's screen capture, so outside it
- * windows fall back to those.
- */
-function WindowEffectRow({
-  event,
-  label,
-  description,
-  windowId,
-  value,
-  onChange,
-}: {
-  event: EffectEvent;
-  label: string;
-  description: string;
-  windowId: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const id = `${event}-effect`;
-  const offered = effectsFor(event);
-  const canCapture = !!getScreenshotBridge()?.captureRegion;
-  const canPreview = canCapture && value !== 'none' && value !== 'pop';
-
-  return (
-    <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
-      <div className="min-w-0">
-        <Label htmlFor={id} className="text-sm">{label}</Label>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id={id} className="min-w-0 flex-1">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="max-h-80">
-            <SelectItem value="none">None</SelectItem>
-            {event === 'close' && <SelectItem value="pop">Pop</SelectItem>}
-            <SelectItem value="random">Random</SelectItem>
-            {EFFECT_GROUPS.map((group) => {
-              const effects = offered.filter((e) => e.group === group.id);
-              if (!effects.length) return null;
-              return (
-                <Fragment key={group.id}>
-                  <SelectSeparator />
-                  <SelectGroup>
-                    <SelectLabel>{group.name}</SelectLabel>
-                    {effects.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        {e.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </Fragment>
-              );
-            })}
-          </SelectContent>
-        </Select>
-        <Button
-          variant="outline"
-          disabled={!canPreview}
-          onClick={() => previewEffect(windowId, event, value)}
-        >
-          <Play aria-hidden />
-          Preview
-        </Button>
-      </div>
-      {!canCapture && (
-        <p className="text-xs text-muted-foreground">
-          In a browser, windows use the {event === 'close' ? 'pop' : 'genie'} whatever you choose.
-        </p>
-      )}
-    </div>
   );
 }
 

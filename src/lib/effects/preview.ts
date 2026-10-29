@@ -1,5 +1,5 @@
 /**
- * Settings' "Preview" buttons: play an effect on a window, there and back,
+ * Settings' effect tiles: play an effect on a window, there and back,
  * without minimizing or closing it. The window registers by id and plays
  * it (Window.tsx).
  */

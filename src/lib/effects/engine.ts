@@ -292,42 +292,37 @@ function link(gl: WebGLRenderingContext, vertex: string, fragment: string): WebG
 /** How an effect plays: out (minimize, close) or back in (restore). */
 export type EffectDirection = 'out' | 'in';
 
+/** An effect bound to a canvas and a snapshot, ready to draw any frame. */
+export interface EffectRenderer {
+  /** Paint the frame at progress `p`, 0 (at rest) to 1 (gone). */
+  draw(p: number): void;
+  /** Free the WebGL context. */
+  release(): void;
+}
+
 /**
- * Play `effect` on a snapshot of the window. `image` must already be
- * decoded; `win` and `target` are in workspace coordinates (`parent`'s).
- * The first frame is painted synchronously, `onDone` fires once when the
- * timeline completes (never on cancel), and the returned function cancels.
- * Returns null, having drawn nothing, when WebGL can't be used - the caller
- * falls back.
+ * Set up `effect` to draw on `canvas` from `image`, a snapshot of the window
+ * (decoded, if an image). The canvas shows a `view.width` × `view.height`
+ * workspace at `scale` device pixels per pixel; `win` and `target` are in
+ * that workspace's coordinates. Null when WebGL can't be used.
  */
-export function runWindowEffect(
-  parent: HTMLElement,
-  image: HTMLImageElement,
+export function createEffectRenderer(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement | HTMLCanvasElement,
   effect: WindowEffect,
+  view: { width: number; height: number },
+  scale: number,
   win: GenieRect,
   target: GenieRect | null,
-  direction: EffectDirection,
-  zIndex: number,
   seed: number,
-  onDone: () => void,
-): (() => void) | null {
-  const viewW = parent.clientWidth;
-  const viewH = parent.clientHeight;
-  const texW = image.naturalWidth;
-  const texH = image.naturalHeight;
+): EffectRenderer | null {
+  const { width: viewW, height: viewH } = view;
+  const texW = image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+  const texH = image instanceof HTMLImageElement ? image.naturalHeight : image.height;
   if (!viewW || !viewH || !texW || !texH || !win.width || !win.height) return null;
 
-  const dpr = window.devicePixelRatio || 1;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(viewW * dpr);
-  canvas.height = Math.round(viewH * dpr);
-  canvas.style.position = 'absolute';
-  canvas.style.left = '0';
-  canvas.style.top = '0';
-  canvas.style.width = `${viewW}px`;
-  canvas.style.height = `${viewH}px`;
-  canvas.style.pointerEvents = 'none';
-  canvas.style.zIndex = String(zIndex);
+  canvas.width = Math.round(viewW * scale);
+  canvas.height = Math.round(viewH * scale);
 
   const gl = canvas.getContext('webgl', {
     alpha: true,
@@ -456,6 +451,45 @@ export function runWindowEffect(
       gl.disableVertexAttribArray(particleAttr.add);
     }
   };
+
+  return { draw, release };
+}
+
+/**
+ * Play `effect` on a snapshot of the window. `image` must already be
+ * decoded; `win` and `target` are in workspace coordinates (`parent`'s).
+ * The first frame is painted synchronously, `onDone` fires once when the
+ * timeline completes (never on cancel), and the returned function cancels.
+ * Returns null, having drawn nothing, when WebGL can't be used - the caller
+ * falls back.
+ */
+export function runWindowEffect(
+  parent: HTMLElement,
+  image: HTMLImageElement,
+  effect: WindowEffect,
+  win: GenieRect,
+  target: GenieRect | null,
+  direction: EffectDirection,
+  zIndex: number,
+  seed: number,
+  onDone: () => void,
+): (() => void) | null {
+  const viewW = parent.clientWidth;
+  const viewH = parent.clientHeight;
+
+  const canvas = document.createElement('canvas');
+  canvas.style.position = 'absolute';
+  canvas.style.left = '0';
+  canvas.style.top = '0';
+  canvas.style.width = `${viewW}px`;
+  canvas.style.height = `${viewH}px`;
+  canvas.style.pointerEvents = 'none';
+  canvas.style.zIndex = String(zIndex);
+
+  const view = { width: viewW, height: viewH };
+  const renderer = createEffectRenderer(canvas, image, effect, view, window.devicePixelRatio || 1, win, target, seed);
+  if (!renderer) return null;
+  const { draw, release } = renderer;
 
   parent.appendChild(canvas);
   let raf = 0;

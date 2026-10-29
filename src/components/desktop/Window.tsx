@@ -912,8 +912,9 @@ export const Window = memo(function Window({
   }, [win.closing, win.minimized, win.id, win.z, config.closeEffect, closeWithEngine, destroy, stopWobble]);
   useEffect(() => () => closeRun.current?.(), []);
 
-  // Settings' Preview: play an effect out and back in on this window,
-  // through the same snapshot path as minimize, leaving the window as it was.
+  // Settings' effect tiles: play an effect out and back in on this window,
+  // through the same snapshot path as minimize (or, for the pop, the same
+  // fade and zoom as the CSS), leaving the window as it was.
   useEffect(
     () =>
       onEffectPreview(win.id, (event: EffectEvent, choice: string) => {
@@ -921,7 +922,20 @@ export const Window = memo(function Window({
         const parent = el?.parentElement;
         if (!el || !parent || animCancel.current || win.minimized || win.closing) return;
         const effect = resolveEffect(choice, event);
-        if (effect === 'none' || effect === 'pop') return;
+        if (effect === 'none') return;
+        if (effect === 'pop') {
+          if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+          const gone = { opacity: 0, scale: '0.95' };
+          const pop = el.animate(
+            [{ opacity: 1, scale: '1' }, { ...gone, offset: 0.25 }, { ...gone, offset: 0.7 }, { opacity: 1, scale: '1' }],
+            { duration: 650, easing: 'ease-out' },
+          );
+          animCancel.current = () => pop.cancel();
+          pop.onfinish = () => {
+            animCancel.current = null;
+          };
+          return;
+        }
         const capture = captureSection(el);
         if (!capture) return;
         stopWobble(false);
