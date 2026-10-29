@@ -19,6 +19,15 @@
 //! Din is handed the app's own buffer instead (Passthrough), imported once
 //! like a ring buffer, and the app gets it back once Din has drawn the frame
 //! after it.
+//!
+//! Only where Din can show such a buffer, though: one it can't import is a
+//! black window, with nothing to say so. Linear buffers it always can, as
+//! the rings are linear. Tiled ones are passed on only when this compositor
+//! draws on the GPU Chromium does (DIN_CHROMIUM_RENDER_NODE, from Din's
+//! main process); the apps are then offered the layouts Chromium imports.
+//! Elsewhere (two GPUs, Din on X11) apps get every layout the GPU can
+//! composite, and only those that pick a linear one are passed on.
+//! DIN_COMPOSITOR_PASSTHROUGH=0 turns it off.
 
 use std::{
     collections::HashMap,
@@ -68,12 +77,25 @@ pub struct Gpu {
     /// The render node's device number, for dmabuf feedback.
     pub device: libc::dev_t,
     next_buffer: u32,
+    /// Whether apps' own buffers may go to Din (DIN_COMPOSITOR_PASSTHROUGH).
+    passthrough: bool,
+    /// Whether this is the GPU Chromium draws on, so it imports the tiled
+    /// layouts apps render in.
+    shared_with_chromium: bool,
 }
 
-/// The render node to use: DIN_RENDER_NODE, else the first one present.
+/// The device number of a render node.
+fn device_of(path: &str) -> Option<libc::dev_t> {
+    std::fs::metadata(path).ok().map(|m| m.rdev())
+}
+
+/// The render node to use: DIN_RENDER_NODE, else Chromium's, else the first
+/// one present.
 fn render_node() -> Option<PathBuf> {
-    if let Ok(node) = std::env::var("DIN_RENDER_NODE") {
-        return Some(node.into());
+    for name in ["DIN_RENDER_NODE", "DIN_CHROMIUM_RENDER_NODE"] {
+        if let Ok(node) = std::env::var(name) {
+            return Some(node.into());
+        }
     }
     let mut nodes: Vec<PathBuf> = std::fs::read_dir("/dev/dri")
         .ok()?
@@ -101,12 +123,27 @@ impl Gpu {
         let context = EGLContext::new(&display).ok()?;
         // SAFETY: the context is new and current on this thread only.
         let renderer = unsafe { GlesRenderer::new(context) }.ok()?;
-        eprintln!("din-compositor: rendering on {}", path.display());
+        let passthrough = std::env::var("DIN_COMPOSITOR_PASSTHROUGH").as_deref() != Ok("0");
+        let shared_with_chromium = std::env::var("DIN_CHROMIUM_RENDER_NODE")
+            .ok()
+            .and_then(|node| device_of(&node))
+            .is_some_and(|chromium| chromium == device);
+        eprintln!(
+            "din-compositor: rendering on {}{}",
+            path.display(),
+            match (passthrough, shared_with_chromium) {
+                (false, _) => ", compositing every window",
+                (true, true) => ", Chromium's GPU",
+                (true, false) => ", passing on only linear buffers",
+            },
+        );
         Some(Self {
             renderer,
             allocator: GbmAllocator::new(gbm, GbmBufferFlags::RENDERING),
             device,
             next_buffer: 1,
+            passthrough,
+            shared_with_chromium,
         })
     }
 
@@ -166,12 +203,16 @@ impl Gpu {
         Some(buffer.id)
     }
 
-    /// The buffer formats to offer apps: 8-bit RGB (Din's pages show nothing
-    /// deeper), in layouts of a single plane. Those are what Chromium
-    /// imports, so an app's buffer can go to Din as it is; compressed
-    /// layouts (AMD's DCC) carry a second plane it can't.
+    /// The buffer formats to offer apps. On Chromium's GPU: 8-bit RGB (Din's
+    /// pages show nothing deeper), in layouts of a single plane. Those are
+    /// what Chromium imports, so an app's buffer can go to Din as it is;
+    /// compressed layouts (AMD's DCC) carry a second plane it can't.
+    /// Elsewhere, everything the GPU composites.
     pub fn client_formats(&mut self) -> Vec<smithay::backend::allocator::Format> {
         let formats = smithay::backend::renderer::ImportDma::dmabuf_formats(&self.renderer);
+        if !(self.passthrough && self.shared_with_chromium) {
+            return formats.into_iter().collect();
+        }
         formats
             .into_iter()
             .filter(|f| matches!(f.code, Fourcc::Argb8888 | Fourcc::Xrgb8888 | Fourcc::Abgr8888 | Fourcc::Xbgr8888))
@@ -186,6 +227,13 @@ impl Gpu {
                         .is_some_and(|dmabuf| dmabuf.num_planes() == 1)
             })
             .collect()
+    }
+
+    /// Whether Din can be handed DMABUF as it is (see the module docs).
+    fn shows(&self, dmabuf: &Dmabuf) -> bool {
+        self.passthrough
+            && dmabuf.num_planes() == 1
+            && (self.shared_with_chromium || dmabuf.format().modifier == Modifier::Linear)
     }
 
     fn allocate_id(&mut self) -> u32 {
@@ -271,7 +319,7 @@ impl Passthrough {
             (whole && size == geometry.size).then(|| state.buffer().cloned()).flatten()
         })
         .flatten()?;
-        let dmabuf = get_dmabuf(&buffer).ok()?;
+        let dmabuf = get_dmabuf(&buffer).ok().filter(|d| gpu.shows(d))?;
         let format = passthrough_format(dmabuf.format().code, opaque)?;
         let id = match self.known.get(&buffer.id()) {
             Some(&id) => id,

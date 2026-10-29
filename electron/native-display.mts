@@ -36,7 +36,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electron';
-import { connectGpuBuffers, dinFd } from './native-gpu.mts';
+import { chromiumRenderNode, connectGpuBuffers, dinFd } from './native-gpu.mts';
 import { keyboardKeymap, onKeymapChange } from './keyboard.mts';
 
 // .mts in development, the compiled .mjs in a build (scripts/build-electron.mjs).
@@ -201,9 +201,13 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
 /** Fork the window manager / compositor against the server. */
 async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
   const keymap = await keyboardKeymap();
+  // The compositor draws on the GPU Chromium does, where that's known
+  // (native/din-compositor/src/gpu.rs).
+  const renderNode = chromiumRenderNode();
   const child = utilityProcess.fork(WORKER, [], {
     serviceName: 'Din native display',
     stdio: 'inherit',
+    env: { ...process.env, ...(renderNode && { DIN_CHROMIUM_RENDER_NODE: renderNode }) },
   });
   const ok = await new Promise<boolean>((resolve) => {
     child.on('message', (message: {

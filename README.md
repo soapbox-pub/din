@@ -232,7 +232,9 @@ servers whose windows Din composites into its own:
   `native/din-fd`, a small N-API addon) and the shell draws without any CPU
   copy - apps get linux-dmabuf and render on the GPU too. A window that is
   one surface in one GPU buffer (most games, video players and X11 apps)
-  isn't composited at all: Din imports the app's own buffer. Without one, pixels
+  isn't composited at all: Din imports the app's own buffer (in any layout
+  when the compositor is on the GPU Chromium uses, only linear ones
+  otherwise, as with two GPUs). Without one, pixels
   stream to the shell over a token-guarded localhost WebSocket. Either way,
   apps are paced by the shell's display refresh.
 - **X11** — the compositor's rootless Xwayland, which it manages as the X
@@ -263,8 +265,8 @@ Din's own settings; the boot and lock screens follow the format too.
 
 Build both crates with `npm run build:native`. Without the compositor, every
 app runs on Xvfb; without din-fd, the compositor stays on the CPU path.
-`DIN_NATIVE_DISPLAY=x11` forces X and `DIN_COMPOSITOR_GPU=0` the CPU path,
-for comparisons, and `DIN_COMPOSITOR_STATS=1` logs the compositor's frame
+`DIN_NATIVE_DISPLAY=x11` forces X, `DIN_COMPOSITOR_GPU=0` the CPU path and
+`DIN_COMPOSITOR_PASSTHROUGH=0` compositing every window, for comparisons, and `DIN_COMPOSITOR_STATS=1` logs the compositor's frame
 rate.
 
 ### Windows programs

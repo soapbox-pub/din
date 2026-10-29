@@ -18,7 +18,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { sharedTexture } from 'electron';
+import { app, sharedTexture } from 'electron';
 
 /** What din-fd exports (see native/din-fd/src/lib.rs). */
 interface DinFd {
@@ -53,6 +53,26 @@ export function dinFd(): DinFd | null {
     }
   }
   return addon;
+}
+
+/**
+ * The render node Chromium's GPU process draws on, where it says: on
+ * Wayland it's handed the one its compositor uses. Null on X11, or before
+ * the GPU process is up.
+ */
+export function chromiumRenderNode(): string | null {
+  for (const metric of app.getAppMetrics()) {
+    if (metric.type !== 'GPU') continue;
+    try {
+      // Chromium rewrites its command line as one space-separated string.
+      const args = fs.readFileSync(`/proc/${metric.pid}/cmdline`, 'utf8').split(/[\0 ]/);
+      const node = args.find((arg) => arg.startsWith('--render-node-override='))?.split('=')[1];
+      if (node && /^\/dev\/dri\/renderD\d+$/.test(node)) return node;
+    } catch {
+      // gone, or not ours to read
+    }
+  }
+  return null;
 }
 
 /** Messages on the buffer socket (see native/din-compositor/src/gpu.rs). */
