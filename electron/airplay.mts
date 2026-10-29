@@ -20,8 +20,9 @@
 //
 // Connecting to a receiver uses the way it was last shared, extending by
 // default, as a monitor keeps its place when it's plugged back in. Switching
-// a receiver that's streaming reconnects it the other way (deckmon keeps the
-// pairing, so no PIN again), and is remembered for next time.
+// a receiver that's streaming moves the session over without reconnecting
+// (deckmon's `switch`; an older deckmon reconnects it, keeping the pairing,
+// so no PIN again), and is remembered for next time.
 //
 // The display-switch key does the same switch (switchAirPlayMode).
 //
@@ -606,6 +607,23 @@ export function registerAirPlayHandlers(options: {
     saveMode(target, mode);
     const session = sessions.get(target);
     if (!session || session.state !== 'streaming' || session.extend === (mode === 'extend')) return;
+    const extend = mode === 'extend' && ![...sessions.values()].some((s) => s.extend && s.target !== target);
+    const output = extend ? null : await primaryOutput().catch(() => null);
+    try {
+      await send(
+        {
+          cmd: 'switch',
+          target,
+          source: output ? { kind: 'monitor', name: output } : { kind: 'screen' },
+          extras: extend ? { display: true, extend: 'right-of' } : { display: false },
+        },
+        30_000,
+      );
+      return;
+    } catch (error) {
+      // A deckmon from before `switch` doesn't know it.
+      if (!/unknown variant|bad request/i.test(messageOf(error))) throw error;
+    }
     await send({ cmd: 'disconnect', target }, 30_000);
     await start(target, mode);
   };
