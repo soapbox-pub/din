@@ -1,12 +1,16 @@
 import { getFsBridge } from '@/lib/fs';
 import { player } from './engine';
-import { grantsReady, inOwnFolders, keepFor } from './grants';
+import { grantsReady, homeDir, inOwnFolders, keepFor, setSavedPaths } from './grants';
+import { library } from './library';
 
 /**
  * Which files from outside the player's own folders must still be reachable
  * after a restart: the Now Playing list's, and the songs of the playlists it
  * saved (the library keeps its folders itself).
  */
+
+// Saved state from before the player had grants: what to ask for at startup.
+setSavedPaths(async (home) => [...player.getState().queue.map((t) => t.location), ...(await library.savedFolders(home))]);
 
 const PLAYLISTS_KEY = 'din:media-player:playlist-songs';
 
@@ -69,5 +73,10 @@ export function keepGrants(): () => void {
   const unsubscribe = player.subscribe(sync);
   sync();
   void prunePlaylists();
+  // The library's folders reached at startup are kept even if it isn't shown.
+  void grantsReady().then(async () => {
+    const home = homeDir();
+    if (home && !library.getState().loaded) await keepFor('library', await library.savedFolders(home));
+  });
   return unsubscribe;
 }

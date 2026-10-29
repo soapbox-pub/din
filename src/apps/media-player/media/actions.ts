@@ -2,7 +2,7 @@ import { extensionOf } from '@/lib/fileTypes';
 import { cleanFsError, getFsBridge, joinPath, sortEntries } from '@/lib/fs';
 import type { DinFileHandle } from '@/sdk';
 import { makeTrack, player, type Track } from './engine';
-import { adopt, grantsReady, handleFor, homeDir, readLocal } from './grants';
+import { adopt, grantsReady, handleFor, homeDir, reachPlaylistSongs, readLocal } from './grants';
 import { isPlayableMedia } from './metadata';
 import { isPlaylistFile, parsePlaylist, writePlaylist } from './playlists';
 import { setPrefs } from './prefs';
@@ -61,13 +61,15 @@ async function mediaInFolder(dir: string, depth = 0): Promise<string[]> {
   return out;
 }
 
-/** The songs in a playlist file. */
-export async function readPlaylistFile(path: string): Promise<Track[]> {
+/** The songs in a playlist file; to play them, ask for those in folders the player can't reach. */
+export async function readPlaylistFile(path: string, { reach = false } = {}): Promise<Track[]> {
   const data = await readLocal(path, 8 * 1024 * 1024);
   let text = new TextDecoder('utf-8').decode(data);
   // Old M3U files are Windows-1252, not UTF-8.
   if (text.includes('\ufffd') && extensionOf(path) !== 'm3u8') text = new TextDecoder('windows-1252').decode(data);
-  return parsePlaylist(path, text).map((e) => makeTrack(e.location, { title: e.title, artist: e.artist, duration: e.duration ?? null }));
+  const entries = parsePlaylist(path, text);
+  if (reach) await reachPlaylistSongs(path, entries.map((e) => e.location));
+  return entries.map((e) => makeTrack(e.location, { title: e.title, artist: e.artist, duration: e.duration ?? null }));
 }
 
 /** Tracks for whatever was opened: songs, videos, playlists and folders. */
@@ -80,7 +82,7 @@ export async function tracksFor(paths: string[]): Promise<Track[]> {
       continue;
     }
     if (isPlaylistFile(path)) {
-      tracks.push(...(await readPlaylistFile(path)));
+      tracks.push(...(await readPlaylistFile(path, { reach: true })));
       continue;
     }
     if (isPlayableMedia(path)) {

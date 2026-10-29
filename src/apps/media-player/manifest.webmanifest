@@ -85,6 +85,9 @@
     ],
     "migrateStorage": [
       "din:media-player:*"
-    ]
+    ],
+    "migrateFiles": {
+      "~/.local/share/din/media-library.json": "~/.local/share/din/media-library/library.json"
+    }
   }
 }

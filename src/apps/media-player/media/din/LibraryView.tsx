@@ -41,7 +41,7 @@ function play(items: LibraryItem[], start = 0) {
 }
 
 async function playPlaylist(path: string, how: 'play' | 'next' | 'enqueue') {
-  const tracks = await readPlaylistFile(path);
+  const tracks = await readPlaylistFile(path, { reach: true });
   if (tracks.length === 0) return;
   if (how !== 'play') return player.enqueue(tracks, { next: how === 'next' });
   player.setQueue(tracks, 0, true);
@@ -274,7 +274,7 @@ function NameList({ names, items, keyOf, onOpen, icon }: { names: [string, numbe
 }
 
 function PlaylistView({ path }: { path: string }) {
-  const query = useQuery({ queryKey: ['music', 'playlist', path], queryFn: () => readPlaylistFile(path) });
+  const query = useQuery({ queryKey: ['music', 'playlist', path], queryFn: () => readPlaylistFile(path, { reach: true }) });
   const items = useMemo(
     () =>
       (query.data ?? []).map((t: Track): LibraryItem => ({
@@ -324,7 +324,7 @@ function FoldersView() {
         type="button"
         className="mp-btn"
         onClick={async () => {
-          const [path] = await pickPaths({ title: 'Add Folder to Library', directory: true });
+          const [path] = await pickPaths({ title: 'Add Folder to Library', directory: true, confirmLabel: 'Add' });
           if (path) library.addFolder(path);
         }}
       >

@@ -94,6 +94,38 @@ class Library {
     return home ? joinPath(home, '.local/share/din/media-library/library.json') : null;
   }
 
+  private reading: Promise<{ saved: SavedLibrary; moved: boolean } | null> | null = null;
+
+  /**
+   * The saved index, read once: from its folder, or where it was before it
+   * had one (the desktop copies it over with the manifest's migrateFiles;
+   * read there too should it ever be reachable and the copy not).
+   */
+  private readIndex(home: string): Promise<{ saved: SavedLibrary; moved: boolean } | null> {
+    this.reading ??= (async () => {
+      const fs = getFsBridge();
+      if (!fs) return null;
+      const path = joinPath(home, '.local/share/din/media-library/library.json');
+      for (const at of [path, joinPath(home, '.local/share/din/media-library.json')]) {
+        try {
+          const { data } = await fs.readFile(at, 64 * 1024 * 1024);
+          const saved = JSON.parse(new TextDecoder().decode(data)) as SavedLibrary;
+          if (saved.version === 1 && Array.isArray(saved.items)) return { saved, moved: at !== path };
+        } catch {
+          // No index there.
+        }
+      }
+      return null;
+    })();
+    return this.reading;
+  }
+
+  /** The watched folders the saved index names (before it's loaded); none if there's no index. */
+  async savedFolders(home: string): Promise<string[]> {
+    const index = await this.readIndex(home);
+    return Array.isArray(index?.saved.folders) ? index.saved.folders : [];
+  }
+
   /** Load the saved index, then bring it up to date in the background. */
   load(): Promise<void> {
     this.loading ??= (async () => {
@@ -105,21 +137,12 @@ class Library {
         return;
       }
       let folders = [joinPath(home, 'Music'), joinPath(home, 'Videos')];
-      // Where the index was before it had a folder of its own (reachable only
-      // if the desktop grants it).
-      for (const at of [path, joinPath(home, '.local/share/din/media-library.json')]) {
-        try {
-          const { data } = await fs.readFile(at, 64 * 1024 * 1024);
-          const saved = JSON.parse(new TextDecoder().decode(data)) as SavedLibrary;
-          if (saved.version === 1 && Array.isArray(saved.items)) {
-            folders = Array.isArray(saved.folders) ? saved.folders : folders;
-            this.set({ items: saved.items, folders }, at !== path);
-            break;
-          }
-        } catch {
-          // No index there.
-        }
+      const index = await this.readIndex(home);
+      if (index) {
+        folders = Array.isArray(index.saved.folders) ? index.saved.folders : folders;
+        this.set({ items: index.saved.items, folders }, index.moved);
       }
+      this.reading = null;
       this.set({ folders, loaded: true });
       void keepFor('library', folders);
       void this.scan();

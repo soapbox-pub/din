@@ -32,7 +32,7 @@ export function useCommands() {
 
   const openFolder = useCallback(
     async (how: 'play' | 'enqueue' = 'enqueue') => {
-      const files = await pickFiles({ title: 'Add Folder', directory: true });
+      const files = await pickFiles({ title: 'Add Folder', directory: true, confirmLabel: 'Add' });
       if (files.length === 0) return;
       setMessage(await openHandles(files, how));
     },
@@ -68,7 +68,7 @@ export function useCommands() {
   }, []);
 
   const addLibraryFolder = useCallback(async () => {
-    const [path] = await pickPaths({ title: 'Add Folder to Library', directory: true });
+    const [path] = await pickPaths({ title: 'Add Folder to Library', directory: true, confirmLabel: 'Add' });
     if (path) library.addFolder(path);
   }, []);
 

@@ -10,9 +10,15 @@ import { isPlaylistFile } from './playlists';
  * folder (`file-folders`). Handles still needed after a restart (the Now
  * Playing list, the library's folders, saved playlists' songs) are kept as
  * persist tokens, by path, and restored at startup; the rest are released.
+ *
+ * State saved before the player had grants (or whose grant is gone) names
+ * paths nothing reaches: those it asks the desktop for, once, at startup
+ * (silently on the launch that moved it out of the desktop).
  */
 
 const TOKENS_KEY = 'din:media-player:grants';
+/** Paths of saved state already asked for at startup and not granted (or gone): not asked again. */
+const ASKED_KEY = 'din:media-player:asked';
 
 /** The manifest's `din.folders`, under home. */
 const OWN_FOLDERS = ['Music', 'Videos', '.local/share/din/skins', '.local/share/din/media-library'];
@@ -25,6 +31,12 @@ let tokens: Partial<Record<GrantUser, Record<string, string>>> = {};
 let ownRoots: string[] = [];
 let home: string | null = null;
 let starting: Promise<Din> | null = null;
+let savedPaths: ((home: string) => Promise<string[]>) | null = null;
+
+/** What saved state names by path (the Now Playing list, the library's folders), for startup. */
+export function setSavedPaths(list: (home: string) => Promise<string[]>): void {
+  savedPaths = list;
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -62,6 +74,9 @@ export function grantsReady(): Promise<Din> {
       ownRoots = OWN_FOLDERS.map((f) => joinPath(home!, f));
     }
     tokens = loadTokens();
+    // A grant that won't come back is a file gone (or one the user took
+    // back): not one to ask for again.
+    const lost: string[] = [];
     await Promise.all(Object.values(tokens).flatMap((kept) => Object.entries(kept).map(async ([path, token]) => {
       const handle = await din.files.restore(token).catch(() => null);
       if (handle) {
@@ -69,12 +84,42 @@ export function grantsReady(): Promise<Din> {
       } else {
         din.files.release(token);
         delete kept[path];
+        lost.push(path);
       }
     })));
     saveTokens();
+    if (home) await reachSavedState(din, home, lost);
     return din;
   })();
   return starting;
+}
+
+function loadAsked(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(ASKED_KEY) ?? '[]');
+    return Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Ask once for what saved state names and nothing reaches. */
+async function reachSavedState(din: Din, home: string, lost: string[]) {
+  const asked = new Set([...loadAsked(), ...lost]);
+  const named = savedPaths ? await savedPaths(home).catch(() => []) : [];
+  const wanted = [...new Set(named)].filter((p) => p.startsWith('/') && !inOwnFolders(p) && !reachedBy(p) && !asked.has(p));
+  if (wanted.length > 0) {
+    const granted = await din.files
+      .requestAccess(wanted, 'Media Player can’t reach some songs and folders it played before. Allow it to reach them again?')
+      .catch(() => []);
+    for (const handle of granted) handles.set(handle.path, handle);
+    for (const p of wanted) if (!handles.has(p)) asked.add(p);
+  }
+  try {
+    localStorage.setItem(ASKED_KEY, JSON.stringify([...asked].slice(-2000)));
+  } catch {
+    // Asked again next time.
+  }
 }
 
 /** Home, once `grantsReady` has resolved. */
@@ -118,6 +163,20 @@ function reachedBy(path: string): string | null {
     if (h.kind === 'directory' && under(path, p) && (!best || p.length > best.length)) best = p;
   }
   return best;
+}
+
+/**
+ * Reach the songs a playlist names that nothing reaches yet, asking the
+ * user (one prompt for the playlist).
+ */
+export async function reachPlaylistSongs(playlist: string, locations: string[]): Promise<void> {
+  const din = await grantsReady();
+  const folder = playlist.slice(0, playlist.lastIndexOf('/'));
+  const wanted = [...new Set(locations)].filter((p) => p.startsWith('/') && !inOwnFolders(p) && !reachedBy(p) && !(reachedBy(playlist) && under(p, folder)));
+  if (wanted.length === 0) return;
+  const name = playlist.slice(playlist.lastIndexOf('/') + 1);
+  const granted = await din.files.requestAccess(wanted, `${name} lists songs in other folders.`).catch(() => []);
+  for (const handle of granted) handles.set(handle.path, handle);
 }
 
 /** A URL to load a local file from: its handle's, or by path in a folder the player reaches. */
