@@ -5,13 +5,14 @@
  *
  * A drag's data can't be read until the drop, and drop targets want to know
  * sooner (a folder can't take itself, a favorite can only be a folder). A
- * drag started in this window keeps its paths here for the duration; one
- * from elsewhere is known by what the desktop says of it (`din.drag.current`)
+ * drag started in this window keeps its paths here for the duration (and
+ * tells the other Files windows, files/windows.ts); one from elsewhere is known by what the desktop says of it (`din.drag.current`)
  * until it's dropped and its files arrive as handles.
  */
 
 import type { DinFileHandle } from '@/sdk';
 import { DRAG_MIME } from '@/sdk';
+import { broadcastDrag, otherWindowDrag } from './windows';
 
 interface LocalDrag {
   paths: string[];
@@ -34,6 +35,7 @@ export interface DraggedFiles {
 /** Start dragging files from this window, to it, other windows or other apps. */
 export function startFilesDrag(e: React.DragEvent, paths: string[], folders: Set<string>, label: string): void {
   local = { paths, folders };
+  broadcastDrag({ paths, folders: [...folders] });
   const din = window.din;
   if (din) {
     din.drag.startPaths(e.nativeEvent, paths, label);
@@ -44,6 +46,7 @@ export function startFilesDrag(e: React.DragEvent, paths: string[], folders: Set
 }
 
 export function endFilesDrag(): void {
+  if (local) broadcastDrag(null);
   local = null;
 }
 
@@ -60,6 +63,15 @@ export function draggedFiles(e: React.DragEvent): DraggedFiles | null {
   if (!e.dataTransfer.types.includes(DRAG_MIME)) return null;
   const current = window.din?.drag.current;
   if (current?.kind !== 'files') return null;
+  // Another Files window said what it's dragging.
+  const other = otherWindowDrag();
+  if (other && current.source === window.din?.app.id && current.count === other.paths.length) {
+    return {
+      paths: other.paths,
+      allFolders: current.folders,
+      anyFolder: other.folders.length > 0,
+    };
+  }
   // Whether some of a mixed drag are folders isn't known until the drop.
   return { paths: null, allFolders: current.folders, anyFolder: current.folders };
 }

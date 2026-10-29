@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -40,11 +40,11 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useVolumes } from '@/hooks/useVolumes';
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
 import { isWindowsProgram } from '@/lib/nativeApps';
-import { moveItem, type DragPoint } from '@/hooks/useDragReorder';
+import { moveItem } from '@/hooks/useDragReorder';
 import type { Din, LaunchContext } from '@/sdk';
 import { useDin, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
-import type { TabTransfer } from '@/shared/TabContextMenu';
+import { adoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
 import { dinWindowMove } from '@/shared/dinWindowMove';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
@@ -83,30 +83,16 @@ import { Sidebar } from './files/Sidebar';
 import { CompressDialog, ConfirmDialog, PropertiesDialog, ShortcutsDialog } from './files/Dialogs';
 import { FileViewerBody } from '@/shared/FileViewerBody';
 import { canDropInto, draggedFiles, dropCopies, endFilesDrag, startFilesDrag, takeDrop } from './files/drag';
-import {
-  broadcastInvalidate,
-  joinWindows,
-  onInvalidate,
-  onOtherWindowsChange,
-  otherWindows,
-  otherWindowsNow,
-  popUndo,
-  pushUndo,
-  receiveTabs,
-  runUndo,
-  sendTab,
-  updateWindowInfo,
-  type WindowInfo,
-} from './files/windows';
+import { broadcastInvalidate, onInvalidate, popUndo, pushUndo, runUndo } from './files/windows';
+
+/** The tab this window was opened for, if any: read once per window. */
+let adoption: Promise<unknown> | null = null;
 
 let nextTabId = 0;
 const newTabId = () => `files-${nextTabId++}`;
 
 /** How long type-ahead keeps adding to what's been typed (ms). */
 const TYPEAHEAD_MS = 1000;
-
-/** Where a new window for a torn-off tab puts its tab, from the pointer (px). */
-const GRAB = { x: 120, y: 18 };
 
 const SORT_LABELS: Record<SortKey, string> = {
   name: 'Name',
@@ -156,11 +142,9 @@ function launchTab(launch: LaunchContext): TabSpec {
   return { id: newTabId(), path: file?.path ?? undefined, select };
 }
 
-/** Where a window for a torn-off tab goes: `{ x, y, width, height }` in its launch params. */
-function isPlacement(value: unknown): value is { x: number; y: number; width: number; height: number } {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return ['x', 'y', 'width', 'height'].every((k) => typeof v[k] === 'number' && Number.isFinite(v[k]));
+/** What a Files tab carries to another window: its directory. */
+function isFilesTabTransfer(value: unknown): value is { path: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { path?: unknown }).path === 'string';
 }
 
 /** Open a folder, or files, in a new window of an app. */
@@ -180,7 +164,7 @@ async function openWithPaths(din: Din, appId: string, paths: string[], params: R
  * other apps as handles. Each tab is an independent navigation context, all
  * kept mounted so background tabs keep their state; the tab strip is the
  * window's own header (a `custom` frame). Files windows share their undo
- * history and move tabs between them (files/windows.ts).
+ * history (files/windows.ts) and move tabs between them (useDinTabTransfer).
  *
  * Opened with a folder (or a file, which it shows selected in its folder),
  * and launch params `{ select?: string }`: an item in it to select.
@@ -195,16 +179,24 @@ export function FileBrowser() {
   const [prefs, setPrefs] = useLocalStorage<FilesPrefs>('din:files:prefs', DEFAULT_PREFS);
   const mergedPrefs = useMemo(() => ({ ...DEFAULT_PREFS, ...prefs }), [prefs]);
 
-  const [tabs, setTabs] = useState<TabSpec[]>(() => [launchTab(din.app.launch)]);
-  const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
+  // No tabs until it's known whether the window was opened for a torn-off one.
+  const [tabs, setTabs] = useState<TabSpec[]>([]);
+  const [activeId, setActiveId] = useState<string>('');
   // Current directory per tab, reported up by each tab for its label.
   const [cwds, setCwds] = useState<Record<string, string | null>>({});
-  const listRef = useRef<HTMLDivElement | null>(null);
 
-  // A window opened for a torn-off tab goes where the tab was dropped.
   useEffect(() => {
-    const place = din.app.launch.params.place;
-    if (isPlacement(place)) din.window.setBounds(place);
+    let live = true;
+    adoption ??= adoptedTab(din).catch(() => undefined);
+    void adoption.then((adopted) => {
+      if (!live) return;
+      const tab = isFilesTabTransfer(adopted) ? { id: newTabId(), path: adopted.path || undefined } : launchTab(din.app.launch);
+      setTabs([tab]);
+      setActiveId(tab.id);
+    });
+    return () => {
+      live = false;
+    };
   }, [din]);
 
   const openTab = useCallback((path?: string) => {
@@ -259,17 +251,13 @@ export function FileBrowser() {
   useWindowTitle(activeCwd && title);
 
   const cwdsRef = useRef(cwds);
+  const tabsRef = useRef(tabs);
   useEffect(() => {
     cwdsRef.current = cwds;
-  }, [cwds]);
+    tabsRef.current = tabs;
+  }, [cwds, tabs]);
 
-  // ---- Other Files windows: refreshes, undo, tabs moving between them ------
-
-  const { bounds } = windowState;
-  useEffect(() => {
-    joinWindows(din.window.state.id, { title, bounds });
-    updateWindowInfo({ title, bounds });
-  }, [din, title, bounds]);
+  // ---- Other Files windows: refreshes, and tabs moving between them --------
 
   useEffect(
     () =>
@@ -280,81 +268,26 @@ export function FileBrowser() {
     [queryClient],
   );
 
-  const others = useSyncExternalStore(onOtherWindowsChange, otherWindows);
-
-  /** The slot in this window's strip under a point on the desktop. */
-  const slotAt = useCallback((desktopX: number | null) => {
-    const list = listRef.current;
-    if (desktopX === null || !list) return Infinity;
-    const x = desktopX - din.window.state.bounds.x;
-    const tabEls = [...list.querySelectorAll<HTMLElement>('[role="tab"]')];
-    const index = tabEls.findIndex((el) => {
-      const r = el.getBoundingClientRect();
-      return x < r.left + r.width / 2;
-    });
-    return index === -1 ? Infinity : index;
-  }, [din]);
-
-  useEffect(() => {
-    receiveTabs((path, x) => {
-      const tab = { id: newTabId(), path: path || undefined };
-      const index = slotAt(x);
-      setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
-      setActiveId(tab.id);
-      din.window.focus();
-    });
-    return () => receiveTabs(null);
-  }, [din, slotAt]);
-
-  const moveToWindow = useCallback(
-    (id: string, windowId: string, desktopX: number | null = null) => {
-      // A tab still finding its home directory carries no path.
-      sendTab(windowId, cwdsRef.current[id] ?? '', desktopX);
-      closeTab(id);
-    },
-    [closeTab],
-  );
-
-  const moveToNewWindow = useCallback(
-    (id: string, point?: DragPoint) => {
-      const path = cwdsRef.current[id] ?? undefined;
-      const b = din.window.state.bounds;
-      const place = point
-        ? { x: Math.round(b.x + point.x - GRAB.x), y: Math.max(0, Math.round(b.y + point.y - GRAB.y)), width: b.width, height: b.height }
-        : undefined;
-      openWindow(path, place ? { place } : {});
-      closeTab(id);
-    },
-    [din, openWindow, closeTab],
-  );
-
-  const transfer = useMemo<TabTransfer>(
-    () => ({
-      setList: (el) => {
-        listRef.current = el;
+  const transfer = useDinTabTransfer(
+    {
+      din,
+      label: (id) => folderTitle(cwdsRef.current[id] ?? null, home.data, trash.data),
+      take: (id) => {
+        // A tab still finding its home directory carries no path.
+        const path = cwdsRef.current[id] ?? '';
+        // The last tab takes the window with it, once the tab is on its way.
+        if (tabsRef.current.length === 1) setTimeout(() => din.window.close());
+        else closeTab(id);
+        return { path };
       },
-      tearOff: {
-        enabled: true,
-        onDrop: (id, point) => {
-          // Dropped on another Files window: the tab moves there; anywhere
-          // else but this window's strip, it gets a window of its own.
-          const b = din.window.state.bounds;
-          const x = b.x + point.x;
-          const y = b.y + point.y;
-          const inside = ([, info]: [string, WindowInfo]) =>
-            x >= info.bounds.x && x < info.bounds.x + info.bounds.width && y >= info.bounds.y && y < info.bounds.y + info.bounds.height;
-          const target = otherWindowsNow().find(inside);
-          if (target) moveToWindow(id, target[0], x);
-          else moveToNewWindow(id, point);
-        },
+      receive: (payload, index) => {
+        if (!isFilesTabTransfer(payload)) return;
+        const tab = { id: newTabId(), path: payload.path || undefined };
+        setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
+        setActiveId(tab.id);
       },
-      enabled: true,
-      canDetach: tabs.length > 1,
-      moveToNewWindow,
-      moveToWindow: (id, windowId) => moveToWindow(id, windowId),
-      otherWindows: () => others.map(([windowId, info]) => ({ windowId, title: info.title })),
-    }),
-    [din, tabs.length, others, moveToWindow, moveToNewWindow],
+    },
+    tabs.length,
   );
 
   const reportCwd = useCallback((id: string, cwd: string | null) => {
@@ -859,12 +792,12 @@ function FileBrowserTab({
         } finally {
           refresh(...paths);
           if (trashed.length > 0) {
-            pushUndo(`trashing ${describe(names.slice(0, trashed.length))}`, { kind: 'restore', trashed });
+            pushUndo(din, `trashing ${describe(names.slice(0, trashed.length))}`, { kind: 'restore', trashed });
           }
         }
       });
     },
-    [fs, run, refresh],
+    [din, fs, run, refresh],
   );
 
   const deleteNames = useCallback(
@@ -919,6 +852,7 @@ function FileBrowserTab({
           if (target === cwd && done.length > 0) setPending({ names: done.map((d) => basename(d.to)) });
           if (done.length > 0) {
             pushUndo(
+              din,
               `${copy ? 'copy' : 'move'} of ${describe(done.map((d) => basename(d.to)))}`,
               copy ? { kind: 'trash', paths: done.map((d) => d.to) } : { kind: 'move', moves: done },
             );
@@ -926,7 +860,7 @@ function FileBrowserTab({
         }
       });
     },
-    [trash.data, trashPaths, run, fs, refresh, cwd],
+    [din, trash.data, trashPaths, run, fs, refresh, cwd],
   );
 
   const paste = useCallback(
@@ -958,10 +892,10 @@ function FileBrowserTab({
         await fs.move(src, dest);
         refresh(src, dest);
         setPending({ names: [to] });
-        pushUndo(`rename of “${to}”`, { kind: 'move', moves: [{ from: src, to: dest }] });
+        pushUndo(din, `rename of “${to}”`, { kind: 'move', moves: [{ from: src, to: dest }] });
       });
     },
-    [cwd, fs, run, refresh, focusView],
+    [din, cwd, fs, run, refresh, focusView],
   );
 
   const createNew = useCallback(
@@ -974,10 +908,10 @@ function FileBrowserTab({
         else await fs.writeFile(path, '');
         refresh(path);
         setPending({ names: [name], rename: true });
-        pushUndo(`creation of “${name}”`, { kind: 'remove', path });
+        pushUndo(din, `creation of “${name}”`, { kind: 'remove', path });
       });
     },
-    [cwd, isTrash, listing.data, fs, run, refresh],
+    [din, cwd, isTrash, listing.data, fs, run, refresh],
   );
 
   const duplicate = useCallback(
@@ -991,12 +925,12 @@ function FileBrowserTab({
           refresh(cwd);
           if (made.length > 0) {
             setPending({ names: made.map(basename) });
-            pushUndo(`duplicate of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
+            pushUndo(din, `duplicate of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
           }
         }
       });
     },
-    [cwd, fs, run, refresh],
+    [din, cwd, fs, run, refresh],
   );
 
   const extract = useCallback(
@@ -1030,12 +964,12 @@ function FileBrowserTab({
           refresh(cwd);
           if (made.length > 0) {
             setPending({ names: made.map(basename) });
-            pushUndo(`extraction of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
+            pushUndo(din, `extraction of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
           }
         }
       });
     },
-    [cwd, fs, run, refresh],
+    [din, cwd, fs, run, refresh],
   );
 
   const cancelExtract = useCallback(() => {
@@ -1053,14 +987,14 @@ function FileBrowserTab({
           setDialog(null);
           refresh(cwd);
           setPending({ names: [basename(out)] });
-          pushUndo(`creation of “${basename(out)}”`, { kind: 'trash', paths: [out] });
+          pushUndo(din, `creation of “${basename(out)}”`, { kind: 'trash', paths: [out] });
           requestAnimationFrame(focusView);
         },
         (error: unknown) =>
           setDialog({ type: 'compress', names, error: cleanFsError(error), pending: false }),
       );
     },
-    [cwd, fs, refresh, focusView],
+    [din, cwd, fs, refresh, focusView],
   );
 
   const restore = useCallback(
@@ -1089,13 +1023,14 @@ function FileBrowserTab({
   }, [fs, run, refresh, trash.data]);
 
   const undo = useCallback(() => {
-    const entry = popUndo();
-    if (!entry) {
-      setStatus({ kind: 'info', text: 'Nothing to undo' });
-      return;
-    }
-    void run(`Undoing ${entry.label}…`, async () => refresh(...(await runUndo(fs, entry.op))));
-  }, [run, fs, refresh]);
+    void popUndo(din).then((entry) => {
+      if (!entry) {
+        setStatus({ kind: 'info', text: 'Nothing to undo' });
+        return;
+      }
+      void run(`Undoing ${entry.label}…`, async () => refresh(...(await runUndo(fs, entry.op))));
+    });
+  }, [din, run, fs, refresh]);
 
   const openInTerminal = useCallback((path: string) => void din.app.open('terminal', { cwd: path }), [din]);
   const canPrint = din.print.available;

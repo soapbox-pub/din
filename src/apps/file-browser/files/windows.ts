@@ -1,12 +1,13 @@
 import type { FsBridge } from '@/lib/fs';
-import type { Rect } from '@/sdk';
+import type { Din } from '@/sdk';
 
 /**
- * What Files windows share. Each window is its own document now, but they
- * share an origin, so they talk over a BroadcastChannel: like a native file
- * manager's, the undo history spans windows (Ctrl+Z works wherever focus
- * is), a change made in one refreshes the others' cached folders and
- * favorites, and tabs move between windows.
+ * What Files windows share. Like a native file manager's, the undo history
+ * spans windows (Ctrl+Z works wherever focus is) and lasts as long as the
+ * desktop runs, so it lives in `din.app.session`. The windows share an
+ * origin, so a BroadcastChannel carries the rest: a change made in one
+ * refreshes the others' cached folders and favorites, and a drag of files
+ * from one tells the others what it carries before the drop.
  */
 
 /** An undoable file operation, as data, so any window can undo it. */
@@ -27,113 +28,40 @@ export interface UndoEntry {
   op: UndoOp;
 }
 
-export interface WindowInfo {
-  title: string;
-  /** Where it is on the desktop (din.window.state.bounds). */
-  bounds: Rect;
+/** Files being dragged out of a Files window. */
+export interface WindowDrag {
+  paths: string[];
+  folders: string[];
 }
 
 type Message =
-  | { type: 'hello'; from: string; info: WindowInfo }
-  | { type: 'here'; from: string; info: WindowInfo; undo: UndoEntry[] }
-  | { type: 'bye'; from: string }
   | { type: 'invalidate'; paths: string[]; bookmarks: boolean }
-  | { type: 'undo-push'; entry: UndoEntry }
-  | { type: 'undo-remove'; id: string }
-  | { type: 'tab'; to: string; path: string; x: number | null };
+  | { type: 'drag'; drag: WindowDrag | null };
 
+const UNDO_KEY = 'undo';
 const UNDO_LIMIT = 50;
 
-let channel: BroadcastChannel | null = null;
-let self = '';
-let selfInfo: WindowInfo | null = null;
-const others = new Map<string, WindowInfo>();
-let undoStack: UndoEntry[] = [];
+const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('din-files');
 const invalidateListeners = new Set<(paths: string[], bookmarks: boolean) => void>();
-const othersListeners = new Set<() => void>();
-let tabReceiver: ((path: string, x: number | null) => void) | null = null;
+let otherDrag: WindowDrag | null = null;
 
-function post(message: Message): void {
-  channel?.postMessage(message);
-}
-
-let othersSnapshot: [string, WindowInfo][] = [];
-
-function emitOthers(): void {
-  othersSnapshot = [...others];
-  for (const l of othersListeners) l();
-}
-
-/** Join the other Files windows, as `windowId`. Once per document. */
-export function joinWindows(windowId: string, info: WindowInfo): void {
-  if (channel || typeof BroadcastChannel === 'undefined') return;
-  self = windowId;
-  selfInfo = info;
-  channel = new BroadcastChannel('din-files');
+if (channel) {
   channel.onmessage = (e: MessageEvent<Message>) => {
     const m = e.data;
     switch (m.type) {
-      case 'hello':
-        others.set(m.from, m.info);
-        emitOthers();
-        if (selfInfo) post({ type: 'here', from: self, info: selfInfo, undo: undoStack });
-        break;
-      case 'here': {
-        // Windows move all the time; only joining and retitling change the list.
-        const before = others.get(m.from);
-        others.set(m.from, m.info);
-        if (before?.title !== m.info.title) emitOthers();
-        // A window just opened takes the history from whoever answers first.
-        if (undoStack.length === 0 && m.undo.length > 0) undoStack = m.undo.slice(-UNDO_LIMIT);
-        break;
-      }
-      case 'bye':
-        others.delete(m.from);
-        emitOthers();
-        break;
       case 'invalidate':
         for (const l of invalidateListeners) l(m.paths, m.bookmarks);
         break;
-      case 'undo-push':
-        undoStack.push(m.entry);
-        if (undoStack.length > UNDO_LIMIT) undoStack.shift();
-        break;
-      case 'undo-remove':
-        undoStack = undoStack.filter((u) => u.id !== m.id);
-        break;
-      case 'tab':
-        if (m.to === self) tabReceiver?.(m.path, m.x);
+      case 'drag':
+        otherDrag = m.drag;
         break;
     }
   };
-  post({ type: 'hello', from: self, info });
-  window.addEventListener('pagehide', () => post({ type: 'bye', from: self }));
-}
-
-/** Tell the others this window's title or place changed. */
-export function updateWindowInfo(info: WindowInfo): void {
-  selfInfo = info;
-  post({ type: 'here', from: self, info, undo: [] });
-}
-
-/** The other Files windows open now (the same array until that changes). */
-export function otherWindows(): [string, WindowInfo][] {
-  return othersSnapshot;
-}
-
-/** The other Files windows and where each is now, for finding the one under a point. */
-export function otherWindowsNow(): [string, WindowInfo][] {
-  return [...others];
-}
-
-export function onOtherWindowsChange(listener: () => void): () => void {
-  othersListeners.add(listener);
-  return () => othersListeners.delete(listener);
 }
 
 /** Folders changed (or the favorites did): other windows drop what they cached. */
 export function broadcastInvalidate(paths: string[], bookmarks = false): void {
-  post({ type: 'invalidate', paths, bookmarks });
+  channel?.postMessage({ type: 'invalidate', paths, bookmarks } satisfies Message);
 }
 
 export function onInvalidate(listener: (paths: string[], bookmarks: boolean) => void): () => void {
@@ -141,29 +69,41 @@ export function onInvalidate(listener: (paths: string[], bookmarks: boolean) => 
   return () => invalidateListeners.delete(listener);
 }
 
-/**
- * Hand a tab (its folder) to another Files window: dropped at `x` on the
- * desktop (the receiver finds the slot), or at the end of its strip.
- */
-export function sendTab(windowId: string, path: string, x: number | null = null): void {
-  post({ type: 'tab', to: windowId, path, x });
+/** A drag of files from this window started (or, with null, ended). */
+export function broadcastDrag(drag: WindowDrag | null): void {
+  channel?.postMessage({ type: 'drag', drag } satisfies Message);
 }
 
-export function receiveTabs(receiver: ((path: string, x: number | null) => void) | null): void {
-  tabReceiver = receiver;
+/** What another Files window is dragging, if it's dragging files. */
+export function otherWindowDrag(): WindowDrag | null {
+  return otherDrag;
 }
 
-export function pushUndo(label: string, op: UndoOp): void {
-  const entry = { id: crypto.randomUUID(), label, op };
-  undoStack.push(entry);
-  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
-  post({ type: 'undo-push', entry });
+function isUndoStack(value: unknown): value is UndoEntry[] {
+  return Array.isArray(value);
 }
 
-export function popUndo(): UndoEntry | undefined {
-  const entry = undoStack.pop();
-  if (entry) post({ type: 'undo-remove', id: entry.id });
-  return entry;
+// This window's reads and writes of the history, one after another.
+let undoQueue: Promise<unknown> = Promise.resolve();
+
+function editUndo<T>(din: Din, edit: (stack: UndoEntry[]) => T): Promise<T> {
+  const next = undoQueue.then(async () => {
+    const stored = await din.app.session.get(UNDO_KEY);
+    const stack = isUndoStack(stored) ? stored : [];
+    const result = edit(stack);
+    din.app.session.set(UNDO_KEY, stack.slice(-UNDO_LIMIT));
+    return result;
+  });
+  undoQueue = next.catch(() => {});
+  return next;
+}
+
+export function pushUndo(din: Din, label: string, op: UndoOp): void {
+  void editUndo(din, (stack) => stack.push({ id: crypto.randomUUID(), label, op }));
+}
+
+export function popUndo(din: Din): Promise<UndoEntry | undefined> {
+  return editUndo(din, (stack) => stack.pop());
 }
 
 /** Undo an operation; resolves with the paths it touched, to refresh. */
