@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm, type ILink } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { SquareTerminal } from 'lucide-react';
@@ -10,6 +11,7 @@ import type { Din } from '@/sdk';
 import { useDin, useDinTheme, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
 import { dinWindowMove } from '@/shared/dinWindowMove';
+import { adoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -191,6 +193,8 @@ interface LeafNode {
   initialCwd?: string;
   /** A terminal app (htop) the pane runs in place of a shell. */
   app?: TerminalApp;
+  /** The running pty this pane takes over (its tab came from another window). */
+  handover?: PaneHandover;
 }
 interface SplitNode {
   type: 'split';
@@ -202,6 +206,44 @@ interface SplitNode {
   b: LayoutNode;
 }
 type LayoutNode = LeafNode | SplitNode;
+
+/** A pane's pty on its way to another window, and what its screen showed. */
+interface PaneHandover {
+  /** From din.system.pty.release. */
+  token: string;
+  /** The screen and scrollback, as SerializeAddon writes them. */
+  screen: string;
+  cols: number;
+  rows: number;
+  cwd?: string;
+  command?: string;
+}
+
+/** A tab moving between windows (useDinTabTransfer's payload). */
+interface TabPayload {
+  layout: LayoutNode;
+  activePaneId: string;
+}
+
+function isTabPayload(value: unknown): value is TabPayload {
+  if (typeof value !== 'object' || value === null) return false;
+  const { layout, activePaneId } = value as Partial<TabPayload>;
+  return typeof activePaneId === 'string' && typeof layout === 'object' && layout !== null
+    && (layout.type === 'leaf' || layout.type === 'split');
+}
+
+/** A tab from another window, with ids of this window's own. */
+function tabFromPayload(payload: TabPayload): TermTab {
+  let activePaneId = '';
+  const renumber = (node: LayoutNode): LayoutNode => {
+    if (node.type === 'split') return { ...node, id: newSplitId(), a: renumber(node.a), b: renumber(node.b) };
+    const paneId = newSessionId();
+    if (node.paneId === payload.activePaneId) activePaneId = paneId;
+    return { ...node, paneId };
+  };
+  const layout = renumber(payload.layout);
+  return { id: newTabId(), layout, activePaneId: activePaneId || firstPaneId(layout) };
+}
 
 /** Tab-management actions triggered by keyboard shortcuts inside a pane. */
 type TabShortcut = 'next-tab' | 'prev-tab' | 'new-tab' | 'close-tab';
@@ -308,6 +350,7 @@ interface LeafBox {
   paneId: string;
   initialCwd?: string;
   app?: TerminalApp;
+  handover?: PaneHandover;
   rect: Rect;
 }
 interface DividerBox {
@@ -327,7 +370,7 @@ function flattenLayout(
   dividers: DividerBox[],
 ): void {
   if (node.type === 'leaf') {
-    leaves.push({ paneId: node.paneId, initialCwd: node.initialCwd, app: node.app, rect });
+    leaves.push({ paneId: node.paneId, initialCwd: node.initialCwd, app: node.app, handover: node.handover, rect });
     return;
   }
   if (node.dir === 'row') {
@@ -366,12 +409,28 @@ function flattenLayout(
  * a while and finishes out of sight posts a notification.
  * Within a tab, right-click offers Tilix-style tiling: split a pane right or
  * down into a tree of terminals with draggable dividers.
+ * Tabs move between Terminal windows (dragged, torn off, or from the tab's
+ * menu) with their shells still running: each pty is handed over
+ * (din.system.pty.release/adopt) along with its screen and scrollback.
  * Outside the Electron shell (plain-browser dev) there is no bridge, so a
  * fallback notice renders instead.
  *
  * Launch params: `{ cwd }` starts the first shell in a folder, `{ app,
  * appName }` runs a terminal app (htop) in the first pane.
  */
+/** A window's first tab: a shell, in a folder (`cwd`), or a terminal app (`app`). */
+function firstTab(params: Record<string, unknown>): TermTab {
+  const paneId = newSessionId();
+  // Files' "Open in Terminal" starts the first shell in a given folder.
+  const initialCwd = typeof params.cwd === 'string' ? params.cwd : undefined;
+  // The apps menu opens terminal apps (htop) here, running in the first pane.
+  const app =
+    typeof params.app === 'string'
+      ? { id: params.app, name: typeof params.appName === 'string' ? params.appName : params.app }
+      : undefined;
+  return { id: newTabId(), layout: { type: 'leaf', paneId, initialCwd, app }, activePaneId: paneId };
+}
+
 export function Terminal() {
   const din = useDin();
   const params = din.app.launch.params;
@@ -380,20 +439,21 @@ export function Terminal() {
   useLayoutEffect(() => setDinDark(dark), [dark]);
   const closeWindow = useCallback(() => din.window.close(), [din]);
 
-  const [tabs, setTabs] = useState<TermTab[]>(() => {
-    const paneId = newSessionId();
-    // Files' "Open in Terminal" starts the first shell in a given folder.
-    const initialCwd = typeof params?.cwd === 'string' ? params.cwd : undefined;
-    // The apps menu opens terminal apps (htop) here, running in the first pane.
-    const app =
-      typeof params?.app === 'string'
-        ? { id: params.app, name: typeof params.appName === 'string' ? params.appName : params.app }
-        : undefined;
-    return [
-      { id: newTabId(), layout: { type: 'leaf', paneId, initialCwd, app }, activePaneId: paneId },
-    ];
-  });
-  const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
+  // A window opened for a tab torn off another one starts empty, and gets
+  // the tab (useDinTabTransfer passes it as `adoptTab`).
+  const adopting = typeof params?.adoptTab === 'string';
+  const [tabs, setTabs] = useState<TermTab[]>(() => (adopting ? [] : [firstTab(params)]));
+  const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
+  const adoptStarted = useRef(false);
+  useEffect(() => {
+    if (!adopting || adoptStarted.current) return;
+    adoptStarted.current = true;
+    void adoptedTab(din).then((payload) => {
+      const tab = isTabPayload(payload) ? tabFromPayload(payload) : firstTab({});
+      setTabs([tab]);
+      setActiveId(tab.id);
+    });
+  }, [adopting, din]);
   const tabsRef = useRef(tabs);
   useLayoutEffect(() => {
     tabsRef.current = tabs;
@@ -434,15 +494,20 @@ export function Terminal() {
     setActiveId(tab.id);
   }, [tabs, activeId]);
 
-  const closeTab = useCallback(
-    (id: string) => {
+  /**
+   * Remove a tab. Removing the last closes the window, a moment later when
+   * the tab is moving (so it's posted to its new window first).
+   */
+  const dropTab = useCallback(
+    (id: string, moving: boolean) => {
       setTabs((ts) => {
         const index = ts.findIndex((t) => t.id === id);
         if (index === -1) return ts;
         const next = ts.filter((t) => t.id !== id);
         // Closing the last tab closes the terminal window.
         if (next.length === 0) {
-          closeWindow();
+          if (moving) setTimeout(closeWindow, 0);
+          else closeWindow();
           return ts;
         }
         setActiveId((current) =>
@@ -453,6 +518,36 @@ export function Terminal() {
     },
     [closeWindow],
   );
+  const closeTab = useCallback((id: string) => dropTab(id, false), [dropTab]);
+
+  /** Hand a tab to another window: its ptys keep running, its screens come along. */
+  const takeTab = useCallback(
+    async (id: string): Promise<TabPayload | undefined> => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab) return undefined;
+      const handOver = async (node: LayoutNode): Promise<LayoutNode> => {
+        if (node.type === 'split') {
+          const [a, b] = await Promise.all([handOver(node.a), handOver(node.b)]);
+          return { ...node, a, b };
+        }
+        // A pane with no live pty (or one that fails to let go) starts a
+        // fresh shell where it was.
+        const handover = await paneSessions.get(node.paneId)?.release().catch(() => undefined);
+        return { ...node, initialCwd: panesCwd.current.get(node.paneId) ?? node.initialCwd, handover };
+      };
+      const layout = await handOver(tab.layout);
+      dropTab(id, true);
+      return { layout, activePaneId: tab.activePaneId };
+    },
+    [dropTab],
+  );
+
+  const receiveTab = useCallback((payload: unknown, index: number) => {
+    if (!isTabPayload(payload)) return;
+    const tab = tabFromPayload(payload);
+    setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
+    setActiveId(tab.id);
+  }, []);
 
   const splitPane = useCallback((tabId: string, paneId: string, dir: SplitDir) => {
     const newPaneId = newSessionId();
@@ -556,6 +651,19 @@ export function Terminal() {
   const title = activeTab ? paneTitle(labels[activeTab.activePaneId]) : null;
   useWindowTitle(title);
 
+  const transfer = useDinTabTransfer(
+    {
+      din,
+      label: (id) => {
+        const tab = tabsRef.current.find((t) => t.id === id);
+        return tab ? paneTitle(labels[tab.activePaneId]) : 'Terminal';
+      },
+      take: takeTab,
+      receive: receiveTab,
+    },
+    tabs.length,
+  );
+
   // The tab strip shares a line with the window controls (Chrome-style), in
   // the window's own header (a `custom` frame).
   const headerRef = useRef<HTMLDivElement>(null);
@@ -579,6 +687,7 @@ export function Terminal() {
             onClose={closeTab}
             onNew={openTab}
             onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+            transfer={transfer}
             moveWindow={tabs.length === 1 ? dinWindowMove(din) : undefined}
           />
         </div>
@@ -750,6 +859,7 @@ const TerminalTab = memo(function TerminalTab({
             focused={tab.activePaneId === leaf.paneId}
             initialCwd={leaf.initialCwd}
             app={leaf.app}
+            handover={leaf.handover}
             onSplit={handleSplit}
             onClose={handleClose}
             onReveal={handleReveal}
@@ -819,6 +929,12 @@ interface PaneSession {
   fit: FitAddon;
   /** Show the terminal in a pane's container. Returns the detach fn. */
   attach: (container: HTMLElement, host: { current: PaneHost }) => () => void;
+  /**
+   * Let go of the pty for another window to adopt, with the screen as it
+   * stands; detaching afterwards leaves the shell running. Undefined when
+   * there's no live pty to hand over.
+   */
+  release: () => Promise<PaneHandover | undefined>;
 }
 
 const paneSessions = new Map<string, PaneSession>();
@@ -830,6 +946,7 @@ function paneSession(
   paneId: string,
   initialCwd: string | undefined,
   app: TerminalApp | undefined,
+  handover: PaneHandover | undefined,
 ): PaneSession {
   const existing = paneSessions.get(paneId);
   if (existing) return existing;
@@ -841,9 +958,9 @@ function paneSession(
   /** Output that raced ahead of the spawn() ack, keyed by session id. */
   const pending: Array<{ id: number; data: Uint8Array }> = [];
   /** Tracks the shell's current working directory via OSC 7. */
-  let cwd = initialCwd;
+  let cwd = handover?.cwd ?? initialCwd;
   /** The command the pane's tab is named after. */
-  let command: string | undefined = app?.name;
+  let command: string | undefined = handover?.command ?? app?.name;
 
   const term = new XTerm({
     cursorBlink: true,
@@ -854,9 +971,14 @@ function paneSession(
     theme: terminalTheme(currentDark),
     // The graphemes addon needs the proposed `unicode` API.
     allowProposedApi: true,
+    // A moved pane starts at its old size, so its screen lands as it was
+    // drawn; fitting reflows it to this window afterwards.
+    ...(handover ? { cols: handover.cols, rows: handover.rows } : {}),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  const serializer = new SerializeAddon();
+  term.loadAddon(serializer);
   // Treat grapheme clusters (skin tones, ZWJ sequences, flags) as one
   // double-width cell, so emoji like 👍🏽 and 🇺🇸 render whole.
   term.loadAddon(new UnicodeGraphemesAddon());
@@ -1133,9 +1255,16 @@ function paneSession(
     if (sessionId !== null) bridge.resize(sessionId, cols, rows);
   });
 
+  // A pane from another window shows what it showed there, then takes over
+  // its pty (whose output since waits in main, and follows the screen).
+  if (handover) term.write(handover.screen);
+  const pty = din.system.pty;
+
   const spawn = () => {
-    bridge
-      .spawn({ cols: term.cols, rows: term.rows }, cwd, app?.id)
+    const started = handover && pty
+      ? pty.adopt(handover.token)
+      : bridge.spawn({ cols: term.cols, rows: term.rows }, cwd, app?.id);
+    started
       .then((id) => {
         if (disposed) {
           bridge.kill(id);
@@ -1146,10 +1275,17 @@ function paneSession(
           if (event.id === id) term.write(event.data);
         }
         pending.length = 0;
+        if (handover) {
+          // Tell it this window's size. A full-screen program (htop, vim)
+          // redraws on SIGWINCH, which only comes when the size changes, so
+          // one gets a nudge first.
+          if (term.buffer.active.type === 'alternate') bridge.resize(id, term.cols, Math.max(1, term.rows - 1));
+          bridge.resize(id, term.cols, term.rows);
+        }
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        if (!disposed) term.write(`Failed to start ${app?.name ?? 'shell'}: ${message}\r\n`);
+        if (!disposed) term.write(`\r\nFailed to start ${app?.name ?? 'shell'}: ${message}\r\n`);
       });
   };
 
@@ -1171,9 +1307,21 @@ function paneSession(
     term.dispose();
   };
 
+  const release = async (): Promise<PaneHandover | undefined> => {
+    if (sessionId === null || exited || disposed || !pty) return undefined;
+    const id = sessionId;
+    const token = await pty.release(id);
+    // Its output up to now has arrived (main holds the rest for the adopter);
+    // let xterm finish parsing it, then copy the screen.
+    sessionId = null;
+    await new Promise<void>((resolve) => term.write('', resolve));
+    return { token, screen: serializer.serialize(), cols: term.cols, rows: term.rows, cwd, command };
+  };
+
   const session: PaneSession = {
     term,
     fit,
+    release,
     attach(container, h) {
       host = h;
       if (term.element) {
@@ -1247,6 +1395,7 @@ const TerminalSession = memo(function TerminalSession({
   focused,
   initialCwd,
   app,
+  handover,
   onSplit,
   onClose,
   onReveal,
@@ -1264,6 +1413,8 @@ const TerminalSession = memo(function TerminalSession({
   initialCwd?: string;
   /** A terminal app to run in place of the shell on first spawn. */
   app?: TerminalApp;
+  /** A running pty to take over on first attach, from another window. */
+  handover?: PaneHandover;
   onSplit: (paneId: string, dir: SplitDir) => void;
   onClose: (paneId: string) => void;
   /** Bring this pane into view. */
@@ -1281,6 +1432,7 @@ const TerminalSession = memo(function TerminalSession({
   const termRef = useRef<XTerm | null>(null);
   const initialCwdRef = useRef(initialCwd);
   const appRef = useRef(app);
+  const handoverRef = useRef(handover);
   const isTop = useWindowState().focused;
   const isTopRef = useRef(isTop);
   // Always-fresh callbacks for the (long-lived) session.
@@ -1309,7 +1461,7 @@ const TerminalSession = memo(function TerminalSession({
   useEffect(() => {
     const container = containerRef.current;
     if (!bridge || !container) return;
-    const session = paneSession(din, bridge, paneId, initialCwdRef.current, appRef.current);
+    const session = paneSession(din, bridge, paneId, initialCwdRef.current, appRef.current, handoverRef.current);
     termRef.current = session.term;
     fitRef.current = session.fit;
     const detach = session.attach(container, host);
