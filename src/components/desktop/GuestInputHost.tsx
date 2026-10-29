@@ -38,13 +38,27 @@ export function GuestInputHost() {
     return bridge.onInput((input) => {
       const el = findGuest(input.wcId);
       if (!el) return;
-      const rect = el.getBoundingClientRect();
+      // From the shell's own view where main has it: the guest's rect may
+      // have moved since the guest saw the event (its window being dragged
+      // by this very pointer), and adding the newer rect would feed that
+      // back into the drag.
+      const zoom = zoomRef.current;
+      let clientX: number;
+      let clientY: number;
+      if (input.sx !== undefined && input.sy !== undefined) {
+        clientX = input.sx / zoom;
+        clientY = input.sy / zoom;
+      } else {
+        const rect = el.getBoundingClientRect();
+        clientX = rect.left + input.x / zoom;
+        clientY = rect.top + input.y / zoom;
+      }
       const init: PointerEventInit = {
         bubbles: true,
         cancelable: true,
         composed: true,
-        clientX: rect.left + input.x / zoomRef.current,
-        clientY: rect.top + input.y / zoomRef.current,
+        clientX,
+        clientY,
         pointerId: 1,
         pointerType: 'mouse',
         isPrimary: true,

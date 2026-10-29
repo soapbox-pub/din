@@ -3177,7 +3177,8 @@ const GUEST_MOVE_INTERVAL_MS = 16;
  * menus stay open over a click into the page, and the dock can't tell the
  * pointer moved over one. Forward what the shell reacts to - button presses
  * and moves (at most one per frame) - so GuestInputHost can replay it on the
- * guest's <webview> element. Coordinates are in the guest's view, in DIPs
+ * guest's <webview> element. Coordinates are in DIPs, in the guest's view
+ * (x, y) and, where the event has a screen position, the shell's (sx, sy)
  * (verified on Electron 41: the shell's interface zoom isn't applied).
  *
  * A guest's own `focus` event would be the obvious way to report focus too,
@@ -3186,7 +3187,18 @@ const GUEST_MOVE_INTERVAL_MS = 16;
  */
 function forwardGuestInput(contents: Electron.WebContents): void {
   const wcId = contents.id;
-  let pendingMove: { x: number; y: number; meta: boolean } | null = null;
+  // Where the pointer is in the shell's own view, from the event's screen
+  // position: the guest's view moves with its window, so a window being
+  // dragged by a press inside it can't place itself by the guest-local
+  // point plus where the shell has the guest now (that's already moved on,
+  // and the error feeds back into the drag).
+  const inShell = (mouse: Electron.MouseInputEvent): { sx: number; sy: number } | null => {
+    if (typeof mouse.globalX !== 'number' || typeof mouse.globalY !== 'number') return null;
+    if (!shellWindow || shellWindow.isDestroyed()) return null;
+    const content = shellWindow.getContentBounds();
+    return { sx: mouse.globalX - content.x, sy: mouse.globalY - content.y };
+  };
+  let pendingMove: { x: number; y: number; sx?: number; sy?: number; meta: boolean } | null = null;
   let moveTimer: NodeJS.Timeout | null = null;
   const flushMove = (): void => {
     if (moveTimer) clearTimeout(moveTimer);
@@ -3201,12 +3213,12 @@ function forwardGuestInput(contents: Electron.WebContents): void {
     // replayed move without it would read as Super released.
     const meta = mouse.modifiers?.includes('meta') ?? false;
     if (mouse.type === 'mouseMove') {
-      pendingMove = { x: mouse.x, y: mouse.y, meta };
+      pendingMove = { x: mouse.x, y: mouse.y, ...inShell(mouse), meta };
       moveTimer ??= setTimeout(flushMove, GUEST_MOVE_INTERVAL_MS);
     } else if (mouse.type === 'mouseDown') {
       // Keep the order the guest saw: the move that led here comes first.
       flushMove();
-      sendToShell('guest:input', { wcId, type: 'down', x: mouse.x, y: mouse.y, button: mouse.button ?? 'left', meta });
+      sendToShell('guest:input', { wcId, type: 'down', x: mouse.x, y: mouse.y, ...inShell(mouse), button: mouse.button ?? 'left', meta });
     }
   });
   contents.once('destroyed', () => {
