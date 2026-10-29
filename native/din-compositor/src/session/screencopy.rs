@@ -6,8 +6,15 @@
 //! A plain copy is made at once. A copy "with damage" waits for the
 //! display's next frame that changed something, which paces a screen
 //! recorder by what happens on screen.
+//!
+//! A copy into a GPU buffer is ready once the GPU has drawn it, which the
+//! event loop hears from its fence, so the compositor's own frames and input
+//! don't wait on it.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    os::fd::OwnedFd,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use smithay::{
     backend::{
@@ -20,6 +27,7 @@ use smithay::{
     },
     output::Output,
     reexports::{
+        calloop::{Interest, Mode, PostAction, generic::Generic},
         wayland_protocols_wlr::screencopy::v1::server::{
             zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1},
             zwlr_screencopy_manager_v1::{self, ZwlrScreencopyManagerV1},
@@ -223,14 +231,20 @@ impl State {
     fn copy_frame(&mut self, frame: &ZwlrScreencopyFrameV1, buffer: &WlBuffer, with_damage: bool) {
         let Some(info) = frame.data::<FrameInfo>() else { return };
         match self.render_copy(info, buffer) {
-            Ok(()) => {
-                frame.flags(zwlr_screencopy_frame_v1::Flags::empty());
-                if with_damage {
-                    frame.damage(0, 0, info.size.w as u32, info.size.h as u32);
+            Ok(None) => self.copy_ready(frame, with_damage),
+            Ok(Some(fence)) => {
+                let waiting = frame.clone();
+                let source = Generic::new(fence, Interest::READ, Mode::OneShot);
+                let inserted = self.handle.insert_source(source, move |_, _, state| {
+                    if waiting.is_alive() {
+                        state.copy_ready(&waiting, with_damage);
+                    }
+                    Ok(PostAction::Remove)
+                });
+                if let Err(err) = inserted {
+                    debug!("screencopy: waiting for the GPU: {err}");
+                    frame.failed();
                 }
-                let now: std::time::Duration = self.clock.now().into();
-                let secs = now.as_secs();
-                frame.ready((secs >> 32) as u32, secs as u32, now.subsec_nanos());
             }
             Err(err) => {
                 debug!("screencopy: {err}");
@@ -239,7 +253,20 @@ impl State {
         }
     }
 
-    fn render_copy(&mut self, info: &FrameInfo, buffer: &WlBuffer) -> Result<(), String> {
+    fn copy_ready(&self, frame: &ZwlrScreencopyFrameV1, with_damage: bool) {
+        let Some(info) = frame.data::<FrameInfo>() else { return };
+        frame.flags(zwlr_screencopy_frame_v1::Flags::empty());
+        if with_damage {
+            frame.damage(0, 0, info.size.w as u32, info.size.h as u32);
+        }
+        let now: std::time::Duration = self.clock.now().into();
+        let secs = now.as_secs();
+        frame.ready((secs >> 32) as u32, secs as u32, now.subsec_nanos());
+    }
+
+    /// Draws the copy. A GPU copy that's still being drawn gives the fence
+    /// that signals when it's done.
+    fn render_copy(&mut self, info: &FrameInfo, buffer: &WlBuffer) -> Result<Option<OwnedFd>, String> {
         let head = info.head.and_then(|id| self.backend.head(id)).ok_or("the display is gone")?;
         let output = head.output.clone();
         let display = self.space.output_geometry(&output).ok_or("the display is off")?;
@@ -268,8 +295,13 @@ impl State {
                 .render_output(renderer, &mut target, 0, &elements, BACKDROP)
                 .map_err(|e| format!("{e:?}"))?;
             // The client reads it as soon as it hears it's ready.
-            let _ = result.sync.wait();
-            return Ok(());
+            if !result.sync.is_reached() {
+                if let Some(fence) = result.sync.export() {
+                    return Ok(Some(fence));
+                }
+                let _ = result.sync.wait();
+            }
+            return Ok(None);
         }
 
         let size = (info.size.w, info.size.h);
@@ -302,5 +334,6 @@ impl State {
             }
         })
         .map_err(|e| e.to_string())
+        .map(|()| None)
     }
 }
