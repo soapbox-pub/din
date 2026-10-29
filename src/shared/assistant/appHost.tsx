@@ -10,20 +10,29 @@ async function startIn(din: Din, path: string | undefined): Promise<DinFileHandl
   return path ? din.files.fromPath(path).catch(() => undefined) : undefined;
 }
 
-/** Dictation into the composer's field, through din.dictation (it types into what's focused). */
+/**
+ * Dictation into the composer's field, through din.dictation (it types
+ * into what's focused). Lit while what's dictated goes into this window's
+ * composer, from its mic or Din's dictation key alike.
+ */
 function useAppDictation(din: Din, ref: RefObject<HTMLTextAreaElement | null>) {
   const [status, setStatus] = useState(din.dictation.status);
-  // Started from this composer's mic, rather than Super+H somewhere else.
-  const [mine, setMine] = useState(false);
-  useEffect(
-    () =>
-      din.dictation.onStatus((next) => {
-        setStatus(next);
-        if (next === 'idle' || next === 'error') setMine(false);
-      }),
-    [din],
-  );
-  const active = mine && (status === 'listening' || status === 'transcribing');
+  useEffect(() => din.dictation.onStatus(setStatus), [din]);
+  // Whether the composer has focus: dictation types into the focused field.
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const on = () => setFocused(true);
+    const off = () => setFocused(false);
+    el.addEventListener('focus', on);
+    el.addEventListener('blur', off);
+    return () => {
+      el.removeEventListener('focus', on);
+      el.removeEventListener('blur', off);
+    };
+  }, [ref]);
+  const active = din.dictation.here && focused && (status === 'listening' || status === 'transcribing');
   return {
     available: din.dictation.available,
     active,
@@ -35,8 +44,7 @@ function useAppDictation(din: Din, ref: RefObject<HTMLTextAreaElement | null>) {
       const textarea = ref.current;
       if (!textarea) return;
       textarea.focus();
-      setMine(true);
-      din.dictation.start().catch(() => setMine(false));
+      din.dictation.start().catch(() => {});
     },
   };
 }
@@ -50,12 +58,15 @@ function useAppDictation(din: Din, ref: RefObject<HTMLTextAreaElement | null>) {
 export function AppAssistantHost({ children }: { children: ReactNode }) {
   const din = useDin();
   useAssistantEventSync();
+  // Din's settings for the assistant, which the desktop keeps.
+  const [settings, setSettings] = useState(din.assistant.settings);
+  useEffect(() => din.assistant.onSettingsChange(setSettings), [din]);
 
   const host = useMemo(
     (): AssistantHost => ({
-      // Din's settings aren't the app's to read: the home folder, and colors on.
-      directory: '',
-      colorfulReplies: true,
+      directory: settings.directory,
+      colorfulReplies: settings.colorfulReplies,
+      setEnabled: (enabled) => din.assistant.setSettings({ enabled }),
       openApp: (appId, params) => void din.app.open(appId, params),
       openUrl: (url) => void din.app.openUrl(url),
       openPath: (path, kind) =>
@@ -68,7 +79,7 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
           .then((folder) => din.app.open('file-browser', { select: path.slice(path.lastIndexOf('/') + 1) }, [folder])),
       pickFiles: async ({ title }) => {
         const picked = await din.files.open({ title, multiple: true, writable: false });
-        return picked.flatMap((handle) => (handle.path ? [handle.path] : []));
+        return picked.map((handle) => handle.path);
       },
       pickFolder: async ({ title, initialPath }) => {
         const [picked] = await din.files.open({ title, directory: true, writable: false, startIn: await startIn(din, initialPath) });
@@ -77,7 +88,7 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
       notify: ({ title, description }) => void din.notifications.show(title, { body: description, transient: true }),
       useDictation: (ref) => useAppDictation(din, ref),
     }),
-    [din],
+    [din, settings.directory, settings.colorfulReplies],
   );
 
   return <AssistantHostContext value={host}>{children}</AssistantHostContext>;
