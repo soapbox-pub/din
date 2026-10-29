@@ -84,10 +84,13 @@ function dataHome(): string {
   return process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share');
 }
 
-/** `$XDG_DATA_DIRS`, per the base-directory spec. */
+/**
+ * `$XDG_DATA_DIRS`, per the base-directory spec, plus the spec's defaults
+ * (as native-apps.mts does, so system apps keep their icons).
+ */
 function dataDirs(): string[] {
-  const raw = process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share';
-  return raw.split(':').filter(Boolean);
+  const raw = process.env.XDG_DATA_DIRS || '';
+  return [...new Set([...raw.split(':').filter(Boolean), '/usr/local/share', '/usr/share'])];
 }
 
 /** Roots that can contain icon themes, most specific first. */
