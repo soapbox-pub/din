@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { contains, getMonitorsBridge, type Monitor } from '@/lib/monitors';
+import { setFullscreenMonitor } from '@/lib/pageFullscreen';
 import { guestFrame, guestId, isGuestElement } from '@/platform/guest';
 
 interface PageFullscreenBridge {
@@ -37,6 +38,9 @@ const STYLE_ID = 'din-page-fullscreen';
  *
  * A native app in full screen is the same, with its window's canvas host
  * (NativeWindowView.tsx) as the frame; the app sizes itself to the monitor.
+ *
+ * The covered monitor is recorded (src/lib/pageFullscreen.ts) so new
+ * windows and links open on another one rather than behind the page.
  *
  * Monitors can come and go while a page is fullscreen (an AirPlay receiver
  * taken over by another device), so the fit is redone whenever they change.
@@ -85,6 +89,7 @@ export function PageFullscreenHost() {
 
     const onChange = () => {
       unfit();
+      setFullscreenMonitor(null);
       const host = document.fullscreenElement;
       if (!(host instanceof HTMLElement)) {
         emulated = false;
@@ -124,6 +129,7 @@ export function PageFullscreenHost() {
       // rest of the page's view, which isn't drawn.
       frame.style.clipPath = `inset(0px ${Math.max(0, window.innerWidth - monitor.width)}px ${Math.max(0, window.innerHeight - monitor.height)}px 0px)`;
       fitted = frame;
+      setFullscreenMonitor(monitor);
 
       if (layer && !layer.open) {
         // Opening a modal dialog focuses into it; the page keeps the focus.
@@ -158,6 +164,7 @@ export function PageFullscreenHost() {
       document.removeEventListener('fullscreenchange', onChange);
       layer?.removeEventListener('cancel', onCancel);
       unfit();
+      setFullscreenMonitor(null);
     };
   }, []);
 

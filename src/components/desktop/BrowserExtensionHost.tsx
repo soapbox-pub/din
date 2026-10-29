@@ -52,7 +52,7 @@ export function BrowserExtensionHost() {
       // or else as a preview tab beside the page.
       if (command.type === 'open' && isNostrUri(command.url)) {
         void openNostrUri(command.url, (uri) => {
-          if (!hasTabConsumer()) open('web-browser');
+          if (!hasTabConsumer(command)) open('web-browser');
           publishTabCommand({ ...command, url: uri });
         });
         return;
@@ -66,7 +66,7 @@ export function BrowserExtensionHost() {
       }
       // select/close target existing tabs; nothing to do without a browser.
       const needsBrowser = command.type === 'create' || command.type === 'open';
-      if (needsBrowser && !hasTabConsumer()) {
+      if (needsBrowser && !hasTabConsumer(command)) {
         open('web-browser');
       }
       publishTabCommand(command);

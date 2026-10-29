@@ -62,6 +62,7 @@ import {
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { consumeTabCommands, consumeBrowserHotkeys } from '@/lib/browserTabBus';
 import { consumeInspectorDock } from '@/lib/inspectorBus';
+import { onFullscreenMonitor } from '@/lib/pageFullscreen';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import type { AppComponentProps } from '@/lib/apps';
 import { Button } from '@/components/ui/button';
@@ -1281,7 +1282,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           break;
         }
       }
-    }, (wcId) => tabsRef.current.some((t) => t.wcId === wcId));
+    }, (wcId) => tabsRef.current.some((t) => t.wcId === wcId), false, () => onFullscreenMonitor(windowId));
   }, [openTab, closeTab, focusWindow, windowId]);
 
   /**

@@ -17,7 +17,9 @@ import type { CrxTabCommand } from '@/lib/crx';
  * the same session - as its opener. This keeps private-window links out of the
  * persistent, authenticated session (and vice versa). Commands with no such
  * reference (chrome.tabs.create, desktop link clicks) go to the most recently
- * mounted window (consumers form a stack).
+ * mounted window (consumers form a stack), passing over windows behind a
+ * fullscreen page on another monitor: a link opened there would be out of
+ * sight (src/lib/pageFullscreen.ts). With none left, a new window opens.
  *
  * Pop-up windows (WebPopup) consume too, but only the commands bound to their
  * one page; they are never a browser window that unbound commands fall to.
@@ -30,6 +32,8 @@ interface Consumer {
   ownsTab: (wcId: number) => boolean;
   /** A pop-up window: takes bound commands only. */
   popup: boolean;
+  /** Whether this window is behind a fullscreen page. */
+  covered: () => boolean;
 }
 
 const consumers: Consumer[] = [];
@@ -52,9 +56,9 @@ function boundWcId(command: CrxTabCommand): number | undefined {
   }
 }
 
-/** The newest browser window (not a pop-up), if any. */
+/** The newest browser window (not a pop-up) in sight, if any. */
 function topBrowser(): Consumer | undefined {
-  return consumers.findLast((c) => !c.popup);
+  return consumers.findLast((c) => !c.popup && !c.covered());
 }
 
 /** The consumer that should handle a command: its tab owner, else top-of-stack. */
@@ -75,9 +79,13 @@ export function publishTabCommand(command: CrxTabCommand): void {
   }
 }
 
-/** Whether a Web Browser instance is currently consuming commands. */
-export function hasTabConsumer(): boolean {
-  return topBrowser() !== undefined;
+/**
+ * Whether a Web Browser window would take a command (by default one bound to
+ * no tab, like a desktop link); without one the caller opens a new window,
+ * which takes the queued command.
+ */
+export function hasTabConsumer(command?: CrxTabCommand): boolean {
+  return (command ? targetFor(command) : topBrowser()) !== undefined;
 }
 
 /**
@@ -85,14 +93,17 @@ export function hasTabConsumer(): boolean {
  * reports whether this window hosts a given tab, so commands route to the
  * right window. Any queued commands (issued while no browser was open, hence
  * ownerless) are delivered immediately. A pop-up window passes `popup` and
- * gets only the commands bound to its page. Returns an unsubscribe fn.
+ * gets only the commands bound to its page. `covered` reports whether the
+ * window is behind a fullscreen page, so unbound commands pass it over.
+ * Returns an unsubscribe fn.
  */
 export function consumeTabCommands(
   handle: Consumer['handle'],
   ownsTab: Consumer['ownsTab'],
   popup = false,
+  covered: Consumer['covered'] = () => false,
 ): () => void {
-  const consumer: Consumer = { handle, ownsTab, popup };
+  const consumer: Consumer = { handle, ownsTab, popup, covered };
   consumers.push(consumer);
   if (!popup) {
     while (queue.length > 0) {
