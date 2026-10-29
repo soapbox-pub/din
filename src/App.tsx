@@ -62,6 +62,8 @@ const defaultConfig: AppConfig = {
   tilingEnabled: false,
   tilingGap: 8,
   dockMagnification: true,
+  dockMagnificationScale: 1.5,
+  dockSize: 80,
   dockStyle: 'none',
   zoomLevel: 100,
   clockFormat: 'auto',

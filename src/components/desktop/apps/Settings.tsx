@@ -263,7 +263,7 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     group: 'Personal',
     name: 'Dock',
     icon: Dock,
-    search: ['Magnification', 'Background', 'None', 'Modern', 'Classic', 'magnify', 'zoom', 'taskbar', 'launcher', 'shelf', 'macOS'],
+    search: ['Size', 'Magnification', 'Magnification level', 'Background', 'None', 'Modern', 'Classic', 'magnify', 'zoom', 'taskbar', 'launcher', 'shelf', 'macOS'],
   },
   {
     id: 'notifications',
@@ -3594,12 +3594,30 @@ function WindowsSection() {
   );
 }
 
-/** The Dock's magnification and backdrop, as its own right-click menu offers them. */
+/**
+ * The Dock's size, magnification and backdrop. Its own right-click menu
+ * offers the last two, less the magnification level.
+ */
 function DockSection() {
   const { config, updateConfig } = useAppContext();
 
   return (
     <SectionShell title="Dock">
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="dock-size" className="text-sm">Size</Label>
+          <span className="text-xs tabular-nums text-muted-foreground">{config.dockSize} px</span>
+        </div>
+        <Slider
+          id="dock-size"
+          aria-label="Dock size"
+          value={[config.dockSize]}
+          min={48}
+          max={128}
+          step={4}
+          onValueChange={([v]) => updateConfig((current) => ({ ...current, dockSize: v }))}
+        />
+      </div>
       <SettingSwitchRow
         id="dock-magnification"
         icon={ZoomIn}
@@ -3608,6 +3626,32 @@ function DockSection() {
         checked={config.dockMagnification}
         onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockMagnification: checked }))}
       />
+      <div
+        className={cn(
+          'flex flex-col gap-2 rounded-md border bg-muted/20 p-3',
+          !config.dockMagnification && 'opacity-60',
+        )}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="dock-magnification-scale" className="text-sm">Magnification level</Label>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {Math.round(config.dockMagnificationScale * 100)}%
+          </span>
+        </div>
+        <Slider
+          id="dock-magnification-scale"
+          aria-label="Magnification level"
+          value={[config.dockMagnificationScale]}
+          min={1.1}
+          max={2.5}
+          step={0.1}
+          disabled={!config.dockMagnification}
+          onValueChange={([v]) =>
+            updateConfig((current) => ({ ...current, dockMagnificationScale: Math.round(v * 10) / 10 }))
+          }
+        />
+        <p className="text-xs text-muted-foreground">How large the icon under the pointer grows.</p>
+      </div>
       <SubHeading>Background</SubHeading>
       <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Dock background">
         {DOCK_STYLES.map((option) => {

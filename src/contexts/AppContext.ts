@@ -80,6 +80,10 @@ export interface AppConfig {
   tilingGap: number;
   /** Whether Dock icons grow as the pointer sweeps across them. */
   dockMagnification: boolean;
+  /** How large an icon under the pointer grows, as a multiple of its size (1.5 = half again). */
+  dockMagnificationScale: number;
+  /** The width and height of a Dock icon's slot, in px. */
+  dockSize: number;
   /**
    * The Dock's backdrop: none (icons over the wallpaper), modern (macOS's
    * frosted panel since Big Sur) or classic (Leopard's glass shelf).
