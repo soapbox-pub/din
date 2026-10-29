@@ -80,6 +80,16 @@ export function createGuest(options: CreateGuestOptions): GuestElement {
   el.setAttribute('src', options.src);
   if (options.className) el.className = options.className;
   el.style.display = 'flex';
+  // Focus moving straight from one guest to another moves the document's
+  // focus but not the keyboard's: the page it went to never hears of it, and
+  // even clicks into it can't take focus from then on (verified on Electron
+  // 43). Leaving the other guest first, by way of the shell, does it right.
+  const focus = el.focus.bind(el);
+  el.focus = (focusOptions?: FocusOptions) => {
+    const active = document.activeElement;
+    if (active !== el && isGuestElement(active)) active.blur();
+    focus(focusOptions);
+  };
   return el as GuestElement;
 }
 
