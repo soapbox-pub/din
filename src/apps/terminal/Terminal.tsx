@@ -11,7 +11,7 @@ import type { Din } from '@/sdk';
 import { useDin, useDinTheme, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
 import { dinWindowMove } from '@/shared/dinWindowMove';
-import { adoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
+import { adoptedTab, hasAdoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -440,8 +440,8 @@ export function Terminal() {
   const closeWindow = useCallback(() => din.window.close(), [din]);
 
   // A window opened for a tab torn off another one starts empty, and gets
-  // the tab (useDinTabTransfer passes it as `adoptTab`).
-  const adopting = typeof params?.adoptTab === 'string';
+  // the tab.
+  const adopting = hasAdoptedTab(din);
   const [tabs, setTabs] = useState<TermTab[]>(() => (adopting ? [] : [firstTab(params)]));
   const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
   const adoptStarted = useRef(false);

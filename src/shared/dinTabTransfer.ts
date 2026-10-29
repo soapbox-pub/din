@@ -60,6 +60,11 @@ function slotAt(list: HTMLElement, x: number): { index: number; x: number } {
   return { index, x: tabs[tabs.length - 1].getBoundingClientRect().right + 2 };
 }
 
+/** Whether this window was opened to adopt a tab (so it shouldn't start with one of its own). */
+export function hasAdoptedTab(din: Din): boolean {
+  return typeof din.app.launch.params[ADOPT_PARAM] === 'string';
+}
+
 /**
  * The tab a window was opened to adopt (a tab dropped away from every
  * window), if any. Read it when the window starts; it's removed once read.
