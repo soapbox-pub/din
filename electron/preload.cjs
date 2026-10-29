@@ -828,13 +828,23 @@ ipcRenderer.on(
    * @param {{ id: number, buffer: number }[]} windows
    */
   (_event, windows) => {
-    for (const { id, buffer } of windows) {
-      gpuShowing.set(id, buffer);
-      gpuDraw(id);
-    }
+    gpuPresent(windows);
     gpuPresented?.();
   },
 );
+
+/**
+ * Show each window's new buffer.
+ * @param {unknown} windows
+ */
+function gpuPresent(windows) {
+  if (!Array.isArray(windows)) return;
+  for (const { id, buffer } of windows) {
+    if (typeof id !== 'number' || typeof buffer !== 'number') continue;
+    gpuShowing.set(id, buffer);
+    gpuDraw(id);
+  }
+}
 
 expose('nativeDisplay', {
   /** Request a port; it arrives as a 'din:native-display-port' message. */
@@ -858,7 +868,14 @@ expose('nativeDisplay', {
   },
 
   /**
-   * Called once per present batch, after drawing: the page acks it to the
+   * A present that came to the page on the compositor's frame stream,
+   * straight rather than relayed by the main process: draw it now.
+   * @param {unknown} windows
+   */
+  present: (windows) => gpuPresent(windows),
+
+  /**
+   * Called once per present batch relayed by the main process, after drawing: the page acks it to the
    * compositor, which is what paces the apps.
    * @param {() => void} callback
    */

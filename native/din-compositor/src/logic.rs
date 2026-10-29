@@ -318,7 +318,7 @@ impl State {
         let mut idle = Vec::new();
         let mut waiting = Vec::new();
         let mut pixels = 0usize;
-        let State { toplevels, popups, gpu, buffers, .. } = self;
+        let State { toplevels, popups, gpu, buffers, frames, .. } = self;
         let (Some(gpu), Some(buffers)) = (gpu.as_mut(), buffers.as_mut()) else { return };
         let windows = toplevels
             .iter_mut()
@@ -344,7 +344,14 @@ impl State {
             }
         }
         if !presents.is_empty() {
-            buffers.send(&json!({ "type": "present", "windows": presents }), None);
+            // On the stream the present reaches the renderer directly; the
+            // buffer socket would relay it through Din's main process.
+            let present = json!({ "type": "present", "windows": presents });
+            if frames.live() {
+                frames.send_json(&present);
+            } else {
+                buffers.send(&present, None);
+            }
             self.in_flight += 1;
             if let (Some(stats), Some(started)) = (self.stats.as_mut(), started) {
                 stats.record(pixels * 4, started.elapsed());
@@ -368,7 +375,7 @@ impl State {
     }
 
     /// The shell put a batch on screen: apps that drew into it may draw again.
-    fn ack(&mut self) {
+    pub fn ack(&mut self) {
         self.in_flight = self.in_flight.saturating_sub(1);
         for surface in std::mem::take(&mut self.awaiting_frame) {
             if surface.is_alive() {
@@ -390,6 +397,19 @@ impl State {
         }
         // A fresh page holds no imported buffers.
         self.release_all_targets();
+    }
+
+    /// A renderer connected to the frame stream. On the GPU it only carries
+    /// presents, and the buffers the renderer has stay valid (a reload resets
+    /// them separately): whatever was in flight on the old stream won't be
+    /// acked.
+    pub fn frames_connected(&mut self) {
+        if self.gpu.is_some() {
+            self.in_flight = 0;
+            self.ack();
+        } else {
+            self.stream_connected();
+        }
     }
 
     /// A renderer connected to the frame stream: it has no pixels yet, so

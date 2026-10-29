@@ -49,8 +49,8 @@ fn main() {
     let screen = (env_size("DIN_SCREEN_WIDTH", 1920), env_size("DIN_SCREEN_HEIGHT", 1080)).into();
 
     let (clipboard_tx, clipboard_rx) = channel::channel::<(clipboard::Contents, bool)>();
-    let (connected_tx, connected_rx) = channel::channel::<()>();
-    let frames = frames::FrameServer::start(connected_tx).expect("frame stream");
+    let (stream_tx, stream_rx) = channel::channel::<frames::StreamEvent>();
+    let frames = frames::FrameServer::start(stream_tx).expect("frame stream");
     let frames_url = frames.url.clone();
     let gpu = gpu::Gpu::open();
     let buffers = gpu.as_ref().and_then(|_| gpu::BufferChannel::bind().ok());
@@ -72,10 +72,10 @@ fn main() {
     }
 
     handle
-        .insert_source(connected_rx, |event, _, state| {
-            if let channel::Event::Msg(()) = event {
-                state.stream_connected();
-            }
+        .insert_source(stream_rx, |event, _, state| match event {
+            channel::Event::Msg(frames::StreamEvent::Connected) => state.frames_connected(),
+            channel::Event::Msg(frames::StreamEvent::Ack) => state.ack(),
+            channel::Event::Closed => {}
         })
         .expect("frame stream source");
 
@@ -139,8 +139,9 @@ fn main() {
         "socket": socket_name,
         // DISPLAY for X11 apps, when Xwayland runs.
         "xwayland": xdisplay.map(|n| format!(":{n}")),
-        // One path or the other: buffers with a GPU, the stream without.
-        "frames": if buffers_path.is_some() { None } else { Some(frames_url) },
+        // Pixels go one way or the other (buffers with a GPU, the stream
+        // without); presents and acks always travel on the stream.
+        "frames": frames_url,
         "buffers": buffers_path,
     }));
     state.wire.flush();

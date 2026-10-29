@@ -130,7 +130,9 @@ interface NativeDisplayBridge {
   /** Draw a GPU-rendered window into this canvas (electron/native-gpu.mts). */
   attachCanvas(id: number, canvas: HTMLCanvasElement): void;
   detachCanvas(id: number): void;
-  /** Called once per GPU present batch, after drawing. */
+  /** Draw a GPU present that arrived on the frame stream. */
+  present?(windows: unknown): void;
+  /** Called once per GPU present batch relayed by the main process, after drawing. */
   onPresented(callback: () => void): void;
 }
 
@@ -224,7 +226,12 @@ function send(message: unknown): void {
  * any display refreshes; tied to rAF, apps run at the real refresh rate.
  */
 function ackOnNextFrame(source: string | undefined): void {
-  requestAnimationFrame(() => send({ type: 'ack', source }));
+  requestAnimationFrame(() => {
+    // Straight back to the compositor when its stream is up, rather than
+    // through the display worker.
+    if (source === 'wayland' && frameStream?.readyState === WebSocket.OPEN) frameStream.send('ack');
+    else send({ type: 'ack', source });
+  });
 }
 
 function createCanvas(width: number, height: number): HTMLCanvasElement {
@@ -420,16 +427,32 @@ let frameStream: WebSocket | null = null;
  * full-window repaint at ~130 MB/s; a WebSocket delivers each batch as one
  * ArrayBuffer. The URL is localhost-only and carries a per-session token.
  *
- * Each message is a batch: u32 count, then per patch u32 id, i32 x, i32 y,
- * u32 width, u32 height (little-endian) and the RGBA bytes. Batches are
- * acked on the control channel, which is what paces the apps.
+ * Each binary message is a batch: u32 count, then per patch u32 id, i32 x,
+ * i32 y, u32 width, u32 height (little-endian) and the RGBA bytes. On the
+ * GPU path, where the pixels are shared buffers, the stream carries the
+ * presents instead, as JSON text: they'd otherwise wait their turn on Din's
+ * main process. Either way each batch is acked back on the stream, which is
+ * what paces the apps.
  */
 function connectFrameStream(url: string): void {
   if (!/^ws:\/\/127\.0\.0\.1:\d+\/[0-9a-f]+$/.test(url)) return;
   frameStream?.close();
   const ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
-  ws.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+  ws.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
+    if (typeof event.data === 'string') {
+      let message: { type?: string; windows?: unknown };
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (message.type !== 'present') return;
+      window.dinos?.nativeDisplay?.present?.(message.windows);
+      if (import.meta.env.VITE_PROFILE === '1') noteNativeFrame();
+      ackOnNextFrame('wayland');
+      return;
+    }
     const buffer = event.data;
     const view = new DataView(buffer);
     const count = view.getUint32(0, true);

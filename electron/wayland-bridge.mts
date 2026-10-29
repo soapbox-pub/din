@@ -15,8 +15,11 @@
 // compositor streams them straight to the renderer over a token-guarded
 // localhost WebSocket (native/din-compositor/src/frames.rs), because Node in
 // the frame path - reassembling pipe chunks, then a MessagePort deep-copying
-// the result - capped a full-window repaint at ~130 MB/s. What remains here
-// is control: announcements, input, geometry, focus, clipboard, cursors.
+// the result - capped a full-window repaint at ~130 MB/s. That WebSocket
+// runs on the GPU path too, carrying the presents ("window W is in buffer
+// B") and the renderer's acks, so the frame loop skips both this worker and
+// the main process. What remains here is control: announcements, input,
+// geometry, focus, clipboard, cursors.
 //
 // Wire format (see native/din-compositor/src/wire.rs): each record is a u32
 // little-endian length, a kind byte, and a payload. JSON both ways, plus
@@ -52,9 +55,8 @@ export class WaylandBridge {
 
   /**
    * Start the compositor; resolves with the bridge, its socket name (for
-   * WAYLAND_DISPLAY), and where its pixels go - the buffer socket for Din's
-   * main process when it renders on the GPU, else the renderer's frame-stream
-   * URL - and Xwayland's DISPLAY when it runs, or null if it can't run. `gpu: false` keeps it on the CPU path
+   * WAYLAND_DISPLAY), the renderer's frame-stream URL, the buffer socket for
+   * Din's main process when it renders on the GPU, and Xwayland's DISPLAY when it runs, or null if it can't run. `gpu: false` keeps it on the CPU path
    * (Din's main process can't receive GPU buffers without native/din-fd).
    */
   static start(
