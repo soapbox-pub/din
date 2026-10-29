@@ -1,10 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useDin } from '@/sdk/react';
-import { installSkin, OPEN_EXTENSIONS, openPaths, SKIN_EXTENSIONS } from './actions';
+import { installSkin, OPEN_EXTENSIONS, openHandles, SKIN_EXTENSIONS } from './actions';
 import { makeTrack, player } from './engine';
 import { library } from './library';
 import { askText } from './din/askText';
-import { pickPaths } from './host';
+import { pickFiles, pickPaths } from './host';
 import { useSavePlaylist } from './din/useSavePlaylist';
 
 /** File and window commands shared by every skin's menus and buttons. */
@@ -15,7 +15,7 @@ export function useCommands() {
 
   const openFiles = useCallback(
     async (how: 'play' | 'enqueue' = 'play') => {
-      const paths = await pickPaths({
+      const files = await pickFiles({
         title: how === 'play' ? 'Open' : 'Add to Now Playing',
         multiple: true,
         startIn: 'music',
@@ -24,17 +24,17 @@ export function useCommands() {
           { description: 'Skins', extensions: SKIN_EXTENSIONS },
         ],
       });
-      if (paths.length === 0) return;
-      setMessage(await openPaths(paths, how));
+      if (files.length === 0) return;
+      setMessage(await openHandles(files, how));
     },
     [],
   );
 
   const openFolder = useCallback(
     async (how: 'play' | 'enqueue' = 'enqueue') => {
-      const paths = await pickPaths({ title: 'Add Folder', directory: true });
-      if (paths.length === 0) return;
-      setMessage(await openPaths(paths, how));
+      const files = await pickFiles({ title: 'Add Folder', directory: true });
+      if (files.length === 0) return;
+      setMessage(await openHandles(files, how));
     },
     [],
   );

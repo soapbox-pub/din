@@ -4,12 +4,12 @@ import {
   DropdownMenuShortcut, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useWindowState } from '@/sdk/react';
-import { cleanFsError, getFsBridge } from '@/lib/fs';
+import { cleanFsError } from '@/lib/fs';
 import { displayTitle, formatTime, player, usePlaybackTime, usePlayer } from '../engine';
 import { EQ_PRESETS, parseEqf, writeEqf } from '../eq';
 import { setPrefs, setWinampPrefs, usePrefs } from '../prefs';
 import type { Commands } from '../useCommands';
-import { pickPaths, pickSavePath } from '../host';
+import { pickFiles, pickSave } from '../host';
 import { regionClip, type WinampSkin } from './skin';
 import { SkinText, Sprite, SpriteButton, WinampVis } from './parts';
 import { SkinContext, spriteStyle, useSkin, useSliderDrag, useWindowDrag } from './hooks';
@@ -391,11 +391,10 @@ function EqPresetsMenu({ children }: { children: ReactNode }) {
         </DropdownMenuSub>
         <DropdownMenuItem
           onSelect={async () => {
-            const [path] = await pickPaths({ title: 'Load EQ Preset', types: [{ description: 'Equalizer presets', extensions: ['.eqf', '.q1'] }] });
-            const fs = getFsBridge();
-            if (!path || !fs) return;
+            const [file] = await pickFiles({ title: 'Load EQ Preset', types: [{ description: 'Equalizer presets', extensions: ['.eqf', '.q1'] }] });
+            if (!file) return;
             try {
-              const presets = parseEqf((await fs.readFile(path)).data);
+              const presets = parseEqf(new Uint8Array(await (await file.getFile()).arrayBuffer()));
               if (presets[0]) player.applyPreset(presets[0]);
             } catch (e) {
               setError(cleanFsError(e));
@@ -406,10 +405,9 @@ function EqPresetsMenu({ children }: { children: ReactNode }) {
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={async () => {
-            const path = await pickSavePath({ title: 'Save EQ Preset', suggestedName: 'Preset.eqf', types: [{ description: 'Winamp EQ preset', extensions: ['.eqf'] }] });
-            const fs = getFsBridge();
-            if (!path || !fs) return;
-            await fs.writeFile(path, writeEqf([{ name: path.slice(path.lastIndexOf('/') + 1, -4), preamp, bands }]));
+            const target = await pickSave({ title: 'Save EQ Preset', suggestedName: 'Preset.eqf', types: [{ description: 'Winamp EQ preset', extensions: ['.eqf'] }] });
+            if (!target) return;
+            await target.write(writeEqf([{ name: target.name.replace(/\.eqf$/i, ''), preamp, bands }]));
           }}
         >
           Save to EQF File…

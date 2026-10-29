@@ -1,8 +1,10 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
-import { getFsBridge, cleanFsError } from '@/lib/fs';
+import { cleanFsError } from '@/lib/fs';
 import { DRAG_MIME, type FrameMode, type LaunchContext, type Rect } from '@/sdk';
 import { useCurrentDrag, useDin, useWindowState, useWindowTitle } from '@/sdk/react';
-import { openPaths } from './media/actions';
+import { openHandles } from './media/actions';
+import { readLocal } from './media/grants';
+import { keepGrants } from './media/keep';
 import { connectMediaSession, player, usePlayer } from './media/engine';
 import { getPrefs, setPrefs, setWinampPrefs, usePrefs, type SkinChoice } from './media/prefs';
 import { useCommands, type Commands } from './media/useCommands';
@@ -46,7 +48,7 @@ function useLoadedSkin(choice: SkinChoice, onError: (message: string) => void): 
       try {
         const bytes = !choice.path ? null
           : isBuiltinSkin(choice.path) ? await builtinSkinBytes(choice.path)
-            : (await getFsBridge()!.readFile(choice.path, 64 * 1024 * 1024)).data;
+            : await readLocal(choice.path, 64 * 1024 * 1024);
         if (choice.kind === 'winamp') {
           const made = await loadWinampSkin(bytes, choice.path ? choice.path.slice(choice.path.lastIndexOf('/') + 1) : 'Din Classic');
           if (live) setLoaded({ key, skin: { kind: 'winamp', skin: made } });
@@ -210,9 +212,8 @@ function useLaunches(setMessage: (message: string) => void) {
   const din = useDin();
   useEffect(() => {
     const take = ({ params, files, shortcut }: LaunchContext) => {
-      const paths = files.flatMap((f) => (f.path ? [f.path] : []));
-      if (paths.length > 0) {
-        void openPaths(paths, params.how === 'enqueue' ? 'enqueue' : 'play').then((message) => message && setMessage(message));
+      if (files.length > 0) {
+        void openHandles(files, params.how === 'enqueue' ? 'enqueue' : 'play').then((message) => message && setMessage(message));
       }
       // A jump-list shortcut from the Dock or the apps menu.
       const show = shortcut ?? (typeof params.show === 'string' ? params.show : null);
@@ -231,8 +232,9 @@ function useLaunches(setMessage: (message: string) => void) {
  * Winamp (.wsz) and Windows Media Player (.wmz) skins.
  *
  * Opened with files (songs, videos, playlists, folders or skin files) and
- * `how: 'play' | 'enqueue'`. It has `fs`: the library is the Music and
- * Videos folders, playlists name songs by path, skins live in a folder.
+ * `how: 'play' | 'enqueue'`. It reaches its own folders by path (Music,
+ * Videos, its skins and library index) and the folders of files it's
+ * handed (`file-folders`): playlists name songs by path.
  */
 export function MediaPlayer() {
   const din = useDin();
@@ -252,6 +254,7 @@ export function MediaPlayer() {
   useLaunches(commands.setMessage);
 
   useEffect(() => connectMediaSession(din), [din]);
+  useEffect(() => keepGrants(), []);
 
   useEffect(() => {
     rootRef.current?.focus({ preventScroll: true });
@@ -298,8 +301,7 @@ export function MediaPlayer() {
         e.preventDefault();
         void din.drag.accept(e.nativeEvent, 'copy').then((result) => {
           if (result?.kind !== 'files') return;
-          const dropped = result.files.flatMap((f) => (f.path ? [f.path] : []));
-          return openPaths(dropped, player.getState().queue.length === 0 ? 'play' : 'enqueue').then((m) => m && commands.setMessage(m));
+          return openHandles(result.files, player.getState().queue.length === 0 ? 'play' : 'enqueue').then((m) => m && commands.setMessage(m));
         });
       }}
       className="relative size-full outline-none"

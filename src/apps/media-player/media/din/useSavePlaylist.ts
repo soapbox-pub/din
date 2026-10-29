@@ -1,10 +1,12 @@
 import { useCallback } from 'react';
 import { getFsBridge, joinPath } from '@/lib/fs';
 import type { FileTypeFilter } from '@/sdk';
-import { pickSavePath } from '../host';
-import { savePlaylist } from '../actions';
+import { pickSave, startFolder } from '../host';
+import { playlistText } from '../actions';
 import type { Track } from '../engine';
+import { grantsReady, homeDir } from '../grants';
 import { library } from '../library';
+import { rememberPlaylist } from '../keep';
 
 const SAVE_TYPES: FileTypeFilter[] = [
   { description: 'M3U Playlist (UTF-8)', extensions: ['.m3u8'] },
@@ -18,16 +20,21 @@ const SAVE_TYPES: FileTypeFilter[] = [
 export function useSavePlaylist(): (tracks: Track[]) => Promise<string | null> {
   return useCallback(
     async (tracks: Track[]) => {
-      const fs = getFsBridge();
-      if (!fs) return null;
-      const dir = joinPath(await fs.homedir(), 'Music/Playlists');
-      await fs.mkdir(dir).catch(() => {});
-      const startIn = await window.din?.files.fromPath(dir).catch(() => undefined);
-      const path = await pickSavePath({ title: 'Save Playlist', startIn: startIn ?? 'music', suggestedName: 'Playlist.m3u8', types: SAVE_TYPES });
-      if (!path) return null;
-      await savePlaylist(path, tracks);
+      await grantsReady();
+      const home = homeDir();
+      const dir = home ? joinPath(home, 'Music/Playlists') : null;
+      if (dir) await getFsBridge()?.mkdir(dir).catch(() => {});
+      const target = await pickSave({
+        title: 'Save Playlist',
+        startIn: dir ? await startFolder(dir, 'music') : 'music',
+        suggestedName: 'Playlist.m3u8',
+        types: SAVE_TYPES,
+      });
+      if (!target) return null;
+      await target.write(playlistText(target.path, tracks));
+      rememberPlaylist(target.path, tracks.map((t) => t.location));
       void library.scan();
-      return path;
+      return target.path;
     },
     [],
   );

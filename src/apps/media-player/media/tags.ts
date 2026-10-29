@@ -1,4 +1,4 @@
-import { fileUrl } from '@/lib/fs';
+import { localUrl } from './grants';
 
 /**
  * What a song file says about itself: ID3 (v1 and v2.2-2.4) in MP3s, Vorbis
@@ -40,7 +40,7 @@ export interface ByteSource {
 
 /** A local file, read through din-file: with Range requests. */
 export async function fileSource(path: string): Promise<ByteSource> {
-  const url = await fileUrl(path);
+  const url = await localUrl(path);
   const head = await fetch(url, { headers: { Range: 'bytes=0-0' } });
   const total = /\/(\d+)$/.exec(head.headers.get('content-range') ?? '');
   const size = total ? Number(total[1]) : Number(head.headers.get('content-length') ?? 0);

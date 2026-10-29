@@ -46,8 +46,14 @@
   ],
   "din": {
     "permissions": [
-      "fs",
+      "file-folders",
       "media-session"
+    ],
+    "folders": [
+      "~/Music",
+      "~/Videos",
+      "~/.local/share/din/skins",
+      "~/.local/share/din/media-library"
     ],
     "window": {
       "size": {

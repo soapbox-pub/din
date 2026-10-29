@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getFsBridge, cleanFsError } from '@/lib/fs';
-import { pickPaths, pickSavePath } from '../host';
+import { cleanFsError } from '@/lib/fs';
+import { pickFiles, pickSave } from '../host';
 import { player, usePlayer } from '../engine';
 import { EQ_BANDS, EQ_PRESETS, parseEqf, writeEqf, type EqPreset } from '../eq';
 import { setPrefs } from '../prefs';
@@ -39,12 +39,10 @@ function Equalizer() {
   };
 
   const importEqf = async () => {
-    const [path] = await pickPaths({ title: 'Load Winamp Presets', types: [{ description: 'Equalizer presets', extensions: ['.eqf', '.q1'] }] });
-    const fs = getFsBridge();
-    if (!path || !fs) return;
+    const [file] = await pickFiles({ title: 'Load Winamp Presets', types: [{ description: 'Equalizer presets', extensions: ['.eqf', '.q1'] }] });
+    if (!file) return;
     try {
-      const { data } = await fs.readFile(path);
-      const presets = parseEqf(data);
+      const presets = parseEqf(new Uint8Array(await (await file.getFile()).arrayBuffer()));
       saveCustom([...custom.filter((c) => !presets.some((p) => p.name === c.name)), ...presets]);
       if (presets[0]) player.applyPreset(presets[0]);
       setMessage(`Loaded ${presets.length} preset${presets.length === 1 ? '' : 's'}.`);
@@ -54,11 +52,10 @@ function Equalizer() {
   };
 
   const exportEqf = async () => {
-    const path = await pickSavePath({ title: 'Save Preset', suggestedName: `${presetName ?? 'Custom'}.eqf`, types: [{ description: 'Winamp EQ preset', extensions: ['.eqf'] }] });
-    const fs = getFsBridge();
-    if (!path || !fs) return;
+    const target = await pickSave({ title: 'Save Preset', suggestedName: `${presetName ?? 'Custom'}.eqf`, types: [{ description: 'Winamp EQ preset', extensions: ['.eqf'] }] });
+    if (!target) return;
     try {
-      await fs.writeFile(path, writeEqf([{ name: presetName ?? 'Custom', preamp, bands }]));
+      await target.write(writeEqf([{ name: presetName ?? 'Custom', preamp, bands }]));
       setMessage('Saved.');
     } catch (error) {
       setMessage(cleanFsError(error));

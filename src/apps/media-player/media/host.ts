@@ -1,10 +1,11 @@
-import type { Din, OpenFileOptions, SaveFileOptions } from '@/sdk';
+import type { Din, DinFileHandle, OpenFileOptions, SaveFileOptions } from '@/sdk';
 import { parentPath } from '@/lib/fs';
+import { adopt, handleFor } from './grants';
 
 /**
- * The Media Player's few calls to the desktop that aren't the player's own,
- * by path: it has `fs`, since its library is the Music and Videos folders,
- * its playlists name songs by path and its skins live in a folder of Din's.
+ * The Media Player's few calls to the desktop that aren't the player's own.
+ * It reaches its own folders by path (Music, Videos, its skins and library
+ * index), and everything else through what the user picks (`grants.ts`).
  */
 
 function din(): Din {
@@ -12,20 +13,31 @@ function din(): Din {
   return window.din;
 }
 
-/** Din's file picker; the paths chosen, or none if cancelled. */
-export async function pickPaths(options: OpenFileOptions): Promise<string[]> {
+/** Din's file picker; what was chosen (and is now reachable by path), or nothing if cancelled. */
+export async function pickFiles(options: OpenFileOptions): Promise<DinFileHandle[]> {
   const handles = await din().files.open({ writable: false, ...options });
-  return handles.flatMap((h) => (h.path ? [h.path] : []));
+  await adopt(handles);
+  return handles;
 }
 
-/** Din's save dialog; the path chosen, with the chosen type's extension, or null. */
-export async function pickSavePath(options: SaveFileOptions): Promise<string | null> {
-  return (await din().files.save(options))?.path ?? null;
+/** Din's file picker; the paths chosen, or none if cancelled. */
+export async function pickPaths(options: OpenFileOptions): Promise<string[]> {
+  return (await pickFiles(options)).map((h) => h.path);
+}
+
+/** Din's save dialog: a handle to write, with the chosen type's extension, or null. */
+export function pickSave(options: SaveFileOptions): Promise<DinFileHandle | null> {
+  return din().files.save(options);
+}
+
+/** A folder of home's as a picker's start: a handle when the player reaches it, else the named folder. */
+export async function startFolder(path: string, named: NonNullable<OpenFileOptions['startIn']>): Promise<NonNullable<OpenFileOptions['startIn']>> {
+  return handleFor(path) ?? (await din().files.fromPath(path).catch(() => null)) ?? named;
 }
 
 /** Open Files at a folder, with an item in it selected. */
 export async function showInFiles(dir: string, select?: string): Promise<void> {
-  const handle = await din().files.fromPath(dir);
+  const handle = handleFor(dir) ?? (await din().files.fromPath(dir));
   await din().app.open('file-browser', select ? { select } : {}, [handle]);
 }
 

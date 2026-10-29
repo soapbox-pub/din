@@ -1,6 +1,8 @@
 import { extensionOf } from '@/lib/fileTypes';
 import { cleanFsError, getFsBridge, joinPath, sortEntries } from '@/lib/fs';
+import type { DinFileHandle } from '@/sdk';
 import { makeTrack, player, type Track } from './engine';
+import { adopt, grantsReady, handleFor, homeDir, readLocal } from './grants';
 import { isPlayableMedia } from './metadata';
 import { isPlaylistFile, parsePlaylist, writePlaylist } from './playlists';
 import { setPrefs } from './prefs';
@@ -14,9 +16,9 @@ export function skinKindOf(name: string): 'winamp' | 'wmp' | null {
 }
 
 export async function skinsDir(): Promise<string | null> {
-  const fs = getFsBridge();
-  if (!fs) return null;
-  return joinPath(await fs.homedir(), '.local/share/din/skins');
+  await grantsReady();
+  const home = homeDir();
+  return home ? joinPath(home, '.local/share/din/skins') : null;
 }
 
 /**
@@ -32,14 +34,9 @@ export async function installSkin(path: string, apply = true): Promise<string> {
   let target = path;
   if (!path.startsWith(`${dir}/`)) {
     await fs.mkdir(dir);
-    const name = path.slice(path.lastIndexOf('/') + 1);
     // The same skin again replaces the old copy rather than piling up.
-    try {
-      await fs.rm(joinPath(dir, name));
-    } catch {
-      // Not there.
-    }
-    target = await fs.copyInto(path, dir);
+    target = joinPath(dir, path.slice(path.lastIndexOf('/') + 1));
+    await fs.writeFile(target, await readLocal(path, 64 * 1024 * 1024));
   }
   if (apply) setPrefs({ skin: { kind, path: target } });
   return target;
@@ -66,9 +63,7 @@ async function mediaInFolder(dir: string, depth = 0): Promise<string[]> {
 
 /** The songs in a playlist file. */
 export async function readPlaylistFile(path: string): Promise<Track[]> {
-  const fs = getFsBridge();
-  if (!fs) return [];
-  const { data } = await fs.readFile(path, 8 * 1024 * 1024);
+  const data = await readLocal(path, 8 * 1024 * 1024);
   let text = new TextDecoder('utf-8').decode(data);
   // Old M3U files are Windows-1252, not UTF-8.
   if (text.includes('\ufffd') && extensionOf(path) !== 'm3u8') text = new TextDecoder('windows-1252').decode(data);
@@ -93,8 +88,8 @@ export async function tracksFor(paths: string[]): Promise<Track[]> {
       continue;
     }
     try {
-      const stat = await fs?.stat(path);
-      if (stat?.kind === 'directory') tracks.push(...(await mediaInFolder(path)).map((p) => makeTrack(p)));
+      const kind = handleFor(path)?.kind ?? (await fs?.stat(path))?.kind;
+      if (kind === 'directory') tracks.push(...(await mediaInFolder(path)).map((p) => makeTrack(p)));
     } catch {
       // Gone.
     }
@@ -122,17 +117,20 @@ export async function openPaths(paths: string[], how: 'play' | 'enqueue' | 'next
   }
 }
 
-/** Save the Now Playing list (or any tracks) as a playlist file. */
-export async function savePlaylist(path: string, tracks: Track[]): Promise<void> {
-  const fs = getFsBridge();
-  if (!fs) throw new Error('Saving needs the Electron shell');
+/** Open files the user handed over (picked, dropped, launched with). */
+export async function openHandles(handles: readonly DinFileHandle[], how: 'play' | 'enqueue' | 'next' = 'play'): Promise<string | null> {
+  if (handles.length === 0) return null;
+  return openPaths(await adopt(handles), how);
+}
+
+/** A playlist file's text for these songs. */
+export function playlistText(path: string, tracks: Track[]): string {
   const name = path.slice(path.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '');
-  const text = writePlaylist(
+  return writePlaylist(
     path,
     name,
     tracks.map((t) => ({ location: t.location, title: t.title, artist: t.artist || undefined, duration: t.duration ?? undefined })),
   );
-  await fs.writeFile(path, text);
 }
 
 export const OPEN_EXTENSIONS = [

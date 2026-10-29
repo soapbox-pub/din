@@ -1,5 +1,6 @@
 import { extensionOf, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 import { fileUrl, getFsBridge, joinPath, parentPath } from '@/lib/fs';
+import { grantsReady, localUrl } from './grants';
 import { fileSource, readTags, type TrackTags } from './tags';
 
 /**
@@ -33,7 +34,7 @@ export function baseTitle(location: string): string {
 
 /** Where to load a song from: a stream as it is, a local file through the URL Din gives for it. */
 export function mediaUrl(location: string): Promise<string> {
-  return isUrl(location) ? Promise.resolve(location) : fileUrl(location);
+  return isUrl(location) ? Promise.resolve(location) : localUrl(location);
 }
 
 export function isVideoLocation(location: string): boolean {
@@ -45,8 +46,9 @@ export function trackInfo(location: string): Promise<TrackInfo> {
   let cached = infoCache.get(location);
   if (!cached) {
     cached = (async (): Promise<TrackInfo> => {
-      if (isUrl(location) || !getFsBridge()) return { hasPicture: false };
+      if (isUrl(location)) return { hasPicture: false };
       try {
+        await grantsReady();
         const { picture, ...rest } = await readTags(await fileSource(location));
         pictureCache.set(location, picture ?? null);
         return { ...rest, hasPicture: !!picture };
@@ -75,6 +77,7 @@ function folderCover(dir: string): Promise<string | null> {
   let cached = folderCoverCache.get(dir);
   if (!cached) {
     cached = (async () => {
+      await grantsReady().catch(() => {});
       const fs = getFsBridge();
       if (!fs) return null;
       try {

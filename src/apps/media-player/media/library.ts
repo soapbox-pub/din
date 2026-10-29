@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { getFsBridge, joinPath, parentPath } from '@/lib/fs';
+import { grantsReady, homeDir, keepFor } from './grants';
 import { isPlayableMedia, isVideoLocation, trackInfo, baseTitle } from './metadata';
 import { isPlaylistFile } from './playlists';
 import { player } from './engine';
@@ -8,7 +9,9 @@ import { player } from './engine';
  * The Media Library: every song and video in the watched folders (Music and
  * Videos by default, as Windows Media Player watches My Music), with its
  * tags, star rating and play count. The index lives in
- * ~/.local/share/din/media-library.json so a scan only reads what changed.
+ * ~/.local/share/din/media-library/ (one of the player's own folders) so a
+ * scan only reads what changed. Folders added from elsewhere are kept
+ * reachable with persisted grants (`grants.ts`).
  */
 
 export interface LibraryItem {
@@ -57,7 +60,6 @@ const MAX_FILES = 50_000;
 class Library {
   private state: LibraryState = { folders: [], items: [], playlists: [], scanning: false, scanned: 0, loaded: false };
   private listeners = new Set<() => void>();
-  private home: string | null = null;
   private saveTimer: number | null = null;
   private loading: Promise<void> | null = null;
   private lastCounted: string | null = null;
@@ -87,33 +89,39 @@ class Library {
   }
 
   private async indexPath(): Promise<string | null> {
-    const fs = getFsBridge();
-    if (!fs) return null;
-    this.home ??= await fs.homedir();
-    return joinPath(this.home, '.local/share/din/media-library.json');
+    await grantsReady();
+    const home = homeDir();
+    return home ? joinPath(home, '.local/share/din/media-library/library.json') : null;
   }
 
   /** Load the saved index, then bring it up to date in the background. */
   load(): Promise<void> {
     this.loading ??= (async () => {
+      const path = await this.indexPath().catch(() => null);
       const fs = getFsBridge();
-      const path = await this.indexPath();
-      if (!fs || !path) {
+      const home = homeDir();
+      if (!fs || !path || !home) {
         this.set({ loaded: true });
         return;
       }
-      let folders = [joinPath(this.home!, 'Music'), joinPath(this.home!, 'Videos')];
-      try {
-        const { data } = await fs.readFile(path, 64 * 1024 * 1024);
-        const saved = JSON.parse(new TextDecoder().decode(data)) as SavedLibrary;
-        if (saved.version === 1 && Array.isArray(saved.items)) {
-          folders = Array.isArray(saved.folders) ? saved.folders : folders;
-          this.set({ items: saved.items, folders });
+      let folders = [joinPath(home, 'Music'), joinPath(home, 'Videos')];
+      // Where the index was before it had a folder of its own (reachable only
+      // if the desktop grants it).
+      for (const at of [path, joinPath(home, '.local/share/din/media-library.json')]) {
+        try {
+          const { data } = await fs.readFile(at, 64 * 1024 * 1024);
+          const saved = JSON.parse(new TextDecoder().decode(data)) as SavedLibrary;
+          if (saved.version === 1 && Array.isArray(saved.items)) {
+            folders = Array.isArray(saved.folders) ? saved.folders : folders;
+            this.set({ items: saved.items, folders }, at !== path);
+            break;
+          }
+        } catch {
+          // No index there.
         }
-      } catch {
-        // No index yet.
       }
       this.set({ folders, loaded: true });
+      void keepFor('library', folders);
       void this.scan();
     })();
     return this.loading;
@@ -142,17 +150,23 @@ class Library {
 
   /** Walk the watched folders, reading tags of new and changed files. */
   async scan(): Promise<void> {
+    // Not loaded yet: loading scans (and a scan now would save an empty index).
+    if (!this.state.loaded) return this.load();
     const fs = getFsBridge();
     if (!fs || this.state.scanning) return;
     this.set({ scanning: true, scanned: 0 });
     const found = new Map<string, { mtimeMs: number; size: number }>();
     const playlists: string[] = [];
+    // A watched folder the player can't reach now (a drive not mounted, a
+    // grant gone) keeps its songs, ratings and all, rather than losing them.
+    const unreachable: string[] = [];
     const walk = async (dir: string, depth: number) => {
       if (depth > MAX_DEPTH || found.size >= MAX_FILES) return;
       let listing;
       try {
         listing = await fs.readdir(dir);
       } catch {
+        if (depth === 0) unreachable.push(dir);
         return;
       }
       const subdirs: string[] = [];
@@ -175,6 +189,13 @@ class Library {
       const item = known.get(location);
       if (item && item.mtimeMs === stat.mtimeMs && item.size === stat.size) fresh.push(item);
       else stale.push([location, stat]);
+    }
+    const inside = (location: string, folder: string) => location.startsWith(`${folder.replace(/\/+$/, '')}/`);
+    for (const item of this.state.items) {
+      if (!found.has(item.location) && unreachable.some((f) => inside(item.location, f))) fresh.push(item);
+    }
+    for (const p of this.state.playlists) {
+      if (unreachable.some((f) => inside(p, f))) playlists.push(p);
     }
     // Keep what we had while the changed files are read.
     this.set({ items: [...fresh, ...stale.flatMap(([l]) => (known.has(l) ? [known.get(l)!] : []))], playlists: playlists.sort() }, true);
@@ -235,6 +256,7 @@ class Library {
   addFolder(folder: string) {
     if (this.state.folders.includes(folder)) return;
     this.set({ folders: [...this.state.folders, folder] }, true);
+    void keepFor('library', this.state.folders);
     void this.scan();
   }
 
@@ -242,6 +264,7 @@ class Library {
     const folders = this.state.folders.filter((f) => f !== folder);
     const inside = (location: string) => location.startsWith(`${folder.replace(/\/+$/, '')}/`);
     this.set({ folders, items: this.state.items.filter((i) => !inside(i.location)) }, true);
+    void keepFor('library', folders);
   }
 
   /** Forget a file the library lists (Delete from Library). */
@@ -250,12 +273,6 @@ class Library {
     this.set({ items: this.state.items.filter((i) => !drop.has(i.location)) }, true);
   }
 
-  async homedir(): Promise<string | null> {
-    const fs = getFsBridge();
-    if (!fs) return null;
-    this.home ??= await fs.homedir();
-    return this.home;
-  }
 }
 
 export const library = new Library();
