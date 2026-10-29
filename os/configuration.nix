@@ -484,6 +484,38 @@ let
     printf '[Icon Theme]\nInherits=capitaine-cursors\n' > $out/share/icons/default/index.theme
   '';
 
+  # Icon themes for Settings → Appearance → Icons (electron/icon-theme.mts).
+  # "Din" is Din's own look: it holds no icons, so Din keeps its bundled ones
+  # and native apps fall through to Adwaita. Papirus and Papirus Dark come
+  # without Papirus Light and without breeze, which Papirus inherits from for
+  # the few icons it lacks; Adwaita stands in, and that saves about 100 MB.
+  din-icon-themes = pkgs.runCommand "din-icon-themes" { } ''
+    mkdir -p $out/share/icons/Din/scalable/apps
+    cat > $out/share/icons/Din/index.theme <<'THEME'
+    [Icon Theme]
+    Name=Din
+    Comment=Din's own icons
+    Inherits=Adwaita,hicolor
+    Directories=scalable/apps
+
+    [scalable/apps]
+    Size=64
+    MinSize=8
+    MaxSize=512
+    Type=Scalable
+    Context=Applications
+    THEME
+    cp -a ${pkgs.papirus-icon-theme}/share/icons/{Papirus,Papirus-Dark} $out/share/icons/
+    for theme in Papirus Papirus-Dark; do
+      file=$out/share/icons/$theme/index.theme
+      chmod u+w $file
+      # Rewritten in place: cp -a left the directory read-only, so sed -i
+      # couldn't make its temporary file there.
+      text=$(sed 's/^Inherits=.*/Inherits=Adwaita,hicolor/' $file)
+      printf '%s\n' "$text" > $file
+    done
+  '';
+
   # The screen: din-compositor's session mode, Din's own compositor
   # (native/din-compositor/src/session), running Din's launcher. It takes
   # XCURSOR_THEME and XCURSOR_SIZE, which this reads from dconf (the
@@ -1109,8 +1141,9 @@ in
     ++ [ libnotify ]
     # AirPlay from the command line too (`deckmon discover`, `deckmon status`).
     ++ [ din-deckmon ]
-    # Pointer themes: Adwaita (GTK's own default) and the others Settings offers.
-    ++ [ adwaita-icon-theme din-cursor-themes ]
+    # Pointer themes: Adwaita (GTK's own default) and the others Settings
+    # offers; and the icon themes it offers.
+    ++ [ adwaita-icon-theme din-cursor-themes din-icon-themes ]
     # xdg-open, and Din as the handler for the links it opens (see
     # xdg.mime.defaultApplications below).
     ++ [
@@ -1196,12 +1229,14 @@ in
   # which dconf keeps and GTK - and through it Chromium - follows live
   # (electron/cursor.mts). The themes are din-cursor-themes, above.
   # DinOS's default is Capitaine at 40 (which shows its 36px images), set
-  # in the system's dconf database, under whatever the user picks.
+  # in the system's dconf database, under whatever the user picks. The icon
+  # theme is GSettings' too (icon-theme), and Din's own by default.
   programs.dconf.enable = true;
   programs.dconf.profiles.user.databases = [
     {
       settings."org/gnome/desktop/interface" = {
         cursor-theme = "capitaine-cursors";
+        icon-theme = "Din";
         cursor-size = lib.gvariant.mkInt32 40;
       };
     }
