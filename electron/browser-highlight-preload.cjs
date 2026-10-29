@@ -3,8 +3,10 @@
 //
 // Brings Ditto's NIP-84 "Highlight" affordance to arbitrary websites: when the
 // user selects text on any page, a small floating "Highlight" button appears;
-// clicking it publishes a kind 9802 Highlight event referencing the page URL
-// (an `r`-tag source, per NIP-84's website-highlight form).
+// clicking it opens Din's highlight composer, where the user reviews the
+// excerpt, may add a comment, and posts a kind 9802 Highlight event
+// referencing the page URL (an `r`-tag source, per NIP-84's website form).
+// Nothing is published without that confirmation.
 //
 // Unlike Ditto, the highlighted content is a foreign web page, not Din's own
 // rendered Nostr content - so there are no `data-highlight-*` attributes to
@@ -15,16 +17,17 @@
 //
 // Signing uses the "native signer in the environment": the click is proxied
 // over IPC (din-highlight:publish) to the main process, which relays it to the
-// Din shell, where the signed-in account's signer runs (see HighlightBridgeHost
-// and the din-highlight:* handlers in main.mts). No keys, no window.nostr, and
-// no signer surface are ever exposed to the page:
+// Din shell, where the composer and the signed-in account's signer run (see
+// HighlightBridgeHost and the din-highlight:* handlers in main.mts). No keys,
+// no window.nostr, and no signer surface are ever exposed to the page:
 //
 //   - This preload runs in an isolated world; the page's own JavaScript cannot
 //     see `ipcRenderer` or any function here.
 //   - The button lives in a CLOSED shadow root, so page scripts can't find or
 //     restyle it, and only a genuine user gesture (event.isTrusted) on a button
-//     that has visibly been on screen (IntersectionObserver v2) publishes - a
-//     synthetic `.click()` or a click through a covering overlay is ignored.
+//     that has visibly been on screen (IntersectionObserver v2) opens the
+//     composer - a synthetic `.click()` or a click through a covering overlay
+//     is ignored.
 //
 // Stays plain CommonJS (.cjs): sandboxed preloads run through Electron's own
 // loader, which does not support ESM or TypeScript - typed via JSDoc instead.
@@ -157,10 +160,10 @@ const visibilityObserver =
         /** @type {IntersectionObserverInit} */ ({ trackVisibility: true, delay: 100 }),
       )
     : null;
-/** The selection snapshot the button currently offers to publish.
+/** The selection snapshot the button currently offers to highlight.
  * @type {HighlightSelection | null} */
 let current = null;
-let publishing = false;
+let composing = false;
 
 /** Build the button + toast inside a closed shadow root on first use. */
 function ensureUi() {
@@ -234,7 +237,7 @@ function ensureUi() {
   button.addEventListener('mousedown', (event) => {
     event.preventDefault();
     if (event.isTrusted && visibleSince && performance.now() - visibleSince >= MIN_VISIBLE_MS) {
-      publish();
+      compose();
     }
   });
   shadow.appendChild(button);
@@ -292,38 +295,32 @@ function showToast(message, isError) {
   toastTimer = setTimeout(() => toast && toast.classList.remove('show'), 3200);
 }
 
-// --- Publish flow -----------------------------------------------------------
+// --- Compose flow -----------------------------------------------------------
 
-async function publish() {
-  if (publishing || !current) return;
+/** Hand the selection to Din's composer; resolves once it's posted or cancelled. */
+async function compose() {
+  if (composing || !current) return;
   const snapshot = current;
-  publishing = true;
-  if (button) {
-    button.disabled = true;
-    const label = button.querySelector('span');
-    if (label) label.textContent = 'Publishing…';
-  }
+  composing = true;
+  hideButton();
   try {
-    await ipcRenderer.invoke('din-highlight:publish', {
+    const posted = await ipcRenderer.invoke('din-highlight:publish', {
       text: snapshot.text,
       context: snapshot.context,
     });
-    showToast('Highlight published', false);
+    if (!posted) return;
+    showToast('Highlight posted', false);
     window.getSelection()?.removeAllRanges();
     current = null;
-    hideButton();
   } catch (error) {
     const raw = error instanceof Error ? error.message : 'Failed to publish highlight';
     // Electron prefixes invoke errors with the handler location; keep it short.
     const message = raw.replace(/^Error: /, '').split('Error invoking remote method')[0].trim();
     showToast(message || 'Failed to publish highlight', true);
   } finally {
-    publishing = false;
-    if (button) {
-      button.disabled = false;
-      const label = button.querySelector('span');
-      if (label) label.textContent = 'Highlight';
-    }
+    composing = false;
+    // Offer the button again if the selection is still there (cancelled).
+    schedule();
   }
 }
 
@@ -342,7 +339,8 @@ function compute() {
     return;
   }
   current = selection;
-  showButton(selection.rect);
+  if (composing) hideButton();
+  else showButton(selection.rect);
 }
 
 function schedule() {

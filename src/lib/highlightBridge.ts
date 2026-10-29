@@ -5,12 +5,13 @@
  * The ad-hoc Web Browser's tabs get a NIP-84 "Highlight" affordance
  * (electron/browser-highlight-preload.cjs): selecting text on any page shows a
  * floating button whose click is relayed to the main process, forwarded here,
- * to the shell renderer, where the signed-in account's signer publishes a kind
- * 9802 Highlight referencing the page URL. The renderer subscribes with
+ * to the shell renderer, which shows the highlight for the user to review and
+ * comment on before the signed-in account's signer publishes a kind 9802
+ * Highlight referencing the page URL. The renderer subscribes with
  * `onRequest` and answers each request with `respond`.
  *
  * Unlike the Nostr identity bridge (`window.dinos.nostrHost`), this carries no general
- * signing surface: a request is only ever `{ url, text, context }` for a fixed
+ * signing surface: a request is only ever `{ url, title, text, context }` for a fixed
  * highlight kind. In a plain browser (`npm run dev:browser`) the bridge is
  * absent - there are no <webview> tabs to serve - so callers feature-detect via
  * `getHighlightHostBridge()`.
@@ -22,6 +23,8 @@ export interface HighlightBridgeRequest {
   requestId: number;
   /** The tab's cleaned source URL (authoritative; read in main, not the page). */
   url: string;
+  /** The tab's title, for showing where the highlight is from. Page-controlled. */
+  title?: string;
   /** The highlighted excerpt (event `content`). */
   text: string;
   /** Surrounding prose containing the highlight verbatim (NIP-84 `context`). */
@@ -32,7 +35,7 @@ export interface HighlightBridgeRequest {
 export interface HighlightBridgeResponse {
   requestId: number;
   ok: boolean;
-  /** Present when `ok` - the published event id. */
+  /** Present when `ok` - the published event id, or absent if the user cancelled. */
   result?: unknown;
   /** Present when not `ok` - a human-readable failure message. */
   error?: string;

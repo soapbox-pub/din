@@ -2697,20 +2697,21 @@ expose('bunkerHost', {
 // Highlight bridge host (window.dinos.highlightHost), backed by the din-highlight:*
 // handlers in main.mts. A browser tab's NIP-84 highlight click (see
 // browser-highlight-preload.cjs) is relayed here, to the shell renderer, where
-// HighlightBridgeHost builds and publishes a kind 9802 event with the signed-in
-// account's signer. Unlike nostrHost this carries no arbitrary signing surface -
-// only { url, text, context } for a fixed highlight kind.
+// HighlightBridgeHost shows it to the user to review and comment on, then
+// publishes a kind 9802 event with the signed-in account's signer. Unlike
+// nostrHost this carries no arbitrary signing surface - only
+// { url, title, text, context } for a fixed highlight kind.
 expose('highlightHost', {
   /**
    * Subscribe to highlight-publish requests relayed from browser tabs. The
-   * callback receives { requestId, url, text, context }. Returns an
+   * callback receives { requestId, url, title, text, context }. Returns an
    * unsubscribe fn.
-   * @param {(request: { requestId: number, url: string, text: string, context?: string }) => void} callback
+   * @param {(request: { requestId: number, url: string, title?: string, text: string, context?: string }) => void} callback
    */
   onRequest: (callback) => {
     /**
      * @param {Electron.IpcRendererEvent} _event
-     * @param {{ requestId: number, url: string, text: string, context?: string }} request
+     * @param {{ requestId: number, url: string, title?: string, text: string, context?: string }} request
      */
     const listener = (_event, request) => callback(request);
     ipcRenderer.on('din-highlight:request', listener);
@@ -2719,6 +2720,7 @@ expose('highlightHost', {
 
   /**
    * Answer a relayed highlight request: { requestId, ok, result?, error? }.
+   * A cancelled highlight is ok with no result.
    * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string }} response
    */
   respond: (response) => ipcRenderer.send('din-highlight:response', response),

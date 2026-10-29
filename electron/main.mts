@@ -3462,7 +3462,9 @@ const pendingHighlightRequests = new Map<number, {
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 }>();
-const HIGHLIGHT_REQUEST_TIMEOUT_MS = 60_000;
+// The shell asks the user to review the highlight (and maybe write a comment)
+// before it's posted, so this only guards against a shell that never answers.
+const HIGHLIGHT_REQUEST_TIMEOUT_MS = 30 * 60_000;
 
 /** Query params dropped when cleaning a URL for a highlight source (NIP-84). */
 const TRACKING_PARAM = /^(utm_|fbclid$|gclid$|dclid$|msclkid$|mc_|ref$|ref_src$|igshid$|yclid$|_hsenc$|_hsmi$|vero_|oly_|wickedid$)/i;
@@ -3520,10 +3522,11 @@ function registerHighlightBridge(): void {
       const requestId = nextHighlightRequestId++;
       const timer = setTimeout(() => {
         pendingHighlightRequests.delete(requestId);
-        reject(new Error('Publishing timed out'));
+        reject(new Error('The highlight was never posted'));
       }, HIGHLIGHT_REQUEST_TIMEOUT_MS);
       pendingHighlightRequests.set(requestId, { resolve, reject, timer });
-      sendToShell('din-highlight:request', { requestId, url, text, context });
+      const title = event.sender.getTitle().slice(0, 300) || undefined;
+      sendToShell('din-highlight:request', { requestId, url, title, text, context });
     });
   });
 
