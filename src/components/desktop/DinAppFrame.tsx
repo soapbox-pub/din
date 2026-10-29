@@ -14,6 +14,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 import { DataMenuBar, PointMenu } from '@/components/desktop/dinHost/DataMenus';
 import { onThemeChange, themeSnapshot } from '@/components/desktop/dinHost/theme';
 import { sanitizeImageUrl } from '@/components/desktop/dinHost/urls';
@@ -1406,9 +1407,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       )}
       {moving &&
         createPortal(
-          <div
+          // Over every monitor: <body> is only the primary one, and a move
+          // carries the window wherever the pointer goes.
+          <ScreenLayer
             aria-hidden
-            className="fixed inset-0 z-[10000] cursor-grabbing"
+            className="z-[10000] cursor-grabbing"
             onPointerMove={(e) => {
               if (e.buttons === 0) endMove();
               else live.current.chrome.gestureMove(e);
