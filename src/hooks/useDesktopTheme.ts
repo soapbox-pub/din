@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import type { AppConfig } from '@/contexts/AppContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
@@ -28,24 +29,60 @@ export function useDesktopTheme(): DesktopTheme | null {
 
 export type AppearanceMode = 'light' | 'dark' | 'custom';
 
+/** What `snapshot` saves for `restore`. */
+export interface ThemeSnapshot {
+  mode: AppearanceMode;
+  theme: DesktopTheme | null;
+  config: Pick<
+    AppConfig,
+    'theme' | 'customThemeEnabled' | 'syncProfileTheme' | 'localTheme' | 'profileThemeMetadata'
+  >;
+  /** publishCount when it was taken. */
+  published: number;
+  /** Whether an edit was waiting to be published then. */
+  pending: boolean;
+}
+
 /** How long edits settle (a color being dragged) before the profile theme is published. */
 const PUBLISH_DELAY_MS = 1500;
 
+/**
+ * How long a theme tried on (clicking around the App Store's themes) is
+ * held before it's published, unless it's committed or discarded first.
+ */
+const HOLD_DELAY_MS = 30_000;
+
 let publishTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingPublish: (() => Promise<unknown>) | undefined;
+/** How many profile themes have gone out, so a restore can tell whether one has since. */
+let publishCount = 0;
+
+function runPublish() {
+  const publish = pendingPublish;
+  clearTimeout(publishTimer);
+  pendingPublish = undefined;
+  if (!publish) return;
+  publishCount++;
+  publish().catch((error: unknown) => {
+    console.error('Failed to publish profile theme:', error);
+    toast({
+      title: "Couldn't update your profile theme",
+      description: error instanceof Error ? error.message : String(error),
+      variant: 'destructive',
+    });
+  });
+}
 
 /** Publish the latest of a run of edits, once they settle. */
-function schedulePublish(publish: () => Promise<unknown>) {
+function schedulePublish(publish: () => Promise<unknown>, delay = PUBLISH_DELAY_MS) {
   clearTimeout(publishTimer);
-  publishTimer = setTimeout(() => {
-    publish().catch((error: unknown) => {
-      console.error('Failed to publish profile theme:', error);
-      toast({
-        title: "Couldn't update your profile theme",
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-    });
-  }, PUBLISH_DELAY_MS);
+  pendingPublish = publish;
+  publishTimer = setTimeout(runPublish, delay);
+}
+
+function cancelPublish() {
+  clearTimeout(publishTimer);
+  pendingPublish = undefined;
 }
 
 /** The built-in mode in effect, with `system` resolved. */
@@ -71,9 +108,12 @@ export function useDesktopThemeEditor() {
   const mode: AppearanceMode = theme ? 'custom' : resolvedMode(config.theme);
   const pubkey = user?.pubkey;
 
-  /** Wear a theme as the profile theme now, and publish it once edits settle. */
+  /**
+   * Wear a theme as the profile theme now, and publish it once edits
+   * settle, or with `hold` once it's committed or HOLD_DELAY_MS passes.
+   */
   const applyProfile = useCallback(
-    (next: ProfileTheme) => {
+    (next: ProfileTheme, { hold = false }: { hold?: boolean } = {}) => {
       if (!pubkey) return;
       // updatedAt stays put until the event is out, so NostrSync doesn't
       // look the theme up again on every edit.
@@ -104,7 +144,7 @@ export function useDesktopThemeEditor() {
               }
             : current,
         );
-      });
+      }, hold ? HOLD_DELAY_MS : PUBLISH_DELAY_MS);
     },
     [pubkey, updateConfig, publishEvent],
   );
@@ -125,13 +165,15 @@ export function useDesktopThemeEditor() {
   /**
    * Wear a custom theme: the profile theme while syncing, else this
    * computer's. A theme with a local background can't be the profile theme.
+   * `hold` is for trying a theme on: it goes out on `commit`, not as soon
+   * as it settles.
    */
   const apply = useCallback(
-    (next: DesktopTheme) => {
+    (next: DesktopTheme, options?: { hold?: boolean }) => {
       if (syncing) {
         const asProfile = toProfileTheme(next);
         if (!asProfile) throw new Error('A background on this computer can’t go in your profile theme.');
-        applyProfile(asProfile);
+        applyProfile(asProfile, options);
       } else {
         applyLocal(next);
       }
@@ -207,17 +249,43 @@ export function useDesktopThemeEditor() {
 
   /** What's worn now, to put back later with `restore` (Undo). */
   const snapshot = useCallback(
-    (): { mode: AppearanceMode; theme: DesktopTheme | null } => ({ mode, theme }),
-    [mode, theme],
+    (): ThemeSnapshot => ({
+      mode,
+      theme,
+      config: {
+        theme: config.theme,
+        customThemeEnabled: config.customThemeEnabled,
+        syncProfileTheme: config.syncProfileTheme,
+        localTheme: config.localTheme,
+        profileThemeMetadata: config.profileThemeMetadata,
+      },
+      published: publishCount,
+      pending: !!pendingPublish,
+    }),
+    [mode, theme, config],
   );
 
+  /**
+   * Put back a snapshot. While nothing has been published since it was
+   * taken, what's waiting to go out is dropped and the settings put back as
+   * they were, so the profile theme on relays never changes.
+   */
   const restore = useCallback(
-    (saved: { mode: AppearanceMode; theme: DesktopTheme | null }) => {
-      if (saved.theme) apply(saved.theme);
-      else setMode(saved.mode);
+    (saved: ThemeSnapshot) => {
+      if (saved.published === publishCount && !saved.pending) {
+        cancelPublish();
+        updateConfig((current) => ({ ...current, ...saved.config }));
+      } else if (saved.theme) {
+        apply(saved.theme);
+      } else {
+        setMode(saved.mode);
+      }
     },
-    [apply, setMode],
+    [apply, setMode, updateConfig],
   );
+
+  /** Publish now whatever `apply` with `hold` is holding back. */
+  const commit = useCallback(() => runPublish(), []);
 
   const canSync = !!user;
   const syncProfileTheme = config.syncProfileTheme;
@@ -238,6 +306,7 @@ export function useDesktopThemeEditor() {
       edit,
       snapshot,
       restore,
+      commit,
       setMode,
       setSync,
     }),
@@ -253,6 +322,7 @@ export function useDesktopThemeEditor() {
       edit,
       snapshot,
       restore,
+      commit,
       setMode,
       setSync,
     ],

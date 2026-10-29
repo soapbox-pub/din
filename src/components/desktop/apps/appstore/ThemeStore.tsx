@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthor } from '@/hooks/useAuthor';
-import { useDesktopThemeEditor } from '@/hooks/useDesktopTheme';
+import { useDesktopThemeEditor, type ThemeSnapshot } from '@/hooks/useDesktopTheme';
 import { useToast } from '@/hooks/useToast';
 import { useThemeActions, useThemeCatalog, useThemeDefinition } from '@/hooks/useThemes';
 import { sameThemeLook } from '@/lib/profileTheme';
@@ -40,7 +40,7 @@ interface ThemeHandlers {
 
 /** What was worn before a run of themes was put on, and what that run added to the user's themes. */
 interface Streak {
-  previous: ReturnType<ReturnType<typeof useDesktopThemeEditor>['snapshot']>;
+  previous: ThemeSnapshot;
   added: ThemeDefinition[];
   current: ThemeDefinition;
 }
@@ -53,6 +53,10 @@ interface Streak {
  * Settings → Appearance lists. A bar then offers Revert, which puts back
  * what was worn before the first theme clicked and takes back what the
  * clicks added.
+ *
+ * Themes clicked are only tried on: the profile theme is published when the
+ * bar is dismissed, the Themes page closes, or a while passes untouched, so
+ * clicking around doesn't publish every theme on the way.
  */
 export function ThemeStore({
   catalog,
@@ -70,6 +74,9 @@ export function ThemeStore({
   const { toast } = useToast();
   const [streak, setStreak] = useState<Streak | null>(null);
 
+  const { commit } = editor;
+  useEffect(() => commit, [commit]);
+
   const isWorn = (theme: ThemeDefinition) =>
     !!editor.theme &&
     editor.theme.source?.pubkey === theme.pubkey &&
@@ -80,7 +87,7 @@ export function ThemeStore({
     if (isWorn(theme)) return;
     const previous = editor.snapshot();
     try {
-      editor.apply(theme.theme);
+      editor.apply(theme.theme, { hold: true });
     } catch (error) {
       toast({
         title: 'Couldn’t use this theme',
@@ -210,7 +217,16 @@ export function ThemeStore({
           </div>
         </div>
       )}
-      {streak && <RevertBar theme={streak.current} onRevert={revert} onDone={() => setStreak(null)} />}
+      {streak && (
+        <RevertBar
+          theme={streak.current}
+          onRevert={revert}
+          onDone={() => {
+            commit();
+            setStreak(null);
+          }}
+        />
+      )}
     </div>
   );
 }
