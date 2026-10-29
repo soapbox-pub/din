@@ -2435,7 +2435,7 @@ export function Spreadsheet() {
               <p className="flex items-center gap-2 text-[15px] font-semibold">
                 <FileSpreadsheet className="size-5 text-[#107c41]" /> {file.name}
               </p>
-              <p className="text-[#616161]">{file.handle?.name ?? 'Not saved yet'}</p>
+              <p className="text-[#616161]">{file.handle?.path ?? 'Not saved yet'}</p>
               <table className="text-[13px]">
                 <tbody>
                   <tr>
@@ -2464,7 +2464,8 @@ export function Spreadsheet() {
             { label: 'Save a copy as Excel Workbook', description: 'An .xlsx copy, leaving this window on the current file.', icon: <FileSpreadsheet />, onClick: () => (setBackstage(null), void file.exportCopy(SAVE_XLSX)) },
             { label: 'Save a copy as OpenDocument Spreadsheet', description: 'An .ods copy for LibreOffice Calc and other OpenDocument apps.', icon: <FileSpreadsheet />, onClick: () => (setBackstage(null), void file.exportCopy(SAVE_ODS)) },
           ]}
-          fileName={file.handle?.name ?? null}
+          onShowRecentInFiles={(r) => void file.showRecentInFiles(r)}
+          path={file.handle?.path ?? null}
         />
       )}
       {file.prompt}

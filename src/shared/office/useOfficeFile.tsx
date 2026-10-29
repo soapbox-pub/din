@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { typesFromFilters, type Din, type DinFileHandle } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import type { FileFilter } from '@/lib/fileFilters';
 import { ACCENTS, type OfficeApp } from './accent';
@@ -25,32 +25,46 @@ function recentKey(app: OfficeApp) {
   return `din:office:recent:${app}`;
 }
 
-/** Files opened or saved lately, newest first. Each keeps its grant with a `persist()` token. */
+/**
+ * Files opened or saved lately, newest first. Each keeps its grant with a
+ * `persist()` token, released when the entry leaves the list.
+ */
 export function readRecent(app: OfficeApp): RecentFile[] {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(recentKey(app)) ?? '[]');
     return Array.isArray(v)
-      ? v.filter((r): r is RecentFile => typeof r?.token === 'string' && typeof r?.key === 'string' && typeof r?.name === 'string' && typeof r?.time === 'number')
+      ? v
+          .filter((r): r is RecentFile => typeof r?.token === 'string' && typeof r?.key === 'string' && typeof r?.name === 'string' && typeof r?.time === 'number')
+          .map((r) => ({ token: r.token, key: r.key, name: r.name, path: typeof r.path === 'string' ? r.path : '', time: r.time }))
       : [];
   } catch {
     return [];
   }
 }
 
-async function addRecent(app: OfficeApp, handle: DinFileHandle): Promise<RecentFile[]> {
+async function addRecent(din: Din, app: OfficeApp, handle: DinFileHandle): Promise<RecentFile[]> {
+  const token = readRecent(app).find((r) => r.key === handle.key)?.token ?? (await handle.persist());
+  // Read again after the await: another window may have changed the list meanwhile.
   const list = readRecent(app);
-  const token = list.find((r) => r.key === handle.key)?.token ?? (await handle.persist());
-  const next = [{ token, key: handle.key, name: handle.name, time: Date.now() }, ...list.filter((r) => r.key !== handle.key)].slice(0, RECENT_MAX);
+  const entry = { token, key: handle.key, name: handle.name, path: handle.path, time: Date.now() };
+  const all = [entry, ...list.filter((r) => r.key !== handle.key)];
+  const next = all.slice(0, RECENT_MAX);
   localStorage.setItem(recentKey(app), JSON.stringify(next));
+  for (const r of all.slice(RECENT_MAX)) din.files.release(r.token);
   return next;
 }
 
 const RECENT_CHANGED = 'din:office:recent';
 
-export function removeRecent(app: OfficeApp, key: string) {
-  localStorage.setItem(recentKey(app), JSON.stringify(readRecent(app).filter((r) => r.key !== key)));
+export function removeRecent(din: Din, app: OfficeApp, key: string) {
+  const list = readRecent(app);
+  localStorage.setItem(recentKey(app), JSON.stringify(list.filter((r) => r.key !== key)));
+  for (const r of list) if (r.key === key) din.files.release(r.token);
   window.dispatchEvent(new CustomEvent(RECENT_CHANGED, { detail: app }));
 }
+
+/** The folder a path is in, as the Recent list and Backstage show it. */
+export const folderOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/';
 
 export interface OfficeFileOptions {
   app: OfficeApp;
@@ -100,15 +114,23 @@ export function useOfficeFile(opts: OfficeFileOptions) {
     const onChange = (e: Event) => {
       if ((e as CustomEvent<OfficeApp>).detail === app) setRecent(readRecent(app));
     };
+    // The app's other windows are documents of their own: they change the list through storage.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === recentKey(app)) setRecent(readRecent(app));
+    };
     window.addEventListener(RECENT_CHANGED, onChange);
-    return () => window.removeEventListener(RECENT_CHANGED, onChange);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(RECENT_CHANGED, onChange);
+      window.removeEventListener('storage', onStorage);
+    };
   }, [app]);
 
   const remember = useCallback(
     (target: DinFileHandle) => {
-      addRecent(app, target).then(setRecent, () => {});
+      addRecent(din, app, target).then(setRecent, () => {});
     },
-    [app],
+    [din, app],
   );
 
   const name = handle ? handle.name : untitledName;
@@ -229,16 +251,34 @@ export function useOfficeFile(opts: OfficeFileOptions) {
     [din, handle, error, load],
   );
 
-  const openRecent = useCallback(
-    async (entry: RecentFile) => {
+  /** A Recent entry's file, or null (and the entry gone from the list) if it can't be found. */
+  const restoreRecent = useCallback(
+    async (entry: RecentFile): Promise<DinFileHandle | null> => {
       const target = await din.files.restore(entry.token).catch(() => null);
-      if (target) openFile(target);
-      else {
-        removeRecent(app, entry.key);
+      if (!target) {
+        removeRecent(din, app, entry.key);
         setStatus(`Couldn’t find ${entry.name}. It may have been moved or deleted.`);
       }
+      return target;
     },
-    [din, app, openFile],
+    [din, app],
+  );
+
+  const openRecent = useCallback(
+    async (entry: RecentFile) => {
+      const target = await restoreRecent(entry);
+      if (target) openFile(target);
+    },
+    [restoreRecent, openFile],
+  );
+
+  /** Files, opened on the entry's folder with the file selected. */
+  const showRecentInFiles = useCallback(
+    async (entry: RecentFile) => {
+      const target = await restoreRecent(entry);
+      if (target) void din.app.open('file-browser', {}, [target]);
+    },
+    [din, restoreRecent],
   );
 
   const browse = useCallback(async () => {
@@ -332,6 +372,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
     exportCopy,
     openFile,
     openRecent,
+    showRecentInFiles,
     browse,
     pickInsert,
     recent,

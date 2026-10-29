@@ -586,7 +586,7 @@ export function WordProcessor() {
     [active, file],
   );
 
-  const canPrint = din.permissions.has('printing');
+  const canPrint = din.permissions.has('printing') && din.print.available;
   const print = useCallback(async () => {
     const view = mounted && viewOf(mounted);
     if (!view) return;
@@ -1428,7 +1428,8 @@ export function WordProcessor() {
             setBackstage(null);
             void file.saveAs();
           }}
-          fileName={file.handle?.name ?? null}
+          onShowRecentInFiles={(r) => void file.showRecentInFiles(r)}
+          path={file.handle?.path ?? null}
           onPrint={
             canPrint
               ? () => {
@@ -1440,8 +1441,8 @@ export function WordProcessor() {
           info={
             <div className="max-w-lg space-y-2 text-[13px]">
               <p>
-                <span className="text-[#616161]">File: </span>
-                {file.handle?.name ?? 'Not saved yet'}
+                <span className="text-[#616161]">Location: </span>
+                {file.handle?.path ?? 'Not saved yet'}
               </p>
               <p>
                 <span className="text-[#616161]">Pages: </span>

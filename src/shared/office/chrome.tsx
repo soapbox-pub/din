@@ -7,9 +7,11 @@ import {
   ChevronRight,
   ChevronUp,
   Clock,
+  Copy,
   File,
   FileText,
   FolderOpen,
+  FolderSearch,
   Info,
   Minus,
   Plus,
@@ -26,7 +28,7 @@ import { cn } from '@/lib/utils';
 import { AERO_CSS } from './aero';
 import { ACCENTS, AppContext, FIELD, FOCUS, keepFocus, refocusFrame, useOfficeApp, type OfficeApp } from './accent';
 import { FONT_CHOICES, fontStack } from '@/shared/office/fonts';
-import { removeRecent } from './useOfficeFile';
+import { folderOf, removeRecent } from './useOfficeFile';
 import { PICKER_NAMES, PICKER_THEME_ORDER, pickerVariants, STANDARD_COLORS, tintColor, type Theme, type ThemeColorName } from './theme';
 
 /**
@@ -1079,6 +1081,8 @@ export interface RecentFile {
   /** The handle's key, the same for the same file. */
   key: string;
   name: string;
+  /** Its full path, to show; empty for entries saved before paths were kept. */
+  path: string;
   time: number;
 }
 
@@ -1093,11 +1097,12 @@ export function Backstage({
   templates,
   recent,
   onOpenRecent,
+  onShowRecentInFiles,
   onBrowse,
   onSaveAs,
   info,
   exports,
-  fileName,
+  path,
   onPrint,
 }: {
   page: BackstagePage;
@@ -1108,12 +1113,13 @@ export function Backstage({
   templates: Template[];
   recent: RecentFile[];
   onOpenRecent: (file: RecentFile) => void;
+  onShowRecentInFiles: (file: RecentFile) => void;
   onBrowse: () => void;
   onSaveAs: () => void;
   info: React.ReactNode;
   exports: { label: string; description: string; icon: React.ReactNode; onClick: () => void }[];
-  /** The file's name, once it's been saved or opened. */
-  fileName: string | null;
+  /** The file's path, once it's been saved or opened. */
+  path: string | null;
   /** Print opens Din's print dialog straight away. */
   onPrint?: () => void;
 }) {
@@ -1180,7 +1186,7 @@ export function Backstage({
           <>
             <h1 className={H1}>{greeting}</h1>
             <TemplateRow templates={templates} />
-            <RecentList recent={recent} onOpen={onOpenRecent} />
+            <RecentList recent={recent} onOpen={onOpenRecent} onShowInFiles={onShowRecentInFiles} />
           </>
         )}
         {page === 'new' && (
@@ -1195,7 +1201,7 @@ export function Backstage({
             <div className="mb-6 flex gap-2">
               <BackstageTile icon={<FolderOpen className="size-8 fill-[#f8d775] text-[#c19c00]" />} label="Browse" onClick={onBrowse} />
             </div>
-            <RecentList recent={recent} onOpen={onOpenRecent} />
+            <RecentList recent={recent} onOpen={onOpenRecent} onShowInFiles={onShowRecentInFiles} />
           </>
         )}
         {page === 'info' && (
@@ -1208,7 +1214,7 @@ export function Backstage({
           <>
             <h1 className={H1}>Save As</h1>
             <p className="mb-4 max-w-lg text-[13px] text-[#616161]">
-              {fileName ? `This file is saved as ${fileName}.` : 'This file hasn’t been saved yet.'} Choose a folder and a name.
+              {path ? `This file is in ${folderOf(path)}.` : 'This file hasn’t been saved yet.'} Choose a folder and a name.
             </p>
             <BackstageTile icon={<FolderOpen className="size-8 fill-[#f8d775] text-[#c19c00]" />} label="Browse" onClick={onSaveAs} />
           </>
@@ -1267,8 +1273,9 @@ function TemplateRow({ templates }: { templates: Template[] }) {
   );
 }
 
-function RecentList({ recent, onOpen }: { recent: RecentFile[]; onOpen: (file: RecentFile) => void }) {
+function RecentList({ recent, onOpen, onShowInFiles }: { recent: RecentFile[]; onOpen: (file: RecentFile) => void; onShowInFiles: (file: RecentFile) => void }) {
   const app = useOfficeApp();
+  const din = useDin();
   return (
     <section>
       <h2 className="mb-2 flex items-center gap-2 border-b border-[#d5dfec] pb-2 text-[14px] font-semibold text-[#1e395b]">
@@ -1281,6 +1288,7 @@ function RecentList({ recent, onOpen }: { recent: RecentFile[]; onOpen: (file: R
           <thead>
             <tr className="text-left text-[12px] text-[#616161]">
               <th className="py-1.5 font-normal">Name</th>
+              <th className="hidden py-1.5 font-normal md:table-cell">Folder</th>
               <th className="py-1.5 text-right font-normal">Opened</th>
             </tr>
           </thead>
@@ -1290,11 +1298,13 @@ function RecentList({ recent, onOpen }: { recent: RecentFile[]; onOpen: (file: R
                 <ContextMenuTrigger asChild>
                   <tr className="cursor-pointer hover:bg-[#e5f1fc]" onClick={() => onOpen(r)}>
                     <td className="rounded-l-md py-2 pl-1">
-                      <button type="button" className={cn('flex items-center gap-2 text-left', FOCUS)} onClick={() => onOpen(r)}>
+                      {/* Its click (a key's too) reaches the row, which opens it. */}
+                      <button type="button" className={cn('flex items-center gap-2 text-left', FOCUS)}>
                         <FileText className="size-4 shrink-0 text-[var(--office-accent)]" />
                         {r.name}
                       </button>
                     </td>
+                    <td className="hidden max-w-[320px] truncate py-2 text-[#616161] md:table-cell">{r.path && folderOf(r.path)}</td>
                     <td className="rounded-r-md py-2 pr-2 text-right whitespace-nowrap text-[#616161]">{relativeTime(r.time)}</td>
                   </tr>
                 </ContextMenuTrigger>
@@ -1302,8 +1312,14 @@ function RecentList({ recent, onOpen }: { recent: RecentFile[]; onOpen: (file: R
                   <ContextMenuItem onSelect={() => onOpen(r)}>
                     <FolderOpen /> Open
                   </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => onShowInFiles(r)}>
+                    <FolderSearch /> Show in Files
+                  </ContextMenuItem>
+                  <ContextMenuItem disabled={!r.path} onSelect={() => void navigator.clipboard?.writeText(r.path).catch(() => {})}>
+                    <Copy /> Copy Path
+                  </ContextMenuItem>
                   <ContextMenuSeparator />
-                  <ContextMenuItem onSelect={() => removeRecent(app, r.key)}>
+                  <ContextMenuItem onSelect={() => removeRecent(din, app, r.key)}>
                     <X /> Remove from List
                   </ContextMenuItem>
                 </ContextMenuContent>
