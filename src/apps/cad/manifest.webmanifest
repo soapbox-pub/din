@@ -1,0 +1,44 @@
+{
+  "name": "CAD",
+  "description": "2D drafting, AutoCAD style, for DWG and DXF drawings.",
+  "icons": [
+    {
+      "src": "/icons/apps/cad.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "permissions": [
+      "assistant",
+      "fs"
+    ],
+    "window": {
+      "size": {
+        "width": 1360,
+        "height": 860
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "autocad",
+      "dwg",
+      "dxf",
+      "drafting",
+      "drawing",
+      "cad",
+      "draftsight",
+      "librecad",
+      "blueprint",
+      "floor plan",
+      "technical drawing"
+    ],
+    "migrateStorage": [
+      "din:cad:*"
+    ]
+  }
+}

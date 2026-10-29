@@ -1,5 +1,4 @@
 import { ContextMenu as CM } from 'radix-ui';
-import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
 
 /** Right-click menus for CAD's palettes, styled like its dropdowns (`./chrome`). */
@@ -14,7 +13,7 @@ export function ContextMenuTrigger(props: React.ComponentProps<typeof CM.Trigger
 
 export function ContextMenuContent({ className, children, ...props }: React.ComponentProps<typeof CM.Content>) {
   return (
-    <CM.Portal container={portalContainer()}>
+    <CM.Portal>
       <CM.Content
         collisionPadding={8}
         onCloseAutoFocus={(e) => e.preventDefault()}

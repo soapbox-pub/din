@@ -22,9 +22,6 @@ const WebPopup = lazy(() =>
 const FileBrowser = lazy(() =>
   import('@/components/desktop/apps/FileBrowser').then((m) => ({ default: m.FileBrowser })),
 );
-const CAD = lazy(() =>
-  import('@/components/desktop/apps/CAD').then((m) => ({ default: m.CAD })),
-);
 const Settings = lazy(() =>
   import('@/components/desktop/apps/Settings').then((m) => ({ default: m.Settings })),
 );
@@ -227,17 +224,10 @@ export const APPS: readonly AppDefinition[] = [
   // documents (.pub), InDesign documents (.indd, .indt) and IDML, and saves
   // IDML. Files opens them here. Launch params `{ path }` open one.
   dinApp('publisher'),
-  {
-    // 2D drafting, AutoCAD style: opens DWGs (R14 to 2018) and saves
-    // AutoCAD 2000 DWGs. Files opens .dwg files here. Launch params
-    // `{ path }` open one; `{ new: 'imperial' | 'metric' }` start one.
-    id: 'cad',
-    name: 'CAD',
-    icon: '/icons/apps/cad.png',
-    component: CAD,
-    defaultSize: { width: 1360, height: 860 },
-    keywords: ['autocad', 'dwg', 'dxf', 'drafting', 'drawing', 'cad', 'draftsight', 'librecad', 'blueprint', 'floor plan', 'technical drawing'],
-  },
+  // 2D drafting, AutoCAD style: opens DWGs (R14 to 2018) and saves
+  // AutoCAD 2000 DWGs. Files opens .dwg files here. Launch params
+  // `{ path }` open one; `{ new: 'imperial' | 'metric' }` start one.
+  dinApp('cad'),
   // Music and video, Windows Media Player style with Winamp's soul: the
   // Now Playing list, a library of the Music and Videos folders, internet
   // radio, the equalizer and visualizations, and Winamp (.wsz) and Windows

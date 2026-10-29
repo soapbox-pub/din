@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { FolderOpen, Plus, X } from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
 import { cn } from '@/lib/utils';
-import { cleanFsError, formatBytes, getFsBridge, parentPath } from '@/lib/fs';
-import { setCloseGuard } from '@/lib/closeGuards';
-import { invalidateListings } from '@/hooks/useFileSystem';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
-import { useWindowAccent } from '@/contexts/WindowAccentContext';
-import { useFilePicker } from '@/contexts/FilePickerContext';
+import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
+import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { useCloseGuard, useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { AppAssistantHost } from '@/shared/assistant/appHost';
 import '@fontsource/arimo/400.css';
 import '@fontsource/arimo/700.css';
 import '@fontsource/arimo/400-italic.css';
@@ -78,7 +72,6 @@ const MAX_BYTES = 512 * 1024 * 1024;
 
 /** What CAD saves: DWG, or DXF for programs that take nothing else. */
 type Format = 'dwg' | 'dxf';
-const FORMATS: Format[] = ['dwg', 'dxf'];
 const SAVE_FILTERS = [
   { name: 'AutoCAD 2000 Drawing (*.dwg)', patterns: ['*.dwg'], mimeTypes: ['image/vnd.dwg'] },
   { name: 'AutoCAD 2004 DXF (*.dxf)', patterns: ['*.dxf'], mimeTypes: ['image/vnd.dxf'] },
@@ -197,15 +190,23 @@ let textEditSeq = 0;
  * DWG files from R13 to AutoCAD 2018 and DXF files of any version, and saves
  * AutoCAD 2000 DWGs or AutoCAD 2004 DXFs.
  *
- * Launch params: `{ path?: string }` opens a drawing; `{ new?: 'imperial' |
- * 'metric' }` starts one.
+ * Opened with a file (from Files), it opens that drawing; launch params
+ * `{ new?: 'imperial' | 'metric' }` start one. Its assistant palette needs
+ * the `assistant` and `fs` permissions (see cad/useCadAssistant.ts); the
+ * drawings themselves are files it's handed.
  */
-export function CAD({ windowId, params }: AppComponentProps) {
-  const initialPath = typeof params?.path === 'string' ? params.path : null;
-  const fs = getFsBridge();
-  const { open, close, focus } = useWindowActions();
-  const { pickFile, pickFiles } = useFilePicker();
-  const queryClient = useQueryClient();
+export function CAD() {
+  return (
+    <AppAssistantHost>
+      <CADWindow />
+    </AppAssistantHost>
+  );
+}
+
+function CADWindow() {
+  const din = useDin();
+  const params = din.app.launch.params;
+  const launchFile = din.app.launch.files[0] ?? null;
 
   const [settings, setSettings] = useState(readSettings);
   useEffect(() => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)), [settings]);
@@ -213,17 +214,18 @@ export function CAD({ windowId, params }: AppComponentProps) {
   const theme = settings.dark ? DARK : LIGHT;
 
   const [hist, setHist] = useState<{ entries: Entry[]; index: number } | null>(() => {
-    if (initialPath) return null;
-    const kind = params?.new === 'metric' ? 'metric' : params?.new === 'imperial' ? 'imperial' : null;
+    if (launchFile) return null;
+    const kind = params.new === 'metric' ? 'metric' : params.new === 'imperial' ? 'imperial' : null;
     if (!kind) return null;
     return { entries: [{ d: newDrawing(kind === 'metric'), label: 'New', run: 0 }], index: 0 };
   });
   const doc = hist ? hist.entries[hist.index].d : null;
   const [savedEntry, setSavedEntry] = useState<Entry | null>(() => hist?.entries[0] ?? null);
   const dirty = !!hist && hist.entries[hist.index] !== savedEntry;
-  const [path, setPath] = useState<string | null>(null);
+  const [file, setFile] = useState<DinFileHandle | null>(null);
+  const path = file?.path ?? null;
   const [docName, setDocName] = useState(() => (hist ? `Drawing${++untitled}.dwg` : ''));
-  const [loading, setLoading] = useState(initialPath !== null && fs !== undefined);
+  const [loading, setLoading] = useState(launchFile !== null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -633,14 +635,14 @@ export function CAD({ windowId, params }: AppComponentProps) {
   // ---- Files ------------------------------------------------------------------------------------
 
   const startDoc = useCallback(
-    (d: Drawing, name: string, p: string | null) => {
-      const entry: Entry = { d, label: p ? 'Open' : 'New', run: 0 };
+    (d: Drawing, name: string, f: DinFileHandle | null) => {
+      const entry: Entry = { d, label: f ? 'Open' : 'New', run: 0 };
       const h = { entries: [entry], index: 0 };
       histRef.current = h;
       docRef.current = d;
       setHist(h);
       setSavedEntry(entry);
-      setPath(p);
+      setFile(f);
       setDocName(name);
       setSelection([]);
       setLayerIso(null);
@@ -661,29 +663,29 @@ export function CAD({ windowId, params }: AppComponentProps) {
   );
 
   const load = useCallback(
-    (p: string) => {
-      if (!fs) return;
+    (f: DinFileHandle) => {
       const seq = ++loadSeq.current;
       (async () => {
         try {
-          const r = await fs.readFile(p, MAX_BYTES);
-          if (r.truncated) throw new Error(`It’s too big to open (${formatBytes(r.size ?? r.data.length)}).`);
-          const version = dwgVersion(r.data);
-          const dxf = !version && isDxf(r.data);
+          const blob = await f.getFile();
+          if (blob.size > MAX_BYTES) throw new Error(`It’s too big to open (${formatBytes(blob.size)}).`);
+          const data = new Uint8Array(await blob.arrayBuffer());
+          const version = dwgVersion(data);
+          const dxf = !version && isDxf(data);
           if (!version && !dxf) throw new Error('It isn’t a DWG or DXF drawing.');
           let res: ReadResult;
           if (version) {
             if (version < 'AC1012') throw new Error(`It’s from ${versionName(version)} or earlier, older than CAD can read (R13 and later).`);
-            const db = await readDwgBytes(r.data);
+            const db = await readDwgBytes(data);
             if (seq !== loadSeq.current) return;
             res = convertDwg(db, version);
           } else {
-            res = readDxf(r.data);
+            res = readDxf(data);
           }
           versionRef.current = dxf ? `DXF ${res.version}` : res.version;
           dropped.current = res.dropped;
-          startDoc(res.drawing, basename(p), p);
-          setRecent(addRecent(p));
+          startDoc(res.drawing, f.name, f);
+          if (f.path) setRecent(addRecent(f.path));
           const n = Object.values(res.dropped).reduce((a, b) => a + b, 0);
           setStatus(`Opened ${versionName(res.version)} ${dxf ? 'DXF' : 'drawing'}`);
           if (n) {
@@ -694,34 +696,35 @@ export function CAD({ windowId, params }: AppComponentProps) {
           }
         } catch (err) {
           if (seq !== loadSeq.current) return;
-          setError(`Couldn’t open ${basename(p)}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
+          setError(`Couldn’t open ${f.name}. ${err instanceof Error ? err.message : cleanFsError(err)}`);
         } finally {
           if (seq === loadSeq.current) setLoading(false);
         }
       })();
     },
-    [fs, startDoc],
+    [startDoc],
   );
 
-  const [prevInitial, setPrevInitial] = useState<string | null>(null);
-  if (initialPath !== prevInitial) {
-    setPrevInitial(initialPath);
-    if (initialPath && fs) {
+  const openHandle = useCallback(
+    (f: DinFileHandle) => {
       setLoading(true);
       setError(null);
-    }
-  }
-  const openPath = useCallback(
-    (p: string) => {
-      setLoading(true);
-      setError(null);
-      load(p);
+      load(f);
     },
     [load],
   );
+  /** A recent drawing, by the path it was kept under. */
+  const openPath = useCallback(
+    (p: string) =>
+      void din.files.fromPath(p).then(openHandle, (err: unknown) => setError(`Couldn’t open ${basename(p)}. ${cleanFsError(err)}`)),
+    [din, openHandle],
+  );
+  const launched = useRef(false);
   useEffect(() => {
-    if (initialPath) load(initialPath);
-  }, [initialPath, load]);
+    if (launched.current || !launchFile) return;
+    launched.current = true;
+    load(launchFile);
+  }, [launchFile, load]);
 
   const encode = useCallback(
     (d: Drawing, format: Format): Uint8Array => {
@@ -736,89 +739,95 @@ export function CAD({ windowId, params }: AppComponentProps) {
   );
 
   const writeTo = useCallback(
-    async (p: string): Promise<boolean> => {
+    async (f: DinFileHandle): Promise<boolean> => {
       const d = docRef.current;
       const h = histRef.current;
-      if (!fs || !d || !h) return false;
+      if (!d || !h) return false;
       setBusy(true);
       setStatus('Saving…');
       try {
         await new Promise((r) => setTimeout(r, 16));
-        const format = formatOf(p) ?? 'dwg';
+        const format = formatOf(f.name) ?? 'dwg';
         const bytes = encode(d, format);
-        await fs.writeFile(p, bytes);
+        await f.write(bytes);
         setSavedEntry(h.entries[h.index]);
-        setPath(p);
-        setDocName(basename(p));
-        setRecent(addRecent(p));
+        setFile(f);
+        setDocName(f.name);
+        if (f.path) setRecent(addRecent(f.path));
         const was = versionRef.current;
         const now = SAVED_AS[format];
-        setStatus(was && was !== now.version ? `Saved as ${now.name}` : `Saved ${basename(p)}`);
+        setStatus(was && was !== now.version ? `Saved as ${now.name}` : `Saved ${f.name}`);
         versionRef.current = now.version;
-        void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', p] });
-        void invalidateListings(queryClient, p);
         return true;
       } catch (err) {
-        setStatus(`Couldn’t save ${basename(p)}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
+        setStatus(`Couldn’t save ${f.name}: ${err instanceof Error ? err.message : cleanFsError(err)}`);
         return false;
       } finally {
         setBusy(false);
       }
     },
-    [fs, encode, queryClient],
+    [encode],
   );
 
   const saveAs = useCallback(
     async (format?: Format): Promise<boolean> => {
       if (!docRef.current) return false;
-      const start: Format = format ?? (path ? formatOf(path) : null) ?? 'dwg';
-      const r = await pickFiles({
-        mode: 'save',
+      const start: Format = format ?? (file ? formatOf(file.name) : null) ?? 'dwg';
+      // The format asked for first, so a name typed without one gets its extension.
+      const types = typesFromFilters(start === 'dxf' ? [...SAVE_FILTERS].reverse() : SAVE_FILTERS);
+      const t = await din.files.save({
         title: format === 'dxf' ? 'Export DXF' : 'Save Drawing As',
-        currentName: `${docName.replace(/\.[^.]*$/, '')}.${start}`,
-        initialPath: path ? parentPath(path) : undefined,
-        filters: SAVE_FILTERS,
-        currentFilter: FORMATS.indexOf(start),
+        suggestedName: `${docName.replace(/\.[^.]*$/, '')}.${start}`,
+        startIn: file ?? undefined,
+        types,
       });
-      if (!r) return false;
-      let t = r.paths[0];
-      if (!formatOf(t)) t += `.${FORMATS[r.filter ?? FORMATS.indexOf(start)] ?? start}`;
+      if (!t) return false;
+      if (!formatOf(t.name)) {
+        setStatus(`CAD can’t save ${t.name}: choose a .dwg or .dxf name.`);
+        return false;
+      }
       return writeTo(t);
     },
-    [pickFiles, docName, path, writeTo],
+    [din, docName, file, writeTo],
   );
 
-  const save = useCallback((): Promise<boolean> => (path && formatOf(path) ? writeTo(path) : saveAs()), [path, writeTo, saveAs]);
+  const save = useCallback(
+    (): Promise<boolean> => (file && file.writable && formatOf(file.name) ? writeTo(file) : saveAs()),
+    [file, writeTo, saveAs],
+  );
 
   const openFile = useCallback(async () => {
-    const t = await pickFile({ title: 'Select File', extensions: ['.dwg', '.dxf'], initialPath: path ? parentPath(path) : undefined });
+    const [t] = await din.files.open({
+      title: 'Select File',
+      types: [{ description: 'Drawings', extensions: ['.dwg', '.dxf'] }],
+      startIn: file ?? undefined,
+    });
     if (!t) return;
-    if (docRef.current && (dirty || path)) open('cad', { path: t });
-    else openPath(t);
-  }, [pickFile, path, dirty, open, openPath]);
+    // Work in progress stays put; the drawing gets a window of its own.
+    if (docRef.current && (dirty || file)) void din.app.open('cad', {}, [t]);
+    else openHandle(t);
+  }, [din, file, dirty, openHandle]);
 
   const newFile = useCallback(
     (metric: boolean) => {
-      if (docRef.current) open('cad', { new: metric ? 'metric' : 'imperial' });
+      if (docRef.current) void din.app.open('cad', { new: metric ? 'metric' : 'imperial' });
       else startDoc(newDrawing(metric), `Drawing${++untitled}.dwg`, null);
     },
-    [open, startDoc],
+    [din, startDoc],
   );
 
-  useEffect(() => {
-    if (!dirty) return;
-    setCloseGuard(windowId, () => {
-      focus(windowId);
-      setDialog({ kind: 'unsaved', then: () => close(windowId) });
-      return true;
-    });
-    return () => setCloseGuard(windowId, null);
-  }, [dirty, windowId, focus, close]);
+  // Closing with unsaved changes asks first.
+  useCloseGuard(
+    dirty
+      ? () => {
+          din.window.focus();
+          setDialog({ kind: 'unsaved', then: () => din.window.close() });
+          return true;
+        }
+      : null,
+  );
 
-  const closeNow = useCallback(() => {
-    setCloseGuard(windowId, null);
-    close(windowId);
-  }, [windowId, close]);
+  const closeNow = useCallback(() => din.window.close(), [din]);
 
   // ---- The command engine -----------------------------------------------------------------------
 
@@ -1656,8 +1665,6 @@ export function CAD({ windowId, params }: AppComponentProps) {
 
   // ---- Title bar ------------------------------------------------------------------------------------
 
-  const setTitlebar = useWindowTitlebar();
-  const setAccent = useWindowAccent();
   const qat = useRef({ newFile, openFile, save, saveAs, undo, redo, run });
   useLayoutEffect(() => {
     qat.current = { newFile, openFile, save, saveAs, undo, redo, run };
@@ -1667,8 +1674,8 @@ export function CAD({ windowId, params }: AppComponentProps) {
   const canRedo = !!hist && hist.index < hist.entries.length - 1;
   const titleContent = useMemo(
     () => (
-      <div className="-mr-[100px] grid h-full min-w-0 flex-1 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-3 text-[#e3e8ef]" onMouseDown={keepFocus} style={{ fontFamily: "'Inter Variable', 'Segoe UI', sans-serif" }}>
-        <div className="flex items-center gap-px" data-window-no-drag>
+      <WindowDragRegion className="relative grid h-9 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-3 bg-[#1b2028] pl-2 text-[#e3e8ef]" onMouseDown={keepFocus} style={{ fontFamily: "'Inter Variable', 'Segoe UI', sans-serif" }}>
+        <div className="flex items-center gap-px">
           <Menu.Root modal={false}>
             <Menu.Trigger asChild>
               <button type="button" aria-label="Application menu" title="Application menu" className={cn('mr-1 flex h-7 items-center gap-1 rounded-[3px] px-1.5 hover:bg-white/10', FOCUS)}>
@@ -1710,16 +1717,14 @@ export function CAD({ windowId, params }: AppComponentProps) {
           {status && <span className="hidden shrink-0 text-[12px] text-[#a9b2bf] sm:inline">• {status}</span>}
         </div>
         <div className="pr-[100px]" />
-      </div>
+        <WindowControls className="absolute top-1/2 right-2 -translate-y-1/2" />
+      </WindowDragRegion>
     ),
     [title, status, hasDoc, canUndo, canRedo],
   );
-  useEffect(() => setTitlebar(titleContent), [setTitlebar, titleContent]);
-  useEffect(() => () => setTitlebar(null), [setTitlebar]);
-  useEffect(() => {
-    setAccent('#1b2028');
-    return () => setAccent(null);
-  }, [setAccent]);
+  // The title bar is the app's own, in the drawing area's colors; the accent
+  // gives Din's window controls on it their light icons.
+  useEffect(() => din.window.setAccent('#1b2028'), [din]);
 
   // ---- The assistant ------------------------------------------------------------------------------
 
@@ -1819,6 +1824,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
       style={{ fontFamily: "'Inter Variable', 'Segoe UI', system-ui, sans-serif", colorScheme: 'dark' }}
       onKeyDown={onKeyDown}
     >
+      {titleContent}
       {doc && (
         <Ribbon
           tab={settings.tab === 'hatch' && !hatchActive ? 'home' : settings.tab}
@@ -2151,10 +2157,7 @@ export function CAD({ windowId, params }: AppComponentProps) {
                   const then = dialog.then;
                   setDialog(null);
                   void save().then((ok) => {
-                    if (ok) {
-                      setCloseGuard(windowId, null);
-                      then();
-                    }
+                    if (ok) then();
                   });
                 }}
               >
@@ -2164,7 +2167,6 @@ export function CAD({ windowId, params }: AppComponentProps) {
                 onClick={() => {
                   const then = dialog.then;
                   setDialog(null);
-                  setCloseGuard(windowId, null);
                   then();
                 }}
               >

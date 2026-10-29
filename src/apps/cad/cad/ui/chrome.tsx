@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { DropdownMenu as Menu } from 'radix-ui';
 import { Check, ChevronDown, ChevronRight } from 'lucide-react';
-import { portalContainer } from '@/lib/portalContainer';
 import { cn } from '@/lib/utils';
 import { FOCUS, keepFocus } from './style';
 
@@ -71,7 +70,7 @@ function SplitMenu({ trigger, onClick, children }: { trigger: React.ReactElement
 
 export function MenuContent({ className, children, ...props }: React.ComponentProps<typeof Menu.Content>) {
   return (
-    <Menu.Portal container={portalContainer()}>
+    <Menu.Portal>
       <Menu.Content
         align="start"
         sideOffset={2}
@@ -117,7 +116,7 @@ export function SubMenu({ label, icon, children }: { label: string; icon?: React
         <span className="flex-1">{label}</span>
         <ChevronRight className="size-3.5" />
       </Menu.SubTrigger>
-      <Menu.Portal container={portalContainer()}>
+      <Menu.Portal>
         <Menu.SubContent sideOffset={2} className="z-[61] min-w-44 rounded-[3px] border border-[#15191e] bg-[#2f3640] p-1 text-[12px] text-[#e3e8ef] shadow-[0_6px_18px_rgba(0,0,0,0.45)]" style={{ fontFamily: "'Inter Variable', 'Segoe UI', sans-serif" }}>
           {children}
         </Menu.SubContent>
