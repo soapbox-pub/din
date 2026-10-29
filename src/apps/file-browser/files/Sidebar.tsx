@@ -12,7 +12,6 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { joinPath } from '@/lib/fs';
-import { notify } from '@/lib/notificationCenter';
 import { cleanVolumesError, getVolumesBridge, type Volume } from '@/lib/volumes';
 import { useDirectory } from '@/hooks/useFileSystem';
 import type { Bookmark } from '@/hooks/useFileSystem';
@@ -25,8 +24,8 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { activeFileDrag, dropCopies } from './dnd';
-import { USER_DIRS } from './layout';
+import { USER_DIRS } from '@/shared/userDirs';
+import { canDropInto, draggedFiles, dropCopies, takeDrop } from './drag';
 
 interface Place {
   path: string;
@@ -135,7 +134,7 @@ export function Sidebar({
   ];
 
   const failed = (title: string, error: unknown) =>
-    notify({ source: { appId: 'file-browser', name: 'Files' }, title, body: cleanVolumesError(error) });
+    void window.din?.notifications.show(title, { body: cleanVolumesError(error), transient: true });
 
   /** Open a place; a disk that isn't mounted is mounted first. */
   const openPlace = (place: Place, open: (path: string) => void) => {
@@ -174,8 +173,8 @@ export function Sidebar({
       onEmptyTrash={onEmptyTrash}
       onProperties={onProperties}
       onDragOver={(e) => {
-        const drag = activeFileDrag(e);
-        if (!drag || !place.path || drag.paths.some((p) => place.path === p || place.path.startsWith(`${p}/`))) return;
+        const drag = draggedFiles(e);
+        if (!drag || !place.path || !canDropInto(drag.paths, place.path, true)) return;
         e.preventDefault();
         e.stopPropagation();
         e.dataTransfer.dropEffect = dropCopies(e) && !place.trash ? 'copy' : 'move';
@@ -183,20 +182,25 @@ export function Sidebar({
       }}
       onDragLeave={() => setDragTarget((t) => (t === place.path ? null : t))}
       onDrop={(e) => {
-        const drag = activeFileDrag(e);
+        const drag = draggedFiles(e);
         setDragTarget(null);
         setOfferingFavorite(false);
         if (!drag || !place.path) return;
         e.preventDefault();
         e.stopPropagation();
-        onDrop(place.path, drag.paths, dropCopies(e) && !place.trash);
+        const target = place.path;
+        void takeDrop(e, dropCopies(e) && !place.trash).then((dropped) => {
+          if (!dropped) return;
+          const paths = dropped.paths.filter((p) => canDropInto([p], target, true));
+          if (paths.length > 0) onDrop(target, paths, dropped.copy);
+        });
       }}
     />
   );
 
   const favoriteDrop = (e: React.DragEvent) => {
-    const drag = activeFileDrag(e);
-    if (!drag || drag.folders.size === 0) return null;
+    const drag = draggedFiles(e);
+    if (!drag?.anyFolder) return null;
     return drag;
   };
 
@@ -230,7 +234,10 @@ export function Sidebar({
               setOfferingFavorite(false);
               if (!drag) return;
               e.preventDefault();
-              for (const path of drag.folders) onAddBookmark(path);
+              // Favorites only link to folders: nothing moves.
+              void takeDrop(e, true).then((dropped) => {
+                for (const path of dropped?.folders ?? []) onAddBookmark(path);
+              });
             }}
             className={cn(
               'flex items-center gap-2 rounded-md border border-dashed px-2 py-2 text-xs',

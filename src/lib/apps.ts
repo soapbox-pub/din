@@ -19,9 +19,6 @@ const WebBrowser = lazy(() =>
 const WebPopup = lazy(() =>
   import('@/components/desktop/apps/WebPopup').then((m) => ({ default: m.WebPopup })),
 );
-const FileBrowser = lazy(() =>
-  import('@/components/desktop/apps/FileBrowser').then((m) => ({ default: m.FileBrowser })),
-);
 const Settings = lazy(() =>
   import('@/components/desktop/apps/Settings').then((m) => ({ default: m.Settings })),
 );
@@ -179,13 +176,7 @@ export const APPS: readonly AppDefinition[] = [
     component: WebBrowser,
     defaultSize: { width: 960, height: 640 },
   },
-  {
-    id: 'file-browser',
-    name: 'Files',
-    icon: '/icons/apps/file-browser.png',
-    component: FileBrowser,
-    defaultSize: { width: 880, height: 600 },
-  },
+  dinApp('file-browser'),
   dinApp('terminal'),
   // Plain text and code, VS Code style: a folder, tabs, quick open and
   // search across files. Files opens text files here; launch params

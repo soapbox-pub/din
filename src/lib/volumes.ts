@@ -59,7 +59,8 @@ declare global {
 /** The volumes bridge, or undefined outside the Electron shell. */
 export function getVolumesBridge(): VolumesBridge | undefined {
   if (typeof window === 'undefined') return undefined;
-  return window.dinos?.volumes;
+  // An app granted it has it through window.din; the desktop, through window.dinos.
+  return window.din?.system.volumes ?? window.dinos?.volumes;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

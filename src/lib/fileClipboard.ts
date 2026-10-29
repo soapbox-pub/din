@@ -1,9 +1,7 @@
-import { useSyncExternalStore } from 'react';
-
 /**
- * State shared by every Files window: what was cut or copied, and what can
- * be undone. Like a native file manager's, both span windows, so a file cut
- * in one window pastes in another and Ctrl+Z works wherever focus is.
+ * What was cut or copied, for every app: Din's file clipboard, behind
+ * `din.clipboard` (DinAppFrame) and the native-window bridge. Like a native
+ * file manager's, it spans windows, so a file cut in one pastes in another.
  */
 
 export interface FileClipboard {
@@ -29,27 +27,4 @@ export function setFileClipboard(next: FileClipboard | null): void {
 
 export function getFileClipboard(): FileClipboard | null {
   return clipboard;
-}
-
-export function useFileClipboard(): FileClipboard | null {
-  return useSyncExternalStore(subscribeFileClipboard, () => clipboard);
-}
-
-/** One undoable file operation. */
-export interface UndoEntry {
-  /** What undoing does, for the status bar: "Undo move of 3 items". */
-  label: string;
-  undo: () => Promise<void>;
-}
-
-const UNDO_LIMIT = 50;
-const undoStack: UndoEntry[] = [];
-
-export function pushUndo(entry: UndoEntry): void {
-  undoStack.push(entry);
-  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
-}
-
-export function popUndo(): UndoEntry | undefined {
-  return undoStack.pop();
 }

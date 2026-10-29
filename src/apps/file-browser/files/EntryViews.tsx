@@ -5,7 +5,7 @@ import { formatBytes, isValidEntryName, joinPath } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
 import { typeLabel } from '@/lib/fileTypes';
 import { FileIcon } from '@/shared/FileIcon';
-import { activeFileDrag, dropCopies } from './dnd';
+import { canDropInto, draggedFiles, dropCopies, takeDrop } from './drag';
 import { GRID_ZOOMS, ROW_HEIGHT } from './layout';
 
 export type ViewMode = 'list' | 'grid';
@@ -295,13 +295,8 @@ export const EntryView = memo(function EntryView(props: EntryViewProps) {
   // ---- Drops ---------------------------------------------------------------
 
   const acceptDrop = (e: React.DragEvent, target: string): boolean => {
-    const drag = activeFileDrag(e);
-    if (!drag) return false;
-    // A folder can't go into itself, or where it already is (unless copied).
-    if (drag.paths.some((p) => target === p || target.startsWith(`${p}/`))) return false;
-    if (!dropCopies(e) && drag.paths.every((p) => p.slice(0, p.lastIndexOf('/')) === target || (target === '/' && p.lastIndexOf('/') === 0))) {
-      return false;
-    }
+    const drag = draggedFiles(e);
+    if (!drag || !canDropInto(drag.paths, target, dropCopies(e))) return false;
     e.preventDefault();
     e.dataTransfer.dropEffect = dropCopies(e) ? 'copy' : 'move';
     return true;
@@ -320,17 +315,19 @@ export const EntryView = memo(function EntryView(props: EntryViewProps) {
       return;
     }
     setDropTarget(null);
-    if (folder === null || !activeFileDrag(e)) acceptDrop(e, dir);
+    if (folder === null || !draggedFiles(e)) acceptDrop(e, dir);
   };
 
   const onDropEvent = (e: React.DragEvent) => {
     setDropTarget(null);
-    const drag = activeFileDrag(e);
-    if (!drag) return;
     const folder = folderTarget(e);
     const target = folder !== null ? joinPath(dir, folder) : dir;
     if (!acceptDrop(e, target)) return;
-    onDrop(target, drag.paths, dropCopies(e));
+    void takeDrop(e, dropCopies(e)).then((dropped) => {
+      if (!dropped) return;
+      const paths = dropped.paths.filter((p) => canDropInto([p], target, dropped.copy));
+      if (paths.length > 0) onDrop(target, paths, dropped.copy);
+    });
   };
 
   // ---- Render ----------------------------------------------------------------

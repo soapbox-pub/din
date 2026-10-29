@@ -1,0 +1,42 @@
+{
+  "name": "Files",
+  "description": "Browse, open and organize the files on this computer.",
+  "icons": [
+    {
+      "src": "/icons/apps/file-browser.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "din": {
+    "permissions": [
+      "fs",
+      "volumes",
+      "printing",
+      "wallpaper"
+    ],
+    "window": {
+      "size": {
+        "width": 880,
+        "height": 600
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "file manager",
+      "folders",
+      "explorer",
+      "finder",
+      "nautilus",
+      "directory",
+      "trash"
+    ],
+    "migrateStorage": [
+      "din:files:*"
+    ]
+  }
+}

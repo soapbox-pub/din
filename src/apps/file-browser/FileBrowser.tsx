@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -16,7 +16,6 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { AppComponentProps } from '@/lib/apps';
 import {
   cleanFsError,
   extractionWarning,
@@ -27,7 +26,7 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
-import { appForFile, isDelimitedText, isExtractable, isLayeredImage, isMediaPlayerFile, isPhotoEditable, isPlayableAudio, isPlayableVideo, isTextFile, isVectorEditable, isViewableImage } from '@/lib/fileTypes';
+import { isDelimitedText, isExtractable, isLayeredImage, isMediaPlayerFile, isPhotoEditable, isPlayableAudio, isPlayableVideo, isTextFile, isVectorEditable, isViewableImage } from '@/lib/fileTypes';
 import {
   invalidateListings,
   useBookmarks,
@@ -39,25 +38,14 @@ import {
 } from '@/hooks/useFileSystem';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useVolumes } from '@/hooks/useVolumes';
-import { useAppContext } from '@/hooks/useAppContext';
-import { getAssistantBridge } from '@/lib/assistant';
-import { cleanPrintingError, getPrintingBridge, isPrintableFile, printFile } from '@/lib/printing';
-import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
-import {
-  getFileClipboard,
-  popUndo,
-  pushUndo,
-  setFileClipboard,
-  useFileClipboard,
-} from '@/lib/fileClipboard';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useDesktopBackground } from '@/contexts/DesktopBackgroundContext';
-import { parkedTab } from '@/lib/tabTransfer';
-import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
-import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useWindowIsTop } from '@/contexts/WindowFocusContext';
-import { TabStrip } from '@/components/desktop/TabStrip';
-import { moveItem } from '@/hooks/useDragReorder';
+import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
+import { isWindowsProgram } from '@/lib/nativeApps';
+import { moveItem, type DragPoint } from '@/hooks/useDragReorder';
+import type { Din, DinFileHandle, LaunchContext } from '@/sdk';
+import { useDin, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { TabStrip } from '@/shared/TabStrip';
+import type { TabTransfer } from '@/shared/TabContextMenu';
+import { dinWindowMove } from '@/shared/dinWindowMove';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
   ContextMenu,
@@ -94,13 +82,31 @@ import type { SortKey, SortOrder, ViewMode } from './files/EntryViews';
 import { Sidebar } from './files/Sidebar';
 import { CompressDialog, ConfirmDialog, PropertiesDialog, ShortcutsDialog } from './files/Dialogs';
 import { FileViewerBody } from '@/shared/FileViewerBody';
-import { endFileDrag, startFileDrag } from './files/dnd';
+import { canDropInto, draggedFiles, dropCopies, endFilesDrag, startFilesDrag, takeDrop } from './files/drag';
+import {
+  broadcastInvalidate,
+  joinWindows,
+  onInvalidate,
+  onOtherWindowsChange,
+  otherWindows,
+  otherWindowsNow,
+  popUndo,
+  pushUndo,
+  receiveTabs,
+  runUndo,
+  sendTab,
+  updateWindowInfo,
+  type WindowInfo,
+} from './files/windows';
 
 let nextTabId = 0;
 const newTabId = () => `files-${nextTabId++}`;
 
 /** How long type-ahead keeps adding to what's been typed (ms). */
 const TYPEAHEAD_MS = 1000;
+
+/** Where a new window for a torn-off tab puts its tab, from the pointer (px). */
+const GRAB = { x: 120, y: 18 };
 
 const SORT_LABELS: Record<SortKey, string> = {
   name: 'Name',
@@ -140,9 +146,50 @@ interface TabSpec {
   select?: string;
 }
 
-/** What a Files tab carries to another window: its directory. */
-function isFilesTabTransfer(value: unknown): value is { path: string } {
-  return typeof value === 'object' && value !== null && typeof (value as { path?: unknown }).path === 'string';
+/** The first tab, from what the window was opened with: a folder, or a file to select in its folder. */
+function launchTab(launch: LaunchContext): TabSpec {
+  const file = launch.files[0];
+  const select = typeof launch.params.select === 'string' ? launch.params.select : undefined;
+  if (file?.path && file.kind === 'file') {
+    return { id: newTabId(), path: parentPath(file.path), select: file.name };
+  }
+  return { id: newTabId(), path: file?.path ?? undefined, select };
+}
+
+/** Where a window for a torn-off tab goes: `{ x, y, width, height }` in its launch params. */
+function isPlacement(value: unknown): value is { x: number; y: number; width: number; height: number } {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return ['x', 'y', 'width', 'height'].every((k) => typeof v[k] === 'number' && Number.isFinite(v[k]));
+}
+
+/** Open a folder, or files, in a new window of an app. */
+async function openWithPaths(din: Din, appId: string, paths: string[], params: Record<string, unknown> = {}): Promise<void> {
+  const handles = await Promise.all(paths.map((p) => din.files.fromPath(p)));
+  await din.app.open(appId, params, handles);
+}
+
+/** A drag needs handles the moment it starts; fetch them ahead for paths that may be dragged. */
+const handleCache = new Map<string, Promise<DinFileHandle | null>>();
+const readyHandles = new Map<string, DinFileHandle>();
+
+function prefetchHandles(din: Din, paths: string[]): void {
+  for (const path of paths) {
+    if (handleCache.has(path)) continue;
+    handleCache.set(
+      path,
+      din.files.fromPath(path).then(
+        (handle) => {
+          readyHandles.set(path, handle);
+          return handle;
+        },
+        () => {
+          handleCache.delete(path);
+          return null;
+        },
+      ),
+    );
+  }
 }
 
 /**
@@ -151,38 +198,37 @@ function isFilesTabTransfer(value: unknown): value is { path: string } {
  * selection, drag and drop, cut/copy/paste, the Trash, undo, archives,
  * thumbnails, and a keyboard shortcut for nearly everything.
  *
- * Backed by `window.dinos.fs` (Electron preload + IPC into the main process, see
- * electron/files.mts for the heavier operations). Each tab is an
- * independent navigation context, all kept mounted so background tabs keep
- * their state; the tab strip is published into the window title bar.
+ * Works on the filesystem by path (`din.system.fs`, the `fs` permission;
+ * see electron/files.mts for the heavier operations), and hands files to
+ * other apps as handles. Each tab is an independent navigation context, all
+ * kept mounted so background tabs keep their state; the tab strip is the
+ * window's own header (a `custom` frame). Files windows share their undo
+ * history and move tabs between them (files/windows.ts).
  *
- * Launch params: `{ path?: string, select?: string }` - the folder to show
- * and an item in it to select.
+ * Opened with a folder (or a file, which it shows selected in its folder),
+ * and launch params `{ select?: string }`: an item in it to select.
  */
-export function FileBrowser({ windowId, params }: AppComponentProps) {
+export function FileBrowser() {
+  const din = useDin();
   const bridge = getFsBridge();
-  const { close: closeWindow, open } = useWindowActions();
-  const setTitlebar = useWindowTitlebar();
+  const queryClient = useQueryClient();
+  const windowState = useWindowState();
   const home = useHomeDir();
   const trash = useTrashDir();
   const [prefs, setPrefs] = useLocalStorage<FilesPrefs>('din:files:prefs', DEFAULT_PREFS);
   const mergedPrefs = useMemo(() => ({ ...DEFAULT_PREFS, ...prefs }), [prefs]);
 
-  const [tabs, setTabs] = useState<TabSpec[]>(() => {
-    // A window opened for a tab dragged out of another one.
-    const adopted = parkedTab(params);
-    if (isFilesTabTransfer(adopted)) return [{ id: newTabId(), path: adopted.path || undefined }];
-    return [
-      {
-        id: newTabId(),
-        path: typeof params?.path === 'string' ? params.path : undefined,
-        select: typeof params?.select === 'string' ? params.select : undefined,
-      },
-    ];
-  });
+  const [tabs, setTabs] = useState<TabSpec[]>(() => [launchTab(din.app.launch)]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   // Current directory per tab, reported up by each tab for its label.
   const [cwds, setCwds] = useState<Record<string, string | null>>({});
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  // A window opened for a torn-off tab goes where the tab was dropped.
+  useEffect(() => {
+    const place = din.app.launch.params.place;
+    if (isPlacement(place)) din.window.setBounds(place);
+  }, [din]);
 
   const openTab = useCallback((path?: string) => {
     const tab = { id: newTabId(), path };
@@ -191,8 +237,11 @@ export function FileBrowser({ windowId, params }: AppComponentProps) {
   }, []);
 
   const openWindow = useCallback(
-    (path?: string) => open('file-browser', path ? { path } : undefined),
-    [open],
+    (path?: string, params: Record<string, unknown> = {}) =>
+      void openWithPaths(din, 'file-browser', path ? [path] : [], params).catch((error: unknown) =>
+        console.warn('Files: couldn’t open a window:', error),
+      ),
+    [din],
   );
 
   const closeTab = useCallback(
@@ -202,7 +251,7 @@ export function FileBrowser({ windowId, params }: AppComponentProps) {
         if (index === -1) return ts;
         const next = ts.filter((t) => t.id !== id);
         if (next.length === 0) {
-          closeWindow(windowId);
+          din.window.close();
           return ts;
         }
         setActiveId((current) =>
@@ -215,7 +264,7 @@ export function FileBrowser({ windowId, params }: AppComponentProps) {
         return rest;
       });
     },
-    [closeWindow, windowId],
+    [din],
   );
 
   const cycleTab = useCallback(
@@ -229,113 +278,249 @@ export function FileBrowser({ windowId, params }: AppComponentProps) {
   );
 
   const activeCwd = cwds[activeId] ?? null;
-  useWindowTitle(activeCwd && folderTitle(activeCwd, home.data, trash.data));
+  const title = folderTitle(activeCwd, home.data, trash.data);
+  useWindowTitle(activeCwd && title);
 
   const cwdsRef = useRef(cwds);
   useEffect(() => {
     cwdsRef.current = cwds;
   }, [cwds]);
 
-  /** Hand a tab to another window, which reopens its directory. */
-  const takeTab = useCallback(
-    (id: string) => {
-      const path = cwdsRef.current[id];
-      closeTab(id);
+  // ---- Other Files windows: refreshes, undo, tabs moving between them ------
+
+  const { bounds } = windowState;
+  useEffect(() => {
+    joinWindows(din.window.state.id, { title, bounds });
+    updateWindowInfo({ title, bounds });
+  }, [din, title, bounds]);
+
+  useEffect(
+    () =>
+      onInvalidate((paths, bookmarks) => {
+        if (paths.length > 0) void invalidateListings(queryClient, ...paths);
+        if (bookmarks) void queryClient.invalidateQueries({ queryKey: ['fs', 'bookmarks'] });
+      }),
+    [queryClient],
+  );
+
+  const others = useSyncExternalStore(onOtherWindowsChange, otherWindows);
+
+  /** The slot in this window's strip under a point on the desktop. */
+  const slotAt = useCallback((desktopX: number | null) => {
+    const list = listRef.current;
+    if (desktopX === null || !list) return Infinity;
+    const x = desktopX - din.window.state.bounds.x;
+    const tabEls = [...list.querySelectorAll<HTMLElement>('[role="tab"]')];
+    const index = tabEls.findIndex((el) => {
+      const r = el.getBoundingClientRect();
+      return x < r.left + r.width / 2;
+    });
+    return index === -1 ? Infinity : index;
+  }, [din]);
+
+  useEffect(() => {
+    receiveTabs((path, x) => {
+      const tab = { id: newTabId(), path: path || undefined };
+      const index = slotAt(x);
+      setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
+      setActiveId(tab.id);
+      din.window.focus();
+    });
+    return () => receiveTabs(null);
+  }, [din, slotAt]);
+
+  const moveToWindow = useCallback(
+    (id: string, windowId: string, desktopX: number | null = null) => {
       // A tab still finding its home directory carries no path.
-      return { path: path ?? '' };
+      sendTab(windowId, cwdsRef.current[id] ?? '', desktopX);
+      closeTab(id);
     },
     [closeTab],
   );
 
-  const receiveTab = useCallback((payload: unknown, index: number) => {
-    if (!isFilesTabTransfer(payload)) return;
-    const tab = { id: newTabId(), path: payload.path || undefined };
-    setTabs((ts) => [...ts.slice(0, index), tab, ...ts.slice(index)]);
-    setActiveId(tab.id);
-  }, []);
+  const moveToNewWindow = useCallback(
+    (id: string, point?: DragPoint) => {
+      const path = cwdsRef.current[id] ?? undefined;
+      const b = din.window.state.bounds;
+      const place = point
+        ? { x: Math.round(b.x + point.x - GRAB.x), y: Math.max(0, Math.round(b.y + point.y - GRAB.y)), width: b.width, height: b.height }
+        : undefined;
+      openWindow(path, place ? { place } : {});
+      closeTab(id);
+    },
+    [din, openWindow, closeTab],
+  );
+
+  const transfer = useMemo<TabTransfer>(
+    () => ({
+      setList: (el) => {
+        listRef.current = el;
+      },
+      tearOff: {
+        enabled: true,
+        onDrop: (id, point) => {
+          // Dropped on another Files window: the tab moves there; anywhere
+          // else but this window's strip, it gets a window of its own.
+          const b = din.window.state.bounds;
+          const x = b.x + point.x;
+          const y = b.y + point.y;
+          const inside = ([, info]: [string, WindowInfo]) =>
+            x >= info.bounds.x && x < info.bounds.x + info.bounds.width && y >= info.bounds.y && y < info.bounds.y + info.bounds.height;
+          const target = otherWindowsNow().find(inside);
+          if (target) moveToWindow(id, target[0], x);
+          else moveToNewWindow(id, point);
+        },
+      },
+      enabled: true,
+      canDetach: tabs.length > 1,
+      moveToNewWindow,
+      moveToWindow: (id, windowId) => moveToWindow(id, windowId),
+      otherWindows: () => others.map(([windowId, info]) => ({ windowId, title: info.title })),
+    }),
+    [din, tabs.length, others, moveToWindow, moveToNewWindow],
+  );
 
   const reportCwd = useCallback((id: string, cwd: string | null) => {
     setCwds((c) => (c[id] === cwd ? c : { ...c, [id]: cwd }));
   }, []);
 
-  useEffect(() => {
-    if (!bridge) return;
-    setTitlebar(
-      <TabStrip
-        tabs={tabs.map((t) => ({
-          id: t.id,
-          title: folderTitle(cwds[t.id] ?? null, home.data, trash.data),
-          icon:
-            cwds[t.id] && cwds[t.id] === trash.data ? (
-              <Trash2 className="size-3.5 text-muted-foreground" />
-            ) : (
-              <Folder className="size-3.5 text-primary" />
-            ),
-        }))}
-        activeId={activeId}
-        label="Files tabs"
-        newTabLabel="New tab"
-        onActivate={setActiveId}
-        onClose={closeTab}
-        onNew={() => openTab(activeCwd ?? undefined)}
-        onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
-        transfer={{
-          windowId,
-          appId: 'file-browser',
-          group: 'file-browser',
-          title: folderTitle(activeCwd, home.data, trash.data),
-          take: takeTab,
-          receive: receiveTab,
-        }}
-      />,
-    );
-    return () => setTitlebar(null);
-  }, [bridge, tabs, cwds, activeId, activeCwd, windowId, closeTab, openTab, takeTab, receiveTab, setTitlebar, home.data, trash.data]);
+  const header = (
+    <WindowDragRegion className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 bg-background/60 pr-3 pl-2">
+      {bridge ? (
+        <div className="flex min-w-0 flex-1 items-center self-stretch">
+          <TabStrip
+            tabs={tabs.map((t) => ({
+              id: t.id,
+              title: folderTitle(cwds[t.id] ?? null, home.data, trash.data),
+              icon:
+                cwds[t.id] && cwds[t.id] === trash.data ? (
+                  <Trash2 className="size-3.5 text-muted-foreground" />
+                ) : (
+                  <Folder className="size-3.5 text-primary" />
+                ),
+            }))}
+            activeId={activeId}
+            label="Files tabs"
+            newTabLabel="New tab"
+            onActivate={setActiveId}
+            onClose={closeTab}
+            onNew={() => openTab(activeCwd ?? undefined)}
+            onMove={(id, to) => setTabs((ts) => moveItem(ts, id, to))}
+            transfer={transfer}
+            moveWindow={tabs.length === 1 ? dinWindowMove(din) : undefined}
+          />
+        </div>
+      ) : (
+        <>
+          <img src="/icons/apps/file-browser.png" alt="" className="size-4 shrink-0" />
+          <span className="flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium">Files</span>
+        </>
+      )}
+      <WindowControls />
+    </WindowDragRegion>
+  );
 
   if (!bridge) {
     return (
-      <div className="grid h-full w-full place-items-center p-6">
-        <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
-          <HardDrive className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
-          <p className="text-sm text-muted-foreground">
-            Files needs the Electron shell to access the OS filesystem. Run{' '}
-            <code className="rounded bg-foreground/10 px-1 py-0.5">npm run dev</code> or
-            boot DinOS; the bridge is not available in a plain browser.
-          </p>
+      <div className="flex h-full w-full flex-col">
+        {header}
+        <div className="grid min-h-0 flex-1 place-items-center p-6">
+          <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+            <HardDrive className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
+            <p className="text-sm text-muted-foreground">
+              Files needs the Electron shell to access the OS filesystem. Run{' '}
+              <code className="rounded bg-foreground/10 px-1 py-0.5">npm run dev</code> or
+              boot DinOS; the bridge is not available in a plain browser.
+            </p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="relative h-full w-full">
-      {tabs.map((tab) => (
-        <div
-          key={tab.id}
-          className="absolute inset-0"
-          style={
-            tab.id === activeId
-              ? undefined
-              : { visibility: 'hidden', pointerEvents: 'none' }
-          }
-        >
-          <FileBrowserTab
-            tabId={tab.id}
-            active={tab.id === activeId}
-            initialPath={tab.path}
-            initialSelect={tab.select}
-            prefs={mergedPrefs}
-            setPrefs={setPrefs}
-            onCwdChange={reportCwd}
-            onNewTab={openTab}
-            onNewWindow={openWindow}
-            onCloseTab={() => closeTab(tab.id)}
-            onCycleTab={cycleTab}
-          />
-        </div>
-      ))}
+    <div className="flex h-full w-full flex-col">
+      {header}
+      <div className="relative min-h-0 flex-1">
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className="absolute inset-0"
+            style={
+              tab.id === activeId
+                ? undefined
+                : { visibility: 'hidden', pointerEvents: 'none' }
+            }
+          >
+            <FileBrowserTab
+              tabId={tab.id}
+              active={tab.id === activeId}
+              windowFocused={windowState.focused}
+              initialPath={tab.path}
+              initialSelect={tab.select}
+              prefs={mergedPrefs}
+              setPrefs={setPrefs}
+              onCwdChange={reportCwd}
+              onNewTab={openTab}
+              onNewWindow={openWindow}
+              onCloseTab={() => closeTab(tab.id)}
+              onCycleTab={cycleTab}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
+}
+
+/** What's on Din's file clipboard: whether anything is, and the paths that were cut (drawn faded). */
+function useClipboardFiles(din: Din): { count: number; cutPaths: string[] } | null {
+  const [state, setState] = useState<{ count: number; cutPaths: string[] } | null>(null);
+  useEffect(() => {
+    let seq = 0;
+    const update = (has: { count: number; cut: boolean } | null) => {
+      const n = ++seq;
+      if (!has || has.count === 0) setState(null);
+      else if (!has.cut) setState({ count: has.count, cutPaths: [] });
+      else {
+        void din.clipboard.readFiles().then((board) => {
+          if (n !== seq) return;
+          const cutPaths = board?.cut ? board.files.flatMap((f) => (f.path ? [f.path] : [])) : [];
+          setState({ count: has.count, cutPaths });
+        });
+      }
+    };
+    // What's there already; the desktop says when it changes from now on.
+    void din.clipboard.readFiles().then((board) => {
+      if (seq === 0) update(board && { count: board.files.length, cut: board.cut });
+    });
+    return din.clipboard.onFilesChange(update);
+  }, [din]);
+  return state;
+}
+
+/** The sidebar's favorites, and other Files windows told when they change here. */
+function useSharedBookmarks(home: string | undefined) {
+  const bookmarks = useBookmarks(home);
+  const edited = useRef(false);
+  const key = bookmarks.bookmarks.map((b) => `${b.path}\u0000${b.label ?? ''}`).join('\n');
+  useEffect(() => {
+    if (!edited.current) return;
+    edited.current = false;
+    broadcastInvalidate([], true);
+  }, [key]);
+  const { add, remove } = bookmarks;
+  return {
+    bookmarks: bookmarks.bookmarks,
+    add: (path: string) => {
+      edited.current = true;
+      add(path);
+    },
+    remove: (path: string) => {
+      edited.current = true;
+      remove(path);
+    },
+  };
 }
 
 type Dialog =
@@ -369,6 +554,7 @@ const basename = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 function FileBrowserTab({
   tabId,
   active,
+  windowFocused,
   initialPath,
   initialSelect,
   prefs,
@@ -381,6 +567,8 @@ function FileBrowserTab({
 }: {
   tabId: string;
   active: boolean;
+  /** The window has keyboard focus. */
+  windowFocused: boolean;
   initialPath?: string;
   initialSelect?: string;
   prefs: FilesPrefs;
@@ -392,13 +580,12 @@ function FileBrowserTab({
   onCycleTab: (delta: number) => void;
 }) {
   const queryClient = useQueryClient();
-  const { open } = useWindowActions();
-  const { setBackground } = useDesktopBackground();
-  const isTop = useWindowIsTop();
+  const din = useDin();
+  const isTop = windowFocused;
   const home = useHomeDir();
   const trash = useTrashDir();
-  const bookmarks = useBookmarks(home.data);
-  const clipboard = useFileClipboard();
+  const bookmarks = useSharedBookmarks(home.data);
+  const clipboard = useClipboardFiles(din);
   const fs = getFsBridge()!;
 
   const [history, setHistory] = useState<string[]>(() => (initialPath ? [initialPath] : []));
@@ -471,8 +658,8 @@ function FileBrowserTab({
     [selectedNames, entries, byName],
   );
   const cut = useMemo(() => {
-    if (!clipboard || clipboard.op !== 'cut' || cwd === null) return new Set<string>();
-    return new Set(clipboard.paths.filter((p) => parentPath(p) === cwd).map(basename));
+    if (!clipboard || cwd === null) return new Set<string>();
+    return new Set(clipboard.cutPaths.filter((p) => parentPath(p) === cwd).map(basename));
   }, [clipboard, cwd]);
 
   const focusView = useCallback(() => {
@@ -592,6 +779,8 @@ function FileBrowserTab({
     (...paths: string[]) => {
       void invalidateListings(queryClient, ...paths);
       void queryClient.invalidateQueries({ queryKey: ['fs', 'du'] });
+      // Other Files windows may be showing (or have cached) these folders.
+      broadcastInvalidate(paths);
     },
     [queryClient],
   );
@@ -599,6 +788,16 @@ function FileBrowserTab({
   const pathsOf = useCallback(
     (names: string[]) => (cwd === null ? [] : names.map((n) => joinPath(cwd, n))),
     [cwd],
+  );
+
+  /** Open files (or folders) in an app, as handles; failures go to the status bar. */
+  const openIn = useCallback(
+    (appId: string, paths: string[], params: Record<string, unknown> = {}) => {
+      openWithPaths(din, appId, paths, params).catch((error: unknown) =>
+        setStatus({ kind: 'error', text: cleanFsError(error) }),
+      );
+    },
+    [din],
   );
 
   const openNames = useCallback(
@@ -618,43 +817,50 @@ function FileBrowserTab({
       }
       // Songs and playlists go to Media Player together, as one list.
       const music = files.filter((f) => isMediaPlayerFile(f.name));
-      if (music.length > 0) open('media-player', { paths: music.map((f) => joinPath(cwd, f.name)), at: Date.now() });
-      const nativeApps = getNativeAppsBridge();
+      if (music.length > 0) openIn('media-player', music.map((f) => joinPath(cwd, f.name)), { at: Date.now() });
       for (const file of files.filter((f) => !isMediaPlayerFile(f.name))) {
         const target = joinPath(cwd, file.name);
-        if (nativeApps && isWindowsProgram(file.name)) {
-          // Windows programs run, as they would from Explorer. The first one
-          // also sets up Wine, which takes a while, so say something meanwhile.
-          // Habitual double-clicks land here twice; one copy is plenty.
-          if (startingRef.current.has(target)) continue;
-          startingRef.current.add(target);
-          setStatus({ kind: 'busy', text: `Opening ${file.name}…` });
-          nativeApps
-            .runWindowsProgram(target)
-            .then(() => setStatus((s) => (s?.text === `Opening ${file.name}…` ? null : s)))
-            .catch((error: unknown) => setStatus({ kind: 'error', text: cleanFsError(error) }))
-            .finally(() => {
-              // Wine takes a moment more to put the window up.
-              setTimeout(() => startingRef.current.delete(target), 3_000);
-            });
-        } else {
-          open(appForFile(file.name), { path: target });
+        if (!isWindowsProgram(file.name)) {
+          din.files.fromPath(target).then((handle) => din.app.openFiles([handle])).catch((error: unknown) =>
+            setStatus({ kind: 'error', text: cleanFsError(error) }),
+          );
+          continue;
         }
+        // Windows programs run, as they would from Explorer. The first one
+        // also sets up Wine, which takes a while, so say something meanwhile.
+        // Habitual double-clicks land here twice; one copy is plenty.
+        if (startingRef.current.has(target)) continue;
+        startingRef.current.add(target);
+        setStatus({ kind: 'busy', text: `Opening ${file.name}…` });
+        din.files
+          .fromPath(target)
+          .then((handle) => din.app.openFiles([handle]))
+          .then(() => setStatus((s) => (s?.text === `Opening ${file.name}…` ? null : s)))
+          .catch((error: unknown) => setStatus({ kind: 'error', text: cleanFsError(error) }))
+          .finally(() => {
+            // Wine takes a moment more to put the window up.
+            setTimeout(() => startingRef.current.delete(target), 3_000);
+          });
       }
     },
-    [cwd, entries, byName, navigate, onNewTab, onNewWindow, open],
+    [cwd, entries, byName, navigate, onNewTab, onNewWindow, openIn, din],
   );
 
   const copyOrCut = useCallback(
     (op: 'copy' | 'cut', names: string[]) => {
       if (names.length === 0) return;
-      setFileClipboard({ op, paths: pathsOf(names) });
-      setStatus({
-        kind: 'info',
-        text: `${op === 'copy' ? 'Copied' : 'Cut'} ${describe(names)} - paste with Ctrl+V`,
-      });
+      Promise.all(pathsOf(names).map((p) => din.files.fromPath(p))).then(
+        (handles) => {
+          din.clipboard.writeFiles(handles, op === 'cut');
+          setStatus({
+            kind: 'info',
+            text: `${op === 'copy' ? 'Copied' : 'Cut'} ${describe(names)} - paste with Ctrl+V`,
+          });
+        },
+        (error: unknown) => setStatus({ kind: 'error', text: cleanFsError(error) }),
+      );
     },
-    [pathsOf],
+    [pathsOf, din],
   );
 
   const trashPaths = useCallback(
@@ -676,14 +882,7 @@ function FileBrowserTab({
         } finally {
           refresh(...paths);
           if (trashed.length > 0) {
-            pushUndo({
-              label: `trashing ${describe(names.slice(0, trashed.length))}`,
-              undo: async () => {
-                const restored: string[] = [];
-                for (const t of trashed) restored.push(await fs.restore(t));
-                refresh(...restored);
-              },
-            });
+            pushUndo(`trashing ${describe(names.slice(0, trashed.length))}`, { kind: 'restore', trashed });
           }
         }
       });
@@ -742,17 +941,10 @@ function FileBrowserTab({
           refresh(target, ...paths, ...done.map((d) => d.to));
           if (target === cwd && done.length > 0) setPending({ names: done.map((d) => basename(d.to)) });
           if (done.length > 0) {
-            pushUndo({
-              label: `${copy ? 'copy' : 'move'} of ${describe(done.map((d) => basename(d.to)))}`,
-              undo: async () => {
-                if (copy) {
-                  for (const d of done) await fs.trash(d.to);
-                } else {
-                  for (const d of [...done].reverse()) await fs.move(d.to, d.from);
-                }
-                refresh(target, ...done.flatMap((d) => [d.from, d.to]));
-              },
-            });
+            pushUndo(
+              `${copy ? 'copy' : 'move'} of ${describe(done.map((d) => basename(d.to)))}`,
+              copy ? { kind: 'trash', paths: done.map((d) => d.to) } : { kind: 'move', moves: done },
+            );
           }
         }
       });
@@ -762,13 +954,20 @@ function FileBrowserTab({
 
   const paste = useCallback(
     (into?: string) => {
-      const board = getFileClipboard();
       const target = into ?? cwd;
-      if (!board || target === null) return;
-      transfer(target, board.paths, board.op === 'copy');
-      if (board.op === 'cut') setFileClipboard(null);
+      if (target === null) return;
+      din.clipboard.readFiles().then(
+        (board) => {
+          const paths = (board?.files ?? []).flatMap((f) => (f.path ? [f.path] : []));
+          if (!board || paths.length === 0) return;
+          transfer(target, paths, !board.cut);
+          // What was cut is gone from where it was: nothing's left to paste.
+          if (board.cut) din.clipboard.writeFiles([], false);
+        },
+        (error: unknown) => setStatus({ kind: 'error', text: cleanFsError(error) }),
+      );
     },
-    [cwd, transfer],
+    [cwd, transfer, din],
   );
 
   const renameEntry = useCallback(
@@ -782,13 +981,7 @@ function FileBrowserTab({
         await fs.move(src, dest);
         refresh(src, dest);
         setPending({ names: [to] });
-        pushUndo({
-          label: `rename of “${to}”`,
-          undo: async () => {
-            await fs.move(dest, src);
-            refresh(src, dest);
-          },
-        });
+        pushUndo(`rename of “${to}”`, { kind: 'move', moves: [{ from: src, to: dest }] });
       });
     },
     [cwd, fs, run, refresh, focusView],
@@ -804,13 +997,7 @@ function FileBrowserTab({
         else await fs.writeFile(path, '');
         refresh(path);
         setPending({ names: [name], rename: true });
-        pushUndo({
-          label: `creation of “${name}”`,
-          undo: async () => {
-            await fs.rm(path);
-            refresh(path);
-          },
-        });
+        pushUndo(`creation of “${name}”`, { kind: 'remove', path });
       });
     },
     [cwd, isTrash, listing.data, fs, run, refresh],
@@ -827,13 +1014,7 @@ function FileBrowserTab({
           refresh(cwd);
           if (made.length > 0) {
             setPending({ names: made.map(basename) });
-            pushUndo({
-              label: `duplicate of ${describe(made.map(basename))}`,
-              undo: async () => {
-                for (const p of made) await fs.trash(p);
-                refresh(cwd);
-              },
-            });
+            pushUndo(`duplicate of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
           }
         }
       });
@@ -872,13 +1053,7 @@ function FileBrowserTab({
           refresh(cwd);
           if (made.length > 0) {
             setPending({ names: made.map(basename) });
-            pushUndo({
-              label: `extraction of ${describe(made.map(basename))}`,
-              undo: async () => {
-                for (const p of made) await fs.trash(p);
-                refresh(cwd);
-              },
-            });
+            pushUndo(`extraction of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
           }
         }
       });
@@ -901,13 +1076,7 @@ function FileBrowserTab({
           setDialog(null);
           refresh(cwd);
           setPending({ names: [basename(out)] });
-          pushUndo({
-            label: `creation of “${basename(out)}”`,
-            undo: async () => {
-              await fs.trash(out);
-              refresh(cwd);
-            },
-          });
+          pushUndo(`creation of “${basename(out)}”`, { kind: 'trash', paths: [out] });
           requestAnimationFrame(focusView);
         },
         (error: unknown) =>
@@ -948,20 +1117,38 @@ function FileBrowserTab({
       setStatus({ kind: 'info', text: 'Nothing to undo' });
       return;
     }
-    void run(`Undoing ${entry.label}…`, entry.undo);
-  }, [run]);
+    void run(`Undoing ${entry.label}…`, async () => refresh(...(await runUndo(fs, entry.op))));
+  }, [run, fs, refresh]);
 
-  const openInTerminal = useCallback((path: string) => open('terminal', { cwd: path }), [open]);
-  const canPrint = !!getPrintingBridge();
+  const openInTerminal = useCallback((path: string) => void din.app.open('terminal', { cwd: path }), [din]);
+  const canPrint = din.print.available;
   const print = useCallback((path: string | undefined) => {
     if (!path) return;
-    printFile(path).catch((error) => setStatus({ kind: 'error', text: cleanPrintingError(error) }));
-  }, []);
-  const { config } = useAppContext();
-  const hasAssistant = !!getAssistantBridge() && config.assistantEnabled;
+    din.files
+      .fromPath(path)
+      .then((handle) => din.print.file(handle))
+      .catch((error: unknown) => setStatus({ kind: 'error', text: cleanPrintingError(error) }));
+  }, [din]);
+  const setBackground = useCallback((path: string | undefined) => {
+    if (!path) return;
+    din.files
+      .fromPath(path)
+      .then((handle) => din.desktop.setWallpaper(handle))
+      .catch((error: unknown) => setStatus({ kind: 'error', text: cleanFsError(error) }));
+  }, [din]);
+  // Whether the Assistant is set up and on; checked again as the window comes forward.
+  const [hasAssistant, setHasAssistant] = useState(false);
+  useEffect(() => {
+    if (!isTop) return;
+    let live = true;
+    din.app.canOpen('assistant').then((can) => live && setHasAssistant(can), () => {});
+    return () => {
+      live = false;
+    };
+  }, [din, isTop]);
   const openInAssistant = useCallback(
-    (path: string) => open('assistant', { sessionID: undefined, directory: path, nonce: Date.now() }),
-    [open],
+    (path: string) => void din.app.open('assistant', { directory: path, nonce: Date.now() }),
+    [din],
   );
 
   const copyPaths = useCallback((paths: string[]) => {
@@ -1009,13 +1196,16 @@ function FileBrowserTab({
 
   const onItemPointerDown = useCallback(
     (name: string, e: React.MouseEvent) => {
+      // A drag may follow, which leaves the window only with handles, and
+      // has to have them by the time it starts.
+      prefetchHandles(din, pathsOf(selected.has(name) ? selectedNames : [name]));
       if (renaming !== null && renaming !== name) setRenaming(null);
       if (e.shiftKey) selectRange(name, e.ctrlKey || e.metaKey);
       else if (e.ctrlKey || e.metaKey) setCursor(name);
       else if (!selected.has(name)) selectOnly(name);
       else setCursor(name);
     },
-    [renaming, selected, selectRange, selectOnly],
+    [din, pathsOf, selectedNames, renaming, selected, selectRange, selectOnly],
   );
 
   const onItemClick = useCallback(
@@ -1077,7 +1267,9 @@ function FileBrowserTab({
       const folders = new Set(
         names.filter((n) => entries[byName.get(n)!]?.kind === 'directory').map((n) => joinPath(cwd, n)),
       );
-      startFileDrag(e, { paths: pathsOf(names), folders }, names.length === 1 ? names[0] : `${names.length} items`);
+      const paths = pathsOf(names);
+      const handles = paths.flatMap((p) => readyHandles.get(p) ?? []);
+      startFilesDrag(e, paths, folders, names.length === 1 ? names[0] : `${names.length} items`, handles.length === paths.length ? handles : null);
     },
     [cwd, selected, selectedNames, selectOnly, entries, byName, pathsOf],
   );
@@ -1631,7 +1823,7 @@ function FileBrowserTab({
                     onItemContextMenu={onItemContextMenu}
                     onBackgroundContextMenu={onBackgroundContextMenu}
                     onItemDragStart={onItemDragStart}
-                    onDragEnd={endFileDrag}
+                    onDragEnd={endFilesDrag}
                     onDrop={transfer}
                     onRenameSubmit={renameEntry}
                     onRenameCancel={() => {
@@ -1678,37 +1870,37 @@ function FileBrowserTab({
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && !isTextFile(single.name) && (
-                      <ContextMenuItem onSelect={() => open('text-editor', { path: pathsOf([single.name])[0] })}>
+                      <ContextMenuItem onSelect={() => openIn('text-editor', pathsOf([single.name]))}>
                         Open in Text Editor
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isDelimitedText(single.name) && (
-                      <ContextMenuItem onSelect={() => open('spreadsheet', { path: pathsOf([single.name])[0] })}>
+                      <ContextMenuItem onSelect={() => openIn('spreadsheet', pathsOf([single.name]))}>
                         Open in Spreadsheet
                       </ContextMenuItem>
                     )}
                     {!isTrash && selectedNames.some((n) => isPlayableAudio(n) || isPlayableVideo(n)) && (
-                      <ContextMenuItem onSelect={() => open('media-player', { paths: pathsOf(selectedNames), how: 'enqueue', at: Date.now() })}>
+                      <ContextMenuItem onSelect={() => openIn('media-player', pathsOf(selectedNames), { how: 'enqueue', at: Date.now() })}>
                         Add to Media Player List
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isPlayableVideo(single.name) && (
-                      <ContextMenuItem onSelect={() => open('media-player', { paths: pathsOf([single.name]), at: Date.now() })}>
+                      <ContextMenuItem onSelect={() => openIn('media-player', pathsOf([single.name]), { at: Date.now() })}>
                         Play in Media Player
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isViewableImage(single.name) && (
-                      <ContextMenuItem onSelect={() => open('paint', { path: pathsOf([single.name])[0] })}>
+                      <ContextMenuItem onSelect={() => openIn('paint', pathsOf([single.name]))}>
                         Edit in Paint
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isPhotoEditable(single.name) && !isLayeredImage(single.name) && (
-                      <ContextMenuItem onSelect={() => open('photo-editor', { path: pathsOf([single.name])[0] })}>
+                      <ContextMenuItem onSelect={() => openIn('photo-editor', pathsOf([single.name]))}>
                         Edit in Photo Editor
                       </ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isVectorEditable(single.name) && (
-                      <ContextMenuItem onSelect={() => open('vector-editor', { path: pathsOf([single.name])[0] })}>
+                      <ContextMenuItem onSelect={() => openIn('vector-editor', pathsOf([single.name]))}>
                         Edit in Vector Editor
                       </ContextMenuItem>
                     )}
@@ -1716,7 +1908,7 @@ function FileBrowserTab({
                       <ContextMenuItem onSelect={() => print(pathsOf([single.name])[0])}>Print…</ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isViewableImage(single.name) && (
-                      <ContextMenuItem onSelect={() => void setBackground({ path: pathsOf([single.name])[0] })}>
+                      <ContextMenuItem onSelect={() => setBackground(pathsOf([single.name])[0])}>
                         Set as Desktop Background
                       </ContextMenuItem>
                     )}
@@ -1764,7 +1956,7 @@ function FileBrowserTab({
                         <ContextMenuItem onSelect={() => openInTerminal(singleFolderPath)}>
                           Open in Terminal
                         </ContextMenuItem>
-                        <ContextMenuItem onSelect={() => open('text-editor', { folder: singleFolderPath })}>
+                        <ContextMenuItem onSelect={() => openIn('text-editor', [singleFolderPath])}>
                           Open in Text Editor
                         </ContextMenuItem>
                         {hasAssistant && (
@@ -1819,7 +2011,7 @@ function FileBrowserTab({
                     <ContextMenuSeparator />
                     <ContextMenuItem onSelect={() => cwd && openInTerminal(cwd)}>Open in Terminal</ContextMenuItem>
                     {cwd && (
-                      <ContextMenuItem onSelect={() => open('text-editor', { folder: cwd })}>Open in Text Editor</ContextMenuItem>
+                      <ContextMenuItem onSelect={() => openIn('text-editor', [cwd])}>Open in Text Editor</ContextMenuItem>
                     )}
                     {cwd && hasAssistant && (
                       <ContextMenuItem onSelect={() => openInAssistant(cwd)}>Open in Assistant</ContextMenuItem>
@@ -2079,22 +2271,21 @@ function Breadcrumbs({
                   onClick={() => onNavigate(c.path)}
                   aria-current={last ? 'location' : undefined}
                   onDragOver={(e) => {
-                    if (last || !e.dataTransfer.types.includes('application/x-din-files')) return;
+                    const drag = draggedFiles(e);
+                    if (last || !drag || !canDropInto(drag.paths, c.path, dropCopies(e))) return;
                     e.preventDefault();
-                    e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+                    e.dataTransfer.dropEffect = dropCopies(e) ? 'copy' : 'move';
                     setOver(c.path);
                   }}
                   onDragLeave={() => setOver((o) => (o === c.path ? null : o))}
                   onDrop={(e) => {
                     setOver(null);
-                    const raw = e.dataTransfer.getData('application/x-din-files');
-                    if (!raw) return;
+                    if (last || !draggedFiles(e)) return;
                     e.preventDefault();
-                    try {
-                      onDrop(c.path, JSON.parse(raw) as string[], e.ctrlKey);
-                    } catch {
-                      // Not ours after all.
-                    }
+                    void takeDrop(e, dropCopies(e)).then((dropped) => {
+                      const paths = (dropped?.paths ?? []).filter((p) => canDropInto([p], c.path, dropped?.copy ?? true));
+                      if (dropped && paths.length > 0) onDrop(c.path, paths, dropped.copy);
+                    });
                   }}
                   className={cn(
                     'flex h-6 items-center gap-1.5 rounded px-1.5 text-sm',

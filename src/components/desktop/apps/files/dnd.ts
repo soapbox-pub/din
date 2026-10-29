@@ -1,6 +1,8 @@
 /**
- * Drag and drop of files between Files windows, tabs, and the sidebar, and
- * out of Files into native apps and web pages.
+ * Drag and drop of files the desktop itself starts (a screenshot's
+ * thumbnail), and the drop side for web pages and native windows, which
+ * take files dragged here or from apps (Files' drags come by token through
+ * `din.drag`, src/lib/dinDrag.ts).
  *
  * The paths ride in the DataTransfer under a private type, but a drag's
  * data can't be read until the drop, and drop targets need to know sooner

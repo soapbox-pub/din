@@ -33,7 +33,7 @@ import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { useVolumes } from '@/hooks/useVolumes';
 import type { FilePickerOptions, FilePickerResult } from '@/contexts/FilePickerContext';
 import { FileIcon } from '@/shared/FileIcon';
-import { USER_DIRS } from '@/components/desktop/apps/files/layout';
+import { USER_DIRS } from '@/shared/userDirs';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
