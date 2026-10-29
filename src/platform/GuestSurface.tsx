@@ -3,7 +3,7 @@ import type { CSSProperties, Ref, RefObject } from 'react';
 import { activeFileDrag, fileDragActive, subscribeFileDrag } from '@/components/desktop/apps/files/dnd';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
-import { createGuest, guest, GUEST_EVENTS, guestId, type GuestElement } from '@/platform/guest';
+import { createGuest, guest, GUEST_EVENTS, guestId, isGuestFullscreen, type GuestElement } from '@/platform/guest';
 
 /** Imperative controls of a guest surface. */
 export interface GuestSurfaceHandle {
@@ -239,8 +239,8 @@ export function GuestSurface({
   // rest of the desktop inert, ignoring every click. It leaves fullscreen.
   useEffect(() => {
     const el = elRef.current;
-    if (!hidden || !el || document.fullscreenElement !== el) return;
-    void document.exitFullscreen().catch(() => {});
+    if (!hidden || !el || !isGuestFullscreen(el)) return;
+    if (document.fullscreenElement === el) void document.exitFullscreen().catch(() => {});
     guest.executeJavaScript(el, 'document.fullscreenElement && document.exitFullscreen().catch(() => {})').catch(() => {});
   }, [hidden]);
 

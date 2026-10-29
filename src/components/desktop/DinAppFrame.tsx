@@ -84,7 +84,7 @@ import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { readStoredModel, setStoredModel, setViewedSession, subscribeStoredModel, followDinSession } from '@/hooks/useAssistant';
 import { setTabDragLabel } from '@/lib/dinDrag';
 import { acceptDrag, dragInfo, finishDrag, registerDrag, setDragPoint, subscribeDrag, currentDrag } from '@/lib/dinDrag';
-import { guestsAvailable } from '@/platform/guest';
+import { guestElements, guestsAvailable, isGuestFullscreen } from '@/platform/guest';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
 import type { AssistantSettings, DinManifest, FrameStyle, MediaSession, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
@@ -242,8 +242,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
     const update = () => {
-      const el = document.fullscreenElement;
-      setFullscreen(el !== null && container.current?.contains(el) === true);
+      const root = container.current;
+      setFullscreen(!!root && guestElements().some((el) => root.contains(el) && isGuestFullscreen(el)));
     };
     document.addEventListener('fullscreenchange', update);
     return () => document.removeEventListener('fullscreenchange', update);

@@ -124,7 +124,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     let height = host.clientHeight;
     // In full screen the box spans the whole page, but only the monitor it
     // was moved onto shows.
-    if (document.fullscreenElement === host) {
+    if (host.matches(':fullscreen')) {
       const monitor = monitorsRef.current.find((m) => contains(m, rect.left, rect.top));
       if (monitor) {
         width = Math.min(width, monitor.width);
@@ -187,7 +187,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     const host = hostRef.current;
     if (!host || !xid) return;
     const onChange = () => {
-      const fullscreen = document.fullscreenElement === host;
+      // A page on another monitor can go fullscreen after this one.
+      const fullscreen = host.matches(':fullscreen');
       if (fullscreen === fullscreenRef.current) return;
       fullscreenRef.current = fullscreen;
       setNativeFullscreen(xid, fullscreen);

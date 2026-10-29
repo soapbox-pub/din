@@ -1157,6 +1157,86 @@ function shellGuestFromId(wcId: unknown): Electron.WebContents | null {
 /** Guests laid out at a monitor's size, waiting to leave fullscreen. */
 const fittedGuests = new Set<number>();
 
+// Pages on different monitors can be fullscreen at once, but Chromium has one
+// fullscreen state for the whole window: one page leaving fullscreen (Escape,
+// its player's button) takes every other page out too. The rest are put back,
+// all but the one the user last clicked or typed in, which is the one leaving.
+// Each page's fullscreen element is kept in a world of its own to re-request.
+
+const FULLSCREEN_WORLD_ID = 1_338;
+
+/** Shell guests in fullscreen. */
+const fullscreenGuests = new Set<number>();
+/** When each shell guest last had a click, tap, or key. */
+const guestInputAt = new Map<number, number>();
+/** The guests that were fullscreen when they started leaving together. */
+let leavingGuests: Set<number> | null = null;
+
+function attachPageFullscreen(contents: Electron.WebContents): void {
+  const id = contents.id;
+  const touched = () => guestInputAt.set(id, Date.now());
+  contents.on('before-mouse-event', (_event, mouse) => {
+    if (mouse.type === 'mouseDown') touched();
+  });
+  contents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown') touched();
+  });
+  contents.on('input-event', (_event, input) => {
+    if (input.type === 'touchEnd' || input.type === 'gestureTap') touched();
+  });
+  contents.on('enter-html-full-screen', () => {
+    if (contents.hostWebContents?.id !== shellContentsId) return;
+    fullscreenGuests.add(id);
+    contents
+      .executeJavaScriptInIsolatedWorld(FULLSCREEN_WORLD_ID, [
+        { code: 'window.dinFullscreenElement = document.fullscreenElement; void 0' },
+      ])
+      .catch(() => {});
+  });
+  contents.on('leave-html-full-screen', () => {
+    if (!fullscreenGuests.has(id)) return;
+    if (!leavingGuests) {
+      leavingGuests = new Set(fullscreenGuests);
+      setTimeout(restoreFullscreenGuests, 100);
+    }
+    fullscreenGuests.delete(id);
+  });
+  contents.once('destroyed', () => {
+    fullscreenGuests.delete(id);
+    guestInputAt.delete(id);
+  });
+}
+
+function restoreFullscreenGuests(): void {
+  const left = leavingGuests;
+  leavingGuests = null;
+  if (!left || left.size < 2) return;
+  let leaving: number | null = null;
+  let latest = -Infinity;
+  for (const id of left) {
+    const at = guestInputAt.get(id) ?? -Infinity;
+    if (at > latest) {
+      latest = at;
+      leaving = id;
+    }
+  }
+  // Nobody touched any of them: no telling which one meant to leave.
+  if (leaving === null) return;
+  for (const id of left) {
+    // A page the shell hid (its tab went to the background) left on purpose.
+    if (id === leaving || fullscreenGuests.has(id) || hiddenGuests.has(id)) continue;
+    const guest = webContents.fromId(id);
+    if (!guest || guest.isDestroyed()) continue;
+    guest
+      .executeJavaScriptInIsolatedWorld(
+        FULLSCREEN_WORLD_ID,
+        [{ code: 'window.dinFullscreenElement?.isConnected && window.dinFullscreenElement.requestFullscreen().catch(() => {}); void 0' }],
+        true,
+      )
+      .catch(() => {});
+  }
+}
+
 function registerPageFullscreenHandlers(): void {
   ipcMain.handle('pageFullscreen:fit', (event, wcId, rawWidth, rawHeight) => {
     assertShellSender(event);
@@ -5743,6 +5823,7 @@ app.on('web-contents-created', (_event, contents) => {
   // Super+A's release is forwarded too, when it was pressed here: holding it
   // dictates into the assistant's prompt until it comes up.
   if (contents.getType() === 'webview') {
+    attachPageFullscreen(contents);
     let assistantKeyDown = false;
     contents.on('before-input-event', (event, input) => {
       // Super+H held: only the first press toggles dictation (see

@@ -128,6 +128,14 @@ export function guestFrame(el: GuestElement): HTMLElement | null {
   return el.shadowRoot?.querySelector('iframe') ?? null;
 }
 
+/**
+ * Whether the guest's page is fullscreen. Several can be at once (on
+ * different monitors), and document.fullscreenElement is only the last.
+ */
+export function isGuestFullscreen(el: GuestElement): boolean {
+  return guestFrame(el)?.matches(':fullscreen') ?? false;
+}
+
 /** The guest's navigation and page controls. All tolerate a guest that isn't attached yet. */
 export const guest = {
   reload: (el: GuestElement) => engine(el).reload(),

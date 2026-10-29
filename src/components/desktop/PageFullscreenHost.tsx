@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { contains, getMonitorsBridge, type Monitor } from '@/lib/monitors';
-import { setFullscreenMonitor } from '@/lib/pageFullscreen';
-import { guestFrame, guestId, isGuestElement } from '@/platform/guest';
+import { setFullscreenMonitors } from '@/lib/pageFullscreen';
+import { guestElements, guestFrame, guestId, isGuestElement, isGuestFullscreen } from '@/platform/guest';
 
 interface PageFullscreenBridge {
   fit(webContentsId: number, width: number, height: number): Promise<void>;
@@ -36,6 +36,11 @@ const STYLE_ID = 'din-page-fullscreen';
  * layer (index.html's `#shell`) opens as one, above the frame, with a hole
  * cut over the frame's monitor.
  *
+ * Each monitor can have its own fullscreen page at the same time; each frame
+ * goes to its monitor and the layer has a hole over every one. (Chromium
+ * takes them all out of fullscreen when one leaves; main puts the others
+ * back, electron/main.mts.)
+ *
  * A native app in full screen is the same, with its window's canvas host
  * (NativeWindowView.tsx) as the frame; the app sizes itself to the monitor.
  *
@@ -59,20 +64,21 @@ export function PageFullscreenHost() {
     if (!bridge) return;
     const shell = document.getElementById('shell');
     const layer = shell instanceof HTMLDialogElement ? shell : null;
-    let fitted: HTMLElement | null = null;
-    // Whether the fullscreen page is laid out at a monitor's size, which only
-    // leaving fullscreen undoes in the main process.
-    let emulated = false;
+    const fitted = new Set<HTMLElement>();
+    // The fullscreen pages laid out at a monitor's size, which only leaving
+    // fullscreen undoes in the main process.
+    const emulated = new Set<number>();
 
     // Escape belongs to the fullscreen page, not to the desktop's layer.
     const onCancel = (event: Event) => event.preventDefault();
     layer?.addEventListener('cancel', onCancel);
 
     const unfit = () => {
-      if (!fitted) return;
-      fitted.style.translate = '';
-      fitted.style.clipPath = '';
-      fitted = null;
+      for (const frame of fitted) {
+        frame.style.translate = '';
+        frame.style.clipPath = '';
+      }
+      fitted.clear();
       if (layer?.open) {
         layer.close();
         Object.assign(layer.style, { left: '', top: '', width: '', height: '', clipPath: '' });
@@ -80,7 +86,7 @@ export function PageFullscreenHost() {
     };
 
     const fit = (pageId: number, width: number, height: number) => {
-      emulated = true;
+      emulated.add(pageId);
       const zoom = getMonitorsBridge()?.zoomFactor() ?? 1;
       void bridge
         .fit(pageId, width * zoom, height * zoom)
@@ -89,47 +95,57 @@ export function PageFullscreenHost() {
 
     const onChange = () => {
       unfit();
-      setFullscreenMonitor(null);
-      const host = document.fullscreenElement;
-      if (!(host instanceof HTMLElement)) {
-        emulated = false;
-        return;
-      }
-      const page = isGuestElement(host);
-      const pageId = page ? guestId(host) : null;
+      setFullscreenMonitors([]);
+      // Pages on different monitors can be fullscreen together, and
+      // document.fullscreenElement is only the last of them.
+      const hosts: HTMLElement[] = [
+        ...guestElements().filter(isGuestFullscreen),
+        ...document.querySelectorAll<HTMLElement>('[data-native-window]:fullscreen'),
+      ];
+      const pageIds = new Set(hosts.map((host) => (isGuestElement(host) ? guestId(host) : null)));
+      for (const id of emulated) if (!pageIds.has(id)) emulated.delete(id);
       if (monitorsRef.current.length < 2) {
-        // Down to one monitor under a page fitted to another: it fills the
+        // Down to one monitor under pages fitted to another: they fill the
         // whole window again.
-        if (pageId !== null && emulated) fit(pageId, window.innerWidth, window.innerHeight);
+        for (const id of emulated) fit(id, window.innerWidth, window.innerHeight);
         return;
       }
-      if (!page && host.dataset.nativeWindow === undefined) return;
-      const frame = page ? guestFrame(host) : host;
-      if (!frame) return;
 
-      // The window's monitor: the one under the middle of the webview, which
-      // keeps its place in the window while its frame is fullscreen (or of
-      // the native app's Din window, likewise).
-      const box = (page ? host : (host.closest('section') ?? host)).getBoundingClientRect();
-      const cx = box.x + box.width / 2;
-      const cy = box.y + box.height / 2;
-      const monitor: Monitor =
-        monitorsRef.current.find((m) => contains(m, cx, cy)) ??
-        monitorsRef.current.find((m) => m.primary) ??
-        monitorsRef.current[0];
+      const covered: Monitor[] = [];
+      for (const host of hosts) {
+        const page = isGuestElement(host);
+        const frame = page ? guestFrame(host) : host;
+        if (!frame) continue;
 
-      if (page && !host.shadowRoot?.getElementById(STYLE_ID)) {
-        const style = document.createElement('style');
-        style.id = STYLE_ID;
-        style.textContent = 'iframe::backdrop { background: transparent; }';
-        host.shadowRoot?.append(style);
+        // The window's monitor: the one under the middle of the webview, which
+        // keeps its place in the window while its frame is fullscreen (or of
+        // the native app's Din window, likewise).
+        const box = (page ? host : (host.closest('section') ?? host)).getBoundingClientRect();
+        const cx = box.x + box.width / 2;
+        const cy = box.y + box.height / 2;
+        const monitor: Monitor =
+          monitorsRef.current.find((m) => contains(m, cx, cy)) ??
+          monitorsRef.current.find((m) => m.primary) ??
+          monitorsRef.current[0];
+
+        if (page && !host.shadowRoot?.getElementById(STYLE_ID)) {
+          const style = document.createElement('style');
+          style.id = STYLE_ID;
+          style.textContent = 'iframe::backdrop { background: transparent; }';
+          host.shadowRoot?.append(style);
+        }
+        frame.style.translate = `${monitor.x}px ${monitor.y}px`;
+        // The frame still has the page's size; past the monitor's edge is the
+        // rest of the page's view, which isn't drawn.
+        frame.style.clipPath = `inset(0px ${Math.max(0, window.innerWidth - monitor.width)}px ${Math.max(0, window.innerHeight - monitor.height)}px 0px)`;
+        fitted.add(frame);
+        if (!covered.includes(monitor)) covered.push(monitor);
+
+        const pageId = page ? guestId(host) : null;
+        if (pageId !== null) fit(pageId, monitor.width, monitor.height);
       }
-      frame.style.translate = `${monitor.x}px ${monitor.y}px`;
-      // The frame still has the page's size; past the monitor's edge is the
-      // rest of the page's view, which isn't drawn.
-      frame.style.clipPath = `inset(0px ${Math.max(0, window.innerWidth - monitor.width)}px ${Math.max(0, window.innerHeight - monitor.height)}px 0px)`;
-      fitted = frame;
-      setFullscreenMonitor(monitor);
+      if (covered.length === 0) return;
+      setFullscreenMonitors(covered);
 
       if (layer && !layer.open) {
         // Opening a modal dialog focuses into it; the page keeps the focus.
@@ -143,18 +159,18 @@ export function PageFullscreenHost() {
         const primary = monitorsRef.current.find((m) => m.primary) ?? monitorsRef.current[0];
         const left = primary.x;
         const top = primary.y;
-        const { x, y, width, height } = monitor;
+        const holes = covered
+          .map(({ x, y, width, height }) => ` M${x - left} ${y - top}h${width}v${height}h${-width}Z`)
+          .join('');
         Object.assign(layer.style, {
           left: `${left}px`,
           top: `${top}px`,
           width: `${primary.width}px`,
           height: `${primary.height}px`,
           // The path is in the layer's own coordinates.
-          clipPath: `path(evenodd, 'M${-left} ${-top}h${window.innerWidth}v${window.innerHeight}h${-window.innerWidth}Z M${x - left} ${y - top}h${width}v${height}h${-width}Z')`,
+          clipPath: `path(evenodd, 'M${-left} ${-top}h${window.innerWidth}v${window.innerHeight}h${-window.innerWidth}Z${holes}')`,
         });
       }
-
-      if (pageId !== null) fit(pageId, monitor.width, monitor.height);
     };
 
     document.addEventListener('fullscreenchange', onChange);
@@ -164,7 +180,7 @@ export function PageFullscreenHost() {
       document.removeEventListener('fullscreenchange', onChange);
       layer?.removeEventListener('cancel', onCancel);
       unfit();
-      setFullscreenMonitor(null);
+      setFullscreenMonitors([]);
     };
   }, []);
 

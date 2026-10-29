@@ -5,7 +5,7 @@ import { closeIntercepted } from '@/lib/closeGuards';
 import { areaAt, areaFor, primaryArea, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
 import { launchNativeApp } from '@/lib/nativeApps';
 import { closeNativeWindow, isNativeWindowOpen } from '@/lib/nativeDisplay';
-import { fullscreenMonitorId } from '@/lib/pageFullscreen';
+import { fullscreenMonitorIds } from '@/lib/pageFullscreen';
 import {
   insertLeaf,
   layoutTree,
@@ -580,10 +580,12 @@ export function useWindows(
         clicked ??
         (focused ? homeArea(areas, focused) : areas.length > 0 ? primaryArea(areas) : null);
       // Not behind a fullscreen page: on the primary monitor, else another.
-      const covered = fullscreenMonitorId();
+      const covered = fullscreenMonitorIds();
       const area =
-        picked && picked.id === covered
-          ? (areas.find((a) => a.primary && a.id !== covered) ?? areas.find((a) => a.id !== covered) ?? picked)
+        picked && covered.includes(picked.id)
+          ? (areas.find((a) => a.primary && !covered.includes(a.id)) ??
+            areas.find((a) => !covered.includes(a.id)) ??
+            picked)
           : picked;
       const workspace = area ? activeWorkspace(s.active, area.id) : 1;
       const offset =
