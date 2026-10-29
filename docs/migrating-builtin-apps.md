@@ -1,6 +1,8 @@
 # Moving built-in apps out of the desktop
 
-> **Status: under way.** Moved: Calculator, Paint.
+> **Status: under way.** Moved: Calculator, Paint, Word Processor,
+> Spreadsheet, Slides, Photo Editor, Vector Editor, Publisher, Text Editor,
+> Terminal.
 
 Each app moves in its own commit: its folder goes from
 `src/components/desktop/apps/` to `src/apps/<id>/`, it gets an
@@ -48,7 +50,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `useAppContext().config` (theme, relays) | `din.theme`, `din.account` |
 | `useCurrentUser`, `useNostrPublish` | `window.nostr` (permission `nostr`) with the app's own Nostrify pool |
 | `registerMediaSource` (now playing) | `media-session` permission (API to come with Media Player) |
-| `registerDictationTarget` | Text fields need nothing: dictation reaches a guest's focused field with `insertText`, as for web pages. Terminal's pty target needs a hook, added when Terminal moves |
+| `registerDictationTarget` | Nothing: dictation reaches a guest's focused field with `insertText`, as for web pages, and that includes xterm's, so Terminal needed no hook. An app's own mic button uses `din.dictation` |
 | `useLocalStorage` | Unchanged; it's the app's own origin now. List old keys in `migrateStorage` |
 
 ## Code the apps share
@@ -57,16 +59,25 @@ Some code is imported across app folders today. It moves to
 `src/shared/` (bundled into each app that uses it; it can't touch the
 desktop) or splits:
 
-- `files/Dialogs`' `Overlay` and `DialogButton` are in
-  `src/shared/dialogs.tsx` (Calculator was the first to need them);
-  `FileIcon` and `FileViewerBody` (Text Editor, Media Player, the
-  browser, native windows) follow when those apps move.
-- `photo/` and `vector/pdf` (Vector Editor, Publisher) → `src/shared/`.
-- `components/desktop/assistant/*` (Assistant, CAD, Settings) →
-  `src/shared/assistant/`, with its `window.assistant` use behind a
-  permission.
-- `TabStrip` (Files, Terminal, Text Editor, Assistant) → `src/shared/`,
-  drawn inside each app's custom header.
+- `src/shared/dialogs.tsx`: `Overlay` and `DialogButton`, from Files'
+  dialogs (Calculator, Files).
+- `src/shared/office/`: the office apps' look, file hook, OOXML/ODF
+  helpers, fonts and themes. Each app's own format code moved in with it.
+- `src/shared/photo/`: Photo Editor's widgets, used by Vector Editor and
+  Publisher too. `src/shared/pdf/`: the general PDF reader/writer pieces;
+  the Illustrator code stays with Vector Editor.
+- `src/shared/TabStrip.tsx`, `TabContextMenu.tsx`: tabs in Terminal and
+  Text Editor (in their custom headers) and in Files, the Web Browser and
+  the Assistant on the desktop. Moving the window by a lone tab and moving
+  tabs between windows are props (`moveWindow`, from
+  `src/shared/dinWindowMove.ts` in an app; `transfer`), so the strip itself
+  touches neither host.
+- `src/shared/FileIcon.tsx`, `src/shared/codeTheme.ts`: Text Editor, Files,
+  the file picker, the Assistant.
+- Lib getters that work in both documents: `getFsBridge()` and
+  `getPtyBridge()` return `window.din?.system.fs` in an app and
+  `window.dinos?.fs` on the desktop, so code shared by both reaches the
+  bridge the same way.
 - `components/ui/` (shadcn/ui) is shared by everything, desktop and apps.
 
 ## Order
@@ -78,11 +89,11 @@ a time.
 |---|---|---|
 | 1 | Calculator ✓ | The whole path: `din://`, the port, the manifest, `setBounds`, `workArea` |
 | 2 | Paint ✓ | Files by handle, close requests, the title |
-| 3 | Word Processor, Spreadsheet, Slides | Shared office code, accent, printing, opening URLs |
-| 4 | Photo Editor, Vector Editor, Publisher | Shared `photo/` code |
+| 3 | Word Processor, Spreadsheet, Slides ✓ | Shared office code, accent, printing, opening URLs |
+| 4 | Photo Editor, Vector Editor, Publisher ✓ | Shared `photo/` code |
 | 5 | Preview | Launch files, icon, wallpaper |
 | 6 | Media Player | `frame: 'none'`, transparency, shapes, the menu bar, media session |
-| 7 | Text Editor, Terminal | `custom` headers with tabs, `fs` and `pty`, tab drags |
+| 7 | Text Editor, Terminal ✓ | `custom` headers with tabs, `fs` and `pty`, tab drags |
 | 8 | Files | Drag sources, the file clipboard, `wallpaper` |
 | 9 | CAD, Assistant, App Store | The `assistant` and `account`/`nostr` permissions |
 | 10 | System Monitor, Settings | The most of `window.dinos`; last, while their design settles |
@@ -94,6 +105,25 @@ Staying in the desktop for now:
 - **Native windows**: input injection into the embedded display.
 - **Screenshot**: draws over the whole desktop.
 - **Installer**: runs before anyone is signed in.
+
+## What moving changed, and what's still owed
+
+Behavior that changed when apps moved, to fix or to live with:
+
+- **Terminal tabs don't move between windows.** Each window's ptys belong
+  to its own bridge port, and main lets a port touch only the ptys it
+  spawned. Owed: a pty hand-over between windows of the same app (a
+  transfer token main honors), carried by `din.drag.startTab`.
+- **Office apps' Recent lists** hold `persist()` tokens, not paths, so
+  older entries were dropped and "Show in Files"/"Copy Path" are gone.
+  Tokens are never released yet.
+- **Links from apps open in the Web Browser**, not in an installed web app
+  that owns the site, as `useOpenUrl` did on the desktop.
+- **Photo Editor's Quick Export** asks where to save the first time, since
+  it can't write beside the document by path.
+- **Moving a window from inside an app** ends without the app hearing the
+  pointer's release; a `beginMove` that resolves when the move ends would
+  let tab strips settle at once.
 
 ## Checklist per app
 
