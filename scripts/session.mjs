@@ -74,6 +74,10 @@ const LIBRARIES = [
   { module: "xkbcommon", apt: "libxkbcommon-dev", dnf: "libxkbcommon-devel", pacman: "libxkbcommon", zypper: "libxkbcommon-devel" },
   { module: "pixman-1", apt: "libpixman-1-dev", dnf: "pixman-devel", pacman: "pixman", zypper: "libpixman-1-0-devel" },
 ];
+/** Programs Din runs in the session that DinOS ships and other distributions may not, and what needs each. */
+const RUNTIME_TOOLS = [
+  { binary: "wlr-randr", purpose: "Settings → Displays", apt: "wlr-randr", dnf: "wlr-randr", pacman: "wlr-randr", zypper: "wlr-randr" },
+];
 const PACKAGE_MANAGERS = [
   { binary: "apt-get", key: "apt", install: "sudo apt-get install", pkgConfig: "pkg-config" },
   { binary: "dnf", key: "dnf", install: "sudo dnf install", pkgConfig: "pkgconf-pkg-config" },
@@ -217,6 +221,15 @@ function missingBuildTools() {
   return problems;
 }
 
+/** Say which programs Din uses in the session aren't installed; it runs without them, short of what they do. */
+function warnMissingRuntimeTools() {
+  const missing = RUNTIME_TOOLS.filter((tool) => !which(tool.binary));
+  if (missing.length === 0) return;
+  const manager = PACKAGE_MANAGERS.find((m) => which(m.binary));
+  for (const tool of missing) log(`${tool.purpose} needs ${tool.binary}, which isn't installed.`);
+  if (manager) log(`  ${manager.install} ${missing.map((tool) => tool[manager.key]).join(" ")}`);
+}
+
 /** Electron's own directory in node_modules, downloading it if npm skipped that. */
 async function electronDist() {
   const require = createRequire(path.join(ROOT, "package.json"));
@@ -289,8 +302,11 @@ fi
 accounts() {
   busctl --system "$@" org.freedesktop.Accounts "/org/freedesktop/Accounts/User$(id -u)" org.freedesktop.Accounts.User 2>/dev/null
 }
+# LightDM leaves Session empty and goes by XSession.
 current_session() {
-  accounts get-property Session | sed -n 's/^s "\\(.*\\)"$/\\1/p'
+  name=$(accounts get-property Session | sed -n 's/^s "\\(.*\\)"$/\\1/p')
+  [ -n "$name" ] || name=$(accounts get-property XSession | sed -n 's/^s "\\(.*\\)"$/\\1/p')
+  echo "$name"
 }
 
 echo "$release" > "$session/running"
@@ -617,6 +633,7 @@ async function install({ makeDefault }) {
   activate(id);
   prune();
   fs.rmSync(path.join(SESSION, "uninstalled"), { force: true });
+  warnMissingRuntimeTools();
   if (makeDefault) {
     setDefaultSession(SESSION_NAME, "wayland");
     log("Din is installed, and it's the session you log in to. Log out to start it.");
@@ -634,6 +651,7 @@ async function update() {
   if (!systemFilesCurrent()) await installSystemFiles();
   activate(id);
   prune();
+  warnMissingRuntimeTools();
   log(process.env.DIN_SESSION_RELEASE ? "Updated. Log out and back in to use the new build." : "Updated. The next login runs the new build.");
 }
 
