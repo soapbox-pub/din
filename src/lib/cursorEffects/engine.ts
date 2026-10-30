@@ -30,6 +30,7 @@ import {
   type TrailEffect,
   along,
   burnPoint,
+  SHOW_MOUSE_SPIN,
   showMouse,
 } from '@/lib/cursorEffects/effects';
 import { PACKAGE_PREFIX, loadPackage } from '@/lib/cursorEffects/packages';
@@ -118,6 +119,12 @@ class CursorEffectsEngine {
   private width = 0;
   private height = 0;
   private frame = 0;
+  /**
+   * In a tick, which schedules the next itself: a wake from inside one used
+   * to start a second loop alongside it, and every frame of a Fire Paint
+   * preview another, each stepping the scene and adding Show Mouse's light.
+   */
+  private ticking = false;
   private last = 0;
   /** Where the particle canvas is on the screen, in CSS pixels: only over what's drawn. */
   private area: { x: number; y: number } | null = null;
@@ -136,6 +143,8 @@ class CursorEffectsEngine {
   private shownUntil = 0;
   private showStrength = 0;
   private showPhase = 0;
+  /** Where Show Mouse was drawn last frame, to spread this frame's light from. */
+  private shownAt: { x: number; y: number } | null = null;
   private shake: { x: number; t: number; dir: number }[] = [];
 
   private painting = false;
@@ -447,7 +456,8 @@ class CursorEffectsEngine {
 
   private wake(): void {
     window.clearTimeout(this.idleTimer);
-    if (this.frame || !this.host) return;
+    // From inside a tick (a preview painting), the tick itself goes on.
+    if (this.frame || this.ticking || !this.host) return;
     this.last = performance.now();
     this.frame = requestAnimationFrame(this.tick);
   }
@@ -459,6 +469,15 @@ class CursorEffectsEngine {
 
   private readonly tick = (now: number): void => {
     this.frame = 0;
+    this.ticking = true;
+    try {
+      this.step(now);
+    } finally {
+      this.ticking = false;
+    }
+  };
+
+  private step(now: number): void {
     const dt = Math.min(50, Math.max(0, now - this.last));
     this.last = now;
 
@@ -468,8 +487,11 @@ class CursorEffectsEngine {
     const shown = this.settings.showMouse && (this.showing || this.shownUntil > now);
     this.showStrength = Math.min(1, Math.max(0, this.showStrength + (shown ? dt : -dt) / SHOW_FADE_MS));
     if (this.showStrength > 0 && this.pointer) {
-      this.showPhase += (dt / 1000) * 3.2;
-      showMouse(this.scene, this.pointer.x, this.pointer.y, this.showPhase, dt, this.showStrength);
+      this.showPhase += (dt / 1000) * SHOW_MOUSE_SPIN;
+      showMouse(this.scene, this.pointer.x, this.pointer.y, this.showPhase, dt, this.showStrength, this.shownAt ?? this.pointer);
+      this.shownAt = { x: this.pointer.x, y: this.pointer.y };
+    } else {
+      this.shownAt = null;
     }
 
     const rate = Math.min(1, PAINT_FLAME_POINTS / Math.max(1, this.paint.length));
@@ -488,7 +510,7 @@ class CursorEffectsEngine {
       this.scene.busy || this.paint.length > 0 || this.showStrength > 0 || this.previews.length > 0 || !!this.water?.moving;
     if (busy) this.frame = requestAnimationFrame(this.tick);
     else this.idleTimer = window.setTimeout(() => this.releaseCanvases(), RELEASE_MS);
-  };
+  }
 
   /**
    * Draw the particles on a canvas over just the part of the screen they're
@@ -577,7 +599,7 @@ class CursorEffectsEngine {
         }
       } else if (run.kind === 'show-mouse') {
         const strength = Math.min(1, Math.min(run.age, PREVIEW_MS - run.age) / SHOW_FADE_MS);
-        if (strength > 0) showMouse(this.scene, point.x, point.y, (run.age / 1000) * 3.2, dt, strength);
+        if (strength > 0) showMouse(this.scene, point.x, point.y, (run.age / 1000) * SHOW_MOUSE_SPIN, dt, strength, from ?? point);
       } else if (run.kind === 'fire-paint' && from && t < 0.6) {
         along({ ...this.strokeBase(from, point.x, point.y, dt), state: run.state }, 5, (px, py) => this.addPaint(px, py));
       } else if (run.kind === 'water' && from) {

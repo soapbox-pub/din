@@ -4,7 +4,7 @@
  * made-up click), and snapped mid-flight. Made once per effect and kept.
  */
 
-import { CLICK_EFFECTS, TRAIL_EFFECTS, along, burnPoint, showMouse, type Stroke } from '@/lib/cursorEffects/effects';
+import { CLICK_EFFECTS, SHOW_MOUSE_SPIN, TRAIL_EFFECTS, along, burnPoint, showMouse, type Stroke } from '@/lib/cursorEffects/effects';
 import { PACKAGE_PREFIX, loadPackage } from '@/lib/cursorEffects/packages';
 import { Scene, arrowImage } from '@/lib/cursorEffects/scene';
 import type { Rgb } from '@/lib/cursorEffects/sprites';
@@ -118,7 +118,7 @@ async function draw(kind: PreviewKind, id: string, tint: Rgb | null): Promise<st
   } else if (kind === 'show-mouse') {
     let phase = 0;
     run(30, scene, () => {
-      phase += (STEP_MS / 1000) * 3.2;
+      phase += (STEP_MS / 1000) * SHOW_MOUSE_SPIN;
       showMouse(scene, pointer.x, pointer.y, phase, STEP_MS, 1);
     });
   } else if (kind === 'fire-paint') {

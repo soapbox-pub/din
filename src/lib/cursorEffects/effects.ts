@@ -435,19 +435,36 @@ const SHOW_MOUSE: Rgb[] = [
   [60, 120, 255],
 ];
 
+/** How fast Show Mouse's emitters circle, in radians per second. */
+export const SHOW_MOUSE_SPIN = 3.2;
+
 /**
  * Compiz's Show Mouse, for one frame: emitters circling the pointer, each
- * shedding a stream of light. `phase` is how far round they've come.
+ * shedding a stream of light. `phase` is how far round they've come. A
+ * frame's particles are spread along the stretch of the circle the emitters
+ * covered since the last one, and the pointer's way since then (`from`):
+ * piled on one spot, a slow frame's handful
+ * added up to one big white blob, and the blobs slowed the next frame.
  */
-export function showMouse(scene: Scene, x: number, y: number, phase: number, dt: number, strength: number): void {
+export function showMouse(
+  scene: Scene,
+  x: number,
+  y: number,
+  phase: number,
+  dt: number,
+  strength: number,
+  from: { x: number; y: number } = { x, y },
+): void {
   const emitters = 3;
   const radius = 40;
   const count = Math.max(1, Math.round((dt / 1000) * 90 * strength));
+  const swept = (dt / 1000) * SHOW_MOUSE_SPIN;
   for (let e = 0; e < emitters; e++) {
-    const angle = phase + (e * Math.PI * 2) / emitters;
-    const ex = x + Math.cos(angle) * radius;
-    const ey = y + Math.sin(angle) * radius;
     for (let i = 0; i < count; i++) {
+      const f = (i + 1) / count;
+      const angle = phase - swept * (1 - f) + (e * Math.PI * 2) / emitters;
+      const ex = from.x + (x - from.x) * f + Math.cos(angle) * radius;
+      const ey = from.y + (y - from.y) * f + Math.sin(angle) * radius;
       scene.add({
         x: ex + between(scene, -2, 2),
         y: ey + between(scene, -2, 2),
