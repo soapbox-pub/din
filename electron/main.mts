@@ -281,6 +281,10 @@ protocol.registerSchemesAsPrivileged([
 // leaves the Terminal on its DOM renderer until Din restarts.
 app.disableDomainBlockingFor3DAPIs();
 
+// Each of Din's subsystems (shells, mail, push, askpass, printing, …) stops
+// itself on will-quit, once: more than Node's default 10, and not a leak.
+app.setMaxListeners(30);
+
 startWatchdog();
 
 /** Map a request pathname to a file inside dist/, with SPA fallback. */
@@ -6173,6 +6177,11 @@ async function defuseViewSourceLineWrap(contents: Electron.WebContents): Promise
 // Browser-partition guests are also registered as tabs with the Chrome
 // extension system (chrome.tabs sees them; content scripts inject).
 app.on('web-contents-created', (_event, contents) => {
+  // Each of Din's modules that tracks a guest (media, popups, passwords,
+  // screen share, …) cleans up on its 'destroyed', once per guest, and a
+  // browser tab is tracked by more than Node's default 10. Not a leak.
+  contents.setMaxListeners(30);
+
   // Brightness and volume keys arrive as ordinary keyboard input to whichever
   // contents holds focus (shell or any guest), so hook them everywhere.
   attachMediaKeys(contents);

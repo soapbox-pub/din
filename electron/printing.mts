@@ -147,6 +147,8 @@ interface Document {
   /** The last PDF rendered for it, and the layout it was rendered with. */
   pdf: string | null;
   layout: string | null;
+  /** Stops watching the page it goes with (`addDocument`'s `page`). */
+  unwatch: (() => void) | null;
 }
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.avif']);
@@ -586,13 +588,27 @@ async function previewPdf(pdf: string): Promise<{ pageCount: number | null; page
   }
 }
 
+/**
+ * A document to print. One that goes with a page (`page`) is discarded when
+ * the page closes, and stops listening for that when it's discarded first,
+ * so a page that prints again and again doesn't gather listeners.
+ */
 function addDocument(
   title: string,
   source: Source,
   owner: number | null = null,
+  page: WebContents | null = null,
 ): { id: string; title: string; kind: PrintKind } {
   const id = `doc${nextDocument++}`;
-  documents.set(id, { title, source, owner, pdf: null, layout: null });
+  let unwatch: (() => void) | null = null;
+  if (page) {
+    const closed = () => discard(id);
+    page.once('destroyed', closed);
+    unwatch = () => {
+      if (!page.isDestroyed()) page.removeListener('destroyed', closed);
+    };
+  }
+  documents.set(id, { title, source, owner, pdf: null, layout: null, unwatch });
   const kind = source.kind === 'file' ? source.type : 'page';
   return { id, title, kind };
 }
@@ -601,6 +617,7 @@ function discard(id: string): void {
   const document = documents.get(id);
   if (!document) return;
   documents.delete(id);
+  document.unwatch?.();
   if (document.pdf) fs.rmSync(document.pdf, { force: true });
 }
 
@@ -847,8 +864,7 @@ function hasDialog(contents: WebContents): boolean {
 /** Tell the shell a page asked to print (window.print(), or Ctrl+P). */
 export function requestPagePrint(contents: WebContents): void {
   if (hasDialog(contents)) return;
-  const document = addDocument(contents.getTitle() || 'Untitled', { kind: 'page', contents }, contents.id);
-  contents.once('destroyed', () => discard(document.id));
+  const document = addDocument(contents.getTitle() || 'Untitled', { kind: 'page', contents }, contents.id, contents);
   sendToShell('printing:open', document);
 }
 
@@ -874,8 +890,7 @@ export function registerPrintingHandlers(options: {
     }
     const baseUrl = typeof f.baseUrl === 'string' && /^https?:/.test(f.baseUrl) ? f.baseUrl : contents.getURL();
     const title = (typeof f.title === 'string' && f.title.trim()) || contents.getTitle() || 'Untitled';
-    const document = addDocument(title, { kind: 'html', html: f.html, baseUrl }, contents.id);
-    contents.once('destroyed', () => discard(document.id));
+    const document = addDocument(title, { kind: 'html', html: f.html, baseUrl }, contents.id, contents);
     sendToShell('printing:open', document);
   });
 
@@ -903,9 +918,7 @@ export function registerPrintingHandlers(options: {
     assertShellSender(event);
     const guest = guestFromId(wcId);
     if (!guest) throw new Error('That page was closed.');
-    const document = addDocument(guest.getTitle() || 'Untitled', { kind: 'page', contents: guest });
-    guest.once('destroyed', () => discard(document.id));
-    return document;
+    return addDocument(guest.getTitle() || 'Untitled', { kind: 'page', contents: guest }, null, guest);
   });
 
   ipcMain.handle('printing:openHtml', (event, title: unknown, html: unknown) => {
