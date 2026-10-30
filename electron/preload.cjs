@@ -134,12 +134,41 @@ expose('boot', {
   ready: () => ipcRenderer.invoke('shell:bootReady'),
 });
 
-// Session bridge (window.dinos.session): "Log out" quits the shell cleanly. Under
-// din-session.sh a clean exit ends the login session and hands control back
-// to the display manager (GDM etc.); the saved Nostr accounts are untouched.
+// Session bridge (window.dinos.session): "Log out" quits the shell cleanly. As
+// a login session a clean exit ends it and hands control back to the display
+// manager (GDM etc.); the saved Nostr accounts are untouched. The rest puts
+// Din on another Linux's login screen (electron/login-session.mts).
 expose('session', {
   /** End the desktop session (quits Din). */
   end: () => ipcRenderer.send('shell:endSession'),
+
+  /** Whether Din is running as another Linux's login session, which "Log out" ends. */
+  isLoginSession: () => ipcRenderer.invoke('session:isLoginSession'),
+
+  /** Whether Din is on the login screen, its builds, and the session you log in to. */
+  status: () => ipcRenderer.invoke('session:status'),
+
+  /**
+   * Install, update, roll back, make default, restore or uninstall. What it
+   * prints arrives through onOutput.
+   * @param {'install' | 'update' | 'rollback' | 'default' | 'restore' | 'uninstall'} action
+   * @param {boolean} [makeDefault] With install: make Din the session you log in to.
+   */
+  run: (action, makeDefault) => ipcRenderer.invoke('session:run', action, makeDefault),
+
+  /**
+   * Subscribe to what the running action prints, line by line. Returns an unsubscribe fn.
+   * @param {(line: string) => void} callback
+   */
+  onOutput: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {string} line
+     */
+    const handler = (_event, line) => callback(line);
+    ipcRenderer.on('session:output', handler);
+    return () => ipcRenderer.removeListener('session:output', handler);
+  },
 });
 
 expose('fs', {

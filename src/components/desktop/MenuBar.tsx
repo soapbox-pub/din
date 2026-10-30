@@ -57,6 +57,7 @@ import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { useNostrd } from '@/hooks/useNostrd';
 import { useQuery } from '@tanstack/react-query';
 import { getLockBridge } from '@/lib/lock';
+import { getSessionBridge } from '@/lib/session';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
 import { useBatteryStatus } from '@/hooks/usePower';
@@ -711,13 +712,21 @@ const AccountMenuItem = memo(function AccountMenuItem() {
 });
 
 /**
- * Lock, restart, and shut down. Lock is DinOS's lock screen, which takes
- * the computer's password, so it's offered only where there's one to take;
- * restart and shut down only where logind lets this session do them.
+ * Lock, log out, restart, and shut down. Lock is DinOS's lock screen, which
+ * takes the computer's password, so it's offered only where there's one to
+ * take; log out only where Din is another Linux's login session; restart
+ * and shut down only where logind lets this session do them.
  */
 function SystemButtons({ onPower }: { onPower: (action: PowerAction) => void }) {
   const lockBridge = getLockBridge();
   const powerBridge = getPowerBridge();
+  const sessionBridge = getSessionBridge();
+  const { data: loginSession = false } = useQuery({
+    queryKey: ['session', 'login'],
+    queryFn: () => sessionBridge?.isLoginSession() ?? false,
+    enabled: !!sessionBridge,
+    staleTime: Infinity,
+  });
   const { data: lockAvailable = false } = useQuery({
     queryKey: ['lock', 'available'],
     queryFn: () => lockBridge?.available() ?? false,
@@ -731,7 +740,7 @@ function SystemButtons({ onPower }: { onPower: (action: PowerAction) => void }) 
     staleTime: 60_000,
   });
   const canLock = !!lockBridge && lockAvailable;
-  if (!canLock && !power?.reboot && !power?.powerOff) return null;
+  if (!canLock && !loginSession && !power?.reboot && !power?.powerOff) return null;
 
   const item = (icon: ReactNode, label: string, onClick: () => void) => (
     <PopoverClose asChild>
@@ -751,6 +760,7 @@ function SystemButtons({ onPower }: { onPower: (action: PowerAction) => void }) 
       <Separator />
       <div className="flex flex-col gap-1 p-2">
         {canLock && item(<Lock aria-hidden />, 'Lock', () => void lockBridge?.lock())}
+        {loginSession && item(<LogOut aria-hidden />, 'Log out…', () => onPower('logOut'))}
         {power?.reboot && item(<RotateCcw aria-hidden />, 'Restart…', () => onPower('reboot'))}
         {power?.powerOff && item(<Power aria-hidden />, 'Shut down…', () => onPower('powerOff'))}
       </div>

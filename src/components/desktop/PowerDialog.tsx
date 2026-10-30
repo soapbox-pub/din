@@ -11,10 +11,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cleanPowerError, getPowerBridge } from '@/lib/power';
+import { getSessionBridge } from '@/lib/session';
 
-export type PowerAction = 'reboot' | 'powerOff';
+export type PowerAction = 'logOut' | 'reboot' | 'powerOff';
 
 const COPY: Record<PowerAction, { title: string; description: string; confirm: string }> = {
+  logOut: {
+    title: 'Log out?',
+    description: 'Open apps will close, and anything unsaved in them will be lost. You’ll be back at the login screen.',
+    confirm: 'Log out',
+  },
   reboot: {
     title: 'Restart the computer?',
     description: 'Open apps will close, and anything unsaved in them will be lost.',
@@ -33,7 +39,7 @@ interface PowerDialogProps {
   onClose: () => void;
 }
 
-/** Confirm a restart or shutdown, since either closes every open app. */
+/** Confirm logging out, a restart or shutdown, since each closes every open app. */
 export function PowerDialog({ action, onClose }: PowerDialogProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -48,6 +54,11 @@ export function PowerDialog({ action, onClose }: PowerDialogProps) {
   };
 
   const confirm = async () => {
+    if (action === 'logOut') {
+      setPending(true);
+      getSessionBridge()?.end();
+      return;
+    }
     const bridge = getPowerBridge();
     if (!bridge || !action) return;
     setPending(true);

@@ -2,9 +2,9 @@
  * Typed access to the OS display bridge exposed by the Electron preload
  * (`window.dinos.display`, see electron/preload.cjs + electron/main.cjs).
  *
- * Backed by wlr-randr under din-shell (DinOS) and by xrandr on a bare X11 session
- * (the os/x11 standalone launcher) - wherever Din is the whole desktop and
- * nothing else manages the outputs. Elsewhere, or in a plain browser, the
+ * Backed by wlr-randr under din-shell (DinOS, or Din's login session
+ * elsewhere) and by xrandr on a bare X11 session - wherever Din is the whole
+ * desktop and nothing else manages the outputs. Elsewhere, or in a plain browser, the
  * bridge is absent or `status()` resolves with `available: false`; callers
  * must feature-detect and render a fallback.
  *

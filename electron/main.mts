@@ -134,6 +134,7 @@ import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
 import { airplayDisplays, airplayNetworkChanged, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
 import { registerSystemPackageHandlers } from './system-packages.mts';
+import { registerLoginSessionHandlers } from './login-session.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
@@ -160,10 +161,10 @@ function messageOf(error: unknown): string {
 
 // Locate the built Vite app. Two supported layouts:
 //   - DinOS/Nix: main.mts and dist/ are installed side by side (dirname/dist)
-//   - repo/standalone launcher (os/x11/din-session.sh): main.mts lives in
-//     electron/, dist/ sits at the repo root (dirname/../dist)
-// DIN_DIST_DIR overrides both. Without this, the standalone session loads
-// app://din/ against a non-existent electron/dist and shows a black screen.
+//   - the checkout: main.mts lives in electron/, dist/ sits at the repo
+//     root (dirname/../dist)
+// DIN_DIST_DIR overrides both. (scripts/session.mjs's builds are laid out
+// as DinOS's are.)
 function resolveDistDir(): string {
   const candidates = [
     process.env.DIN_DIST_DIR,
@@ -691,8 +692,8 @@ async function tool(
 //     the arrangement, and the arrangement is reapplied whenever the same set
 //     of outputs is connected again - din-shell itself forgets, laying outputs out
 //     left to right at their preferred modes.
-//   - xrandr on a bare X11 session (the os/x11 standalone launcher), where
-//     Din is the whole desktop and nothing else manages the outputs.
+//   - xrandr on a bare X11 session, where Din is the whole desktop and
+//     nothing else manages the outputs.
 // Where neither applies (a desktop compositor without the protocol, a
 // windowed dev shell), status reports `available: false` and the Settings
 // panel renders a fallback - same shape as the WiFi bridge in QEMU.
@@ -1917,9 +1918,9 @@ function registerPowerHandlers(): void {
     return readPowerProfiles();
   });
 
-  // Log out: quit cleanly. din-session.sh treats exit 0 as "the user quit"
-  // and ends the login session, returning to the display manager; on DinOS
-  // the din-shell service brings a fresh Din back up.
+  // Log out: quit cleanly. As a login session (scripts/session.mjs) that
+  // ends it, returning to the display manager; on DinOS the din-shell
+  // service brings a fresh Din back up.
   ipcMain.on('shell:endSession', (event) => {
     if (!isShellSender(event)) return;
     app.quit();
@@ -5585,6 +5586,7 @@ app.whenReady().then(() => {
   registerUpdaterHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
   registerFirmwareHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
   registerSystemPackageHandlers({ assertShellSender });
+  registerLoginSessionHandlers({ devUrl: DEV_URL, assertShellSender, sendToShell });
   registerAirPlayHandlers({
     assertShellSender,
     sendToShell,
@@ -5645,8 +5647,8 @@ app.whenReady().then(() => {
   // Route chrome.action popups into the shell instead of native windows.
   overrideActionPopup();
 
-  // Production runs with no window manager (din-shell on DinOS, or a bare X11
-  // login session via os/x11). din-shell force-fills the one app across every
+  // Production runs with no window manager (din-shell, on DinOS or as a
+  // login session elsewhere, or a bare X11 session). din-shell force-fills the one app across every
   // output, but bare X11 has nothing to honor the EWMH fullscreen hint, so
   // the window would sit at its default size letterboxed on a black screen.
   // Size it to cover every display explicitly and drop the frame;

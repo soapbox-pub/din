@@ -149,7 +149,7 @@ function install(feature: PackageFeature): Promise<void> {
 }
 
 /** sudo's askpass: Din's helper, unless sudo.conf names one already. */
-function sudoAskpass(): string | null {
+export function sudoAskpass(): string | null {
   try {
     if (/^\s*Path\s+askpass\s/m.test(fs.readFileSync('/etc/sudo.conf', 'utf8'))) return null;
   } catch {

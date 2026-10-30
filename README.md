@@ -76,6 +76,42 @@ ships) against the dev server via `DIN_DEV_URL`. This gives you the real
 Electron/`app://` environment with Vite HMR + React fast refresh. Ctrl-C stops
 both processes.
 
+### Din as your desktop, on another Linux
+
+From a checkout, Din can go on your login screen's session menu (GDM,
+LightDM, SDDM) next to the desktop you already have:
+
+```sh
+npm run session:install              # build this checkout and add "Din" to the login screen
+npm run session:install -- --default # ...and log in to it by default
+npm run session:update               # rebuild from the checkout for the next login
+npm run session -- rollback          # back to the build before
+npm run session -- restore           # log in to your old desktop by default again
+npm run session:uninstall            # take Din off the login screen
+```
+
+Settings → About does the same from `npm run dev` (**Use Din as your
+desktop**), and from the session itself, where it also updates, rolls back,
+and returns to the old desktop. The session runs Din the way DinOS does, Din's
+compositor on the screen running Electron, but from a copy of a build in
+`~/.local/share/din/session`, never the checkout, so a broken edit can't keep
+you from logging in. sudo asks for the password once, to install
+`/usr/share/wayland-sessions/din.desktop`, the `/usr/local/bin/din-session`
+it runs, and, on Ubuntu 24.04 and later, an AppArmor profile that lets
+Electron's sandbox start. If Din fails three times running just after
+logging in, the login screen goes back to your old desktop. In the session,
+the account menu has **Log out**. DinOS-only parts (updates, the Installer,
+the lock screen, nostrd) stay off. `scripts/session.mjs` has the details.
+
+Building it needs Rust 1.85 or newer ([rustup](https://rustup.rs); distribution
+packages are often older) and the compositor's libraries:
+
+- Debian/Ubuntu: `sudo apt install pkg-config libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev libxkbcommon-dev libpixman-1-dev`
+- Fedora: `sudo dnf install pkgconf-pkg-config libseat-devel libinput-devel systemd-devel mesa-libgbm-devel libdrm-devel libxkbcommon-devel pixman-devel`
+- Arch: `sudo pacman -S --needed pkgconf seatd libinput systemd-libs mesa libdrm libxkbcommon pixman`
+
+The script says which are missing. NixOS can't take it (`/usr` is read-only).
+
 `npm run os:build` produces the real artifact: a raw UEFI disk image meant to
 be installed on a physical machine. Write it to a drive and boot from it:
 

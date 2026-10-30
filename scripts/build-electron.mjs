@@ -1,7 +1,7 @@
 /**
  * Compiles the Electron host (electron/*.mts) to plain JavaScript beside it
- * (electron/*.mjs), which is what production runs: DinOS, os/x11's
- * din-session.sh.
+ * (electron/*.mjs), which is what production runs: DinOS, and the login
+ * session's builds (scripts/session.mjs).
  *
  * Development runs the .mts files directly through Node's type stripping, so
  * `npm run dev` needs no build. A build shouldn't pay for that: Node's

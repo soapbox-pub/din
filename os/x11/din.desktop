@@ -1,8 +1,0 @@
-[Desktop Entry]
-# Copy to /usr/share/xsessions/ (X11) or /usr/share/wayland-sessions/
-# (Wayland) so your display manager offers "Din" as a login session. Exec
-# points at the symlink created during install (see din-session.sh header).
-Name=Din
-Comment=Din social computer, fullscreen
-Exec=/usr/local/bin/din-session
-Type=Application

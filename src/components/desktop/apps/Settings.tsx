@@ -207,6 +207,7 @@ import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSec
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
 import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
+import { LoginSessionSection } from '@/components/desktop/apps/LoginSessionSection';
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 import { DockPreview } from '@/components/desktop/Dock';
 import { DOCK_STYLES } from '@/lib/dockStyles';
@@ -370,6 +371,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     search: [
       'Updates', 'Firmware', 'version', 'update', 'upgrade', 'restart', 'DinOS', 'system information',
       'Update automatically', 'commit', 'source', 'branch', 'fork', 'repository',
+      'Login screen', 'Use Din as your desktop', 'Log in to Din by default', 'Roll back', 'Remove from login screen',
+      'session', 'display manager', 'GDM', 'LightDM', 'desktop environment',
     ],
   },
   {
@@ -417,7 +420,8 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
  * to test the error boundary. About shows Din's logo and DinOS's version, and
  * the update it's building through `window.dinos.updater`, offers the restart
  * that finishes one and the repository it's built from, and firmware updates
- * through `window.dinos.firmware`.
+ * through `window.dinos.firmware`; elsewhere on Linux, it puts Din on the login
+ * screen (LoginSessionSection).
  */
 const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
 
@@ -4412,6 +4416,8 @@ function AboutSection() {
           <UpdateSourceCard state={state} />
         </>
       )}
+
+      {!dinos && <LoginSessionSection />}
 
       <FirmwareSection />
     </SectionShell>

@@ -4,11 +4,13 @@
  * line, relative to the repo. Directories nested in another's
  * node_modules are left out, since copying the outer one brings them.
  * For os/configuration.nix, which copies Electron main's runtime modules
- * beside it.
+ * beside it. --electron names every package electron/ imports, for
+ * scripts/session.mjs, which copies all of them.
  *
  *   node scripts/runtime-deps.mjs imapflow nodemailer mailparser
+ *   node scripts/runtime-deps.mjs --electron
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,7 +40,25 @@ function walk(name, from, optional) {
   for (const dep of Object.keys(pkg.optionalDependencies ?? {})) walk(dep, dir, true);
 }
 
-for (const name of process.argv.slice(2)) walk(name, root, false);
+/** The packages electron/'s modules and preloads import, by name. */
+function electronImports() {
+  const dir = join(root, "electron");
+  const names = new Set();
+  const specifier = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire(?:\.resolve)?\s*\(\s*)["']([^"'./][^"']*)["']/g;
+  const pkg = /^(?:@[a-z0-9][\w.~-]*\/)?[a-z0-9][\w.~-]*/;
+  for (const file of readdirSync(dir).filter((f) => /\.(mts|cjs)$/.test(f))) {
+    for (const [, spec] of readFileSync(join(dir, file), "utf8").matchAll(specifier)) {
+      if (spec.startsWith("node:")) continue;
+      const name = pkg.exec(spec)?.[0];
+      if (!name || name === "electron" || (spec !== name && spec[name.length] !== "/")) continue;
+      names.add(name);
+    }
+  }
+  return [...names];
+}
+
+const names = process.argv[2] === "--electron" ? electronImports() : process.argv.slice(2);
+for (const name of names) walk(name, root, false);
 
 const dirs = [...found].map((d) => relative(root, d)).sort();
 for (const dir of dirs) {
