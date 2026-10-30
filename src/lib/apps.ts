@@ -245,6 +245,7 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/settings.png',
     component: Settings,
     defaultSize: { width: 960, height: 680 },
+    keywords: ['preferences', 'control panel', 'system settings', 'options'],
     singleInstance: true,
   },
   {

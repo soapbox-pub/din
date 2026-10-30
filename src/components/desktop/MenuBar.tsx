@@ -50,6 +50,8 @@ import { AssistantMenuItem } from '@/components/desktop/AssistantIndicator';
 import { ScreenShareMenuItem } from '@/components/desktop/ScreenShareHost';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { onToggleAppsMenu } from '@/lib/appsMenu';
+import { parseQuery } from '@/lib/settingsSearch';
+import { matchingSections, type SettingsSection } from '@/lib/settingsSections';
 import { useClock } from '@/hooks/useClock';
 import { useAppContext } from '@/hooks/useAppContext';
 import { timeFormatOptions } from '@/lib/datetime';
@@ -225,13 +227,25 @@ const AppsMenu = memo(function AppsMenu() {
   // section, since there are typically hundreds of them.
   const dinApps = launcherApps.filter((app) => !app.native);
   const nativeApps = launcherApps.filter((app) => app.native);
+  // Settings' sections match the way Settings' own search does, once the
+  // query has two letters or digits, so "display" or "wifi" finds them.
+  const terms = parseQuery(query);
+  const settings = terms.join('').length >= 2 ? matchingSections(terms) : [];
+  const openSetting = (section: SettingsSection) => open('settings', { section: section.id });
 
   /** Enter in the search launches the first match, as shown. */
   const launchFirst = () => {
-    const first = dinApps[0] ?? nativeApps[0];
-    if (!first) return;
-    setMenuOpen(false);
-    open(first.id);
+    const first = dinApps[0];
+    if (first) {
+      setMenuOpen(false);
+      open(first.id);
+    } else if (settings[0]) {
+      setMenuOpen(false);
+      openSetting(settings[0]);
+    } else if (nativeApps[0]) {
+      setMenuOpen(false);
+      open(nativeApps[0].id);
+    }
   };
 
   return (
@@ -275,9 +289,9 @@ const AppsMenu = memo(function AppsMenu() {
           />
         </div>
         <div className="max-h-96 overflow-y-auto p-3">
-          {launcherApps.length === 0 ? (
+          {launcherApps.length === 0 && settings.length === 0 ? (
             <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-              No apps match “{query}”.
+              No apps or settings match “{query}”.
             </p>
           ) : (
             <>
@@ -287,13 +301,15 @@ const AppsMenu = memo(function AppsMenu() {
                 onUninstall={uninstall}
                 canUninstall={canUninstall}
               />
+              {settings.length > 0 && (
+                <>
+                  {dinApps.length > 0 && <LauncherHeading>Settings</LauncherHeading>}
+                  <SettingsList sections={settings} onOpen={openSetting} />
+                </>
+              )}
               {nativeApps.length > 0 && (
                 <>
-                  {dinApps.length > 0 && (
-                    <h2 className="px-2 pb-1 pt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      System
-                    </h2>
-                  )}
+                  {(dinApps.length > 0 || settings.length > 0) && <LauncherHeading>System</LauncherHeading>}
                   <AppGrid
                     apps={nativeApps}
                     onOpen={open}
@@ -309,6 +325,48 @@ const AppsMenu = memo(function AppsMenu() {
     </Popover>
   );
 });
+
+function LauncherHeading({ children }: { children: ReactNode }) {
+  return (
+    <h2 className="px-2 pb-1 pt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      {children}
+    </h2>
+  );
+}
+
+/** Settings' sections that match the search, each opening Settings there. */
+function SettingsList({
+  sections,
+  onOpen,
+}: {
+  sections: SettingsSection[];
+  onOpen: (section: SettingsSection) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      {sections.map((section) => (
+        <ContextMenu key={section.id}>
+          <ContextMenuTrigger asChild>
+            <PopoverClose asChild>
+              <button
+                type="button"
+                onClick={() => onOpen(section)}
+                className="flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <section.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">{section.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{section.group}</span>
+              </button>
+            </PopoverClose>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-52">
+            <ContextMenuItem onSelect={() => onOpen(section)}>Open in Settings</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ))}
+    </div>
+  );
+}
 
 /** One section of launcher tiles. */
 function AppGrid({
