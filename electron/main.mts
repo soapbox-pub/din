@@ -3198,6 +3198,13 @@ const NOTIFICATION_PRELOAD = path.join(import.meta.dirname, 'notification-preloa
 const GEOLOCATION_PRELOAD = path.join(import.meta.dirname, 'geolocation-preload.cjs');
 
 /**
+ * Absolute path to the session preload that has navigator.permissions.query
+ * say "prompt" for what the user hasn't answered yet (see
+ * site-permissions:state). Every page gets it.
+ */
+const PERMISSIONS_PRELOAD = path.join(import.meta.dirname, 'permissions-preload.cjs');
+
+/**
  * Absolute path to the session preload that sends web pages' print() to
  * Din's print dialog (see electron/printing.mts). Every page gets it, in
  * every frame.
@@ -4427,6 +4434,23 @@ function registerSitePermissionHandlers(): void {
     decide(s, origin, capability, allow);
   });
 
+  // What a page's navigator.permissions.query reports (permissions-preload.cjs):
+  // Electron's check can only say yes or no, and an unanswered "no" stops
+  // pages that look first from ever asking.
+  ipcMain.on('site-permissions:state', (event, name) => {
+    const s = event.sender.session;
+    const origin = event.senderFrame ? siteOriginOf(event.senderFrame.url) : null;
+    const capability = (['camera', 'microphone', 'geolocation', 'notifications'] as const).find((c) => c === name);
+    if (!origin || !capability || !siteAskers.has(s)) {
+      event.returnValue = null;
+      return;
+    }
+    const key = decisionKey(origin, capability);
+    const allow = decisionsFor(s).get(key);
+    event.returnValue =
+      allow === true ? 'granted' : allow === false || dismissedFor(s).has(key) ? 'denied' : 'prompt';
+  });
+
   // Every site answered for one capability, for Settings (remembered answers only).
   ipcMain.handle('site-permissions:list', (event, capability) => {
     assertShellSender(event);
@@ -5395,6 +5419,7 @@ app.whenReady().then(() => {
   for (const s of [browserSession(), privateBrowserSession(), torBrowserSession()]) {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-geolocation', type: 'frame', filePath: GEOLOCATION_PRELOAD });
+    s.registerPreloadScript({ id: 'din-permissions', type: 'frame', filePath: PERMISSIONS_PRELOAD });
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
     s.registerPreloadScript({ id: 'din-screen-share', type: 'frame', filePath: SCREEN_SHARE_PRELOAD });
     s.registerPreloadScript({ id: 'din-media', type: 'frame', filePath: MEDIA_PRELOAD });

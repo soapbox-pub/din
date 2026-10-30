@@ -13,7 +13,11 @@ import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 import { usePopupSettings } from '@/hooks/usePopups';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+
+/** What every website may be asked for, listed in its site info even unanswered. */
+const ALWAYS_SHOWN = new Set<SiteCapability>(['camera', 'microphone', 'geolocation', 'notifications']);
 
 /** The origin a page's permissions are filed under (as electron/main.mts's siteOriginOf). */
 function siteOriginOf(url: string): string | null {
@@ -66,7 +70,8 @@ const SECURITY: Record<Security, { title: string; detail: string; warn: boolean 
  * page, a green N for an nsite, a violet onion for an onion service, and a
  * warning for a page that isn't secure. Clicking it shows how the connection
  * stands and what the site may do (camera, microphone, location,
- * notifications, pop-ups), each of which can be switched or forgotten.
+ * notifications, pop-ups), each of which can be allowed, blocked, or left to
+ * ask, whether or not the site has asked yet.
  * Renders nothing for pages that aren't websites (the new tab page, settings).
  */
 export function SiteInfoButton({
@@ -139,6 +144,11 @@ export function SiteInfoButton({
 
   const answered = (Object.keys(SITE_CAPABILITIES) as SiteCapability[]).filter(
     (c) => info?.permissions[c] !== undefined,
+  );
+  // Always offered, answered or not: a page that decided it was blocked
+  // without asking has to be allowed from here.
+  const shown = (Object.keys(SITE_CAPABILITIES) as SiteCapability[]).filter(
+    (c) => ALWAYS_SHOWN.has(c) || answered.includes(c),
   );
 
   const setPermission = (capability: SiteCapability, allow: boolean | null) => {
@@ -229,51 +239,51 @@ export function SiteInfoButton({
         {bridge && (
           <div className="space-y-2 border-t border-border/60 pt-4">
             <p className="text-xs font-medium text-muted-foreground">Permissions</p>
-            {answered.length === 0 && !popupsAllowed ? (
-              <p className="text-xs text-muted-foreground">
-                This site hasn't asked for anything. When it does, Din asks you first.
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {answered.map((capability) => {
-                  const { name, icon: Icon } = SITE_CAPABILITIES[capability];
-                  const allowed = info?.permissions[capability] === true;
-                  const id = `site-permission-${capability}`;
-                  return (
-                    <li key={capability} className="flex items-center gap-3 rounded-md py-1">
-                      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      <label htmlFor={id} className="min-w-0 flex-1 space-y-0.5">
-                        <span className="block text-sm">{name}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {allowed ? 'Allowed' : 'Blocked'}
-                        </span>
-                      </label>
-                      <Switch
-                        id={id}
-                        checked={allowed}
-                        onCheckedChange={(on) => setPermission(capability, on)}
-                      />
-                    </li>
-                  );
-                })}
-                {popupsAllowed && popups && (
-                  <li className="flex items-center gap-3 rounded-md py-1">
-                    <AppWindow className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <label htmlFor="site-permission-popups" className="min-w-0 flex-1 space-y-0.5">
-                      <span className="block text-sm">Pop-ups</span>
-                      <span className="block text-xs text-muted-foreground">Allowed</span>
+            <ul className="space-y-1">
+              {shown.map((capability) => {
+                const { name, icon: Icon } = SITE_CAPABILITIES[capability];
+                const answer = info?.permissions[capability];
+                const value = answer === undefined ? 'ask' : answer ? 'allow' : 'block';
+                const id = `site-permission-${capability}`;
+                return (
+                  <li key={capability} className="flex items-center gap-3 rounded-md py-1">
+                    <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <label htmlFor={id} className="min-w-0 flex-1 text-sm">
+                      {name}
                     </label>
-                    <Switch
-                      id="site-permission-popups"
-                      checked
-                      onCheckedChange={(on) => {
-                        if (!on) popups.setSiteAllowed(hostname, false).catch(() => {});
-                      }}
-                    />
+                    <Select
+                      value={value}
+                      onValueChange={(next) => setPermission(capability, next === 'ask' ? null : next === 'allow')}
+                    >
+                      <SelectTrigger id={id} size="sm" className="w-28">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ask">Ask</SelectItem>
+                        <SelectItem value="allow">Allow</SelectItem>
+                        <SelectItem value="block">Block</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </li>
-                )}
-              </ul>
-            )}
+                );
+              })}
+              {popupsAllowed && popups && (
+                <li className="flex items-center gap-3 rounded-md py-1">
+                  <AppWindow className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <label htmlFor="site-permission-popups" className="min-w-0 flex-1 space-y-0.5">
+                    <span className="block text-sm">Pop-ups</span>
+                    <span className="block text-xs text-muted-foreground">Allowed</span>
+                  </label>
+                  <Switch
+                    id="site-permission-popups"
+                    checked
+                    onCheckedChange={(on) => {
+                      if (!on) popups.setSiteAllowed(hostname, false).catch(() => {});
+                    }}
+                  />
+                </li>
+              )}
+            </ul>
 
             {answered.length > 0 && (
               <Button
