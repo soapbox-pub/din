@@ -18,9 +18,11 @@ import {
   type PermissionRequest,
   type PromptAttachment,
   type SessionInfo,
+  type ShellInfo,
   linkedIconPaths,
   packageIconPath,
   PROJECT_ICON_PATHS,
+  sessionTitle,
   worktreeMainCheckout,
 } from '@/lib/assistant';
 import { getFsBridge, localFileUrl, type FsEntry } from '@/lib/fs';
@@ -41,6 +43,9 @@ export const assistantKeys = {
   permissions: (id: string) => ['assistant', 'permissions', id] as const,
   forms: (id: string) => ['assistant', 'forms', id] as const,
   inbox: (id: string) => ['assistant', 'inbox', id] as const,
+  shells: ['assistant', 'shells'] as const,
+  shellsIn: (directory: string) => ['assistant', 'shells', directory] as const,
+  lineage: (id: string) => ['assistant', 'lineage', id] as const,
   passwords: ['assistant', 'passwords'] as const,
   models: ['assistant', 'models'] as const,
   agents: ['assistant', 'agents'] as const,
@@ -128,6 +133,8 @@ const REFRESH_DELAY_MS = 150;
 
 const SESSION_LIST_EVENTS = /^session\.(created|deleted|updated|renamed|moved|archived|unarchived|execution\.)/;
 
+const SHELL_EVENTS = /^session\.(execution\.|tool\.(called|success|failed)|synthetic|background|shell\.|deleted)/;
+
 /**
  * Keep the assistant's queries current from the server's events: a session's
  * messages refetch as it works (text arrives a sentence or so at a time, so
@@ -181,6 +188,9 @@ export function useAssistantEventSync() {
         refresh(assistantKeys.messages(sessionID));
         if (event.type.startsWith('session.inbox.')) refresh(assistantKeys.inbox(sessionID));
       }
+      // Commands start and stop with the tool calls that run them, and one
+      // finishing in the background tells its session.
+      if (SHELL_EVENTS.test(event.type)) refresh(assistantKeys.shells);
       if (SESSION_LIST_EVENTS.test(event.type)) {
         refresh(assistantKeys.sessions);
         refresh(assistantKeys.active);
@@ -253,6 +263,168 @@ export function useActiveSessions() {
     enabled: ready,
     staleTime: 30_000,
   });
+}
+
+/** Something a session started that's still running: a command, or a subagent and whatever runs under it. */
+export interface BackgroundTask {
+  kind: 'shell' | 'subagent';
+  /** The command's id, or the subagent's session. */
+  id: string;
+  /** The session that started it. */
+  sessionID: string;
+  /** The command line, or the subagent's title. */
+  title: string;
+  /** Where it runs. */
+  directory: string;
+  started: number;
+}
+
+export interface AssistantWork {
+  /**
+   * Sessions with something going on in them or under them: their own turn,
+   * a subagent's, or a command still running, in the foreground or not.
+   */
+  busy: ReadonlySet<string>;
+  /** The top-level conversations among them. */
+  roots: ReadonlySet<string>;
+  /** What each session started that's still running, by the session. */
+  tasks: ReadonlyMap<string, BackgroundTask[]>;
+}
+
+const NO_TASKS: BackgroundTask[] = [];
+const NO_IDS: string[] = [];
+
+/** A session and its parents, up to the conversation it belongs to. */
+async function fetchLineage(queryClient: QueryClient, sessionID: string): Promise<SessionInfo[]> {
+  const chain: SessionInfo[] = [];
+  let id: string | undefined = sessionID;
+  while (id && chain.length < 16) {
+    const next: string = id;
+    const session = await queryClient.fetchQuery({
+      queryKey: assistantKeys.session(next),
+      queryFn: () => assistantApi.session(next),
+      staleTime: 30_000,
+    });
+    chain.push(session);
+    id = session.parentID;
+  }
+  return chain;
+}
+
+function useLineages(sessionIDs: string[]): SessionInfo[][] {
+  const ready = useAssistantReady();
+  const queryClient = useQueryClient();
+  return useQueries({
+    queries: sessionIDs.map((sessionID) => ({
+      queryKey: assistantKeys.lineage(sessionID),
+      queryFn: () => fetchLineage(queryClient, sessionID),
+      enabled: ready,
+      // A session's parents never change.
+      staleTime: Infinity,
+    })),
+    combine: lineages,
+  });
+}
+
+function lineages(results: { data?: SessionInfo[] }[]): SessionInfo[][] {
+  return results.flatMap((result) => (result.data?.length ? [result.data] : []));
+}
+
+/** The commands running in these folders. Their sessions' events say when to look again. */
+export function useRunningShells(directories: string[]): ShellInfo[] {
+  const ready = useAssistantReady();
+  return useQueries({
+    queries: directories.map((directory) => ({
+      queryKey: assistantKeys.shellsIn(directory),
+      queryFn: () => assistantApi.shells(directory),
+      enabled: ready,
+      staleTime: 30_000,
+      // In case one ends without its session hearing (it was deleted, the server restarted).
+      refetchInterval: (query: { state: { data?: ShellInfo[] } }) => (query.state.data?.length ? 15_000 : false),
+    })),
+    combine: flatten<ShellInfo>,
+  });
+}
+
+/**
+ * What's running, conversation by conversation: a conversation stays busy
+ * while it works, and after, while a command or subagent it started in the
+ * background still runs. Commands are found in the folders the listed
+ * conversations work in, those working now do, and `directories`.
+ */
+export function useAssistantWork(directories: string[] = []): AssistantWork {
+  const { data: active = NO_IDS } = useActiveSessions();
+  const { data: sessions } = useAssistantSessions();
+  const activeLineages = useLineages(active);
+  const folders = [
+    ...new Set([
+      ...directories,
+      ...(sessions ?? []).filter((s) => !s.time.archived).map((s) => s.location.directory),
+      ...activeLineages.flatMap((chain) => chain.map((s) => s.location.directory)),
+    ]),
+  ].sort();
+  const shells = useRunningShells(folders);
+  const owners = [...new Set(shells.flatMap((shell) => (shell.metadata.sessionID ? [shell.metadata.sessionID] : [])))]
+    .filter((id) => !active.includes(id))
+    .sort();
+  const ownerLineages = useLineages(owners);
+
+  return useMemo(() => {
+    const chains = new Map([...activeLineages, ...ownerLineages].map((chain) => [chain[0].id, chain]));
+    const busy = new Set<string>();
+    const roots = new Set<string>();
+    const tasks = new Map<string, BackgroundTask[]>();
+    const markBusy = (sessionID: string) => {
+      const chain = chains.get(sessionID);
+      for (const session of chain ?? []) busy.add(session.id);
+      busy.add(sessionID);
+      roots.add(chain?.at(-1)?.id ?? sessionID);
+    };
+    const add = (sessionID: string, task: BackgroundTask) => {
+      const list = tasks.get(sessionID) ?? [];
+      if (!list.some((t) => t.id === task.id)) list.push(task);
+      tasks.set(sessionID, list);
+    };
+
+    for (const sessionID of active) markBusy(sessionID);
+    const seen = new Set<string>();
+    for (const shell of shells) {
+      const owner = shell.metadata.sessionID;
+      if (!owner || seen.has(shell.id)) continue;
+      seen.add(shell.id);
+      markBusy(owner);
+      add(owner, {
+        kind: 'shell',
+        id: shell.id,
+        sessionID: owner,
+        title: shell.command,
+        directory: shell.directory,
+        started: shell.time.started,
+      });
+    }
+    // A subagent with something going on under it is its parent's task.
+    for (const chain of chains.values()) {
+      for (let i = 0; i < chain.length - 1; i++) {
+        const child = chain[i];
+        if (!busy.has(child.id)) continue;
+        add(chain[i + 1].id, {
+          kind: 'subagent',
+          id: child.id,
+          sessionID: chain[i + 1].id,
+          title: sessionTitle(child),
+          directory: child.location.directory,
+          started: child.time.created,
+        });
+      }
+    }
+    for (const list of tasks.values()) list.sort((a, b) => a.started - b.started);
+    return { busy, roots, tasks };
+  }, [active, shells, activeLineages, ownerLineages]);
+}
+
+/** What a session started that's still running, from `useAssistantWork`. */
+export function tasksOf(work: AssistantWork, sessionID: string): BackgroundTask[] {
+  return work.tasks.get(sessionID) ?? NO_TASKS;
 }
 
 export function useSessionMessages(sessionID: string | null) {
@@ -736,6 +908,16 @@ export function useBackgroundSession() {
   return useMutation({
     mutationFn: (sessionID: string) => assistantApi.background(sessionID),
     onSuccess: (_data, sessionID) => invalidateSession(queryClient, sessionID),
+  });
+}
+
+/** Stop a command the agent left running. */
+export function useKillShell() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ directory, shellID }: { directory: string; shellID: string }) =>
+      assistantApi.killShell(directory, shellID),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: assistantKeys.shells }),
   });
 }
 

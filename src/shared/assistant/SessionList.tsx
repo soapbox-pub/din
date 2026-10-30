@@ -14,8 +14,8 @@ import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assis
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
 import { WindowDragRegion } from '@/sdk/react';
 import {
-  useActiveSessions,
   useAssistantSessions,
+  useAssistantWork,
   useHomeDirectory,
   useMainCheckouts,
   usePendingRequests,
@@ -118,7 +118,8 @@ export function SessionList({
   style?: CSSProperties;
 }) {
   const { data: sessions, isLoading } = useAssistantSessions();
-  const { data: active = [] } = useActiveSessions();
+  // Working, or still running a command or subagent it started.
+  const { busy } = useAssistantWork();
   const pending = usePendingRequests();
   const home = useHomeDirectory();
   const [filter, setFilter] = useState('');
@@ -187,7 +188,7 @@ export function SessionList({
               tag={tag}
               worktree={mains.has(session.location.directory)}
               selected={session.id === selected}
-              running={active.includes(session.id)}
+              running={busy.has(session.id)}
               waiting={waitingNow.has(session.id)}
               home={home}
               onSelect={() => onSelect(session.id)}
@@ -321,7 +322,7 @@ export function SessionList({
               const sessions = project.sessions.filter((s) => !waiting.has(s.id));
               const shown = all
                 ? sessions
-                : sessions.filter((s, i) => i < PROJECT_LIMIT || s.id === selected || active.includes(s.id));
+                : sessions.filter((s, i) => i < PROJECT_LIMIT || s.id === selected || busy.has(s.id));
               const hidden = sessions.length - shown.length;
               if (sessions.length === 0) return null;
               return (

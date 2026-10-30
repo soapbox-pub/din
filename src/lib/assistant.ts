@@ -123,6 +123,18 @@ export interface SessionInfo {
   location: { directory: string };
 }
 
+/** A command the server is running for a session: a tool call's, in the foreground or the background. */
+export interface ShellInfo {
+  id: string;
+  status: 'running' | 'exited' | 'timeout' | 'killed';
+  command: string;
+  cwd: string;
+  /** The folder the server lists it under, which asking about it again names. */
+  directory: string;
+  metadata: { sessionID?: string };
+  time: { started: number; completed?: number };
+}
+
 /** A failure the server reports (a provider refusing a key, a tool crashing). */
 export interface StructuredError {
   type?: string;
@@ -440,6 +452,16 @@ export const assistantApi = {
    */
   background: (sessionID: string) => call<unknown>('POST', `/api/session/${id(sessionID)}/background`),
 
+  /** The commands running in a folder, every session's that works there. */
+  shells: async (directory: string) =>
+    (await call<{ data: Omit<ShellInfo, 'directory'>[] }>('GET', `/api/shell${query({ 'location[directory]': directory })}`)).data
+      .filter((shell) => shell.status === 'running')
+      .map((shell): ShellInfo => ({ ...shell, directory })),
+
+  /** Stop a command and forget its output. */
+  killShell: (directory: string, shellID: string) =>
+    call<unknown>('DELETE', `/api/shell/${id(shellID)}${query({ 'location[directory]': directory })}`),
+
   rename: (sessionID: string, title: string) => call<unknown>('PATCH', `/api/session/${id(sessionID)}`, { title }),
 
   remove: (sessionID: string) => call<unknown>('DELETE', `/api/session/${id(sessionID)}`),
@@ -610,6 +632,57 @@ export function packageIconPath(json: string): string | null {
 export function parseSlashCommand(text: string): { name: string; args: string } | null {
   const match = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
   return match ? { name: match[1], args: (match[2] ?? '').trim() } : null;
+}
+
+type ToolPart = Extract<AssistantContent, { type: 'tool' }>;
+
+const SHELL_TOOL = /^(bash|shell|exec|command)/i;
+const SUBAGENT_TOOL = /^(task|subagent|agent)/i;
+
+/**
+ * What a tool call left running once it returned: the command it moved to the
+ * background, or the subagent it started there (or the subagent it waited
+ * for, which can go on working). Its id is the command's or the subagent
+ * session's, as `useAssistantWork` names tasks.
+ */
+export function toolTaskID(part: ToolPart): string | undefined {
+  if (part.state.status === 'streaming') return undefined;
+  const metadata = part.state.metadata;
+  const shellID = metadata?.shellID;
+  if (typeof shellID === 'string') return shellID;
+  const sessionID = metadata?.sessionID;
+  if (SUBAGENT_TOOL.test(part.name) && typeof sessionID === 'string') return sessionID;
+  return undefined;
+}
+
+/**
+ * Of a session's tasks, the ones it isn't waiting on: a tool call still
+ * running has its command or subagent in the foreground. A running call
+ * names its command by its text and its subagent by its session or its
+ * description, the subagent's title.
+ */
+export function backgroundOnly<T extends { kind: 'shell' | 'subagent'; id: string; title: string }>(
+  tasks: T[],
+  messages: SessionMessage[] | undefined,
+): T[] {
+  if (tasks.length === 0) return tasks;
+  const commands = new Set<string>();
+  const subagents = new Set<string>();
+  for (const message of messages ?? []) {
+    if (message.type !== 'assistant') continue;
+    for (const part of message.content) {
+      if (part.type !== 'tool' || part.state.status !== 'running') continue;
+      const { input, metadata } = part.state;
+      if (SHELL_TOOL.test(part.name) && typeof input.command === 'string') commands.add(input.command.trim());
+      if (SUBAGENT_TOOL.test(part.name)) {
+        if (typeof metadata?.sessionID === 'string') subagents.add(metadata.sessionID);
+        if (typeof input.description === 'string') subagents.add(input.description.trim());
+      }
+    }
+  }
+  return tasks.filter((task) =>
+    task.kind === 'shell' ? !commands.has(task.title.trim()) : !subagents.has(task.id) && !subagents.has(task.title.trim()),
+  );
 }
 
 /** What a session is called before the server has titled it. */

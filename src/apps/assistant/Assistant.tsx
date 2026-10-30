@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
+import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
 import { Composer, type SlashCommand } from '@/shared/assistant/Composer';
 import { ModelPicker } from '@/shared/assistant/ModelPicker';
@@ -42,7 +43,11 @@ import {
   useAssistantSession,
   useAssistantSessions,
   useAssistantStatus,
+  useAssistantWork,
   useBackgroundSession,
+  useKillShell,
+  tasksOf,
+  type BackgroundTask,
   useDirectoryIcons,
   useCancelQueued,
   useCompactSession,
@@ -67,6 +72,7 @@ import {
   useSwitchModel,
 } from '@/hooks/useAssistant';
 import {
+  backgroundOnly,
   cleanAssistantError,
   contextUsage,
   directoryName,
@@ -306,7 +312,8 @@ function AssistantWindow() {
     for (const sessionID of sessionIDs) followDinSession(sessionID);
   }, [sessionIDs]);
 
-  const { data: running = [] } = useActiveSessions();
+  // Busy while it works, or a command or subagent it started still runs.
+  const work = useAssistantWork(sessions.flatMap((s) => (s.session ? [s.session.location.directory] : [])));
   const pending = usePendingRequests();
   const waiting = new Set(
     [...pending.permissions, ...pending.forms, ...pending.passwords].map((request) => request.sessionID),
@@ -319,7 +326,7 @@ function AssistantWindow() {
       return {
         id: tab.id,
         title: session ? sessionTitle(session) : 'Loading…',
-        state: waiting.has(tab.sessionID) ? 'waiting' : running.includes(tab.sessionID) ? 'running' : 'idle',
+        state: waiting.has(tab.sessionID) ? 'waiting' : work.busy.has(tab.sessionID) ? 'running' : 'idle',
         directory: session?.location.directory,
       };
     }),
@@ -591,6 +598,7 @@ function AssistantWindow() {
             onPasswordFocused={() => setPasswordFocus(null)}
             onRename={() => setRenaming(activeTab.sessionID)}
             onNew={startNew}
+            onOpenSession={choose}
             onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
           />
         ) : (
@@ -650,6 +658,7 @@ function Conversation({
   onPasswordFocused,
   onRename,
   onNew,
+  onOpenSession,
   onFork,
 }: {
   ref?: Ref<ConversationHandle>;
@@ -660,6 +669,8 @@ function Conversation({
   /** Edit its title in its tab (/rename on its own). */
   onRename: () => void;
   onNew: (directory?: string) => void;
+  /** Show another conversation (a subagent's) in its tab. */
+  onOpenSession: (sessionID: string) => void;
   /** Fork it, whole or from before `message`. */
   onFork: (message?: UserMessage) => void;
 }) {
@@ -692,6 +703,40 @@ function Conversation({
   const directory = session?.location.directory;
   const fileLinkBase = useMemo(() => ({ directory, home }), [directory, home]);
   useMarkViewedSession(sessionID);
+
+  // What it started that still runs: the calls that started it keep
+  // spinning, and what it isn't waiting on shows above the composer.
+  const work = useAssistantWork(directory ? [directory] : []);
+  const tasks = tasksOf(work, sessionID);
+  const taskIDs = useMemo(() => new Set(tasks.map((task) => task.id)), [tasks]);
+  const inBackground = useMemo(() => backgroundOnly(tasks, messages), [tasks, messages]);
+  const killShell = useKillShell();
+  const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
+  /** Stop a task, and with a subagent, whatever it left running too. */
+  const stopTask = (task: BackgroundTask) => {
+    const all: BackgroundTask[] = [];
+    const collect = (t: BackgroundTask) => {
+      all.push(t);
+      if (t.kind === 'subagent') tasksOf(work, t.id).forEach(collect);
+    };
+    collect(task);
+    setStopping((prev) => new Set([...prev, task.id]));
+    void Promise.all(
+      all.map((t) =>
+        t.kind === 'shell'
+          ? killShell.mutateAsync({ directory: t.directory, shellID: t.id })
+          : interrupt.mutateAsync(t.id),
+      ),
+    )
+      .catch(fail(task.kind === 'shell' ? 'Couldn’t stop the command' : 'Couldn’t stop the subagent'))
+      .finally(() =>
+        setStopping((prev) => {
+          const next = new Set(prev);
+          next.delete(task.id);
+          return next;
+        }),
+      );
+  };
 
   // Follow the conversation down as it grows, unless the user scrolled up.
   // Coming back to its tab finds it where it was left.
@@ -814,6 +859,7 @@ function Conversation({
                     messages={messages ?? []}
                     queued={queued}
                     running={running}
+                    tasks={taskIDs}
                     home={home}
                     onCancelQueued={(message) =>
                       cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
@@ -840,6 +886,7 @@ function Conversation({
         )}
       </div>
       <div className="mx-auto w-full max-w-3xl space-y-3 px-4 pb-2 @2xl/assistant:px-6">
+        <BackgroundTasks tasks={inBackground} stopping={stopping} onOpen={onOpenSession} onStop={stopTask} />
         {permissions.map((request) => (
           <PermissionCard key={request.id} request={request} />
         ))}

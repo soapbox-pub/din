@@ -9,11 +9,11 @@ import { FormCard, PasswordCard, PermissionCard } from '@/shared/assistant/Reque
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import {
-  useActiveSessions,
   useAssistantDirectory,
   useAssistantReady,
   useAssistantSessions,
   useAssistantStatus,
+  useAssistantWork,
   useDirectoryIcons,
   useHomeDirectory,
   usePendingRequests,
@@ -44,21 +44,22 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
   const { config } = useAppContext();
   const ready = useAssistantReady();
   const { data: status } = useAssistantStatus();
-  const { data: active = [] } = useActiveSessions();
+  // Conversations working, or still running a command or subagent they started.
+  const { roots } = useAssistantWork();
   const pending = usePendingRequests();
   const [open, setOpen] = useState(false);
 
   if (!getAssistantBridge() || !config.assistantEnabled) return null;
 
   const waiting = pending.permissions.length + pending.forms.length + pending.passwords.length;
-  const working = ready && active.length > 0;
+  const working = ready && roots.size > 0;
   // Its panel says what's missing, and installs it.
   const missing = !!status && !status.binary && !status.installing;
   const label =
     waiting > 0
       ? `Assistant: waiting for you`
       : working
-        ? `Assistant: ${active.length} working`
+        ? `Assistant: ${roots.size} working`
         : missing
           ? 'Assistant: OpenCode isn’t installed'
           : 'Assistant';
@@ -133,7 +134,7 @@ function AssistantPanel({ onDone }: { onDone: () => void }) {
 
 function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; onDone: () => void }) {
   const { data: sessions, isLoading } = useAssistantSessions();
-  const { data: active = [] } = useActiveSessions();
+  const { busy } = useAssistantWork();
   const pending = usePendingRequests();
   const home = useHomeDirectory();
   const directory = useAssistantDirectory();
@@ -143,8 +144,8 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
 
   const all = sessions ?? [];
   const recent = [
-    ...all.filter((s) => active.includes(s.id)),
-    ...all.filter((s) => !active.includes(s.id) && !s.time.archived).slice(0, 5),
+    ...all.filter((s) => busy.has(s.id)),
+    ...all.filter((s) => !busy.has(s.id) && !s.time.archived).slice(0, 5),
   ];
 
   return (
@@ -188,7 +189,7 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
         </p>
       ) : (
         recent.length > 0 && (
-          <SessionSection title="Recent" sessions={recent} active={active} home={home} onShow={onShow} />
+          <SessionSection title="Recent" sessions={recent} busy={busy} home={home} onShow={onShow} />
         )
       )}
       <button
@@ -208,13 +209,13 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
 function SessionSection({
   title,
   sessions,
-  active,
+  busy,
   home,
   onShow,
 }: {
   title: string;
   sessions: SessionInfo[];
-  active: string[];
+  busy: ReadonlySet<string>;
   home?: string;
   onShow: (sessionID: string) => void;
 }) {
@@ -230,7 +231,7 @@ function SessionSection({
               onClick={() => onShow(session.id)}
               className="flex w-full items-center gap-2.5 px-4 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
             >
-              {active.includes(session.id) ? (
+              {busy.has(session.id) ? (
                 <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-label="Working" />
               ) : (
                 <ProjectIcon

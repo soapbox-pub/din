@@ -1,4 +1,4 @@
-import { createElement, memo, useEffect, useState, type ReactNode } from 'react';
+import { createContext, createElement, memo, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
   Bot,
   Braces,
@@ -28,6 +28,7 @@ import { CopyButton } from '@/shared/assistant/CopyButton';
 import { Markdown } from '@/shared/assistant/Markdown';
 import {
   tildify,
+  toolTaskID,
   type AssistantContent,
   type QueuedMessage,
   type SessionMessage,
@@ -104,11 +105,24 @@ function group(messages: SessionMessage[]): Entry[] {
   return entries;
 }
 
+const NO_TASKS: ReadonlySet<string> = new Set();
+
+/** The ids of the commands and subagents the conversation started that still run. */
+const TasksContext = createContext(NO_TASKS);
+
+/** Whether a step's call has returned but left a command or subagent running. */
+function stillRunning(step: Step, tasks: ReadonlySet<string>): boolean {
+  if (step.type !== 'tool' || toolRunning(step)) return false;
+  const id = toolTaskID(step);
+  return id !== undefined && tasks.has(id);
+}
+
 /** A conversation's messages, oldest first. */
 export const Transcript = memo(function Transcript({
   messages,
   queued = [],
   running,
+  tasks = NO_TASKS,
   home,
   onCancelQueued,
   onFork,
@@ -118,6 +132,11 @@ export const Transcript = memo(function Transcript({
   queued?: QueuedMessage[];
   /** The agent is working: the last turn shows it. */
   running: boolean;
+  /**
+   * The ids of the commands and subagents it started that still run: the
+   * calls that started them, and what holds those, keep spinning.
+   */
+  tasks?: ReadonlySet<string>;
   home?: string;
   onCancelQueued?: (message: QueuedMessage) => void;
   /** Fork the conversation from before one of the user's messages. */
@@ -129,6 +148,7 @@ export const Transcript = memo(function Transcript({
   const taken = new Set(messages.map((m) => m.id));
   const waiting = queued.filter((q) => !taken.has(q.id));
   return (
+    <TasksContext value={tasks}>
     <ol className="flex flex-col gap-8" aria-label="Conversation">
       {entries.map((entry) => {
         if (entry.kind === 'user') {
@@ -174,6 +194,7 @@ export const Transcript = memo(function Transcript({
         </li>
       ))}
     </ol>
+    </TasksContext>
   );
 });
 
@@ -355,6 +376,7 @@ function Turn({
   home?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const tasks = useContext(TasksContext);
   const now = useNow(working);
   const assistants = turn.items.filter((m): m is AssistantMessage => m.type === 'assistant');
   const lastMessage = assistants[assistants.length - 1];
@@ -385,6 +407,12 @@ function Turn({
   } else if (outcome === 'interrupted') label = `Stopped after ${elapsed}`;
   else if (outcome === 'failed') label = `Failed after ${elapsed}`;
   else label = `Worked for ${elapsed}`;
+  // What it left running keeps the line spinning after the turn is over.
+  const leftRunning = working
+    ? 0
+    : work.reduce((n, block) => n + (block.kind === 'steps' ? block.steps.filter((s) => stillRunning(s, tasks)).length : 0), 0);
+  if (leftRunning > 0) label += ` · ${stillRunningLabel(leftRunning)}`;
+  const spinning = working || leftRunning > 0;
 
   const render = (block: Block) => {
     if (block.kind === 'text') return <Markdown key={block.key} text={block.text} />;
@@ -395,7 +423,7 @@ function Turn({
 
   const summary = (
     <>
-      {working && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
+      {spinning && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
       <span className={cn('min-w-0 truncate', working && SHIMMER)}>{label}</span>
     </>
   );
@@ -450,14 +478,17 @@ const TRIGGER =
 /** A run of steps as one line ("Read 3 files, ran a command") that opens into the list of them. */
 function Steps({ steps, live }: { steps: Step[]; live: boolean }) {
   const [open, setOpen] = useState(false);
+  const tasks = useContext(TasksContext);
   if (steps.length === 1 && steps[0].type === 'reasoning') return <Reasoning step={steps[0]} live={live} />;
   const failed = steps.filter((step) => step.type === 'tool' && step.state.status === 'error').length;
+  const leftRunning = live ? 0 : steps.filter((step) => stillRunning(step, tasks)).length;
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className={cn(TRIGGER, 'max-w-full')}>
-        {live && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
+        {(live || leftRunning > 0) && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
         <span className={cn('min-w-0 truncate', live && SHIMMER)} role={live ? 'status' : undefined}>
           {live ? activeLabel(steps) : doneLabel(steps)}
+          {leftRunning > 0 && ` · ${stillRunningLabel(leftRunning)}`}
         </span>
         {failed > 0 && <span className="shrink-0 text-destructive">· {failed} failed</span>}
         <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
@@ -525,8 +556,13 @@ function ThoughtStep({ step }: { step: ReasoningPart }) {
   );
 }
 
+function stillRunningLabel(n: number): string {
+  return n === 1 ? '1 task still running' : `${n} tasks still running`;
+}
+
 function ToolStep({ step }: { step: ToolPart }) {
   const [open, setOpen] = useState(false);
+  const background = stillRunning({ ...step, key: step.id }, useContext(TasksContext));
   const { state } = step;
   const kind = toolKind(step.name);
   const target = toolTarget(kind, state);
@@ -541,10 +577,11 @@ function ToolStep({ step }: { step: ToolPart }) {
       <CollapsibleTrigger className={ROW}>
         {createElement(kind.icon, { className: 'size-3.5 shrink-0', 'aria-hidden': true })}
         <span className="min-w-0 flex-1 truncate" title={target?.full}>
-          {done ? kind.past(step.name) : kind.active(step.name)}
+          {done && !background ? kind.past(step.name) : kind.active(step.name)}
           {target && <code className="ml-1.5 font-mono text-xs text-foreground/80">{target.short}</code>}
         </span>
-        <ToolStatus status={state.status} />
+        {background && <span className="shrink-0 text-xs">in the background</span>}
+        <ToolStatus status={background ? 'running' : state.status} />
         <RowChevron open={open} />
       </CollapsibleTrigger>
       <CollapsibleContent>
