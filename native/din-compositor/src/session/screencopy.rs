@@ -5,15 +5,21 @@
 //!
 //! A plain copy is made at once. A copy "with damage" waits for the
 //! display's next frame that changed something, which paces a screen
-//! recorder by what happens on screen.
+//! recorder by what happens on screen. One that changed since the client's
+//! last copy of it doesn't wait: the client asking a little late doesn't
+//! cost it a frame.
 //!
 //! A copy into a GPU buffer is ready once the GPU has drawn it, which the
 //! event loop hears from its fence, so the compositor's own frames and input
 //! don't wait on it.
 
 use std::{
+    collections::HashMap,
     os::fd::OwnedFd,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use smithay::{
@@ -50,6 +56,15 @@ use super::{
 pub struct Screencopy {
     /// Copies waiting for their display to change.
     waiting: Vec<Copy>,
+    /// How many frames that changed something each display has drawn.
+    changes: HashMap<u64, u64>,
+}
+
+/// Per screencopy manager (a client's), the changes of each display it has
+/// copies of.
+#[derive(Default)]
+pub struct ManagerData {
+    seen: Arc<Mutex<HashMap<u64, u64>>>,
 }
 
 struct Copy {
@@ -66,12 +81,13 @@ pub struct FrameInfo {
     cursor: bool,
     size: Size<i32, Physical>,
     used: AtomicBool,
+    seen: Arc<Mutex<HashMap<u64, u64>>>,
 }
 
 impl Screencopy {
     pub fn new(dh: &DisplayHandle) -> Screencopy {
         dh.create_global::<State, ZwlrScreencopyManagerV1, _>(3, ());
-        Screencopy { waiting: Vec::new() }
+        Screencopy { waiting: Vec::new(), changes: HashMap::new() }
     }
 
     pub fn head_disabled(&mut self, id: u64) {
@@ -86,6 +102,7 @@ impl Screencopy {
 
     pub fn head_removed(&mut self, id: u64) {
         self.head_disabled(id);
+        self.changes.remove(&id);
     }
 }
 
@@ -98,27 +115,27 @@ impl GlobalDispatch<ZwlrScreencopyManagerV1, ()> for State {
         _data: &(),
         data_init: &mut DataInit<'_, State>,
     ) {
-        data_init.init(resource, ());
+        data_init.init(resource, ManagerData::default());
     }
 }
 
-impl Dispatch<ZwlrScreencopyManagerV1, ()> for State {
+impl Dispatch<ZwlrScreencopyManagerV1, ManagerData> for State {
     fn request(
         state: &mut State,
         _client: &Client,
         _resource: &ZwlrScreencopyManagerV1,
         request: zwlr_screencopy_manager_v1::Request,
-        _data: &(),
+        data: &ManagerData,
         _dh: &DisplayHandle,
         data_init: &mut DataInit<'_, State>,
     ) {
         match request {
             zwlr_screencopy_manager_v1::Request::CaptureOutput { frame, overlay_cursor, output } => {
-                state.new_frame(frame, overlay_cursor != 0, &output, None, data_init);
+                state.new_frame(frame, overlay_cursor != 0, &output, None, data.seen.clone(), data_init);
             }
             zwlr_screencopy_manager_v1::Request::CaptureOutputRegion { frame, overlay_cursor, output, x, y, width, height } => {
                 let region = Rectangle::new((x, y).into(), (width, height).into());
-                state.new_frame(frame, overlay_cursor != 0, &output, Some(region), data_init);
+                state.new_frame(frame, overlay_cursor != 0, &output, Some(region), data.seen.clone(), data_init);
             }
             _ => {}
         }
@@ -152,7 +169,10 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameInfo> for State {
             frame.post_error(zwlr_screencopy_frame_v1::Error::InvalidBuffer, "the buffer isn't what was offered");
             return;
         }
-        if with_damage {
+        let head = info.head.unwrap_or_default();
+        let changes = state.screencopy.changes.get(&head).copied().unwrap_or(0);
+        let seen = info.seen.lock().unwrap().get(&head).copied().unwrap_or(0);
+        if with_damage && seen >= changes {
             state.screencopy.waiting.push(Copy { frame: frame.clone(), buffer });
         } else {
             state.copy_frame(frame, &buffer, false);
@@ -182,6 +202,7 @@ impl State {
         cursor: bool,
         output: &WlOutput,
         region: Option<Rectangle<i32, Logical>>,
+        seen: Arc<Mutex<HashMap<u64, u64>>>,
         data_init: &mut DataInit<'_, State>,
     ) {
         let head = Output::from_resource(output).and_then(|o| self.backend.head_for_output(&o)).filter(|h| h.enabled());
@@ -200,7 +221,7 @@ impl State {
             }
             None => (None, None, Size::from((0, 0))),
         };
-        let frame = data_init.init(frame, FrameInfo { head, region, cursor, size, used: AtomicBool::new(false) });
+        let frame = data_init.init(frame, FrameInfo { head, region, cursor, size, used: AtomicBool::new(false), seen });
         if head.is_none() || size.w <= 0 || size.h <= 0 {
             frame.failed();
             return;
@@ -217,6 +238,7 @@ impl State {
         if !damaged {
             return;
         }
+        *self.screencopy.changes.entry(id).or_default() += 1;
         let (ready, waiting): (Vec<Copy>, Vec<Copy>) = std::mem::take(&mut self.screencopy.waiting)
             .into_iter()
             .partition(|c| c.frame.data::<FrameInfo>().and_then(|i| i.head) == Some(id));
@@ -230,6 +252,10 @@ impl State {
 
     fn copy_frame(&mut self, frame: &ZwlrScreencopyFrameV1, buffer: &WlBuffer, with_damage: bool) {
         let Some(info) = frame.data::<FrameInfo>() else { return };
+        if let Some(head) = info.head {
+            let changes = self.screencopy.changes.get(&head).copied().unwrap_or(0);
+            info.seen.lock().unwrap().insert(head, changes);
+        }
         match self.render_copy(info, buffer) {
             Ok(None) => self.copy_ready(frame, with_damage),
             Ok(Some(fence)) => {
