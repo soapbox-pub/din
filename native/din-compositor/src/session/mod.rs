@@ -16,7 +16,9 @@
 //!
 //! For everything else on the computer it speaks the wlroots protocols:
 //! output management (wlr-randr, Din's display settings and deckmon's AirPlay
-//! displays), screencopy (grim and deckmon) and gamma control (night light).
+//! displays), screencopy (grim and deckmon) and gamma control (night light),
+//! and one of its own for displays with no screen, which deckmon adds to
+//! extend the desktop onto a TV (virtual_output.rs).
 //!
 //! The Wayland socket is `din-shell` in XDG_RUNTIME_DIR. The compositor exits
 //! when Din does, with its exit status.
@@ -31,6 +33,7 @@ mod render;
 mod screencopy;
 mod shell;
 mod state;
+mod virtual_output;
 mod virtual_pointer;
 
 use std::{process::Command, sync::Arc};

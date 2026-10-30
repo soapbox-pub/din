@@ -12,6 +12,12 @@
 //! waits for its refresh, the next waits for that. At the refresh, clients
 //! hear that their frame is on screen (frame callbacks and presentation
 //! feedback), so they draw the next one in the time that's left.
+//!
+//! A head can also be virtual (virtual_output.rs): a display with no screen,
+//! for screen sharing, that's only ever drawn into screen copies. It's drawn
+//! as soon as something on it changes, at most twice a refresh, so a copy
+//! has what Din just drew rather than waiting on a clock of its own; its
+//! refreshes are a steady clock for whatever has it as its main display.
 
 use std::time::Duration;
 
@@ -33,8 +39,9 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             ImportDma,
+            damage::OutputDamageTracker,
             element::{
-                RenderElementStates,
+                RenderElementState, RenderElementStates, default_primary_scanout_output_compare,
                 utils::select_dmabuf_feedback,
             },
             gles::GlesRenderer,
@@ -111,8 +118,7 @@ pub struct Head {
     /// Stays the same while the display is connected.
     pub id: u64,
     pub name: String,
-    pub connector: connector::Handle,
-    pub crtc: crtc::Handle,
+    pub kind: Kind,
     pub modes: Vec<smithay::reexports::drm::control::Mode>,
     pub info: edid::Info,
     /// Millimetres.
@@ -132,15 +138,37 @@ pub struct Head {
     pub gamma: Option<Vec<u16>>,
 }
 
-/// An enabled head's DRM output and its frame schedule.
+/// What a head is.
+pub enum Kind {
+    Drm { connector: connector::Handle, crtc: crtc::Handle },
+    /// A display with no screen, drawn only into screen copies.
+    Virtual,
+}
+
+/// Marks a virtual head's output.
+pub struct VirtualMarker;
+
+pub fn is_virtual(output: &Output) -> bool {
+    output.user_data().get::<VirtualMarker>().is_some()
+}
+
+/// An enabled head's frames: a DRM output, or a virtual one's damage.
 pub struct Screen {
-    surface: Surface,
+    target: Target,
     feedback: Option<SurfaceFeedback>,
     redraw: Redraw,
     /// Stands in for the refresh after a frame that changed nothing.
     estimated_vblank: Option<RegistrationToken>,
     last_vblank: Option<Duration>,
     refresh: Duration,
+}
+
+enum Target {
+    Drm(Surface),
+    Virtual {
+        damage: Box<OutputDamageTracker>,
+        last_render: Option<Duration>,
+    },
 }
 
 impl Screen {
@@ -181,6 +209,13 @@ enum Redraw {
 impl Head {
     pub fn enabled(&self) -> bool {
         self.screen.is_some()
+    }
+
+    pub fn crtc(&self) -> Option<crtc::Handle> {
+        match self.kind {
+            Kind::Drm { crtc, .. } => Some(crtc),
+            Kind::Virtual => None,
+        }
     }
 
     pub fn preferred(&self) -> Option<&smithay::reexports::drm::control::Mode> {
@@ -288,8 +323,8 @@ impl Backend {
                     }
                     state.backend.active = true;
                     for head in &state.backend.heads {
-                        if let Some(screen) = &head.screen {
-                            screen.surface.reset_buffers();
+                        if let Some(Screen { target: Target::Drm(surface), .. }) = &head.screen {
+                            surface.reset_buffers();
                         }
                     }
                     state.restore_gamma();
@@ -346,9 +381,9 @@ impl Backend {
     pub fn set_gamma(&self, id: u64, ramp: Option<&[u16]>) -> Result<(), String> {
         let head = self.head(id).ok_or("no such display")?;
         let size = head.gamma_size as usize;
-        if size == 0 {
+        let Some(crtc) = head.crtc().filter(|_| size > 0) else {
             return Err("the display has no gamma table".into());
-        }
+        };
         let identity: Vec<u16>;
         let ramp = match ramp {
             Some(ramp) if ramp.len() == size * 3 => ramp,
@@ -362,7 +397,7 @@ impl Backend {
         };
         let (red, rest) = ramp.split_at(size);
         let (green, blue) = rest.split_at(size);
-        self.drm.device().set_gamma(head.crtc, red, green, blue).map_err(|err| format!("setting gamma: {err}"))
+        self.drm.device().set_gamma(crtc, red, green, blue).map_err(|err| format!("setting gamma: {err}"))
     }
 
     fn surface_feedback(&mut self, surface: &Surface) -> Option<SurfaceFeedback> {
@@ -465,8 +500,7 @@ impl State {
         self.backend.heads.push(Head {
             id,
             name,
-            connector: connector.handle(),
-            crtc,
+            kind: Kind::Drm { connector: connector.handle(), crtc },
             modes,
             info,
             physical_size: (w as i32, h as i32),
@@ -486,8 +520,67 @@ impl State {
     }
 
     fn remove_head(&mut self, connector: connector::Handle) {
-        let Some(index) = self.backend.heads.iter().position(|h| h.connector == connector) else { return };
-        let id = self.backend.heads[index].id;
+        let Some(head) = self
+            .backend
+            .heads
+            .iter()
+            .find(|h| matches!(h.kind, Kind::Drm { connector: c, .. } if c == connector))
+        else {
+            return;
+        };
+        self.remove_head_id(head.id);
+    }
+
+    /// Adds a virtual head, MAKE MODEL, of WIDTH x HEIGHT at REFRESH mHz, to
+    /// the right of the displays that are on, and gives its id and name.
+    pub fn add_virtual_head(&mut self, make: String, model: String, width: u16, height: u16, refresh: u32) -> Result<(u64, String), String> {
+        let n = (1..).find(|n| !self.backend.heads.iter().any(|h| h.name == format!("HEADLESS-{n}"))).unwrap_or(1);
+        let name = format!("HEADLESS-{n}");
+        let mode = virtual_mode(width, height, refresh, true);
+        let mut modes = vec![mode];
+        for (w, h) in [(3840, 2160), (2560, 1440), (1920, 1200), (1920, 1080), (1280, 800), (1280, 720)] {
+            if (w, h) != (width, height) {
+                modes.push(virtual_mode(w, h, refresh, false));
+            }
+        }
+        let output = Output::new(
+            name.clone(),
+            PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: make.clone(), model: model.clone() },
+        );
+        output.user_data().insert_if_missing(|| VirtualMarker);
+        output.set_preferred(WlMode::from(mode));
+        let id = self.backend.next_id;
+        self.backend.next_id += 1;
+        let x = self.layout_right();
+        info!("{name} is added ({make} {model}), at {width}x{height}");
+        self.backend.heads.push(Head {
+            id,
+            name: name.clone(),
+            kind: Kind::Virtual,
+            modes,
+            info: edid::Info { make, model, serial: String::new() },
+            physical_size: (0, 0),
+            output,
+            global: None,
+            screen: None,
+            mode,
+            position: (x, 0).into(),
+            scale: 1.0,
+            transform: Transform::Normal,
+            gamma_size: 0,
+            gamma: None,
+        });
+        if let Err(err) = self.enable_head(id) {
+            self.backend.heads.retain(|h| h.id != id);
+            return Err(err);
+        }
+        self.layout_changed();
+        Ok((id, name))
+    }
+
+    /// Forgets head ID, which is gone.
+    pub fn remove_head_id(&mut self, id: u64) {
+        let Some(index) = self.backend.heads.iter().position(|h| h.id == id) else { return };
         self.disable_head(id);
         let head = self.backend.heads.remove(index);
         info!("{} is disconnected", head.name);
@@ -510,6 +603,7 @@ impl State {
         let Some(index) = self.backend.heads.iter().position(|h| h.id == id) else {
             return Err("no such display".into());
         };
+        let now: Duration = self.clock.now().into();
         let Backend { heads, drm, renderer, .. } = &mut self.backend;
         let head = &mut heads[index];
         let output = head.output.clone();
@@ -521,33 +615,37 @@ impl State {
         );
         let elements = DrmOutputRenderElements::<GlesRenderer, OutputElement>::default();
         if let Some(screen) = &mut head.screen {
-            if screen.surface.with_compositor(|c| c.pending_mode()) != head.mode {
-                screen
-                    .surface
-                    .use_mode(head.mode, renderer, &elements)
-                    .map_err(|err| format!("{}: setting the mode: {err}", head.name))?;
+            let changed = match &mut screen.target {
+                Target::Drm(surface) if surface.with_compositor(|c| c.pending_mode()) != head.mode => {
+                    surface
+                        .use_mode(head.mode, renderer, &elements)
+                        .map_err(|err| format!("{}: setting the mode: {err}", head.name))?;
+                    true
+                }
+                Target::Drm(_) => false,
+                Target::Virtual { .. } => mode_refresh(&head.mode) != screen.refresh,
+            };
+            if changed {
                 screen.refresh = mode_refresh(&head.mode);
                 screen.last_vblank = None;
             }
         } else {
-            let surface = drm
-                .initialize_output::<_, OutputElement>(
-                    head.crtc,
-                    head.mode,
-                    &[head.connector],
-                    &output,
-                    None,
-                    renderer,
-                    &elements,
-                )
-                .map_err(|err| format!("{}: lighting it: {err}", head.name))?;
+            let target = match head.kind {
+                Kind::Drm { connector, crtc } => Target::Drm(
+                    drm.initialize_output::<_, OutputElement>(crtc, head.mode, &[connector], &output, None, renderer, &elements)
+                        .map_err(|err| format!("{}: lighting it: {err}", head.name))?,
+                ),
+                Kind::Virtual => Target::Virtual { damage: Box::new(OutputDamageTracker::from_output(&output)), last_render: None },
+            };
+            // A virtual display's refreshes count from when it's on.
+            let last_vblank = matches!(target, Target::Virtual { .. }).then_some(now);
             head.global = Some(output.create_global::<State>(&self.dh));
             head.screen = Some(Screen {
-                surface,
+                target,
                 feedback: None,
                 redraw: Redraw::Idle,
                 estimated_vblank: None,
-                last_vblank: None,
+                last_vblank,
                 refresh: mode_refresh(&head.mode),
             });
             info!("{} is on", head.name);
@@ -555,7 +653,10 @@ impl State {
         let position = head.position;
         // Which formats it can scan out may have changed with the mode.
         let screen = self.backend.heads[index].screen.take().unwrap();
-        let feedback = self.backend.surface_feedback(&screen.surface);
+        let feedback = match &screen.target {
+            Target::Drm(surface) => self.backend.surface_feedback(surface),
+            Target::Virtual { .. } => None,
+        };
         self.backend.heads[index].screen = Some(Screen { feedback, ..screen });
         self.space.map_output(&output, position);
         if let Some(gamma) = self.backend.heads[index].gamma.clone() {
@@ -600,9 +701,15 @@ impl State {
             Redraw::Scheduled(_) => {}
             Redraw::Flipping { again } => *again = true,
             Redraw::Idle => {
-                let delay = screen
-                    .next_vblank(now)
-                    .map_or(Duration::ZERO, |next| next.saturating_sub(max_render_time).saturating_sub(now));
+                let delay = match &screen.target {
+                    Target::Drm(_) => screen
+                        .next_vblank(now)
+                        .map_or(Duration::ZERO, |next| next.saturating_sub(max_render_time).saturating_sub(now)),
+                    // Twice a refresh at most: the pointer moves far more often.
+                    Target::Virtual { last_render, .. } => {
+                        last_render.map_or(Duration::ZERO, |last| (last + screen.refresh / 2).saturating_sub(now))
+                    }
+                };
                 let token = self
                     .handle
                     .insert_source(Timer::from_duration(delay), move |_, _, state| {
@@ -667,36 +774,65 @@ impl State {
             dnd_icon: self.dnd_icon.as_ref(),
         };
         let elements = render::elements(&mut scene, renderer, area, scale, true);
-        let (damaged, states) = match screen.surface.render_frame(renderer, &elements, BACKDROP, FrameFlags::DEFAULT) {
-            Ok(frame) => (!frame.is_empty, frame.states),
-            Err(err) => {
-                warn!("{}: rendering: {err}", head.name);
-                return;
+        let now: Duration = self.clock.now().into();
+        let (damaged, states) = match &mut screen.target {
+            Target::Drm(surface) => {
+                let (damaged, states) = match surface.render_frame(renderer, &elements, BACKDROP, FrameFlags::DEFAULT) {
+                    Ok(frame) => (!frame.is_empty, frame.states),
+                    Err(err) => {
+                        warn!("{}: rendering: {err}", head.name);
+                        return;
+                    }
+                };
+                update_primary_scanout_output(&self.space, &output, &self.cursor_status, self.dnd_icon.as_ref().map(|i| &i.surface), &states);
+                if damaged {
+                    let feedback = presentation_feedback(&output, &self.space, &states);
+                    match surface.queue_frame(Some(feedback)) {
+                        Ok(()) => screen.redraw = Redraw::Flipping { again: false },
+                        Err(err) => warn!("{}: queueing a frame: {err}", head.name),
+                    }
+                } else {
+                    // Nothing changed on screen. Whoever drew hears at the refresh the
+                    // frame would have made, so a client committing nothing new
+                    // doesn't spin.
+                    let delay = screen.next_vblank(now).map_or(screen.refresh, |next| next - now);
+                    let token = self
+                        .handle
+                        .insert_source(Timer::from_duration(delay), move |_, _, state| {
+                            state.on_estimated_vblank(id);
+                            TimeoutAction::Drop
+                        })
+                        .expect("frame timer");
+                    screen.estimated_vblank = Some(token);
+                    screen.redraw = Redraw::Flipping { again: false };
+                }
+                (damaged, states)
+            }
+            Target::Virtual { damage, last_render } => {
+                let (damaged, states) = match damage.damage_output(1, &elements) {
+                    Ok((damage, states)) => (damage.is_some_and(|d| !d.is_empty()), states),
+                    Err(err) => {
+                        warn!("{}: {err:?}", head.name);
+                        return;
+                    }
+                };
+                *last_render = Some(now);
+                update_primary_scanout_output(&self.space, &output, &self.cursor_status, self.dnd_icon.as_ref().map(|i| &i.surface), &states);
+                // Whatever has it as its main display hears at its next refresh.
+                if screen.estimated_vblank.is_none() {
+                    let at = screen.next_vblank(now).unwrap_or(now + screen.refresh);
+                    let token = self
+                        .handle
+                        .insert_source(Timer::from_duration(at - now), move |_, _, state| {
+                            state.on_virtual_vblank(id, at);
+                            TimeoutAction::Drop
+                        })
+                        .expect("frame timer");
+                    screen.estimated_vblank = Some(token);
+                }
+                (damaged, states)
             }
         };
-        update_primary_scanout_output(&self.space, &output, &self.cursor_status, self.dnd_icon.as_ref().map(|i| &i.surface), &states);
-        if damaged {
-            let feedback = presentation_feedback(&output, &self.space, &states);
-            match screen.surface.queue_frame(Some(feedback)) {
-                Ok(()) => screen.redraw = Redraw::Flipping { again: false },
-                Err(err) => warn!("{}: queueing a frame: {err}", head.name),
-            }
-        } else {
-            // Nothing changed on screen. Whoever drew hears at the refresh the
-            // frame would have made, so a client committing nothing new
-            // doesn't spin.
-            let now: Duration = self.clock.now().into();
-            let delay = screen.next_vblank(now).map_or(screen.refresh, |next| next - now);
-            let token = self
-                .handle
-                .insert_source(Timer::from_duration(delay), move |_, _, state| {
-                    state.on_estimated_vblank(id);
-                    TimeoutAction::Drop
-                })
-                .expect("frame timer");
-            screen.estimated_vblank = Some(token);
-            screen.redraw = Redraw::Flipping { again: false };
-        }
         let feedback = screen.feedback.clone();
         drop(elements);
         if let Some(feedback) = feedback {
@@ -718,10 +854,21 @@ impl State {
         }
     }
 
+    /// A virtual head's refresh, at AT.
+    fn on_virtual_vblank(&mut self, id: u64, at: Duration) {
+        let Some(head) = self.backend.heads.iter_mut().find(|h| h.id == id) else { return };
+        let Some(screen) = head.screen.as_mut() else { return };
+        screen.estimated_vblank = None;
+        screen.last_vblank = Some(at);
+        let output = head.output.clone();
+        self.send_frames(&output);
+    }
+
     fn on_vblank(&mut self, crtc: crtc::Handle, metadata: &mut Option<DrmEventMetadata>) {
         let now: Duration = self.clock.now().into();
-        let Some(head) = self.backend.heads.iter_mut().find(|h| h.crtc == crtc) else { return };
+        let Some(head) = self.backend.heads.iter_mut().find(|h| h.crtc() == Some(crtc)) else { return };
         let Some(screen) = head.screen.as_mut() else { return };
+        let Target::Drm(surface) = &mut screen.target else { return };
         let (time, flags) = match metadata.as_ref().map(|m| m.time) {
             Some(DrmEventTime::Monotonic(tp)) if !tp.is_zero() => (
                 tp,
@@ -732,7 +879,7 @@ impl State {
             _ => (now, wp_presentation_feedback::Kind::Vsync),
         };
         let sequence = metadata.as_ref().map_or(0, |m| m.sequence) as u64;
-        match screen.surface.frame_submitted() {
+        match surface.frame_submitted() {
             Ok(Some(Some(mut feedback))) => {
                 feedback.presented::<_, Monotonic>(Time::from(time), Refresh::fixed(screen.refresh), sequence, flags)
             }
@@ -786,7 +933,7 @@ fn update_primary_scanout_output(
     dnd_icon: Option<&smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>,
     states: &RenderElementStates,
 ) {
-    let compare = smithay::backend::renderer::element::default_primary_scanout_output_compare;
+    let compare = prefer_screens;
     for window in space.elements() {
         window.with_surfaces(|surface, data| {
             update_surface_primary_scanout_output(surface, output, data, states, compare);
@@ -804,6 +951,52 @@ fn update_primary_scanout_output(
             update_surface_primary_scanout_output(surface, output, data, states, compare);
         });
     }
+}
+
+/// Which of two outputs a surface is mainly on, for its frame callbacks and
+/// the like: a screen rather than a virtual display, whose refreshes aren't a
+/// screen's, else smithay's choice.
+fn prefer_screens<'a>(
+    current: &'a Output,
+    current_state: &'a RenderElementState,
+    next: &'a Output,
+    next_state: &'a RenderElementState,
+) -> &'a Output {
+    match (is_virtual(current), is_virtual(next)) {
+        (true, false) => next,
+        (false, true) => current,
+        _ => default_primary_scanout_output_compare(current, current_state, next, next_state),
+    }
+}
+
+/// A virtual display's mode: WIDTH x HEIGHT at REFRESH mHz (0 for 60 Hz),
+/// with blanking only so the refresh comes out right.
+fn virtual_mode(width: u16, height: u16, refresh: u32, preferred: bool) -> smithay::reexports::drm::control::Mode {
+    let refresh = if refresh == 0 { 60_000 } else { refresh.clamp(1_000, 240_000) };
+    let (htotal, vtotal) = (width.saturating_add(160), height.saturating_add(40));
+    let clock = (htotal as u64 * vtotal as u64 * refresh as u64 / 1_000_000) as u32;
+    let mut name = [0; 32];
+    for (to, from) in name.iter_mut().zip(format!("{width}x{height}").bytes()) {
+        *to = from as std::ffi::c_char;
+    }
+    drm_ffi::drm_mode_modeinfo {
+        clock,
+        hdisplay: width,
+        hsync_start: width + 48,
+        hsync_end: width + 80,
+        htotal,
+        hskew: 0,
+        vdisplay: height,
+        vsync_start: height + 3,
+        vsync_end: height + 9,
+        vtotal,
+        vscan: 0,
+        vrefresh: (refresh + 500) / 1000,
+        flags: 0,
+        type_: if preferred { drm_ffi::DRM_MODE_TYPE_PREFERRED | drm_ffi::DRM_MODE_TYPE_USERDEF } else { drm_ffi::DRM_MODE_TYPE_USERDEF },
+        name,
+    }
+    .into()
 }
 
 fn presentation_feedback(output: &Output, space: &Space<Window>, states: &RenderElementStates) -> OutputPresentationFeedback {

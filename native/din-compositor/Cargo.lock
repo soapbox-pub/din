@@ -184,6 +184,7 @@ name = "din-compositor"
 version = "0.1.0"
 dependencies = [
  "data-encoding",
+ "drm-ffi",
  "libc",
  "serde",
  "serde_json",
@@ -192,6 +193,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tungstenite",
+ "wayland-scanner",
  "xcursor",
 ]
 

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="din_virtual_output_v1">
+  <copyright>
+    Copyright 2026 Din's authors. Use, copy and change freely.
+  </copyright>
+
+  <description summary="displays with no screen, for screen sharing">
+    A client adds a display that has no screen behind it: one that is on the
+    layout like any monitor plugged in, and whose picture the client takes
+    with wlr-screencopy, as a screen sharer sending it to a TV does. It is a
+    head in wlr-output-management, so it can be arranged and resized like
+    the others, and it goes away when the client destroys it or disconnects.
+  </description>
+
+  <interface name="din_virtual_output_manager_v1" version="1">
+    <request name="create">
+      <description summary="add a display">
+        Adds a WIDTHxHEIGHT display refreshing REFRESH times every thousand
+        seconds (0 for 60 Hz). MAKE and MODEL are what the display is shown
+        as. The display answers with name once it's on, or failed.
+      </description>
+      <arg name="id" type="new_id" interface="din_virtual_output_v1"/>
+      <arg name="make" type="string"/>
+      <arg name="model" type="string"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="refresh" type="int"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="the displays made through it stay"/>
+    </request>
+  </interface>
+
+  <interface name="din_virtual_output_v1" version="1">
+    <event name="name">
+      <description summary="the display is on">
+        The display is on the layout, as the wl_output and output head called
+        NAME.
+      </description>
+      <arg name="name" type="string"/>
+    </event>
+
+    <event name="failed">
+      <description summary="the display couldn't be added">
+        The display wasn't added, or was taken away; the object does nothing
+        more and can be destroyed.
+      </description>
+      <arg name="reason" type="string"/>
+    </event>
+
+    <request name="destroy" type="destructor">
+      <description summary="take the display away"/>
+    </request>
+  </interface>
+</protocol>

@@ -53,7 +53,7 @@ use smithay::{
     },
 };
 
-use super::{cursor, drm, gamma, output_management, screencopy, shell, virtual_pointer};
+use super::{cursor, drm, gamma, output_management, screencopy, shell, virtual_output, virtual_pointer};
 
 /// CLOCK_MONOTONIC, the clock presentation times are in.
 const CLOCK_MONOTONIC: u32 = 1;
@@ -152,6 +152,7 @@ impl State {
         // know the socket.
         VirtualKeyboardManagerState::new::<State, _>(&dh, |_| true);
         virtual_pointer::create_global(&dh);
+        virtual_output::create_global(&dh);
 
         let mut seat = seat_state.new_wl_seat(&dh, backend.seat_name());
         let xkb = xkb_config();
