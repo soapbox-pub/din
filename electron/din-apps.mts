@@ -1,4 +1,5 @@
-// Built-in apps at din://<id>/ (docs/README.md, docs/security-model.md).
+// Built-in apps at din://<id>/ (docs/README.md, docs/security-model.md), and
+// apps from folders at din+file://<hash>/ (din-file-apps.mts serves those).
 //
 // Each app window is a <webview> in its own session (persist:din-apps), at an
 // origin of its own, in a process of its own. This module serves the apps'
@@ -25,10 +26,33 @@ import { ptyRoutes } from './pty-routes.mts';
 import type { MessagePortMain } from 'electron';
 
 export const DIN_SCHEME = 'din';
+/** Apps from folders the user added (electron/din-file-apps.mts). */
+export const DIN_FILE_SCHEME = 'din+file';
 export const DIN_APPS_PARTITION = 'persist:din-apps';
 
 /** What a din:// app's id may look like: the host of its origin. */
 const APP_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/** A din+file:// app's host: the sha256 of its folder's path, in base32. */
+const FILE_HOST = /^[a-z2-7]{52}$/;
+
+/** What a din+file://<host>/ app's id is: `file-<host>`. */
+const FILE_APP_PREFIX = 'file-';
+
+/** Whether an app id is a din+file:// app's (no din:// app may have one). */
+export function isFileAppId(id: string): boolean {
+  return id.startsWith(FILE_APP_PREFIX) && FILE_HOST.test(id.slice(FILE_APP_PREFIX.length));
+}
+
+/** The id of the app from a folder at din+file://<host>/. */
+export function fileAppId(host: string): string {
+  return FILE_APP_PREFIX + host;
+}
+
+/** An app's origin: din+file://<host> for one from a folder, else din://<id>. */
+export function appOrigin(appId: string): string {
+  return isFileAppId(appId) ? `${DIN_FILE_SCHEME}://${appId.slice(FILE_APP_PREFIX.length)}` : `${DIN_SCHEME}://${appId}`;
+}
 
 /** The permissions whose bridges get a port straight to main, and the IPC channels each reaches. */
 const SYSTEM_PERMISSIONS = {
@@ -75,12 +99,16 @@ export function appsSession(): Electron.Session {
   return session.fromPartition(DIN_APPS_PARTITION);
 }
 
-/** The app id of a din:// URL or origin, or null. Compares scheme and host, never `URL.origin` ('null' for custom schemes). */
+/**
+ * The app id of a din:// or din+file:// URL or origin, or null. Compares
+ * scheme and host, never `URL.origin` ('null' for custom schemes).
+ */
 export function appIdOf(url: string): string | null {
   try {
     const parsed = new URL(url);
+    if (parsed.protocol === `${DIN_FILE_SCHEME}:`) return FILE_HOST.test(parsed.hostname) ? fileAppId(parsed.hostname) : null;
     if (parsed.protocol !== `${DIN_SCHEME}:`) return null;
-    return APP_ID.test(parsed.hostname) ? parsed.hostname : null;
+    return APP_ID.test(parsed.hostname) && !isFileAppId(parsed.hostname) ? parsed.hostname : null;
   } catch {
     return null;
   }
@@ -336,7 +364,7 @@ function serveFileUrl(request: Request): Promise<Response> | Response {
     return notFound();
   }
   const grant = fileUrls.get(token);
-  if (grant) return serveLocalFile(request, grant.file, { 'access-control-allow-origin': `${DIN_SCHEME}://${grant.appId}` });
+  if (grant) return serveLocalFile(request, grant.file, { 'access-control-allow-origin': appOrigin(grant.appId) });
   const base = fsUrlBases.get(token);
   const fsGrant = base ? grants.get(base.wcId)?.get('fs') : undefined;
   if (!base || !fsGrant) return notFound();
@@ -347,7 +375,7 @@ function serveFileUrl(request: Request): Promise<Response> | Response {
     return notFound();
   }
   if (isProtectedPath(file) || (fsGrant.roots && !withinRoots(fsGrant.roots, file))) return notFound();
-  return serveLocalFile(request, file, { 'access-control-allow-origin': `${DIN_SCHEME}://${base.appId}` });
+  return serveLocalFile(request, file, { 'access-control-allow-origin': appOrigin(base.appId) });
 }
 
 /** Apps granted fs, by the token of the URL base they load files from. */

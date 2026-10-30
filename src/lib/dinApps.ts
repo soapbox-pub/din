@@ -31,6 +31,12 @@ export interface AppsBridge {
   fileUrl(webContentsId: number, path: string): Promise<string>;
   kill(webContentsId: number): Promise<void>;
   onResponsive(callback: (e: { webContentsId: number; responsive: boolean }) => void): () => void;
+  /** Open a folder as an app (src/lib/fileApps.ts); resolves with its id and its manifest as found, untrusted. */
+  folder(path: string): Promise<{ appId: string; path: string; manifest: unknown }>;
+  /** Stop serving and watching a folder's app. */
+  closeFolder(appId: string): Promise<void>;
+  /** Hear when a file in a folder opened as an app changes. */
+  onFolderChanged(callback: (e: { appId: string }) => void): () => void;
 }
 
 declare global {
@@ -96,9 +102,15 @@ export function manifestSize(manifest: DinManifest): Size | undefined {
   return manifest.din.window?.size;
 }
 
+/** Whether an id is an app's from a folder, at din+file://<host>/ (`file-<host>`; src/lib/fileApps.ts). */
+export function isFileAppId(id: string): boolean {
+  return /^file-[a-z2-7]{52}$/.test(id);
+}
+
 /** The URL an app's window loads. */
 export function appUrl(id: string, manifest: DinManifest): string {
   const start = manifest.start_url && manifest.start_url.startsWith('/') ? manifest.start_url : '/';
+  if (isFileAppId(id)) return `din+file://${id.slice('file-'.length)}${start}`;
   if (guestsAvailable()) return `din://${id}${start}`;
   // Outside Electron the app is a page of the dev server (or the static
   // build), framed. In development it gets an origin of its own; a static

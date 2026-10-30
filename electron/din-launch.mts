@@ -24,10 +24,10 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { app, ipcMain, net as electronNet } from 'electron';
-import { appIdOf, appsSession, isBuiltInApp, DIN_SCHEME } from './din-apps.mts';
+import { appIdOf, appsSession, isBuiltInApp, isFileAppId, DIN_SCHEME } from './din-apps.mts';
 
 /** Where an app's files come from. */
-type Source = { kind: 'dir'; root: string } | { kind: 'url'; origin: string };
+export type Source = { kind: 'dir'; root: string } | { kind: 'url'; origin: string };
 
 interface Running {
   source: Source;
@@ -115,7 +115,7 @@ function fileIn(root: string, pathname: string): string | null {
   }
 }
 
-function serveFrom(source: Source, request: Request): Promise<Response> {
+export function serveFrom(source: Source, request: Request): Promise<Response> {
   const url = new URL(request.url);
   const accept = request.headers.get('accept');
   if (source.kind === 'url') {
@@ -156,7 +156,7 @@ const IMAGE_TYPES: Record<string, string> = {
 };
 
 /** The app's manifest, as its page links it (a build hashes the name), with its best icon inlined. */
-async function findManifest(source: Source, host: string): Promise<Record<string, unknown>> {
+export async function findManifest(source: Source, host: string): Promise<Record<string, unknown>> {
   const page = await read(source, host, '/', MAX_REQUEST * 16);
   const html = page?.bytes.toString('utf8') ?? '';
   const link = /<link\b[^>]*\brel=["']?manifest\b[^>]*>/i.exec(html)?.[0];
@@ -263,6 +263,32 @@ function describe(source: Source): string {
   return source.kind === 'dir' ? source.root : source.origin;
 }
 
+/**
+ * A folder an app may be served from, with its symlinks resolved: one with
+ * an index.html, not holding Din's own profile nor inside it. Throws why not.
+ */
+export function appFolder(dir: string, protectedPaths: string[]): string {
+  let root: string;
+  try {
+    root = fs.realpathSync(dir);
+  } catch {
+    throw new Error(`No such folder: ${dir}`);
+  }
+  if (!fs.statSync(root).isDirectory()) throw new Error(`Not a folder: ${dir}`);
+  if (!fs.existsSync(path.join(root, 'index.html'))) throw new Error(`No index.html in ${root}`);
+  for (const p of protectedPaths) {
+    const guarded = (() => {
+      try {
+        return fs.realpathSync(p);
+      } catch {
+        return path.resolve(p);
+      }
+    })();
+    if (inside(root, guarded) || inside(guarded, root)) throw new Error(`${root} holds Din's own profile; serve a folder of just the app`);
+  }
+  return root;
+}
+
 /** Check a request and work out the app's source and origin; throws what to tell the command. */
 function parse(request: LaunchArgs): { source: Source; host: string; ephemeral: boolean; paths: string[]; detach: boolean } {
   let source: Source;
@@ -276,25 +302,7 @@ function parse(request: LaunchArgs): { source: Source; host: string; ephemeral: 
     if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('--url takes an http or https URL');
     source = { kind: 'url', origin: url.origin };
   } else if (typeof request.dir === 'string' && path.isAbsolute(request.dir)) {
-    let root: string;
-    try {
-      root = fs.realpathSync(request.dir);
-    } catch {
-      throw new Error(`No such folder: ${request.dir}`);
-    }
-    if (!fs.statSync(root).isDirectory()) throw new Error(`Not a folder: ${request.dir}`);
-    if (!fs.existsSync(path.join(root, 'index.html'))) throw new Error(`No index.html in ${root}`);
-    for (const p of options?.protectedPaths() ?? []) {
-      const guarded = (() => {
-        try {
-          return fs.realpathSync(p);
-        } catch {
-          return path.resolve(p);
-        }
-      })();
-      if (inside(root, guarded) || inside(guarded, root)) throw new Error(`${root} holds Din's own profile; serve a folder of just the app`);
-    }
-    source = { kind: 'dir', root };
+    source = { kind: 'dir', root: appFolder(request.dir, options?.protectedPaths() ?? []) };
   } else {
     throw new Error('Name a folder, or a dev server with --url');
   }
@@ -305,6 +313,7 @@ function parse(request: LaunchArgs): { source: Source; host: string; ephemeral: 
     if (typeof request.origin !== 'string' || !ORIGIN.test(request.origin)) {
       throw new Error('--origin takes lowercase letters, digits and dashes (up to 63), starting with a letter or digit');
     }
+    if (isFileAppId(request.origin)) throw new Error(`din://${request.origin} is reserved for apps from folders`);
     if (isBuiltInApp(request.origin)) throw new Error(`din://${request.origin} is a built-in app's`);
     const existing = running.get(request.origin);
     if (existing && !sameSource(existing.source, source)) {

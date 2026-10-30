@@ -99,7 +99,7 @@ export interface LaunchContext {
 }
 
 export interface DinApp {
-  /** The app's id: the host of its `din://` URL. */
+  /** The app's id: the host of its `din://` URL (`file-<host>` for an app from a folder, at `din+file://<host>/`). */
   readonly id: string;
   /** How this window was launched. */
   readonly launch: LaunchContext;

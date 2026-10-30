@@ -3,6 +3,7 @@ import type { AppDefinition } from '@/lib/apps';
 import type { WebApp } from '@/lib/webApps';
 import type { NsiteAppEntry } from '@/lib/nsiteApps';
 import type { NostrHandler } from '@/lib/nostrUri';
+import type { FileAppEntry, OpenedFolder } from '@/lib/fileApps';
 
 /**
  * The desktop app registry: built-in apps, user-installed web apps and nsites,
@@ -41,9 +42,15 @@ export interface InstalledAppsManager {
    * app window rather than a browser tab.
    */
   findAppIdForUrl: (url: string) => string | undefined;
-  /** Whether the user can uninstall an app (installed web apps and nsites). */
+  /** Apps from folders on this computer (empty outside the Electron shell). */
+  fileApps: readonly FileAppEntry[];
+  /** Add a folder main opened (dinos.apps.folder) as an app, or update it. */
+  installFileApp: (opened: OpenedFolder) => FileAppEntry;
+  /** Update a folder's app from its manifest as main read it again; null if it isn't installed. */
+  refreshFileApp: (opened: OpenedFolder) => FileAppEntry | null;
+  /** Whether the user can uninstall an app (installed web apps, nsites and folders' apps). */
   canUninstall: (id: string) => boolean;
-  /** Remove an installed web app or nsite. */
+  /** Remove an installed web app, nsite or folder's app. */
   uninstallApp: (id: string) => void;
 }
 

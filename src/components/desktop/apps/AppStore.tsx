@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Check, ChevronLeft, Copy, Globe, RefreshCw, Search } from 'lucide-react';
+import { Check, ChevronLeft, Copy, FolderPlus, Globe, RefreshCw, Search } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import type { StoreApp } from '@/lib/nsiteCatalog';
 import { canonicalNsiteUrl } from '@/lib/nsite';
@@ -32,6 +32,9 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
+import { FolderAppDetail, FolderAppsSection } from '@/components/desktop/apps/appstore/FolderApps';
+import { useChooseAppFolder } from '@/hooks/useChooseAppFolder';
+import { canAddFileApps, type OpenedFolder } from '@/lib/fileApps';
 import { ThemeStore, type ThemeAddress } from '@/components/desktop/apps/appstore/ThemeStore';
 import { useThemeCatalog } from '@/hooks/useThemes';
 import { parseThemeNaddr } from '@/lib/themeDefinition';
@@ -74,6 +77,10 @@ const TABS: { id: StoreTab; name: string }[] = [
  * installNsiteApp() path as the browser's "install site as app" button: the
  * nsite store downloads every file, and the entry roams via encrypted app
  * data.
+ *
+ * Apps can also come from a folder on this computer (src/lib/fileApps.ts),
+ * for developing one: the title bar's folder button, or the From Your
+ * Folders section, picks it and opens its page (FolderApps).
  */
 export function AppStore({ params }: AppComponentProps) {
   const catalog = useNsiteCatalog();
@@ -89,8 +96,15 @@ export function AppStore({ params }: AppComponentProps) {
   const [selectedTheme, setSelectedTheme] = useState<ThemeAddress | null>(() =>
     typeof params?.theme === 'string' ? parseThemeNaddr(params.theme) : null,
   );
+  // A folder chosen to add as an app, whose page is showing.
+  const [folderApp, setFolderApp] = useState<OpenedFolder | null>(null);
+  const { choose: chooseAppFolder, busy: choosingFolder } = useChooseAppFolder();
   const onThemes = tab === 'themes';
-  const detailOpen = onThemes ? !!selectedTheme : !!selected;
+  const detailOpen = onThemes ? !!selectedTheme : !!selected || !!folderApp;
+  const closeDetail = () => {
+    setSelected(null);
+    setFolderApp(null);
+  };
 
   const rawQuery = search.trim();
   const searching = rawQuery.length > 0;
@@ -130,7 +144,7 @@ export function AppStore({ params }: AppComponentProps) {
           <button
             type="button"
             data-window-no-drag
-            onClick={() => (onThemes ? setSelectedTheme(null) : setSelected(null))}
+            onClick={() => (onThemes ? setSelectedTheme(null) : closeDetail())}
             aria-label={onThemes ? 'Back to all themes' : 'Back to all apps'}
             title="Back"
             className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -185,7 +199,7 @@ export function AppStore({ params }: AppComponentProps) {
             onChange={(e) => {
               setSearch(e.target.value);
               if (onThemes) setSelectedTheme(null);
-              else setSelected(null);
+              else closeDetail();
             }}
             placeholder={onThemes ? 'Search themes, or paste an address' : 'Search apps, or paste an address'}
             aria-label={onThemes ? 'Search themes, or paste an address' : 'Search apps, or paste an address'}
@@ -194,6 +208,24 @@ export function AppStore({ params }: AppComponentProps) {
             className="h-7 pl-7 text-sm md:text-sm"
           />
         </div>
+        {!onThemes && canAddFileApps() && (
+          <button
+            type="button"
+            onClick={() => {
+              void chooseAppFolder().then((opened) => {
+                if (!opened) return;
+                setSelected(null);
+                setFolderApp(opened);
+              });
+            }}
+            disabled={choosingFolder}
+            aria-label="Add an app from a folder"
+            title="Add an App from a Folder…"
+            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+          >
+            <FolderPlus className="size-4" aria-hidden />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -224,6 +256,8 @@ export function AppStore({ params }: AppComponentProps) {
     refetchThemes,
     refreshing,
     refreshDisabled,
+    chooseAppFolder,
+    choosingFolder,
   ]);
   useEffect(() => () => setTitlebar(null), [setTitlebar]);
 
@@ -257,16 +291,17 @@ export function AppStore({ params }: AppComponentProps) {
       <div
         className="flex h-full w-full flex-col bg-background text-foreground"
         onKeyDown={(e) => {
-          if (selected && e.key === 'Escape') {
-            setSelected(null);
+          if ((selected || folderApp) && e.key === 'Escape') {
+            closeDetail();
           }
         }}
       >
         {selected && (
           <AppDetail key={selected.host} app={selected} moreFromPublisher={moreFromPublisher} />
         )}
+        {folderApp && !selected && <FolderAppDetail key={folderApp.appId} opened={folderApp} />}
         {/* Content */}
-        <div className={cn('min-h-0 flex-1 overflow-y-auto', selected && 'hidden')}>
+        <div className={cn('min-h-0 flex-1 overflow-y-auto', (selected || folderApp) && 'hidden')}>
           <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
             {searching ? (
               <section className="flex flex-col gap-4" aria-label="Search results">
@@ -292,6 +327,7 @@ export function AppStore({ params }: AppComponentProps) {
             ) : (
               <>
                 <FeaturedSection />
+                <FolderAppsSection onChose={setFolderApp} />
                 <section className="flex flex-col gap-4" aria-label="All apps">
                   <SectionHeader
                     title="All Apps"

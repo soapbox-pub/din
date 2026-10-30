@@ -19,6 +19,7 @@ import {
   appIdOf,
   attachAppGuest,
   DIN_APPS_PARTITION,
+  DIN_FILE_SCHEME,
   DIN_SCHEME,
   forwardPushToGrants,
   isAppGuest as isDinAppGuest,
@@ -110,6 +111,7 @@ import {
 import { registerTrayHandlers } from './tray.mts';
 import { registerOpenUri } from './open-uri.mts';
 import { attachLaunchedGuest, registerDinLaunch, serveLaunched } from './din-launch.mts';
+import { registerDinFileApps } from './din-file-apps.mts';
 import { registerNotificationHandlers } from './notifications.mts';
 import { registerGeolocationHandlers } from './geolocation.mts';
 import { forgetNappSite, nappPermissionChanged, registerNappHandlers } from './napp.mts';
@@ -195,6 +197,16 @@ protocol.registerSchemesAsPrivileged([
     // Built-in apps (electron/din-apps.mts): an origin of their own each,
     // secure, fetchable and streamable, but none of the desktop's app:.
     scheme: DIN_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+  {
+    // Apps from folders (electron/din-file-apps.mts): the same as din:.
+    scheme: DIN_FILE_SCHEME,
     privileges: {
       standard: true,
       secure: true,
@@ -5446,6 +5458,11 @@ app.whenReady().then(() => {
     assertShellSender,
     protectedPaths: () => [app.getPath('userData')],
   });
+  registerDinFileApps({
+    sendToShell,
+    assertShellSender,
+    protectedPaths: () => [app.getPath('userData')],
+  });
 
   registerFsHandlers();
   registerFileOpsHandlers({ assertShellSender, sendToShell });
@@ -5706,7 +5723,7 @@ app.whenReady().then(() => {
       event.preventDefault();
       return;
     }
-    // A built-in app's window: din:// only, sandboxed, no extra preloads, and
+    // A built-in app's window: din:// (or din+file://) only, sandboxed, no extra preloads, and
     // transparent, so an app can draw its own window's shape.
     if (params.partition === DIN_APPS_PARTITION) {
       if (!appIdOf(typeof params.src === 'string' ? params.src : '')) {

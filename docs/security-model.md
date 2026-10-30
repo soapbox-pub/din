@@ -42,6 +42,11 @@ still apply, and moving apps out shrinks what code runs there.
   origin no built-in app has. Their manifests aren't reviewed, so the
   desktop drops the members that reach past the app (storage and file
   migration) and asks the user before granting permissions or folders.
+  **Apps from folders** (the App Store's "Add from a Folder…", the same
+  page) are the same, at `din+file://<hash>/`, a scheme of their own in
+  the apps' session that serves only folders the desktop opened; their
+  permissions are allowed by adding them, and asked about again whenever
+  the manifest asks for more.
 - **Each built-in app is its own origin**, so its `localStorage`,
   IndexedDB and caches are its own. `din://paint` can't read
   `din://terminal`'s storage.
@@ -52,7 +57,7 @@ still apply, and moving apps out shrinks what code runs there.
   `connect-src` there, in review.
 - **Built-in apps' guests are created only by `DinAppFrame`**, in their
   partition, and `will-attach-webview` refuses a `din-apps` guest whose
-  `src` isn't `din://`.
+  `src` isn't `din://` (or `din+file://`).
 
 ## Who trusts whom
 

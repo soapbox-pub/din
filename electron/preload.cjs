@@ -3338,6 +3338,30 @@ expose('apps', {
     ipcRenderer.on('dinos-apps:responsive', listener);
     return () => ipcRenderer.removeListener('dinos-apps:responsive', listener);
   },
+  /**
+   * Open a folder as an app: serve it at din+file://<host>/ and watch it
+   * (electron/din-file-apps.mts).
+   * @param {string} path absolute
+   * @returns {Promise<{ appId: string, path: string, manifest: unknown }>} its manifest as found, untrusted
+   */
+  folder: (path) => ipcRenderer.invoke('dinos-apps:folder', path),
+  /**
+   * Stop serving and watching a folder's app.
+   * @param {string} appId
+   * @returns {Promise<void>}
+   */
+  closeFolder: (appId) => ipcRenderer.invoke('dinos-apps:closeFolder', appId),
+  /**
+   * Hear when a file in a folder opened as an app changes.
+   * @param {(e: { appId: string }) => void} callback
+   * @returns {() => void}
+   */
+  onFolderChanged: (callback) => {
+    /** @param {unknown} _event @param {{ appId: string }} e */
+    const listener = (_event, e) => callback(e);
+    ipcRenderer.on('dinos-apps:folderChanged', listener);
+    return () => ipcRenderer.removeListener('dinos-apps:folderChanged', listener);
+  },
 });
 
 // Widgets bridge (window.dinos.widgets): desktop widgets at widget://<id>/,

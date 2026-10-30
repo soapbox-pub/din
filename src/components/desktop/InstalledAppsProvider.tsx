@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { APPS, NativeWindowView } from '@/lib/apps';
@@ -30,6 +30,16 @@ import {
 } from '@/lib/nsiteApps';
 import { getNsiteStore, type NsiteSummary } from '@/lib/nsiteStore';
 import { launchedApp, launchedApps, subscribeLaunchedApps } from '@/lib/launchedApps';
+import { getAppsBridge } from '@/lib/dinApps';
+import {
+  FILE_APPS_KEY,
+  fileAppDefinition,
+  fileAppEntry,
+  parseFileApps,
+  type FileAppEntry,
+  type OpenedFolder,
+} from '@/lib/fileApps';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { ensureNsiteAppInfo } from '@/lib/nsiteAppInfo';
 import { parseCanonicalNsiteHost } from '@/lib/nsite';
 import {
@@ -172,7 +182,8 @@ function nativeAppToDefinition(app: NativeApp): AppDefinition {
  * Provides the desktop app registry: the static built-in apps, the user's
  * installed web apps and nsites (persisted + roamed via encrypted app data;
  * an nsite's files live in the OS-level nsite store), the Linux apps
- * installed on the host system, and the apps the `din` command is running.
+ * installed on the host system, apps from folders on this computer, and the
+ * apps the `din` command is running.
  */
 export function InstalledAppsProvider({ children }: { children: ReactNode }) {
   const [webApps, setWebApps] = useAppData<WebApp[]>(
@@ -196,6 +207,44 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
   const nsiteApps = store ? nsiteEntries : NO_NSITE_APPS;
   // Apps the `din` command is running (src/lib/launchedApps.ts).
   const launched = useSyncExternalStore(subscribeLaunchedApps, launchedApps);
+  // Apps from folders on this computer (src/lib/fileApps.ts).
+  const [storedFileApps, setStoredFileApps] = useLocalStorage<unknown>(FILE_APPS_KEY, []);
+  const fileApps = useMemo(() => parseFileApps(storedFileApps), [storedFileApps]);
+  const fileAppsRef = useRef(fileApps);
+  useEffect(() => {
+    fileAppsRef.current = fileApps;
+  });
+  const saveFileApp = useCallback((opened: OpenedFolder, install: boolean): FileAppEntry | null => {
+    const existing = fileAppsRef.current.find((e) => e.appId === opened.appId);
+    if (!existing && !install) return null;
+    const entry = fileAppEntry(opened, existing?.addedAt);
+    if (existing && JSON.stringify(existing) === JSON.stringify(entry)) return existing;
+    setStoredFileApps((prev: unknown) => {
+      const list = parseFileApps(prev);
+      if (!install && !list.some((e) => e.appId === entry.appId)) return prev;
+      return [...list.filter((e) => e.appId !== entry.appId), entry];
+    });
+    return entry;
+  }, [setStoredFileApps]);
+
+  // Main serves only folders it was asked for since it started: open each
+  // again (reading its manifest afresh), and again whenever it changes.
+  const fileAppPaths = fileApps.map((e) => e.path).join('\0');
+  useEffect(() => {
+    const bridge = getAppsBridge();
+    if (!bridge || !fileAppPaths) return;
+    for (const path of fileAppPaths.split('\0')) {
+      bridge.folder(path).then((opened) => saveFileApp(opened, false), () => {});
+    }
+  }, [fileAppPaths, saveFileApp]);
+  useEffect(() => {
+    const bridge = getAppsBridge();
+    return bridge?.onFolderChanged(({ appId }) => {
+      const entry = fileAppsRef.current.find((e) => e.appId === appId);
+      if (entry) bridge.folder(entry.path).then((opened) => saveFileApp(opened, false), () => {});
+    });
+  }, [saveFileApp]);
+
   const queryClient = useQueryClient();
   const { data: storedSites } = useQuery({
     queryKey: NSITE_INSTALLED_QUERY_KEY,
@@ -249,6 +298,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         ),
       ),
       ...nativeApps.map(nativeAppToDefinition),
+      ...fileApps.map(fileAppDefinition),
       ...launched.map((app) => app.definition),
     ];
 
@@ -259,6 +309,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
       apps,
       webApps,
       nsiteApps,
+      fileApps,
       // A launch opens its window as soon as it's registered, before this list has it.
       getApp: (id) => apps.find((app) => app.id === id) ?? launchedApp(id)?.definition,
       findWebAppByUrl: (url) => webApps.find((webApp) => webApp.url === url),
@@ -271,7 +322,11 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         return webApps.find((webApp) => sameOrigin(webApp.url, url))?.id;
       },
       canUninstall: (id) =>
-        webApps.some((webApp) => webApp.id === id) || nsiteEntryFor(id) !== undefined,
+        webApps.some((webApp) => webApp.id === id) ||
+        nsiteEntryFor(id) !== undefined ||
+        fileApps.some((entry) => entry.appId === id),
+      installFileApp: (opened) => saveFileApp(opened, true)!,
+      refreshFileApp: (opened) => saveFileApp(opened, false),
       installNsiteApp: (host, name) => {
         if (!store || !parseCanonicalNsiteHost(host)) return null;
         const existing = nsiteApps.find((entry) => entry.host === host);
@@ -304,6 +359,11 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         return webApp;
       },
       uninstallApp: (id) => {
+        if (fileApps.some((e) => e.appId === id)) {
+          setStoredFileApps((prev: unknown) => parseFileApps(prev).filter((e) => e.appId !== id));
+          void getAppsBridge()?.closeFolder(id);
+          return;
+        }
         const entry = nsiteEntryFor(id);
         if (entry) {
           setNsiteEntries((prev) => prev.filter((e) => e.host !== entry.host));
@@ -314,7 +374,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         setWebApps((prev) => prev.filter((webApp) => webApp.id !== id));
       },
     };
-  }, [webApps, setWebApps, nsiteApps, setNsiteEntries, storedSites, store, nativeApps, live, launched, themeIcons]);
+  }, [webApps, setWebApps, nsiteApps, setNsiteEntries, storedSites, store, nativeApps, live, launched, themeIcons, fileApps, saveFileApp, setStoredFileApps]);
 
   return (
     <InstalledAppsContext.Provider value={value}>

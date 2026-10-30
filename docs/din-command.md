@@ -64,3 +64,29 @@ desktop (`dinos.launch.onOpen`). `LaunchHost` registers the app
 Main hears back when the window opened, when it closed, and when the app
 has no windows left (`release`), which frees the origin and clears an
 ephemeral one's storage.
+
+## Apps from folders: `din+file://`
+
+To keep an app you're working on in the launcher, add its folder in the
+App Store instead: the folder button in its title bar, or **Add from a
+Folder…** under From Your Folders. The folder is served the same way
+(inside it only, `index.html` for router paths, never one holding Din's
+profile), at `din+file://<hash>/`, where the hash is the sha256 of its
+path in base32: the same folder always gets the same origin, and its
+storage. Its id on the desktop is `file-<hash>` (no `din://` app may
+have one), which is `din.app.id`.
+
+The App Store shows the app as its manifest describes it, and what it
+asks for; **Add** allows that and opens it. A manifest that later asks for
+more is asked about again, as a named origin's is. Whenever a file in the
+folder changes (outside `.git` and `node_modules`), its windows load
+again with the manifest read afresh, so `vite build --watch` into the
+folder, or saving a plain `index.html`, shows up at once.
+
+The list is this computer's, in the desktop's `localStorage`
+(`din:file-apps`, with each manifest as last read). Main serves only
+folders the desktop opened since it started (`dinos.apps.folder`,
+`electron/din-file-apps.mts`), so the desktop opens each again when it
+starts, and a window (`FileAppFrame`) does before it loads. Removing the
+app (from the App Store or the Dock) stops serving its folder, and leaves
+the files and the origin's storage alone.

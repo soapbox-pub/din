@@ -242,8 +242,16 @@ export function addLaunchedApp(request: LaunchRequest): LaunchedApp {
   const component: ComponentType<AppComponentProps> = function LaunchedApp(props: AppComponentProps) {
     return createElement(LaunchedAppFrame, { ...props, app: entry });
   };
-  entry.definition = {
-    id: request.appId,
+  entry.definition = manifestDefinition(request.appId, manifest, component);
+  apps.set(request.appId, entry);
+  changed();
+  return entry;
+}
+
+/** An app Din hasn't reviewed, as the window manager knows it, from its sanitized manifest. */
+export function manifestDefinition(appId: string, manifest: DinManifest, component: ComponentType<AppComponentProps>): AppDefinition {
+  return {
+    id: appId,
     name: manifest.short_name ?? manifest.name,
     icon: manifest.icons[0]?.src ?? WEB_APP_ICON,
     component,
@@ -252,9 +260,6 @@ export function addLaunchedApp(request: LaunchRequest): LaunchedApp {
     keywords: manifest.din.keywords,
     singleInstance: manifest.launch_handler?.client_mode === 'focus-existing',
   };
-  apps.set(request.appId, entry);
-  changed();
-  return entry;
 }
 
 export function removeLaunchedApp(appId: string): void {

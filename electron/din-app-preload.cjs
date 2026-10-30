@@ -1,5 +1,6 @@
 // @ts-check
-// Preload for built-in apps (din://<id>/, the persist:din-apps session; see
+// Preload for built-in apps (din://<id>/, and din+file://<hash>/ for apps from
+// folders; the persist:din-apps session; see
 // electron/din-apps.mts and docs/security-model.md).
 //
 // It connects the page to the desktop, and for apps granted fs or pty, to
@@ -20,7 +21,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 /** @type {((transport: object) => void) | null} */
 const installDin = /* @din-runtime */ null;
 
-if (process.isMainFrame && location.protocol === 'din:') {
+if (process.isMainFrame && (location.protocol === 'din:' || location.protocol === 'din+file:')) {
   /** @type {MessagePort | null} */
   let desktop = null;
   /** @type {unknown[]} */

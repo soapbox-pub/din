@@ -15,14 +15,17 @@ import {
 
 interface Props extends AppComponentProps {
   app: LaunchedApp;
+  /** Where it came from, to say before what it asks for. */
+  from?: string;
 }
 
 /**
- * The window body of an app the `din` command runs (src/lib/launchedApps.ts):
+ * The window body of an app the `din` command runs (src/lib/launchedApps.ts),
+ * or of one from a folder (FileAppFrame):
  * a built-in app's frame, once the user has said what its manifest may have.
  * Din hasn't reviewed its code, so its permissions are asked for, not given.
  */
-export function LaunchedAppFrame({ app, ...props }: Props) {
+export function LaunchedAppFrame({ app, from = 'It was started from the command line', ...props }: Props) {
   const { permissions, folders } = requestedAccess(app.manifest);
   const asks = permissions.length > 0 || folders.length > 0;
   const [answer, setAnswer] = useState<'allow' | 'deny' | null>(() => (!asks || isApproved(app) ? 'allow' : null));
@@ -48,7 +51,7 @@ export function LaunchedAppFrame({ app, ...props }: Props) {
         </div>
 
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">It was started from the command line and asks to:</p>
+          <p className="text-sm text-muted-foreground">{from} and asks to:</p>
           <ul className="space-y-2 rounded-lg bg-muted/50 p-4 text-sm">
             {permissions.map((p) => (
               <li key={p} className="flex gap-2">
