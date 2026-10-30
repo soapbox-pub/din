@@ -152,6 +152,7 @@
         in
         {
           accounts = test ./tests/accounts.nix;
+          airplay-display = test ./tests/airplay-display.nix;
           boot-screen = test ./tests/boot-screen.nix;
           firmware = test ./tests/firmware.nix;
           lock = test ./tests/lock.nix;

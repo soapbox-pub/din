@@ -153,8 +153,8 @@ let
   # from its repository (the flake's `deckmon` input). It captures the screen
   # through din-shell's wlroots screencopy and encodes with GStreamer: VA-API on
   # the GPU, x264 or OpenH264 without one. pactl gives the receiver its sound
-  # output, wlr-randr sets the size of the display it adds to extend the
-  # desktop, and tee writes that display's EDID (through sudo, below).
+  # output. To extend the desktop it asks din-shell for a display with no
+  # screen (din-virtual-output), which it takes away again when it's done.
   deckmon-gst = with pkgs.gst_all_1; [ gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly ];
   din-deckmon = pkgs.rustPlatform.buildRustPackage {
     pname = "deckmon";
@@ -720,13 +720,6 @@ in
       "${din-password}/bin/din-password sudo skip"
       "${din-password}/bin/din-password sudo grant"
       "${din-password}/bin/din-password sudo revoke"
-      # deckmon's virtual display for an AirPlay receiver, which extends the
-      # desktop onto it: its EDID on the spare DisplayPort connector, forced
-      # on, and taken away again.
-      "${pkgs.coreutils}/bin/tee /sys/kernel/debug/dri/[0-9]*/DP-2/edid_override"
-      "${pkgs.coreutils}/bin/tee /sys/kernel/debug/dri/[0-9]*/DP-2/trigger_hotplug"
-      "${pkgs.coreutils}/bin/tee /sys/class/drm/card[0-9]*-DP-2/status"
-      "${pkgs.coreutils}/bin/test -e /sys/kernel/debug/dri/[0-9]*/DP-2/trigger_hotplug"
     ];
   }];
   security.sudo.extraConfig = ''
@@ -1848,8 +1841,6 @@ in
     wantedBy = [ "default.target" ];
     unitConfig.ConditionUser = "din";
     environment.WAYLAND_DISPLAY = "din-shell";
-    # sudo, for the virtual display's EDID.
-    path = [ "/run/wrappers" ];
     serviceConfig = {
       ExecStart = "${din-deckmon}/bin/deckmon daemon";
       Restart = "on-failure";

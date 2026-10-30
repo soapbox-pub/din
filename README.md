@@ -315,9 +315,12 @@ that is remembered (`airplay.json` in Din's config). Sound goes to the
 receiver too. The
 sending is [deckmon](https://git.shakespeare.diy)'s, a daemon DinOS runs as a
 user service (the flake's `deckmon` input) and Din talks to over its socket
-(`electron/airplay.mts`). It captures the screen through din-shell's wlroots screencopy, and a
-separate display is a spare DisplayPort connector forced on with an EDID,
-through a sudo rule for those writes. Elsewhere Din uses a `deckmon` on PATH.
+(`electron/airplay.mts`). It captures the screen through din-shell's wlroots
+screencopy. A separate display is one din-shell adds with no screen behind it
+(`HEADLESS-1`, through its own din-virtual-output protocol,
+`native/din-compositor/protocols/`): it's drawn only into deckmon's copies, as
+soon as Din draws, and goes with deckmon, even if deckmon is killed.
+Elsewhere Din uses a `deckmon` on PATH.
 
 ### Printing
 

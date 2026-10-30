@@ -12,9 +12,10 @@
 // Two ways to share:
 //   - mirror: deckmon captures the primary display (wlroots screencopy, by
 //     output name) and sends it, scaled into the receiver's screen.
-//   - extend: deckmon plugs in a virtual display named after the receiver,
-//     which din-shell adds beside the others like any monitor, and sends that. It
-//     shows up in Settings → Display, where it's arranged like the rest.
+//   - extend: deckmon asks din-shell for a display with no screen, named
+//     after the receiver, which din-shell adds beside the others like any
+//     monitor, and sends that. It shows up in Settings → Display, where it's
+//     arranged like the rest.
 // Either way the receiver also gets a sound output, made the default while
 // it lasts, so sound plays there and the volume keys reach it.
 //
