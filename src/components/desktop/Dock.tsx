@@ -688,7 +688,9 @@ export function Dock({
         className={cn(
           'pointer-events-none absolute inset-x-0 bottom-0 z-[9999] flex justify-center',
           'motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out',
-          hidden && 'translate-y-full',
+          // Past its own height: an icon pokes a little above its tile, and
+          // an unread badge on its corner, shadow and all, above that.
+          hidden && 'translate-y-[calc(100%+1rem)]',
         )}
         onFocus={() => setFocusWithin(true)}
         onBlur={(e) => {
