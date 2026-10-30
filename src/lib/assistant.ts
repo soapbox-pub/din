@@ -174,6 +174,8 @@ export type AssistantContent =
 export interface PromptFile {
   mime: string;
   name?: string;
+  /** A pasted file's contents, base64. */
+  data?: string;
   source?: { type: 'inline' } | { type: 'uri'; uri: string };
 }
 
@@ -222,7 +224,7 @@ export interface QueuedMessage {
   type: 'user';
   delivery: 'steer' | 'queue';
   time: { created: number };
-  payload: { text: string; files?: { mime: string; name?: string }[] };
+  payload: { text: string; files?: PromptFile[] };
 }
 
 export interface PermissionRequest {

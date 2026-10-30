@@ -1,9 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, FileText, ImageIcon, Mic, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, Mic, Paperclip, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
 import { draftStorageKey } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
+import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { useAssistantHost } from '@/shared/assistant/host';
 
 /** Pasted pictures past this size are left out; the request would be too big. */
@@ -270,29 +271,15 @@ export function Composer({
         </ul>
       )}
       {files.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5 px-1 pt-1" aria-label="Attachments">
-          {files.map((file) => {
-            const Icon = file.uri.startsWith('data:image/') ? ImageIcon : FileText;
-            return (
-              <li
-                key={file.uri}
-                className="flex max-w-56 items-center gap-1.5 rounded-lg border border-border bg-muted/50 py-1 pl-2 pr-1 text-xs"
-              >
-                <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="truncate" title={file.name}>
-                  {file.name}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setFiles((current) => current.filter((f) => f.uri !== file.uri))}
-                  aria-label={`Remove ${file.name}`}
-                  className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <X className="size-3" aria-hidden />
-                </button>
-              </li>
-            );
-          })}
+        <ul className="flex flex-wrap items-end gap-1.5 px-1 pt-1" aria-label="Attachments">
+          {files.map((file) => (
+            <AttachmentItem
+              key={file.uri}
+              file={file}
+              compact
+              onRemove={() => setFiles((current) => current.filter((f) => f.uri !== file.uri))}
+            />
+          ))}
         </ul>
       )}
       <textarea

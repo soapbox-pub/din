@@ -24,12 +24,14 @@ import {
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { CopyButton } from '@/shared/assistant/CopyButton';
 import { Markdown } from '@/shared/assistant/Markdown';
 import {
   tildify,
   toolTaskID,
   type AssistantContent,
+  type PromptFile,
   type QueuedMessage,
   type SessionMessage,
   type ToolState,
@@ -224,18 +226,12 @@ function QueuedBubble({ message, onCancel }: { message: QueuedMessage; onCancel?
   );
 }
 
-function Attachments({ files = [] }: { files?: { mime: string; name?: string }[] }) {
+function Attachments({ files = [] }: { files?: PromptFile[] }) {
   if (files.length === 0) return null;
   return (
-    <ul className="flex flex-wrap justify-end gap-1.5">
+    <ul className="flex flex-wrap items-end justify-end gap-1.5" aria-label="Attachments">
       {files.map((file, index) => (
-        <li
-          key={index}
-          className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
-        >
-          <FileText className="size-3.5" aria-hidden />
-          {file.name ?? file.mime}
-        </li>
+        <AttachmentItem key={index} file={{ ...file, uri: file.source?.type === 'uri' ? file.source.uri : undefined }} />
       ))}
     </ul>
   );
