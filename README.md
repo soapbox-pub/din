@@ -150,25 +150,42 @@ root, so the disk is locked too; waking from that goes through the boot
 screen's password, and the lock screen steps aside. Without a password nothing
 locks, and the lid just suspends. `nix build ./os#checks.x86_64-linux.lock`.
 
-Installed systems update themselves. A DinOS release is a NIP-82 release of
-the application `din` (`.ngit/release.yaml`), signed by the soapbox.pub key,
-with two files on Blossom: the compressed disk image, for new installs, and an
-update bundle. The bundle holds the new system's store path, the list of its
-store paths cache.nixos.org already has, and a `nix-store --export` of the
-rest (Din itself and the generated configuration, a few tens of MB). Din looks
-for a newer release a minute after starting and every six hours. The check is
-`os/din-update.sh`, run as root like the Installer's helper. It verifies the
-release's signature and author, downloads the bundle and checks it against the
-asset's sha256, fetches the rest from cache.nixos.org, and stages the new
-system with `switch-to-configuration boot`. Settings → About shows its
-progress and offers the restart. Older systems stay in the boot menu. Live
-sticks aren't updated.
+Installed systems update themselves, by building Din from source. Each keeps
+a checkout of Din in `/var/lib/dinos/src`, which only root can write to, and
+follows one branch of one repository: by default `main` of Din's own,
+`nostr://npub1q3sle…/git.shakespeare.diy/din`, which git fetches through
+`git-remote-nostr` (from ngit, which DinOS ships), taking the branch's tip
+from the maintainers' signed repository state. `din-update.service` runs
+`os/din-update.sh` five minutes after boot and every six hours after: it
+fetches the branch, and if its tip is a commit the system isn't already
+running or staging, builds that commit's `os#dinos` and stages it with
+`switch-to-configuration boot`, the same as `nixos-rebuild boot`. Each
+system records the commit it was built from (`/etc/din-revision`), and a
+commit that fails to build isn't tried again until someone asks. Nix's
+builds run at idle priority, and the timer's runs wait for AC power.
 
-To cut a release, bump `os/version`, commit, tag `v<version>`, and run
-`npm run os:release -- -- --nbunksec-file <file>` (or pass any other
-`ngit release publish` signer option after the second `--`). It builds from a
-clean worktree of the tag. `npm run os:release -- --stage-only` builds the two
-files into `.release-artifacts/` without publishing anything.
+Before it builds, the updater asks Nix (`--dry-run`) how much the update
+downloads, and makes sure root has that plus 4 GB free for the store and
+`/home` 10 GB for build scratch (`nix.settings.build-dir`). If not, it drops
+systems beyond the boot menu's five from the profile and collects garbage;
+if that's still not enough it stops and says why. Every update prunes the
+profile the same way after staging, and `min-free`/`max-free` have Nix make
+room on its own if a build runs short anyway. Settings → About shows the
+build's progress, offers the restart, turns automatic updates off (a
+developer building by hand wants that; **Check now** still works), and
+changes the repository and branch, so anyone can run their own fork:
+`din-update source <url> <branch>`, through sudo, which asks first, since
+whoever picks the source picks what runs as root. Older systems stay in the
+boot menu. Live sticks aren't updated.
+
+New installs start from a disk image. To cut one, bump `os/version`, commit,
+tag `v<version>`, and run `npm run os:release -- -- --nbunksec-file <file>`
+(or pass any other `ngit release publish` signer option after the second
+`--`). It builds the image from a clean worktree of the tag and publishes it
+as a NIP-82 release of the application `din` (`.ngit/release.yaml`), signed
+by the soapbox.pub key, with the file on Blossom.
+`npm run os:release -- --stage-only` builds it into `.release-artifacts/`
+without publishing anything. Installed systems don't use releases.
 
 For debugging on real hardware, `nix build ./os#debug-image` builds the same
 image plus an SSH server (key-only) and mDNS (`dinos.local`). No key is baked

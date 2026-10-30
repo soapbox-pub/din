@@ -1,5 +1,20 @@
 {
   "nodes": {
+    "crane": {
+      "locked": {
+        "lastModified": 1792350552,
+        "narHash": "sha256-292lvpvxTGKryKxh3/3tcIVi85CwYGdl4oOi113Sob8=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "e675a36b7377bebe41d548388a2501cbb16d380d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
     "deckmon": {
       "flake": false,
       "locked": {
@@ -27,6 +42,30 @@
         "type": "path"
       },
       "parent": []
+    },
+    "ngit": {
+      "inputs": {
+        "crane": "crane",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "nixpkgs-intel-darwin": "nixpkgs-intel-darwin",
+        "rust-overlay": "rust-overlay"
+      },
+      "locked": {
+        "lastModified": 1793225056,
+        "narHash": "sha256-4WnKBiHO5hTABt7YAXbgC4BSmdtxgBYS5ilQ5+44Wlw=",
+        "ref": "refs/tags/v3.0.5",
+        "rev": "777fd6ab549a4bb2d8c164d02c5f4542b4ac69a3",
+        "revCount": 1820,
+        "type": "git",
+        "url": "https://relay.ngit.dev/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/ngit.git"
+      },
+      "original": {
+        "ref": "refs/tags/v3.0.5",
+        "type": "git",
+        "url": "https://relay.ngit.dev/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/ngit.git"
+      }
     },
     "nixpkgs": {
       "locked": {
@@ -60,6 +99,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-intel-darwin": {
+      "locked": {
+        "lastModified": 1792972624,
+        "narHash": "sha256-ry0XgykkfLTK5p8PB68FZC0tJBApel70iRJBjwyIZ/s=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "1e67485f1727d2f653b370efaaac93434ba2899b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-26.05-darwin",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "nostrd": {
       "inputs": {
         "nixpkgs": [
@@ -84,9 +139,31 @@
       "inputs": {
         "deckmon": "deckmon",
         "din": "din",
+        "ngit": "ngit",
         "nixpkgs": "nixpkgs",
         "nixpkgs-electron": "nixpkgs-electron",
         "nostrd": "nostrd"
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "ngit",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793086596,
+        "narHash": "sha256-ObKS44vw4IIVpQ69YJzUGjZ0IwnpWoUlwjJSY7gefdo=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "c7e9d512653a35ef4d5879c3df4d44d7b78d0e6d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
       }
     }
   },

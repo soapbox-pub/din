@@ -1,4 +1,4 @@
-{ config, pkgs, lib, din, deckmon, electron, ... }:
+{ config, pkgs, lib, din, deckmon, ngit, electron, ... }:
 
 let
   # The Din source tree (the repo root, via the flake's `din` input),
@@ -44,9 +44,9 @@ let
   };
 
   # The release this system is (os/version), which a release's tag repeats
-  # (scripts/dinos-release.sh). The updater compares it with the newest
-  # release's. Not package.json's: the lockfile repeats that one, and
-  # changing it changes npmDepsHash.
+  # (scripts/dinos-release.sh), shown in Settings → About. Updates go by
+  # commit instead (din-revision below). Not package.json's: the lockfile
+  # repeats that one, and changing it changes npmDepsHash.
   version = lib.fileContents ./version;
 
   # Build the Vite/React desktop environment from source (deps fetched via
@@ -200,12 +200,13 @@ let
     text = builtins.readFile ./din-install.sh;
   };
 
-  # The privileged half of system updates, which stages newer releases for
-  # the next boot (see the script, and electron/updater.mts).
+  # The privileged half of system updates, which builds Din's source and
+  # stages it for the next boot (see the script, din-update.service below,
+  # and electron/updater.mts).
   din-updater = pkgs.writeShellApplication {
     name = "din-update";
     runtimeInputs = with pkgs; [
-      coreutils util-linux jq curl nak zstd gnutar config.nix.package
+      coreutils util-linux gnugrep gawk jq git ngit systemd config.nix.package
     ];
     text = builtins.readFile ./din-update.sh;
   };
@@ -533,9 +534,11 @@ in
 {
   networking.hostName = "dinos";
 
-  # Which release this is, for the updater (os/din-update.sh), which reads it
-  # from a system's etc/ - the running one's, and the next boot's.
+  # Which release this is, and the commit it's built from (os/flake.nix), for
+  # the updater (os/din-update.sh), which reads them from a system's etc/ -
+  # the running one's, and the next boot's.
   environment.etc."din-version".text = version;
+  environment.etc."din-revision".text = lib.optionalString (config.system.configurationRevision != null) config.system.configurationRevision;
 
   # NetworkManager backs Din's WiFi settings panel (nmcli via the
   # Electron wifi bridge). Physical adapters (wired and wireless) are
@@ -697,7 +700,11 @@ in
     users = [ "din" ];
     commands = map (command: { inherit command; options = [ "NOPASSWD" ]; }) [
       "${din-installer}/bin/din-install"
-      "${din-updater}/bin/din-update"
+      # Not `source`: choosing what's built is choosing what runs as root.
+      "${din-updater}/bin/din-update status"
+      "${din-updater}/bin/din-update start"
+      "${din-updater}/bin/din-update auto on"
+      "${din-updater}/bin/din-update auto off"
       "${din-keyboard}/bin/din-keyboard"
       "${din-boot-screen}/bin/din-boot-screen"
       "${din-time}/bin/din-time"
@@ -1079,7 +1086,8 @@ in
   # Root is a fixed-size volume on an installed system (os/din-install.sh), so
   # the Nix store mustn't grow without end: old systems leave the boot menu
   # after five (each initrd carries the GPUs' firmware, and the ESP is
-  # 512MB), and what's unused for a month goes.
+  # 512MB), and what's unused for a month goes. Updates also drop systems
+  # beyond the boot menu's from the profile (os/din-update.sh).
   nix.gc = {
     automatic = true;
     dates = "weekly";
@@ -1097,12 +1105,62 @@ in
     user = "root";
     group = "root";
   };
+  # Should root run low mid-build anyway, Nix collects garbage until there's
+  # room again, rather than failing the build. What it's building is safe:
+  # Nix holds it as a temporary root.
+  nix.settings.min-free = 3 * 1024 * 1024 * 1024;
+  nix.settings.max-free = 10 * 1024 * 1024 * 1024;
+  # Builds - system updates' above all, which run in the background - take
+  # only the time the desktop leaves.
+  nix.daemonCPUSchedPolicy = "idle";
+  nix.daemonIOSchedClass = "idle";
+
+  # System updates (os/din-update.sh): DinOS builds Din's source, a checkout
+  # in /var/lib/dinos/src, and stages the system for the next boot. A few
+  # minutes after starting and every six hours after it last ran, and when
+  # Settings asks (`din-update start`); Settings follows it through
+  # /var/lib/dinos/state.json (electron/updater.mts).
+  systemd.services.din-update = {
+    description = "Build and stage DinOS updates";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    # A live stick isn't updated.
+    unitConfig.ConditionPathExists = "!/run/din/live";
+    environment = {
+      HOME = "/root";
+      # ngit's cache of nostr events, and Nix's of flake inputs.
+      XDG_CACHE_HOME = "/var/cache/din-update";
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${din-updater}/bin/din-update run";
+      CacheDirectory = "din-update";
+      # Its own part is fetching and evaluating; nix-daemon builds (above).
+      Nice = 19;
+      IOSchedulingClass = "idle";
+    };
+  };
+  systemd.timers.din-update = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "5min";
+      OnUnitInactiveSec = "6h";
+      RandomizedDelaySec = "10min";
+    };
+  };
+  # Readable by `din`: Settings watches the state file in it.
+  systemd.tmpfiles.settings."10-din-update"."/var/lib/dinos".d = {
+    mode = "0755";
+    user = "root";
+    group = "root";
+  };
 
   # What install scripts and a developer's first hour assume is present.
   # distrobox is the escape hatch for anything else: a full Ubuntu/Fedora/Arch
   # userland with its own package manager, sharing $HOME, in rootless podman
-  # (also answering to `docker`).
-  environment.systemPackages = with pkgs; [ git unzip distrobox din-keyring din-cli ]
+  # (also answering to `docker`). ngit brings git-remote-nostr, so git takes
+  # nostr:// remotes, Din's own among them.
+  environment.systemPackages = with pkgs; [ git ngit unzip distrobox din-keyring din-cli ]
     # The command-line userland a Mac ships with, so nobody who sits down at a
     # terminal finds their usual tools missing.
     ++ [

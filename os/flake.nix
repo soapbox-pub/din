@@ -25,6 +25,15 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # ngit and git-remote-nostr, for git's nostr:// remotes: Din's own source
+    # is one, which system updates fetch (os/din-update.sh). Its repository is
+    # nostr://npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/relay.ngit.dev/ngit;
+    # pinned to a release tag, so bump the ref to update it.
+    ngit = {
+      url = "git+https://relay.ngit.dev/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/ngit.git?ref=refs/tags/v3.0.5";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # deckmon, the AirPlay sender behind screen sharing (electron/airplay.mts).
     # Its repository is
     # nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/deckmon;
@@ -35,13 +44,18 @@
     };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-electron, din, nostrd, deckmon }:
+  outputs = { self, nixpkgs, nixpkgs-electron, din, nostrd, deckmon, ngit }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
 
       # The Electron that runs Din (configuration.nix's `electron`).
       electron = { _module.args.electron = nixpkgs-electron.legacyPackages.${system}.electron_43; };
+
+      # The commit the system is built from, which system updates compare
+      # with the tip they fetch (os/din-update.sh): `self.rev` for a clean
+      # checkout, `dirtyRev` (the commit plus "-dirty") for one with changes.
+      revision = { system.configurationRevision = self.rev or self.dirtyRev or null; };
 
       # OpenCode, the agent behind Din's Assistant (electron/assistant.mts),
       # as its v2 installer would put it in ~/.opencode/bin: the npm
@@ -91,15 +105,15 @@
     {
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit din deckmon; };
-        modules = [ nostrd.nixosModules.default electron ./configuration.nix ];
+        specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
+        modules = [ nostrd.nixosModules.default electron revision ./configuration.nix ];
       };
 
       # The same system plus remote access (debug.nix), for real hardware.
       nixosConfigurations.dinos-debug = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit din deckmon; };
-        modules = [ nostrd.nixosModules.default electron ./configuration.nix ./debug.nix ];
+        specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
+        modules = [ nostrd.nixosModules.default electron revision ./configuration.nix ./debug.nix ];
       };
 
       packages.${system} = {
@@ -133,6 +147,7 @@
               { boot.consoleLogLevel = nixpkgs.lib.mkForce 7; }
             ];
             inherit din deckmon;
+            ngit = ngit.packages.${system}.default;
           };
         in
         {

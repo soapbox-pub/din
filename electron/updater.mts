@@ -1,58 +1,92 @@
 // The updater bridge (window.dinos.updater, for Settings): keeps DinOS current.
 //
-// Releases are found, checked and staged for the next boot as root by
-// os/din-update.sh, which DinOS's launcher names in DIN_UPDATER and the
-// shell's user runs through sudo without a password, like the Installer's
-// helper. It trusts nothing it's given, so this side only schedules it and
-// relays its progress. Where DIN_UPDATER isn't set (a dev machine, another
-// distro) the bridge reports itself unavailable.
+// DinOS builds its updates from Din's source, as root: din-update.service
+// (configuration.nix) runs os/din-update.sh, which fetches the branch the
+// system follows, builds it, and stages it for the next boot. It runs a few
+// minutes after boot and every six hours, and when asked. DinOS's launcher
+// names the script in DIN_UPDATER. The shell's user runs its `status`,
+// `start` and `auto` commands through sudo without a password, and `source`
+// (which repository and branch are built) only once sudo has asked. Where
+// DIN_UPDATER isn't set (a dev machine, another distro) the bridge reports
+// itself unavailable.
 //
-// Updates are looked for a minute after Din starts and every six hours after,
-// and whatever's newer is downloaded and staged right away; the restart that
-// finishes it is the user's. Progress is pushed as `updater:progress`, and
-// can be read back with `updater:state` after a reload.
+// The script trusts nothing it's given, so this side only relays: it reads
+// the status again whenever the service's state file changes, and pushes it
+// as `updater:progress`; `updater:state` reads it back after a reload. The
+// restart that finishes an update is the user's.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
-import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
+import fs from 'node:fs';
 import { ipcMain } from 'electron';
-import { runCommand } from './system.mts';
+import { CommandError, runCommand } from './system.mts';
 
 const HELPER = process.env.DIN_UPDATER;
 
-const FIRST_CHECK_MS = 60_000;
-const CHECK_INTERVAL_MS = 6 * 60 * 60_000;
+/** Written by the script as a run goes (os/din-update.sh's STATE). */
+const STATE_FILE = '/var/lib/dinos/state.json';
+const WATCH_INTERVAL_MS = 2_000;
+/** sudo may wait this long for the user to approve a new source. */
+const APPROVAL_TIMEOUT_MS = 11 * 60_000;
 
-type Step = 'download' | 'fetch' | 'install';
+type Step = 'fetch' | 'space' | 'build' | 'install';
 
-const STEPS: readonly string[] = ['download', 'fetch', 'install'];
+const STEPS: readonly string[] = ['fetch', 'space', 'build', 'install'];
+const PHASES: readonly string[] = ['idle', 'checking', 'updating', 'failed'];
 
 interface UpdateState {
   available: boolean;
   /** Running from a USB stick, which isn't updated. */
   live: boolean;
-  /** The running system's version. */
+  /** The running system's release (os/version). */
+  version: string | null;
+  /** The commit the running system was built from. */
   current: string | null;
-  /** The version the next boot starts, when it isn't the running one. */
+  /** The commit the next boot starts, when it isn't the running one. */
   staged: string | null;
+  /** The repository updates are built from, and its branch. */
+  url: string | null;
+  branch: string | null;
+  /** Whether the system updates by itself, rather than only when asked. */
+  auto: boolean;
   phase: 'idle' | 'checking' | 'updating' | 'failed';
-  /** The newer release being staged. */
+  /** The commit being built and staged. */
   updatingTo: string | null;
   step: Step | null;
-  /** Percent of the current step. */
+  /** Percent of the build. */
   percent: number;
   /** When a check last finished, in ms since the epoch. */
   checkedAt: number | null;
   error: string | null;
 }
 
+/** os/din-update.sh's `status`. */
+interface HelperStatus {
+  live: boolean;
+  version: string | null;
+  current: string | null;
+  staged: string | null;
+  url: string;
+  branch: string;
+  auto: boolean;
+  phase: string;
+  step: string | null;
+  percent: number;
+  target: string | null;
+  error: string | null;
+  checkedAt: number | null;
+}
+
 let state: UpdateState = {
   available: false,
   live: false,
+  version: null,
   current: null,
   staged: null,
+  url: null,
+  branch: null,
+  auto: true,
   phase: 'idle',
   updatingTo: null,
   step: null,
@@ -62,12 +96,16 @@ let state: UpdateState = {
 };
 
 function messageOf(error: unknown): string {
+  if (error instanceof CommandError) {
+    const reason = error.stderr.trim().split('\n').filter(Boolean).pop();
+    if (reason) return reason;
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Whether an update is being installed, which a restart would cut short. */
+/** Whether an update is being added to the boot menu, which a restart would cut short. */
 export function isUpdating(): boolean {
-  return state.phase === 'updating';
+  return state.phase === 'updating' && state.step === 'install';
 }
 
 export function registerUpdaterHandlers(options: {
@@ -78,88 +116,107 @@ export function registerUpdaterHandlers(options: {
 }): void {
   const { assertShellSender, sendToShell, assertSafeToPowerOff } = options;
 
-  const update = (next: Partial<UpdateState>) => {
-    state = { ...state, ...next };
+  // One status read at a time, and one more queued if anything changed
+  // while it ran.
+  let reading: Promise<void> | null = null;
+  let again = false;
+
+  const read = async (helper: string) => {
+    const { stdout } = await runCommand('sudo', ['-n', helper, 'status'], { timeout: 30_000 });
+    const status = JSON.parse(stdout) as HelperStatus;
+    const phase = PHASES.includes(status.phase) ? status.phase as UpdateState['phase'] : 'idle';
+    const step = status.step && STEPS.includes(status.step) ? status.step as Step : null;
+    state = {
+      available: true,
+      live: status.live,
+      version: status.version,
+      current: status.current,
+      staged: status.staged,
+      url: status.url,
+      branch: status.branch,
+      auto: status.auto,
+      phase,
+      updatingTo: phase === 'updating' ? status.target : null,
+      step: phase === 'updating' ? step : null,
+      percent: Math.max(0, Math.min(100, Number(status.percent) || 0)),
+      checkedAt: status.checkedAt,
+      error: status.error,
+    };
     sendToShell('updater:progress', state);
   };
 
-  const readStatus = async (helper: string) => {
-    const { stdout } = await runCommand('sudo', ['-n', helper, 'status'], { timeout: 30_000 });
-    const status = JSON.parse(stdout) as { live: boolean; current: string | null; staged: string | null };
-    update({ available: true, live: status.live, current: status.current, staged: status.staged });
+  const refresh = (helper: string): Promise<void> => {
+    if (reading) {
+      again = true;
+      return reading;
+    }
+    reading = (async () => {
+      do {
+        again = false;
+        try {
+          await read(helper);
+        } catch (error) {
+          console.error('updater: status failed:', messageOf(error));
+        }
+      } while (again);
+      reading = null;
+    })();
+    return reading;
   };
 
-  const check = (helper: string): Promise<void> => new Promise((resolve) => {
-    update({ phase: 'checking', updatingTo: null, step: null, percent: 0, error: null });
-    const child = spawn('sudo', ['-n', helper, 'update'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    createInterface({ input: child.stdout }).on('line', (line) => {
-      const [kind, value] = line.split(' ');
-      if (kind === 'available') {
-        update({ phase: 'updating', updatingTo: value });
-      } else if (kind === 'step' && STEPS.includes(value)) {
-        update({ step: value as Step, percent: 0 });
-      } else if (kind === 'progress') {
-        const percent = Number.parseInt(value, 10);
-        if (Number.isFinite(percent)) update({ percent: Math.max(0, Math.min(100, percent)) });
-      } else if (kind === 'staged') {
-        update({ staged: value });
-      }
-    });
-    child.on('error', (error) => {
-      update({ phase: 'failed', error: messageOf(error), checkedAt: Date.now() });
-      resolve();
-    });
-    child.on('close', (code) => {
-      if (code === 0) {
-        update({ phase: 'idle', updatingTo: null, step: null, percent: 0, checkedAt: Date.now() });
-      } else {
-        const reason = stderr.trim().split('\n').filter(Boolean).pop();
-        update({
-          phase: 'failed',
-          error: reason || `The updater stopped (exit ${code})`,
-          checkedAt: Date.now(),
-        });
-      }
-      resolve();
-    });
-  });
+  const helperOf = (): string => {
+    if (!HELPER || !state.available) throw new Error('Updates are not available here');
+    return HELPER;
+  };
 
-  const start = (helper: string) => {
-    if (state.phase === 'checking' || state.phase === 'updating') return;
-    if (state.live) return;
-    void check(helper);
+  /** Run one of the script's commands: `-n` never asks, `-A` asks in Din. */
+  const run = async (helper: string, sudo: '-n' | '-A', args: string[], timeout = 30_000) => {
+    try {
+      await runCommand('sudo', [sudo, helper, ...args], { timeout });
+    } catch (error) {
+      throw new Error(messageOf(error), { cause: error });
+    } finally {
+      void refresh(helper);
+    }
   };
 
   ipcMain.handle('updater:state', (event) => {
     assertShellSender(event);
+    if (HELPER) void refresh(HELPER);
     return state;
   });
 
-  ipcMain.handle('updater:check', (event) => {
+  ipcMain.handle('updater:check', async (event) => {
     assertShellSender(event);
-    if (!HELPER || !state.available) throw new Error('Updates are not available here');
+    const helper = helperOf();
     if (state.live) throw new Error('A live system isn\'t updated. Install DinOS to get updates.');
-    start(HELPER);
+    await run(helper, '-n', ['start']);
+  });
+
+  ipcMain.handle('updater:setAuto', async (event, auto: unknown) => {
+    assertShellSender(event);
+    if (typeof auto !== 'boolean') throw new Error('Expected true or false');
+    await run(helperOf(), '-n', ['auto', auto ? 'on' : 'off']);
+  });
+
+  ipcMain.handle('updater:setSource', async (event, url: unknown, branch: unknown) => {
+    assertShellSender(event);
+    if (typeof url !== 'string' || typeof branch !== 'string') throw new Error('Expected a URL and a branch');
+    // The script checks both. sudo asks the user first.
+    await run(helperOf(), '-A', ['source', url.trim(), branch.trim()], APPROVAL_TIMEOUT_MS);
   });
 
   ipcMain.handle('updater:reboot', async (event) => {
     assertShellSender(event);
-    if (state.phase === 'updating') throw new Error('An update is being installed');
+    if (isUpdating()) throw new Error('An update is being installed');
     assertSafeToPowerOff();
     await runCommand('systemctl', ['reboot'], { timeout: 15_000 });
   });
 
   if (!HELPER) return;
   const helper = HELPER;
-  readStatus(helper).then(() => {
-    if (state.live) return;
-    setTimeout(() => start(helper), FIRST_CHECK_MS);
-    setInterval(() => start(helper), CHECK_INTERVAL_MS);
-  }).catch((error: unknown) => {
-    console.error('updater: status failed:', messageOf(error));
+  void refresh(helper);
+  fs.watchFile(STATE_FILE, { interval: WATCH_INTERVAL_MS, persistent: false }, () => {
+    void refresh(helper);
   });
 }

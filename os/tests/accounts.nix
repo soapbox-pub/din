@@ -1,4 +1,4 @@
-{ pkgs, modules, din, deckmon }:
+{ pkgs, modules, din, deckmon, ngit }:
 
 let
   # Din's end of din-askpass (electron/askpass.mts): answers each connection
@@ -74,7 +74,7 @@ in
 # `nix build ./os#checks.x86_64-linux.accounts`
 pkgs.testers.runNixOSTest {
   name = "dinos-accounts";
-  node.specialArgs = { inherit din deckmon; };
+  node.specialArgs = { inherit din deckmon ngit; };
   nodes.machine = {
     imports = modules;
     # Din itself isn't under test, and has no GPU here: din-shell runs a

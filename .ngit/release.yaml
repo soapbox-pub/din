@@ -1,12 +1,11 @@
 # What `ngit release publish` publishes for a DinOS release: the NIP-82
 # application, release, and asset events (kinds 32267/30063/3063), with the
-# files on Blossom. Run by scripts/dinos-release.sh, which builds and stages
-# the files in .release-artifacts/ first. See https://ngit.dev/releases/manifest.
+# image on Blossom. Run by scripts/dinos-release.sh, which builds and stages
+# it in .release-artifacts/ first. See https://ngit.dev/releases/manifest.
 schema: 1
 application: din
-# The key installed DinOS systems take updates from (RELEASE_PUBKEY in
-# os/din-update.sh). Publishing fails before anything is uploaded under
-# another one.
+# The key DinOS releases are signed with. Publishing fails before anything
+# is uploaded under another one.
 pubkey: npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj
 name: Din
 summary: A social computer. Sign in with Nostr, and your identity carries into every app on the desktop.
@@ -18,13 +17,11 @@ description: |
 
   DinOS is its operating system, a minimal NixOS that boots straight into
   Din. Write the image to a USB stick to try it, then install it from there.
-  Installed systems update themselves from these releases.
+  Installed systems update themselves, building Din from source.
 tags: [nostr, desktop, os, nixos]
 license: AGPL-3.0
 repository: nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/din
 publication:
-  # The updater reads from these relays and falls back to these servers
-  # (os/din-update.sh), so keep the lists the same.
   blossom_servers:
     - https://blossom.ditto.pub
     - https://blossom.primal.net
@@ -34,12 +31,6 @@ publication:
     - wss://relay.primal.net
     - wss://relay.dreamith.to
 assets:
-  # What installed systems update from (variant `update`, which the updater
-  # looks for): the system's store paths that cache.nixos.org doesn't have.
-  - file: .release-artifacts/DinOS-v{version}-x86_64-linux.update.tar.zst
-    mime: application/vnd.dinos.update+zstd
-    variant: update
-    platforms: [linux-x86_64]
   # The disk image, for new installs: `zstdcat … | dd` to a USB stick.
   - file: .release-artifacts/DinOS-v{version}-x86_64.img.zst
     mime: application/zstd

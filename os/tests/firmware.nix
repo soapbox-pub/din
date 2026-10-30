@@ -1,4 +1,4 @@
-{ pkgs, modules, din, deckmon }:
+{ pkgs, modules, din, deckmon, ngit }:
 
 # Firmware updates: `din` lists fwupd's devices and installs signed firmware
 # without an admin password, the way Settings does (electron/firmware.mts),
@@ -7,7 +7,7 @@
 # `nix build ./os#checks.x86_64-linux.firmware`.
 pkgs.testers.runNixOSTest {
   name = "dinos-firmware";
-  node.specialArgs = { inherit din deckmon; };
+  node.specialArgs = { inherit din deckmon ngit; };
   nodes.machine = {
     imports = modules;
     systemd.services.din-shell.enable = pkgs.lib.mkForce false;

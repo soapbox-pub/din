@@ -5,18 +5,13 @@
 # release is: bump os/version, commit, tag v<version>, run this. The build
 # is from a clean worktree of the tag, never from the working tree.
 #
-# Two files are staged in .release-artifacts/ and published as a NIP-82
-# release of `din` (.ngit/release.yaml):
-#
-#   DinOS-v<version>-x86_64-linux.update.tar.zst
-#       What installed systems update from (os/din-update.sh): the system's
-#       store path, the part of its closure cache.nixos.org has (which the
-#       updater fetches from there), and a `nix-store --export` of the rest.
-#   DinOS-v<version>-x86_64.img.zst
-#       The disk image, for new installs.
+# The disk image, for new installs, is staged in .release-artifacts/ as
+# DinOS-v<version>-x86_64.img.zst and published as a NIP-82 release of `din`
+# (.ngit/release.yaml). Installed systems don't take releases: they build
+# their updates from source (os/din-update.sh).
 #
 # Options:
-#   --stage-only  build and stage the files, but publish nothing. Builds
+#   --stage-only  build and stage the image, but publish nothing. Builds
 #                 HEAD when the version isn't tagged yet.
 # Anything after `--` goes to `ngit release publish`, e.g. a signer:
 #   npm run os:release -- -- --nbunksec-file ~/.soapbox-bunker
@@ -62,36 +57,12 @@ git -C "$repo" worktree add --quiet --detach "$worktree" "$commit"
   die "$tag's os/version isn't $version."
 
 echo "Building DinOS $version ($commit)..."
-system=$(nix build --no-link --print-out-paths "$worktree/os#nixosConfigurations.dinos.config.system.build.toplevel")
 image=$(nix build --no-link --print-out-paths "$worktree/os#image")
-[[ $(cat "$system/etc/din-version") == "$version" ]] || die "The system isn't version $version."
-
-# Split the closure into what cache.nixos.org has and what it doesn't.
-# Anything it can't be asked about is shipped, which only costs size.
-echo "Asking cache.nixos.org which of the system's store paths it has..."
-# shellcheck disable=SC2016 # expanded by the inner shell
-nix-store --query --requisites "$system" | xargs -P 32 -n 1 sh -c '
-  hash=${1#/nix/store/}
-  if curl -fsI -o /dev/null "https://cache.nixos.org/${hash%%-*}.narinfo"; then
-    echo "cached $1"
-  else
-    echo "shipped $1"
-  fi' _ >"$tmp/paths"
-bundle=$tmp/bundle
-mkdir "$bundle"
-echo "$system" >"$bundle/system"
-sed -n 's/^cached //p' "$tmp/paths" | sort >"$bundle/substitutes"
-mapfile -t shipped < <(sed -n 's/^shipped //p' "$tmp/paths" | sort)
-printf '%s\n' "${shipped[@]}" | grep -qxF "$system" || die "cache.nixos.org has the system itself?"
-echo "${#shipped[@]} store paths to ship, $(wc -l <"$bundle/substitutes") from cache.nixos.org."
-nix-store --export "${shipped[@]}" >"$bundle/store.export"
 
 out=$repo/.release-artifacts
 rm -rf "$out"
 mkdir -p "$out"
-update_file=$out/DinOS-v$version-x86_64-linux.update.tar.zst
 image_file=$out/DinOS-v$version-x86_64.img.zst
-tar -C "$bundle" -cf - system substitutes store.export | zstd -q -T0 -19 -o "$update_file"
 echo "Compressing the disk image..."
 zstd -q -T0 -12 "$image/nixos.img" -o "$image_file"
 ls -lh "$out"

@@ -15,6 +15,7 @@ import {
   Cpu,
   Dock,
   FolderOpen,
+  GitBranch,
   Link2,
   CloudOff,
   Gauge,
@@ -189,7 +190,13 @@ import { CursorEffectsSettings } from '@/components/desktop/apps/CursorEffectPic
 import { PACKAGE_PREFIX, forgetPackage, forgetThumbnails } from '@/lib/cursorEffects';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
-import { getUpdaterBridge, UPDATE_STEP_LABELS } from '@/lib/updater';
+import {
+  DEFAULT_UPDATE_BRANCH,
+  DEFAULT_UPDATE_URL,
+  getUpdaterBridge,
+  shortRevision,
+  UPDATE_STEP_LABELS,
+} from '@/lib/updater';
 import type { UpdateState } from '@/lib/updater';
 import { cleanInstallerError } from '@/lib/installer';
 import { useUpdateState } from '@/hooks/useUpdater';
@@ -360,7 +367,10 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
     group: 'System',
     name: 'About',
     icon: Info,
-    search: ['Updates', 'Firmware', 'version', 'update', 'upgrade', 'restart', 'DinOS', 'system information'],
+    search: [
+      'Updates', 'Firmware', 'version', 'update', 'upgrade', 'restart', 'DinOS', 'system information',
+      'Update automatically', 'commit', 'source', 'branch', 'fork', 'repository',
+    ],
   },
   {
     id: 'developers',
@@ -405,8 +415,9 @@ const SECTIONS: { id: SectionId; name: string; icon: LucideIcon; group: SectionG
  * right-click menu does.
  * Developers holds debug utilities such as intentionally crashing the shell
  * to test the error boundary. About shows Din's logo and DinOS's version, and
- * the update it's staging through `window.dinos.updater`, and offers the restart
- * that finishes one, and firmware updates through `window.dinos.firmware`.
+ * the update it's building through `window.dinos.updater`, offers the restart
+ * that finishes one and the repository it's built from, and firmware updates
+ * through `window.dinos.firmware`.
  */
 const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
 
@@ -4348,8 +4359,9 @@ function SudoModeSetting() {
 
 /**
  * Din's logo and DinOS's version, and its updates (window.dinos.updater). The
- * system looks for them by itself and stages what it finds for the next boot,
- * so this mostly reports, and offers the restart.
+ * system builds them from Din's source by itself and stages them for the
+ * next boot, so this mostly reports, and offers the restart. It also turns
+ * that off, and changes the repository and branch they're built from.
  */
 function AboutSection() {
   const bridge = getUpdaterBridge();
@@ -4364,8 +4376,11 @@ function AboutSection() {
           <Skeleton className="h-4 w-24 bg-foreground/10" aria-hidden />
         ) : (
           <p className="text-sm font-medium text-foreground">
-            {dinos ? `DinOS ${state?.current ?? '(unknown version)'}` : 'Din'}
+            {dinos ? `DinOS ${state?.version ?? ''}`.trim() : 'Din'}
           </p>
+        )}
+        {dinos && state?.current && (
+          <p className="font-mono text-xs text-muted-foreground">Commit {shortRevision(state.current)}</p>
         )}
         <p className="text-xs text-muted-foreground">A social computer.</p>
       </div>
@@ -4388,9 +4403,13 @@ function AboutSection() {
       ) : (
         <>
           <p className="text-xs text-muted-foreground">
-            Updates are downloaded by themselves and installed when you restart.
+            {state.auto
+              ? 'DinOS builds its updates from source by itself, while the computer is plugged in, and installs them when you restart.'
+              : 'DinOS builds an update from source when you check for one, and installs it when you restart.'}
           </p>
           <UpdateStatus state={state} />
+          <UpdateAutoRow auto={state.auto} />
+          <UpdateSourceCard state={state} />
         </>
       )}
 
@@ -4578,20 +4597,28 @@ function UpdateStatus({ state }: { state: UpdateState }) {
           <div className="flex items-center gap-2 text-sm text-foreground">
             <Loader2 className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden />
             <span className="min-w-0 flex-1 truncate">
-              {state.step ? UPDATE_STEP_LABELS[state.step] : 'Getting'} DinOS {state.updatingTo}
+              {UPDATE_STEP_LABELS[state.step ?? 'fetch']} commit{' '}
+              <span className="font-mono">{shortRevision(state.updatingTo)}</span>
             </span>
-            {state.step && state.step !== 'install' && (
+            {state.step === 'build' && (
               <span className="tabular-nums text-muted-foreground">{state.percent}%</span>
             )}
           </div>
-          {state.step && state.step !== 'install' && (
-            <Progress value={state.percent} aria-label="Update progress" />
+          {state.step === 'build' && (
+            <>
+              <Progress value={state.percent} aria-label="Update progress" />
+              <p className="text-xs text-muted-foreground">
+                This can take a while. You can keep using the computer.
+              </p>
+            </>
           )}
         </div>
       ) : state.staged ? (
         <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">DinOS {state.staged} is ready</p>
+            <p className="text-sm font-medium text-foreground">
+              An update is ready: commit <span className="font-mono">{shortRevision(state.staged)}</span>
+            </p>
             <p className="text-xs text-muted-foreground">Restart to finish updating.</p>
           </div>
           <Button size="sm" disabled={rebooting} onClick={reboot}>
@@ -4604,18 +4631,177 @@ function UpdateStatus({ state }: { state: UpdateState }) {
       <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
         <p className="min-w-0 text-xs text-muted-foreground">
           {state.phase === 'checking'
-            ? 'Looking for updates…'
-            : state.phase === 'failed'
-              ? state.error ?? 'The last check didn’t finish.'
-              : state.checkedAt
-                ? `${state.staged ? 'Checked' : 'Up to date. Checked'} ${new Date(state.checkedAt).toLocaleString()}.`
-                : 'Not checked yet.'}
+            ? `Looking for updates on ${state.branch ?? 'the branch'}…`
+            : state.phase === 'updating'
+              ? `Found a new commit on ${state.branch ?? 'the branch'}.`
+              : state.phase === 'failed'
+                ? state.error ?? 'The last check didn’t finish.'
+                : state.checkedAt
+                  ? `${state.staged ? 'Checked' : 'Up to date. Checked'} ${new Date(state.checkedAt).toLocaleString()}.`
+                  : 'Not checked yet.'}
         </p>
         <Button variant="outline" size="sm" disabled={busy} onClick={check}>
           <RotateCw className={cn('size-4', state.phase === 'checking' && 'motion-safe:animate-spin')} aria-hidden />
           Check now
         </Button>
       </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/** Whether DinOS updates by itself (`din-update auto`). */
+function UpdateAutoRow({ auto }: { auto: boolean }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<boolean | null>(null);
+
+  const change = (next: boolean) => {
+    setError(null);
+    setPending(next);
+    getUpdaterBridge()
+      ?.setAuto(next)
+      .catch((e: unknown) => setError(cleanInstallerError(e)))
+      .finally(() => setPending(null));
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <SettingSwitchRow
+        id="update-automatically"
+        icon={CircleArrowUp}
+        label="Update automatically"
+        description="Look for new commits every six hours, and build them while the computer is plugged in."
+        checked={pending ?? auto}
+        disabled={pending !== null}
+        onCheckedChange={change}
+      />
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The repository and branch DinOS builds its updates from. Changing them
+ * goes through sudo, which asks first: whoever picks the source picks what
+ * runs as root.
+ */
+function UpdateSourceCard({ state }: { state: UpdateState }) {
+  const url = state.url ?? DEFAULT_UPDATE_URL;
+  const branch = state.branch ?? DEFAULT_UPDATE_BRANCH;
+  const [editing, setEditing] = useState(false);
+  const [draftUrl, setDraftUrl] = useState(url);
+  const [draftBranch, setDraftBranch] = useState(branch);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isDefault = url === DEFAULT_UPDATE_URL && branch === DEFAULT_UPDATE_BRANCH;
+  const busy = state.phase === 'checking' || state.phase === 'updating';
+
+  const edit = () => {
+    setDraftUrl(url);
+    setDraftBranch(branch);
+    setError(null);
+    setEditing(true);
+  };
+
+  const save = (nextUrl: string, nextBranch: string) => {
+    setSaving(true);
+    setError(null);
+    const bridge = getUpdaterBridge();
+    bridge
+      ?.setSource(nextUrl, nextBranch)
+      .then(() => {
+        setEditing(false);
+        return bridge.check();
+      })
+      .catch((e: unknown) => setError(cleanInstallerError(e)))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <GitBranch className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Source</p>
+            <p className="text-xs text-muted-foreground">
+              {isDefault ? 'Din’s own repository, ' : 'A repository of your choosing, '}
+              branch <span className="font-mono">{branch}</span>.
+            </p>
+            {!editing && <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={url}>{url}</p>}
+          </div>
+        </div>
+        {!editing && (
+          <Button variant="outline" size="sm" disabled={busy} onClick={edit}>
+            Change…
+          </Button>
+        )}
+      </div>
+
+      {editing && (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save(draftUrl, draftBranch);
+          }}
+        >
+          <p className="text-xs text-muted-foreground">
+            Updates are built from whatever this branch holds, and run with full control of the computer,
+            so only follow a repository you trust. A nostr:// or https:// git URL.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="update-source-url">Repository</Label>
+            <Input
+              id="update-source-url"
+              className="font-mono text-xs"
+              value={draftUrl}
+              onChange={(e) => setDraftUrl(e.target.value)}
+              spellCheck={false}
+              autoComplete="off"
+              disabled={saving}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="update-source-branch">Branch</Label>
+            <Input
+              id="update-source-branch"
+              className="font-mono text-xs"
+              value={draftBranch}
+              onChange={(e) => setDraftBranch(e.target.value)}
+              spellCheck={false}
+              autoComplete="off"
+              disabled={saving}
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {!isDefault && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mr-auto"
+                disabled={saving}
+                onClick={() => save(DEFAULT_UPDATE_URL, DEFAULT_UPDATE_BRANCH)}
+              >
+                Use Din’s own
+              </Button>
+            )}
+            <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={saving || !draftUrl.trim() || !draftBranch.trim() || (draftUrl.trim() === url && draftBranch.trim() === branch)}
+            >
+              {saving && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
+              Save
+            </Button>
+          </div>
+        </form>
+      )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>

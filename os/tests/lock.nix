@@ -1,4 +1,4 @@
-{ pkgs, modules, din, deckmon }:
+{ pkgs, modules, din, deckmon, ngit }:
 
 # The lock screen: it takes over the screen on its own terminal, nothing can
 # switch away from it, only the computer's password gets past it, waking
@@ -7,7 +7,7 @@
 # result has screenshots.
 pkgs.testers.runNixOSTest {
   name = "dinos-lock";
-  node.specialArgs = { inherit din deckmon; };
+  node.specialArgs = { inherit din deckmon ngit; };
   nodes.machine = {
     imports = modules;
     systemd.services.din-shell.enable = pkgs.lib.mkForce false;

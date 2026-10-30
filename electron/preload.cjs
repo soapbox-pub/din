@@ -1710,16 +1710,29 @@ expose('askpass', {
   approve: (requestId, allow) => ipcRenderer.invoke('askpass:approve', requestId, allow),
 });
 
-// Updater bridge (window.dinos.updater), backed by electron/updater.mts: stages
-// newer DinOS releases for the next boot.
+// Updater bridge (window.dinos.updater), backed by electron/updater.mts: builds
+// Din's source and stages it for the next boot.
 expose('updater', {
-  /** Versions, and the check or update in progress (or the failed one). */
+  /** Versions, the source, and the check or update in progress (or the failed one). */
   state: () => ipcRenderer.invoke('updater:state'),
 
-  /** Look for a newer release now, and stage it. Progress arrives through onProgress. */
+  /** Look for a newer commit now, and build and stage it. Progress arrives through onProgress. */
   check: () => ipcRenderer.invoke('updater:check'),
 
-  /** Restart the computer, into the staged release. */
+  /**
+   * Whether the system updates by itself.
+   * @param {boolean} auto
+   */
+  setAuto: (auto) => ipcRenderer.invoke('updater:setAuto', auto),
+
+  /**
+   * Build updates from another repository or branch. sudo asks the user first.
+   * @param {string} url
+   * @param {string} branch
+   */
+  setSource: (url, branch) => ipcRenderer.invoke('updater:setSource', url, branch),
+
+  /** Restart the computer, into the staged update. */
   reboot: () => ipcRenderer.invoke('updater:reboot'),
 
   /**

@@ -1,4 +1,4 @@
-{ pkgs, modules, din, deckmon }:
+{ pkgs, modules, din, deckmon, ngit }:
 
 # The boot screen: Plymouth draws Din's theme with the wallpaper and clock
 # the initrd hands it, and a password typed at it goes through the keyboard
@@ -12,7 +12,7 @@ let
 in
 pkgs.testers.runNixOSTest {
   name = "dinos-boot-screen";
-  node.specialArgs = { inherit din deckmon; };
+  node.specialArgs = { inherit din deckmon ngit; };
   nodes.machine = {
     imports = modules;
     systemd.services.din-shell.enable = pkgs.lib.mkForce false;
