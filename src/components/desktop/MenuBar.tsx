@@ -363,21 +363,21 @@ function AppGrid({
 }
 
 /**
- * AirPlay status item: shows once a receiver is nearby, and lights up while
- * the screen is shared; clicking lists the receivers to connect to, and
- * switches a connected one between extending and mirroring. Renders nothing outside the Electron shell or without
- * deckmon, like the hardware indicators.
+ * AirPlay status item: lights up while the screen is shared; clicking lists
+ * the receivers to connect to, and switches a connected one between
+ * extending and mirroring. Without deckmon it's dimmed, and its panel says
+ * what's missing. Renders nothing outside the Electron shell.
  */
 const AirPlayMenuItem = memo(function AirPlayMenuItem() {
   const bridge = getAirPlayBridge();
   const { data } = useAirPlayState();
 
-  if (!bridge || !data?.available) return null;
+  if (!bridge || !data) return null;
   const sharing = data.sessions.filter((s) => s.state === 'streaming');
-  if (data.receivers.length === 0 && data.sessions.length === 0) return null;
 
-  const label =
-    sharing.length > 0
+  const label = !data.available
+    ? 'Screen sharing: deckmon isn’t installed'
+    : sharing.length > 0
       ? `Sharing the screen with ${sharing.map((s) => s.name).join(', ')}`
       : 'Screen sharing';
 
@@ -391,7 +391,9 @@ const AirPlayMenuItem = memo(function AirPlayMenuItem() {
           title={label}
           className={cn(
             'size-7 rounded-md hover:bg-foreground/10 hover:text-foreground',
-            sharing.length > 0 ? 'bg-primary/15 text-primary' : 'text-foreground/90',
+            sharing.length > 0
+              ? 'bg-primary/15 text-primary'
+              : data.available ? 'text-foreground/90' : 'text-muted-foreground',
           )}
         >
           <Airplay className="size-4.5" />

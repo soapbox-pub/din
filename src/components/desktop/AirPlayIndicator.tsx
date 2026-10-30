@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Airplay, Columns2, Copy, Loader2, Settings2, Tv } from 'lucide-react';
+import { Airplay, Columns2, Copy, ExternalLink, Loader2, Settings2, Tv } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { PopoverClose } from '@/components/ui/popover';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useAirPlayActions, useAirPlayScan, useAirPlayState } from '@/hooks/useAirPlay';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { cleanAirPlayError, getAirPlayBridge, type AirPlayMode, type AirPlaySession } from '@/lib/airplay';
@@ -171,9 +172,42 @@ export function AirPlayReceiverList({ className }: { className?: string }) {
   );
 }
 
+/** deckmon's repository, whose README says how to build and install it. */
+const DECKMON_URL =
+  'https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/deckmon.git';
+
+/**
+ * Why there's no AirPlay here: deckmon, which does the sending, isn't
+ * installed. DinOS comes with it; elsewhere it's built from source, so this
+ * says where to get it rather than installing it.
+ */
+function AirPlayUnavailable() {
+  const openUrl = useOpenUrl();
+
+  return (
+    <div className="flex flex-col items-center gap-1 px-4 py-6 text-center">
+      <div className="mb-2 grid size-12 place-items-center rounded-2xl bg-muted text-muted-foreground">
+        <Airplay className="size-6" aria-hidden />
+      </div>
+      <p className="text-sm font-medium text-foreground">AirPlay needs deckmon installed to work</p>
+      <p className="text-sm text-muted-foreground">
+        deckmon shares the screen with Apple TVs, AirPlay TVs and Rokus. Din finds it once it’s on your PATH; DinOS
+        comes with it.
+      </p>
+      <PopoverClose asChild>
+        <Button size="sm" variant="outline" className="mt-2" onClick={() => openUrl(DECKMON_URL)}>
+          <ExternalLink aria-hidden />
+          How to install deckmon
+        </Button>
+      </PopoverClose>
+    </div>
+  );
+}
+
 /** Popover content for the menu bar's AirPlay item. */
 export function AirPlayPopoverBody() {
   const { open } = useWindowActions();
+  const { data } = useAirPlayState();
 
   return (
     <div className="flex flex-col">
@@ -181,7 +215,7 @@ export function AirPlayPopoverBody() {
         <h2 className="text-sm font-medium text-foreground">Screen sharing</h2>
         <Airplay className="size-4 text-muted-foreground" aria-hidden />
       </header>
-      <AirPlayReceiverList className="p-3" />
+      {data?.available === false ? <AirPlayUnavailable /> : <AirPlayReceiverList className="p-3" />}
       <footer className="border-t border-border/60 p-1.5">
         <PopoverClose asChild>
           <Button

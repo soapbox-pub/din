@@ -7,7 +7,7 @@
 // $XDG_RUNTIME_DIR/deckmon.sock. DinOS runs it as a user service and names
 // its binary in DIN_DECKMON; elsewhere a `deckmon` on PATH is used, and its
 // daemon started on first use. Without either, the bridge reports itself
-// unavailable and the shell shows nothing.
+// unavailable and the menu bar's panel says deckmon is missing.
 //
 // Two ways to share:
 //   - mirror: deckmon captures the primary display (wlroots screencopy, by

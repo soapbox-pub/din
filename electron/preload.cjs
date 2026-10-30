@@ -1903,6 +1903,23 @@ expose('airplay', {
   },
 });
 
+// System packages bridge (window.dinos.packages), backed by
+// electron/system-packages.mts: installing what a feature needs from the host
+// system's package manager.
+expose('packages', {
+  /**
+   * Whether what a feature needs is installed, and the command that would install it.
+   * @param {'xvfb'} feature
+   */
+  status: (feature) => ipcRenderer.invoke('packages:status', feature),
+
+  /**
+   * Install it, asking for the administrator password in Din.
+   * @param {'xvfb'} feature
+   */
+  install: (feature) => ipcRenderer.invoke('packages:install', feature),
+});
+
 // Dictation bridge (window.dinos.dictation), backed by electron/dictation.mts:
 // whisper.cpp's server, which turns the shell's recordings into text.
 expose('dictation', {

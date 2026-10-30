@@ -130,6 +130,7 @@ import { registerAskpass } from './askpass.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
 import { airplayDisplays, airplayNetworkChanged, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
+import { registerSystemPackageHandlers } from './system-packages.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
@@ -5558,6 +5559,7 @@ app.whenReady().then(() => {
   });
   registerUpdaterHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
   registerFirmwareHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
+  registerSystemPackageHandlers({ assertShellSender });
   registerAirPlayHandlers({
     assertShellSender,
     sendToShell,

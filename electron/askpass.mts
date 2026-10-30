@@ -56,6 +56,11 @@ export interface AskpassRequest {
   command: string;
   /** Allow or Deny, rather than the password. */
   approve: boolean;
+  /**
+   * Din itself ran sudo, because the user just asked it to (installing a
+   * package, electron/system-packages.mts), so the dialog opens at once.
+   */
+  direct: boolean;
 }
 
 /** A password or approval the Assistant's conversation is waiting on (src/lib/assistant.ts). */
@@ -192,11 +197,13 @@ function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolea
     return;
   }
   const requestId = nextId++;
+  const direct = parentOf(sudo) === process.pid;
   const request: AskpassRequest = {
     requestId,
-    requester: requesterOf(sudo),
-    command: ['sudo', ...args.slice(1)].map(quote).join(' '),
+    requester: direct ? 'Din' : requesterOf(sudo),
+    command: ['sudo', ...args.slice(1).filter((arg) => !direct || arg !== '-A')].map(quote).join(' '),
     approve,
+    direct,
   };
   const sessionID = typeof session === 'string' && SESSION_ID.test(session) ? session : null;
   pending.set(requestId, { socket, pid: sudo, request, sessionID, tty, timer: setTimeout(() => settle(requestId), TIMEOUT_MS) });

@@ -13,7 +13,8 @@
  */
 
 import { endLaunching, startLaunching } from '@/lib/appLaunches';
-import { notify } from '@/lib/notificationCenter';
+import { closeNotification, notify } from '@/lib/notificationCenter';
+import { cleanPackageError, getSystemPackagesBridge, type SystemPackagesBridge } from '@/lib/systemPackages';
 
 /** Registry id prefix for native apps, e.g. `native:org.gnome.Calculator`. */
 export const NATIVE_APP_PREFIX = 'native:';
@@ -115,8 +116,25 @@ export function launchNativeApp(app: { id: string; name: string }, uri?: string)
   const bridge = getNativeAppsBridge();
   if (!bridge) return;
   startLaunching(app.id);
-  void bridge.launch(app.id, uri).catch((error: unknown) => {
+  void bridge.launch(app.id, uri).catch(async (error: unknown) => {
     endLaunching(app.id);
+    // Missing Xvfb, which Din can install from here: say so, with the button.
+    const packages = getSystemPackagesBridge();
+    const xvfb = await packages?.status('xvfb').catch(() => null);
+    if (packages && xvfb && !xvfb.installed && xvfb.command) {
+      notify({
+        source: { name: 'Din' },
+        title: `Couldn’t open ${app.name}`,
+        body: 'Linux apps need Xvfb, which isn’t installed on this computer.',
+        actions: [{ id: 'install', label: 'Install Xvfb' }],
+        replaceKey: 'packages:xvfb',
+        history: true,
+        onActivate: (action) => {
+          if (action === 'install') installXvfbThenLaunch(packages, app, uri);
+        },
+      });
+      return;
+    }
     notify({
       source: { name: 'Din' },
       title: `Couldn’t open ${app.name}`,
@@ -124,4 +142,30 @@ export function launchNativeApp(app: { id: string; name: string }, uri?: string)
       history: true,
     });
   });
+}
+
+/** Install Xvfb, then open the app it was missing for. */
+function installXvfbThenLaunch(packages: SystemPackagesBridge, app: { id: string; name: string }, uri?: string): void {
+  const progress = notify({
+    source: { name: 'Din' },
+    title: 'Installing Xvfb…',
+    body: `${app.name} opens once it’s installed.`,
+    replaceKey: 'packages:xvfb',
+    timeout: 0,
+    history: false,
+  });
+  packages.install('xvfb').then(
+    () => {
+      closeNotification(progress, 'closed');
+      launchNativeApp(app, uri);
+    },
+    (error: unknown) =>
+      notify({
+        source: { name: 'Din' },
+        title: 'Couldn’t install Xvfb',
+        body: cleanPackageError(error),
+        replaceKey: 'packages:xvfb',
+        history: true,
+      }),
+  );
 }

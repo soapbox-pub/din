@@ -172,7 +172,8 @@ function ApprovalDialog({
  * programs other than the Assistant, which asks in its conversation. Each
  * request is a notification first, so nothing takes the keyboard while the
  * user is typing elsewhere; an approval can be answered right on it, and
- * clicking it opens the dialog. A wrong password stays there, and only the
+ * clicking it opens the dialog. One Din asks itself, because the user just
+ * clicked to install something, opens the dialog at once. A wrong password stays there, and only the
  * right one goes to sudo.
  *
  * Renders nothing outside the Electron shell.
@@ -188,6 +189,7 @@ export function AdminPromptHost() {
     const shown = notifications.current;
     const offRequest = bridge.onRequest((request) => {
       setRequests((q) => [...q, request]);
+      if (request.direct) setOpenId(request.requestId);
       shown.set(
         request.requestId,
         notify({

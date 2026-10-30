@@ -1,13 +1,15 @@
-import { CircleAlert, Loader2, Power } from 'lucide-react';
+import { useMutation } from '@tanstack/react-query';
+import { CircleAlert, Download, Loader2, Power } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAssistantStatus } from '@/hooks/useAssistant';
-import { getAssistantBridge } from '@/lib/assistant';
+import { cleanAssistantError, getAssistantBridge } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 import { useAssistantHost } from '@/shared/assistant/host';
 
 /**
  * Why the assistant can't answer yet, and what to do about it: it's off,
- * installing, starting, or failed. Renders nothing once it's ready.
+ * OpenCode isn't installed (with the button that installs it), installing,
+ * starting, or failed. Renders nothing once it's ready.
  */
 export function AssistantUnavailable({ className, compact = false }: { className?: string; compact?: boolean }) {
   const { data: status, isLoading } = useAssistantStatus();
@@ -43,6 +45,10 @@ export function AssistantUnavailable({ className, compact = false }: { className
     );
   }
 
+  if (!status.binary && !status.installing) {
+    return <InstallOpenCode className={className} compact={compact} version={status.version} error={status.error} />;
+  }
+
   if (status.installing || !status.error) {
     return (
       <Shell className={className} compact={compact} icon={<Loader2 className="size-6 animate-spin" aria-hidden />}>
@@ -61,6 +67,42 @@ export function AssistantUnavailable({ className, compact = false }: { className
       <Button size="sm" variant="outline" onClick={openSettings} className="mt-2">
         Open Settings
       </Button>
+    </Shell>
+  );
+}
+
+/** OpenCode isn't installed, or is too old to speak to: install it from here. */
+function InstallOpenCode({
+  className,
+  compact,
+  version,
+  error,
+}: {
+  className?: string;
+  compact: boolean;
+  version: string | null;
+  error: string | null;
+}) {
+  const install = useMutation({ mutationFn: () => getAssistantBridge()!.install() });
+  const failure = install.error ? cleanAssistantError(install.error) : error;
+
+  return (
+    <Shell className={className} compact={compact} icon={<Download className="size-6" aria-hidden />}>
+      <p className="font-medium">{version ? 'Update OpenCode to continue' : 'Install OpenCode to continue'}</p>
+      <p className="text-sm text-muted-foreground">
+        {version
+          ? `The assistant needs OpenCode 2 or newer, and this computer has ${version}.`
+          : 'The assistant is OpenCode, the AI agent, which isn’t on this computer yet. It installs into your home folder and keeps itself up to date.'}
+      </p>
+      <Button size="sm" onClick={() => install.mutate()} disabled={install.isPending} className="mt-2">
+        {install.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+        {version ? 'Update OpenCode' : 'Install OpenCode'}
+      </Button>
+      {failure && !install.isPending && (
+        <p role="alert" className="mt-1 break-words text-xs text-destructive">
+          {failure}
+        </p>
+      )}
     </Shell>
   );
 }

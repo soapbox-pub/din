@@ -13,6 +13,7 @@ import {
   useAssistantDirectory,
   useAssistantReady,
   useAssistantSessions,
+  useAssistantStatus,
   useDirectoryIcons,
   useHomeDirectory,
   usePendingRequests,
@@ -35,12 +36,14 @@ const ASSISTANT_APP_ID = 'assistant';
 /**
  * The assistant's robot in the menu bar: busy while the agent works, with a
  * dot when it's waiting on the user. Its panel answers what it's waiting on,
- * shows what's running and lately done, and takes a new request. Renders
+ * shows what's running and lately done, and takes a new request. Without
+ * OpenCode it's dimmed, and its panel says so and installs it. Renders
  * nothing outside the Electron shell or while the assistant is off.
  */
 export const AssistantMenuItem = memo(function AssistantMenuItem() {
   const { config } = useAppContext();
   const ready = useAssistantReady();
+  const { data: status } = useAssistantStatus();
   const { data: active = [] } = useActiveSessions();
   const pending = usePendingRequests();
   const [open, setOpen] = useState(false);
@@ -49,12 +52,16 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
 
   const waiting = pending.permissions.length + pending.forms.length + pending.passwords.length;
   const working = ready && active.length > 0;
+  // Its panel says what's missing, and installs it.
+  const missing = !!status && !status.binary && !status.installing;
   const label =
     waiting > 0
       ? `Assistant: waiting for you`
       : working
         ? `Assistant: ${active.length} working`
-        : 'Assistant';
+        : missing
+          ? 'Assistant: OpenCode isn’t installed'
+          : 'Assistant';
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -66,7 +73,7 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
           title={label}
           className={cn(
             'relative size-7 rounded-md hover:bg-foreground/10 hover:text-foreground',
-            working || waiting > 0 ? 'text-primary' : 'text-foreground/90',
+            working || waiting > 0 ? 'text-primary' : missing ? 'text-muted-foreground' : 'text-foreground/90',
           )}
         >
           <Bot className={cn('size-4.5', working && waiting === 0 && 'motion-safe:animate-pulse')} />

@@ -14,6 +14,8 @@ export interface AskpassRequest {
   command: string;
   /** Allow or Deny, rather than the password. */
   approve: boolean;
+  /** Din itself asked, because the user just did (installing a package): open the dialog at once. */
+  direct: boolean;
 }
 
 export interface AskpassBridge {
