@@ -15,7 +15,8 @@
 // on every call.
 //
 // The script trusts nothing it's given, so this side only relays: it reads
-// the status again whenever the service's state file changes, and pushes it
+// the status again whenever the service's state file changes or the system is
+// switched, and pushes it
 // as `updater:progress`; `updater:state` reads it back after a reload. What
 // finishes an update is the user's: applying it now (`apply`, a system
 // switch), then restarting Din if Din changed, or restarting the computer if
@@ -32,6 +33,8 @@ const HELPER = process.env.DIN_UPDATER;
 
 /** Written by the script as a run goes (os/din-update.sh's STATE). */
 const STATE_FILE = '/var/lib/dinos/state.json';
+/** The running system; stat follows the link, so a switch changes its inode. */
+const CURRENT_SYSTEM = '/run/current-system';
 const WATCH_INTERVAL_MS = 2_000;
 /** sudo may wait this long for the user to approve a new source. */
 const APPROVAL_TIMEOUT_MS = 11 * 60_000;
@@ -294,6 +297,11 @@ export function registerUpdaterHandlers(options: {
   const helper = HELPER;
   void refresh(helper);
   fs.watchFile(STATE_FILE, { interval: WATCH_INTERVAL_MS, persistent: false }, () => {
+    void refresh(helper);
+  });
+  // A `nixos-rebuild switch` by hand moves the system without writing the
+  // state file, and what it leaves to restart is read from the system.
+  fs.watchFile(CURRENT_SYSTEM, { interval: WATCH_INTERVAL_MS, persistent: false }, () => {
     void refresh(helper);
   });
 }
