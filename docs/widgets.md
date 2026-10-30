@@ -47,10 +47,9 @@ turned back on in About This Widget; the widget reloads with the new set.
 Din draws nothing behind a widget: no card, no border, no blur. The
 webview, its host page and the srcdoc iframe are all transparent, so a
 widget is exactly as transparent as its own page. Din does cut it to
-rounded corners (24px, both the webview and the iframe), and gives its
-frame overlay scrollbars: the native ones are hidden
-(`:where(*){scrollbar-width:none}`, which a widget's own styles override)
-and a thin thumb is drawn over whatever scrolls, fading out once it stops. One catch, from
+rounded corners (24px, both the webview and the iframe), and hides its
+scrollbars, as Safari does: what overflows still scrolls, but no scrollbar
+is drawn (`scrollbar-width: none`, `!important`). One catch, from
 Chromium: a frame whose used `color-scheme` differs from its parent's gets
 an opaque backdrop, so a widget that wants to stay see-through should leave
 `color-scheme` unset (or `normal`) rather than setting `dark`.
