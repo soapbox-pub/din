@@ -55,7 +55,8 @@ areas' commands rather than `settings` keys, since they act on the system.
 
 Commands act at once, as the user's own clicks would, except where Din
 asks the user anyway or the act can't be taken back: restarting or shutting
-down (`din power restart|off`) and installing firmware put the question on
+down (`din power restart|off`), restarting Din (`din update restart`) and
+installing firmware put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps
 aren't commands; the user changes those in Settings.

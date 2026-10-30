@@ -11,12 +11,17 @@ import { bare, call, command, need } from './util';
 const updater = () => need(getUpdaterBridge(), 'DinOS updates');
 const firmware = () => need(getFirmwareBridge(), 'Firmware updates');
 const ON: Param = { name: 'on', type: 'boolean', positional: true, help: 'on or off' };
-/** How long `update local` waits after answering before Din restarts. */
+/** How long a command waits after answering before Din restarts. */
 const RESTART_DELAY_MS = 1_000;
+
+/** Restart Din once the answer's on its way: the restart ends whatever ran the command. */
+function restartDinSoon(bridge = updater()) {
+  setTimeout(() => void bridge.restartDin().catch(() => {}), RESTART_DELAY_MS);
+}
 
 export const updateArea: Area = {
   name: 'update',
-  summary: 'DinOS updates: status, check, apply, your own builds, where they come from',
+  summary: 'DinOS updates: status, check, apply, your own builds, restarting Din, where they come from',
   commands: [
     command('update', 'status', 'The running system, and any update in the works', [], async () => {
       const state = await call(updater().state());
@@ -42,15 +47,24 @@ export const updateArea: Area = {
     }),
     command('update', 'local', 'Build your own commits in ~/DinOS and switch to them, restarting Din if it changed (sudo asks you first)', [
       { name: 'ref', type: 'string', positional: true, optional: true, help: 'The branch or commit (default: main)' },
+      { name: 'restart', type: 'boolean', optional: true, help: 'Restart Din if it changed (default: on; --no-restart leaves that to din update restart)' },
     ], async (args, ctx) => {
       const { commit, restart } = await call(updater().buildLocal(args.optString('ref') ?? 'main', ctx.session));
       const built = `Built commit ${shortRevision(commit)}`;
       const data = { commit, restart };
       if (restart === 'reboot') return { data, text: `${built}. It starts when the computer restarts.` };
       if (restart !== 'din') return { data, text: `${built}. It's live.` };
-      // After the answer's on its way: the restart ends whatever ran this.
-      setTimeout(() => void updater().restartDin().catch(() => {}), RESTART_DELAY_MS);
+      if (args.optBool('restart') === false) return { data, text: `${built}. It starts when Din restarts (din update restart).` };
+      restartDinSoon();
       return { data, text: `${built}. Din is restarting.` };
+    }),
+    command('update', 'restart', 'Restart Din, closing every app, as Restart Din does (asks on screen first)', [], async (_args, ctx) => {
+      const bridge = updater();
+      if (!(await ctx.confirm({ title: 'Restart Din?', description: 'A command asked to restart Din. Every app closes.', action: 'Restart Din', destructive: true }))) {
+        throw new CommandError('You didn’t allow it');
+      }
+      restartDinSoon(bridge);
+      return { text: 'Din is restarting.' };
     }),
     command('update', 'auto', 'Whether DinOS updates by itself', [ON], async (args) => {
       await call(updater().setAuto(args.bool('on')));
