@@ -78,11 +78,15 @@ export function createGuest(options: CreateGuestOptions): GuestElement {
   // focus but not the keyboard's: the page it went to never hears of it, and
   // even clicks into it can't take focus from then on (verified on Electron
   // 43). Leaving the other guest first, by way of the shell, does it right.
+  // Nor does the element fire focusin when it takes focus, so say so for it,
+  // the way GuestInputHost does for clicks: that's how the window it's in
+  // knows to give it focus back when raised again.
   const focus = el.focus.bind(el);
   el.focus = (focusOptions?: FocusOptions) => {
     const active = document.activeElement;
     if (active !== el && isGuestElement(active)) active.blur();
     focus(focusOptions);
+    if (active !== el && document.activeElement === el) el.dispatchEvent(new FocusEvent('focusin', { bubbles: true, composed: true }));
   };
   return el as GuestElement;
 }
