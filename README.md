@@ -438,6 +438,22 @@ app closes, and Din finds it again after a restart by its pidfile. Its screen
 is QEMU's VNC server, drawn by noVNC in the app, whose bytes go over the
 app's bridge port (apps can't open sockets).
 
+The app's gallery installs a system in one click
+(`electron/vm-installers.mts`): Din makes the machine at once, sized to this
+computer, then asks the system's own servers for its newest release and its
+SHA-256 (Ubuntu's `meta-release-lts` and `SHA256SUMS`, Fedora's
+`releases.json`), downloads it to `~/VMs/.installers/` (resumable, shared by
+machines installing the same release, checked against that hash), and
+installs it hands-free. Linux installers boot their own kernel straight from
+the disc image, with an answer file on a FAT drive QEMU makes from a folder
+(Ubuntu's autoinstall, Fedora's kickstart): the account is the computer's
+user's name, with no password, logged in automatically. The installer
+powering the machine off is it finishing; Din ejects the disc and starts the
+new system. The install's state is kept in `vm.json`, so it carries on after
+a restart. Right-clicking a system offers Custom Install, the full form with
+that system filled in; when a download fails, the app links to the system's
+own download page and installs from the disc image the user chooses.
+
 Windows machines get what Windows 11's installer checks for and has drivers
 for: UEFI with Secure Boot and Microsoft's keys (OVMF's `OVMF_VARS.ms.fd`), a
 TPM 2.0 (swtpm), a SATA disk, an e1000e network card and Hyper-V

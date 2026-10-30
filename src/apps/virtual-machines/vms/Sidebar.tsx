@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import type { VmInfo, VmState } from '@/lib/vms';
+import type { VmInfo, VmInstall, VmState } from '@/lib/vms';
 import { WindowDragRegion } from '@/sdk/react';
 import { STATE_LABELS } from './bridge';
 import type { VmAction } from './actions';
@@ -17,6 +17,22 @@ const DOT: Record<VmState, string> = {
   paused: 'bg-amber-500',
   stopping: 'bg-amber-500 motion-safe:animate-pulse',
 };
+
+function installStatus(install: VmInstall): string {
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  switch (install.phase) {
+    case 'resolving':
+      return 'Getting ready…';
+    case 'downloading':
+      return install.totalBytes ? `Downloading · ${pct(install.receivedBytes / install.totalBytes)}` : 'Downloading…';
+    case 'verifying':
+      return 'Checking…';
+    case 'installing':
+      return `Installing · ${pct(install.progress)}`;
+    case 'failed':
+      return 'Couldn’t install';
+  }
+}
 
 export function StateDot({ state, className }: { state: VmState; className?: string }) {
   return <span aria-hidden className={cn('inline-block size-2 shrink-0 rounded-full', DOT[state], className)} />;
@@ -70,12 +86,12 @@ export function Sidebar({
                   vm.id === selected ? 'bg-primary/15' : 'hover:bg-foreground/10',
                 )}
               >
-                <OsBadge os={vm.config.os} />
+                <OsBadge os={vm.config.os} system={vm.config.system} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{vm.config.name}</span>
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <StateDot state={vm.state} />
-                    {vm.error && vm.state === 'stopped' ? 'Stopped with an error' : STATE_LABELS[vm.state]}
+                    <StateDot state={vm.install ? 'starting' : vm.state} />
+                    {vm.install ? installStatus(vm.install) : vm.error && vm.state === 'stopped' ? 'Stopped with an error' : STATE_LABELS[vm.state]}
                   </span>
                 </span>
               </button>

@@ -1,9 +1,9 @@
 import type { ComponentType } from 'react';
-import { Camera, FolderOpen, Pause, Play, Power, PowerOff, RotateCcw, Settings, Trash2 } from 'lucide-react';
+import { Ban, Camera, FolderOpen, Pause, Play, Power, PowerOff, RotateCcw, Settings, Trash2 } from 'lucide-react';
 import type { VmInfo } from '@/lib/vms';
 import type { MenuItem } from '@/sdk';
 
-export type VmAction = 'start' | 'shutdown' | 'pause' | 'resume' | 'reset' | 'forceStop' | 'snapshot' | 'settings' | 'showInFiles' | 'delete';
+export type VmAction = 'start' | 'shutdown' | 'pause' | 'resume' | 'reset' | 'forceStop' | 'snapshot' | 'settings' | 'showInFiles' | 'delete' | 'cancelInstall';
 
 export interface ActionItem {
   id: VmAction;
@@ -17,10 +17,12 @@ export interface ActionItem {
 export function vmActions(vm: VmInfo): ActionItem[][] {
   const off = vm.state === 'stopped';
   const up = vm.state === 'running' || vm.state === 'paused';
+  // Its installer can be started again; a download can't be started at all.
+  const startable = !vm.install || vm.install.phase === 'installing';
   return [
     [
       off
-        ? { id: 'start', label: 'Start', icon: Play, enabled: true }
+        ? { id: 'start', label: 'Start', icon: Play, enabled: startable }
         : { id: 'shutdown', label: 'Shut Down', icon: Power, enabled: up },
       vm.state === 'paused'
         ? { id: 'resume', label: 'Resume', icon: Play, enabled: true }
@@ -29,11 +31,15 @@ export function vmActions(vm: VmInfo): ActionItem[][] {
       { id: 'forceStop', label: 'Force Off', icon: PowerOff, enabled: !off, destructive: true },
     ],
     [
-      { id: 'snapshot', label: 'Take Snapshot…', icon: Camera, enabled: off || up },
+      { id: 'snapshot', label: 'Take Snapshot…', icon: Camera, enabled: !vm.install && (off || up) },
       { id: 'settings', label: 'Settings…', icon: Settings, enabled: true },
       { id: 'showInFiles', label: 'Show in Files', icon: FolderOpen, enabled: true },
     ],
-    [{ id: 'delete', label: 'Move to Trash…', icon: Trash2, enabled: off, destructive: true }],
+    [
+      vm.install
+        ? { id: 'cancelInstall', label: 'Cancel Install…', icon: Ban, enabled: true, destructive: true }
+        : { id: 'delete', label: 'Move to Trash…', icon: Trash2, enabled: off, destructive: true },
+    ],
   ];
 }
 

@@ -887,7 +887,7 @@ export function installDin(transport: Transport): void {
         await sys.ready('vms');
         const v: Record<string, unknown> = {};
         for (const m of [
-          'status', 'list', 'create', 'update', 'remove', 'start', 'shutdown', 'forceStop', 'pause', 'resume', 'reset',
+          'status', 'list', 'create', 'install', 'retryInstall', 'cancelInstall', 'update', 'remove', 'start', 'shutdown', 'forceStop', 'pause', 'resume', 'reset',
           'setCdrom', 'resizeDisk', 'snapshots', 'takeSnapshot', 'restoreSnapshot', 'deleteSnapshot', 'openDisplay',
         ]) {
           v[m] = (...args: unknown[]) => sys.call('vms', `vms:${m}`, args);

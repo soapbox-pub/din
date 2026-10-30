@@ -11,11 +11,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { cleanVmsError, type VmInfo, type VmsBridge, type VmsStatus } from '@/lib/vms';
+import { cleanVmsError, type VmInfo, type VmInstallerId, type VmsBridge, type VmsStatus } from '@/lib/vms';
 import type { MenuItem } from '@/sdk';
 import { useDin, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { formatBytes, formatMemory, isOn, OS_LABELS, STATE_LABELS, useBridge, usePickDiscImage, useVms, useVmsStatus } from './vms/bridge';
@@ -23,6 +24,8 @@ import { Console, type ConsoleHandle } from './vms/Console';
 import { vmMenuItems, type VmAction } from './vms/actions';
 import { VmActionItems } from './vms/ActionItems';
 import { CdromField, OsBadge } from './vms/fields';
+import { Gallery } from './vms/Gallery';
+import { InstallCard } from './vms/InstallCard';
 import { NewVmDialog } from './vms/NewVmDialog';
 import { SettingsDialog } from './vms/SettingsDialog';
 import { Sidebar, StateDot } from './vms/Sidebar';
@@ -105,12 +108,18 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
   const { data: vms = [], isLoading } = useVms();
   const [chosen, setChosen] = useState<string | null>(() => localStorage.getItem(SELECTED_KEY));
   const [scale, setScale] = useState(() => localStorage.getItem(SCALE_KEY) !== 'false');
-  const [newOpen, setNewOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  /** The form: undefined while closed, null for Other, else Custom Install of that system. */
+  const [form, setForm] = useState<VmInstallerId | null | undefined>(undefined);
+  const [cancelling, setCancelling] = useState<VmInfo | null>(null);
+  /** Machines being installed whose screens are shown instead of their progress. */
+  const [screens, setScreens] = useState<Set<string>>(new Set());
   const [settingsFor, setSettingsFor] = useState<string | null>(null);
   const [snapshotFor, setSnapshotFor] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<VmInfo | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const consoleRef = useRef<ConsoleHandle>(null);
+  const pick = usePickDiscImage();
 
   const vm = vms.find((v) => v.id === chosen) ?? vms[0] ?? null;
   const select = (id: string) => {
@@ -176,10 +185,35 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
           return void din.app.open('file-browser', { path: target.dir });
         case 'delete':
           return setDeleting(target);
+        case 'cancelInstall':
+          return setCancelling(target);
       }
     },
     [bridge, busy, din],
   );
+
+  const install = useCallback(
+    async (system: VmInstallerId) => {
+      try {
+        const created = await bridge.install(system);
+        select(created.id);
+        setGalleryOpen(false);
+      } catch (err) {
+        fail(err);
+      }
+    },
+    [bridge, fail],
+  );
+  const custom = (system: VmInstallerId | null) => {
+    setGalleryOpen(false);
+    setForm(system);
+  };
+  const toggleScreen = (id: string) =>
+    setScreens((s) => {
+      const next = new Set(s);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
   const on = vm ? isOn(vm) && vm.state !== 'stopping' : false;
   const sendKeys = (keys: { keysym: number; code: string }[]) => consoleRef.current?.sendKeys(keys);
@@ -214,7 +248,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
     },
   ];
   useMenuBar(menus, (id) => {
-    if (id === 'new') setNewOpen(true);
+    if (id === 'new') setGalleryOpen(true);
     else if (id.startsWith('vm:') && vm) act(vm, id.slice(3) as VmAction);
     else if (id === 'scale') setScale((s) => !s);
     else if (id === 'fullscreen') consoleRef.current?.fullscreen();
@@ -236,7 +270,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         loading={isLoading}
         selected={vm?.id ?? null}
         onSelect={select}
-        onNew={() => setNewOpen(true)}
+        onNew={() => setGalleryOpen(true)}
         onAction={act}
         className="hidden sm:flex"
       />
@@ -288,7 +322,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
                   <VmActionItems vm={vm} kind="dropdown" onAction={(action) => act(vm, action)} />
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button variant="ghost" size="icon" className="size-8 sm:hidden" aria-label="New virtual machine" onClick={() => setNewOpen(true)}>
+              <Button variant="ghost" size="icon" className="size-8 sm:hidden" aria-label="New virtual machine" onClick={() => setGalleryOpen(true)}>
                 <Plus className="size-4" />
               </Button>
             </>
@@ -299,8 +333,18 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
           isLoading ? (
             <Skeleton className="m-auto h-40 w-80 rounded-xl" />
           ) : (
-            <Empty onNew={() => setNewOpen(true)} dir={status.dir} />
+            <Empty status={status} onInstall={install} onCustom={custom} />
           )
+        ) : vm.install && !(isOn(vm) && screens.has(vm.id)) ? (
+          <InstallCard
+            key={vm.id}
+            vm={vm}
+            onShowScreen={isOn(vm) ? () => toggleScreen(vm.id) : undefined}
+            onStart={() => act(vm, 'start')}
+            onRetry={() => void busy(vm.id, () => bridge.retryInstall(vm.id))}
+            onChooseIso={() => void pick().then((file) => file && busy(vm.id, () => bridge.retryInstall(vm.id, { iso: file.path })))}
+            onCancel={() => act(vm, 'cancelInstall')}
+          />
         ) : isOn(vm) ? (
           <div className="relative flex min-h-0 flex-1 flex-col">
             <Console key={vm.id} ref={consoleRef} bridge={bridge} vmId={vm.id} scale={scale} />
@@ -315,6 +359,16 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
                 </div>
               </div>
             )}
+            {vm.install && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="absolute right-3 top-3 shadow-md"
+                onClick={() => toggleScreen(vm.id)}
+              >
+                Show Progress
+              </Button>
+            )}
             {vm.changesPending && (
               <p className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-xs text-white">
                 Some settings take effect when it next starts.
@@ -326,9 +380,20 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         )}
       </main>
 
+      <Dialog open={galleryOpen} onOpenChange={setGalleryOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>New Virtual Machine</DialogTitle>
+            <DialogDescription>Pick a system and Din sets it all up. Right-click one to choose its settings first.</DialogDescription>
+          </DialogHeader>
+          <Gallery available={status.installers} onInstall={install} onCustom={custom} />
+        </DialogContent>
+      </Dialog>
       <NewVmDialog
-        open={newOpen}
-        onOpenChange={setNewOpen}
+        key={form ?? 'other'}
+        system={form ?? null}
+        open={form !== undefined}
+        onOpenChange={(o) => !o && setForm(undefined)}
         status={status}
         existing={vms}
         onCreated={(created, start) => {
@@ -346,6 +411,23 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         />
       )}
       {snapshotVm && <TakeSnapshotDialog vm={snapshotVm} onOpenChange={(o) => !o && setSnapshotFor(null)} onError={fail} />}
+      <AlertDialog open={!!cancelling} onOpenChange={(o) => !o && setCancelling(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop installing “{cancelling?.config.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>The machine is thrown away. Nothing’s on it yet.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Installing</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => cancelling && void busy(cancelling.id, () => bridge.cancelInstall(cancelling.id))}
+            >
+              Stop and Throw Away
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -369,20 +451,25 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
   );
 }
 
-function Empty({ onNew, dir }: { onNew: () => void; dir: string }) {
+function Empty({
+  status,
+  onInstall,
+  onCustom,
+}: {
+  status: VmsStatus;
+  onInstall: (system: VmInstallerId) => Promise<unknown>;
+  onCustom: (system: VmInstallerId | null) => void;
+}) {
   return (
-    <div className="m-auto max-w-sm space-y-5 p-8 text-center">
-      <img src="/icons/apps/virtual-machines.png" alt="" className="mx-auto size-28" />
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">No virtual machines yet</h1>
-        <p className="text-sm text-muted-foreground">
-          Run Windows, Linux or another system in a window, from its installer’s disc image. Machines are kept in {dir}.
-        </p>
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-xl space-y-8 px-6 py-10">
+        <div className="space-y-2 text-center">
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Another computer, in a window</h1>
+          <p className="text-muted-foreground">Pick a system. Din downloads it and sets it up, and you can change anything later.</p>
+        </div>
+        <Gallery available={status.installers} onInstall={onInstall} onCustom={onCustom} />
+        <p className="text-center text-xs text-muted-foreground">Machines are kept in {status.dir}.</p>
       </div>
-      <Button size="lg" onClick={onNew}>
-        <Plus className="size-4" aria-hidden />
-        New Virtual Machine
-      </Button>
     </div>
   );
 }
@@ -412,7 +499,7 @@ function Details({ vm, working, onAction, onError }: { vm: VmInfo; working: bool
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-2xl space-y-8 px-6 pb-10 pt-4">
         <header className="flex flex-wrap items-center gap-4">
-          <OsBadge os={config.os} className="size-16 rounded-2xl" />
+          <OsBadge os={config.os} system={config.system} className="size-16 rounded-2xl" />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-2xl font-semibold tracking-tight">{config.name}</h2>
             <p className="text-sm text-muted-foreground">

@@ -1,34 +1,18 @@
 import { useId, type ReactNode } from 'react';
-import { Box, Disc3, Terminal } from 'lucide-react';
+import { Disc3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
-import type { VmOs, VmsStatus } from '@/lib/vms';
+import type { VmInstallerId, VmOs, VmsStatus } from '@/lib/vms';
 import { formatMemory, OS_LABELS } from './bridge';
+import { OS_STYLE, SYSTEM_STYLE } from './systems';
 
-function WindowsGlyph({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 16 16" className={className} aria-hidden fill="currentColor">
-      <rect x="1" y="1" width="6.5" height="6.5" rx="0.6" />
-      <rect x="8.5" y="1" width="6.5" height="6.5" rx="0.6" />
-      <rect x="1" y="8.5" width="6.5" height="6.5" rx="0.6" />
-      <rect x="8.5" y="8.5" width="6.5" height="6.5" rx="0.6" />
-    </svg>
-  );
-}
-
-const OS_STYLE: Record<VmOs, { icon: (p: { className?: string }) => ReactNode; className: string }> = {
-  windows: { icon: WindowsGlyph, className: 'bg-gradient-to-b from-sky-500 to-blue-600' },
-  linux: { icon: Terminal, className: 'bg-gradient-to-b from-amber-500 to-orange-600' },
-  other: { icon: Box, className: 'bg-gradient-to-b from-zinc-400 to-zinc-600' },
-};
-
-/** A machine's badge: its OS's glyph on a rounded square. */
-export function OsBadge({ os, className }: { os: VmOs; className?: string }) {
-  const { icon: Icon, className: color } = OS_STYLE[os];
+/** A machine's badge: its system's mark (or its OS's glyph) on a rounded square. */
+export function OsBadge({ os, system, className }: { os: VmOs; system?: VmInstallerId | null; className?: string }) {
+  const { icon: Icon, className: color } = system ? SYSTEM_STYLE[system] : OS_STYLE[os];
   return (
     <span aria-hidden className={cn('grid size-8 shrink-0 place-items-center rounded-lg text-white shadow-sm', color, className)}>
       <Icon className="size-[55%]" />

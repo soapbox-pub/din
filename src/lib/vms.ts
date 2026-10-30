@@ -23,6 +23,8 @@ export interface VmPortForward {
 export interface VmConfig {
   name: string;
   os: VmOs;
+  /** The system Din installed on it, for its badge; null when it was installed by hand. */
+  system: VmInstallerId | null;
   memoryMiB: number;
   cpus: number;
   firmware: VmFirmware;
@@ -37,6 +39,46 @@ export interface VmConfig {
   forwards: VmPortForward[];
   /** Sound through this computer's speakers and microphone. */
   audio: boolean;
+}
+
+/** The systems Din fetches and installs by itself. */
+export type VmInstallerId = 'windows' | 'macos' | 'ubuntu' | 'fedora';
+
+export type VmInstallPhase =
+  /** Finding the newest release. */
+  | 'resolving'
+  | 'downloading'
+  /** Checking the download against its published SHA-256. */
+  | 'verifying'
+  /** The installer is running in the machine. */
+  | 'installing'
+  /** It couldn't go on: `error` says why, and `manualUrl` where to get the disc image by hand. */
+  | 'failed';
+
+/** A machine Din is still installing: downloading its system, then setting it up. */
+export interface VmInstall {
+  installer: VmInstallerId;
+  /** What's going on it, once known ("Ubuntu 26.04.1 LTS"). */
+  label: string;
+  phase: VmInstallPhase;
+  receivedBytes: number;
+  /** 0 while unknown. */
+  totalBytes: number;
+  /** While installing, roughly how far along it is (0-1). */
+  progress: number;
+  error: string | null;
+  /** The system's own download page, for getting its disc image by hand. */
+  manualUrl: string;
+}
+
+/** Custom Install: anything left out is chosen for this computer. */
+export interface VmInstallOptions {
+  /** Install from this disc image instead of downloading one. */
+  iso?: string;
+  name?: string;
+  memoryMiB?: number;
+  cpus?: number;
+  diskGiB?: number;
 }
 
 export interface VmInfo {
@@ -54,6 +96,8 @@ export interface VmInfo {
   changesPending: boolean;
   /** Why it last stopped when it shouldn't have, or failed to start. */
   error: string | null;
+  /** Set while Din is installing its system; null once it's done. */
+  install: VmInstall | null;
 }
 
 export interface VmSnapshot {
@@ -79,6 +123,8 @@ export interface VmsStatus {
   tpm: boolean;
   /** Where machines are kept (~/VMs). */
   dir: string;
+  /** The systems Din can install by itself (`install`). */
+  installers: VmInstallerId[];
   hostMemoryMiB: number;
   hostCpus: number;
 }
@@ -87,6 +133,16 @@ export interface VmsBridge {
   status(): Promise<VmsStatus>;
   list(): Promise<VmInfo[]>;
   create(input: NewVm): Promise<VmInfo>;
+  /**
+   * A new machine with this system on it: Din makes it at once, sized to this
+   * computer, then downloads the newest release, checks it, and installs it
+   * hands-free. Progress is the machine's `install`.
+   */
+  install(installer: VmInstallerId, options?: VmInstallOptions): Promise<VmInfo>;
+  /** Try a failed install again, from a disc image of the user's if given. */
+  retryInstall(id: string, options?: VmInstallOptions): Promise<void>;
+  /** Stop installing and throw the machine away. */
+  cancelInstall(id: string): Promise<void>;
   /** Change its settings; hardware changes take effect when it next starts. Renaming needs it off. */
   update(id: string, patch: Partial<VmConfig>): Promise<VmInfo>;
   /** Move it to the Trash. Needs it off. */
@@ -126,17 +182,17 @@ export function vmDefaults(os: VmOs): Omit<NewVm, 'name' | 'cdrom'> {
   switch (os) {
     case 'windows':
       return {
-        os, memoryMiB: 8192, cpus: 4, diskGiB: 80, firmware: 'uefi', secureBoot: true, tpm: true,
+        os, system: null, memoryMiB: 8192, cpus: 4, diskGiB: 80, firmware: 'uefi', secureBoot: true, tpm: true,
         network: true, forwards: [], audio: true,
       };
     case 'linux':
       return {
-        os, memoryMiB: 4096, cpus: 2, diskGiB: 40, firmware: 'uefi', secureBoot: false, tpm: false,
+        os, system: null, memoryMiB: 4096, cpus: 2, diskGiB: 40, firmware: 'uefi', secureBoot: false, tpm: false,
         network: true, forwards: [], audio: true,
       };
     default:
       return {
-        os, memoryMiB: 2048, cpus: 2, diskGiB: 20, firmware: 'bios', secureBoot: false, tpm: false,
+        os, system: null, memoryMiB: 2048, cpus: 2, diskGiB: 20, firmware: 'bios', secureBoot: false, tpm: false,
         network: true, forwards: [], audio: true,
       };
   }

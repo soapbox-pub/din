@@ -4,12 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { cleanVmsError, vmDefaults, type NewVm, type VmInfo, type VmOs, type VmsStatus } from '@/lib/vms';
+import { cleanVmsError, vmDefaults, type NewVm, type VmInfo, type VmInstallerId, type VmOs, type VmsStatus } from '@/lib/vms';
 import { guessName, guessOs, useBridge, usePickDiscImage } from './bridge';
-import { CdromField, CpuField, Field, MemoryField, OsPicker, SliderField, SwitchRow } from './fields';
+import { CdromField, CpuField, Field, MemoryField, OsBadge, OsPicker, SliderField, SwitchRow } from './fields';
+import { SYSTEMS } from './systems';
 
-function defaultsFor(os: VmOs, status: VmsStatus): Omit<NewVm, 'name' | 'cdrom'> {
-  const d = vmDefaults(os);
+function defaultsFor(os: VmOs, status: VmsStatus, system: VmInstallerId | null = null): Omit<NewVm, 'name' | 'cdrom'> {
+  const d = { ...vmDefaults(os), system };
   return {
     ...d,
     // Never more than half of this computer.
@@ -24,6 +25,9 @@ function defaultsFor(os: VmOs, status: VmsStatus): Omit<NewVm, 'name' | 'cdrom'>
  * A new machine: a disc image to install from, what's on it (which picks
  * its hardware), and how big. Windows gets Windows 11's needs (UEFI with
  * Secure Boot, a TPM, 4 GB and up).
+ *
+ * With a `system`, it's Custom Install: that system, installed hands-free
+ * like its tile does, from a disc image of the user's or Din's download.
  */
 export function NewVmDialog({
   open,
@@ -31,7 +35,9 @@ export function NewVmDialog({
   status,
   existing,
   onCreated,
+  system = null,
 }: {
+  system?: VmInstallerId | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   status: VmsStatus;
@@ -43,7 +49,9 @@ export function NewVmDialog({
   const [cdrom, setCdrom] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [nameEdited, setNameEdited] = useState(false);
-  const [vm, setVm] = useState(() => defaultsFor('windows', status));
+  const systemOs: VmOs = system === 'windows' ? 'windows' : system ? 'linux' : 'windows';
+  const systemName = SYSTEMS.find((s) => s.id === system)?.name ?? null;
+  const [vm, setVm] = useState(() => defaultsFor(systemOs, status, system));
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +60,7 @@ export function NewVmDialog({
     setCdrom(null);
     setName('');
     setNameEdited(false);
-    setVm(defaultsFor('windows', status));
+    setVm(defaultsFor(systemOs, status, system));
     setAdvanced(false);
     setError(null);
   };
@@ -67,8 +75,7 @@ export function NewVmDialog({
     const file = await pick();
     if (!file) return;
     setCdrom(file.path);
-    const os = guessOs(file.name);
-    setVm(defaultsFor(os, status));
+    if (!system) setVm(defaultsFor(guessOs(file.name), status));
     if (!nameEdited) setName(uniqueName(guessName(file.name)));
   };
 
@@ -77,15 +84,21 @@ export function NewVmDialog({
     if (!nameEdited && !cdrom) setName('');
   };
 
-  const shownName = name || uniqueName(vm.os === 'windows' ? 'Windows' : vm.os === 'linux' ? 'Linux' : 'Virtual Machine');
+  const shownName = name || uniqueName(systemName ?? (vm.os === 'windows' ? 'Windows' : vm.os === 'linux' ? 'Linux' : 'Virtual Machine'));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const created = await bridge.create({ ...vm, name: shownName.trim(), cdrom });
-      onCreated(created, !!cdrom);
+      if (system) {
+        const { memoryMiB, cpus, diskGiB } = vm;
+        // It starts by itself once its disc image is ready.
+        onCreated(await bridge.install(system, { iso: cdrom ?? undefined, name: shownName.trim(), memoryMiB, cpus, diskGiB }), false);
+      } else {
+        const created = await bridge.create({ ...vm, name: shownName.trim(), cdrom });
+        onCreated(created, !!cdrom);
+      }
       onOpenChange(false);
       reset();
     } catch (err) {
@@ -111,20 +124,37 @@ export function NewVmDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={submit} className="space-y-6">
           <DialogHeader>
-            <DialogTitle>New Virtual Machine</DialogTitle>
-            <DialogDescription>Choose the installer’s disc image, and the machine is set up to suit it.</DialogDescription>
+            <DialogTitle className="flex items-center gap-3">
+              {system && <OsBadge os={vm.os} system={system} />}
+              {systemName ? `Install ${systemName}` : 'New Virtual Machine'}
+            </DialogTitle>
+            <DialogDescription>
+              {systemName
+                ? `It sets itself up without asking anything. Everything here can be changed later in Settings.`
+                : 'Choose the installer’s disc image, and the machine is set up to suit it.'}
+            </DialogDescription>
           </DialogHeader>
 
           <CdromField
             path={cdrom}
             onChoose={() => void chooseImage()}
             onEject={() => setCdrom(null)}
-            hint={cdrom ? 'It starts from this disc to install.' : 'An .iso file, like the ones Windows and Linux are downloaded as. You can add one later.'}
+            hint={
+              systemName
+                ? cdrom
+                  ? `It installs from this disc image instead of downloading ${systemName}.`
+                  : `Leave it empty and Din downloads the newest ${systemName}.`
+                : cdrom
+                  ? 'It starts from this disc to install.'
+                  : 'An .iso file, like the ones Windows and Linux are downloaded as. You can add one later.'
+            }
           />
 
-          <Field label="Operating system">
-            <OsPicker value={vm.os} onChange={setOs} />
-          </Field>
+          {!system && (
+            <Field label="Operating system">
+              <OsPicker value={vm.os} onChange={setOs} />
+            </Field>
+          )}
 
           <Field label="Name" htmlFor="vm-name">
             <Input
@@ -152,7 +182,7 @@ export function NewVmDialog({
             hint="It only takes up what the machine writes to it, and can grow later."
           />
 
-          <Collapsible open={advanced} onOpenChange={setAdvanced}>
+          {!system && <Collapsible open={advanced} onOpenChange={setAdvanced}>
             <CollapsibleTrigger asChild>
               <Button type="button" variant="ghost" size="sm" className="-ml-2 gap-1 text-muted-foreground">
                 <ChevronDown className={advanced ? 'size-4 rotate-180 transition-transform' : 'size-4 transition-transform'} aria-hidden />
@@ -183,7 +213,7 @@ export function NewVmDialog({
               <SwitchRow label="Network" description="Through this computer’s connection." checked={vm.network} onChange={(network) => setVm({ ...vm, network })} />
               <SwitchRow label="Sound" description="Through this computer’s speakers and microphone." checked={vm.audio} onChange={(audio) => setVm({ ...vm, audio })} />
             </CollapsibleContent>
-          </Collapsible>
+          </Collapsible>}
 
           {windowsWarning && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">{windowsWarning}</p>}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -194,7 +224,7 @@ export function NewVmDialog({
             </Button>
             <Button type="submit" disabled={busy || !shownName.trim()}>
               {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              {cdrom ? 'Create and Start' : 'Create'}
+              {system ? 'Install' : cdrom ? 'Create and Start' : 'Create'}
             </Button>
           </DialogFooter>
         </form>
