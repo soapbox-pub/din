@@ -1230,6 +1230,13 @@ in
   environment.extraInit = ''
     export PATH="$HOME/.opencode/bin:$PATH"
   '';
+  # Its skills for every session on the computer, from OpenCode's system
+  # directory: making apps and widgets, and changing DinOS. They point at
+  # Din's docs and API types, which come along in /etc/din.
+  environment.etc."opencode/skills".source = ./opencode/skills;
+  environment.etc."din/docs".source = din-root + "/docs";
+  environment.etc."din/din.d.ts".source = din-root + "/src/sdk/din.d.ts";
+  environment.etc."din/napplet.ts".source = din-root + "/src/widgets/shared/napplet.ts";
 
   # Flatpak for desktop apps from Flathub, per user and without root. It
   # requires the desktop portals, which the GTK backend provides, except for
