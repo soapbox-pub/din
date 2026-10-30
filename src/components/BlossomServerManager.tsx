@@ -15,6 +15,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useToast } from '@/hooks/useToast';
+import { blossomListTags, normalizeBlossomUrl } from '@/lib/relayLists';
 
 /**
  * BlossomServerManager - edit the user's BUD-03 Blossom server list.
@@ -40,23 +41,8 @@ export function BlossomServerManager() {
     setServers(config.blossomServerMetadata.servers);
   }, [config.blossomServerMetadata.servers]);
 
-  const normalizeServerUrl = (url: string): string | null => {
-    let trimmed = url.trim();
-    if (!trimmed) return null;
-    if (!/^https?:\/\//i.test(trimmed)) {
-      trimmed = `https://${trimmed}`;
-    }
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
-      return parsed.toString();
-    } catch {
-      return null;
-    }
-  };
-
   const handleAddServer = () => {
-    const normalized = normalizeServerUrl(newServerUrl);
+    const normalized = normalizeBlossomUrl(newServerUrl);
     if (!normalized) {
       toast({
         title: 'Invalid server URL',
@@ -112,7 +98,7 @@ export function BlossomServerManager() {
         {
           kind: 10063,
           content: '',
-          tags: newServers.map((url) => ['server', url]),
+          tags: blossomListTags(newServers),
         },
         {
           onSuccess: () => {

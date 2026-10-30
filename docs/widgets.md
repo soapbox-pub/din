@@ -193,7 +193,7 @@ in and it shows on the desktop as you edit.
   its path (`FileSource`) and opens the folder again when Din starts.
   Main only ever serves folders the desktop opened.
 - Its identity, for storage, is `file:<path>`.
-- **`din widget <folder>`** does the same from a terminal (`docs/din-command.md`):
+- **`din widgets add-folder <folder>`** does the same from a terminal (`docs/din-command.md`):
   the widget's permission screen comes up on its own, or, if it asks for no
   permissions, it goes straight on the desktop.
 

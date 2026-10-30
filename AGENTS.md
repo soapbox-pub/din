@@ -58,6 +58,10 @@ Din has three layers, and each talks only to the one below it (`docs/README.md`)
 
 **Read `docs/README.md` before working on app hosting, window chrome, `<webview>`, the preload bridges, or any built-in app**, and the `docs/din/` page for the area you're touching. A new or moved app follows `docs/building-an-app.md` and `docs/migrating-builtin-apps.md`; code shared by apps (or apps and the desktop) goes in `src/shared/`, and must work in both documents. The API's types are `src/sdk/din.d.ts`; keep the docs and types in step with each other and with the code.
 
+### The `din` command
+
+Anything a user can do on Din, the `din` command can do too, so the Assistant and scripts can do it for them (`docs/din-command.md`). **A new setting, Settings section, or user action ships its command in the same change**: a command in `src/lib/commands/` (a `settings` key for an `AppConfig` preference) that calls the same code the UI calls, never a copy of it. Share the logic the way right-click menus share their ⋯ menu's. `src/lib/commands/commands.test.ts` fails on a Settings section or `AppConfig` field with no command; an exception names its reason in `SECTION_AREAS` or `CONFIG_FIELDS_ELSEWHERE`. What gives trust away or can't be undone asks the user on screen first (`ctx.confirm`).
+
 ## UI Components
 
 Components in `@/components/ui` are unstyled, accessible primitives styled with Tailwind. They follow a consistent React 19 pattern: plain function components that type props via `React.ComponentProps<...>` and forward `ref` as a normal prop (no `React.forwardRef`), tag their root with a `data-slot` attribute, merge classes with the `cn()` utility, and define variants with `class-variance-authority`. Components built on Radix import from the unified `radix-ui` package (e.g. `import { Dialog as DialogPrimitive } from "radix-ui"`), not individual `@radix-ui/react-*` packages. When you need a specific component, list the directory (`ls src/components/ui/`) or import from `@/components/ui/<name>` — all common primitives are present (buttons, inputs, dialogs, dropdowns, forms, tables, etc.).

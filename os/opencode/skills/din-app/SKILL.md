@@ -35,8 +35,8 @@ for `window.nostr`, `fs`, `notifications`, …) goes in `din.permissions`.
 
 ## Running it
 
-- `din ./folder` opens it in a window and prints its console in the terminal
-  (`--origin <name>` keeps its storage between runs, `-d` returns at once,
+- `din apps run ./folder` opens it in a window and prints its console in the terminal
+  (`--origin <name>` keeps its storage between runs, `--detach` returns at once,
   `--url http://localhost:5173` runs a dev server with HMR).
 - To keep it, the user adds the folder in the App Store (**Add from a
   Folder…**). It's then in the launcher at `din+file://…` and reloads

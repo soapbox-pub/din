@@ -88,8 +88,6 @@ let
       # The cursor converter's sandboxed page, bundled above.
       install -m444 electron/cursor-converter.js $out/share/din/cursor-converter.js
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
-      # The `din` command's client (din-cli below).
-      install -m444 electron/din-cli.py $out/share/din/din-cli.py
       # Publisher's INDD reader (electron/indd.mts), committed prebuilt.
       install -m444 electron/indd.wasm $out/share/din/indd.wasm
       # The ad blocker's extension, with its engine bundle built above.
@@ -273,15 +271,14 @@ let
     '';
   };
 
-  # The `din` command: runs a built web app (or a dev server) in a Din
-  # window at din://<origin>/ (electron/din-launch.mts).
-  din-cli = pkgs.writeShellApplication {
-    name = "din";
-    runtimeInputs = [ pkgs.python3 ];
-    text = ''
-      exec python3 ${din-app}/share/din/din-cli.py "$@"
-    '';
-  };
+  # The `din` command: everything a user can do on Din, from a shell
+  # (docs/din-command.md). Its client, din-cli.mjs (compiled with the rest
+  # of electron/ and installed with it), runs on Din's own Electron as
+  # Node: the binary itself, not nixpkgs' wrapper, whose Chromium flags
+  # Node would take for arguments.
+  din-cli = pkgs.writeShellScriptBin "din" ''
+    ELECTRON_RUN_AS_NODE=1 exec ${electron-hardened}/libexec/electron/electron ${din-app}/share/din/din-cli.mjs "$@"
+  '';
 
   # Unlocks and re-keys `din`'s login keyring with the computer's password
   # (see the script).

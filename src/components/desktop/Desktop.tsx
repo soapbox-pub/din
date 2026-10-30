@@ -38,6 +38,7 @@ import { NativeDisplayHost } from './NativeDisplayHost';
 import { SystemEventsHost } from './SystemEventsHost';
 import { NativeLinksHost } from './NativeLinksHost';
 import { LaunchHost } from './LaunchHost';
+import { CommandHost } from './CommandHost';
 import { InstallerAutoOpen } from './InstallerAutoOpen';
 import { UpdateNotifier } from './UpdateNotifier';
 import { AirPlayOsd, AirPlayPromptHost } from './AirPlayIndicator';
@@ -218,6 +219,7 @@ function DesktopSession() {
                   <SystemEventsHost />
                   <NativeLinksHost />
                   <LaunchHost />
+                  <CommandHost />
                   <SystemNotificationsHost />
                   <GuestInputHost />
                   <CursorEffectsLayer />

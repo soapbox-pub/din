@@ -17,6 +17,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useToast } from '@/hooks/useToast';
+import { normalizeRelayUrl, relayListTags } from '@/lib/relayLists';
 
 interface Relay {
   url: string;
@@ -41,19 +42,6 @@ export function RelayListManager() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRelays(config.relayMetadata.relays);
   }, [config.relayMetadata.relays]);
-
-  const normalizeRelayUrl = (url: string): string => {
-    url = url.trim();
-    try {
-      return new URL(url).toString();
-    } catch {
-      try {
-        return new URL(`wss://${url}`).toString();
-      } catch {
-        return url;
-      }
-    }
-  };
 
   const isValidRelayUrl = (url: string): boolean => {
     const trimmed = url.trim();
@@ -146,17 +134,7 @@ export function RelayListManager() {
   };
 
   const publishNIP65RelayList = (relayList: Relay[]) => {
-    const tags = relayList.map(relay => {
-      if (relay.read && relay.write) {
-        return ['r', relay.url];
-      } else if (relay.read) {
-        return ['r', relay.url, 'read'];
-      } else if (relay.write) {
-        return ['r', relay.url, 'write'];
-      }
-      // If neither read nor write, don't include (shouldn't happen)
-      return null;
-    }).filter((tag): tag is string[] => tag !== null);
+    const tags = relayListTags(relayList);
 
     publishEvent(
       {

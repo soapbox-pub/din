@@ -3504,7 +3504,7 @@ expose('launch', {
    */
   release: (appId) => ipcRenderer.invoke('dinos-launch:release', appId),
   /**
-   * Hear `din widget`: a folder's widget to offer, then answer with widgetAnswer().
+   * Hear `din widgets add-folder`: a folder's widget to offer, then answer with widgetAnswer().
    * @param {(offer: unknown) => void} callback
    * @returns {() => void}
    */
@@ -3533,6 +3533,36 @@ expose('launch', {
    * @returns {Promise<void>}
    */
   widgetAnswer: (offerId, state, message) => ipcRenderer.invoke('dinos-launch:widget-answer', offerId, state, message),
+});
+
+// Command bridge (window.dinos.commands): `din <area> <command>` from a
+// shell, run by the desktop's command registry (electron/din-launch.mts,
+// src/lib/commands/, CommandHost).
+expose('commands', {
+  /**
+   * Hear commands: say taken() at once, then answer().
+   * @param {(request: unknown) => void} callback
+   * @returns {() => void}
+   */
+  onRun: (callback) => {
+    /** @param {unknown} _event @param {unknown} request */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('dinos-command:run', listener);
+    return () => ipcRenderer.removeListener('dinos-command:run', listener);
+  },
+  /**
+   * The desktop has a command, and is running it.
+   * @param {string} id
+   * @returns {Promise<void>}
+   */
+  taken: (id) => ipcRenderer.invoke('dinos-command:taken', id),
+  /**
+   * A command's answer.
+   * @param {string} id
+   * @param {unknown} answer
+   * @returns {Promise<void>}
+   */
+  answer: (id, answer) => ipcRenderer.invoke('dinos-command:answer', id, answer),
 });
 
 contextBridge.exposeInMainWorld('dinos', dinos);

@@ -81,7 +81,7 @@ Where a page and the types disagree, the types win and the page is a bug.
 | `src/platform/` | `GuestSurface` and the guest helpers ([guest-surfaces.md](guest-surfaces.md)) |
 | `src/components/desktop/DinAppFrame.tsx` | The desktop's end of every app window's port; `dinHost/` beside it |
 | `src/lib/dinApps.ts`, `src/lib/dinDrag.ts` | Apps' manifests and ports; the drag broker |
-| `electron/din-launch.mts`, `electron/din-cli.py`, `src/lib/launchedApps.ts` | The `din` command: its socket and files, its client, and the desktop's side |
+| `electron/din-launch.mts`, `electron/din-cli.mts`, `src/lib/commands/`, `src/components/desktop/CommandHost.tsx`, `src/lib/launchedApps.ts` | The `din` command: its socket and files, its client, its commands, and the desktop's side |
 | `electron/din-file-apps.mts`, `src/lib/fileApps.ts`, `src/components/desktop/FileAppFrame.tsx` | Apps from folders at `din+file://<hash>/`, added in the App Store |
 | `src/apps/<id>/` | Each built-in app: `index.html`, `manifest.webmanifest`, `main.tsx`, its code |
 | `src/shared/` | Code apps and the desktop both use (it must not reach the desktop's internals) |

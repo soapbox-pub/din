@@ -1,14 +1,17 @@
-// The `din` command (electron/din-cli.py): a web app from a folder (a
-// build's dist/) or from a dev server, run as a Din app at din://<origin>/,
-// with window.din like a built-in app's.
+// The `din` command (electron/din-cli.mts) talks to this module over a Unix
+// socket in $XDG_RUNTIME_DIR (din.sock, or din-<pid>.sock when another Din
+// has that one; the Terminal's shells get $DIN_SOCKET either way). One
+// connection is one request: a JSON line, then lines back.
 //
-// The command talks to this module over a Unix socket in $XDG_RUNTIME_DIR
-// (din.sock, or din-<pid>.sock when another Din has that one; the Terminal's
-// shells get $DIN_SOCKET either way). One connection is one launch: a JSON
-// request line, then lines back (opened, the window's console, closed). The
-// window closes when the connection does, unless the command detached.
-// `din widget` sends `{ widget: { dir, size } }` instead, and hears whether
-// the folder's widget was added to the desktop (offerWidget).
+// - `{ command: argv, cwd }`, or `{ path, input, cwd }`: one of the
+//   desktop's commands (src/lib/commands/), which runs it and answers once
+//   (runCommand).
+// - `din apps run`: a web app from a folder (a build's dist/) or from a dev
+//   server, run as a Din app at din://<origin>/ with window.din like a
+//   built-in app's. Lines back: opened, the window's console, closed. The
+//   window closes when the connection does, unless the command detached.
+// - `din widgets add-folder` sends `{ widget: { dir, size } }`, and hears
+//   whether the folder's widget was added to the desktop (offerWidget).
 //
 // Origins: a random din://tmp-<id>/ by default, whose storage is cleared
 // once its last window closes, or one the command names, which keeps its
@@ -22,6 +25,7 @@
 
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -445,11 +449,11 @@ export interface WidgetOffer {
   size?: 'small' | 'medium' | 'large';
 }
 
-/** `din widget`s waiting on the desktop, by offer id. */
+/** `din widgets add-folder`s waiting on the desktop, by offer id. */
 const offers = new Map<string, { socket: net.Socket; timer: ReturnType<typeof setTimeout> | null }>();
 
 /**
- * `din widget <folder>`: put a folder's widget on the desktop. The desktop
+ * `din widgets add-folder <folder>`: put a folder's widget on the desktop. The desktop
  * shows it on the widget's permission screen, as Add Widgets does, unless
  * it asks for nothing; the command hears when it's added, or why not.
  */
@@ -508,6 +512,77 @@ function answerOffer(offerId: unknown, state: unknown, message: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+/** What the desktop gets to run a command with (src/components/desktop/CommandHost.tsx). */
+export interface CommandRequest {
+  id: string;
+  /** A command line, `din` itself left off. */
+  argv?: string[];
+  /** Or a command by its path, with structured arguments (the Assistant's tools). */
+  path?: string[];
+  input?: Record<string, unknown>;
+  /** Where it was run, for relative paths. */
+  cwd: string;
+}
+
+const MAX_ARGV = 1024;
+
+/** Commands waiting on the desktop, by id. */
+const commands = new Map<string, { socket: net.Socket; timer: ReturnType<typeof setTimeout> | null }>();
+
+/**
+ * `din <area> <command> …`: run in the desktop, whose answer goes back as
+ * one line. It may take its time (a confirmation on screen, a build), so the
+ * desktop says when it has the command and only that is timed.
+ */
+function runCommand(socket: net.Socket, raw: Record<string, unknown>): void {
+  const opts = options;
+  if (!opts) return;
+  const fail = (message: string, usage = false): void => {
+    socket.end(`${JSON.stringify({ type: 'answer', ok: false, error: message, usage })}\n`);
+  };
+  const strings = (value: unknown): value is string[] =>
+    Array.isArray(value) && value.length <= MAX_ARGV && value.every((v) => typeof v === 'string');
+  const request: CommandRequest = { id: randomUUID(), cwd: typeof raw.cwd === 'string' ? raw.cwd : '' };
+  if (strings(raw.command)) request.argv = raw.command;
+  else if (strings(raw.path) && typeof raw.input === 'object' && raw.input !== null && !Array.isArray(raw.input)) {
+    request.path = raw.path;
+    request.input = raw.input as Record<string, unknown>;
+  } else return fail('Bad request', true);
+  if (!opts.hasShell()) return fail('Din’s desktop isn’t running');
+
+  const pending = {
+    socket,
+    timer: setTimeout(() => answerCommand(request.id, { ok: false, error: 'Din’s desktop didn’t answer (is someone signed in?)', usage: false }), OPEN_TIMEOUT_MS) as ReturnType<typeof setTimeout> | null,
+  };
+  commands.set(request.id, pending);
+  socket.on('close', () => {
+    const waiting = commands.get(request.id);
+    if (waiting?.timer) clearTimeout(waiting.timer);
+    commands.delete(request.id);
+  });
+  opts.sendToShell('dinos-command:run', request);
+}
+
+/** The desktop has the command: from here it takes as long as it takes. */
+function commandTaken(id: unknown): void {
+  const pending = typeof id === 'string' ? commands.get(id) : undefined;
+  if (pending?.timer) clearTimeout(pending.timer);
+  if (pending) pending.timer = null;
+}
+
+function answerCommand(id: unknown, answer: unknown): void {
+  const pending = typeof id === 'string' ? commands.get(id) : undefined;
+  if (!pending) return;
+  if (pending.timer) clearTimeout(pending.timer);
+  commands.delete(id as string);
+  const line = typeof answer === 'object' && answer !== null ? answer : { ok: false, error: 'No answer', usage: false };
+  if (!pending.socket.destroyed) pending.socket.end(`${JSON.stringify({ type: 'answer', ...line })}\n`);
+}
+
+// ---------------------------------------------------------------------------
 // The socket
 // ---------------------------------------------------------------------------
 
@@ -547,28 +622,43 @@ function accept(socket: net.Socket): void {
       socket.end(`${JSON.stringify({ type: 'error', message: 'Bad request' })}\n`);
       return;
     }
-    const widget = (request as { widget?: unknown }).widget;
-    if (widget !== undefined) offerWidget(socket, widget);
+    const fields = request as { widget?: unknown; command?: unknown; path?: unknown };
+    if (fields.widget !== undefined) offerWidget(socket, fields.widget);
+    else if (fields.command !== undefined || fields.path !== undefined) runCommand(socket, request as Record<string, unknown>);
     else void start(socket, request as LaunchArgs);
   });
 }
 
-async function listen(): Promise<void> {
+/**
+ * Where the command finds Din: a socket in the runtime folder, or on
+ * Windows a named pipe of the user's (untested there). The client
+ * (din-cli.mts) looks in the same places.
+ */
+function socketPaths(): { shared: string; own: string } {
+  if (process.platform === 'win32') {
+    const user = os.userInfo().username.replace(/[^A-Za-z0-9_.-]/g, '_');
+    return { shared: `\\\\.\\pipe\\din-${user}`, own: `\\\\.\\pipe\\din-${user}-${process.pid}` };
+  }
   const dir = process.env.XDG_RUNTIME_DIR || app.getPath('userData');
-  const shared = path.join(dir, 'din.sock');
+  return { shared: path.join(dir, 'din.sock'), own: path.join(dir, `din-${process.pid}.sock`) };
+}
+
+async function listen(): Promise<void> {
+  const { shared, own } = socketPaths();
+  const pipe = process.platform === 'win32';
   // Another Din (a dev build nested in DinOS) keeps the shared name.
-  const file = (await answers(shared)) ? path.join(dir, `din-${process.pid}.sock`) : shared;
-  fs.rmSync(file, { force: true });
+  const file = (await answers(shared)) ? own : shared;
+  if (!pipe) fs.rmSync(file, { force: true });
   const server = net.createServer(accept);
   server.on('error', (error) => console.error('din-launch:', error));
   server.listen(file, () => {
-    fs.chmodSync(file, 0o600);
+    if (!pipe) fs.chmodSync(file, 0o600);
     // For the Terminal's shells and the apps Din starts (native-apps.mts).
     process.env.DIN_SOCKET = file;
   });
   app.on('will-quit', () => {
     server.close();
-    fs.rmSync(file, { force: true });
+    if (!pipe) fs.rmSync(file, { force: true });
   });
 }
 
@@ -590,6 +680,14 @@ export function registerDinLaunch(opts: Options): void {
   ipcMain.handle('dinos-launch:widget-answer', (event, offerId, state, message) => {
     opts.assertShellSender(event);
     answerOffer(offerId, state, message);
+  });
+  ipcMain.handle('dinos-command:taken', (event, id) => {
+    opts.assertShellSender(event);
+    commandTaken(id);
+  });
+  ipcMain.handle('dinos-command:answer', (event, id, answer) => {
+    opts.assertShellSender(event);
+    answerCommand(id, answer);
   });
   void listen().catch((error: unknown) => console.error('din-launch: listening:', error));
 }

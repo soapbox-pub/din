@@ -42,7 +42,7 @@ domains it declares, on `window.napplet`.
 
 ## Running it
 
-- `din widget ./folder` puts it on the desktop (`--size small|medium|large`).
+- `din widgets add-folder ./folder` puts it on the desktop (`--size small|medium|large`).
   If it asks for `identity`, `resource` or `storage`, the desktop shows its
   permission screen and the command waits for the user to answer, so tell
   them to look. One that asks for nothing goes on at once.

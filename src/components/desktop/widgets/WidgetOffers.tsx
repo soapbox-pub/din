@@ -22,7 +22,7 @@ interface Offer {
 const SIZES: readonly string[] = ['small', 'medium', 'large'];
 
 /**
- * Folders' widgets the `din widget` command offers (electron/din-launch.mts):
+ * Folders' widgets `din widgets add-folder` offers (electron/din-launch.mts):
  * one that asks for no permissions goes straight on the desktop, and any
  * other waits on its permission screen, as in Add Widgets, for the user to
  * add it or not. The command hears which.

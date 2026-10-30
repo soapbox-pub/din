@@ -216,6 +216,11 @@ function getState(): State {
   return state;
 }
 
+/** The notification center's state now (the `din` command's). */
+export function getNotificationState(): Readonly<State> {
+  return state;
+}
+
 /** The notification center's state, re-rendering on every change. */
 export function useNotificationCenter(): State {
   return useSyncExternalStore(subscribe, getState);
