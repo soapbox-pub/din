@@ -433,7 +433,7 @@ function Turn({
             <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="ml-1.5 mt-3 flex flex-col gap-4 border-l border-border pl-4">{work.map(render)}</div>
+            <div className="ml-1.5 mt-3 flex flex-col gap-4 border-l border-border/60 pl-4">{work.map(render)}</div>
           </CollapsibleContent>
         </Collapsible>
       ) : (
@@ -490,7 +490,7 @@ function Steps({ steps, live }: { steps: Step[]; live: boolean }) {
         <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ol className="ml-1.5 mt-2 flex flex-col gap-0.5 border-l border-border pl-2">
+        <ol className="ml-1.5 mt-2 flex flex-col gap-0.5 border-l border-border/60 pl-2">
           {steps.map((step) => (
             <li key={step.key}>{step.type === 'tool' ? <ToolStep step={step} /> : <ThoughtStep step={step} />}</li>
           ))}
@@ -515,7 +515,7 @@ function Reasoning({ step, live }: { step: ReasoningPart; live: boolean }) {
         <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <Markdown text={step.text} className="mt-2 border-l border-border pl-3 text-sm leading-6 text-muted-foreground" />
+        <Markdown text={step.text} className="mt-2 border-l border-border/60 pl-3 text-sm leading-6 text-muted-foreground" />
       </CollapsibleContent>
     </Collapsible>
   );
@@ -581,7 +581,7 @@ function ToolStep({ step }: { step: ToolPart }) {
         <RowChevron open={open} />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mb-2 ml-7 mt-1 space-y-2 rounded-lg border border-border/70 bg-muted/30 p-2.5">
+        <div className="mb-2 ml-7 mt-1 space-y-2 rounded-lg bg-muted/50 p-2.5">
           {state.status === 'error' && <ErrorBanner message={state.error.message ?? 'The tool failed'} />}
           {typeof diff === 'string' && diff ? (
             <Diff text={diff} />
@@ -817,7 +817,7 @@ function Note({ message, home }: { message: SessionMessage; home?: string }) {
       return <Divider>Using skill: {message.name}</Divider>;
     case 'shell':
       return (
-        <div className="rounded-lg border border-border/70 bg-muted/30 p-2.5">
+        <div className="rounded-lg bg-muted/50 p-2.5">
           <p className="font-mono text-xs">$ {message.command}</p>
           {message.output?.output && <OutputBlock label="Output" text={message.output.output} />}
         </div>

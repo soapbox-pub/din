@@ -253,9 +253,9 @@ export function SessionList({
       onPointerEnter={hold}
       onPointerLeave={() => setHeld(null)}
       style={style}
-      className={cn('w-64 shrink-0 flex-col border-r border-border/60 bg-muted/30', className)}>
+      className={cn('w-64 shrink-0 flex-col bg-muted/30', className)}>
       {/* The window's title bar runs across the list's top, so it drags the window too. */}
-      <WindowDragRegion className="flex h-9 shrink-0 items-center gap-2 pl-3 pr-2">
+      <WindowDragRegion className="flex h-10 shrink-0 items-center gap-2 pl-3 pr-2">
         <img src="/icons/apps/assistant.png" alt="" aria-hidden draggable={false} className="size-4 shrink-0 object-contain" />
         {/* In the theme's title font, like a window's title. */}
         <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
@@ -272,8 +272,8 @@ export function SessionList({
           <SquarePen className="size-4" aria-hidden />
         </Button>
       </WindowDragRegion>
-      <div className="relative shrink-0 px-2 pb-1">
-        <Search className="pointer-events-none absolute left-4.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      <div className="relative mx-2.5 mt-1 shrink-0">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
         <Input
           ref={searchRef}
           value={filter}
@@ -286,10 +286,10 @@ export function SessionList({
           placeholder="Search"
           aria-label="Search conversations"
           title="Search conversations (Ctrl+K)"
-          className="h-8 pl-8 text-sm"
+          className="h-8 rounded-full border-transparent bg-foreground/[0.06] pl-8 text-sm shadow-none dark:bg-foreground/[0.08] md:text-sm focus-visible:border-transparent focus-visible:ring-2"
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
         {isLoading ? (
           <div className="space-y-2 p-2" aria-label="Loading conversations">
             <Skeleton className="h-3 w-1/3" />

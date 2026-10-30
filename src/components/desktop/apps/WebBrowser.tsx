@@ -108,6 +108,16 @@ import {
 } from '@/lib/browserSession';
 import { TabContextMenu } from '@/shared/TabContextMenu';
 import {
+  newTabButtonClass,
+  tabClass,
+  tabCloseClass,
+  tabContentClass,
+  tabIconClass,
+  tabListClass,
+  tabRaisedClass,
+  tabTitleClass,
+} from '@/shared/tabStyles';
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -1928,12 +1938,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           navigate(activeTab.address);
         }}
         style={toolbarTint}
-        className={cn(
-          'relative flex shrink-0 items-center gap-1 border-b px-2 py-1.5',
-          // The overridden --border already carries its own alpha; the
-          // default keeps the token at 60%.
-          accent ? 'border-border' : 'border-border/60 bg-background/50',
-        )}
+        // No background of its own: the title bar, tabs or not, takes the
+        // window's, to run on into this one without a seam (see Window).
+        data-titlebar-seamless=""
+        className="relative flex shrink-0 items-center gap-1.5 px-2.5 pt-0.5 pb-2"
       >
         <NavButton label="Go back" disabled={!canBack} onClick={() => go(-1)}>
           <ArrowLeft className="size-4" />
@@ -2392,7 +2400,7 @@ function AddressBar({
         spellCheck={false}
         autoComplete="off"
         className={cn(
-          'h-8 w-full rounded-full border border-border/60 bg-secondary/80 pl-8 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          'h-8 w-full rounded-full bg-secondary/80 pl-8 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
           showOnion && showNsite ? 'pr-36' : showOnion || showNsite ? 'pr-20' : 'pr-3',
         )}
       />
@@ -2651,7 +2659,7 @@ function TabStrip({
           // There's no scrollbar, so the wheel scrolls the tabs sideways.
           if (e.deltaY !== 0 && e.deltaX === 0) e.currentTarget.scrollLeft += e.deltaY;
         }}
-        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
+        className={tabListClass}
       >
         {tabs.map((tab) => (
           <TabButton
@@ -2677,13 +2685,10 @@ function TabStrip({
           aria-label="New tab"
           title="New tab"
           onClick={onNewTab}
-          className={cn(
-            'grid size-7 shrink-0 place-items-center rounded-md text-foreground/70',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
+          className={newTabButtonClass}
         >
-          <Plus className="size-4" />
+          {/* 15px with a 1px stroke, centered as 16px: its lines land on whole pixels, so it's crisp. */}
+          <Plus className="mr-px mb-px size-[15px]" strokeWidth={1.6} />
         </button>
       </div>
     </StripContextMenu>
@@ -2745,10 +2750,13 @@ function StripContextMenu({ menu, children }: { menu: BrowserTabMenu; children: 
   );
 }
 
-/** The icon's classes for when an unpinned tab gets too narrow for its title. */
-function narrowIcon(pinned: boolean, active: boolean) {
-  if (pinned) return undefined;
-  return active ? '@max-[3.25rem]:hidden' : '@max-[3.25rem]:mx-auto';
+/** A tab's favicon, or its glyph while it has none. */
+function TabIcon({ tab, icon, className }: { tab: Tab; icon: string | null; className?: string }) {
+  return icon ? (
+    <img src={icon} alt="" aria-hidden draggable={false} className={cn('size-4 shrink-0', className)} />
+  ) : (
+    <TabGlyph tab={tab} className={cn('size-4 shrink-0 opacity-60', className)} />
+  );
 }
 
 /** A single tab in the tab strip. */
@@ -2818,38 +2826,23 @@ function TabButton({
         title={label}
         style={!tab.pinned && lockedWidth !== null ? { flex: `0 0 ${lockedWidth}px` } : undefined}
         className={cn(
-          'group relative flex h-7 cursor-default select-none items-center rounded-md border text-xs',
-          // Unpinned tabs shrink from 11rem as the strip fills, and are
+          // Unpinned tabs shrink from 13rem as the strip fills, and are
           // containers so their contents can collapse once they get narrow.
           tab.pinned
-            ? 'w-9 shrink-0 justify-center'
-            : cn('@container basis-44 shrink gap-2 px-2.5', active ? 'min-w-10' : 'min-w-9'),
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          active
-            ? 'border-border/60 bg-background text-foreground shadow-sm'
-            : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-          dragging && 'border-border/60 bg-background shadow-md',
+            ? 'w-9 shrink-0'
+            : cn('@container basis-52 shrink', active ? 'min-w-10' : 'min-w-9'),
+          tabClass({ active, dragging }),
         )}
       >
-        {/* Too narrow for everything, a tab shows just its icon - or, if
-            it's the active one, just its close button - like Chrome's. */}
-        {icon ? (
-          <img
-            src={icon}
-            alt=""
-            aria-hidden
-            draggable={false}
-            className={cn('size-4 shrink-0', narrowIcon(tab.pinned, active))}
-          />
+        {/* Too narrow for its title, a tab shows just its icon, like Safari's. */}
+        {tab.pinned ? (
+          <TabIcon tab={tab} icon={icon} />
         ) : (
-          <TabGlyph
-            tab={tab}
-            className={cn('size-4 shrink-0 opacity-60', narrowIcon(tab.pinned, active))}
-          />
-        )}
-        {!tab.pinned && (
           <>
-            <span className="min-w-0 flex-1 truncate @max-[3.25rem]:hidden">{label}</span>
+            <span className={tabContentClass}>
+              <TabIcon tab={tab} icon={icon} className={tabIconClass} />
+              <span className={tabTitleClass(true)}>{label}</span>
+            </span>
             <button
               type="button"
               aria-label={`Close ${label}`}
@@ -2857,12 +2850,7 @@ function TabButton({
                 e.stopPropagation();
                 onClose(e.detail > 0 ? widthOf(e.currentTarget) : undefined);
               }}
-              className={cn(
-                'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
-                'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-                active ? 'opacity-100 @max-[3.25rem]:mx-auto' : '@max-[3.25rem]:hidden',
-                'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              )}
+              className={tabCloseClass}
             >
               <X className="size-3" />
             </button>
@@ -3017,8 +3005,8 @@ function TreeTabStrip({
           title="New tab"
           onClick={onNewTab}
           className={cn(
-            'flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border/60 px-2 text-xs text-muted-foreground',
-            'hover:border-border hover:bg-foreground/5 hover:text-foreground',
+            'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground',
+            'hover:bg-foreground/[0.06] hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}
         >
@@ -3180,13 +3168,13 @@ function TreeTabRow({
         title={label}
         style={{ marginInlineStart: depth * 14, paddingInlineStart: gutter }}
         className={cn(
-          'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md border pr-1.5 text-xs',
+          'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md pr-1.5 text-xs transition-[background-color,color] duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           dragging && 'opacity-40',
           dropZone === 'inside' && 'ring-2 ring-inset ring-primary',
           active
-            ? 'border-border bg-background text-foreground shadow-sm'
-            : 'border-border/50 bg-background/30 text-muted-foreground hover:border-border hover:bg-foreground/5 hover:text-foreground',
+            ? tabRaisedClass
+            : 'text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground',
         )}
       >
         {/* Sibling drop indicators: a bar in the gap above / below the row. */}
@@ -4176,7 +4164,7 @@ function NewTabPage({
             placeholder="Search or type a URL"
             spellCheck={false}
             autoComplete="off"
-            className="h-12 w-full rounded-full border border-border/60 bg-background/80 pl-12 pr-4 text-base shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="h-12 w-full rounded-full bg-secondary/70 pl-12 pr-4 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         </form>
 

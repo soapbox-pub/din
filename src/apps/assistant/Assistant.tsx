@@ -554,7 +554,7 @@ function AssistantWindow() {
       )}
       <main className="flex min-w-0 flex-1 flex-col">
         {/* The title bar over the conversation; the list has its own part of it. */}
-        <WindowDragRegion className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 pl-2 pr-3">
+        <WindowDragRegion className="flex h-10 shrink-0 items-center gap-2 pl-2 pr-3">
           <ListToggle onClick={() => setListOpen(true)} />
           <TabStrip
             tabs={stripTabs.map((t) => ({

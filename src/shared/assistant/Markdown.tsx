@@ -171,8 +171,8 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
   const ref = useRef<HTMLPreElement>(null);
   const highlighted = useHighlightedCode(code, language);
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-border/60 bg-muted/50 first:mt-0 last:mb-0">
-      <div className="flex items-center justify-between border-b border-border/60 py-1 pl-4 pr-1.5">
+    <div className="my-4 overflow-hidden rounded-xl bg-muted/60 first:mt-0 last:mb-0">
+      <div className="flex items-center justify-between py-1 pl-4 pr-1.5">
         <span className="font-mono text-xs text-muted-foreground">{language}</span>
         <CopyButton text={() => ref.current?.textContent ?? ''} label="Copy code" showLabel />
       </div>

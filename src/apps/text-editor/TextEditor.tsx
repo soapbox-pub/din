@@ -1002,7 +1002,7 @@ export function TextEditor() {
   const nameCounts = new Map<string, number>();
   for (const t of tabs) nameCounts.set(tabName(t), (nameCounts.get(tabName(t)) ?? 0) + 1);
   const header = (
-    <WindowDragRegion className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 bg-background/60 pr-3 pl-2">
+    <WindowDragRegion className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 bg-background/60 pr-3 pl-2">
       {tabs.length > 0 ? (
         <div className="flex min-w-0 flex-1 items-center self-stretch">
           <TabStrip

@@ -2,6 +2,15 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
 import { useDragReorder, type WindowMoveGesture } from '@/hooks/useDragReorder';
 import { TabContextMenu, type TabTransfer } from '@/shared/TabContextMenu';
+import {
+  newTabButtonClass,
+  tabClass,
+  tabCloseClass,
+  tabContentClass,
+  tabIconClass,
+  tabListClass,
+  tabTitleClass,
+} from '@/shared/tabStyles';
 import { cn } from '@/lib/utils';
 
 /**
@@ -110,7 +119,7 @@ export function TabStrip({
         // There's no scrollbar, so the wheel scrolls the tabs sideways.
         if (e.deltaY !== 0 && e.deltaX === 0) e.currentTarget.scrollLeft += e.deltaY;
       }}
-      className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
+      className={tabListClass}
     >
       {tabs.map((tab, index) => (
         <TabContextMenu
@@ -150,21 +159,13 @@ export function TabStrip({
         aria-label={newTabLabel}
         title={newTabLabel}
         onClick={onNew}
-        className={cn(
-          'grid size-7 shrink-0 place-items-center rounded-md text-foreground/70',
-          'hover:bg-foreground/10 hover:text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        )}
+        className={newTabButtonClass}
       >
-        <Plus className="size-4" />
+        {/* 15px with a 1px stroke, centered as 16px: its lines land on whole pixels, so it's crisp. */}
+        <Plus className="mr-px mb-px size-[15px]" strokeWidth={1.6} />
       </button>
     </div>
   );
-}
-
-/** A tab's icon classes, for when it gets too narrow for its title. */
-function narrowIcon(active: boolean) {
-  return active ? '@max-[3.25rem]:hidden' : '@max-[3.25rem]:mx-auto';
 }
 
 /**
@@ -226,37 +227,30 @@ function TabButton({
       title={tab.title}
       style={lockedWidth !== null ? { flex: `0 0 ${lockedWidth}px` } : undefined}
       className={cn(
-        // Tabs shrink from 11rem as the strip fills, and are containers so
+        // Tabs shrink from 13rem as the strip fills, and are containers so
         // their contents can collapse once they get narrow.
-        '@container group relative flex h-7 basis-44 shrink cursor-default select-none items-center gap-2 rounded-md border px-2.5 text-xs',
+        '@container basis-52 shrink',
         active ? 'min-w-10' : 'min-w-9',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        active
-          ? 'border-border/60 bg-background text-foreground shadow-sm'
-          : 'border-transparent bg-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-        dragging && 'border-border/60 bg-background shadow-md',
+        tabClass({ active, dragging }),
       )}
     >
-      {/* Too narrow for everything, a tab shows just its icon - or, if it's
-          the active one, just its close button - like Chrome's. */}
-      {tab.icon && (
-        <span className={cn('grid shrink-0 place-items-center opacity-80 empty:hidden', narrowIcon(active))}>
-          {tab.icon}
-        </span>
-      )}
-      {editor ? (
-        // The field's clicks, drags and keys are its own, not the tab's.
-        <span
-          className="min-w-0 flex-1"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          {editor}
-        </span>
-      ) : (
-        <span className={cn('min-w-0 flex-1 truncate', tab.icon && '@max-[3.25rem]:hidden')}>{tab.title}</span>
-      )}
+      {/* Too narrow for its title, a tab shows just its icon, like Safari's. */}
+      <span className={tabContentClass}>
+        {tab.icon && <span className={cn(tabIconClass, 'opacity-80 empty:hidden')}>{tab.icon}</span>}
+        {editor ? (
+          // The field's clicks, drags and keys are its own, not the tab's.
+          <span
+            className="min-w-0 flex-1"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            {editor}
+          </span>
+        ) : (
+          <span className={tabTitleClass(!!tab.icon)}>{tab.title}</span>
+        )}
+      </span>
       <button
         type="button"
         aria-label={`Close ${tab.title}`}
@@ -264,12 +258,7 @@ function TabButton({
           e.stopPropagation();
           onClose(e.detail > 0 ? widthOf(e.currentTarget) : undefined);
         }}
-        className={cn(
-          'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
-          'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
-          active ? 'opacity-100 @max-[3.25rem]:mx-auto' : '@max-[3.25rem]:hidden',
-          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        )}
+        className={tabCloseClass}
       >
         <X className="size-3" />
       </button>

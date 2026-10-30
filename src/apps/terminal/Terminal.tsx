@@ -670,7 +670,7 @@ export function Terminal() {
   const header = (
     <WindowDragRegion
       ref={headerRef}
-      className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 bg-background/60 pr-3 pl-2"
+      className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 bg-background/60 pr-3 pl-2"
     >
       {bridge ? (
         <div className="flex min-w-0 flex-1 items-center self-stretch">

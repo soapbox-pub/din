@@ -277,7 +277,7 @@ export function Composer({
   return (
     <div
       className={cn(
-        'relative flex flex-col gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm transition-shadow focus-within:border-ring/60 focus-within:shadow-md',
+        'relative flex flex-col gap-2 rounded-2xl border border-border/60 bg-card p-2 shadow-sm transition-shadow focus-within:shadow-md',
         className,
       )}
     >
