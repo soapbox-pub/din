@@ -33,7 +33,7 @@ import {
   showMouse,
 } from '@/lib/cursorEffects/effects';
 import { PACKAGE_PREFIX, loadPackage } from '@/lib/cursorEffects/packages';
-import { type Bounds, type CursorImage, Scene } from '@/lib/cursorEffects/scene';
+import { type CursorImage, Scene } from '@/lib/cursorEffects/scene';
 import type { Rgb } from '@/lib/cursorEffects/sprites';
 import { Water } from '@/lib/cursorEffects/water';
 import { getGuestInput } from '@/lib/guestInput';
@@ -61,10 +61,17 @@ const SHAKE_SHOW_MS = 1600;
 const SHOW_FADE_MS = 250;
 /** How long a painted point burns. */
 const PAINT_LIFE_MS = 2600;
+/**
+ * How many painted points burn at full strength; past it they share that
+ * many points' flames, so a long stroke costs no more than a short one.
+ */
+const PAINT_FLAME_POINTS = 60;
 /** How long to wait for the water's snapshot of the screen before drawing without one. */
 const BACKDROP_WAIT_MS = 300;
 /** How long a preview runs. */
 const PREVIEW_MS = 1700;
+/** The particle canvas covers what's drawn in whole squares of this many CSS pixels. */
+const CANVAS_TILE = 64;
 /** How long the canvases are kept after the last effect ends. */
 const RELEASE_MS = 15_000;
 
@@ -112,7 +119,8 @@ class CursorEffectsEngine {
   private height = 0;
   private frame = 0;
   private last = 0;
-  private drawn: Bounds | null = null;
+  /** Where the particle canvas is on the screen, in CSS pixels: only over what's drawn. */
+  private area: { x: number; y: number; width: number; height: number } | null = null;
   private listening: (() => void) | null = null;
 
   private pointer: { x: number; y: number; t: number } | null = null;
@@ -362,11 +370,10 @@ class CursorEffectsEngine {
     if (this.ctx) return this.ctx;
     if (!this.host) return null;
     const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;visibility:hidden';
+    canvas.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;visibility:hidden';
     this.host.appendChild(canvas);
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.sizeCanvases();
     return this.ctx;
   }
 
@@ -418,12 +425,6 @@ class CursorEffectsEngine {
   }
 
   private sizeCanvases(): void {
-    const scale = window.devicePixelRatio || 1;
-    if (this.canvas) {
-      this.canvas.width = Math.max(1, Math.round(this.width * scale));
-      this.canvas.height = Math.max(1, Math.round(this.height * scale));
-      this.drawn = null;
-    }
     this.water?.resize(this.width, this.height, 1);
   }
 
@@ -438,7 +439,7 @@ class CursorEffectsEngine {
     this.water = null;
     this.waterCanvas = null;
     this.backdrop = 'none';
-    this.drawn = null;
+    this.area = null;
   }
 
   private wake(): void {
@@ -468,9 +469,10 @@ class CursorEffectsEngine {
       showMouse(this.scene, this.pointer.x, this.pointer.y, this.showPhase, dt, this.showStrength);
     }
 
+    const rate = Math.min(1, PAINT_FLAME_POINTS / Math.max(1, this.paint.length));
     for (const p of this.paint) {
       p.age += dt;
-      if (p.age > 0) burnPoint(this.scene, p.x, p.y, 1 - p.age / PAINT_LIFE_MS, dt);
+      if (p.age > 0) burnPoint(this.scene, p.x, p.y, 1 - p.age / PAINT_LIFE_MS, dt, rate);
     }
     if (!this.painting) this.paint = this.paint.filter((p) => p.age < PAINT_LIFE_MS);
     else for (const p of this.paint) p.age = Math.min(p.age, PAINT_LIFE_MS * 0.5);
@@ -485,17 +487,44 @@ class CursorEffectsEngine {
     else this.idleTimer = window.setTimeout(() => this.releaseCanvases(), RELEASE_MS);
   };
 
+  /**
+   * Draw the particles on a canvas over just the part of the screen they're
+   * in, snapped out to whole tiles so it follows them without being made
+   * anew each frame. A canvas that changes is redrawn whole by the
+   * compositor, with every backdrop blur under it: over the whole screen,
+   * Show Mouse alone kept the desktop's glass recomputing every frame.
+   */
   private drawParticles(): void {
-    const ctx = this.scene.busy || this.drawn ? this.ensureCanvas() : null;
-    if (!ctx || !this.canvas) return;
-    const scale = this.canvas.width / Math.max(1, this.width);
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    if (this.drawn) {
-      const { left, top, right, bottom } = this.drawn;
-      ctx.clearRect(left - 2, top - 2, right - left + 4, bottom - top + 4);
+    const bounds = this.scene.busy ? this.scene.bounds() : null;
+    const x = bounds ? Math.max(0, Math.floor((bounds.left - 4) / CANVAS_TILE) * CANVAS_TILE) : 0;
+    const y = bounds ? Math.max(0, Math.floor((bounds.top - 4) / CANVAS_TILE) * CANVAS_TILE) : 0;
+    const width = bounds ? Math.min(this.width, Math.ceil((bounds.right + 4) / CANVAS_TILE) * CANVAS_TILE) - x : 0;
+    const height = bounds ? Math.min(this.height, Math.ceil((bounds.bottom + 4) / CANVAS_TILE) * CANVAS_TILE) - y : 0;
+    if (width <= 0 || height <= 0) {
+      if (this.canvas && this.area) this.canvas.style.visibility = 'hidden';
+      this.area = null;
+      return;
     }
-    this.drawn = this.scene.draw(ctx);
-    this.canvas.style.visibility = this.drawn ? 'visible' : 'hidden';
+    const ctx = this.ensureCanvas();
+    const canvas = this.canvas;
+    if (!ctx || !canvas) return;
+    const scale = window.devicePixelRatio || 1;
+    const was = this.area;
+    if (!was || was.width !== width || was.height !== height) {
+      // Sizing a canvas clears it.
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    if (!was || was.x !== x || was.y !== y) canvas.style.transform = `translate(${x}px, ${y}px)`;
+    if (!was) canvas.style.visibility = 'visible';
+    this.area = { x, y, width, height };
+    ctx.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
+    this.scene.draw(ctx);
   }
 
   private drawWater(dt: number, now: number): void {

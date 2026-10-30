@@ -12,7 +12,8 @@ export type SpriteKind = 'glow' | 'star' | 'smoke' | 'ring' | 'bubble' | 'heart'
 /** A sprite's size in pixels; particles scale it to theirs. */
 const SIZE = 64;
 
-const cache = new Map<string, HTMLCanvasElement>();
+/** Sprites by kind, then by color packed into a number: looked up for every particle every frame. */
+const cache = new Map<SpriteKind, Map<number, HTMLCanvasElement>>();
 
 const rgba = ([r, g, b]: Rgb, a: number) => `rgba(${r},${g},${b},${a})`;
 
@@ -115,15 +116,20 @@ function draw(kind: SpriteKind, color: Rgb, ctx: CanvasRenderingContext2D): void
 
 /** The sprite of `kind` in `color`, drawn on first use. */
 export function sprite(kind: SpriteKind, color: Rgb): HTMLCanvasElement {
-  const key = `${kind}:${color.join(',')}`;
-  let canvas = cache.get(key);
+  let ofKind = cache.get(kind);
+  if (!ofKind) {
+    ofKind = new Map();
+    cache.set(kind, ofKind);
+  }
+  const key = (color[0] << 16) | (color[1] << 8) | color[2];
+  let canvas = ofKind.get(key);
   if (!canvas) {
     canvas = document.createElement('canvas');
     canvas.width = SIZE;
     canvas.height = SIZE;
     const ctx = canvas.getContext('2d');
     if (ctx) draw(kind, color, ctx);
-    cache.set(key, canvas);
+    ofKind.set(key, canvas);
   }
   return canvas;
 }

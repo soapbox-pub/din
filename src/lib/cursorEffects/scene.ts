@@ -198,7 +198,9 @@ export class Scene {
   }
 
   add(spec: ParticleSpec): void {
-    if (this.particles.length >= MAX_PARTICLES) this.particles.splice(0, this.particles.length - MAX_PARTICLES + 1);
+    // Full: the oldest tenth goes at once, not one per add (each a shift of
+    // the whole list, thousands of times a second under Fire Paint).
+    if (this.particles.length >= MAX_PARTICLES) this.particles.splice(0, this.particles.length - MAX_PARTICLES + MAX_PARTICLES / 10);
     this.particles.push({
       vx: 0,
       vy: 0,
@@ -276,6 +278,46 @@ export class Scene {
     this.playing = this.playing.filter((p) => p.age < p.sheet.duration);
     for (const r of this.ribbon) r.age += dt;
     while (this.ribbon.length && this.ribbon[0].age >= this.ribbonLife) this.ribbon.shift();
+  }
+
+  /**
+   * Where `draw` would draw now (in CSS pixels), or null for nowhere: for
+   * the engine to size its canvas to, since the compositor redraws all of a
+   * canvas that changed, and everything blurred under it.
+   */
+  bounds(): Bounds | null {
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    const grow = (x: number, y: number, half: number) => {
+      left = Math.min(left, x - half);
+      top = Math.min(top, y - half);
+      right = Math.max(right, x + half);
+      bottom = Math.max(bottom, y + half);
+    };
+    if (this.ribbon.length > 1) {
+      for (const r of this.ribbon) grow(r.x, r.y, this.ribbonWidth);
+    }
+    const cursor = this.cursor ?? (this.ghosts.length ? arrowImage() : null);
+    if (cursor) {
+      for (const g of this.ghosts) {
+        grow(g.x - cursor.hotX, g.y - cursor.hotY, 0);
+        grow(g.x - cursor.hotX + cursor.width, g.y - cursor.hotY + cursor.height, 0);
+      }
+    }
+    for (const p of this.playing) {
+      grow(p.x - p.sheet.hotX, p.y - p.sheet.hotY, 0);
+      grow(p.x - p.sheet.hotX + p.sheet.width, p.y - p.sheet.hotY + p.sheet.height, 0);
+    }
+    for (const p of this.particles) {
+      if (p.age < p.delay) continue;
+      const t = (p.age - p.delay) / p.life;
+      const size = p.size * (1 + (p.endSize - 1) * t);
+      // A turned sprite reaches its corners out to the diagonal.
+      grow(p.x, p.y, (size / 2) * (p.angle ? Math.SQRT2 : 1) + p.sway);
+    }
+    return left < right ? { left, top, right, bottom } : null;
   }
 
   /** Draw onto `ctx` (in CSS pixels), returning where it drew, or null for nowhere. */

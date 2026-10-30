@@ -464,9 +464,13 @@ export function showMouse(scene: Scene, x: number, y: number, phase: number, dt:
   }
 }
 
-/** Compiz's Fire Paint, for one frame: a painted point gives off flames, fewer as it burns down. */
-export function burnPoint(scene: Scene, x: number, y: number, left: number, dt: number): void {
-  const count = (dt / 1000) * 20 * Math.max(0.15, left);
+/**
+ * Compiz's Fire Paint, for one frame: a painted point gives off flames, fewer
+ * as it burns down, and fewer still at a `rate` below 1 (a long stroke's
+ * points share the flames between them).
+ */
+export function burnPoint(scene: Scene, x: number, y: number, left: number, dt: number, rate = 1): void {
+  const count = (dt / 1000) * 20 * Math.max(0.15, left) * rate;
   let n = Math.floor(count);
   if (scene.random() < count - n) n++;
   for (let i = 0; i < n; i++) {
