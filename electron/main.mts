@@ -5910,6 +5910,11 @@ app.whenReady().then(() => {
 
   shellContentsId = win.webContents.id;
   shellWindow = win;
+  // A destroyed window throws on any property, webContents included, and
+  // quitting runs will-quit hooks that still push to the shell after it.
+  win.on('closed', () => {
+    if (shellWindow === win) shellWindow = null;
+  });
 
   // The shell preload follows its window across navigations, so the shell must
   // never leave its own origin: a remote page loaded here would inherit
