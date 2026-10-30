@@ -161,6 +161,7 @@ impl State {
                     touch.cancel(self);
                 }
             }
+            InputEvent::DeviceAdded { mut device } => configure_touchpad(&mut device),
             _ => {}
         }
     }
@@ -317,6 +318,21 @@ impl State {
             }
         }
         best.map_or(location, |(_, p)| p)
+    }
+}
+
+/// Natural scrolling and tap-to-click on touchpads, as cage set them up:
+/// libinput defaults to neither, and no settings daemon runs to change that.
+/// A touchpad is the device that can tap, so a mouse wheel keeps its direction.
+fn configure_touchpad(device: &mut smithay::reexports::input::Device) {
+    if device.config_tap_finger_count() == 0 {
+        return;
+    }
+    if device.config_tap_set_enabled(true).is_err() {
+        warn!("couldn't turn on tap-to-click for {}", device.name());
+    }
+    if device.config_scroll_has_natural_scroll() && device.config_scroll_set_natural_scroll_enabled(true).is_err() {
+        warn!("couldn't turn on natural scrolling for {}", device.name());
     }
 }
 
