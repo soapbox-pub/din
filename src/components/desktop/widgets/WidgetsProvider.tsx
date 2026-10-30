@@ -2,56 +2,42 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { WidgetsContext, type WidgetsContextValue } from '@/contexts/WidgetsContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
-import type { WorkArea } from '@/lib/monitors';
+import { areaGrid, cellsFree, clampCells, freeCells, placedCells, WIDGET_PITCH, type Cells } from '@/lib/widgetGrid';
 import { builtinWidget, WIDGET_SIZES, widgetIdentity, type PermissionDomain, type PlacedWidget, type WidgetSize, type WidgetSource } from '@/lib/widgets';
 import { storageArea, storageClear } from '@/lib/widgetStorage';
 
-/** The space kept between widgets and around the edges. */
-const GAP = 16;
-
-/** Where a new widget of this size fits: down the right side of the primary monitor, then the next column in. */
-function freeSpot(areas: WorkArea[], widgets: PlacedWidget[], size: WidgetSize): { monitor: string; x: number; y: number } {
-  const area = areas.find((a) => a.primary) ?? areas[0];
-  if (!area) return { monitor: '', x: GAP, y: GAP };
-  const { width, height } = WIDGET_SIZES[size];
-  // Those on a monitor that's gone show on the primary one.
-  const taken = widgets
-    .filter((w) => w.monitor === area.id || !areas.some((a) => a.id === w.monitor))
-    .map((w) => ({ x: w.x, y: w.y, ...WIDGET_SIZES[w.size] }));
-  const free = (x: number, y: number) =>
-    taken.every((t) => x + width + GAP <= t.x || t.x + t.width + GAP <= x || y + height + GAP <= t.y || t.y + t.height + GAP <= y);
-  for (let x = area.width - width - GAP * 2; x >= GAP; x -= GAP) {
-    for (let y = GAP * 2; y + height <= area.height - GAP; y += GAP) {
-      if (free(x, y)) return { monitor: area.id, x, y };
-    }
-  }
-  return { monitor: area.id, x: GAP * 2, y: GAP * 2 };
+/** A stored widget, or null. Those kept before the grid (`x`, `y` and a `size`) are put on it. */
+function parsePlaced(value: unknown): PlacedWidget | null {
+  const w = value as (PlacedWidget & { x?: unknown; y?: unknown; size?: unknown }) | null;
+  if (!w || typeof w.id !== 'string' || typeof w.monitor !== 'string' || (w.source?.type !== 'builtin' && w.source?.type !== 'napplet')) return null;
+  if ([w.col, w.row, w.cols, w.rows].every(Number.isInteger)) return w;
+  if (typeof w.x !== 'number' || typeof w.y !== 'number' || typeof w.size !== 'string' || !(w.size in WIDGET_SIZES)) return null;
+  const { cols, rows } = WIDGET_SIZES[w.size as WidgetSize];
+  const { x: _x, y: _y, size: _size, ...rest } = w;
+  return { ...rest, col: Math.round(w.x / WIDGET_PITCH), row: Math.round(w.y / WIDGET_PITCH), cols, rows };
 }
 
-function isPlaced(value: unknown): value is PlacedWidget {
-  const w = value as PlacedWidget | null;
-  return !!w && typeof w.id === 'string' && typeof w.monitor === 'string' && typeof w.x === 'number' &&
-    typeof w.y === 'number' && w.size in WIDGET_SIZES && (w.source?.type === 'builtin' || w.source?.type === 'napplet');
+function parseList(stored: unknown): PlacedWidget[] {
+  return Array.isArray(stored) ? stored.map(parsePlaced).filter((w): w is PlacedWidget => w !== null) : [];
 }
 
 /** The desktop's widgets, kept on this computer. */
 export function WidgetsProvider({ children }: { children: ReactNode }) {
   const areas = useWorkAreas();
   const [stored, setStored] = useLocalStorage<unknown[]>('din:widgets', []);
-  const widgets = useMemo(() => (Array.isArray(stored) ? stored.filter(isPlaced) : []), [stored]);
+  const widgets = useMemo(() => parseList(stored), [stored]);
   const [editing, setEditing] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
 
   const update = useCallback(
-    (change: (list: PlacedWidget[]) => PlacedWidget[]) =>
-      setStored((prev) => change(Array.isArray(prev) ? prev.filter(isPlaced) : [])),
+    (change: (list: PlacedWidget[]) => PlacedWidget[]) => setStored((prev) => change(parseList(prev))),
     [setStored],
   );
 
   const add = useCallback((source: WidgetSource, options: { size?: WidgetSize; denied?: PermissionDomain[] } = {}) => {
     const size = options.size ?? (source.type === 'builtin' ? (builtinWidget(source.id)?.size ?? 'small') : 'small');
     const denied = options.denied?.length ? { denied: options.denied } : {};
-    update((list) => [...list, { id: crypto.randomUUID(), source, size, ...denied, ...freeSpot(areas, list, size) }]);
+    update((list) => [...list, { id: crypto.randomUUID(), source, ...denied, ...freeCells(areas, list, WIDGET_SIZES[size]) }]);
   }, [areas, update]);
 
   const remove = useCallback((id: string) => {
@@ -60,21 +46,31 @@ export function WidgetsProvider({ children }: { children: ReactNode }) {
     update((list) => list.filter((w) => w.id !== id));
   }, [widgets, update]);
 
-  const move = useCallback((id: string, monitor: string, x: number, y: number) => {
-    update((list) => list.map((w) => (w.id === id ? { ...w, monitor, x, y } : w)));
+  const place = useCallback((id: string, monitor: string, cells: Cells) => {
+    update((list) => list.map((w) => (w.id === id ? { ...w, monitor, ...cells } : w)));
   }, [update]);
 
+  // A preset size: where it is if there's room, grown from its top-left corner, or else wherever there is.
   const resize = useCallback((id: string, size: WidgetSize) => {
-    update((list) => list.map((w) => (w.id === id ? { ...w, size } : w)));
-  }, [update]);
+    update((list) => list.map((w) => {
+      if (w.id !== id) return w;
+      const placed = placedCells(areas, w);
+      if (!placed) return w;
+      const { cols, rows } = WIDGET_SIZES[size];
+      const cells = clampCells(areaGrid(placed.area), { ...placed.cells, cols, rows });
+      return cellsFree(areas, list, placed.area.id, cells, id)
+        ? { ...w, monitor: placed.area.id, ...cells }
+        : { ...w, ...freeCells(areas, list, { cols, rows }, id) };
+    }));
+  }, [areas, update]);
 
   const setDenied = useCallback((id: string, denied: PermissionDomain[]) => {
     update((list) => list.map((w) => (w.id === id ? { ...w, denied } : w)));
   }, [update]);
 
   const value = useMemo<WidgetsContextValue>(
-    () => ({ widgets, add, remove, move, resize, setDenied, editing, setEditing, galleryOpen, setGalleryOpen }),
-    [widgets, add, remove, move, resize, setDenied, editing, galleryOpen],
+    () => ({ widgets, add, remove, place, resize, setDenied, editing, setEditing, galleryOpen, setGalleryOpen }),
+    [widgets, add, remove, place, resize, setDenied, editing, galleryOpen],
   );
   return <WidgetsContext.Provider value={value}>{children}</WidgetsContext.Provider>;
 }

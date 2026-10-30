@@ -23,6 +23,7 @@ import {
   missingDomains,
   nappletFilter,
   parseNappletManifest,
+  spanPixels,
   WIDGET_SIZES,
   WIDGETS_PARTITION,
   widgetUrl,
@@ -194,19 +195,19 @@ function BuiltinPane({ id, onPick, onAdd }: { id: string; onPick: (id: string) =
 /** A built-in widget, live, at a size: its own guest, answered like any other, but not to be touched. */
 function WidgetPreview({ id, size }: { id: string; size: WidgetSize }) {
   const widget = useMemo<PlacedWidget>(
-    () => ({ id: `preview:${id}`, source: { type: 'builtin', id }, size, monitor: '', x: 0, y: 0 }),
+    () => ({ id: `preview:${id}`, source: { type: 'builtin', id }, monitor: '', col: 0, row: 0, cols: WIDGET_SIZES[size].cols, rows: WIDGET_SIZES[size].rows }),
     [id, size],
   );
   const [webContentsId, setWebContentsId] = useState<number | null>(null);
   useNappletHost(webContentsId, widget, () => {});
-  const { width, height } = WIDGET_SIZES[size];
+  const { width, height } = spanPixels(WIDGET_SIZES[size]);
   return (
     <div className="pointer-events-none relative" style={{ width, height }}>
       {guestsAvailable() ? (
         <GuestSurface
           src={widgetUrl(widget.source)}
           partition={WIDGETS_PARTITION}
-          className="relative h-full w-full"
+          className="relative h-full w-full overflow-hidden rounded-3xl"
           onAttach={setWebContentsId}
         />
       ) : (

@@ -4,30 +4,63 @@ import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import { guestsAvailable } from '@/platform/guest';
 import { APP_BLOSSOM_SERVERS } from '@/lib/appBlossom';
-import { getWidgetsBridge, WIDGET_SIZES, WIDGETS_PARTITION, widgetTitle, widgetUrl, type PlacedWidget } from '@/lib/widgets';
+import { getWidgetsBridge, spanPixels, WIDGET_MIN_SPAN, WIDGETS_PARTITION, widgetTitle, widgetUrl, type PlacedWidget } from '@/lib/widgets';
 import { useWidgets } from '@/contexts/WidgetsContext';
 import { cn } from '@/lib/utils';
 import { useNappletHost } from './useNappletHost';
 import { WidgetMenuContent, type WidgetMenuActions } from './WidgetMenu';
 
-interface WidgetFrameProps {
-  widget: PlacedWidget;
-  /** Where it is in the workspace. */
+export interface WidgetRect {
   left: number;
   top: number;
-  /** Where it was dropped, in the workspace, after a drag in edit mode. */
-  onDrop: (widget: PlacedWidget, left: number, top: number) => void;
+  width: number;
+  height: number;
+}
+
+interface WidgetFrameProps {
+  widget: PlacedWidget;
+  /** Where it is in the workspace, on its cells. */
+  rect: WidgetRect;
+  /** Being dragged or resized in edit mode: where it is now, unsnapped. */
+  onArrange: (widget: PlacedWidget, rect: WidgetRect, resizing: boolean) => void;
+  /** Let go: where it was left, unsnapped, or null if it didn't move. */
+  onArrangeEnd: (widget: PlacedWidget, rect: WidgetRect | null, resizing: boolean) => void;
   /** Hand the layer this widget's guest and trigger, for right-clicks main forwards. */
   onGuest: (webContentsId: number, trigger: HTMLElement | null) => void;
   onAbout: (widget: PlacedWidget) => void;
   onRemove: (widget: PlacedWidget) => void;
 }
 
+/** Which edges a gesture moves: -1 the left or top, 1 the right or bottom; both 0 drags the whole widget. */
+type Edges = { h: -1 | 0 | 1; v: -1 | 0 | 1 };
+
+const HANDLES: { edges: Edges; label: string; className: string }[] = [
+  { edges: { h: 0, v: -1 }, label: 'top', className: 'left-1/2 top-0 cursor-ns-resize' },
+  { edges: { h: 1, v: 0 }, label: 'right', className: 'left-full top-1/2 cursor-ew-resize' },
+  { edges: { h: 0, v: 1 }, label: 'bottom', className: 'left-1/2 top-full cursor-ns-resize' },
+  { edges: { h: -1, v: 0 }, label: 'left', className: 'left-0 top-1/2 cursor-ew-resize' },
+];
+
+/** A gesture's rectangle: the edges it moves, by the pointer's travel, no smaller than the smallest widget. */
+function gestureRect(base: WidgetRect, edges: Edges, dx: number, dy: number): WidgetRect {
+  if (edges.h === 0 && edges.v === 0) return { ...base, left: base.left + dx, top: base.top + dy };
+  const min = spanPixels({ cols: WIDGET_MIN_SPAN, rows: WIDGET_MIN_SPAN });
+  const width = edges.h === 0 ? base.width : Math.max(min.width, base.width + edges.h * dx);
+  const height = edges.v === 0 ? base.height : Math.max(min.height, base.height + edges.v * dy);
+  return {
+    left: edges.h < 0 ? base.left + base.width - width : base.left,
+    top: edges.v < 0 ? base.top + base.height - height : base.top,
+    width,
+    height,
+  };
+}
+
 /**
  * One widget on the desktop: its guest and its menu. Din draws nothing
- * behind it: a widget is as transparent as its own page.
+ * behind it: a widget is as transparent as its own page, cut to rounded
+ * corners.
  */
-export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRemove }: WidgetFrameProps) {
+export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, onAbout, onRemove }: WidgetFrameProps) {
   const { editing, setEditing, resize } = useWidgets();
   const surface = useRef<GuestSurfaceHandle>(null);
   const trigger = useRef<HTMLDivElement>(null);
@@ -37,9 +70,8 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
   const [generation, setGeneration] = useState(0);
   // A widget from Nostr loads once main has its bytes, verified.
   const [fetched, setFetched] = useState(widget.source.type === 'builtin');
-  const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
+  const [gesture, setGesture] = useState<{ rect: WidgetRect; resizing: boolean } | null>(null);
   const title = widgetTitle(widget.source);
-  const { width, height } = WIDGET_SIZES[widget.size];
 
   useNappletHost(webContentsId, widget, setFailed);
 
@@ -82,24 +114,29 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
     remove: () => onRemove(widget),
   };
 
-  // Edit mode: dragged by anywhere, snapping to the 8px grid on the way down.
-  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+  // Edit mode: dragged by anywhere, or resized by a handle on an edge; the
+  // layer snaps it to the grid when it's let go.
+  const startGesture = (event: ReactPointerEvent<HTMLElement>, edges: Edges) => {
     if (event.button !== 0) return;
     event.preventDefault();
+    event.stopPropagation();
     const target = event.currentTarget;
     target.setPointerCapture(event.pointerId);
     const start = { x: event.clientX, y: event.clientY };
-    let last = { dx: 0, dy: 0 };
+    const base = rect;
+    const resizing = edges.h !== 0 || edges.v !== 0;
+    let last: WidgetRect | null = null;
     const move = (e: PointerEvent) => {
-      last = { dx: e.clientX - start.x, dy: e.clientY - start.y };
-      setDrag(last);
+      last = gestureRect(base, edges, e.clientX - start.x, e.clientY - start.y);
+      setGesture({ rect: last, resizing });
+      onArrange(widget, last, resizing);
     };
     const end = () => {
       target.removeEventListener('pointermove', move);
       target.removeEventListener('pointerup', end);
       target.removeEventListener('pointercancel', end);
-      setDrag(null);
-      if (last.dx !== 0 || last.dy !== 0) onDrop(widget, left + last.dx, top + last.dy);
+      setGesture(null);
+      onArrangeEnd(widget, last, resizing);
     };
     target.addEventListener('pointermove', move);
     target.addEventListener('pointerup', end);
@@ -107,6 +144,7 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
   };
 
   const ready = fetched && !failed && !gone && guestsAvailable();
+  const shown = gesture?.rect ?? rect;
 
   return (
     <ContextMenu>
@@ -117,14 +155,11 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
           aria-label={title}
           className={cn(
             'pointer-events-auto absolute overflow-visible rounded-3xl',
-            drag ? 'z-10 cursor-grabbing' : 'motion-safe:transition-[left,top] motion-safe:duration-150',
+            gesture
+              ? cn('z-10', !gesture.resizing && 'cursor-grabbing')
+              : 'motion-safe:transition-[left,top,width,height] motion-safe:duration-150',
           )}
-          style={{
-            left: left + (drag?.dx ?? 0),
-            top: top + (drag?.dy ?? 0),
-            width,
-            height,
-          }}
+          style={shown}
         >
           <div
             className={cn(
@@ -138,7 +173,7 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
                 ref={surface}
                 src={widgetUrl(widget.source)}
                 partition={WIDGETS_PARTITION}
-                className="relative h-full w-full"
+                className="relative h-full w-full overflow-hidden rounded-3xl"
                 onAttach={setWebContentsId}
                 onGone={() => setGone(true)}
               />
@@ -148,11 +183,22 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
             {editing && (
               <div
                 aria-hidden
-                className={cn('absolute inset-0', drag ? 'cursor-grabbing' : 'cursor-grab')}
-                onPointerDown={startDrag}
+                className={cn('absolute inset-0', gesture && !gesture.resizing ? 'cursor-grabbing' : 'cursor-grab')}
+                onPointerDown={(e) => startGesture(e, { h: 0, v: 0 })}
               />
             )}
           </div>
+          {editing && HANDLES.map(({ edges, label, className }) => (
+            <div
+              key={label}
+              aria-hidden
+              title={`Resize from the ${label}`}
+              className={cn('absolute grid size-6 -translate-1/2 touch-none place-items-center', className)}
+              onPointerDown={(e) => startGesture(e, edges)}
+            >
+              <span className="size-3 rounded-full border-2 border-white bg-primary shadow-md" />
+            </div>
+          ))}
           {editing && (
             <button
               type="button"

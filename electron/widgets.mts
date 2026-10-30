@@ -64,7 +64,8 @@ export const NAPPLET_CSP =
 const HOST_PAGE =
   '<!doctype html><html><head><meta charset="utf-8"><style>' +
   'html,body{margin:0;height:100%;overflow:hidden;background:transparent}' +
-  'iframe{display:block;border:0;width:100%;height:100%;background:transparent;color-scheme:normal}' +
+  // The desktop cuts the webview to the same corners (rounded-3xl in WidgetFrame).
+  'iframe{display:block;border:0;width:100%;height:100%;border-radius:24px;background:transparent;color-scheme:normal}' +
   '</style></head><body></body></html>';
 
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';

@@ -23,6 +23,7 @@ export interface WidgetMenuActions {
 /** A widget's right-click menu. */
 export function WidgetMenuContent({ widget, actions }: { widget: PlacedWidget; actions: WidgetMenuActions }) {
   const sizes = widgetSizes(widget.source);
+  const current = sizes.find((size) => WIDGET_SIZES[size].cols === widget.cols && WIDGET_SIZES[size].rows === widget.rows) ?? '';
   return (
     <ContextMenuContent className="w-56">
       <ContextMenuItem onSelect={() => actions.setEditing(!actions.editing)}>
@@ -34,7 +35,7 @@ export function WidgetMenuContent({ widget, actions }: { widget: PlacedWidget; a
             <Maximize2 aria-hidden /> Size
           </ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-40">
-            <ContextMenuRadioGroup value={widget.size} onValueChange={(size) => actions.resize(size as WidgetSize)}>
+            <ContextMenuRadioGroup value={current} onValueChange={(size) => actions.resize(size as WidgetSize)}>
               {sizes.map((size) => (
                 <ContextMenuRadioItem key={size} value={size}>
                   {WIDGET_SIZES[size].label}

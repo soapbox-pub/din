@@ -28,14 +28,26 @@ export function isPermissionDomain(domain: string): domain is PermissionDomain {
   return (PERMISSION_DOMAINS as readonly string[]).includes(domain);
 }
 
+/** Widgets sit on a grid of cells this big, this far apart (src/lib/widgetGrid.ts). */
+export const WIDGET_CELL = 76;
+export const WIDGET_GAP = 16;
+/** The smallest a widget can be resized to, in cells each way. */
+export const WIDGET_MIN_SPAN = 2;
+
+/** The sizes a widget is offered in, to start; from there it can be resized to any number of cells. */
 export type WidgetSize = 'small' | 'medium' | 'large';
 
-/** Each size's box on the desktop, in CSS pixels. */
-export const WIDGET_SIZES: Record<WidgetSize, { width: number; height: number; label: string }> = {
-  small: { width: 168, height: 168, label: 'Small' },
-  medium: { width: 352, height: 168, label: 'Medium' },
-  large: { width: 352, height: 352, label: 'Large' },
+/** Each preset size, in cells. */
+export const WIDGET_SIZES: Record<WidgetSize, { cols: number; rows: number; label: string }> = {
+  small: { cols: 2, rows: 2, label: 'Small' },
+  medium: { cols: 4, rows: 2, label: 'Medium' },
+  large: { cols: 4, rows: 4, label: 'Large' },
 };
+
+/** A span of cells, in CSS pixels. */
+export function spanPixels({ cols, rows }: { cols: number; rows: number }): { width: number; height: number } {
+  return { width: cols * (WIDGET_CELL + WIDGET_GAP) - WIDGET_GAP, height: rows * (WIDGET_CELL + WIDGET_GAP) - WIDGET_GAP };
+}
 
 /** A widget from Nostr: its manifest, as verified when it was added. */
 export interface NappletSource {
@@ -67,11 +79,12 @@ export interface PlacedWidget {
   /** This instance (one widget may be placed more than once). */
   id: string;
   source: WidgetSource;
-  size: WidgetSize;
-  /** The work area it's on, and where in it. */
+  /** The work area it's on, and the cells it covers on that area's grid. */
   monitor: string;
-  x: number;
-  y: number;
+  col: number;
+  row: number;
+  cols: number;
+  rows: number;
   /** Permissions the user turned off for this copy. */
   denied?: PermissionDomain[];
 }

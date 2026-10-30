@@ -15,9 +15,21 @@ the desktop only through the capabilities ("NAP domains",
 "apps".
 
 Right-click the desktop for **Add Widgets…** and **Edit Widgets** (drag to
-arrange, × to remove). Right-click a widget for Edit Widgets, Size (Small,
-Medium, Large), Reload, About This Widget… (who made it, and its
-permissions, each with a switch) and Remove Widget.
+arrange, the handles on the edges to resize, × to remove). Right-click a
+widget for Edit Widgets, Size (Small, Medium, Large), Reload, About This
+Widget… (who made it, and its permissions, each with a switch) and Remove
+Widget.
+
+## The grid
+
+Widgets sit on a grid, like a phone's home screen (`src/lib/widgetGrid.ts`):
+each work area has its own, of 76px cells 16px apart, as many as fit,
+centered. A widget covers a block of cells, at least 2×2, and never overlaps
+another. Small is 2×2, Medium 4×2 and Large 4×4, but those are only where it
+starts: in edit mode a widget resizes to any number of cells from any edge,
+and a drag or resize shows where it will land (red where it can't), snaps
+there on release, or goes back if the cells are taken. A widget whose
+monitor is gone shows on the primary one, fitted to its grid.
 
 The gallery lists the built-in widgets down the side; each shows live, in
 every size it comes in, on the user's own wallpaper, and clicking a size
@@ -32,7 +44,11 @@ turned back on in About This Widget; the widget reloads with the new set.
 
 Din draws nothing behind a widget: no card, no border, no blur. The
 webview, its host page and the srcdoc iframe are all transparent, so a
-widget is exactly as transparent as its own page. One catch, from
+widget is exactly as transparent as its own page. Din does cut it to
+rounded corners (24px, both the webview and the iframe), and gives its
+frame overlay scrollbars: the native ones are hidden
+(`:where(*){scrollbar-width:none}`, which a widget's own styles override)
+and a thin thumb is drawn over whatever scrolls, fading out once it stops. One catch, from
 Chromium: a frame whose used `color-scheme` differs from its parent's gets
 an opaque backdrop, so a widget that wants to stay see-through should leave
 `color-scheme` unset (or `normal`) rather than setting `dark`.
@@ -97,9 +113,10 @@ envelope from that iframe (`event.source`) goes to the desktop as
 
 `icon` names one of the gallery's lucide icons (`WIDGET_ICONS` in
 `src/components/desktop/widgets/widgetMeta.ts`), `domains` what the widget
-may use (reviewed like an app's permissions), `size` where it starts. A
-widget lays itself out for whatever box it's in (`followShape`: `small`,
-`wide` or `large`).
+may use (reviewed like an app's permissions), `size` where it starts and
+`sizes` the presets the gallery and the Size menu offer. A widget can be
+resized to any block of cells, so it lays itself out for whatever box it's
+in (`followShape`: `small`, `wide` or `large`).
 
 | Widget | Looks | Uses |
 |---|---|---|
@@ -171,6 +188,7 @@ never from the widget.
 |---|---|
 | `electron/widgets.mts` | The schemes, the session and its policy, artifacts and their cache, ports |
 | `electron/widget-preload.cjs` | The host page: the srcdoc frame and the relay |
+| `src/lib/widgetGrid.ts` | The grid: cells, fitting, free space |
 | `src/lib/widgets.ts` | Sizes, built-in manifests, manifest parsing, `dinos.widgets`, ports |
 | `src/lib/widgetStorage.ts` | NAP-STORAGE's areas |
 | `src/contexts/WidgetsContext.ts`, `src/components/desktop/widgets/` | The layout (`din:widgets`), the layer, each frame and its NAP host, the menu, the gallery, permissions and icons |

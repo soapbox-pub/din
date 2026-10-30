@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import type { Cells } from '@/lib/widgetGrid';
 import type { PermissionDomain, PlacedWidget, WidgetSize, WidgetSource } from '@/lib/widgets';
 
 export interface WidgetsContextValue {
@@ -8,7 +9,9 @@ export interface WidgetsContextValue {
   add(source: WidgetSource, options?: { size?: WidgetSize; denied?: PermissionDomain[] }): void;
   /** Take one off, with what that copy kept. */
   remove(id: string): void;
-  move(id: string, monitor: string, x: number, y: number): void;
+  /** Put one on these cells of a work area's grid (moved, resized, or both). */
+  place(id: string, monitor: string, cells: Cells): void;
+  /** Make one a preset size: in place if there's room, or wherever there is. */
   resize(id: string, size: WidgetSize): void;
   /** Turn a copy's permissions off (or back on); it reloads with the new set. */
   setDenied(id: string, denied: PermissionDomain[]): void;

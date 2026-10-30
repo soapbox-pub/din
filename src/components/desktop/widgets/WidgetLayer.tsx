@@ -15,30 +15,31 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useWidgets } from '@/contexts/WidgetsContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useAuthor } from '@/hooks/useAuthor';
-import { contains } from '@/lib/monitors';
+import { areaAt } from '@/lib/monitors';
+import { cn } from '@/lib/utils';
+import { areaGrid, cellsFree, cellsRect, clampCells, nearestCells, placedCells, type Cells } from '@/lib/widgetGrid';
 import {
   builtinWidget,
   declaredDomains,
   getWidgetsBridge,
   grantedDomains,
   isPermissionDomain,
-  WIDGET_SIZES,
   widgetTitle,
   type PlacedWidget,
 } from '@/lib/widgets';
 import { BuiltinIcon, NappletIcon, PermissionRow } from './permissions';
-import { WidgetFrame } from './WidgetFrame';
+import { WidgetFrame, type WidgetRect } from './WidgetFrame';
 import { WidgetGallery } from './WidgetGallery';
 
-/** The grid widgets snap to. */
-const GRID = 8;
+/** The Done bar's distance from the top of the screen. */
+const BAR_TOP = 16;
 
 /**
  * The desktop's widgets, over the wallpaper and under every window, each on
  * the monitor it was put on.
  */
 export function WidgetLayer() {
-  const { widgets, editing, setEditing, move, remove } = useWidgets();
+  const { widgets, editing, setEditing, place, remove } = useWidgets();
   const areas = useWorkAreas();
   const [aboutId, setAboutId] = useState<string | null>(null);
   const about = widgets.find((w) => w.id === aboutId) ?? null;
@@ -76,24 +77,33 @@ export function WidgetLayer() {
   }, [editing, setEditing]);
 
   const primary = areas.find((a) => a.primary) ?? areas[0];
-  const place = (w: PlacedWidget) => {
-    const area = areas.find((a) => a.id === w.monitor) ?? primary;
-    if (!area) return { left: w.x, top: w.y };
-    const { width, height } = WIDGET_SIZES[w.size];
-    return {
-      left: area.x + Math.max(0, Math.min(w.x, area.width - width)),
-      top: area.y + Math.max(0, Math.min(w.y, area.height - height)),
-    };
-  };
 
-  // Dropped: onto whichever monitor holds its middle, on the grid, inside it.
-  const onDrop = (w: PlacedWidget, left: number, top: number) => {
-    const { width, height } = WIDGET_SIZES[w.size];
-    const area = areas.find((a) => contains(a, left + width / 2, top + height / 2)) ?? areas.find((a) => a.id === w.monitor) ?? primary;
-    if (!area) return;
-    const snap = (v: number, max: number) => Math.max(0, Math.min(Math.round(v / GRID) * GRID, max));
-    move(w.id, area.id, snap(left - area.x, area.width - width), snap(top - area.y, area.height - height));
+  // Where a widget being arranged would land: on whichever monitor holds its
+  // middle when dragged (its own when resized), on the nearest cells there.
+  const [target, setTarget] = useState<{ id: string; monitor: string; cells: Cells; free: boolean } | null>(null);
+  const targetFor = (w: PlacedWidget, rect: WidgetRect, resizing: boolean) => {
+    const placed = placedCells(areas, w);
+    if (!placed) return null;
+    const area = (resizing ? null : areaAt(areas, rect.left + rect.width / 2, rect.top + rect.height / 2)) ?? placed.area;
+    const grid = areaGrid(area);
+    const cells = clampCells(grid, nearestCells(grid, rect));
+    return { id: w.id, monitor: area.id, cells, free: cellsFree(areas, widgets, area.id, cells, w.id) };
   };
+  const onArrange = (w: PlacedWidget, rect: WidgetRect, resizing: boolean) => {
+    const next = targetFor(w, rect, resizing);
+    setTarget((prev) =>
+      next && prev && prev.id === next.id && prev.monitor === next.monitor && prev.free === next.free &&
+      prev.cells.col === next.cells.col && prev.cells.row === next.cells.row && prev.cells.cols === next.cells.cols && prev.cells.rows === next.cells.rows
+        ? prev
+        : next);
+  };
+  // Let go: there, if those cells are free; otherwise back where it was.
+  const onArrangeEnd = (w: PlacedWidget, rect: WidgetRect | null, resizing: boolean) => {
+    setTarget(null);
+    const next = rect && targetFor(w, rect, resizing);
+    if (next?.free) place(w.id, next.monitor, next.cells);
+  };
+  const targetArea = target && areas.find((a) => a.id === target.monitor);
 
   // Removing a widget that keeps things (a note's text) asks first.
   const askRemove = (w: PlacedWidget) => {
@@ -103,20 +113,35 @@ export function WidgetLayer() {
 
   return (
     <div className="pointer-events-none absolute inset-0" aria-label="Widgets">
-      {widgets.map((w) => (
+      {targetArea && target && (
+        <div
+          aria-hidden
+          className={cn(
+            'absolute rounded-3xl border-2 motion-safe:transition-[left,top,width,height] motion-safe:duration-100',
+            target.free ? 'border-white/70 bg-white/15' : 'border-red-400/80 bg-red-500/15',
+          )}
+          style={cellsRect(areaGrid(targetArea), target.cells)}
+        />
+      )}
+      {widgets.map((w) => {
+        const placed = placedCells(areas, w);
+        if (!placed) return null;
+        return (
         <WidgetFrame
           key={w.id}
           widget={w}
-          {...place(w)}
-          onDrop={onDrop}
+          rect={cellsRect(areaGrid(placed.area), placed.cells)}
+          onArrange={onArrange}
+          onArrangeEnd={onArrangeEnd}
           onGuest={onGuest}
           onAbout={(widget) => setAboutId(widget.id)}
           onRemove={askRemove}
         />
-      ))}
+        );
+      })}
       {editing && primary && (
-        <div className="pointer-events-auto absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-foreground/10 bg-background/80 p-1 pl-4 shadow-lg backdrop-blur-xl" style={{ top: primary.y + GRID * 2 }}>
-          <span className="text-sm text-muted-foreground">Drag widgets to arrange them</span>
+        <div className="pointer-events-auto absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-foreground/10 bg-background/80 p-1 pl-4 shadow-lg backdrop-blur-xl" style={{ top: primary.y + BAR_TOP }}>
+          <span className="text-sm text-muted-foreground">Drag widgets to arrange them, or their edges to resize them</span>
           <Button size="sm" className="rounded-full" onClick={() => setEditing(false)}>
             Done
           </Button>
