@@ -440,6 +440,9 @@ let
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
+    # Screen recording (electron/screen-recorder.mts), through din-shell's
+    # screencopy, encoded with VA-API.
+    export DIN_WF_RECORDER=${pkgs.wf-recorder}/bin/wf-recorder
     export DIN_WHISPER_SERVER=${whisper}/bin/whisper-server
     export DIN_WHISPER_MODEL=${whisper-model}
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}

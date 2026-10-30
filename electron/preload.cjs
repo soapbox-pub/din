@@ -85,6 +85,8 @@
 //     extension installs (see PromptHost)
 //   - window.dinos.screenShare: pages asking to share the screen, and the shares
 //     running (see ScreenShareHost.tsx / electron/screen-share.mts)
+//   - window.dinos.screenRecorder: recording the screen to a video (see
+//     src/lib/screenRecorder.ts / electron/screen-recorder.mts)
 //   - window.dinos.media: what web pages and native apps are playing, and their
 //     play/pause/next/previous (see src/lib/nowPlaying.ts / electron/media.mts)
 //
@@ -3273,6 +3275,45 @@ expose('screenShare', {
    * @param {string} id
    */
   stop: (id) => ipcRenderer.invoke('screen-share:stop', id),
+});
+
+// Screen recording (window.dinos.screenRecorder), backed by
+// electron/screen-recorder.mts: one recording at a time, kept by main, so the
+// Screenshot app, the menu bar and `din screenshot record` all see the same one.
+expose('screenRecorder', {
+  /** Whether recording is available, and the recording running. */
+  status: () => ipcRenderer.invoke('screen-recorder:status'),
+
+  /**
+   * Start recording.
+   * @param {{ region?: { x: number, y: number, width: number, height: number }, audio?: string, path?: string }} request
+   */
+  start: (request) => ipcRenderer.invoke('screen-recorder:start', request),
+
+  /** Stop recording; resolves with the saved file, or null when none was running. */
+  stop: () => ipcRenderer.invoke('screen-recorder:stop'),
+
+  /**
+   * Subscribe to the recorder's status. Returns an unsubscribe fn.
+   * @param {(status: unknown) => void} callback
+   */
+  onState: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, status: unknown) => void} */
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('screen-recorder:state', listener);
+    return () => ipcRenderer.removeListener('screen-recorder:state', listener);
+  },
+
+  /**
+   * Subscribe to recordings ending, asked to or not. Returns an unsubscribe fn.
+   * @param {(finished: unknown) => void} callback
+   */
+  onFinished: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, finished: unknown) => void} */
+    const listener = (_event, finished) => callback(finished);
+    ipcRenderer.on('screen-recorder:finished', listener);
+    return () => ipcRenderer.removeListener('screen-recorder:finished', listener);
+  },
 });
 
 // Media playing in web pages and native apps (window.dinos.media), backed by

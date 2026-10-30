@@ -270,6 +270,7 @@ export const APPS: readonly AppDefinition[] = [
     id: 'screenshot',
     name: 'Screenshot',
     icon: '/icons/apps/screenshot.png',
+    keywords: ['screen recorder', 'screen recording', 'record screen', 'screencast', 'video', 'capture'],
     component: Screenshot,
     defaultSize: { width: 440, height: 400 },
     floating: true,

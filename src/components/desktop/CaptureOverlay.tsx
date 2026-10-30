@@ -16,7 +16,7 @@ const MIN_DRAG_PX = 4;
  */
 export type Session =
   | { phase: 'select'; frozen: Screenshot }
-  | { phase: 'countdown'; left: number };
+  | { phase: 'countdown'; left: number; recording?: boolean };
 
 /** The drag rectangle between two viewport points, clamped to the viewport. */
 function rectFrom(a: { x: number; y: number }, b: { x: number; y: number }): ViewportRect {
@@ -59,7 +59,7 @@ export function CaptureOverlay({
           style={hintStyle}
           className="absolute -translate-x-1/2 rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur"
         >
-          Capturing in <span className="font-semibold tabular-nums">{session.left}</span>s
+          {session.recording ? 'Recording' : 'Capturing'} in <span className="font-semibold tabular-nums">{session.left}</span>s
           <span className="text-muted-foreground"> &middot; Esc to cancel</span>
         </div>
       </ScreenLayer>,

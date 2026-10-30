@@ -7,6 +7,7 @@ import { AssistantHost } from './AssistantHost';
 import { DesktopAssistantHost } from './assistant/DesktopAssistantHost';
 import { SecurityOptions } from './SecurityOptions';
 import { ScreenshotHost } from './ScreenshotHost';
+import { ScreenRecordingHost } from './ScreenRecordingHost';
 import { MenuBar } from './MenuBar';
 import { VolumeOsd } from './VolumeOsd';
 import { WorkspaceOsd } from './WorkspacesIndicator';
@@ -216,6 +217,7 @@ function DesktopSession() {
                   <AssistantHost />
                   <SecurityOptions />
                   <ScreenshotHost />
+                  <ScreenRecordingHost />
                   <SystemEventsHost />
                   <NativeLinksHost />
                   <LaunchHost />

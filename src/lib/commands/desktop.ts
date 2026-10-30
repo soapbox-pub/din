@@ -5,6 +5,9 @@ import {
   activateNotification, clearNotifications, closeNotification, getNotificationState, notify,
 } from '@/lib/notificationCenter';
 import { getScreenshotBridge, saveScreenshot, dataUrlToBytes } from '@/lib/screenshot';
+import {
+  getScreenRecorderBridge, startRecording, stopRecording, type RecordingAudio, type RecordingRequest,
+} from '@/lib/screenRecorder';
 import { builtinWidget, builtinWidgets, widgetTitle, WIDGET_SIZES, type WidgetSize } from '@/lib/widgets';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
@@ -274,7 +277,7 @@ export const notificationsArea: Area = {
 
 export const screenshotArea: Area = {
   name: 'screenshot',
-  summary: 'Take a screenshot of the desktop',
+  summary: 'Take a screenshot of the desktop, or record it',
   commands: [
     bare(command('screenshot', 'take', 'Save the desktop as a PNG (default: in ~/Pictures/Screenshots)', [
       { name: 'file', type: 'path', positional: true, optional: true, help: 'Where to save it' },
@@ -286,6 +289,34 @@ export const screenshotArea: Area = {
       const path = file ?? await call(saveScreenshot(fs, shot));
       return { data: { path, width: shot.width, height: shot.height }, text: path };
     })),
+    command('screenshot', 'record', 'Start recording the screen to an MP4 (default: in ~/Videos/Screen Recordings); `din screenshot stop` ends it', [
+      { name: 'file', type: 'path', positional: true, optional: true, help: 'Where to save it' },
+      { name: 'sound', type: 'string', optional: true, choices: ['none', 'system', 'microphone'], help: 'The computer’s sound or the microphone (default: none)' },
+      { name: 'area', type: 'string', optional: true, help: 'Just this part of the screen, as X,Y,WIDTHxHEIGHT (default: the main display)' },
+    ], async (args) => {
+      const area = args.optString('area');
+      let region: RecordingRequest['region'];
+      if (area !== undefined) {
+        const m = area.match(/^\s*(\d+)\s*,\s*(\d+)\s*[, ]\s*(\d+)\s*x\s*(\d+)\s*$/i);
+        if (!m) throw new CommandError('Give the area as X,Y,WIDTHxHEIGHT, e.g. 0,0,1280x720', 'usage');
+        region = { x: Number(m[1]), y: Number(m[2]), width: Number(m[3]), height: Number(m[4]) };
+      }
+      need(getScreenRecorderBridge(), 'Screen recording');
+      const status = await call(startRecording({
+        path: args.optString('file'),
+        audio: args.optString('sound') as RecordingAudio | undefined,
+        region,
+      }));
+      const path = status.recording?.path ?? '';
+      return { data: { path }, text: `Recording to ${path}` };
+    }),
+    command('screenshot', 'stop', 'Stop recording the screen and save the video', [], async () => {
+      need(getScreenRecorderBridge(), 'Screen recording');
+      const finished = await call(stopRecording());
+      if (!finished) throw new CommandError('The screen isn’t being recorded');
+      if (!finished.path) throw new CommandError(finished.error ?? 'Nothing was recorded');
+      return { data: { path: finished.path, seconds: Math.round(finished.durationMs / 1000) }, text: finished.path };
+    }),
   ],
 };
 

@@ -41,7 +41,7 @@ a missing or bad argument).
 | `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace; show a workspace |
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
 | `notifications` | List, send, click, dismiss, clear |
-| `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save the screen; lock it |
+| `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save or record the screen; lock it |
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
 | `sound`, `display`, `brightness`, `keyboard`, `printers`, `power`, `datetime` | Settings' Devices and System sections |
 | `nostr` | Who's signed in, and the relay and Blossom server lists (published, as Settings does) |
