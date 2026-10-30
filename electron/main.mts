@@ -2224,6 +2224,15 @@ function parseAudioStatus(out: string): {
         isDefault,
       };
       (section === 'Sinks' ? sinks : sources).push(device);
+    } else if (section === 'Filters') {
+      // A filter that stands in for a device: a Bluetooth headset's mic is
+      // one ("bluez_input.<address>  [Audio/Source]"), kept even while the
+      // headset is on its music profile and switching it over when used.
+      // Listed by node name, with no volume; audioDevices fills those in.
+      const filter = raw.match(/^(.+?)\s+\[Audio\/(Sink|Source)\]$/);
+      if (!filter) continue;
+      const device: AudioDevice = { id, name: filter[1], volume: null, muted: false, isDefault };
+      (filter[2] === 'Sink' ? sinks : sources).push(device);
     } else if (section === 'Streams') {
       // Port rows ("output_FL > ...:playback_FL") aren't controllable streams.
       if (/\s>\s/.test(raw)) continue;
@@ -2267,6 +2276,7 @@ interface PactlCard {
 /** A sink or source as `pactl -f json list sinks|sources` reports it. */
 interface PactlNode {
   name: string;
+  description?: string;
   properties: Record<string, string>;
   ports: { name: string; availability?: string }[];
   active_port: string | null;
@@ -2285,6 +2295,26 @@ function unpluggedNodeIds(nodes: PactlNode[]): Set<number> {
     if (port?.availability === 'not available' && Number.isInteger(id)) ids.add(id);
   }
   return ids;
+}
+
+/**
+ * Give devices `wpctl status` listed as filters (no volume tag) the name the
+ * user knows them by ("Soundcore Life Q30", not its node name) and their
+ * volume and mute, which wpctl prints only when asked for that node.
+ */
+async function describeFilterDevices(devices: AudioDevice[], nodes: PactlNode[]): Promise<void> {
+  await Promise.all(
+    devices
+      .filter((device) => device.volume === null)
+      .map(async (device) => {
+        const node = nodes.find((n) => Number(n.properties?.['object.id']) === device.id);
+        if (node?.description) device.name = node.description;
+        const out = await wpctl(['get-volume', String(device.id)]).catch(() => '');
+        const match = out.match(/Volume:\s*([\d.]+)/);
+        if (match) device.volume = Math.round(Number.parseFloat(match[1]) * 100);
+        device.muted = /\[MUTED\]/.test(out);
+      }),
+  );
 }
 
 /** Parse a `pactl -f json list ...` array; [] when pactl can't provide one. */
@@ -2348,6 +2378,7 @@ async function audioDevices(): Promise<AudioDevices> {
       pactlList<PactlNode>('sources'),
     ]);
     const { sinks, sources } = parseAudioStatus(status);
+    await describeFilterDevices([...sinks, ...sources], [...pactlSinks, ...pactlSources]);
     const inactive = inactivePorts(cards);
     const unplugged = unpluggedNodeIds([...pactlSinks, ...pactlSources]);
     // The default stays listed even unplugged, so the panel shows what's in use.

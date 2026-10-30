@@ -575,7 +575,21 @@ async function pair(path: string): Promise<void> {
 }
 
 async function connect(path: string): Promise<void> {
-  await withBusy(path, 'connecting', () => call('Connect', path, DEVICE, '', [], CONNECT_TIMEOUT_MS));
+  try {
+    await withBusy(path, 'connecting', () => call('Connect', path, DEVICE, '', [], CONNECT_TIMEOUT_MS));
+  } catch (error) {
+    // The device no longer has this computer's key (it was reset, or paired
+    // with too many others and dropped it), so the pairing here is dead and
+    // no retry will work. Forget it and look for the device to pair afresh.
+    if (!(error instanceof Error && error.cause instanceof DBusError && /key-missing/.test(error.cause.message))) throw error;
+    const name = deviceProps(path)?.get('Alias') ?? deviceProps(path)?.get('Name');
+    await forget(path).catch(() => {});
+    await discover(true).catch(() => {});
+    throw new Error(
+      `${typeof name === 'string' ? name : 'This device'} has forgotten this computer. Put it in pairing mode to pair it again.`,
+      { cause: error },
+    );
+  }
 }
 
 async function disconnect(path: string): Promise<void> {
