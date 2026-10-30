@@ -3,12 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
-import { AlertTriangle, Plus, Search, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, FolderOpen, Plus, Search, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useWidgets } from '@/contexts/WidgetsContext';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useDesktopTheme } from '@/hooks/useDesktopTheme';
@@ -19,14 +20,17 @@ import {
   builtinWidget,
   builtinWidgets,
   declaredDomains,
+  getWidgetsBridge,
   isPermissionDomain,
   missingDomains,
   nappletFilter,
+  parseFileWidget,
   parseNappletManifest,
   spanPixels,
   WIDGET_SIZES,
   WIDGETS_PARTITION,
   widgetUrl,
+  type FileSource,
   type NappletSource,
   type PermissionDomain,
   type PlacedWidget,
@@ -51,21 +55,58 @@ function napplets(events: NostrEvent[]): NappletSource[] {
   return [...newest.values()].sort((a, b) => b.at - a.at).map((n) => n.source);
 }
 
-type Pane = { kind: 'builtin'; id: string } | { kind: 'nostr' } | { kind: 'confirm'; source: NappletSource };
+type Pane =
+  | { kind: 'builtin'; id: string }
+  | { kind: 'nostr' }
+  | { kind: 'folder' }
+  | { kind: 'confirm'; source: NappletSource | FileSource };
 
-/** "Add Widgets…": the built-in widgets, live on the user's wallpaper, and widgets from Nostr. */
+/** The side's buttons below the built-in widgets. */
+const OTHER_PANES = [
+  { kind: 'nostr', label: 'From Nostr', icon: Search, tile: 'from-violet-500/25 to-violet-500/5 text-violet-600 dark:text-violet-300' },
+  { kind: 'folder', label: 'From a Folder', icon: FolderOpen, tile: 'from-amber-500/25 to-amber-500/5 text-amber-600 dark:text-amber-300' },
+] as const;
+
+/** Which of those a pane belongs to. */
+function otherPane(pane: Pane): 'nostr' | 'folder' | null {
+  if (pane.kind === 'confirm') return pane.source.type === 'file' ? 'folder' : 'nostr';
+  return pane.kind === 'builtin' ? null : pane.kind;
+}
+
+/** "Add Widgets…": the built-in widgets, live on the user's wallpaper, widgets from Nostr, and from folders. */
 export function WidgetGallery() {
   const { galleryOpen, setGalleryOpen, add } = useWidgets();
   const first = [...builtinWidgets().keys()][0] ?? '';
   const [pane, setPane] = useState<Pane>({ kind: 'builtin', id: first });
+  const { pickFiles } = useFilePicker();
+  // Out of the way while the file picker is up: it's a window of the desktop's, under this modal.
+  const [picking, setPicking] = useState(false);
+  const [folder, setFolder] = useState<FolderState>({ state: 'idle' });
+
+  const chooseFolder = async () => {
+    const bridge = getWidgetsBridge();
+    if (!bridge) return;
+    setPicking(true);
+    const picked = await pickFiles({ title: 'Choose a Widget Folder', confirmLabel: 'Choose', directory: true }).finally(() => setPicking(false));
+    const path = picked?.paths[0];
+    if (!path) return;
+    setFolder({ state: 'opening' });
+    try {
+      setPane({ kind: 'confirm', source: parseFileWidget(await bridge.folder(path)) });
+      setFolder({ state: 'idle' });
+    } catch (error) {
+      setFolder({ state: 'error', message: error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error) });
+    }
+  };
 
   const close = () => {
     setGalleryOpen(false);
     setPane({ kind: 'builtin', id: first });
+    setFolder({ state: 'idle' });
   };
 
   return (
-    <Dialog open={galleryOpen} onOpenChange={(open) => (open ? setGalleryOpen(true) : close())}>
+    <Dialog open={galleryOpen && !picking} onOpenChange={(open) => (open ? setGalleryOpen(true) : close())}>
       <DialogContent className="grid h-[min(760px,90vh)] grid-cols-1 gap-0 overflow-hidden p-0 sm:max-w-5xl md:grid-cols-[232px_1fr]">
         <nav aria-label="Widgets" className="hidden flex-col gap-1 overflow-y-auto border-r bg-muted/40 p-4 md:flex">
           <DialogTitle className="px-2 pb-2 text-lg">Add Widgets</DialogTitle>
@@ -91,20 +132,26 @@ export function WidgetGallery() {
             );
           })}
           <div className="my-2 border-t" />
-          <button
-            type="button"
-            aria-current={pane.kind !== 'builtin' || undefined}
-            onClick={() => setPane({ kind: 'nostr' })}
-            className={cn(
-              'flex items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-              pane.kind !== 'builtin' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
-            )}
-          >
-            <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-violet-500/25 to-violet-500/5 text-violet-600 dark:text-violet-300">
-              <Search className="size-4" aria-hidden />
-            </span>
-            From Nostr
-          </button>
+          {OTHER_PANES.map(({ kind, label, icon: Icon, tile }) => {
+            const selected = otherPane(pane) === kind;
+            return (
+              <button
+                key={kind}
+                type="button"
+                aria-current={selected || undefined}
+                onClick={() => setPane({ kind })}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  selected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
+                )}
+              >
+                <span className={cn('grid size-8 place-items-center rounded-lg bg-gradient-to-br', tile)}>
+                  <Icon className="size-4" aria-hidden />
+                </span>
+                {label}
+              </button>
+            );
+          })}
         </nav>
         <div className="min-h-0 overflow-y-auto">
           {pane.kind === 'builtin' && (
@@ -118,10 +165,11 @@ export function WidgetGallery() {
             />
           )}
           {pane.kind === 'nostr' && <NostrPane onPick={(source) => setPane({ kind: 'confirm', source })} />}
+          {pane.kind === 'folder' && <FolderPane state={folder} onChoose={chooseFolder} />}
           {pane.kind === 'confirm' && (
             <PermissionScreen
               source={pane.source}
-              onCancel={() => setPane({ kind: 'nostr' })}
+              onCancel={() => setPane({ kind: pane.source.type === 'file' ? 'folder' : 'nostr' })}
               onAdd={(denied) => {
                 add(pane.source, { denied });
                 close();
@@ -301,6 +349,49 @@ function NostrPane({ onPick }: { onPick: (source: NappletSource) => void }) {
   );
 }
 
+type FolderState = { state: 'idle' | 'opening' } | { state: 'error'; message: string };
+
+function FolderPane({ state, onChoose }: { state: FolderState; onChoose: () => void }) {
+  const bridge = getWidgetsBridge();
+
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <div className="space-y-1 pr-8">
+        <h2 className="text-2xl font-semibold tracking-tight">From a Folder</h2>
+        <p className="text-muted-foreground">Make your own widget, and see it on your desktop as you work on it.</p>
+      </div>
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center gap-4 px-8 py-12 text-center">
+          <span className="grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-500/25 to-amber-500/5 text-amber-600 dark:text-amber-300">
+            <FolderOpen className="size-7" aria-hidden />
+          </span>
+          <p className="max-w-md text-sm text-muted-foreground">
+            Choose a folder with an <code className="font-mono">index.html</code>. Its scripts, styles and images are
+            put into the page, and it reloads whenever you save a file in it.
+          </p>
+          <Button onClick={onChoose} disabled={!bridge || state.state === 'opening'}>
+            <FolderOpen aria-hidden /> Choose Folder…
+          </Button>
+          {!bridge && <p className="text-sm text-muted-foreground">Widgets from folders work in Din's desktop app.</p>}
+          {state.state === 'error' && <p className="text-sm text-destructive" role="alert">{state.message}</p>}
+        </CardContent>
+      </Card>
+      <div className="space-y-2 text-sm text-muted-foreground">
+        <p className="font-medium text-foreground">Describing your widget</p>
+        <p>
+          Din reads NIP-5D's metadata from the page's <code className="font-mono">&lt;head&gt;</code>: its{' '}
+          <code className="font-mono">&lt;title&gt;</code>, <code className="font-mono">&lt;meta name="description"&gt;</code>,
+          and <code className="font-mono">napplet-requires</code> and <code className="font-mono">napplet-optional</code> for
+          the domains it uses (<code className="font-mono">theme</code>, <code className="font-mono">storage</code>,{' '}
+          <code className="font-mono">identity</code>, <code className="font-mono">resource</code>). It reaches Din through{' '}
+          <code className="font-mono">window.napplet</code>, and nothing on the web directly.
+        </p>
+        <p>When it's ready, right-click it and choose Publish to Nostr… to share it.</p>
+      </div>
+    </div>
+  );
+}
+
 function useAuthorName(pubkey: string): string {
   const author = useAuthor(pubkey);
   return author.data?.metadata?.display_name || author.data?.metadata?.name || `${nip19.npubEncode(pubkey).slice(0, 16)}…`;
@@ -324,9 +415,17 @@ function NappletCard({ source, onPick }: { source: NappletSource; onPick: () => 
   );
 }
 
+/** Who a widget is from: its author's name, or its folder. */
+function WidgetOrigin({ source }: { source: NappletSource | FileSource }) {
+  return source.type === 'file' ? <>From <span className="break-all">{source.path}</span></> : <NappletAuthor pubkey={source.pubkey} />;
+}
+
+function NappletAuthor({ pubkey }: { pubkey: string }) {
+  return <>A widget by {useAuthorName(pubkey)}</>;
+}
+
 /** Android-style: who it is, then each permission it asks for with a switch, then Add or Cancel. */
-function PermissionScreen({ source, onCancel, onAdd }: { source: NappletSource; onCancel: () => void; onAdd: (denied: PermissionDomain[]) => void }) {
-  const author = useAuthorName(source.pubkey);
+function PermissionScreen({ source, onCancel, onAdd }: { source: NappletSource | FileSource; onCancel: () => void; onAdd: (denied: PermissionDomain[]) => void }) {
   const asked = declaredDomains(source).filter(isPermissionDomain);
   const missing = missingDomains(source);
   const [denied, setDenied] = useState<PermissionDomain[]>([]);
@@ -336,7 +435,7 @@ function PermissionScreen({ source, onCancel, onAdd }: { source: NappletSource; 
       <NappletIcon source={source} className="size-20 text-3xl shadow-md" />
       <div className="space-y-2 text-center">
         <h2 className="text-2xl font-semibold tracking-tight">Add {source.title} to your desktop?</h2>
-        <p className="text-sm text-muted-foreground">A widget by {author}</p>
+        <p className="text-sm text-muted-foreground"><WidgetOrigin source={source} /></p>
         <p className="line-clamp-4 text-sm whitespace-pre-line text-muted-foreground">{source.description}</p>
       </div>
       <div className="w-full rounded-2xl border bg-card px-4">

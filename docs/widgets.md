@@ -1,7 +1,9 @@
 # Widgets
 
 > **Status: in place.** Eight built-in widgets; widgets from Nostr by
-> `naddr` or from the gallery, with Android-style permissions; the `shell`,
+> `naddr` or from the gallery, and from folders on this computer, which
+> reload as they're edited and can be published to Nostr; with
+> Android-style permissions; the `shell`,
 > `theme`, `identity`, `storage` and `resource` domains. Not yet: `relay`,
 > `notify`, `link`, `media` and `intent`, updating a widget to a newer
 > manifest, and syncing the layout between computers.
@@ -17,8 +19,8 @@ the desktop only through the capabilities ("NAP domains",
 Right-click the desktop for **Add Widgets…** and **Edit Widgets** (drag to
 arrange, the handles on the edges to resize, × to remove). Right-click a
 widget for Edit Widgets, Size (Small, Medium, Large), Reload, About This
-Widget… (who made it, and its permissions, each with a switch) and Remove
-Widget.
+Widget… (who made it, and its permissions, each with a switch), Publish to
+Nostr… (a folder's widget only) and Remove Widget.
 
 ## The grid
 
@@ -60,7 +62,7 @@ an opaque backdrop, so a widget that wants to stay see-through should leave
 │  WidgetFrame: the menu, edit mode, the NAP host (useNappletHost)   │
 │      ▲ MessagePort (main made it; bound to the guest's URL)        │
 │ ┌────┴ <webview> in persist:widgets, a process of its own ───────┐ │
-│ │ widget://clock/ or napplet://<sha256 in base32>/               │ │
+│ │ widget://clock/, napplet://<hash>/ or widget+file://<hash>/    │ │
 │ │ an empty host page with NIP-5D's CSP, and widget-preload.cjs   │ │
 │ │      ▲ postMessage, checked by event.source                    │ │
 │ │ ┌────┴ <iframe sandbox="allow-scripts" srcdoc> ──────────────┐ │ │
@@ -163,6 +165,47 @@ The host of `napplet://` *is* that hash (base32, 52 characters), so the
 bytes behind a URL can only ever be the bytes it names. A placed widget is
 pinned to the version it was added at.
 
+## Widgets from folders: `widget+file://<hash>/`
+
+**From a Folder** in the gallery opens Din's file picker for a folder with
+an `index.html`, and shows the same permission screen as a widget from
+Nostr. It's how a widget is made: point Din at the folder you're working
+in and it shows on the desktop as you edit.
+
+- **Metadata** comes from the page's `<head>`, as NIP-5D's "HTML Metadata
+  for Publishing" has it: `<title>`, `<meta name="description">`,
+  `napplet-id`, `napplet-requires` and `napplet-optional` (whitespace
+  separated domains), `napplet-source`, `napplet-server` and
+  `<link rel="icon">` (`parseFileWidget`, with `DOMParser`, which runs and
+  loads nothing). It's read again on every load; a domain the page newly
+  asks for starts off, for the user to turn on in About This Widget.
+- **One page.** A napplet is a single file, so main
+  (`folderArtifact`) inlines what the page names from inside the folder:
+  classic `<script src>` (`defer` and `async` ones moved to the end of the
+  body), `<link rel="stylesheet">`, and `<link rel="icon">` and `<img>`
+  files as `data:` URLs. Nothing outside the folder, no module `import`s,
+  and nothing from the web: that runs under the same CSP as any widget.
+  Bundle anything bigger (Vite with `vite-plugin-singlefile`, say) and
+  point Din at the output.
+- **Live.** `dinos.widgets.folder(path)` (the desktop only) serves the
+  folder at `widget+file://<host>/`, the host being the sha256 of its path
+  in base32, and watches it: a change sends `dinos-widgets:changed`, and
+  each copy of it reads the folder again and reloads. A placed copy keeps
+  its path (`FileSource`) and opens the folder again when Din starts.
+  Main only ever serves folders the desktop opened.
+- Its identity, for storage, is `file:<path>`.
+
+**Publish to Nostr…** (its menu, or About This Widget) shares it as a
+napplet: the page, byte for byte as it runs here, goes to the user's
+Blossom servers (and its icon, decoded from the `data:` URL, if it's PNG,
+JPEG or WebP), then the user signs a kind 35129 manifest
+(`nappletManifestTemplate`): `d` (its `napplet-id`, or the folder's name),
+`x`, `title`, `R`, `O`, `icon`, `server` for each Blossom server and
+`source` if it's a location NIP-5D accepts, with the description as the
+content. Publishing the same identifier again replaces it; copies already
+placed stay pinned to the version they were added at. The dialog gives the
+`naddr` to share.
+
 ## The domains Din answers
 
 `grantedDomains`: what the widget declared (`R` and `O` tags, or a built-in's
@@ -179,17 +222,17 @@ dropped, as NIP-5D asks.
 | `resource` | `bytes(url)` for https URLs (`data:` the shim decodes itself), fetched by main (`dinos.widgets.resource`) from a cookieless in-memory session, never from a private or local address (checked again on every redirect), 10 MB at most. `info` and `bytesMany` answer `unsupported` |
 
 A widget's identity, for storage, is `builtin:<id>`, `35129:<pubkey>:<d>`,
-`15129:<pubkey>`, or a snapshot's event id: from the verified manifest,
-never from the widget.
+`15129:<pubkey>`, a snapshot's event id, or `file:<path>`: from the
+verified manifest (or the folder the user chose), never from the widget.
 
 ## Where things live
 
 | Path | What |
 |---|---|
-| `electron/widgets.mts` | The schemes, the session and its policy, artifacts and their cache, ports |
+| `electron/widgets.mts` | The schemes, the session and its policy, artifacts and their cache, folders, ports |
 | `electron/widget-preload.cjs` | The host page: the srcdoc frame and the relay |
 | `src/lib/widgetGrid.ts` | The grid: cells, fitting, free space |
 | `src/lib/widgets.ts` | Sizes, built-in manifests, manifest parsing, `dinos.widgets`, ports |
 | `src/lib/widgetStorage.ts` | NAP-STORAGE's areas |
-| `src/contexts/WidgetsContext.ts`, `src/components/desktop/widgets/` | The layout (`din:widgets`), the layer, each frame and its NAP host, the menu, the gallery, permissions and icons |
+| `src/contexts/WidgetsContext.ts`, `src/components/desktop/widgets/` | The layout (`din:widgets`), the layer, each frame and its NAP host, the menu, the gallery, permissions and icons, publishing |
 | `src/widgets/` | The built-in widgets |

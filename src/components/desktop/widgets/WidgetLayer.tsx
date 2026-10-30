@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { nip19 } from 'nostr-tools';
+import { Share } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -24,10 +25,12 @@ import {
   getWidgetsBridge,
   grantedDomains,
   isPermissionDomain,
+  widgetDescription,
   widgetTitle,
   type PlacedWidget,
 } from '@/lib/widgets';
 import { BuiltinIcon, NappletIcon, PermissionRow } from './permissions';
+import { PublishWidget } from './PublishWidget';
 import { WidgetFrame, type WidgetRect } from './WidgetFrame';
 import { WidgetGallery } from './WidgetGallery';
 
@@ -44,6 +47,8 @@ export function WidgetLayer() {
   const [aboutId, setAboutId] = useState<string | null>(null);
   const about = widgets.find((w) => w.id === aboutId) ?? null;
   const [removing, setRemoving] = useState<PlacedWidget | null>(null);
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const publishing = widgets.find((w) => w.id === publishingId)?.source;
 
   // Right-clicks main forwards from a widget's page open that widget's menu
   // where they happened.
@@ -135,6 +140,7 @@ export function WidgetLayer() {
           onArrangeEnd={onArrangeEnd}
           onGuest={onGuest}
           onAbout={(widget) => setAboutId(widget.id)}
+          onPublish={(widget) => setPublishingId(widget.id)}
           onRemove={askRemove}
         />
         );
@@ -148,7 +154,15 @@ export function WidgetLayer() {
         </div>
       )}
       <WidgetGallery />
-      <AboutWidget widget={about} onClose={() => setAboutId(null)} />
+      <AboutWidget
+        widget={about}
+        onClose={() => setAboutId(null)}
+        onPublish={(widget) => {
+          setAboutId(null);
+          setPublishingId(widget.id);
+        }}
+      />
+      <PublishWidget source={publishing?.type === 'file' ? publishing : null} onClose={() => setPublishingId(null)} />
       <AlertDialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -174,7 +188,7 @@ export function WidgetLayer() {
 }
 
 /** About This Widget: who made it, and its permissions, which can be turned off and on. */
-function AboutWidget({ widget, onClose }: { widget: PlacedWidget | null; onClose: () => void }) {
+function AboutWidget({ widget, onClose, onPublish }: { widget: PlacedWidget | null; onClose: () => void; onPublish: (widget: PlacedWidget) => void }) {
   const { setDenied } = useWidgets();
   const source = widget?.source;
   const pubkey = source?.type === 'napplet' ? source.pubkey : undefined;
@@ -183,7 +197,7 @@ function AboutWidget({ widget, onClose }: { widget: PlacedWidget | null; onClose
     ? author.data?.metadata?.display_name || author.data?.metadata?.name || `${nip19.npubEncode(pubkey).slice(0, 16)}…`
     : 'Din';
   const manifest = source?.type === 'builtin' ? builtinWidget(source.id) : undefined;
-  const description = manifest?.description ?? (source?.type === 'napplet' ? source.description : '');
+  const description = source ? widgetDescription(source) : '';
   const asked = source ? declaredDomains(source).filter(isPermissionDomain) : [];
   const denied = widget?.denied ?? [];
 
@@ -191,7 +205,7 @@ function AboutWidget({ widget, onClose }: { widget: PlacedWidget | null; onClose
     <Dialog open={widget !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader className="items-center text-center sm:text-center">
-          {source?.type === 'napplet' ? (
+          {source && source.type !== 'builtin' ? (
             <NappletIcon source={source} className="size-16 text-2xl" />
           ) : (
             <span className="grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-primary/25 to-primary/5 text-primary">
@@ -199,7 +213,9 @@ function AboutWidget({ widget, onClose }: { widget: PlacedWidget | null; onClose
             </span>
           )}
           <DialogTitle className="text-xl">{source ? widgetTitle(source) : ''}</DialogTitle>
-          <p className="text-sm text-muted-foreground">by {authorName}</p>
+          <p className="text-sm text-muted-foreground">
+            {source?.type === 'file' ? <>From <span className="break-all select-text">{source.path}</span></> : <>by {authorName}</>}
+          </p>
           <DialogDescription className="whitespace-pre-line">{description}</DialogDescription>
         </DialogHeader>
         <div className="rounded-2xl border px-4">
@@ -213,7 +229,7 @@ function AboutWidget({ widget, onClose }: { widget: PlacedWidget | null; onClose
                   key={domain}
                   domain={domain}
                   allowed={!denied.includes(domain)}
-                  required={source?.type === 'napplet' ? source.requires.includes(domain) : true}
+                  required={source && source.type !== 'builtin' ? source.requires.includes(domain) : true}
                   onChange={(allowed) => {
                     if (!widget) return;
                     setDenied(widget.id, allowed ? denied.filter((d) => d !== domain) : [...denied, domain]);
@@ -234,6 +250,11 @@ function AboutWidget({ widget, onClose }: { widget: PlacedWidget | null; onClose
             <dt className="text-muted-foreground">Version</dt>
             <dd className="min-w-0 truncate font-mono text-xs leading-5 select-text">{source.sha256.slice(0, 16)}</dd>
           </dl>
+        )}
+        {source?.type === 'file' && widget && (
+          <Button variant="secondary" onClick={() => onPublish(widget)}>
+            <Share aria-hidden /> Publish to Nostr…
+          </Button>
         )}
       </DialogContent>
     </Dialog>

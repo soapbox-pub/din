@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { Cells } from '@/lib/widgetGrid';
-import type { PermissionDomain, PlacedWidget, WidgetSize, WidgetSource } from '@/lib/widgets';
+import type { FileSource, PermissionDomain, PlacedWidget, WidgetSize, WidgetSource } from '@/lib/widgets';
 
 export interface WidgetsContextValue {
   /** The widgets on the desktop, oldest first. */
@@ -15,6 +15,11 @@ export interface WidgetsContextValue {
   resize(id: string, size: WidgetSize): void;
   /** Turn a copy's permissions off (or back on); it reloads with the new set. */
   setDenied(id: string, denied: PermissionDomain[]): void;
+  /**
+   * A folder's widget as its page now reads. Permissions it newly asks for
+   * start off; the user turns them on in About This Widget.
+   */
+  refresh(id: string, source: FileSource): void;
   /** Arranging widgets: dragged by anywhere, with Remove buttons, and their pages not taking input. */
   editing: boolean;
   setEditing(editing: boolean): void;

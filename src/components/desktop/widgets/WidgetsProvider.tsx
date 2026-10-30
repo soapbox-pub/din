@@ -3,13 +3,13 @@ import { WidgetsContext, type WidgetsContextValue } from '@/contexts/WidgetsCont
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { areaGrid, cellsFree, clampCells, freeCells, placedCells, WIDGET_PITCH, type Cells } from '@/lib/widgetGrid';
-import { builtinWidget, WIDGET_SIZES, widgetIdentity, type PermissionDomain, type PlacedWidget, type WidgetSize, type WidgetSource } from '@/lib/widgets';
+import { builtinWidget, declaredDomains, isPermissionDomain, WIDGET_SIZES, widgetIdentity, type FileSource, type PermissionDomain, type PlacedWidget, type WidgetSize, type WidgetSource } from '@/lib/widgets';
 import { storageArea, storageClear } from '@/lib/widgetStorage';
 
 /** A stored widget, or null. Those kept before the grid (`x`, `y` and a `size`) are put on it. */
 function parsePlaced(value: unknown): PlacedWidget | null {
   const w = value as (PlacedWidget & { x?: unknown; y?: unknown; size?: unknown }) | null;
-  if (!w || typeof w.id !== 'string' || typeof w.monitor !== 'string' || (w.source?.type !== 'builtin' && w.source?.type !== 'napplet')) return null;
+  if (!w || typeof w.id !== 'string' || typeof w.monitor !== 'string' || !['builtin', 'napplet', 'file'].includes(w.source?.type)) return null;
   if ([w.col, w.row, w.cols, w.rows].every(Number.isInteger)) return w;
   if (typeof w.x !== 'number' || typeof w.y !== 'number' || typeof w.size !== 'string' || !(w.size in WIDGET_SIZES)) return null;
   const { cols, rows } = WIDGET_SIZES[w.size as WidgetSize];
@@ -68,9 +68,19 @@ export function WidgetsProvider({ children }: { children: ReactNode }) {
     update((list) => list.map((w) => (w.id === id ? { ...w, denied } : w)));
   }, [update]);
 
+  const refresh = useCallback((id: string, source: FileSource) => {
+    update((list) => list.map((w) => {
+      if (w.id !== id || JSON.stringify(w.source) === JSON.stringify(source)) return w;
+      const before = declaredDomains(w.source);
+      const added = declaredDomains(source).filter((d) => isPermissionDomain(d) && !before.includes(d)) as PermissionDomain[];
+      const denied = [...new Set([...(w.denied ?? []), ...added])];
+      return { ...w, source, ...(denied.length ? { denied } : {}) };
+    }));
+  }, [update]);
+
   const value = useMemo<WidgetsContextValue>(
-    () => ({ widgets, add, remove, place, resize, setDenied, editing, setEditing, galleryOpen, setGalleryOpen }),
-    [widgets, add, remove, place, resize, setDenied, editing, galleryOpen],
+    () => ({ widgets, add, remove, place, resize, setDenied, refresh, editing, setEditing, galleryOpen, setGalleryOpen }),
+    [widgets, add, remove, place, resize, setDenied, refresh, editing, galleryOpen],
   );
   return <WidgetsContext.Provider value={value}>{children}</WidgetsContext.Provider>;
 }

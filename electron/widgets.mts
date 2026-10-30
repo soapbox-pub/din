@@ -8,6 +8,10 @@
 //                        in development too: widgets aren't hot-reloaded)
 //   napplet://<hash>/    a widget from Nostr: the artifact whose sha256 is the
 //                        host (base32), fetched from Blossom and verified here
+//   widget+file://<hash>/ a widget from a folder on this computer, which the
+//                        desktop opened (the host is the sha256 of its path):
+//                        its index.html, with the folder's scripts, styles and
+//                        images inlined, read afresh on every load
 //
 // The host's preload (widget-preload.cjs) puts the widget's bytes in a
 // sandbox="allow-scripts" srcdoc iframe, with the NIP-5D CSP and
@@ -32,6 +36,7 @@ import { ipcMain, MessageChannelMain, net, session } from 'electron';
 
 export const WIDGET_SCHEME = 'widget';
 export const NAPPLET_SCHEME = 'napplet';
+export const WIDGET_FILE_SCHEME = 'widget+file';
 export const WIDGETS_PARTITION = 'persist:widgets';
 
 /** A built-in widget's id: the host of widget://<id>/. */
@@ -105,9 +110,12 @@ function hostSha256(host: string): string | null {
   return bytes.length === 32 ? Buffer.from(bytes).toString('hex') : null;
 }
 
-export type WidgetSource = { kind: 'builtin'; id: string } | { kind: 'napplet'; sha256: string };
+export type WidgetSource = { kind: 'builtin'; id: string } | { kind: 'napplet'; sha256: string } | { kind: 'file'; path: string };
 
-/** Which widget a widget:// or napplet:// URL is. Compares scheme and host, never `URL.origin`. */
+/** Folders the desktop opened as widgets, by their widget+file:// host. */
+const folders = new Map<string, { dir: string; watcher: fs.FSWatcher | null }>();
+
+/** Which widget a widget://, napplet:// or widget+file:// URL is. Compares scheme and host, never `URL.origin`. */
 export function widgetOf(url: string): WidgetSource | null {
   try {
     const parsed = new URL(url);
@@ -117,6 +125,10 @@ export function widgetOf(url: string): WidgetSource | null {
     if (parsed.protocol === `${NAPPLET_SCHEME}:`) {
       const sha256 = hostSha256(parsed.hostname);
       return sha256 ? { kind: 'napplet', sha256 } : null;
+    }
+    if (parsed.protocol === `${WIDGET_FILE_SCHEME}:`) {
+      const folder = folders.get(parsed.hostname);
+      return folder ? { kind: 'file', path: folder.dir } : null;
     }
   } catch {
     // Not a URL.
@@ -157,12 +169,13 @@ export function registerWidgets(opts: Options, preloadPath: string): void {
       : new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } });
   s.protocol.handle(WIDGET_SCHEME, host);
   s.protocol.handle(NAPPLET_SCHEME, host);
+  s.protocol.handle(WIDGET_FILE_SCHEME, host);
   s.registerPreloadScript({ id: 'din-widget', type: 'frame', filePath: preloadPath });
   // Nothing a widget could ask for is granted, and nothing reaches the web.
   s.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   s.setPermissionCheckHandler(() => false);
   s.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: !/^(widget|napplet|data|blob|about|devtools):/i.test(details.url) });
+    callback({ cancel: !/^(widget|napplet|widget\+file|data|blob|about|devtools):/i.test(details.url) });
   });
   s.on('will-download', (event) => event.preventDefault());
 
@@ -187,7 +200,11 @@ export function registerWidgets(opts: Options, preloadPath: string): void {
     if (!frame || frame !== contents.mainFrame || !isWidgetGuest(contents)) throw new Error('Not a widget');
     const source = widgetOf(frame.url);
     if (!source) throw new Error('Not a widget');
-    const html = source.kind === 'builtin' ? builtinArtifact(source.id) : await cachedArtifact(source.sha256);
+    const html = source.kind === 'builtin'
+      ? builtinArtifact(source.id)
+      : source.kind === 'napplet'
+        ? await cachedArtifact(source.sha256)
+        : await folderArtifact(source.path).catch(() => null);
     if (html === null) throw new Error('This widget is not available');
     return { html, prelude: prelude(), csp: NAPPLET_CSP };
   });
@@ -201,6 +218,19 @@ export function registerWidgets(opts: Options, preloadPath: string): void {
     const list = Array.isArray(servers) ? servers.filter((s): s is string => typeof s === 'string') : [];
     await fetchArtifact(sha256, list);
     return nappletHost(sha256);
+  });
+
+  // Open a folder the user chose as a widget: serve it at widget+file://<host>/,
+  // tell the desktop when anything in it changes, and hand back its page (as
+  // it'll run, inlined) for its metadata, or for publishing.
+  ipcMain.handle('dinos-widgets:folder', async (event, dir) => {
+    opts.assertShellSender(event);
+    if (typeof dir !== 'string' || !path.isAbsolute(dir)) throw new Error('Not a folder');
+    const resolved = path.resolve(dir);
+    const html = await folderArtifact(resolved);
+    const host = nappletHost(createHash('sha256').update(resolved).digest('hex'));
+    if (!folders.has(host)) folders.set(host, { dir: resolved, watcher: watchFolder(host, resolved) });
+    return { host, path: resolved, html };
   });
 
   // A widget's icon from its manifest, by hash, verified.
@@ -272,8 +302,7 @@ export function attachWidgetGuest(
   const home = widgetOf(src);
   const same = (url: string) => {
     const other = widgetOf(url);
-    if (!home || !other || other.kind !== home.kind) return false;
-    return home.kind === 'builtin' ? other.kind === 'builtin' && other.id === home.id : other.kind === 'napplet' && other.sha256 === home.sha256;
+    return !!home && !!other && JSON.stringify(other) === JSON.stringify(home);
   };
   // The host page stays where it is, and its one iframe holds the srcdoc.
   contents.on('will-frame-navigate', (event) => {
@@ -297,6 +326,133 @@ function builtinArtifact(id: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Tell the desktop when a folder's files change, a moment after the last change. */
+function watchFolder(host: string, dir: string): fs.FSWatcher | null {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const watcher = fs.watch(dir, { recursive: true, persistent: false }, () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        const shell = options?.shell();
+        if (shell && !shell.isDestroyed()) shell.send('dinos-widgets:changed', { host });
+      }, 200);
+    });
+    watcher.on('error', () => watcher.close());
+    return watcher;
+  } catch {
+    return null;
+  }
+}
+
+/** Images a folder's page may name, inlined as data: URLs (the CSP allows only those). */
+const IMAGE_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+};
+
+/**
+ * A folder's index.html as one self-contained page, as a napplet must be:
+ * its classic `<script src>`, `<link rel="stylesheet">`, icon and `<img>`
+ * files from inside the folder inlined. Anything else stays as written
+ * (and the CSP will refuse it).
+ */
+async function folderArtifact(dir: string): Promise<string> {
+  let html: string;
+  try {
+    html = await fs.promises.readFile(path.join(dir, 'index.html'), 'utf8');
+  } catch {
+    throw new Error('There\'s no index.html in this folder');
+  }
+  const local = (ref: string): string | null => {
+    if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(ref)) return null;
+    let name: string;
+    try {
+      name = decodeURIComponent(ref.split(/[?#]/)[0]);
+    } catch {
+      return null;
+    }
+    const file = path.resolve(dir, name.replace(/^\/+/, ''));
+    const rel = path.relative(dir, file);
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? file : null;
+  };
+  const read = async (ref: string, encoding: 'utf8' | 'base64'): Promise<string | null> => {
+    const file = local(ref);
+    if (!file) return null;
+    try {
+      return await fs.promises.readFile(file, encoding);
+    } catch {
+      return null;
+    }
+  };
+  const attr = (tag: string, name: string) => new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
+  const value = (m: RegExpExecArray | null) => (m ? (m[1] ?? m[2] ?? m[3] ?? '') : null);
+  const dataUrl = async (ref: string): Promise<string | null> => {
+    const type = IMAGE_TYPES[path.extname(ref.split(/[?#]/)[0]).toLowerCase()];
+    const base64 = type ? await read(ref, 'base64') : null;
+    return base64 === null ? null : `data:${type};base64,${base64}`;
+  };
+
+  // An inline script runs where it is, so a deferred one moves to the end of the body.
+  const deferred: string[] = [];
+  html = await replaceAsync(html, /<script\b[^>]*>\s*<\/script\s*>/gi, async (tag) => {
+    const m = attr(tag, 'src');
+    const src = value(m);
+    if (!m || src === null) return tag;
+    const code = await read(src, 'utf8');
+    if (code === null) return tag;
+    const open = tag.slice(0, tag.indexOf('>')).replace(m[0], '');
+    const inlined = `${open.replace(/\s(defer|async)(?=[\s>]|$)/gi, '')}>${code.replace(/<\/script/gi, '<\\/script')}</script>`;
+    if (/\s(defer|async)(?=[\s>=]|$)/i.test(open) && value(attr(open, 'type'))?.toLowerCase() !== 'module') {
+      deferred.push(inlined);
+      return '';
+    }
+    return inlined;
+  });
+  if (deferred.length > 0) {
+    const end = html.search(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i);
+    html = end === -1 ? html + deferred.join('') : html.slice(0, end) + deferred.join('') + html.slice(end);
+  }
+  html = await replaceAsync(html, /<link\b[^>]*>/gi, async (tag) => {
+    const rel = value(attr(tag, 'rel'))?.toLowerCase().split(/\s+/) ?? [];
+    const href = value(attr(tag, 'href'));
+    if (href === null) return tag;
+    if (rel.includes('stylesheet')) {
+      const css = await read(href, 'utf8');
+      return css === null ? tag : `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`;
+    }
+    if (rel.includes('icon')) {
+      const url = await dataUrl(href);
+      return url === null ? tag : tag.replace(attr(tag, 'href')![0], ` href="${url}"`);
+    }
+    return tag;
+  });
+  html = await replaceAsync(html, /<img\b[^>]*>/gi, async (tag) => {
+    const m = attr(tag, 'src');
+    const src = value(m);
+    const url = m && src !== null ? await dataUrl(src) : null;
+    return url === null ? tag : tag.replace(m![0], ` src="${url}"`);
+  });
+  if (Buffer.byteLength(html) > MAX_ARTIFACT_BYTES) throw new Error('This widget is too big (8 MB at most)');
+  return html;
+}
+
+async function replaceAsync(text: string, pattern: RegExp, replace: (match: string) => Promise<string>): Promise<string> {
+  const matches = [...text.matchAll(pattern)];
+  const replacements = await Promise.all(matches.map((m) => replace(m[0])));
+  let out = '';
+  let last = 0;
+  matches.forEach((m, i) => {
+    out += text.slice(last, m.index) + replacements[i];
+    last = m.index! + m[0].length;
+  });
+  return out + text.slice(last);
 }
 
 let preludeSource: string | null = null;

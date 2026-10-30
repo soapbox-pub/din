@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { LayoutGrid } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
-import type { NappletSource, PermissionDomain } from '@/lib/widgets';
+import type { FileSource, NappletSource, PermissionDomain } from '@/lib/widgets';
 import { cn } from '@/lib/utils';
 import { PERMISSIONS, useNappletIcon, WIDGET_ICONS } from './widgetMeta';
 
@@ -42,9 +42,10 @@ export function PermissionRow({
   );
 }
 
-/** A widget's icon, or its initial on a tile. */
-export function NappletIcon({ source, className }: { source: NappletSource; className?: string }) {
-  const url = useNappletIcon(source);
+/** A widget from Nostr's or a folder's icon, or its initial on a tile. */
+export function NappletIcon({ source, className }: { source: NappletSource | FileSource; className?: string }) {
+  const fetched = useNappletIcon(source.type === 'napplet' ? source : null);
+  const url = source.type === 'file' ? (source.icon ?? null) : fetched;
   return url ? (
     <img src={url} alt="" className={cn('rounded-2xl object-cover', className)} />
   ) : (

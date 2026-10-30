@@ -1,4 +1,4 @@
-import { Info, LayoutGrid, Maximize2, RotateCw, Trash2 } from 'lucide-react';
+import { Info, LayoutGrid, Maximize2, RotateCw, Share, Trash2 } from 'lucide-react';
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -17,6 +17,8 @@ export interface WidgetMenuActions {
   resize(size: WidgetSize): void;
   reload(): void;
   about(): void;
+  /** Only for a folder's widget. */
+  publish?: () => void;
   remove(): void;
 }
 
@@ -51,6 +53,11 @@ export function WidgetMenuContent({ widget, actions }: { widget: PlacedWidget; a
       <ContextMenuItem onSelect={actions.about}>
         <Info aria-hidden /> About This Widget…
       </ContextMenuItem>
+      {actions.publish && (
+        <ContextMenuItem onSelect={actions.publish}>
+          <Share aria-hidden /> Publish to Nostr…
+        </ContextMenuItem>
+      )}
       <ContextMenuSeparator />
       <ContextMenuItem variant="destructive" onSelect={actions.remove}>
         <Trash2 aria-hidden /> Remove Widget

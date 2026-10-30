@@ -30,6 +30,7 @@ import {
   isWidgetGuest,
   NAPPLET_SCHEME,
   registerWidgets,
+  WIDGET_FILE_SCHEME,
   WIDGET_SCHEME,
   widgetOf,
   WIDGETS_PARTITION,
@@ -212,6 +213,13 @@ protocol.registerSchemesAsPrivileged([
   },
   {
     scheme: NAPPLET_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+    },
+  },
+  {
+    scheme: WIDGET_FILE_SCHEME,
     privileges: {
       standard: true,
       secure: true,
@@ -5714,7 +5722,7 @@ app.whenReady().then(() => {
       delete webPreferences.preload;
       return;
     }
-    // A widget: widget:// or napplet:// only, sandboxed, no extra preloads.
+    // A widget: widget://, napplet:// or widget+file:// only, sandboxed, no extra preloads.
     if (params.partition === WIDGETS_PARTITION) {
       if (!widgetOf(typeof params.src === 'string' ? params.src : '')) {
         event.preventDefault();

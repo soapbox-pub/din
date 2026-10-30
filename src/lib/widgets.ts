@@ -1,6 +1,7 @@
 /**
  * The desktop's side of widgets (docs/widgets.md): napplets (NIP-5D) on the
- * desktop, built in at widget://<id>/ or from Nostr at napplet://<hash>/.
+ * desktop, built in at widget://<id>/, from Nostr at napplet://<hash>/, or
+ * from a folder on this computer at widget+file://<hash>/.
  * What they are, where they come from, and the ports main hands over as they
  * load. WidgetFrame does the hosting.
  */
@@ -72,7 +73,26 @@ export interface BuiltinSource {
   id: string;
 }
 
-export type WidgetSource = BuiltinSource | NappletSource;
+/** A widget from a folder on this computer: its index.html's NIP-5D metadata, as last read. */
+export interface FileSource {
+  type: 'file';
+  /** The folder, absolute. */
+  path: string;
+  /** Where main serves it: widget+file://<host>/. */
+  host: string;
+  title: string;
+  description: string;
+  /** Its `napplet-id`, the `d` tag it's published under. */
+  dTag?: string;
+  requires: string[];
+  optional: string[];
+  servers: string[];
+  source?: string;
+  /** Its `<link rel="icon">`, as a data: URL. */
+  icon?: string;
+}
+
+export type WidgetSource = BuiltinSource | NappletSource | FileSource;
 
 /** A widget on the desktop. */
 export interface PlacedWidget {
@@ -100,6 +120,10 @@ export interface WidgetsBridge {
   icon(sha256: string, servers: string[]): Promise<Uint8Array>;
   /** NAP-RESOURCE: something from the web, fetched by main (https, public addresses, no cookies). */
   resource(url: string): Promise<{ bytes: Uint8Array; type: string }>;
+  /** Open a folder as a widget (served at widget+file://<host>/, and watched); resolves with its page as it runs. */
+  folder(path: string): Promise<{ host: string; path: string; html: string }>;
+  /** Hear when a folder opened as a widget changes. */
+  onFolderChanged(callback: (e: { host: string }) => void): () => void;
   onContextMenu(callback: (e: { webContentsId: number; x: number; y: number }) => void): () => void;
 }
 
@@ -153,6 +177,11 @@ export function widgetTitle(source: WidgetSource): string {
   return source.type === 'builtin' ? (BUILTINS.get(source.id)?.name ?? source.id) : source.title;
 }
 
+/** What a widget says it does. */
+export function widgetDescription(source: WidgetSource): string {
+  return source.type === 'builtin' ? (BUILTINS.get(source.id)?.description ?? '') : source.description;
+}
+
 /** The sizes a widget comes in. */
 export function widgetSizes(source: WidgetSource): WidgetSize[] {
   return source.type === 'builtin' ? (BUILTINS.get(source.id)?.sizes ?? ['small']) : ['small', 'medium', 'large'];
@@ -176,7 +205,7 @@ export function grantedDomains(source: WidgetSource, denied: readonly string[] =
 
 /** Who a widget is, for its storage. */
 export function widgetIdentity(source: WidgetSource): string {
-  return source.type === 'builtin' ? `builtin:${source.id}` : source.address;
+  return source.type === 'builtin' ? `builtin:${source.id}` : source.type === 'file' ? `file:${source.path}` : source.address;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +233,8 @@ export function nappletHost(sha256: string): string {
 
 /** The URL a widget's guest loads. */
 export function widgetUrl(source: WidgetSource): string {
-  return source.type === 'builtin' ? `widget://${source.id}/` : `napplet://${nappletHost(source.sha256)}/`;
+  if (source.type === 'builtin') return `widget://${source.id}/`;
+  return source.type === 'file' ? `widget+file://${source.host}/` : `napplet://${nappletHost(source.sha256)}/`;
 }
 
 /** Why a napplet manifest was refused. */
@@ -248,8 +278,85 @@ export function parseNappletManifest(event: NostrEvent): NappletSource {
   };
 }
 
-/** The required domains a napplet declared that Din doesn't answer. */
-export function missingDomains(source: NappletSource): string[] {
+/** The icon types NIP-5D allows. */
+const ICON_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+
+/** The biggest icon kept from a folder's page. */
+const MAX_FILE_ICON = 512 * 1024;
+
+/**
+ * A folder's widget, from its index.html's NIP-5D metadata ("HTML Metadata
+ * for Publishing"): `<title>`, `<meta name="description">`, `napplet-id`,
+ * `napplet-requires`, `napplet-optional`, `napplet-source`, `napplet-server`
+ * and `<link rel="icon">` (a data: URL, which main makes of a file beside it).
+ */
+export function parseFileWidget(folder: { host: string; path: string; html: string }): FileSource {
+  // DOMParser runs nothing and loads nothing.
+  const doc = new DOMParser().parseFromString(folder.html, 'text/html');
+  const metas = (name: string) =>
+    [...doc.querySelectorAll('meta[name]')].filter((m) => m.getAttribute('name')?.toLowerCase() === name).map((m) => m.getAttribute('content')?.trim() ?? '');
+  const words = (name: string) => [...new Set(metas(name).flatMap((v) => v.split(/\s+/)).filter((v) => /^[a-z][a-z0-9-]*$/.test(v)))];
+  const icon = [...doc.querySelectorAll('link[rel][href]')]
+    .find((l) => l.getAttribute('rel')!.toLowerCase().split(/\s+/).includes('icon'))
+    ?.getAttribute('href') ?? '';
+  const iconType = /^data:([^;,]+);base64,/.exec(icon)?.[1];
+  const dTag = metas('napplet-id')[0];
+  const folderName = folder.path.split('/').filter(Boolean).pop() ?? 'Widget';
+  return {
+    type: 'file',
+    path: folder.path,
+    host: folder.host,
+    title: doc.title.trim() || folderName,
+    description: metas('description')[0] ?? '',
+    ...(dTag ? { dTag } : {}),
+    requires: words('napplet-requires'),
+    optional: words('napplet-optional'),
+    servers: metas('napplet-server').filter((s) => /^https:\/\//.test(s)),
+    ...(metas('napplet-source')[0] ? { source: metas('napplet-source')[0] } : {}),
+    ...(iconType && ICON_TYPES.includes(iconType) && icon.length <= MAX_FILE_ICON ? { icon } : {}),
+  };
+}
+
+/** A NIP-5D `source` location: an http(s), ssh, git or nostr URL, or Git's scp-like `[user@]host:path`. */
+function isSourceLocation(location: string): boolean {
+  return /^(https?|ssh|git|nostr):\/\/\S+$/i.test(location) || /^(?:[\w.-]+@)?[\w.-]+:(?!\/\/)\S+$/.test(location);
+}
+
+/** The identifier a folder's widget is published under, if its page names none: the folder's name, made one. */
+export function defaultNappletId(source: FileSource): string {
+  if (source.dTag) return source.dTag;
+  const name = source.path.split('/').filter(Boolean).pop() ?? '';
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'widget';
+}
+
+/**
+ * The kind 35129 manifest (NIP-5D) for a folder's widget, once its page (and
+ * icon) are on Blossom: the page's metadata as tags, and the description as
+ * the content.
+ */
+export function nappletManifestTemplate(
+  source: FileSource,
+  published: { dTag: string; sha256: string; servers: string[]; icon?: { sha256: string; type: string } },
+): { kind: number; content: string; tags: string[][] } {
+  const servers = [...new Set(published.servers.map((s) => new URL(s).origin))];
+  return {
+    kind: 35129,
+    content: source.description,
+    tags: [
+      ['d', published.dTag],
+      ['x', published.sha256],
+      ['title', source.title],
+      ...source.requires.map((d) => ['R', d]),
+      ...source.optional.map((d) => ['O', d]),
+      ...(published.icon ? [['icon', published.icon.sha256, published.icon.type]] : []),
+      ...servers.map((s) => ['server', s]),
+      ...(source.source && isSourceLocation(source.source) ? [['source', source.source]] : []),
+    ],
+  };
+}
+
+/** The required domains a widget declared that Din doesn't answer. */
+export function missingDomains(source: NappletSource | FileSource): string[] {
   return source.requires.filter((d) => !(SUPPORTED_DOMAINS as readonly string[]).includes(d));
 }
 
@@ -274,7 +381,7 @@ export function nappletFilter(input: string): { filter: { kinds: number[]; autho
 // ---------------------------------------------------------------------------
 
 /** Which widget main says a port is from: the host of the guest's URL. */
-export type PortSource = { kind: 'builtin'; id: string } | { kind: 'napplet'; sha256: string };
+export type PortSource = { kind: 'builtin'; id: string } | { kind: 'napplet'; sha256: string } | { kind: 'file'; path: string };
 
 export interface WidgetPort {
   port: MessagePort;
@@ -283,9 +390,14 @@ export interface WidgetPort {
 
 /** Whether a port is from this widget. */
 export function portIsFrom(port: WidgetPort, source: WidgetSource): boolean {
-  return source.type === 'builtin'
-    ? port.source.kind === 'builtin' && port.source.id === source.id
-    : port.source.kind === 'napplet' && port.source.sha256 === source.sha256;
+  switch (source.type) {
+    case 'builtin':
+      return port.source.kind === 'builtin' && port.source.id === source.id;
+    case 'napplet':
+      return port.source.kind === 'napplet' && port.source.sha256 === source.sha256;
+    case 'file':
+      return port.source.kind === 'file' && port.source.path === source.path;
+  }
 }
 
 const waiting = new Map<number, (port: WidgetPort) => void>();

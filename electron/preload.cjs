@@ -3340,8 +3340,8 @@ expose('apps', {
   },
 });
 
-// Widgets bridge (window.dinos.widgets): desktop widgets at widget://<id>/ and
-// napplet://<hash>/ (electron/widgets.mts, docs/widgets.md). Their ports
+// Widgets bridge (window.dinos.widgets): desktop widgets at widget://<id>/,
+// napplet://<hash>/ and widget+file://<hash>/ (electron/widgets.mts, docs/widgets.md). Their ports
 // arrive as window messages, like apps' (src/lib/widgets.ts listens).
 ipcRenderer.on('dinos-widgets:port', (event, info) => {
   window.postMessage({ type: 'dinos-widgets:port', info }, location.origin, [event.ports[0]]);
@@ -3368,6 +3368,23 @@ expose('widgets', {
    * @returns {Promise<{ bytes: Uint8Array, type: string }>}
    */
   resource: (url) => ipcRenderer.invoke('dinos-widgets:resource', url),
+  /**
+   * Open a folder as a widget: serve it at widget+file://<host>/ and watch it.
+   * @param {string} path absolute
+   * @returns {Promise<{ host: string, path: string, html: string }>} its page, as it runs (inlined)
+   */
+  folder: (path) => ipcRenderer.invoke('dinos-widgets:folder', path),
+  /**
+   * Hear when a folder opened as a widget changes.
+   * @param {(e: { host: string }) => void} callback
+   * @returns {() => void}
+   */
+  onFolderChanged: (callback) => {
+    /** @param {unknown} _event @param {{ host: string }} e */
+    const listener = (_event, e) => callback(e);
+    ipcRenderer.on('dinos-widgets:changed', listener);
+    return () => ipcRenderer.removeListener('dinos-widgets:changed', listener);
+  },
   /**
    * Hear right-clicks in widgets outside text fields, at a point in the widget.
    * @param {(e: { webContentsId: number, x: number, y: number }) => void} callback

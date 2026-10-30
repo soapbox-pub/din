@@ -1,5 +1,5 @@
 // @ts-check
-// Preload for desktop widgets (widget:// and napplet:// in the persist:widgets
+// Preload for desktop widgets (widget://, napplet:// and widget+file:// in the persist:widgets
 // session; see electron/widgets.mts and docs/widgets.md).
 //
 // The host page is empty. This puts the widget in it the way NIP-5D's web
@@ -82,7 +82,7 @@ function overlayScrollbars() {
   }, { capture: true, passive: true });
 }
 
-if (process.isMainFrame && /^(widget|napplet):$/.test(location.protocol)) {
+if (process.isMainFrame && /^(widget|napplet|widget\+file):$/.test(location.protocol)) {
   /** @type {MessagePort | null} */
   let desktop = null;
   /** @type {HTMLIFrameElement | null} */

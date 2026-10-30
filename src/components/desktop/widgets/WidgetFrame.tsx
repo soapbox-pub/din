@@ -4,7 +4,7 @@ import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import { guestsAvailable } from '@/platform/guest';
 import { APP_BLOSSOM_SERVERS } from '@/lib/appBlossom';
-import { getWidgetsBridge, spanPixels, WIDGET_MIN_SPAN, WIDGETS_PARTITION, widgetTitle, widgetUrl, type PlacedWidget } from '@/lib/widgets';
+import { getWidgetsBridge, parseFileWidget, spanPixels, WIDGET_MIN_SPAN, WIDGETS_PARTITION, widgetTitle, widgetUrl, type PlacedWidget } from '@/lib/widgets';
 import { useWidgets } from '@/contexts/WidgetsContext';
 import { cn } from '@/lib/utils';
 import { useNappletHost } from './useNappletHost';
@@ -28,6 +28,8 @@ interface WidgetFrameProps {
   /** Hand the layer this widget's guest and trigger, for right-clicks main forwards. */
   onGuest: (webContentsId: number, trigger: HTMLElement | null) => void;
   onAbout: (widget: PlacedWidget) => void;
+  /** Share a folder's widget on Nostr. */
+  onPublish: (widget: PlacedWidget) => void;
   onRemove: (widget: PlacedWidget) => void;
 }
 
@@ -55,20 +57,26 @@ function gestureRect(base: WidgetRect, edges: Edges, dx: number, dy: number): Wi
   };
 }
 
+/** What went wrong in main, without Electron's wrapping. */
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error);
+}
+
 /**
  * One widget on the desktop: its guest and its menu. Din draws nothing
  * behind it: a widget is as transparent as its own page, cut to rounded
  * corners.
  */
-export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, onAbout, onRemove }: WidgetFrameProps) {
-  const { editing, setEditing, resize } = useWidgets();
+export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, onAbout, onPublish, onRemove }: WidgetFrameProps) {
+  const { editing, setEditing, resize, refresh } = useWidgets();
   const surface = useRef<GuestSurfaceHandle>(null);
   const trigger = useRef<HTMLDivElement>(null);
   const [webContentsId, setWebContentsId] = useState<number | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [gone, setGone] = useState(false);
   const [generation, setGeneration] = useState(0);
-  // A widget from Nostr loads once main has its bytes, verified.
+  // A widget from Nostr loads once main has its bytes, verified; one from a
+  // folder once main serves the folder.
   const [fetched, setFetched] = useState(widget.source.type === 'builtin');
   const [gesture, setGesture] = useState<{ rect: WidgetRect; resizing: boolean } | null>(null);
   const title = widgetTitle(widget.source);
@@ -83,12 +91,45 @@ export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, on
     if (!bridge) return;
     bridge.fetch(source.sha256, [...source.servers, ...APP_BLOSSOM_SERVERS.servers]).then(
       () => !cancelled && setFetched(true),
-      (error: unknown) => !cancelled && setFailed(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error)),
+      (error: unknown) => !cancelled && setFailed(errorText(error)),
     );
     return () => {
       cancelled = true;
     };
   }, [source, generation]);
+
+  // A folder's widget: its page read afresh (and its metadata with it) on
+  // every load, and loaded again whenever a file in the folder changes.
+  const folder = source.type === 'file' ? source.path : null;
+  const folderHost = source.type === 'file' ? source.host : null;
+  useEffect(() => {
+    const bridge = getWidgetsBridge();
+    if (folder === null || !bridge || !guestsAvailable()) return;
+    let cancelled = false;
+    bridge.folder(folder).then(
+      (opened) => {
+        if (cancelled) return;
+        refresh(widget.id, parseFileWidget(opened));
+        setFetched(true);
+      },
+      (error: unknown) => !cancelled && setFailed(errorText(error)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [folder, widget.id, refresh, generation]);
+
+  useEffect(() => {
+    if (folderHost === null) return;
+    return getWidgetsBridge()?.onFolderChanged(({ host }) => {
+      if (host !== folderHost) return;
+      setFailed(null);
+      setGone(false);
+      setFetched(false);
+      setWebContentsId(null);
+      setGeneration((g) => g + 1);
+    });
+  }, [folderHost]);
 
   useEffect(() => {
     if (webContentsId !== null) onGuest(webContentsId, trigger.current);
@@ -96,8 +137,10 @@ export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, on
 
   const reload = () => {
     setFailed(null);
-    if (gone || !surface.current) {
+    // A folder's widget reads its folder again, metadata and all.
+    if (gone || !surface.current || source.type === 'file') {
       setGone(false);
+      if (source.type === 'file') setFetched(false);
       setWebContentsId(null);
       setGeneration((g) => g + 1);
     } else {
@@ -111,6 +154,7 @@ export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, on
     resize: (size) => resize(widget.id, size),
     reload,
     about: () => onAbout(widget),
+    publish: widget.source.type === 'file' ? () => onPublish(widget) : undefined,
     remove: () => onRemove(widget),
   };
 
