@@ -1525,6 +1525,58 @@ expose('volumes', {
   },
 });
 
+/**
+ * A subscription to one of main's pushes. Returns an unsubscribe fn.
+ * @param {string} channel
+ * @param {(payload: any) => void} callback
+ */
+function listen(channel, callback) {
+  /**
+   * @param {Electron.IpcRendererEvent} _event
+   * @param {unknown} payload
+   */
+  const handler = (_event, payload) => callback(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
+// Passwords (window.dinos.passwords), backed by electron/passwords.mts: the
+// vault, and the browser's autofill. Types in src/lib/passwords.ts.
+/** @type {Record<string, (...args: unknown[]) => unknown>} */
+const passwords = {};
+for (const method of [
+  'state', 'create', 'unlock', 'lock', 'setAutoUnlock', 'forgetNever', 'changePassword', 'list', 'get', 'save',
+  'setFavorite', 'move', 'trash', 'restore', 'deleteForever', 'emptyTrash', 'createGroup', 'renameGroup',
+  'deleteGroup', 'generate', 'copy',
+]) {
+  passwords[method] = (...args) => ipcRenderer.invoke(`passwords:${method}`, ...args);
+}
+expose('passwords', {
+  ...passwords,
+  /** @param {(state: unknown) => void} callback */
+  onChanged: (callback) => listen('passwords:changed', callback),
+  /** @param {string} url */
+  siteLogins: (url) => ipcRenderer.invoke('passwords:site-logins', url),
+  /** @param {number} wcId @param {string} id */
+  fillPage: (wcId, id) => ipcRenderer.invoke('passwords:fill-page', wcId, id),
+  /** @param {number} requestId @param {unknown} choice */
+  choose: (requestId, choice) => ipcRenderer.invoke('passwords:choose', requestId, choice),
+  /** @param {number} requestId @param {boolean} highlighted */
+  highlight: (requestId, highlighted) => ipcRenderer.invoke('passwords:highlight', requestId, highlighted),
+  /** @param {number} offerId @param {string} answer @param {string} [username] */
+  answerOffer: (offerId, answer, username) => ipcRenderer.invoke('passwords:answer-offer', offerId, answer, username),
+  /** @param {(suggestion: unknown) => void} callback */
+  onSuggest: (callback) => listen('passwords:suggest', callback),
+  /** @param {(requestId: number) => void} callback */
+  onHide: (callback) => listen('passwords:hide', (p) => callback(p.requestId)),
+  /** @param {(event: unknown) => void} callback */
+  onKey: (callback) => listen('passwords:key', callback),
+  /** @param {(offer: unknown) => void} callback */
+  onOffer: (callback) => listen('passwords:offer', callback),
+  /** @param {(offerId: number) => void} callback */
+  onOfferGone: (callback) => listen('passwords:offer-gone', (p) => callback(p.offerId)),
+});
+
 // System Monitor bridge (window.dinos.systemMonitor), backed by
 // electron/system-monitor.mts: snapshots of what's running, pushed every few
 // seconds while someone is subscribed, and SIGTERM/SIGKILL for Din's user's

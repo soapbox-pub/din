@@ -27,6 +27,7 @@ import { DesktopMenu } from './DesktopMenu';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
 import { BrowserExtensionHost } from './BrowserExtensionHost';
 import { ExtensionPopupHost } from './ExtensionPopupHost';
+import { PasswordAutofillHost } from './PasswordAutofillHost';
 import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { NsiteBridgeHost } from './NsiteBridgeHost';
@@ -203,6 +204,7 @@ function DesktopSession() {
                   <FilePickerBridgeHost />
                   <BrowserExtensionHost />
                   <ExtensionPopupHost />
+                  <PasswordAutofillHost />
                   <NostrBridgeHost />
                   <HighlightBridgeHost />
                   <NsiteBridgeHost />

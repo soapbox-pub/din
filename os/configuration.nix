@@ -57,7 +57,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-cs04ERV6YYmbuXJPxfu9l+W+2LCTmvX5JreLMl3DO2k=";
+    npmDepsHash = "sha256-sT+RHA1k+btvMbJEolIjN4J3Kn8MdviuU7I5WmyzsoM=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -101,9 +101,11 @@ let
       # live in a node_modules directory beside it.
       mkdir -p $out/share/din/node_modules
       # The ad blocker's filter engine (electron/adblock.mts) and its
-      # page preload come along too, and nostr-tools for Din's NIP-46
-      # remote signer (electron/bunker.mts).
+      # page preload come along too, nostr-tools for Din's NIP-46
+      # remote signer (electron/bunker.mts), and Passwords' KeePass
+      # library and Argon2 (electron/passwords.mts).
       for dep in nostr-tools @noble/ciphers @noble/curves @noble/hashes @scure/base \
+        kdbxweb @xmldom/xmldom hash-wasm \
         electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip pbf \
         @ghostery/adblocker @ghostery/adblocker-content @ghostery/adblocker-extended-selectors \
         @ghostery/adblocker-electron-preload @ghostery/url-parser tldts-experimental tldts-core \

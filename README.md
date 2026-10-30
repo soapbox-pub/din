@@ -322,6 +322,34 @@ screencopy. A separate display is one din-shell adds with no screen behind it
 soon as Din draws, and goes with deckmon, even if deckmon is killed.
 Elsewhere Din uses a `deckmon` on PATH.
 
+### Passwords
+
+The Passwords app keeps logins, verification codes (TOTP) and secure notes
+in a KeePass file, `~/.local/share/din/Passwords.kdbx` (KDBX 4, Argon2id),
+which KeePassXC, Strongbox and KeePassDX open with the same password. Only
+Din's main process holds it open (`electron/passwords.mts`); the app reaches
+it through its `passwords` permission. Argon2 runs in a worker thread with
+hash-wasm (`electron/passwords-kdf.mts`), since Electron's BoringSSL has none.
+
+Set up with the computer's password, it opens at login with no prompt. The
+key derived from the password, not the password, is kept in the login
+keyring over the Secret Service (`electron/secret-service.mts`), which the
+boot screen's password unlocks; the vault keeps its KDF salt across saves so
+that key stays valid. Settings → Password re-keys the vault along with
+everything else when its password was the computer's old one. Lock in the
+app locks it until the password is typed; a save by another app (which draws
+a new salt) makes the next unlock ask once.
+
+The Web Browser fills logins in. `electron/passwords-preload.cjs`, in every
+frame of web pages, reports focus on a login field; the desktop draws the
+vault's logins for the site below it (`PasswordAutofillHost`), and main
+checks the one picked against the frame's own URL (same host or registrable
+domain, never https to http) before sending it to that frame. New-password
+fields offer a strong password. A login submitted that the vault doesn't
+have becomes an offer to save it, and the toolbar shows a site's saved
+logins to fill or copy. Copied passwords and codes leave the clipboard after
+90 seconds.
+
 ### Printing
 
 Printers need no setup on DinOS. CUPS runs with Avahi and ipp-usb, so a

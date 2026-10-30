@@ -55,6 +55,7 @@ import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
 import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
+import type { PasswordsBridge } from '@/lib/passwords';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 
@@ -830,6 +831,19 @@ export function installDin(transport: Transport): void {
         }
         m.onChanged = (cb: (change: unknown) => void) => sys.on('mail', 'mail:changed', (c) => cb(c));
         system.mail = m as unknown as MailBridge;
+      }
+      if (permissions.has('passwords')) {
+        await sys.ready('passwords');
+        const p: Record<string, unknown> = {};
+        for (const m of [
+          'state', 'create', 'unlock', 'lock', 'setAutoUnlock', 'forgetNever', 'changePassword', 'list', 'get', 'save',
+          'setFavorite', 'move', 'trash', 'restore', 'deleteForever', 'emptyTrash', 'createGroup', 'renameGroup',
+          'deleteGroup', 'generate', 'copy',
+        ]) {
+          p[m] = (...args: unknown[]) => sys.call('passwords', `passwords:${m}`, args);
+        }
+        p.onChanged = (cb: (state: unknown) => void) => sys.on('passwords', 'passwords:changed', (s) => cb(s));
+        system.passwords = p as unknown as PasswordsBridge;
       }
     }
 

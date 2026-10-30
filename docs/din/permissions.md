@@ -37,6 +37,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `indd` | `din.system.indd`: InDesign conversion | Publisher |
 | `volumes` | `din.system.volumes`: removable disks, mounting and ejecting | Files |
 | `mail` | `din.system.mail`: the user's IMAP and SMTP accounts (`src/lib/mail.ts`), run in main by `electron/mail.mts`. Passwords stay in main, sealed with the keyring; the app never sees them | Mail |
+| `passwords` | `din.system.passwords`: the password vault's items, locking and unlocking it, generating passwords, copying a field (cleared from the clipboard after 90 seconds). Not the browser's autofill, which is the desktop's | Passwords |
 | `file-folders` | `din.system.fs` scoped to the folders of files the user hands the app, and `handle.parent()` ([files.md](files.md#some-folders-by-path)) | Preview, Publisher |
 
 A manifest's `din.folders` scopes `din.system.fs` to fixed folders instead
@@ -63,7 +64,7 @@ They don't go through the desktop. When the app connects, the desktop
 checks its grants and asks main for a port from the app straight to each
 granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made)):
 
-Bridges with ports of their own: `fs`, `pty`, `assistant`, `indd`, `volumes`, `mail`
+Bridges with ports of their own: `fs`, `pty`, `assistant`, `indd`, `volumes`, `mail`, `passwords`
 (`SYSTEM_PERMISSIONS` in `electron/din-apps.mts`, mirrored in
 `src/lib/dinApps.ts` and `src/sdk/runtime.ts`). A bridge's pushes reach the apps
 granted it: a pty's output goes to the app that spawned it, and what main

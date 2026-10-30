@@ -83,6 +83,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   indd: 'Convert InDesign documents',
   volumes: 'Mount and eject disks',
   mail: 'Read and send email from your mail accounts',
+  passwords: 'See and change all your saved passwords',
   'file-folders': 'Reach the folders of files you give it',
 };
 

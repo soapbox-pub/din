@@ -9,7 +9,8 @@
 //
 // The password itself - the disk's, sudo's, the lock screen's and nostrd's,
 // all one - is changed by os/din-password.py (DIN_PASSWORD), which checks
-// the old one before changing anything. Both go to it on stdin. It also says
+// the old one before changing anything. Both go to it on stdin; Passwords'
+// vault, which is `din`'s, follows here (passwords.mts). It also says
 // what sudo asks for - approval in Din, the password, or nothing - and
 // changes it, given the password to loosen it.
 //
@@ -18,6 +19,7 @@
 
 import { spawn } from 'node:child_process';
 import { ipcMain } from 'electron';
+import { computerPasswordChanged } from './passwords.mts';
 import { runCommand } from './system.mts';
 
 const HELPER = process.env.DIN_LOCK;
@@ -77,6 +79,8 @@ export function registerLockHandlers(options: {
     if (typeof old !== 'string' || old.includes('\n')) throw new Error('Not a password');
     if (!isUsablePassword(next)) throw new Error('Not a usable password');
     await runPasswordHelper(PASSWORD_HELPER, ['change'], `${old}\n${next}\n`);
+    // Passwords' vault, if it shared the old one, isn't root's to re-key.
+    await computerPasswordChanged(old, next);
   });
 
   ipcMain.handle('lock:sudo-mode', async (event) => {

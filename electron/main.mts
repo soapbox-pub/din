@@ -125,6 +125,7 @@ import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
+import { registerPasswordsHandlers } from './passwords.mts';
 import { registerAskpass } from './askpass.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
@@ -3195,6 +3196,12 @@ const SCREEN_SHARE_PRELOAD = path.join(import.meta.dirname, 'screen-share-preloa
 const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
 
 /**
+ * Absolute path to the session preload that autofills logins from Passwords
+ * (see electron/passwords.mts). Every page gets it, in every frame.
+ */
+const PASSWORDS_PRELOAD = path.join(import.meta.dirname, 'passwords-preload.cjs');
+
+/**
  * Absolute path to the session preload that gives installed nsites the napp
  * runtime (see electron/napp.mts): window.napp, notifications and periodic
  * sync from the page and the service worker, and window.ENV. Registered on
@@ -5368,6 +5375,7 @@ app.whenReady().then(() => {
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
     s.registerPreloadScript({ id: 'din-screen-share', type: 'frame', filePath: SCREEN_SHARE_PRELOAD });
     s.registerPreloadScript({ id: 'din-media', type: 'frame', filePath: MEDIA_PRELOAD });
+    s.registerPreloadScript({ id: 'din-passwords', type: 'frame', filePath: PASSWORDS_PRELOAD });
     allowScreenSharing(s);
   }
   registerScreenShareHandlers({
@@ -5536,6 +5544,13 @@ app.whenReady().then(() => {
   registerDictationHandlers({ assertShellSender, guestFromId: shellGuestFromId });
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
+  registerPasswordsHandlers({
+    assertShellSender,
+    isBridgeEvent,
+    sendToShell,
+    isAutofillGuest: (contents) =>
+      shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
+  });
   registerAskpass({
     sendToShell,
     hasShell: () => !!shellWindow && !shellWindow.webContents.isDestroyed(),

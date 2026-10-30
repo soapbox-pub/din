@@ -1,0 +1,12 @@
+{
+  "name": "Passwords",
+  "description": "Your passwords, verification codes and secure notes, kept in a KeePass file that unlocks with your computer's password, and filled in for you by the Web Browser.",
+  "icons": [{ "src": "/icons/apps/passwords.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "din": {
+    "permissions": ["passwords"],
+    "window": { "size": { "width": 980, "height": 640 }, "frame": "custom" },
+    "keywords": ["password manager", "keychain", "logins", "KeePass", "kdbx", "1Password", "two-factor", "2FA", "verification codes", "TOTP", "authenticator", "secure notes", "autofill"]
+  }
+}

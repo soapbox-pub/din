@@ -233,6 +233,9 @@ export const APPS: readonly AppDefinition[] = [
   // notifications and the menu bar's robot point at a conversation by
   // its `sessionID` launch param.
   dinApp('assistant'),
+  // The password vault, which the Web Browser fills logins from. One
+  // window, which the browser points at an item by its `item` launch param.
+  dinApp('passwords'),
   {
     id: 'settings',
     name: 'Settings',

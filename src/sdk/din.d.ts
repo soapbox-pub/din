@@ -28,6 +28,7 @@ import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
 import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
+import type { PasswordsBridge } from '@/lib/passwords';
 
 export type Unsubscribe = () => void;
 
@@ -763,6 +764,8 @@ export type Permission =
   | 'volumes'
   /** IMAP and SMTP accounts: read, file and send mail (`din.system.mail`). Mail. */
   | 'mail'
+  /** The password vault: its items, locking, generating (`din.system.passwords`). Passwords. */
+  | 'passwords'
   /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.
@@ -796,6 +799,7 @@ export interface DinSystem {
   indd?: InddBridge;
   volumes?: VolumesBridge;
   mail?: MailBridge;
+  passwords?: PasswordsBridge;
 }
 
 // ---------------------------------------------------------------------------

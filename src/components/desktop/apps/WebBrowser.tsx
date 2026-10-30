@@ -136,6 +136,7 @@ import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 import { AdblockButton } from '@/components/desktop/apps/AdblockButton';
 import { PopupBlockedButton } from '@/components/desktop/apps/PopupBlockedButton';
 import { SignerSiteButton } from '@/components/desktop/apps/SignerSiteButton';
+import { PasswordsSiteButton } from '@/components/desktop/apps/PasswordsSiteButton';
 import { SiteInfoButton } from '@/components/desktop/apps/SiteInfoButton';
 import { useUserscripts } from '@/hooks/useUserscripts';
 import {
@@ -1986,6 +1987,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
 
         {/* Private tabs have no window.nostr. */}
         {!isPrivate && <SignerSiteButton url={activeTab.url} />}
+        <PasswordsSiteButton url={activeTab.url} wcId={activeTab.wcId} />
 
         {activeTab.zoom !== 1 && (
           <button

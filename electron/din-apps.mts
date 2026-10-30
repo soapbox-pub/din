@@ -38,6 +38,7 @@ const SYSTEM_PERMISSIONS = {
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|eject)$/,
   mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|attachment|setFlags|move|remove|send|saveDraft)$/,
+  passwords: /^passwords:(state|create|unlock|lock|setAutoUnlock|forgetNever|changePassword|list|get|save|setFavorite|move|trash|restore|deleteForever|emptyTrash|createGroup|renameGroup|deleteGroup|generate|copy)$/,
 } as const;
 export type SystemPermission = keyof typeof SYSTEM_PERMISSIONS;
 
@@ -50,6 +51,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   indd: null,
   volumes: /^volumes:(changed|event)$/,
   mail: /^mail:changed$/,
+  passwords: /^passwords:changed$/,
 };
 
 /**
