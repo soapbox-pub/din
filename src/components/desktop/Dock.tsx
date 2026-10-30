@@ -25,6 +25,8 @@ import { dockTakes, openDropped, type DroppedItem } from '@/lib/dockDrop';
 import { poof } from '@/lib/dockPoof';
 import { getFsBridge } from '@/lib/fs';
 import { registerDockTile } from '@/lib/dockTiles';
+import { useNotificationCenter } from '@/lib/notificationCenter';
+import { isNsiteAppId } from '@/lib/nsiteApps';
 import { cn } from '@/lib/utils';
 import { appsDockedAs } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
@@ -131,7 +133,8 @@ const MAX_DOTS = 4;
  *
  * Shows pinned apps first (kept on this device), then any
  * running apps that aren't pinned. Each tile groups its app's windows, with
- * a dot under it per window: click launches, toggles, or cycles through
+ * a dot under it per window (and, for an installed web app or nsite, a
+ * count of its unread notifications on the icon's corner): click launches, toggles, or cycles through
  * them, the scroll wheel cycles too, middle-click always opens a new window,
  * right-click offers pin/unpin, close, and uninstall, dragging an
  * unpinned tile left among the pinned ones pins it, and dragging a pinned
@@ -218,6 +221,17 @@ export function Dock({
     .filter((id) => !pinned.includes(id) && getApp(id))
     .sort((a, b) => rank(a) - rank(b));
   const entryIds = [...pinnedIds, ...unpinnedIds];
+
+  // Unread notifications in the notification center, per tile, for the
+  // installed web apps and nsites that sent them.
+  const { notifications } = useNotificationCenter();
+  const unread = new Map<string, number>();
+  for (const n of notifications) {
+    const appId = n.source.appId;
+    if (!n.history || n.read || !appId) continue;
+    const tile = tileOf(appId);
+    unread.set(tile, (unread.get(tile) ?? 0) + 1);
+  }
 
   // The Din window that currently holds focus: highest z among visible ones.
   const activeWindow = focusedWindow(windows);
@@ -368,6 +382,7 @@ export function Dock({
       decorateGhost: (ghost) => {
         ghost.style.boxShadow = '';
         ghost.querySelector('[data-dock-dots]')?.remove();
+        ghost.querySelector('[data-dock-badge]')?.remove();
         const label = ghost.querySelector<HTMLElement>('[data-dock-label]');
         if (label) {
           label.textContent = 'Remove';
@@ -745,6 +760,7 @@ export function Dock({
                   isPinned={pinned.includes(appId)}
                   reordering={dragging}
                   dropping={dropTarget === appId}
+                  unread={app.web || isNsiteAppId(app.id) ? (unread.get(appId) ?? 0) : 0}
                   onTogglePin={togglePin}
                   onDragPointerDown={reorder.onPointerDown}
                   onUninstall={canUninstall(appId) ? uninstall : undefined}
@@ -788,6 +804,7 @@ const DockItem = memo(function DockItem({
   isPinned,
   reordering,
   dropping,
+  unread,
   onTogglePin,
   onDragPointerDown,
   onUninstall,
@@ -808,6 +825,8 @@ const DockItem = memo(function DockItem({
   reordering: boolean;
   /** Files dragged over the tile that its app opens: dropping them opens them. */
   dropping: boolean;
+  /** Unread notifications the app sent, badged on the tile. */
+  unread: number;
   onTogglePin: (appId: string) => void;
   /** Starts a drag to reorder the tiles. */
   onDragPointerDown: (appId: string, e: React.PointerEvent<HTMLElement>) => void;
@@ -881,9 +900,10 @@ const DockItem = memo(function DockItem({
     <button
       type="button"
       aria-label={
-        appWindows.length > 0
+        (appWindows.length > 0
           ? `${app.name} (${appWindows.length} window${appWindows.length > 1 ? 's' : ''})`
-          : `Open ${app.name}`
+          : `Open ${app.name}`) +
+        (unread > 0 ? `, ${unread} unread notification${unread > 1 ? 's' : ''}` : '')
       }
       onClick={handleClick}
       onWheel={handleWheel}
@@ -906,6 +926,19 @@ const DockItem = memo(function DockItem({
         web={app.web}
         className={cn('size-[82%] text-foreground drop-shadow-md', launching && 'motion-safe:animate-dock-bounce')}
       />
+      {/* Unread notifications, on the icon's corner as on macOS. */}
+      {unread > 0 && (
+        <span
+          aria-hidden
+          data-dock-badge=""
+          className={cn(
+            'pointer-events-none absolute top-0 right-0 flex h-5 min-w-5 items-center justify-center rounded-full px-1.5',
+            'bg-red-600 text-[11px] leading-none font-semibold text-white tabular-nums shadow-md ring-1 ring-black/10',
+          )}
+        >
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
       {/* Name label, floating above the (possibly magnified) icon. */}
       <span
         aria-hidden
@@ -1066,6 +1099,7 @@ const DockItem = memo(function DockItem({
   prev.isPinned === next.isPinned &&
   prev.reordering === next.reordering &&
   prev.dropping === next.dropping &&
+  prev.unread === next.unread &&
   prev.onTogglePin === next.onTogglePin &&
   prev.onDragPointerDown === next.onDragPointerDown &&
   prev.onUninstall === next.onUninstall &&
