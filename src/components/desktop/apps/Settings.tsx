@@ -2221,7 +2221,7 @@ function AudioDeviceRow({
   onTest?: () => void;
   testing?: boolean;
 }) {
-  const Icon = kind === 'input' ? Mic : Volume2;
+  const Icon = /head(set|phone)/.test(device.icon ?? '') ? Headphones : kind === 'input' ? Mic : Volume2;
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -2250,7 +2250,14 @@ function AudioDeviceRow({
               {device.isDefault && <span className="size-2 rounded-full bg-primary" />}
             </span>
             <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="min-w-0 truncate text-sm">{device.name}</span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm">{device.name}</span>
+              {device.callQuality && (
+                <span className="block truncate text-xs text-muted-foreground">
+                  Call quality while an app uses the mic
+                </span>
+              )}
+            </span>
             {device.isDefault && (
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">Default</span>
             )}

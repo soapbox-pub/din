@@ -2136,6 +2136,8 @@ interface AudioDevice {
   isDefault: boolean;
   /** Its freedesktop icon name, e.g. "audio-headset-bluetooth", when known. */
   icon?: string;
+  /** A Bluetooth headset on its call profile, while something uses its mic. */
+  callQuality?: boolean;
 }
 
 /** A per-application playback stream from `wpctl status`. */
@@ -2355,6 +2357,10 @@ function profileForPort(card: PactlCard, port: string): string | null {
 function inactivePorts(cards: PactlCard[]): { output: AudioPort[]; input: AudioPort[] } {
   const found = { output: [] as AudioPort[], input: [] as AudioPort[] };
   for (const card of cards) {
+    // A Bluetooth headset's other profile is the same headphones, which
+    // WirePlumber moves between by itself: music, or a call while something
+    // records. Offered too, it would be a second row that locks in one.
+    if (card.properties?.['device.bus'] === 'bluetooth') continue;
     const cardName = card.properties?.['device.description'] ?? card.name;
     for (const [port, info] of Object.entries(card.ports ?? {})) {
       if (info.availability === 'not available') continue;
@@ -2379,12 +2385,24 @@ async function audioDevices(): Promise<AudioDevices> {
       pactlList<PactlNode>('sinks'),
       pactlList<PactlNode>('sources'),
     ]);
-    const { sinks, sources } = parseAudioStatus(status);
+    const parsed = parseAudioStatus(status);
+    const { sinks } = parsed;
+    let { sources } = parsed;
+    // Listed from Filters, so with no volume until described.
+    const filters = new Set(sources.filter((device) => device.volume === null).map((device) => device.id));
     await describeFilterDevices([...sinks, ...sources], [...pactlSinks, ...pactlSources]);
+    // While a headset is on its call profile, its own mic is listed too; the
+    // filter standing in for it is the one to keep, as it lasts.
+    const filterNames = new Set(sources.filter((device) => filters.has(device.id)).map((device) => device.name));
+    sources = sources.filter((device) => filters.has(device.id) || !filterNames.has(device.name));
     for (const device of [...sinks, ...sources]) {
       const node = [...pactlSinks, ...pactlSources].find((n) => Number(n.properties?.['object.id']) === device.id);
       const icon = node?.properties?.['device.icon_name'];
       if (icon) device.icon = icon;
+      const card = cards.find((c) => c.name === node?.properties?.['device.name']);
+      if (card?.properties?.['device.bus'] === 'bluetooth' && /head-unit|handsfree|hfp|hsp/i.test(card.active_profile ?? '')) {
+        device.callQuality = true;
+      }
     }
     const inactive = inactivePorts(cards);
     const unplugged = unpluggedNodeIds([...pactlSinks, ...pactlSources]);
@@ -2638,9 +2656,11 @@ function registerSystemEvents(): void {
 // audio device makes it the output (and, for a headset, the input too), with
 // the volume display saying where sound now goes; taking away the device
 // that was playing pauses what was playing, instead of letting it carry on
-// out of the speakers. Devices are told apart by their card (`device.name`),
-// so a Bluetooth headset switching between its music and call profiles,
-// which swaps its nodes, is neither a new device nor a lost one.
+// out of the speakers. Devices are told apart by their card, which lasts as
+// long as the device is there, so a Bluetooth headset switching between its
+// music and call profiles, which swaps its sinks and sources for others, is
+// neither a new device nor a lost one. (WirePlumber's own pausing, which
+// can't tell the two apart, is off in os/configuration.nix.)
 // ---------------------------------------------------------------------------
 
 /** How long after a device appears its outputs and inputs may still follow. */
@@ -2648,7 +2668,7 @@ const AUDIO_ARRIVAL_MS = 5_000;
 /** How long a device must stay gone before it counts as taken away. */
 const AUDIO_DEPARTURE_MS = 1_000;
 
-/** One sound device, from its sinks and sources. */
+/** One sound device: its card, and the sinks and sources it has now. */
 interface AudioCard {
   description: string;
   /** Plugged in or paired, rather than built in (Bluetooth or USB). */
@@ -2669,27 +2689,35 @@ async function audioSnapshot(): Promise<AudioSnapshot> {
     if (!Array.isArray(parsed)) throw new Error('pactl gave no list');
     return parsed as PactlNode[];
   };
-  const [sinks, sources, defaultSink] = await Promise.all([
+  const [cardList, sinks, sources, defaultSink] = await Promise.all([
+    pactl(['-f', 'json', 'list', 'cards']).then((out) => {
+      const parsed: unknown = JSON.parse(out);
+      if (!Array.isArray(parsed)) throw new Error('pactl gave no list');
+      return parsed as PactlCard[];
+    }),
     list('sinks'),
     list('sources'),
     pactl(['get-default-sink']).then((out) => out.trim()),
   ]);
   const cards = new Map<string, AudioCard>();
-  let defaultSinkCard: string | null = null;
-  const add = (node: PactlNode, kind: 'sink' | 'source') => {
-    const props = node.properties ?? {};
-    const card = props['device.name'];
-    // A sink's monitor is listed among the sources, but isn't an input.
-    if (!card || props['media.class'] !== (kind === 'sink' ? 'Audio/Sink' : 'Audio/Source')) return;
-    const entry = cards.get(card) ?? {
-      description: props['device.description'] ?? node.description ?? card,
+  for (const card of cardList) {
+    const props = card.properties ?? {};
+    cards.set(card.name, {
+      description: props['device.description'] ?? card.name,
       external: props['device.bus'] === 'bluetooth' || props['device.bus'] === 'usb',
       sink: null,
       source: null,
-    };
+    });
+  }
+  let defaultSinkCard: string | null = null;
+  const add = (node: PactlNode, kind: 'sink' | 'source') => {
+    const props = node.properties ?? {};
+    // A sink's monitor is listed among the sources, but isn't an input.
+    if (props['media.class'] !== (kind === 'sink' ? 'Audio/Sink' : 'Audio/Source')) return;
+    const entry = cards.get(props['device.name'] ?? '');
+    if (!entry) return;
     entry[kind] ??= node.name;
-    cards.set(card, entry);
-    if (kind === 'sink' && node.name === defaultSink) defaultSinkCard = card;
+    if (kind === 'sink' && node.name === defaultSink) defaultSinkCard = props['device.name'];
   };
   for (const node of sinks) add(node, 'sink');
   for (const node of sources) add(node, 'source');

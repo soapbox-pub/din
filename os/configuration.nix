@@ -1861,11 +1861,20 @@ in
   # the test tone. rtkit lets the audio threads run at real-time priority.
   # Socket-activated per user session, so the `din` session gets its own
   # instance with no extra configuration.
+  #
+  # WirePlumber's pause-on-removal (linking.pause-playback) is off: it pauses
+  # whatever played to a sink that goes away, and a Bluetooth headset's music
+  # sink goes away each time it switches to its call profile for something
+  # recording, so music stopped as a call began and after it ended. Din
+  # pauses media itself when headphones actually leave (electron/main.mts).
   security.rtkit.enable = true;
   services.pipewire = {
     enable = true;
     alsa.enable = true;
     pulse.enable = true;
+    wireplumber.extraConfig.din-no-pause-on-profile-switch = {
+      "wireplumber.settings"."linking.pause-playback" = false;
+    };
   };
 
   # Screen sharing over AirPlay (electron/airplay.mts). deckmon's daemon owns

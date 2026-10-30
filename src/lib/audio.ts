@@ -39,6 +39,11 @@ export interface AudioDevice {
   isDefault: boolean;
   /** Its freedesktop icon name, e.g. "audio-headset-bluetooth", when known. */
   icon?: string;
+  /**
+   * A Bluetooth headset on its call profile because something is using its
+   * mic: both ways at call quality, back to full quality when that stops.
+   */
+  callQuality?: boolean;
 }
 
 /**

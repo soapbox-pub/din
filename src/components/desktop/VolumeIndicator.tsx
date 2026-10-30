@@ -202,8 +202,13 @@ function DeviceChoice({
       >
         <Icon className="size-4" aria-hidden />
       </span>
-      <span className="min-w-0 flex-1 truncate" title={device.name}>
-        {device.name}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate" title={device.name}>
+          {device.name}
+        </span>
+        {device.callQuality && (
+          <span className="block truncate text-xs text-muted-foreground">Call quality while an app uses the mic</span>
+        )}
       </span>
       {device.isDefault && <Check className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     </button>
