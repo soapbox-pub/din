@@ -215,8 +215,23 @@ changes the repository and branch, so anyone can run their own fork:
 whoever picks the source picks what runs as root. Older systems stay in the
 boot menu. Live sticks aren't updated.
 
+A staged update needn't wait for the next boot. Settings → About (and the
+notification saying it's ready) offers **Apply now**, `din-update apply`:
+the same switch as `nixos-rebuild switch`, which restarts the services that
+changed but never `din-shell.service`, Din itself. If the update brings a
+new Din, the old one runs on until **Restart Din** (`din-update
+restart-din`), which closes every app; if it brings a new kernel, initrd,
+kernel parameters, modules or firmware, it isn't applied, and the computer
+restarts instead. `din-update status` reports what the running system
+still needs (`restart`) and what the staged one would (`stagedNeeds`), by
+comparing those with the booted system's and the command din-shell is
+running with the system's own; Din offers the restart either way, including
+after a switch by hand. Din's launcher names the updater through
+`/run/current-system`, since a Din that hasn't restarted may only run the
+new system's.
+
 A computer's own changes live in `~/DinOS`, the user's copy of Din, built
-with `sudo nixos-rebuild boot --flake ~/DinOS/os#dinos` (the assistant's
+with `sudo nixos-rebuild switch --flake ~/DinOS/os#dinos` (the assistant's
 `dinos` skill, `os/opencode/skills/dinos`). Updates keep them: when the
 commit the newest system was built from isn't in the followed branch, the
 updater merges the branch's tip into that exact commit, which the user

@@ -16,7 +16,9 @@
 #       JSON: whether this is a live boot; the running system's version and
 #       commit and the commit the next boot starts, if one is staged; the
 #       repository and branch followed, whether updates are automatic, and
-#       the last or current run's phase, step, progress and error.
+#       the last or current run's phase, step, progress and error; and
+#       what the running system still needs to be all of itself (`restart`)
+#       and to start the staged one (`stagedNeeds`), below.
 #   din-update start
 #       Check for an update now. Unlike the timer's runs, this one goes ahead
 #       with updates off, on battery, or for a commit that failed to build.
@@ -26,6 +28,12 @@
 #       Follow another repository or branch: a fork's, say. Not one of the
 #       commands Din runs without asking (configuration.nix), as whoever
 #       chooses the source chooses what runs as root.
+#   din-update apply
+#       Switch to the staged system now, as `nixos-rebuild switch` would,
+#       where it needs no restart of the computer.
+#   din-update restart-din
+#       Restart din-shell.service: Din, and every app in it. Din asks for
+#       this, so it doesn't wait for its own end.
 #   din-update run
 #       The update itself, as din-update.service. Writes its progress to
 #       STATE as it goes.
@@ -47,6 +55,16 @@
 # branch the commit of the last system the updater staged, for ~/DinOS to
 # pull.
 #
+# Updates are staged for the next boot, but most needn't wait for it. A
+# system switched to while running (`apply`, or `nixos-rebuild switch`)
+# restarts the services that changed, except din-shell.service: that's
+# Din, and everything in it, so it keeps running the Din it started with
+# until it's restarted (`restart-din`). A new kernel, initrd, kernel
+# parameters, modules or firmware wait for the computer's restart.
+# Settings in /etc that a running service reads only when it starts (one
+# with no restartTriggers) also wait for that service's next start, which
+# nothing here can see.
+#
 # Before it builds, a run makes sure there's room: the store on root has to
 # take what the build adds, and the build directory (nix.settings.build-dir,
 # on the home volume) its scratch space. It collects garbage if there isn't,
@@ -67,6 +85,8 @@ RESULT=/var/lib/dinos/result
 PROFILE=/nix/var/nix/profiles/system
 LOCK=/run/din-update.lock
 UNIT=din-update.service
+SHELL_UNIT=din-shell.service
+BOOTED=/run/booted-system
 BUILD_DIR=/home/.nix-build
 # Systems kept in the profile: the boot menu's (configurationLimit).
 KEEP_GENERATIONS=5
@@ -261,7 +281,13 @@ status() {
     reason=""
   fi
   find_custom
-  jq -n --argjson live "$live" --arg version "$version" --arg current "$current" \
+  local restart="" staged_needs=""
+  if ! $live; then
+    restart=$(needs_for /run/current-system)
+    if [[ -n $staged ]]; then staged_needs=$(needs_for "$(readlink -f "$PROFILE")"); fi
+  fi
+  jq -n --arg restart "$restart" --arg stagedNeeds "$staged_needs" \
+    --argjson live "$live" --arg version "$version" --arg current "$current" \
     --arg staged "$staged" --arg url "$(source_url)" --arg branch "$(source_branch)" \
     --argjson auto "$auto" --arg phase "$phase" --argjson state "$(cat "$STATE" 2>/dev/null || echo '{}')" \
     --arg error "$error" --arg reason "$reason" --argjson custom "$custom" --argjson changes "$changes" '
@@ -271,7 +297,44 @@ status() {
      step: $state.step, percent: ($state.percent // 0), target: $state.target,
      error: (if $phase == "failed" then ($error | orNull) else null end),
      reason: (if $phase == "failed" then ($reason | orNull) else null end),
-     custom: $custom, changes: $changes, checkedAt: $state.checkedAt}'
+     custom: $custom, changes: $changes, checkedAt: $state.checkedAt,
+     restart: ($restart | orNull), stagedNeeds: (if $staged == "" then null else ($stagedNeeds | orNull) end)}'
+}
+
+# The command Din runs under: din-shell's, which execs its compositor with
+# Din's launcher. From system $1's unit, or with no argument, of the
+# running Din.
+din_command() {
+  local script pid
+  if [[ -n ${1:-} ]]; then
+    script=$(sed -n 's/^ExecStart=//p' "$1/etc/systemd/system/$SHELL_UNIT" 2>/dev/null | head -n1)
+    [[ -n $script ]] || return 0
+    sed -n 's/^exec  *//p' "$script" 2>/dev/null | head -n1
+  else
+    pid=$(systemctl show -p MainPID --value "$SHELL_UNIT" 2>/dev/null)
+    [[ -n $pid && $pid != 0 ]] || return 0
+    tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/ *$//'
+  fi
+}
+
+# What running system $1 would take, on top of switching to it: `reboot`
+# when its kernel, initrd, kernel parameters, modules or firmware aren't
+# the booted system's, `din` when its Din isn't the one running, or
+# nothing.
+needs_for() {
+  local system=$1 part running
+  for part in kernel initrd kernel-modules firmware; do
+    [[ $(readlink -f "$system/$part") == $(readlink -f "$BOOTED/$part") ]] || {
+      echo reboot
+      return
+    }
+  done
+  cmp -s "$system/kernel-params" "$BOOTED/kernel-params" || {
+    echo reboot
+    return
+  }
+  running=$(din_command)
+  [[ -z $running || $running == "$(din_command "$system")" ]] || echo din
 }
 
 start() {
@@ -287,6 +350,23 @@ auto() {
     off) mkdir -p "$(dirname "$AUTO_OFF")" && touch "$AUTO_OFF" ;;
     *) die "usage: din-update auto on|off" ;;
   esac
+}
+
+# Switch to the staged system now. It's the one the next boot starts
+# anyway, so applying it early chooses nothing new.
+apply() {
+  is_live && die "A live system isn't updated."
+  exec 9>"$LOCK"
+  flock -w 30 9 || die "An update is running. Try again when it finishes."
+  local next
+  next=$(readlink -f "$PROFILE")
+  [[ $next != "$(readlink -f /run/current-system)" ]] || die "There's no update to apply."
+  [[ $(needs_for "$next") != reboot ]] || die "This update needs the computer to restart."
+  "$next/bin/switch-to-configuration" switch </dev/null || die "Couldn't apply the update."
+}
+
+restart_din() {
+  systemctl restart --no-block "$SHELL_UNIT"
 }
 
 set_source() {
@@ -564,6 +644,8 @@ case "${1:-}" in
     [[ $# == 3 ]] || die "usage: din-update source <url> <branch>"
     set_source "$2" "$3"
     ;;
+  apply) apply ;;
+  restart-din) restart_din ;;
   run) run ;;
-  *) die "usage: din-update status | start | auto on|off | source <url> <branch> | run" ;;
+  *) die "usage: din-update status | start | auto on|off | source <url> <branch> | apply | restart-din | run" ;;
 esac

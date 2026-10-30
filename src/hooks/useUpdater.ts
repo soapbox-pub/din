@@ -41,7 +41,7 @@ function fixPrompt(state: UpdateState): string {
   return [
     `DinOS couldn't update itself: ${state.error ?? 'my changes stopped it.'}`,
     `Load the dinos skill and fix it: bring ~/DinOS up to date with ${branch} of ${url}, keeping my changes,`,
-    'then build it with nixos-rebuild boot, so the update is ready when I restart.',
+    'then apply it with nixos-rebuild switch, and tell me whether Din or the computer needs to restart.',
   ].join(' ');
 }
 

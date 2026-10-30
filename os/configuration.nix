@@ -216,7 +216,7 @@ let
   din-updater = pkgs.writeShellApplication {
     name = "din-update";
     runtimeInputs = with pkgs; [
-      coreutils util-linux gnugrep gawk jq git ngit systemd config.nix.package
+      coreutils util-linux gnugrep gnused gawk diffutils jq git ngit systemd config.nix.package
     ];
     text = builtins.readFile ./din-update.sh;
   };
@@ -324,6 +324,11 @@ let
     '';
   };
 
+  # Din's logo, on its own: the initrd draws it, and taking it from din-src
+  # would make every commit of Din's a new initrd, which only a restart of
+  # the computer loads (os/din-update.sh's needs_for).
+  din-logo = builtins.path { path = din-root + "/public/din-logo.svg"; name = "din-logo.svg"; };
+
   # The boot and unlock screen: a Plymouth script theme (boot-screen/), with
   # the images it draws with made here. Its ImageDir is under /run, where
   # the initrd puts those and the user's wallpaper (dinos-boot-screen, below).
@@ -349,7 +354,7 @@ let
     magick -size 640x96 xc:none -fill 'rgba(255,255,255,0.14)' \
       -stroke 'rgba(255,255,255,0.32)' -strokewidth 2 \
       -draw 'roundrectangle 1,1 638,94 47,47' $dir/field.png
-    rsvg-convert -h 96 ${din-src}/public/din-logo.svg -o $dir/logo.png
+    rsvg-convert -h 96 ${din-logo} -o $dir/logo.png
   '';
 
   # Succeeds when the partition UUID given is the boot loader's ESP, from
@@ -425,7 +430,10 @@ let
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
     export DIN_INSTALLER=${din-installer}/bin/din-install
-    export DIN_UPDATER=${din-updater}/bin/din-update
+    # The running system's, not this Din's: after a switch, Din runs on
+    # until it restarts, and sudo allows only the new system's updater
+    # (electron/updater.mts resolves it on each call).
+    export DIN_UPDATER=/run/current-system/sw/bin/din-update
     export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
     export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
     export DIN_TIME=${din-time}/bin/din-time
@@ -722,6 +730,9 @@ in
       "${din-updater}/bin/din-update start"
       "${din-updater}/bin/din-update auto on"
       "${din-updater}/bin/din-update auto off"
+      # The system the next boot starts anyway, and Din restarting.
+      "${din-updater}/bin/din-update apply"
+      "${din-updater}/bin/din-update restart-din"
       "${din-keyboard}/bin/din-keyboard"
       "${din-boot-screen}/bin/din-boot-screen"
       "${din-time}/bin/din-time"
@@ -978,7 +989,9 @@ in
     wants = [ "dbus.socket" "systemd-logind.service" "plymouth-quit.service" ];
     wantedBy = [ "graphical.target" ];
     conflicts = [ "getty@tty1.service" ];
-    # A system switch must never restart it: that's Din, and everything in it.
+    # A system switch must never restart it: that's Din, and everything in
+    # it. A new Din waits for Din to restart (Settings → About offers it:
+    # os/din-update.sh's `restart-din`).
     restartIfChanged = false;
     unitConfig = {
       ConditionPathExists = "/dev/tty1";
@@ -1170,7 +1183,8 @@ in
   # userland with its own package manager, sharing $HOME, in rootless podman
   # (also answering to `docker`). ngit brings git-remote-nostr, so git takes
   # nostr:// remotes, Din's own among them.
-  environment.systemPackages = with pkgs; [ git ngit unzip distrobox din-keyring din-cli ]
+  # din-update is there for DIN_UPDATER, above.
+  environment.systemPackages = with pkgs; [ git ngit unzip distrobox din-keyring din-cli din-updater ]
     # The command-line userland a Mac ships with, so nobody who sits down at a
     # terminal finds their usual tools missing.
     ++ [

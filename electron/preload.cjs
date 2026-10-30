@@ -1813,6 +1813,10 @@ expose('updater', {
    */
   setSource: (url, branch) => ipcRenderer.invoke('updater:setSource', url, branch),
 
+  /** Switch to the staged system now, where that needs no restart of the computer. */
+  apply: () => ipcRenderer.invoke('updater:apply'),
+  /** Restart Din, to start a new Din a switch brought. */
+  restartDin: () => ipcRenderer.invoke('updater:restartDin'),
   /** Restart the computer, into the staged update. */
   reboot: () => ipcRenderer.invoke('updater:reboot'),
 

@@ -4584,7 +4584,9 @@ function FirmwareUpdateCard({
 
 function UpdateStatus({ state }: { state: UpdateState }) {
   const [error, setError] = useState<string | null>(null);
-  const [rebooting, setRebooting] = useState(false);
+  // The action under way: one at a time, and Din or the computer going down
+  // keeps it until it does.
+  const [pending, setPending] = useState<'apply' | 'restartDin' | 'reboot' | null>(null);
   const busy = state.phase === 'checking' || state.phase === 'updating';
 
   const check = () => {
@@ -4592,16 +4594,48 @@ function UpdateStatus({ state }: { state: UpdateState }) {
     getUpdaterBridge()?.check().catch((e: unknown) => setError(cleanInstallerError(e)));
   };
 
-  const reboot = () => {
-    setRebooting(true);
+  const act = (action: 'apply' | 'restartDin' | 'reboot') => {
+    const bridge = getUpdaterBridge();
+    if (!bridge) return;
+    setPending(action);
     setError(null);
-    getUpdaterBridge()
-      ?.reboot()
+    bridge[action]()
+      .then(() => {
+        if (action === 'apply') setPending(null);
+      })
       .catch((e: unknown) => {
-        setRebooting(false);
+        setPending(null);
         setError(cleanInstallerError(e));
       });
   };
+
+  // What finishing takes: the staged system applied (and maybe a restart
+  // after), or the running one restarted into.
+  const finish: { title: React.ReactNode; detail: string; action: 'apply' | 'restartDin' | 'reboot'; label: string } | null =
+    state.staged
+      ? {
+          title: <>An update is ready: commit <span className="font-mono">{shortRevision(state.staged)}</span></>,
+          ...(state.stagedNeeds === 'reboot'
+            ? { detail: 'Restart the computer to finish updating.', action: 'reboot', label: 'Restart now' }
+            : state.stagedNeeds === 'din'
+              ? { detail: 'Apply it now, then restart Din to finish.', action: 'apply', label: 'Apply now' }
+              : { detail: 'Apply it now. Nothing needs to restart.', action: 'apply', label: 'Apply now' }),
+        }
+      : state.restart === 'din'
+        ? {
+            title: 'Din has been updated',
+            detail: 'Restart Din to start using it. Open apps will close.',
+            action: 'restartDin',
+            label: 'Restart Din',
+          }
+        : state.restart === 'reboot'
+          ? {
+              title: 'Restart to finish updating',
+              detail: 'The system’s kernel loads when the computer starts.',
+              action: 'reboot',
+              label: 'Restart now',
+            }
+          : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -4626,17 +4660,15 @@ function UpdateStatus({ state }: { state: UpdateState }) {
             </>
           )}
         </div>
-      ) : state.staged ? (
+      ) : finish ? (
         <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">
-              An update is ready: commit <span className="font-mono">{shortRevision(state.staged)}</span>
-            </p>
-            <p className="text-xs text-muted-foreground">Restart to finish updating.</p>
+            <p className="text-sm font-medium text-foreground">{finish.title}</p>
+            <p className="text-xs text-muted-foreground">{finish.detail}</p>
           </div>
-          <Button size="sm" disabled={rebooting} onClick={reboot}>
-            {rebooting && <Loader2 className="size-4 motion-safe:animate-spin" />}
-            Restart now
+          <Button size="sm" disabled={pending !== null} onClick={() => act(finish.action)}>
+            {pending === finish.action && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
+            {pending === 'apply' ? 'Applying…' : finish.label}
           </Button>
         </div>
       ) : null}

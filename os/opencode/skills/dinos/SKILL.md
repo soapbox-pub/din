@@ -10,6 +10,10 @@ DinOS is NixOS built from Din's repository: `os/flake.nix` (the
 There is no `/etc/nixos`; to change the system, change a copy of Din and
 build from it.
 
+The updater, `din-update`, is the running system's, and sudo knows it only
+by its store path: `U=$(readlink -f /run/current-system/sw/bin/din-update)`,
+then `sudo -n "$U" status` (JSON).
+
 **That copy is `~/DinOS`**, the user's fork. Always work there, so updates
 can find the changes and keep them. `/var/lib/dinos/src` is the updater's,
 owned by root: read it, never edit it.
@@ -18,7 +22,7 @@ owned by root: read it, never edit it.
 
 1. Get `~/DinOS` ready.
    - If it doesn't exist, clone the repository the system updates from.
-     `sudo -n "$DIN_UPDATER" status` prints it (`url`, `branch`); by default
+     `sudo -n "$U" status` prints it (`url`, `branch`); by default
      that's `git clone nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/din ~/DinOS`
      (git-remote-nostr is installed). Its `origin` is that repository.
    - If it does, catch it up with the running system first. Updates merge
@@ -30,12 +34,30 @@ owned by root: read it, never edit it.
    files, and a system built from uncommitted changes can't be kept by
    updates: they stop and say so. Merge, don't rebase or amend commits a
    system was built from; updates find the user's changes by those hashes.
-3. `sudo nixos-rebuild boot --flake ~/DinOS/os#dinos`.
-   **Always `boot`, never `switch`**: `switch` restarts `din-shell.service`,
-   which is the whole desktop, including this terminal and the agent.
-4. Ask the user to restart. Never reboot the computer yourself. Afterwards
-   `readlink /run/current-system` should be the new build, and
-   `/etc/din-revision` the commit you built.
+3. `sudo nixos-rebuild switch --flake ~/DinOS/os#dinos`. It applies the
+   system now and adds it to the boot menu. It restarts the services that
+   changed, but never `din-shell.service` (Din, with this terminal and the
+   agent in it), so it's safe to run from here.
+4. Tell the user what's left, from `sudo -n "$U" status`'s `restart`
+   (set `$U` again first: the switch moved it):
+   - `null`: done; the change is live.
+   - `"din"`: Din's own code changed, and Din runs the version it started
+     with until it restarts. Din shows a "Restart Din" notification, also
+     in Settings → About. It closes every app, this conversation's window
+     included, so it's the user's to press: **never restart Din or
+     din-shell yourself.**
+   - `"reboot"`: the kernel, initrd, kernel parameters, modules or firmware
+     changed, which load only at startup. Ask the user to restart the
+     computer; never reboot it yourself.
+
+   A setting in `/etc` that a running service reads only at startup
+   (PipeWire's, say) waits for that service to restart, which `restart`
+   can't see; restart that service (`systemctl --user restart pipewire` for
+   a user one) if the user wants it now. `readlink /run/current-system`
+   should be the new build, and `/etc/din-revision` the commit you built.
+
+   Use `nixos-rebuild boot` instead only when the user wants the change to
+   wait for the next startup.
 
 ## How updates treat a customized system
 
@@ -67,7 +89,7 @@ tip and has nothing to do.
 `~/DinOS` needn't be published. To let other computers follow it, push it
 somewhere git can fetch over `nostr://` or `https://` (`ngit init` makes a
 nostr repository) and, on each of them, set the source in Settings → About
-or with `sudo "$DIN_UPDATER" source <url> <branch>`. Such a computer builds that
+or with `sudo "$U" source <url> <branch>`. Such a computer builds that
 branch as its upstream, and merges its own `~/DinOS` changes into it the
 same way.
 

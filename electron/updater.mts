@@ -5,15 +5,21 @@
 // system follows, builds it, and stages it for the next boot. It runs a few
 // minutes after boot and every six hours, and when asked. DinOS's launcher
 // names the script in DIN_UPDATER. The shell's user runs its `status`,
-// `start` and `auto` commands through sudo without a password, and `source`
+// `start`, `auto`, `apply` and `restart-din` commands through sudo without a
+// password, and `source`
 // (which repository and branch are built) only once sudo has asked. Where
 // DIN_UPDATER isn't set (a dev machine, another distro) the bridge reports
-// itself unavailable.
+// itself unavailable. It names the running system's updater through
+// /run/current-system, which moves when the system is switched to while Din
+// runs on; sudo allows only the store path it resolves to, so it's resolved
+// on every call.
 //
 // The script trusts nothing it's given, so this side only relays: it reads
 // the status again whenever the service's state file changes, and pushes it
-// as `updater:progress`; `updater:state` reads it back after a reload. The
-// restart that finishes an update is the user's.
+// as `updater:progress`; `updater:state` reads it back after a reload. What
+// finishes an update is the user's: applying it now (`apply`, a system
+// switch), then restarting Din if Din changed, or restarting the computer if
+// the kernel did.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -33,9 +39,14 @@ const APPROVAL_TIMEOUT_MS = 11 * 60_000;
 type Step = 'fetch' | 'merge' | 'space' | 'build' | 'install';
 /** Why an update failed, when it's the user's changes that stopped it (os/din-update.sh). */
 type Reason = 'conflict' | 'dirty' | 'missing' | 'build';
+/** What a system takes beyond switching to it: Din restarting, or the computer. */
+type Restart = 'din' | 'reboot';
 
 const STEPS: readonly string[] = ['fetch', 'merge', 'space', 'build', 'install'];
 const REASONS: readonly string[] = ['conflict', 'dirty', 'missing', 'build'];
+const RESTARTS: readonly string[] = ['din', 'reboot'];
+/** A system switch restarts what changed, which can take a while. */
+const APPLY_TIMEOUT_MS = 10 * 60_000;
 const PHASES: readonly string[] = ['idle', 'checking', 'updating', 'failed'];
 
 interface UpdateState {
@@ -71,6 +82,13 @@ interface UpdateState {
   error: string | null;
   /** Set when the user's changes stopped the update, which the assistant can fix. */
   reason: Reason | null;
+  /**
+   * What the running system still needs to be all of itself, after a switch
+   * to it: Din restarting (a new Din), or the computer (a new kernel).
+   */
+  restart: Restart | null;
+  /** What the staged system takes beyond applying it; null if nothing. */
+  stagedNeeds: Restart | null;
 }
 
 /** os/din-update.sh's `status`. */
@@ -88,6 +106,8 @@ interface HelperStatus {
   target: string | null;
   error: string | null;
   reason: string | null;
+  restart: string | null;
+  stagedNeeds: string | null;
   custom: boolean;
   changes: number | null;
   checkedAt: number | null;
@@ -111,6 +131,8 @@ let state: UpdateState = {
   checkedAt: null,
   error: null,
   reason: null,
+  restart: null,
+  stagedNeeds: null,
 };
 
 function messageOf(error: unknown): string {
@@ -119,6 +141,19 @@ function messageOf(error: unknown): string {
     if (reason) return reason;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+/** The store path sudo knows the updater by. */
+function resolve(helper: string): string {
+  try {
+    return fs.realpathSync(helper);
+  } catch {
+    return helper;
+  }
+}
+
+function restartOf(value: string | null | undefined): Restart | null {
+  return value && RESTARTS.includes(value) ? value as Restart : null;
 }
 
 /** Whether an update is being added to the boot menu, which a restart would cut short. */
@@ -140,7 +175,7 @@ export function registerUpdaterHandlers(options: {
   let again = false;
 
   const read = async (helper: string) => {
-    const { stdout } = await runCommand('sudo', ['-n', helper, 'status'], { timeout: 30_000 });
+    const { stdout } = await runCommand('sudo', ['-n', resolve(helper), 'status'], { timeout: 30_000 });
     const status = JSON.parse(stdout) as HelperStatus;
     const phase = PHASES.includes(status.phase) ? status.phase as UpdateState['phase'] : 'idle';
     const step = status.step && STEPS.includes(status.step) ? status.step as Step : null;
@@ -162,6 +197,8 @@ export function registerUpdaterHandlers(options: {
       checkedAt: status.checkedAt,
       error: status.error,
       reason: status.reason && REASONS.includes(status.reason) ? status.reason as Reason : null,
+      restart: restartOf(status.restart),
+      stagedNeeds: restartOf(status.stagedNeeds),
     };
     sendToShell('updater:progress', state);
   };
@@ -193,7 +230,7 @@ export function registerUpdaterHandlers(options: {
   /** Run one of the script's commands: `-n` never asks, `-A` asks in Din. */
   const run = async (helper: string, sudo: '-n' | '-A', args: string[], timeout = 30_000) => {
     try {
-      await runCommand('sudo', [sudo, helper, ...args], { timeout });
+      await runCommand('sudo', [sudo, resolve(helper), ...args], { timeout });
     } catch (error) {
       throw new Error(messageOf(error), { cause: error });
     } finally {
@@ -225,6 +262,18 @@ export function registerUpdaterHandlers(options: {
     if (typeof url !== 'string' || typeof branch !== 'string') throw new Error('Expected a URL and a branch');
     // The script checks both. sudo asks the user first.
     await run(helperOf(), '-A', ['source', url.trim(), branch.trim()], APPROVAL_TIMEOUT_MS);
+  });
+
+  ipcMain.handle('updater:apply', async (event) => {
+    assertShellSender(event);
+    await run(helperOf(), '-n', ['apply'], APPLY_TIMEOUT_MS);
+  });
+
+  // Din's end: systemd restarts din-shell.service once this has asked.
+  ipcMain.handle('updater:restartDin', async (event) => {
+    assertShellSender(event);
+    assertSafeToPowerOff();
+    await run(helperOf(), '-n', ['restart-din']);
   });
 
   ipcMain.handle('updater:reboot', async (event) => {

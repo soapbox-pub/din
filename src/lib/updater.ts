@@ -18,6 +18,13 @@ export type UpdateStep = 'fetch' | 'merge' | 'space' | 'build' | 'install';
  */
 export type UpdateFailure = 'conflict' | 'dirty' | 'missing' | 'build';
 
+/**
+ * What a system takes beyond a switch to it: Din restarting, for a new Din
+ * (din-shell is never restarted by a switch), or the computer, for a new
+ * kernel, initrd or kernel parameters.
+ */
+export type UpdateRestart = 'din' | 'reboot';
+
 export interface UpdateState {
   available: boolean;
   /** Running from a USB stick, which isn't updated. */
@@ -51,6 +58,10 @@ export interface UpdateState {
   error: string | null;
   /** Set when the user's changes stopped the update, which the assistant can fix. */
   reason: UpdateFailure | null;
+  /** What the running system still needs to be all of itself, after a switch to it. */
+  restart: UpdateRestart | null;
+  /** What the staged system takes beyond applying it; null if nothing. */
+  stagedNeeds: UpdateRestart | null;
 }
 
 export interface UpdaterBridge {
@@ -61,6 +72,10 @@ export interface UpdaterBridge {
   setAuto(auto: boolean): Promise<void>;
   /** Build updates from another repository or branch. sudo asks the user first. */
   setSource(url: string, branch: string): Promise<void>;
+  /** Switch to the staged system now, where that needs no restart of the computer. */
+  apply(): Promise<void>;
+  /** Restart Din, closing every app, to start a new Din a switch brought. */
+  restartDin(): Promise<void>;
   reboot(): Promise<void>;
   onProgress(callback: (state: UpdateState) => void): () => void;
 }
