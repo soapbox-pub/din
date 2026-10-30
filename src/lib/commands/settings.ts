@@ -48,6 +48,7 @@ const SETTINGS: Setting[] = [
     key: 'appearance.cursor-click', field: 'cursorClick', help: 'What a click sets off',
     param: { type: 'string', choices: ['none', ...CLICK_EFFECTS.map((e) => e.id)] }, accepts: (raw) => raw.startsWith('cursorfx:'),
   },
+  { key: 'appearance.cursor-theme-color', field: 'cursorThemeColor', help: 'Cursor effects take on the theme\'s color', param: bool },
   { key: 'appearance.show-mouse', field: 'cursorShowMouse', help: 'Super+Shift+K, or shaking the mouse, rings the pointer with light', param: bool },
   { key: 'appearance.fire-paint', field: 'cursorFirePaint', help: 'Super+Shift and drag to draw in fire', param: bool },
   { key: 'appearance.water', field: 'cursorWater', help: 'Hold Super+Ctrl and move the mouse to stir the screen', param: bool },

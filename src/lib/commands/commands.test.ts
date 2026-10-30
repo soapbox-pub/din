@@ -29,7 +29,7 @@ function context(config: Partial<AppConfig> = {}): CommandContext & { config: Ap
 
 describe('the din command covers Din', () => {
   it('has an area, or a reason, for every Settings section', () => {
-    const source = readFileSync('src/components/desktop/apps/Settings.tsx', 'utf8');
+    const source = readFileSync('src/lib/settingsSections.ts', 'utf8');
     const union = /type SectionId =([^;]+);/.exec(source)?.[1] ?? '';
     const sections = [...union.matchAll(/'([a-z-]+)'/g)].map((m) => m[1]);
     expect(sections.length).toBeGreaterThan(10);

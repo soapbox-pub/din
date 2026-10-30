@@ -5,6 +5,7 @@ import {
   BellOff,
   Bluetooth,
   Bomb,
+  Bot,
   Check,
   CircleArrowUp,
   Clock,
