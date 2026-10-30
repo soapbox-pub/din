@@ -1,5 +1,6 @@
 import {
   createContext,
+  memo,
   useContext,
   useEffect,
   useMemo,
@@ -498,7 +499,7 @@ function FeaturedHero({ app }: { app: StoreApp }) {
 }
 
 /** A compact card in the horizontally scrolling featured shelf. */
-function ShelfCard({ app }: { app: StoreApp }) {
+const ShelfCard = memo(function ShelfCard({ app }: { app: StoreApp }) {
   const [ref, seen] = useSeen<HTMLDivElement>();
   const view = useStoreAppView(app, seen);
 
@@ -530,7 +531,7 @@ function ShelfCard({ app }: { app: StoreApp }) {
       <GetPill app={app} name={view.name} className="self-start" />
     </div>
   );
-}
+});
 
 /** The catalog's cards. */
 function CatalogGrid({ apps }: { apps: StoreApp[] }) {
@@ -543,8 +544,12 @@ function CatalogGrid({ apps }: { apps: StoreApp[] }) {
   );
 }
 
-/** One catalog entry: icon, name, publisher, blurb, and the Get button. */
-function StoreAppCard({ app }: { app: StoreApp }) {
+/**
+ * One catalog entry: icon, name, publisher, blurb, and the Get button.
+ * Memoized: every site the catalog checks re-renders the store, and a card's
+ * StoreApp stays the same object until its manifest changes.
+ */
+const StoreAppCard = memo(function StoreAppCard({ app }: { app: StoreApp }) {
   const [ref, seen] = useSeen<HTMLDivElement>();
   const view = useStoreAppView(app, seen);
 
@@ -590,7 +595,7 @@ function StoreAppCard({ app }: { app: StoreApp }) {
       )}
     </div>
   );
-}
+});
 
 /**
  * A site's detail page: the screenshots and categories its web app manifest

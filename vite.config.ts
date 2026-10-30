@@ -59,8 +59,9 @@ function dinApps(): Plugin {
         const tags = app
           ? [{ tag: "script", attrs: { type: "module", src: "/src/sdk/frame.ts" }, injectTo: "head-prepend" as const }]
           : [];
-        if (!ctx.server) return { html, tags };
-        if (app) return { html: html.replace("connect-src ", "connect-src ws://localhost:* "), tags };
+        // A profiling build is served from localhost too (scripts/perf-profile.mjs), framing its apps the same way.
+        if (!ctx.server && !PROFILE_BUILD) return { html, tags };
+        if (app) return { html: ctx.server ? html.replace("connect-src ", "connect-src ws://localhost:* ") : html, tags };
         return html.replace("frame-src ", "frame-src http://*.localhost:* ");
       },
     },

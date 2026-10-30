@@ -22,7 +22,7 @@ import { WindowMenuItems } from '@/components/desktop/WindowContextMenu';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWindowFrame, useOwnWindowHeader } from '@/contexts/WindowFrameContext';
 import { invalidateListings } from '@/hooks/useFileSystem';
-import { useWindowChrome } from '@/contexts/WindowChromeContext';
+import { useWindowChrome, type ChromePoint } from '@/contexts/WindowChromeContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
@@ -238,6 +238,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const [accessRequest, setAccessRequest] = useState<{ paths: string[]; reason: string; resolve: (allowed: boolean) => void } | null>(null);
   /** Apps waiting on the move or resize they began to end. */
   const moveEnded = useRef<(() => void)[]>([]);
+  /** Where the move or resize under way began, in the desktop's coordinates. */
+  const gestureFrom = useRef<ChromePoint | null>(null);
   const [loadKey, setLoadKey] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
@@ -316,6 +318,15 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   });
 
   const push = useCallback((message: Push) => session.current?.port.postMessage(message), []);
+  /** The end of a move or resize the app began. */
+  const endMove = useCallback(() => {
+    if (!gestureFrom.current) return;
+    gestureFrom.current = null;
+    setMoving(false);
+    live.current.chrome.gestureEnd();
+    push({ type: 'moveEnd' });
+    for (const resolve of moveEnded.current.splice(0)) resolve();
+  }, [push]);
   /** Whether what's being dictated goes into this window. */
   const dictationHere = () => {
     const owner = getDictationState().owner;
@@ -535,14 +546,24 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       },
       // Answered when the gesture ends, which the app never sees itself.
       'window.beginMove': ({ at }) => {
-        if (!live.current.chrome.beginMove(toDesktop(at))) return;
+        const from = toDesktop(at);
+        if (!live.current.chrome.beginMove(from)) return;
+        gestureFrom.current = from;
         setMoving(true);
         return new Promise<void>((resolve) => moveEnded.current.push(resolve));
       },
       'window.beginResize': ({ edge, at }) => {
-        if (!live.current.chrome.beginResize(edge, toDesktop(at))) return;
+        const from = toDesktop(at);
+        if (!live.current.chrome.beginResize(edge, from)) return;
+        gestureFrom.current = from;
         setMoving(true);
         return new Promise<void>((resolve) => moveEnded.current.push(resolve));
+      },
+      'window.gesturePointer': ({ delta, done }) => {
+        const from = gestureFrom.current;
+        if (!from) return;
+        if (done) endMove();
+        else live.current.chrome.gestureMove({ clientX: from.clientX + delta.x, clientY: from.clientY + delta.y });
       },
       'window.setBounds': (b) => {
         const w = live.current.win;
@@ -1290,13 +1311,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     el?.addEventListener('pointermove', forwarded);
     return () => el?.removeEventListener('pointermove', forwarded);
   }, [moving]);
-  const endMove = () => {
-    if (!moving) return;
-    setMoving(false);
-    live.current.chrome.gestureEnd();
-    push({ type: 'moveEnd' });
-    for (const resolve of moveEnded.current.splice(0)) resolve();
-  };
 
   const forceQuit = () => {
     if (guestId !== null) void getAppsBridge()?.kill(guestId);
@@ -1370,6 +1384,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       {!ready && !gone && (
         <div
           aria-hidden
+          data-din-app-splash
           className="pointer-events-none absolute inset-0 grid place-items-center motion-safe:animate-in motion-safe:fade-in-0"
           style={{ backgroundColor: manifest.background_color }}
         >

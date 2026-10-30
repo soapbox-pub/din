@@ -70,6 +70,12 @@ export interface Transport {
     send(permission: string, channel: string, args: unknown[]): void;
     on(permission: string, channel: string, listener: (...args: unknown[]) => void): () => void;
   };
+  /**
+   * The page is framed in a plain browser, which keeps a press's pointer in
+   * the frame: the desktop is told of presses, and of the pointer during a
+   * move or resize.
+   */
+  framed?: boolean;
 }
 
 /** The MIME type a Din drag carries its token under (DRAG_MIME in src/sdk/index.ts). */
@@ -339,6 +345,17 @@ export function installDin(transport: Transport): void {
   pushes.on((p) => {
     if (p.type === 'tabHover') tabHovers.emit(p.at);
   });
+  // Framed, a press here never reaches the desktop, which sees only focus
+  // leaving it for the first frame: the window is told to come forward.
+  if (transport.framed) {
+    window.addEventListener(
+      'pointerdown',
+      () => {
+        if (!state.focused) tell('window.focus');
+      },
+      true,
+    );
+  }
   pushes.on((p) => {
     if (p.type === 'state') {
       state = p.state;
@@ -357,6 +374,26 @@ export function installDin(transport: Transport): void {
     }
   });
   const point = (e: { clientX: number; clientY: number }) => ({ x: e.clientX, y: e.clientY });
+  /**
+   * A move or resize begun from `down`, until `begun` resolves at its end.
+   * Framed, the pointer stays here, so it's passed on: as a distance in
+   * screen pixels, which holds while the frame moves along under it.
+   */
+  const gesture = (down: PointerEvent, begun: Promise<void>): Promise<void> => {
+    if (!transport.framed) return begun;
+    const send = (e: PointerEvent, done: boolean) =>
+      tell('window.gesturePointer', { delta: { x: e.screenX - down.screenX, y: e.screenY - down.screenY }, done });
+    const move = (e: PointerEvent) => send(e, e.buttons === 0);
+    const up = (e: PointerEvent) => send(e, true);
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    return begun.finally(() => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+    });
+  };
   const win: DinWindow = {
     get state() {
       return state;
@@ -371,8 +408,8 @@ export function installDin(transport: Transport): void {
     onFrameStyleChange: (cb) => styles.on(cb),
     setChrome: (chrome) => tell('window.setChrome', chrome),
     setShape: (shape) => tell('window.setShape', { shape }),
-    beginMove: (e) => request('window.beginMove', { at: point(e) }),
-    beginResize: (edge, e) => request('window.beginResize', { edge, at: point(e) }),
+    beginMove: (e) => gesture(e, request('window.beginMove', { at: point(e) })),
+    beginResize: (edge, e) => gesture(e, request('window.beginResize', { edge, at: point(e) })),
     setBounds: (bounds) => tell('window.setBounds', bounds),
     minimize: () => tell('window.minimize'),
     maximize: () => tell('window.maximize'),

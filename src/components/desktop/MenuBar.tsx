@@ -207,10 +207,10 @@ const AppsMenu = memo(function AppsMenu() {
   );
 
   /** Uninstall an app: close its windows, then drop the entry. */
-  const uninstall = (appId: string) => {
+  const uninstall = useCallback((appId: string) => {
     closeApp(appId);
     uninstallApp(appId);
-  };
+  }, [closeApp, uninstallApp]);
 
   // Native apps also match on their desktop entry's Keywords and Categories,
   // so "browser" finds Firefox and "photo" finds an image editor.
@@ -384,42 +384,69 @@ function AppGrid({
   return (
     <div className="grid grid-cols-4 gap-1">
       {apps.map((app) => (
-        <ContextMenu key={app.id}>
-          <ContextMenuTrigger asChild>
-            <PopoverClose asChild>
-              <button
-                type="button"
-                onClick={() => onOpen(app.id)}
-                className="flex flex-col items-center gap-2 rounded-xl p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <AppIcon icon={app.icon} web={app.web} className="size-9 text-foreground" />
-                <span className="line-clamp-2 text-xs leading-tight text-foreground">
-                  {app.name}
-                </span>
-              </button>
-            </PopoverClose>
-          </ContextMenuTrigger>
-          <ContextMenuContent className="w-52">
-            <ContextMenuItem onSelect={() => onOpen(app.id)}>Open</ContextMenuItem>
-            {app.actions?.map((action) => (
-              <ContextMenuItem key={action.label} onSelect={() => onOpen(app.id, { ...action.params, actionAt: Date.now() })}>
-                {action.label}
-              </ContextMenuItem>
-            ))}
-            {canUninstall(app.id) && (
-              <ContextMenuItem
-                variant="destructive"
-                onSelect={() => onUninstall(app.id)}
-              >
-                <Trash2 aria-hidden /> Uninstall
-              </ContextMenuItem>
-            )}
-          </ContextMenuContent>
-        </ContextMenu>
+        <AppTile
+          key={app.id}
+          app={app}
+          onOpen={onOpen}
+          onUninstall={onUninstall}
+          uninstallable={canUninstall(app.id)}
+        />
       ))}
     </div>
   );
 }
+
+/**
+ * A launcher tile and its menu. Memoized: each keystroke in the search
+ * re-renders the launcher, and with the host's apps listed there can be
+ * hundreds of tiles, each a stack of Radix components.
+ */
+const AppTile = memo(function AppTile({
+  app,
+  onOpen,
+  onUninstall,
+  uninstallable,
+}: {
+  app: AppDefinition;
+  onOpen: (appId: string, params?: Record<string, unknown>) => void;
+  onUninstall: (appId: string) => void;
+  uninstallable: boolean;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <PopoverClose asChild>
+          <button
+            type="button"
+            onClick={() => onOpen(app.id)}
+            className="flex flex-col items-center gap-2 rounded-xl p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <AppIcon icon={app.icon} web={app.web} className="size-9 text-foreground" />
+            <span className="line-clamp-2 text-xs leading-tight text-foreground">
+              {app.name}
+            </span>
+          </button>
+        </PopoverClose>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52">
+        <ContextMenuItem onSelect={() => onOpen(app.id)}>Open</ContextMenuItem>
+        {app.actions?.map((action) => (
+          <ContextMenuItem key={action.label} onSelect={() => onOpen(app.id, { ...action.params, actionAt: Date.now() })}>
+            {action.label}
+          </ContextMenuItem>
+        ))}
+        {uninstallable && (
+          <ContextMenuItem
+            variant="destructive"
+            onSelect={() => onUninstall(app.id)}
+          >
+            <Trash2 aria-hidden /> Uninstall
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+});
 
 /**
  * AirPlay status item: lights up while the screen is shared; clicking lists

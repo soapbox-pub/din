@@ -25,6 +25,7 @@ export function WindowDragRegion({ className, children, ...props }: ComponentPro
     <WindowContextMenu win={frame.win} onMinimize={frame.minimize} onToggleMaximize={frame.toggleMaximize}>
       <div
         {...props}
+        data-din-region="drag"
         onPointerDown={frame.onPointerDown}
         onPointerMove={frame.onPointerMove}
         onPointerUp={frame.onPointerUp}

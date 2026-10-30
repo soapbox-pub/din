@@ -115,6 +115,12 @@ export interface Requests {
   /** `at` in the app's CSS pixels. */
   'window.beginMove': [{ at: Point }, void];
   'window.beginResize': [{ edge: Edge; at: Point }, void];
+  /**
+   * A framed page's pointer during the move or resize it began, which the
+   * frame keeps (a webview's is forwarded by main): how far it has gone
+   * since, in screen pixels, or `done` at the release.
+   */
+  'window.gesturePointer': [{ delta: Point; done: boolean }, void];
   'window.setBounds': [Partial<Rect>, void];
   'window.minimize': [void, void];
   'window.maximize': [void, void];

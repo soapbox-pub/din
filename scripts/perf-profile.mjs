@@ -23,6 +23,9 @@
  *   open-apps    launch each built-in app from the apps menu, one at a time:
  *                click-to-window time, click-to-settled time and what each
  *                launch cost, then close it
+ *   terminal     the Terminal app with a fake pty streaming a TUI spinner,
+ *                one tab on screen, then with a second tab in front of it
+ *                (--idle <s> per phase)
  *   drag         drag a window's title bar in circles for --drag-sec (6) with
  *                wobbly windows on, then again with them off: frame rate,
  *                long frames and main-thread cost of each. --drag-behind
@@ -281,8 +284,20 @@ browser.on("Runtime.exceptionThrown", (p, s) => {
 });
 browser.on("Inspector.targetCrashed", (_p, s) => s === sessionId && errors.push("RENDERER CRASHED"));
 
+// Each frame's page context, by frame id: built-in apps are framed pages of
+// their own (<id>.localhost), which the harness reaches into to click.
+const frameContexts = new Map();
+cdp.on("Runtime.executionContextCreated", ({ context }) => {
+  if (context.auxData?.isDefault && context.auxData.frameId) frameContexts.set(context.auxData.frameId, context.id);
+});
+cdp.on("Runtime.executionContextDestroyed", ({ executionContextId }) => {
+  for (const [frame, id] of frameContexts) if (id === executionContextId) frameContexts.delete(frame);
+});
+cdp.on("Runtime.executionContextsCleared", () => frameContexts.clear());
+
 await cdp.send("Page.enable");
 await cdp.send("Runtime.enable");
+await cdp.send("DOM.enable");
 await cdp.send("Inspector.enable").catch(() => {});
 await cdp.send("Performance.enable");
 await cdp.send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 1, mobile: false });
@@ -298,17 +313,17 @@ if (flag("no-blur")) {
   });
 }
 
-// The terminal scenario's stand-in for Electron's pty bridge (src/lib/pty.ts):
-// every session streams what a TUI agent sitting at its spinner sends, ~30
-// small repaints a second of a few colored lines. Only with the scenario's
-// storage flag, so every other scenario sees the plain browser's no-bridge.
-await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
-  source: `if (localStorage.getItem("din:perf-fake-pty")) {
+// The terminal scenario's stand-in for Electron's pty bridge (src/lib/pty.ts),
+// in the Terminal app's frame, where a plain browser has none: every session
+// streams what a TUI agent sitting at its spinner sends, ~30 small repaints a
+// second of a few colored lines. Installed for that scenario only, so every
+// other one sees the plain browser's no-bridge.
+const FAKE_PTY = `if (location.hostname === "terminal.localhost") {
     const data = new Set(), exits = new Set(), done = new Set();
     const enc = new TextEncoder();
     const spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
     let next = 1;
-    window.pty = {
+    window.dinos = { pty: {
       spawn(size) {
         const id = next++;
         let frame = 0;
@@ -331,17 +346,17 @@ await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
       onData(cb) { data.add(cb); return () => data.delete(cb); },
       onExit(cb) { exits.add(cb); return () => exits.delete(cb); },
       onCommandDone(cb) { done.add(cb); return () => done.delete(cb); },
-    };
-  }`,
-});
+    } };
+  }`;
 
-/** Evaluate `fn(arg)` in the page (a function, serialized), awaiting promises. */
-async function evaluate(fn, arg) {
+/** Evaluate `fn(arg)` in the page (a function, serialized), or in a frame's context, awaiting promises. */
+async function evaluate(fn, arg, contextId) {
   const expression = `(${fn})(${arg === undefined ? "" : JSON.stringify(arg)})`;
   const { result, exceptionDetails } = await cdp.send("Runtime.evaluate", {
     expression,
     awaitPromise: true,
     returnByValue: true,
+    ...(contextId ? { contextId } : {}),
   });
   if (exceptionDetails) throw new Error(`evaluate: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
   return result.value;
@@ -423,6 +438,59 @@ async function clickSelector(selector, within) {
     10_000,
   );
   if (!at) throw new Error(`nothing to click at ${selector}`);
+  await click(at.x, at.y);
+}
+
+/** The page context of the built-in app in window `windowId`, or null before it loads. */
+async function appContext(windowId) {
+  const { result } = await cdp.send("Runtime.evaluate", {
+    expression: `document.querySelector('section[data-window-id="${windowId}"] [data-din-app] iframe')`,
+  });
+  if (!result.objectId) return null;
+  const { node } = await cdp.send("DOM.describeNode", { objectId: result.objectId });
+  await cdp.send("Runtime.releaseObject", { objectId: result.objectId });
+  return frameContexts.get(node.frameId) ?? null;
+}
+
+/** Center of the first element `selector` matches in window `windowId`'s app page, in the desktop's coordinates, or null. */
+async function appCenterOf(windowId, selector) {
+  const contextId = await appContext(windowId);
+  if (!contextId) return null;
+  const inner = await evaluate(
+    (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return r.width && r.height ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    },
+    selector,
+    contextId,
+  ).catch(() => null);
+  if (!inner) return null;
+  const frame = await evaluate(
+    (id) => document.querySelector(`section[data-window-id="${id}"] [data-din-app] iframe`)?.getBoundingClientRect().toJSON(),
+    windowId,
+  );
+  return frame ? { x: frame.left + inner.x, y: frame.top + inner.y } : null;
+}
+
+/** The topmost window's id. */
+const topWindowId = () =>
+  evaluate(() => {
+    const wins = [...document.querySelectorAll("section[data-window-id]")];
+    return wins.sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex))[0]?.dataset.windowId ?? null;
+  });
+
+/** Click what `selector` matches in the topmost window's app page. */
+async function clickInTopApp(selector) {
+  const id = await topWindowId();
+  const deadline = Date.now() + 10_000;
+  let at = null;
+  while (id && !at && Date.now() < deadline) {
+    at = await appCenterOf(id, selector);
+    if (!at) await sleep(50);
+  }
+  if (!at) throw new Error(`nothing to click at ${selector} in the top app`);
   await click(at.x, at.y);
 }
 
@@ -666,15 +734,14 @@ function rawDigest(r) {
 // ─── Din ────────────────────────────────────────────────────────────────────
 
 /** Fresh storage for the origin, set up the way a scenario wants it. */
-async function resetStorage({ login, config, fakePty } = {}) {
+async function resetStorage({ login, config } = {}) {
   await goto("/robots.txt");
   await evaluate(
-    ([who, cfg, offline, pty]) => {
+    ([who, cfg, offline]) => {
       localStorage.clear();
       sessionStorage.clear();
       localStorage.setItem("din:perf-swallow-publish", "1");
       if (offline) localStorage.setItem("din:perf-offline", "1");
-      if (pty) localStorage.setItem("din:perf-fake-pty", "1");
       if (cfg) localStorage.setItem("nostr:app-config", JSON.stringify(cfg));
       if (who) {
         localStorage.setItem(
@@ -691,7 +758,7 @@ async function resetStorage({ login, config, fakePty } = {}) {
         );
       }
     },
-    [login, config, OFFLINE, fakePty],
+    [login, config, OFFLINE],
   );
 }
 
@@ -709,13 +776,13 @@ async function bootDesktop(settleMs = 3000) {
 
 const windowCount = () => evaluate(() => document.querySelectorAll("section[data-window-id]").length);
 
-/** In the page: no Suspense fallback or skeleton left in the newest window, its entrance animation done. */
+/** In the page: no Suspense fallback, skeleton or app splash left in the newest window, its entrance animation done. */
 const windowSettled = () => {
   const wins = [...document.querySelectorAll("section[data-window-id]")];
   const win = wins.sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex))[0];
   if (!win) return false;
   if (getComputedStyle(win).opacity !== "1") return false;
-  return !win.querySelector('[data-slot="skeleton"], .animate-pulse, .animate-spin');
+  return !win.querySelector('[data-slot="skeleton"], .animate-pulse, .animate-spin, [data-din-app-splash]');
 };
 
 /** Launch `name` through the apps menu (search + Enter), as a user would. */
@@ -726,10 +793,14 @@ async function launch(name) {
   await pressKey("Enter", "Enter", 13);
 }
 
-/** Close every window through its close button, waiting out the exit animation. */
+/** Close every window through its close button (a built-in app's is in its page), waiting out the exit animation. */
 async function closeAll() {
   for (let i = 0; i < 20 && (await windowCount()) > 0; i++) {
-    const at = await centerOf('[aria-label="Close window"]', "section[data-window-id]:not(.pointer-events-none)");
+    const id = await evaluate(() => document.querySelector("section[data-window-id]:not(.pointer-events-none)")?.dataset.windowId ?? null);
+    if (!id) break;
+    const at =
+      (await centerOf('[aria-label="Close window"]', `section[data-window-id="${id}"]`)) ??
+      (await appCenterOf(id, '[aria-label="Close window"]'));
     if (!at) break;
     await click(at.x, at.y);
     await sleep(250);
@@ -737,17 +808,44 @@ async function closeAll() {
   await sleep(300);
 }
 
-/** Title-bar grab point of the topmost window. */
-const titleBarOfTop = () =>
-  evaluate(() => {
-    const wins = [...document.querySelectorAll("section[data-window-id]")];
-    const win = wins.sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex))[0];
-    const header = win?.querySelector("header");
-    if (!header) return null;
-    const r = header.getBoundingClientRect();
-    // Left of center, clear of the title text's buttons and the window controls.
-    return { x: r.left + r.width * 0.35, y: r.top + r.height / 2 };
-  });
+/** In this document: the points of the regions `region` (a selector) matches that hit one and nothing clickable in it; to pass to evaluate. */
+const freeSpotsIn = (region) => {
+  const spots = [];
+  for (const el of document.querySelectorAll(region)) {
+    const r = el.getBoundingClientRect();
+    for (let y = r.top + 4; y < r.bottom - 2; y += 6) {
+      for (let x = r.left + 8; x < r.right - 8; x += 12) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && el.contains(hit) && !hit.closest('button, input, a, [role="tab"], [data-window-no-drag]')) spots.push({ x, y });
+      }
+    }
+  }
+  return spots;
+};
+
+/**
+ * A point on window `id`'s title bar that nothing covers and nothing in it
+ * takes as a click: the desktop's header, or a built-in app's own drag region.
+ */
+async function grabPoint(id) {
+  const section = `section[data-window-id="${id}"]`;
+  const [desktop] = await evaluate(freeSpotsIn, `${section} [data-din-region="drag"]`);
+  if (desktop) return desktop;
+  const contextId = await appContext(id);
+  if (!contextId) return null;
+  const inner = await evaluate(freeSpotsIn, '[data-din-region="drag"]', contextId).catch(() => []);
+  // In the desktop's coordinates, where the frame is what's there.
+  return evaluate(
+    ([sel, spots]) => {
+      const frame = document.querySelector(`${sel} [data-din-app] iframe`);
+      const r = frame?.getBoundingClientRect();
+      if (!r) return null;
+      const pts = spots.map((p) => ({ x: r.left + p.x, y: r.top + p.y }));
+      return pts.find((pt) => document.elementFromPoint(pt.x, pt.y) === frame) ?? null;
+    },
+    [section, inner],
+  );
+}
 
 /** Drag from `from` by (dx, dy) in small steps, and let go. */
 async function dragBy(from, dx, dy, steps = 12) {
@@ -858,26 +956,29 @@ try {
   if (wants("terminal")) {
     console.log(`\n▶ terminal (TUI spinners streaming, ${IDLE_SEC}s per phase)`);
     const mark = errors.length;
-    await resetStorage({ fakePty: true });
+    const { identifier: fakePty } = await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: FAKE_PTY });
+    await resetStorage();
     await bootDesktop();
     await launch("Terminal");
-    await waitFor(windowSettled, undefined, 15_000);
+    const settled = await waitFor(windowSettled, undefined, 15_000);
+    if (!settled) throw new Error("Terminal never finished loading");
     await sleep(1500);
     const phases = {};
     const { hot } = await cpuProfile("terminal", async () => {
       // One session, on screen: the floor any visible TUI costs.
       phases.oneVisible = (await measure(() => sleep(IDLE_SEC * 1000))).cost;
       // A second tab in front of it: the first keeps streaming, unseen.
-      await clickSelector('[aria-label="New terminal"]');
+      await clickInTopApp('[aria-label="New terminal"]');
       await sleep(1500);
       phases.plusHiddenTab = (await measure(() => sleep(IDLE_SEC * 1000))).cost;
     });
     // Back to the first tab: the screenshot must show its latest frame (the
     // spinner's elapsed time), not a stale one. WebGL paints to a canvas, so
     // there is no DOM text to check instead.
-    await clickSelector('[role="tab"]');
+    await clickInTopApp('[role="tab"]');
     await sleep(500);
     await screenshot("terminal");
+    await cdp.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: fakePty });
     save("terminal", { ...phases, hot, errors: errors.slice(mark), report: await report() });
     console.log(`  one visible: cpu ${phases.oneVisible.cpuPct}%, + a hidden tab: cpu ${phases.plusHiddenTab.cpuPct}%`);
   }
@@ -897,7 +998,7 @@ try {
       await launch("Settings");
       await waitFor(windowSettled, undefined, 15_000);
       await sleep(800);
-      const grab = await titleBarOfTop();
+      const grab = await grabPoint(await topWindowId());
       if (!grab) throw new Error("no window to drag");
       await moveTo(grab.x, grab.y);
       await mouse("mousePressed", grab.x, grab.y, { clickCount: 1, buttons: 1 });
@@ -952,58 +1053,62 @@ try {
       await launch(name);
       await waitFor(windowSettled, undefined, 15_000);
       await sleep(300);
-      const grab = await titleBarOfTop();
+      const grab = await grabPoint(await topWindowId());
       if (grab) await dragBy(grab, i * 180, i * 50);
     }
     const ids = await evaluate(() => [...document.querySelectorAll("section[data-window-id]")].map((w) => w.dataset.windowId));
     await sleep(1500);
-    // Pointer-down to the next frame after the raise committed, timed in the page.
+    // Press to the next frame after the window came to the front: the press
+    // timed here (one in a built-in app's frame never reaches the desktop's
+    // document), the frame in the page, both on the wall clock.
     await evaluate(() => {
       window.__dinRaises = [];
-      document.addEventListener(
-        "pointerdown",
-        (e) => {
-          const start = e.timeStamp;
-          requestAnimationFrame(() => setTimeout(() => window.__dinRaises.push(performance.now() - start), 0));
-        },
-        true,
-      );
+      const topId = () =>
+        [...document.querySelectorAll("section[data-window-id]")].sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex))[0]?.dataset.windowId;
+      let top = topId();
+      new MutationObserver(() => {
+        const now = topId();
+        if (now === top) return;
+        top = now;
+        requestAnimationFrame(() => setTimeout(() => window.__dinRaises.push({ id: now, at: performance.timeOrigin + performance.now() }), 0));
+      }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["style"] });
     });
-    let missed = 0;
+    const missed = [];
+    const presses = [];
     const { result, hot } = await cpuProfile(scenario, () =>
       measure(async () => {
         for (let round = 0; round < ROUNDS; round++) {
           for (const id of ids) {
-            // A point on the window's title bar that nothing above it covers.
-            const at = await evaluate((wid) => {
-              const header = document.querySelector(`section[data-window-id="${wid}"] header`);
-              if (!header) return null;
-              const r = header.getBoundingClientRect();
-              for (let y = r.top + 4; y < r.bottom - 2; y += 6) {
-                for (let x = r.left + 8; x < r.right - 8; x += 12) {
-                  const hit = document.elementFromPoint(x, y);
-                  if (hit && header.contains(hit) && !hit.closest("button, input, a")) return { x, y };
-                }
-              }
-              return null;
-            }, id);
+            const at = await grabPoint(id);
             if (!at) {
-              missed++;
+              missed.push(id);
               continue;
             }
-            await click(at.x, at.y);
+            await moveTo(at.x, at.y);
+            presses.push({ id, at: performance.timeOrigin + performance.now() });
+            await mouse("mousePressed", at.x, at.y, { clickCount: 1, buttons: 1 });
+            await mouse("mouseReleased", at.x, at.y, { clickCount: 1, buttons: 0 });
             await sleep(120);
           }
         }
       }),
     );
     await sleep(300);
-    const raises = (await evaluate(() => window.__dinRaises)).sort((a, b) => a - b);
+    // Each raise against the press on that window just before it.
+    const raises = (await evaluate(() => window.__dinRaises))
+      .map((r) => {
+        const press = presses.filter((p) => p.id === r.id && p.at <= r.at).at(-1);
+        return press ? r.at - press.at : null;
+      })
+      .filter((ms) => ms !== null)
+      .sort((a, b) => a - b);
     const q = (p) => Math.round(raises[Math.min(raises.length - 1, Math.floor(raises.length * p))] ?? 0);
     await screenshot(scenario);
     save(scenario, {
       raises: raises.length,
-      missed,
+      presses: presses.length,
+      // Windows with no title bar left to click.
+      missed: [...new Set(missed)],
       raiseToFrameMs: { p50: q(0.5), p95: q(0.95), max: Math.round(raises.at(-1) ?? 0) },
       cost: result.cost,
       hot,

@@ -26,6 +26,7 @@ function frameTransport(): Transport {
   // Tell the desktop we're listening; it answers with the port.
   window.parent.postMessage({ type: 'din:hello' }, '*');
   return {
+    framed: true,
     post: (message) => (port ? port.postMessage(message) : outbox.push(message)),
     onMessage: (listener) => {
       listeners.add(listener);

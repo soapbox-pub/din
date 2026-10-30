@@ -248,15 +248,20 @@ function traceSquircle(ctx: CanvasRenderingContext2D, x: number, y: number, size
  * with a transparent border has a shape of its own and keeps it.
  */
 function isFullBleed(ctx: CanvasRenderingContext2D, size: number): boolean {
-  const { data } = ctx.getImageData(0, 0, size, size);
   const edge = Math.max(1, Math.round(size / 64));
+  // The border ring, as four strips: top, bottom, left, right.
+  const strips = [
+    ctx.getImageData(0, 0, size, edge),
+    ctx.getImageData(0, size - edge, size, edge),
+    ctx.getImageData(0, edge, edge, size - edge * 2),
+    ctx.getImageData(size - edge, edge, edge, size - edge * 2),
+  ];
   let ring = 0;
   let clear = 0;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      if (x >= edge && y >= edge && x < size - edge && y < size - edge) continue;
+  for (const { data } of strips) {
+    for (let i = 3; i < data.length; i += 4) {
       ring++;
-      if (data[(y * size + x) * 4 + 3] < 128) clear++;
+      if (data[i] < 128) clear++;
     }
   }
   return ring > 0 && clear / ring < 0.05;
@@ -298,8 +303,13 @@ async function rasterize(
       ctx.drawImage(img, SQUIRCLE_INSET, SQUIRCLE_INSET, inner, inner);
       ctx.restore();
     }
-    const webp = canvas.toDataURL('image/webp', 0.85);
-    return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png');
+    // toBlob, not toDataURL: the encode doesn't block the main thread, which
+    // the App Store's first open does for every site in the catalog.
+    const encode = (type: string, quality?: number) =>
+      new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality));
+    const webp = await encode('image/webp', 0.85);
+    const blob = webp?.type === 'image/webp' ? webp : await encode('image/png');
+    return blob ? await toDataUrl(blob) : null;
   } catch {
     return null;
   } finally {
