@@ -10,6 +10,9 @@ import { useAssistantHost } from '@/shared/assistant/host';
 /** Pasted pictures past this size are left out; the request would be too big. */
 const MAX_PASTE_BYTES = 8 * 1024 * 1024;
 
+/** How soon a second Escape has to follow the first to stop the agent. */
+const STOP_ESCAPE_MS = 1500;
+
 /** A file:// URL for a path, each segment escaped. */
 function fileUri(path: string): string {
   return `file://${path.split('/').map(encodeURIComponent).join('/')}`;
@@ -65,7 +68,7 @@ function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] 
  * Where the user writes to the agent. Enter sends and Shift+Enter starts a
  * new line. Files come from Din's file picker or are pasted in (pictures),
  * and go along with the message. While the agent works, a message sent
- * steers it, and Stop interrupts it. The mic button dictates into it, the
+ * steers it, and Stop (or Escape twice) interrupts it. The mic button dictates into it, the
  * same as Super+H does anywhere. Shift+Tab switches agents, given
  * `onCycleAgent`.
  *
@@ -146,6 +149,27 @@ export function Composer({
   useEffect(() => {
     if (active >= 0) document.getElementById(`${menuID}-${active}`)?.scrollIntoView({ block: 'nearest' });
   }, [active, menuID]);
+
+  // The first Escape while the agent works arms the second, which stops it.
+  const [stopArmed, setStopArmed] = useState(false);
+  const canStop = running && !!onStop;
+  useEffect(() => {
+    if (!stopArmed) return;
+    const timer = setTimeout(() => setStopArmed(false), STOP_ESCAPE_MS);
+    return () => clearTimeout(timer);
+  }, [stopArmed]);
+  if (stopArmed && !canStop) setStopArmed(false);
+
+  const escapeToStop = () => {
+    if (!canStop) return false;
+    if (stopArmed) {
+      setStopArmed(false);
+      onStop();
+    } else {
+      setStopArmed(true);
+    }
+    return true;
+  };
 
   const canSend = !disabled && !busy && text.trim().length > 0;
 
@@ -239,6 +263,13 @@ export function Composer({
         className,
       )}
     >
+      <div aria-live="polite" className="pointer-events-none absolute right-3 bottom-full z-30 mb-2">
+        {stopArmed && (
+          <span className="rounded-full border border-border bg-popover px-3 py-1 text-xs text-popover-foreground shadow-sm motion-safe:animate-in motion-safe:fade-in">
+            Press Esc again to stop
+          </span>
+        )}
+      </div>
       {menuOpen && (
         <ul
           id={menuID}
@@ -295,6 +326,11 @@ export function Composer({
           if (onCycleAgent && event.key === 'Tab' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
             event.preventDefault();
             onCycleAgent();
+            return;
+          }
+          if (event.key === 'Escape' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && escapeToStop()) {
+            event.preventDefault();
+            event.stopPropagation();
             return;
           }
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -354,7 +390,7 @@ export function Composer({
             size="icon"
             onClick={onStop}
             aria-label="Stop"
-            title="Stop"
+            title="Stop (Esc Esc)"
             className="size-8 rounded-full"
           >
             <Square className="size-3.5 fill-current" aria-hidden />
