@@ -657,7 +657,7 @@ function GrowingInput({ className, onKeyDown, ...props }: ComponentProps<'textar
   return (
     <Textarea
       rows={1}
-      className={cn('max-h-60 min-h-9 resize-none py-1.5', className)}
+      className={cn('max-h-60 min-h-9 resize-none py-1.5 wrap-anywhere', className)}
       onKeyDown={(event) => {
         onKeyDown?.(event);
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
