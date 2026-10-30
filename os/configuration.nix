@@ -689,7 +689,8 @@ in
   #
   # It asks to approve the command in Din, with a click: in the Assistant's
   # conversation for the agent's commands, else from a notification - in a
-  # terminal too (din-password's `sudo check`, in sudo's PAM stack below).
+  # terminal too (din-password's `sudo check`, in sudo's PAM stack below),
+  # except one typed at the prompt in Din's Terminal app, which it lets by.
   # Unanswered, denied in a terminal, or with no Din to ask (the text
   # console, SSH), it asks for the computer's password: `din`'s, which the
   # Installer sets to the disk's when it encrypts (os/din-install.sh).

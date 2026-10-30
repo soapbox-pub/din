@@ -10,7 +10,8 @@
 //
 // - Approval. On DinOS sudo's PAM stack asks Din to approve the command
 //   before it asks for the password (os/din-password.py's `sudo check`, as
-//   root), wherever sudo runs, terminal or not. The user clicks Allow or Deny;
+//   root), wherever sudo runs, terminal or not, except at the prompt in Din's
+//   Terminal app, which root lets through itself. The user clicks Allow or Deny;
 //   nothing is typed. Root checks that this socket is Din's main process
 //   before it asks, so only Din can approve. "Allow for this conversation"
 //   has root grant the conversation as well. A request nobody answers, or
