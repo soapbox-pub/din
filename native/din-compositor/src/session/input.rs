@@ -287,6 +287,11 @@ impl State {
     }
 
     /// Where a touch lands: on the built-in panel, or else the first display.
+    ///
+    /// Kept within the panel's last row and column: a finger on the bottom or
+    /// right edge reports a hair short of the panel's size, which Smithay's
+    /// input-region test rounds onto the pixel past it, outside Din's window,
+    /// and the whole touch went nowhere.
     fn touch_location<E: AbsolutePositionEvent<LibinputInputBackend>>(&self, event: &E) -> Option<Point<f64, Logical>> {
         let output = self
             .space
@@ -294,7 +299,12 @@ impl State {
             .find(|o| o.name().starts_with("eDP") || o.name().starts_with("DSI") || o.name().starts_with("LVDS"))
             .or_else(|| self.space.outputs().next())?;
         let geometry = self.space.output_geometry(output)?;
-        Some(geometry.loc.to_f64() + event.position_transformed(geometry.size))
+        let location = geometry.loc.to_f64() + event.position_transformed(geometry.size);
+        let g = geometry.to_f64();
+        Some(Point::from((
+            location.x.clamp(g.loc.x, g.loc.x + g.size.w - 1.0),
+            location.y.clamp(g.loc.y, g.loc.y + g.size.h - 1.0),
+        )))
     }
 
     /// The surface at LOCATION on the layout, and where its origin is.
