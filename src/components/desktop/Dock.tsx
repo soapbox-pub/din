@@ -26,7 +26,6 @@ import { poof } from '@/lib/dockPoof';
 import { getFsBridge } from '@/lib/fs';
 import { registerDockTile } from '@/lib/dockTiles';
 import { useNotificationCenter } from '@/lib/notificationCenter';
-import { isNsiteAppId } from '@/lib/nsiteApps';
 import { cn } from '@/lib/utils';
 import { appsDockedAs } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
@@ -133,7 +132,7 @@ const MAX_DOTS = 4;
  *
  * Shows pinned apps first (kept on this device), then any
  * running apps that aren't pinned. Each tile groups its app's windows, with
- * a dot under it per window (and, for an installed web app or nsite, a
+ * a dot under it per window (and, for any but a Linux app, a
  * count of its unread notifications on the icon's corner): click launches, toggles, or cycles through
  * them, the scroll wheel cycles too, middle-click always opens a new window,
  * right-click offers pin/unpin, close, and uninstall, dragging an
@@ -223,7 +222,7 @@ export function Dock({
   const entryIds = [...pinnedIds, ...unpinnedIds];
 
   // Unread notifications in the notification center, per tile, for the
-  // installed web apps and nsites that sent them.
+  // apps that sent them (Linux apps badge their own icons, if at all).
   const { notifications } = useNotificationCenter();
   const unread = new Map<string, number>();
   for (const n of notifications) {
@@ -762,7 +761,7 @@ export function Dock({
                   isPinned={pinned.includes(appId)}
                   reordering={dragging}
                   dropping={dropTarget === appId}
-                  unread={app.web || isNsiteAppId(app.id) ? (unread.get(appId) ?? 0) : 0}
+                  unread={app.native ? 0 : (unread.get(appId) ?? 0)}
                   onTogglePin={togglePin}
                   onDragPointerDown={reorder.onPointerDown}
                   onUninstall={canUninstall(appId) ? uninstall : undefined}

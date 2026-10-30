@@ -37,11 +37,6 @@ export function nsiteAppId(host: string): string {
   return `nsite-${host}`;
 }
 
-/** Whether a desktop app id is an installed nsite's. */
-export function isNsiteAppId(appId: string): boolean {
-  return appId.startsWith('nsite-');
-}
-
 /** The URL an installed nsite opens at. */
 export function nsiteAppUrl(host: string): string {
   return `${NSITE_PROTOCOL}//${host}/`;
