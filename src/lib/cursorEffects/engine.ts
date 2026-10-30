@@ -120,7 +120,9 @@ class CursorEffectsEngine {
   private frame = 0;
   private last = 0;
   /** Where the particle canvas is on the screen, in CSS pixels: only over what's drawn. */
-  private area: { x: number; y: number; width: number; height: number } | null = null;
+  private area: { x: number; y: number } | null = null;
+  /** The particle canvas's size in CSS pixels, and the device pixels per CSS pixel it was made at. */
+  private canvasSize = { width: 0, height: 0, scale: 0 };
   private listening: (() => void) | null = null;
 
   private pointer: { x: number; y: number; t: number } | null = null;
@@ -440,6 +442,7 @@ class CursorEffectsEngine {
     this.waterCanvas = null;
     this.backdrop = 'none';
     this.area = null;
+    this.canvasSize = { width: 0, height: 0, scale: 0 };
   }
 
   private wake(): void {
@@ -489,10 +492,13 @@ class CursorEffectsEngine {
 
   /**
    * Draw the particles on a canvas over just the part of the screen they're
-   * in, snapped out to whole tiles so it follows them without being made
-   * anew each frame. A canvas that changes is redrawn whole by the
-   * compositor, with every backdrop blur under it: over the whole screen,
-   * Show Mouse alone kept the desktop's glass recomputing every frame.
+   * in, snapped out to whole tiles. A canvas that changes is redrawn whole
+   * by the compositor, with every backdrop blur under it: over the whole
+   * screen, Show Mouse alone kept the desktop's glass recomputing every
+   * frame. It follows the effect by moving, and only ever grows (until it's
+   * released): sizing a canvas makes it anew, and on a GPU a canvas made
+   * anew every few frames both costs a frame and can show its last picture
+   * stretched to the new size for one.
    */
   private drawParticles(): void {
     const bounds = this.scene.busy ? this.scene.bounds() : null;
@@ -509,20 +515,22 @@ class CursorEffectsEngine {
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
     const scale = window.devicePixelRatio || 1;
-    const was = this.area;
-    if (!was || was.width !== width || was.height !== height) {
+    const size = this.canvasSize;
+    if (width > size.width || height > size.height || scale !== size.scale) {
       // Sizing a canvas clears it.
-      canvas.width = Math.round(width * scale);
-      canvas.height = Math.round(height * scale);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
+      this.canvasSize = { width: Math.max(width, size.width), height: Math.max(height, size.height), scale };
+      canvas.width = Math.round(this.canvasSize.width * scale);
+      canvas.height = Math.round(this.canvasSize.height * scale);
+      canvas.style.width = `${this.canvasSize.width}px`;
+      canvas.style.height = `${this.canvasSize.height}px`;
     } else {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
+    const was = this.area;
     if (!was || was.x !== x || was.y !== y) canvas.style.transform = `translate(${x}px, ${y}px)`;
     if (!was) canvas.style.visibility = 'visible';
-    this.area = { x, y, width, height };
+    this.area = { x, y };
     ctx.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
     this.scene.draw(ctx);
   }
