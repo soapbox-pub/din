@@ -40,6 +40,13 @@
 #   din-update restart-din
 #       Restart din-shell.service: Din, and every app in it. Din asks for
 #       this, so it doesn't wait for its own end.
+#   din-update local <commit>
+#       Build commit <commit> of ~/DinOS (the full hash) as the next system,
+#       with the service's progress like any update, and switch to it unless
+#       it needs the computer to restart. Prints what's left: `din`,
+#       `reboot`, or nothing (`needs_for`). Not one of the commands Din runs
+#       without asking, as it builds what the user wrote; sudo asks, for that
+#       commit and no other, as it would for `nixos-rebuild switch`.
 #   din-update run
 #       The update itself, as din-update.service. Writes its progress to
 #       STATE as it goes.
@@ -387,6 +394,32 @@ restart_din() {
   systemctl restart --no-block "$SHELL_UNIT"
 }
 
+# `local`: have the service build commit $1 of ~/DinOS (run_local), then
+# switch to it as `apply` would.
+build_local() {
+  local commit=$1 next
+  is_live && die "A live system isn't updated."
+  [[ $commit =~ ^[0-9a-f]{40}$ ]] || die "usage: din-update local <commit>"
+  systemctl is-active -q "$UNIT" && die "An update is running. Try again when it finishes."
+  echo "local $commit" >"$REQUEST"
+  # A oneshot: this waits for the run, whose failure is in STATE.
+  systemctl start "$UNIT" 2>/dev/null || true
+  load_state
+  [[ $phase != failed ]] || die "${error:-The update failed.}"
+  next=$(readlink -f "$PROFILE")
+  [[ $(revision_of "$next") == "$commit" ]] || die "Commit ${commit:0:7} wasn't built."
+  if [[ $next != "$(readlink -f /run/current-system)" ]]; then
+    if [[ $(needs_for "$next") == reboot ]]; then
+      echo reboot
+      return
+    fi
+    exec 9>"$LOCK"
+    flock -w 30 9 || die "An update is running. Try again when it finishes."
+    "$next/bin/switch-to-configuration" switch </dev/null >&2 || die "Couldn't switch to commit ${commit:0:7}."
+  fi
+  needs_for /run/current-system
+}
+
 set_source() {
   local url=$1 branch=$2
   # Only remotes that fetch by themselves: no local paths, nothing that
@@ -540,10 +573,19 @@ run() {
   flock -n 9 || die "An update is already running."
   load_state
 
-  local manual=false replace=false
-  if [[ -e $REQUEST ]]; then manual=true; fi
-  [[ $(cat "$REQUEST" 2>/dev/null) == replace ]] && replace=true
+  local manual=false replace=false request=""
+  if [[ -e $REQUEST ]]; then
+    manual=true
+    request=$(cat "$REQUEST")
+  fi
   rm -f "$REQUEST"
+  case $request in
+    replace) replace=true ;;
+    local\ *)
+      run_local "${request#local }"
+      return
+      ;;
+  esac
   if ! $manual; then
     [[ -e $AUTO_OFF ]] && exit 0
     # Building a whole system on battery is the user's to ask for.
@@ -624,7 +666,34 @@ run() {
     src_git checkout -q --force --detach "$tip"
     src_git clean -q -ffdx
   fi
+  stage
+}
 
+# Build commit $1 of ~/DinOS, as `local` asked, and stage it. The user
+# approved that commit, so it's built as it is: no merge, and whatever it
+# has of the branch.
+run_local() {
+  local commit=$1 upstream
+  [[ $commit =~ ^[0-9a-f]{40}$ ]] || fail "\"$commit\" isn't a commit."
+  error=""
+  reason=""
+  phase=updating
+  target=$commit
+  attempt=$commit
+  what="commit ${commit:0:7}"
+  set_step fetch
+  ensure_checkout
+  upstream=$(src_git rev-parse -q --verify "$UPSTREAM_REF" 2>/dev/null || true)
+  has_commit "$commit" || import_from_fork "$commit" "$upstream" ||
+    fail "Commit ${commit:0:7} isn't in ~/DinOS."
+  echo "Building commit $commit of $FORK, as asked"
+  src_git checkout -q --force --detach "$commit"
+  src_git clean -q -ffdx
+  stage
+}
+
+# Build the checked-out commit, `target`, and make it the next boot's.
+stage() {
   local installable="$SRC/os#nixosConfigurations.$SYSTEM_NAME.config.system.build.toplevel"
   set_step space
   check_space "$installable"
@@ -681,6 +750,10 @@ case "${1:-}" in
     ;;
   apply) apply ;;
   restart-din) restart_din ;;
+  local)
+    [[ $# == 2 ]] || die "usage: din-update local <commit>"
+    build_local "$2"
+    ;;
   run) run ;;
-  *) die "usage: din-update status | start | replace | auto on|off | source <url> <branch> | apply | restart-din | run" ;;
+  *) die "usage: din-update status | start | replace | auto on|off | source <url> <branch> | apply | restart-din | local <commit> | run" ;;
 esac

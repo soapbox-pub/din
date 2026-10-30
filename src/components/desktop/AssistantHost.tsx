@@ -161,8 +161,8 @@ function useAssistantNotifications() {
         request.approve
           ? notify({
               source: SOURCE,
-              title: 'Allow the assistant to run this as administrator?',
-              body: request.command,
+              title: `Allow the assistant to ${request.action ?? 'run this as administrator'}?`,
+              body: request.detail ?? request.command,
               urgency: 'critical',
               actions: [
                 { id: 'once', label: 'Allow' },
@@ -176,8 +176,8 @@ function useAssistantNotifications() {
             })
           : notify({
               source: SOURCE,
-              title: 'The assistant needs your password',
-              body: request.command,
+              title: request.action ? `The assistant needs your password to ${request.action}` : 'The assistant needs your password',
+              body: request.detail ?? request.command,
               urgency: 'critical',
               replaceKey: `assistant:password:${request.requestId}`,
               onActivate: () => latest.current.showPassword(request.sessionID),

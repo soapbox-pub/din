@@ -722,7 +722,8 @@ in
     users = [ "din" ];
     commands = map (command: { inherit command; options = [ "NOPASSWD" ]; }) [
       "${din-installer}/bin/din-install"
-      # Not `source`: choosing what's built is choosing what runs as root.
+      # Not `source` or `local`: choosing what's built is choosing what runs
+      # as root.
       "${din-updater}/bin/din-update status"
       "${din-updater}/bin/din-update start"
       # The branch already followed, built over the user's own changes.

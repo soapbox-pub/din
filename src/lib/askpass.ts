@@ -16,7 +16,12 @@ export interface AskpassRequest {
   approve: boolean;
   /** Din itself asked, because the user just did (installing a package): open the dialog at once. */
   direct: boolean;
+  /** What the command does, in words ("update Din"), for one of Din's own; then shown instead of it. */
+  action: string | null;
+  /** What comes of it, in a sentence, with `action`. */
+  detail: string | null;
 }
+
 
 export interface AskpassBridge {
   onRequest(callback: (request: AskpassRequest) => void): () => void;

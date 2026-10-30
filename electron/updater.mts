@@ -22,10 +22,18 @@
 // switch), then restarting Din if Din changed, or restarting the computer if
 // the kernel did.
 //
+// `buildLocal` builds the user's own commits instead, from ~/DinOS (the
+// `din update local` command, for the assistant's `dinos` skill): it names
+// the exact commit to `local`, which sudo asks the user to approve, in the
+// Assistant's conversation when it ran the command. It answers what's left
+// to restart, and the command restarts Din.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { ipcMain } from 'electron';
 import { CommandError, runCommand } from './system.mts';
 
@@ -51,6 +59,12 @@ const RESTARTS: readonly string[] = ['din', 'reboot'];
 /** A system switch restarts what changed, which can take a while. */
 const APPLY_TIMEOUT_MS = 10 * 60_000;
 const PHASES: readonly string[] = ['idle', 'checking', 'updating', 'failed'];
+/** The user's copy of Din, which `buildLocal` builds from. */
+const FORK = path.join(os.homedir(), 'DinOS');
+/** Approval, then a whole system's build. */
+const BUILD_LOCAL_TIMEOUT_MS = 3 * 60 * 60_000;
+/** An Assistant conversation's id, for sudo to ask there (electron/askpass.mts). */
+const SESSION_ID = /^ses_[A-Za-z0-9]{1,64}$/;
 
 interface UpdateState {
   available: boolean;
@@ -230,10 +244,17 @@ export function registerUpdaterHandlers(options: {
     return HELPER;
   };
 
-  /** Run one of the script's commands: `-n` never asks, `-A` asks in Din. */
-  const run = async (helper: string, sudo: '-n' | '-A', args: string[], timeout = 30_000) => {
+  /**
+   * Run one of the script's commands: `-n` never asks, `-A` asks in Din, in
+   * the conversation `session` if one's named. Resolves its output.
+   */
+  const run = async (helper: string, sudo: '-n' | '-A', args: string[], timeout = 30_000, session?: string) => {
+    const command = ['sudo', sudo, resolve(helper), ...args];
     try {
-      await runCommand('sudo', [sudo, resolve(helper), ...args], { timeout });
+      const { stdout } = session
+        ? await runCommand('env', [`OPENCODE_SESSION_ID=${session}`, ...command], { timeout })
+        : await runCommand(command[0], command.slice(1), { timeout });
+      return stdout;
     } catch (error) {
       throw new Error(messageOf(error), { cause: error });
     } finally {
@@ -277,6 +298,23 @@ export function registerUpdaterHandlers(options: {
   ipcMain.handle('updater:apply', async (event) => {
     assertShellSender(event);
     await run(helperOf(), '-n', ['apply'], APPLY_TIMEOUT_MS);
+  });
+
+  ipcMain.handle('updater:buildLocal', async (event, ref: unknown, session: unknown) => {
+    assertShellSender(event);
+    const helper = helperOf();
+    if (state.live) throw new Error('A live system isn\'t updated. Install DinOS to get updates.');
+    if (typeof ref !== 'string' || !ref.trim() || ref.trim().startsWith('-')) throw new Error('Expected a branch or commit');
+    let commit: string;
+    try {
+      const { stdout } = await runCommand('git', ['-C', FORK, 'rev-parse', '--verify', '--end-of-options', `${ref.trim()}^{commit}`], { timeout: 15_000 });
+      commit = stdout.trim();
+    } catch {
+      throw new Error(`There's no ${ref.trim()} in ~/DinOS`);
+    }
+    const asker = typeof session === 'string' && SESSION_ID.test(session) ? session : undefined;
+    const out = await run(helper, '-A', ['local', commit], BUILD_LOCAL_TIMEOUT_MS, asker);
+    return { commit, restart: restartOf(out.trim().split('\n').pop()) };
   });
 
   // Din's end: systemd restarts din-shell.service once this has asked.

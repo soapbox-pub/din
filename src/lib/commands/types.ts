@@ -107,6 +107,8 @@ export interface CommandContext {
   confirm(request: { title: string; description: string; action: string; destructive?: boolean }): Promise<boolean>;
   /** Where the command was run, for relative paths; empty when unknown. */
   readonly cwd: string;
+  /** The Assistant conversation that ran it, if one did, for sudo to ask there. */
+  readonly session?: string;
 }
 
 export interface Command {

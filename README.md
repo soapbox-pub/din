@@ -231,8 +231,12 @@ after a switch by hand. Din's launcher names the updater through
 new system's.
 
 A computer's own changes live in `~/DinOS`, the user's copy of Din, built
-with `sudo nixos-rebuild switch --flake ~/DinOS/os#dinos` (the assistant's
-`dinos` skill, `os/opencode/skills/dinos`). Updates keep them: when the
+with `din update local` (the assistant's `dinos` skill,
+`os/opencode/skills/dinos`): Din resolves `main` of `~/DinOS` to its commit
+and runs `din-update local <commit>` through sudo, which asks the user
+("Allow the assistant to update Din?"). The service builds that commit like
+any update, then the command switches to it and Din restarts if it changed.
+Updates keep them: when the
 commit the newest system was built from isn't in the followed branch, the
 updater merges the branch's tip into that exact commit, which the user
 approved when they built it, and builds the merge. It reads the commit from

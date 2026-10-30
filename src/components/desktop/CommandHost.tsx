@@ -72,6 +72,7 @@ export function CommandHost() {
           setAsking((queue) => [...queue, { ...question, resolve }]);
         }),
         cwd: request.cwd,
+        session: 'session' in request ? request.session : undefined,
       };
       const run = 'argv' in request ? runCommandLine(request.argv, ctx) : runStructured(request.path, request.input, ctx);
       void run.then((answer) => bridge.answer(request.id, answer));

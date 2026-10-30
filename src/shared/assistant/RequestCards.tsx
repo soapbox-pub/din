@@ -119,6 +119,26 @@ export function PasswordCard(props: PasswordCardProps) {
   return props.request.approve ? <ApprovalCard {...props} /> : <PasswordEntryCard {...props} />;
 }
 
+/** What the command is for: in words for one of Din's own, else the command as typed. */
+function PasswordRequestSummary({ request }: { request: PasswordRequest }) {
+  if (request.action) {
+    return (
+      <>
+        <p className="font-medium text-foreground">The assistant wants to {request.action}</p>
+        {request.detail && <p className="text-sm text-muted-foreground">{request.detail}</p>}
+      </>
+    );
+  }
+  return (
+    <>
+      <p className="font-medium text-foreground">The assistant wants to run this as administrator</p>
+      <p className="max-h-32 overflow-y-auto break-all rounded-md bg-muted/60 px-2 py-1 font-mono text-xs text-foreground">
+        {request.command}
+      </p>
+    </>
+  );
+}
+
 function ApprovalCard({ request, focusKey, onFocused, className }: PasswordCardProps) {
   const approve = useApprovePassword();
   const { notify } = useAssistantHost();
@@ -158,10 +178,7 @@ function ApprovalCard({ request, focusKey, onFocused, className }: PasswordCardP
       <div className="flex items-start gap-3">
         <ShieldQuestion className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
         <div className="min-w-0 flex-1 space-y-2">
-          <p className="font-medium text-foreground">The assistant wants to run this as administrator</p>
-          <p className="max-h-32 overflow-y-auto break-all rounded-md bg-muted/60 px-2 py-1 font-mono text-xs text-foreground">
-            {request.command}
-          </p>
+          <PasswordRequestSummary request={request} />
         </div>
       </div>
       <div className="mt-3 flex flex-wrap justify-end gap-2">
@@ -231,10 +248,7 @@ function PasswordEntryCard({ request, focusKey, onFocused, className }: Password
         <div className="flex items-start gap-3">
           <KeyRound className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
           <div className="min-w-0 flex-1 space-y-2">
-            <p className="font-medium text-foreground">The assistant wants to run this as administrator</p>
-            <p className="max-h-32 overflow-y-auto break-all rounded-md bg-muted/60 px-2 py-1 font-mono text-xs text-foreground">
-              {request.command}
-            </p>
+            <PasswordRequestSummary request={request} />
             <Label htmlFor={id} className="sr-only">
               Password
             </Label>

@@ -3,7 +3,7 @@
 // has that one; the Terminal's shells get $DIN_SOCKET either way). One
 // connection is one request: a JSON line, then lines back.
 //
-// - `{ command: argv, cwd }`, or `{ path, input, cwd }`: one of the
+// - `{ command: argv, cwd, session? }`, or `{ path, input, cwd }`: one of the
 //   desktop's commands (src/lib/commands/), which runs it and answers once
 //   (runCommand).
 // - `din apps run`: a web app from a folder (a build's dist/) or from a dev
@@ -525,6 +525,8 @@ export interface CommandRequest {
   input?: Record<string, unknown>;
   /** Where it was run, for relative paths. */
   cwd: string;
+  /** The Assistant conversation that ran it ($OPENCODE_SESSION_ID), its word. */
+  session?: string;
 }
 
 const MAX_ARGV = 1024;
@@ -546,6 +548,7 @@ function runCommand(socket: net.Socket, raw: Record<string, unknown>): void {
   const strings = (value: unknown): value is string[] =>
     Array.isArray(value) && value.length <= MAX_ARGV && value.every((v) => typeof v === 'string');
   const request: CommandRequest = { id: randomUUID(), cwd: typeof raw.cwd === 'string' ? raw.cwd : '' };
+  if (typeof raw.session === 'string') request.session = raw.session;
   if (strings(raw.command)) request.argv = raw.command;
   else if (strings(raw.path) && typeof raw.input === 'object' && raw.input !== null && !Array.isArray(raw.input)) {
     request.path = raw.path;

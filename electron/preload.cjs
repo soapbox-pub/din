@@ -1818,6 +1818,14 @@ expose('updater', {
 
   /** Switch to the staged system now, where that needs no restart of the computer. */
   apply: () => ipcRenderer.invoke('updater:apply'),
+
+  /**
+   * Build a branch or commit of ~/DinOS and switch to it. sudo asks first,
+   * in the Assistant conversation `session` if one's named.
+   * @param {string} ref
+   * @param {string | undefined} session
+   */
+  buildLocal: (ref, session) => ipcRenderer.invoke('updater:buildLocal', ref, session),
   /** Restart Din, to start a new Din a switch brought. */
   restartDin: () => ipcRenderer.invoke('updater:restartDin'),
   /** Restart the computer, into the staged update. */

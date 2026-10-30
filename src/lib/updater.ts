@@ -79,6 +79,13 @@ export interface UpdaterBridge {
   setSource(url: string, branch: string): Promise<void>;
   /** Switch to the staged system now, where that needs no restart of the computer. */
   apply(): Promise<void>;
+  /**
+   * Build a branch or commit of the user's ~/DinOS and switch to it, unless
+   * it needs the computer to restart. sudo asks first, in the Assistant
+   * conversation `session` if one's named. Resolves the commit built and
+   * what's left to restart.
+   */
+  buildLocal(ref: string, session?: string): Promise<{ commit: string; restart: UpdateRestart | null }>;
   /** Restart Din, closing every app, to start a new Din a switch brought. */
   restartDin(): Promise<void>;
   reboot(): Promise<void>;

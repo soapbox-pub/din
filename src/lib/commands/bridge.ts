@@ -21,7 +21,7 @@ export function getCommandBridge(): CommandBridge | undefined {
 }
 
 export type CommandRequest =
-  | { id: string; argv: string[]; cwd: string }
+  | { id: string; argv: string[]; cwd: string; session?: string }
   | { id: string; path: string[]; input: Record<string, unknown>; cwd: string };
 
 /** A request from main, checked. */
@@ -31,7 +31,7 @@ export function parseCommandRequest(raw: unknown): CommandRequest | null {
   if (typeof r.id !== 'string') return null;
   const cwd = typeof r.cwd === 'string' ? r.cwd : '';
   const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === 'string');
-  if (strings(r.argv)) return { id: r.id, argv: r.argv, cwd };
+  if (strings(r.argv)) return { id: r.id, argv: r.argv, cwd, ...(typeof r.session === 'string' ? { session: r.session } : {}) };
   if (strings(r.path) && typeof r.input === 'object' && r.input !== null && !Array.isArray(r.input)) {
     return { id: r.id, path: r.path, input: r.input as Record<string, unknown>, cwd };
   }

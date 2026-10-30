@@ -1,6 +1,6 @@
 ---
 name: dinos
-description: Change DinOS itself, the NixOS system this computer runs: packages, services, settings, or Din's own code, built from the user's copy of Din in ~/DinOS with nixos-rebuild. Use when the user wants to change or customize the system, not just their files, when a DinOS update failed and needs fixing, or when they ask how DinOS is built or updated.
+description: Change DinOS itself, the NixOS system this computer runs: packages, services, settings, or Din's own code, built from the user's copy of Din in ~/DinOS with `din update local`. Use when the user wants to change or customize the system, not just their files, when a DinOS update failed and needs fixing, or when they ask how DinOS is built or updated.
 ---
 
 # Changing DinOS
@@ -35,30 +35,27 @@ developer's own checkout of Din; work in it all the same.
    files, and a system built from uncommitted changes can't be kept by
    updates: they stop and say so. Merge, don't rebase or amend commits a
    system was built from; updates find the user's changes by those hashes.
-3. `sudo nixos-rebuild switch --flake ~/DinOS/os#dinos`. It applies the
-   system now and adds it to the boot menu. It restarts the services that
-   changed, but never `din-shell.service` (Din, with this terminal and the
-   agent in it), so it's safe to run from here.
-4. Tell the user what's left, from `sudo -n "$U" status`'s `restart`
-   (set `$U` again first: the switch moved it):
-   - `null`: done; the change is live.
-   - `"din"`: Din's own code changed, and Din runs the version it started
-     with until it restarts. Din shows a "Restart Din" notification, also
-     in Settings → About. It closes every app, this conversation's window
-     included, so it's the user's to press: **never restart Din or
-     din-shell yourself.**
-   - `"reboot"`: the kernel, initrd, kernel parameters, modules or firmware
-     changed, which load only at startup. Ask the user to restart the
-     computer; never reboot it yourself.
+3. `din update local` (or `din update local <branch-or-commit>`; the
+   default is `main`). Din asks the user to allow it ("Allow the assistant
+   to update Din?"), builds that commit of `~/DinOS` the way updates build
+   (progress in Settings → About), adds it to the boot menu and switches to
+   it. Give it a long timeout (an hour): the build, and the user, take a
+   while. It prints what happened:
+   - "It's live": done.
+   - "Din is restarting": Din's own code changed, so Din restarts by
+     itself a moment later, closing every app, this conversation included.
+     The user approved that; the conversation is saved, and they pick it
+     up after. Tell the user before you run it if there's anything left
+     to say.
+   - "It starts when the computer restarts": the kernel, initrd, kernel
+     parameters, modules or firmware changed, which load only at startup.
+     Ask the user to restart the computer; never reboot it yourself.
 
    A setting in `/etc` that a running service reads only at startup
-   (PipeWire's, say) waits for that service to restart, which `restart`
-   can't see; restart that service (`systemctl --user restart pipewire` for
-   a user one) if the user wants it now. `readlink /run/current-system`
-   should be the new build, and `/etc/din-revision` the commit you built.
-
-   Use `nixos-rebuild boot` instead only when the user wants the change to
-   wait for the next startup.
+   (PipeWire's, say) waits for that service to restart, which this can't
+   see; restart that service (`systemctl --user restart pipewire` for a
+   user one) if the user wants it now. **Never restart Din or din-shell
+   yourself** any other way.
 
 ## How updates treat a customized system
 

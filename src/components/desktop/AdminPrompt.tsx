@@ -120,15 +120,22 @@ export function AdminPasswordDialog({
   );
 }
 
+/** A request in words, for one of Din's own commands: "Update Din?" */
+function describedTitle(action: string): string {
+  return `${action.charAt(0).toUpperCase()}${action.slice(1)}?`;
+}
+
 /** A command to allow to run as administrator, or deny, with a click. */
 function ApprovalDialog({
   open,
   title,
+  description = 'Only allow commands you expect.',
   command,
   onAnswer,
 }: {
   open: boolean;
   title: string;
+  description?: string;
   command?: string;
   onAnswer: (allow: boolean) => void;
 }) {
@@ -142,7 +149,7 @@ function ApprovalDialog({
             </span>
             <div className="min-w-0 space-y-1">
               <DialogTitle className="break-words">{title}</DialogTitle>
-              <DialogDescription>Only allow commands you expect.</DialogDescription>
+              <DialogDescription>{description}</DialogDescription>
             </div>
           </DialogHeader>
 
@@ -194,10 +201,12 @@ export function AdminPromptHost() {
         request.requestId,
         notify({
           source: { name: 'Din', icon: ShieldCheck },
-          title: request.approve
-            ? `Allow ${request.requester} to run this as administrator?`
-            : `${request.requester} needs your password`,
-          body: request.command,
+          title: request.action
+            ? describedTitle(request.action)
+            : request.approve
+              ? `Allow ${request.requester} to run this as administrator?`
+              : `${request.requester} needs your password`,
+          body: request.detail ?? request.command,
           urgency: 'critical',
           actions: request.approve
             ? [
@@ -242,8 +251,9 @@ export function AdminPromptHost() {
       <ApprovalDialog
         key={current.requestId}
         open
-        title={`${current.requester} wants to run as administrator`}
-        command={current.command}
+        title={current.action ? describedTitle(current.action) : `${current.requester} wants to run as administrator`}
+        description={current.detail ?? undefined}
+        command={current.action ? undefined : current.command}
         onAnswer={(allow) => {
           void getAskpassBridge()?.approve(current.requestId, allow).catch(() => {});
           done(current.requestId);
@@ -256,8 +266,9 @@ export function AdminPromptHost() {
     <AdminPasswordDialog
       key={current?.requestId}
       open={current !== null}
-      title={`${current?.requester ?? ''} wants to run as administrator`}
-      command={current?.command}
+      title={current?.action ? describedTitle(current.action) : `${current?.requester ?? ''} wants to run as administrator`}
+      description={current?.detail ?? undefined}
+      command={current?.action ? undefined : current?.command}
       onSubmit={async (password) => {
         if (!current) return null;
         const { ok } = (await getAskpassBridge()?.answer(current.requestId, password)) ?? { ok: true };

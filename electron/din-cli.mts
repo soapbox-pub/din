@@ -211,7 +211,8 @@ async function main(): Promise<number> {
   if (argv[0] === 'apps' && argv[1] === 'run') return appsRun(argv.slice(2), color);
   if (argv[0] === 'widgets' && argv[1] === 'add-folder') return widgetsAddFolder(argv.slice(2));
 
-  return request({ command: argv, cwd: process.cwd() }, (message) => {
+  // The Assistant's conversation, if it ran this, for sudo to ask there.
+  return request({ command: argv, cwd: process.cwd(), session: process.env.OPENCODE_SESSION_ID }, (message) => {
     if (message.type !== 'answer') return;
     if (message.ok !== true) {
       process.stderr.write(`din: ${String(message.error ?? 'failed')}\n`);

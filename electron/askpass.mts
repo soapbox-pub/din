@@ -24,7 +24,7 @@
 //   Deny means deny; in a terminal sudo goes on to ask there.
 //
 // This module reads what sudo was asked to run, and who asked, from /proc
-// for the user to see. Cancel, the asker going away (its command was
+// for the user to see, in words for a command of Din's own (describe). Cancel, the asker going away (its command was
 // stopped), or ten minutes without an answer send nothing back, and sudo
 // fails as though nothing was typed.
 //
@@ -62,6 +62,10 @@ export interface AskpassRequest {
    * package, electron/system-packages.mts), so the dialog opens at once.
    */
   direct: boolean;
+  /** What the command does, in words, for one of Din's own (described), or null. */
+  action: string | null;
+  /** What comes of it, in a sentence, with `action`. */
+  detail: string | null;
 }
 
 /** A password or approval the Assistant's conversation is waiting on (src/lib/assistant.ts). */
@@ -70,6 +74,8 @@ export interface AssistantPasswordRequest {
   sessionID: string;
   command: string;
   approve: boolean;
+  action: string | null;
+  detail: string | null;
 }
 
 /** How a conversation's approval is answered. */
@@ -101,6 +107,7 @@ const CHECK_TIMEOUT_MS = 15_000;
 const DENIED_MS = 60_000;
 const SESSION_ID = /^ses_[A-Za-z0-9]{1,64}$/;
 const PASSWORD_HELPER = process.env.DIN_PASSWORD;
+const UPDATER = process.env.DIN_UPDATER;
 /** Programs that only pass a command on: the one that asked is above them. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'env', 'timeout', 'nohup']);
 const ANSWERS: Record<Decision, string> = { once: 'allow', conversation: 'allow-session', reject: 'deny' };
@@ -162,6 +169,21 @@ function requesterOf(sudo: number): string {
   return named || 'A program';
 }
 
+/**
+ * A command of Din's own in words, where the program sudo runs is really
+ * it: the running system's updater building the user's commits (`local`).
+ */
+function describe(args: string[]): { action: string; detail: string } | null {
+  const at = args.findIndex((arg, i) => i > 0 && !arg.startsWith('-'));
+  if (at < 0 || !UPDATER || args[at + 1] !== 'local' || args.length !== at + 3) return null;
+  try {
+    if (fs.realpathSync(args[at]) !== fs.realpathSync(UPDATER)) return null;
+  } catch {
+    return null;
+  }
+  return { action: 'update Din', detail: 'Your desktop session will restart. Applications will be closed.' };
+}
+
 function quote(arg: string): string {
   return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
 }
@@ -199,12 +221,15 @@ function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolea
   }
   const requestId = nextId++;
   const direct = parentOf(sudo) === process.pid;
+  const described = describe(args);
   const request: AskpassRequest = {
     requestId,
     requester: direct ? 'Din' : requesterOf(sudo),
     command: ['sudo', ...args.slice(1).filter((arg) => !direct || arg !== '-A')].map(quote).join(' '),
     approve,
     direct,
+    action: described?.action ?? null,
+    detail: described?.detail ?? null,
   };
   const sessionID = typeof session === 'string' && SESSION_ID.test(session) ? session : null;
   pending.set(requestId, { socket, pid: sudo, request, sessionID, tty, timer: setTimeout(() => settle(requestId), TIMEOUT_MS) });
@@ -362,7 +387,9 @@ export function registerAskpass(opts: Options): void {
   ipcMain.handle('assistant:passwords', (event): AssistantPasswordRequest[] => {
     opts.assertShellSender(event);
     return [...pending.values()].flatMap(({ request, sessionID }) =>
-      sessionID ? [{ requestId: request.requestId, sessionID, command: request.command, approve: request.approve }] : [],
+      sessionID
+        ? [{ requestId: request.requestId, sessionID, command: request.command, approve: request.approve, action: request.action, detail: request.detail }]
+        : [],
     );
   });
   ipcMain.handle('assistant:answerPassword', (event, requestId: unknown, password: unknown, remember: unknown) => {
