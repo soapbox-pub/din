@@ -17,8 +17,16 @@ export const NAPPLET_KINDS = [5129, 15129, 35129] as const;
  * The NAP domains Din answers. A widget gets those of these it declares
  * (R and O tags, or a built-in's manifest), and nothing else.
  */
-export const SUPPORTED_DOMAINS = ['shell', 'theme', 'identity', 'storage'] as const;
+export const SUPPORTED_DOMAINS = ['shell', 'theme', 'identity', 'storage', 'resource'] as const;
 export type Domain = (typeof SUPPORTED_DOMAINS)[number];
+
+/** The domains the user is asked about, and can turn off; the rest are harmless (readiness, colors). */
+export const PERMISSION_DOMAINS = ['identity', 'resource', 'storage'] as const satisfies readonly Domain[];
+export type PermissionDomain = (typeof PERMISSION_DOMAINS)[number];
+
+export function isPermissionDomain(domain: string): domain is PermissionDomain {
+  return (PERMISSION_DOMAINS as readonly string[]).includes(domain);
+}
 
 export type WidgetSize = 'small' | 'medium' | 'large';
 
@@ -43,6 +51,8 @@ export interface NappletSource {
   optional: string[];
   servers: string[];
   source?: string;
+  /** Its icon on Blossom (PNG, JPEG or WebP), by hash. */
+  icon?: { sha256: string; type: string };
 }
 
 export interface BuiltinSource {
@@ -62,6 +72,8 @@ export interface PlacedWidget {
   monitor: string;
   x: number;
   y: number;
+  /** Permissions the user turned off for this copy. */
+  denied?: PermissionDomain[];
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +83,10 @@ export interface PlacedWidget {
 export interface WidgetsBridge {
   /** Fetch and verify a widget's artifact; resolves with the napplet:// host it's served at. */
   fetch(sha256: string, servers: string[]): Promise<string>;
+  /** A widget's icon, verified against its hash. */
+  icon(sha256: string, servers: string[]): Promise<Uint8Array>;
+  /** NAP-RESOURCE: something from the web, fetched by main (https, public addresses, no cookies). */
+  resource(url: string): Promise<{ bytes: Uint8Array; type: string }>;
   onContextMenu(callback: (e: { webContentsId: number; x: number; y: number }) => void): () => void;
 }
 
@@ -101,11 +117,15 @@ export interface BuiltinManifest {
 
 const RAW = import.meta.glob<BuiltinManifest>('/src/widgets/*/manifest.json', { eager: true, import: 'default' });
 
-const BUILTINS = new Map<string, BuiltinManifest>();
-for (const [file, manifest] of Object.entries(RAW)) {
-  const id = /\/src\/widgets\/([^/]+)\/manifest\.json$/.exec(file)?.[1];
-  if (id) BUILTINS.set(id, manifest);
-}
+/** The order the gallery shows them in; any others follow. */
+const ORDER = ['clock', 'calendar', 'weather', 'world-clock', 'battery', 'timer', 'sticky-note', 'profile'];
+
+const BUILTINS = new Map<string, BuiltinManifest>(
+  Object.entries(RAW)
+    .map(([file, manifest]) => [/\/src\/widgets\/([^/]+)\/manifest\.json$/.exec(file)?.[1] ?? '', manifest] as const)
+    .filter(([id]) => id)
+    .sort(([a], [b]) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99)),
+);
 
 export function builtinWidgets(): ReadonlyMap<string, BuiltinManifest> {
   return BUILTINS;
@@ -125,8 +145,8 @@ export function widgetSizes(source: WidgetSource): WidgetSize[] {
   return source.type === 'builtin' ? (BUILTINS.get(source.id)?.sizes ?? ['small']) : ['small', 'medium', 'large'];
 }
 
-/** The domains a widget gets: what it declared, of what Din answers. */
-export function grantedDomains(source: WidgetSource): Domain[] {
+/** The domains a widget declared, of what Din answers. */
+export function declaredDomains(source: WidgetSource): Domain[] {
   const declared = source.type === 'builtin'
     ? (BUILTINS.get(source.id)?.domains ?? [])
     : [...source.requires, ...source.optional];
@@ -134,6 +154,11 @@ export function grantedDomains(source: WidgetSource): Domain[] {
   // NAP-SHELL is only readiness and the list of domains: every widget has it.
   set.add('shell');
   return SUPPORTED_DOMAINS.filter((d) => set.has(d));
+}
+
+/** The domains a widget gets: what it declared, of what Din answers, less what the user turned off. */
+export function grantedDomains(source: WidgetSource, denied: readonly string[] = []): Domain[] {
+  return declaredDomains(source).filter((d) => !denied.includes(d));
 }
 
 /** Who a widget is, for its storage. */
@@ -192,6 +217,8 @@ export function parseNappletManifest(event: NostrEvent): NappletSource {
   const domains = (name: string) => [...new Set(tags(name).map((t) => t[1]).filter((v): v is string => typeof v === 'string' && /^[a-z][a-z0-9-]*$/.test(v)))];
   const title = tags('title')[0]?.[1]?.trim();
   const source = tags('source');
+  const icon = tags('icon')[0];
+  const iconOk = icon && /^[0-9a-f]{64}$/.test(icon[1] ?? '') && ['image/png', 'image/jpeg', 'image/webp'].includes(icon[2] ?? '');
   const address = event.kind === 5129 ? event.id : event.kind === 15129 ? `15129:${event.pubkey}` : `35129:${event.pubkey}:${d[0][1]}`;
   return {
     type: 'napplet',
@@ -204,6 +231,7 @@ export function parseNappletManifest(event: NostrEvent): NappletSource {
     optional: domains('O'),
     servers: tags('server').map((t) => t[1]).filter((s): s is string => typeof s === 'string' && /^https:\/\//.test(s)),
     source: source.length === 1 && source[0].length === 2 ? source[0][1] : undefined,
+    icon: iconOk ? { sha256: icon[1], type: icon[2] } : undefined,
   };
 }
 

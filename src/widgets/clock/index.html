@@ -4,60 +4,12 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Clock</title>
-        <meta name="description" content="The time and date, on an analog face.">
+        <meta name="description" content="The time and date, on a clear analog face or in large digits.">
         <meta name="napplet-id" content="clock">
         <meta name="napplet-optional" content="theme">
     </head>
     <body>
-        <main class="clock">
-            <svg
-                class="face"
-                viewBox="0 0 200 200"
-                role="img"
-                aria-labelledby="time-label"
-            >
-                <title id="time-label">Clock</title>
-                <circle
-                    class="dial"
-                    cx="100"
-                    cy="100"
-                    r="96"
-                />
-                <g class="ticks"></g>
-                <line
-                    class="hand hour"
-                    x1="100"
-                    y1="100"
-                    x2="100"
-                    y2="52"
-                />
-                <line
-                    class="hand minute"
-                    x1="100"
-                    y1="100"
-                    x2="100"
-                    y2="26"
-                />
-                <line
-                    class="hand second"
-                    x1="100"
-                    y1="114"
-                    x2="100"
-                    y2="20"
-                />
-                <circle
-                    class="pin"
-                    cx="100"
-                    cy="100"
-                    r="4"
-                />
-            </svg>
-            <div class="readout">
-                <div class="weekday"></div>
-                <div class="time"></div>
-                <div class="date"></div>
-            </div>
-        </main>
+        <main class="clock clear" aria-live="off"></main>
         <script type="module" src="./main.ts"></script>
     </body>
 </html>

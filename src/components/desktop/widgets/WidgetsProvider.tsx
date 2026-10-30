@@ -3,7 +3,7 @@ import { WidgetsContext, type WidgetsContextValue } from '@/contexts/WidgetsCont
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import type { WorkArea } from '@/lib/monitors';
-import { builtinWidget, WIDGET_SIZES, widgetIdentity, type PlacedWidget, type WidgetSize, type WidgetSource } from '@/lib/widgets';
+import { builtinWidget, WIDGET_SIZES, widgetIdentity, type PermissionDomain, type PlacedWidget, type WidgetSize, type WidgetSource } from '@/lib/widgets';
 import { storageArea, storageClear } from '@/lib/widgetStorage';
 
 /** The space kept between widgets and around the edges. */
@@ -48,9 +48,10 @@ export function WidgetsProvider({ children }: { children: ReactNode }) {
     [setStored],
   );
 
-  const add = useCallback((source: WidgetSource) => {
-    const size = source.type === 'builtin' ? (builtinWidget(source.id)?.size ?? 'small') : 'small';
-    update((list) => [...list, { id: crypto.randomUUID(), source, size, ...freeSpot(areas, list, size) }]);
+  const add = useCallback((source: WidgetSource, options: { size?: WidgetSize; denied?: PermissionDomain[] } = {}) => {
+    const size = options.size ?? (source.type === 'builtin' ? (builtinWidget(source.id)?.size ?? 'small') : 'small');
+    const denied = options.denied?.length ? { denied: options.denied } : {};
+    update((list) => [...list, { id: crypto.randomUUID(), source, size, ...denied, ...freeSpot(areas, list, size) }]);
   }, [areas, update]);
 
   const remove = useCallback((id: string) => {
@@ -67,9 +68,13 @@ export function WidgetsProvider({ children }: { children: ReactNode }) {
     update((list) => list.map((w) => (w.id === id ? { ...w, size } : w)));
   }, [update]);
 
+  const setDenied = useCallback((id: string, denied: PermissionDomain[]) => {
+    update((list) => list.map((w) => (w.id === id ? { ...w, denied } : w)));
+  }, [update]);
+
   const value = useMemo<WidgetsContextValue>(
-    () => ({ widgets, add, remove, move, resize, editing, setEditing, galleryOpen, setGalleryOpen }),
-    [widgets, add, remove, move, resize, editing, galleryOpen],
+    () => ({ widgets, add, remove, move, resize, setDenied, editing, setEditing, galleryOpen, setGalleryOpen }),
+    [widgets, add, remove, move, resize, setDenied, editing, galleryOpen],
   );
   return <WidgetsContext.Provider value={value}>{children}</WidgetsContext.Provider>;
 }

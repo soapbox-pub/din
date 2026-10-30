@@ -1,22 +1,31 @@
 .profile {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
-  height: 100%;
   padding: 16px;
+}
+
+.banner {
+  display: none;
 }
 
 .avatar {
   flex: none;
   display: grid;
   place-items: center;
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--primary), color-mix(in oklab, var(--primary) 55%, #f97316));
+  background: linear-gradient(135deg, #8b5cf6, #ec4899 60%, #f97316) center / cover;
+  box-shadow: 0 0 0 3px var(--glass-edge);
   color: #fff;
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 650;
+}
+
+.avatar.has-picture {
+  color: transparent;
 }
 
 .details {
@@ -35,7 +44,6 @@
 .nip05,
 .follows {
   font-size: 14px;
-  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -61,43 +69,53 @@
   width: 60%;
   height: 20px;
   border-radius: 4px;
-  background: var(--faint);
+  background: var(--glass-faint);
 }
 
 .profile[data-state='signed-out'] .avatar,
 .profile[data-state='unavailable'] .avatar {
-  background: var(--faint);
+  background: var(--glass-faint);
 }
 
-/* Small: stacked and centered. Large: more of the bio. */
-@media (max-width: 240px) {
-  .profile {
-    flex-direction: column;
-    justify-content: center;
-    gap: 8px;
-    text-align: center;
-  }
-
-  .about,
-  .follows {
-    display: none;
-  }
+body[data-shape='small'] .profile {
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
 }
 
-@media (min-height: 280px) {
-  .profile {
-    flex-direction: column;
-    justify-content: center;
-    text-align: center;
-  }
+body[data-shape='small'] .avatar {
+  width: 64px;
+  height: 64px;
+}
 
-  .avatar {
-    width: 96px;
-    height: 96px;
-    font-size: 36px;
-  }
+body[data-shape='small'] .about,
+body[data-shape='small'] .follows {
+  display: none;
+}
 
-  .about {
-    -webkit-line-clamp: 5;
-  }
+body[data-shape='large'] .profile {
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 72px;
+  text-align: center;
+}
+
+body[data-shape='large'] .banner {
+  display: block;
+  position: absolute;
+  inset: 0 0 auto;
+  height: 120px;
+  background: linear-gradient(135deg, rgb(139 92 246 / 0.5), rgb(236 72 153 / 0.4)) center / cover;
+}
+
+body[data-shape='large'] .avatar {
+  position: relative;
+  width: 104px;
+  height: 104px;
+  font-size: 38px;
+}
+
+body[data-shape='large'] .about {
+  -webkit-line-clamp: 4;
 }

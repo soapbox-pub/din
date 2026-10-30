@@ -5,7 +5,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppContext } from '@/hooks/useAppContext';
 import { fetchAuthor } from '@/hooks/useAuthor';
 import { onThemeChange } from '@/components/desktop/dinHost/theme';
-import { grantedDomains, onWidgetPort, portIsFrom, widgetIdentity, type PlacedWidget } from '@/lib/widgets';
+import { getWidgetsBridge, grantedDomains, onWidgetPort, portIsFrom, widgetIdentity, type PlacedWidget } from '@/lib/widgets';
 import { storageArea, storageGet, storageKeys, storageRemove, storageSet } from '@/lib/widgetStorage';
 
 /** A NIP-5D envelope: `{ type: 'domain.action', … }`. */
@@ -36,7 +36,7 @@ function nappletTheme() {
 
 /**
  * Answer one widget's guest: the NAP domains it was granted (NAP-SHELL,
- * THEME, IDENTITY and STORAGE), over the port main hands over each time it
+ * THEME, IDENTITY, STORAGE and RESOURCE), over the port main hands over each time it
  * loads. Messages for any other domain are dropped, as NIP-5D asks.
  */
 export function useNappletHost(webContentsId: number | null, widget: PlacedWidget, onFailed: (reason: string) => void): void {
@@ -53,7 +53,7 @@ export function useNappletHost(webContentsId: number | null, widget: PlacedWidge
   const portRef = useRef<MessagePort | null>(null);
 
   const pubkey = user?.pubkey ?? '';
-  const domains = grantedDomains(widget.source);
+  const domains = grantedDomains(widget.source, widget.denied);
   const hasIdentity = domains.includes('identity');
   const hasTheme = domains.includes('theme');
   useEffect(() => {
@@ -64,11 +64,11 @@ export function useNappletHost(webContentsId: number | null, widget: PlacedWidge
     return onThemeChange(() => portRef.current?.postMessage({ message: { type: 'theme.changed', theme: nappletTheme() } }));
   }, [hasTheme]);
 
-  const sourceKey = JSON.stringify(widget.source);
+  const sourceKey = JSON.stringify([widget.source, widget.denied ?? []]);
   useEffect(() => {
     if (webContentsId === null) return;
     const source = live.current.widget.source;
-    const granted = grantedDomains(source);
+    const granted = grantedDomains(source, live.current.widget.denied);
     return onWidgetPort(webContentsId, (entry) => {
       if (!portIsFrom(entry, source)) return;
       portRef.current?.close();
@@ -120,6 +120,26 @@ export function useNappletHost(webContentsId: number | null, widget: PlacedWidge
             }
             return;
           }
+          case 'resource.bytes': {
+            if (!id) return;
+            const bridge = getWidgetsBridge();
+            if (typeof msg.url !== 'string' || !bridge) {
+              reply({ type: 'resource.bytes.error', id, error: 'unavailable' });
+              return;
+            }
+            try {
+              const { bytes, type } = await bridge.resource(msg.url);
+              reply({ type: 'resource.bytes.result', id, blob: new Blob([bytes as BlobPart], { type }) });
+            } catch (error) {
+              const message = error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error);
+              reply({ type: 'resource.bytes.error', id, error: 'failed', message });
+            }
+            return;
+          }
+          case 'resource.info':
+          case 'resource.bytesMany':
+            if (id) reply({ type: `${msg.type}.error`, id, error: 'unsupported' });
+            return;
           default:
             if (domain === 'identity' && id) reply(await identity(msg.type, id));
         }

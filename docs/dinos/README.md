@@ -183,7 +183,9 @@ hands to the window's `DinAppFrame`.
 `dinos.widgets` (`WidgetsBridge` in `src/lib/widgets.ts`, handled by
 `electron/widgets.mts`) does the same for desktop widgets
 ([../widgets.md](../widgets.md)): `fetch(sha256, servers)` has main fetch
-a widget from Blossom and keep it if its bytes match, `onContextMenu(cb)`
+a widget from Blossom and keep it if its bytes match, `icon(sha256,
+servers)` its icon the same way, `resource(url)` download something from
+the web for a widget granted NAP-RESOURCE, `onContextMenu(cb)`
 hears right-clicks in a widget outside text fields, and each widget's port
 arrives as a `dinos-widgets:port` message for `onWidgetPort`.
 

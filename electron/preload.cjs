@@ -3339,6 +3339,19 @@ expose('widgets', {
    */
   fetch: (sha256, servers) => ipcRenderer.invoke('dinos-widgets:fetch', sha256, servers),
   /**
+   * A widget's icon, by hash from its manifest's Blossom servers, verified.
+   * @param {string} sha256
+   * @param {string[]} servers
+   * @returns {Promise<Uint8Array>}
+   */
+  icon: (sha256, servers) => ipcRenderer.invoke('dinos-widgets:icon', sha256, servers),
+  /**
+   * Download something from the web for a widget (NAP-RESOURCE): https, public addresses, no cookies.
+   * @param {string} url
+   * @returns {Promise<{ bytes: Uint8Array, type: string }>}
+   */
+  resource: (url) => ipcRenderer.invoke('dinos-widgets:resource', url),
+  /**
    * Hear right-clicks in widgets outside text fields, at a point in the widget.
    * @param {(e: { webContentsId: number, x: number, y: number }) => void} callback
    * @returns {() => void}

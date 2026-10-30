@@ -23,7 +23,10 @@ interface WidgetFrameProps {
   onRemove: (widget: PlacedWidget) => void;
 }
 
-/** One widget on the desktop: its guest, in a frosted card, with its menu. */
+/**
+ * One widget on the desktop: its guest and its menu. Din draws nothing
+ * behind it: a widget is as transparent as its own page.
+ */
 export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRemove }: WidgetFrameProps) {
   const { editing, setEditing, resize } = useWidgets();
   const surface = useRef<GuestSurfaceHandle>(null);
@@ -113,7 +116,7 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
           role="group"
           aria-label={title}
           className={cn(
-            'pointer-events-auto absolute overflow-visible rounded-2xl',
+            'pointer-events-auto absolute overflow-visible rounded-3xl',
             drag ? 'z-10 cursor-grabbing' : 'motion-safe:transition-[left,top] motion-safe:duration-150',
           )}
           style={{
@@ -125,13 +128,13 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
         >
           <div
             className={cn(
-              'relative h-full w-full overflow-hidden rounded-2xl border border-foreground/10 bg-background/60 shadow-lg backdrop-blur-xl',
-              editing && 'ring-2 ring-primary/40',
+              'relative h-full w-full rounded-3xl',
+              editing && 'bg-white/5 outline-2 outline-offset-2 outline-white/50 outline-dashed',
             )}
           >
             {ready ? (
               <GuestSurface
-                key={generation}
+                key={`${generation}:${(widget.denied ?? []).join()}`}
                 ref={surface}
                 src={widgetUrl(widget.source)}
                 partition={WIDGETS_PARTITION}
@@ -167,7 +170,16 @@ export function WidgetFrame({ widget, left, top, onDrop, onGuest, onAbout, onRem
   );
 }
 
+/** What shows instead of a widget's page: on a card of Din's own, since there's no page to draw one. */
 function WidgetStatus({ title, failed, unavailable, onRetry }: { title: string; failed: string | null; unavailable: boolean; onRetry: () => void }) {
+  return (
+    <div className="h-full w-full overflow-hidden rounded-3xl border border-foreground/10 bg-background/70 text-foreground backdrop-blur-xl">
+      <WidgetStatusBody title={title} failed={failed} unavailable={unavailable} onRetry={onRetry} />
+    </div>
+  );
+}
+
+function WidgetStatusBody({ title, failed, unavailable, onRetry }: { title: string; failed: string | null; unavailable: boolean; onRetry: () => void }) {
   if (unavailable) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-1 p-4 text-center">

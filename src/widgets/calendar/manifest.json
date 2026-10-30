@@ -1,0 +1,8 @@
+{
+  "name": "Calendar",
+  "description": "Today's date, and the month around it.",
+  "icon": "calendar",
+  "domains": ["theme"],
+  "size": "medium",
+  "sizes": ["small", "medium", "large"]
+}

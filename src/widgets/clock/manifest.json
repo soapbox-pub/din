@@ -1,6 +1,6 @@
 {
   "name": "Clock",
-  "description": "The time and date, on an analog face.",
+  "description": "The time and date, on a clear analog face or in large digits.",
   "icon": "clock",
   "domains": ["theme"],
   "size": "small",

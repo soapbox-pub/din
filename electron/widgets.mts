@@ -15,7 +15,8 @@
 // web projection has it, and relays the napplet's postMessage envelopes to
 // the desktop over a port. Widgets get nothing else: no window.din, no
 // window.nostr, no storage of their own (the iframe's origin is opaque), and
-// no network (the CSP, and this session refuses every web request).
+// no network (the CSP, and this session refuses every web request): what a
+// widget granted NAP-RESOURCE downloads, main fetches for the desktop.
 //
 // Trust: which widget a port belongs to is the host of the frame's URL, never
 // anything the widget says, and the bytes behind napplet://<hash>/ are only
@@ -25,6 +26,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { ipcMain, MessageChannelMain, net, session } from 'electron';
 
 export const WIDGET_SCHEME = 'widget';
@@ -39,6 +42,15 @@ const NAPPLET_HOST = /^[a-z2-7]{52}$/;
 
 /** The biggest artifact fetched: napplets are one self-contained page. */
 const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
+
+/** The biggest icon fetched. */
+const MAX_ICON_BYTES = 1024 * 1024;
+
+/** The biggest thing a widget may download (NAP-RESOURCE). */
+const MAX_RESOURCE_BYTES = 10 * 1024 * 1024;
+
+/** Where widgets' downloads go from: no cookies, no cache, nothing of the user's. */
+const RESOURCE_PARTITION = 'widget-resources';
 
 /**
  * NIP-5D's baseline policy. The host page carries it as a header, so the
@@ -189,6 +201,65 @@ export function registerWidgets(opts: Options, preloadPath: string): void {
     await fetchArtifact(sha256, list);
     return nappletHost(sha256);
   });
+
+  // A widget's icon from its manifest, by hash, verified.
+  ipcMain.handle('dinos-widgets:icon', async (event, sha256, servers) => {
+    opts.assertShellSender(event);
+    if (typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)) throw new Error('Not a sha256 hash');
+    const list = Array.isArray(servers) ? servers.filter((s): s is string => typeof s === 'string') : [];
+    return new Uint8Array(await downloadBlob(sha256, list, MAX_ICON_BYTES));
+  });
+
+  // NAP-RESOURCE: something from the web, for a widget the desktop let have
+  // it. https only, never a private address, and nothing of the user's
+  // (no cookies, no cache) goes with it.
+  ipcMain.handle('dinos-widgets:resource', async (event, url) => {
+    opts.assertShellSender(event);
+    if (typeof url !== 'string') throw new Error('Not a URL');
+    return fetchResource(url);
+  });
+}
+
+/** Whether an address is the machine's own or its network's: never for a widget. */
+function isPrivateAddress(address: string): boolean {
+  if (isIP(address) === 4) {
+    const [a, b] = address.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b < 128) || (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || a >= 224;
+  }
+  const lower = address.toLowerCase();
+  if (lower.startsWith('::ffff:')) return isPrivateAddress(lower.slice(7));
+  return lower === '::' || lower === '::1' || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || lower.startsWith('ff');
+}
+
+async function checkPublicHost(url: URL): Promise<void> {
+  if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Only https:// addresses');
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  if (/(^|\.)(localhost|local|lan|internal|home|onion)$/i.test(host)) throw new Error('Not a public address');
+  const addresses = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
+  if (addresses.length === 0 || addresses.some(isPrivateAddress)) throw new Error('Not a public address');
+}
+
+async function fetchResource(raw: string): Promise<{ bytes: Uint8Array; type: string }> {
+  let url = new URL(raw);
+  const s = session.fromPartition(RESOURCE_PARTITION);
+  for (let hop = 0; hop < 5; hop++) {
+    await checkPublicHost(url);
+    const response = await s.fetch(url.toString(), {
+      redirect: 'manual',
+      credentials: 'omit',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
+      url = new URL(response.headers.get('location')!, url);
+      continue;
+    }
+    if (!response.ok || !response.body) throw new Error(`${url.host} answered ${response.status}`);
+    const bytes = await readCapped(response.body, MAX_RESOURCE_BYTES);
+    return { bytes: new Uint8Array(bytes), type: response.headers.get('content-type') ?? 'application/octet-stream' };
+  }
+  throw new Error('Too many redirects');
 }
 
 /** Per-guest policy, from main's web-contents-created. */
@@ -268,9 +339,17 @@ function fetchArtifact(sha256: string, servers: string[]): Promise<void> {
 async function downloadArtifact(sha256: string, servers: string[]): Promise<void> {
   if (!options) throw new Error('Widgets are not ready');
   if ((await cachedArtifact(sha256)) !== null) return;
+  const bytes = await downloadBlob(sha256, servers, MAX_ARTIFACT_BYTES);
+  await fs.promises.mkdir(options.cacheDir, { recursive: true });
+  const temp = `${cacheFile(sha256)}.${process.pid}.tmp`;
+  await fs.promises.writeFile(temp, bytes);
+  await fs.promises.rename(temp, cacheFile(sha256));
+}
+
+/** A blob from the first of these Blossom servers that has it with the right hash. */
+async function downloadBlob(sha256: string, servers: string[], max: number): Promise<Buffer> {
   const origins = [...new Set(servers.map(serverOrigin).filter((s): s is string => s !== null))];
-  if (origins.length === 0) throw new Error('No Blossom server has this widget');
-  let lastError = 'No Blossom server has this widget';
+  let lastError = 'No Blossom server has it';
   for (const origin of origins) {
     try {
       const response = await net.fetch(`${origin}/${sha256}`, { signal: AbortSignal.timeout(20_000) });
@@ -278,16 +357,12 @@ async function downloadArtifact(sha256: string, servers: string[]): Promise<void
         lastError = `${origin} answered ${response.status}`;
         continue;
       }
-      const bytes = await readCapped(response.body, MAX_ARTIFACT_BYTES);
+      const bytes = await readCapped(response.body, max);
       if (createHash('sha256').update(bytes).digest('hex') !== sha256) {
-        lastError = `${origin} sent bytes that don't match the widget's hash`;
+        lastError = `${origin} sent bytes that don't match the hash`;
         continue;
       }
-      await fs.promises.mkdir(options.cacheDir, { recursive: true });
-      const temp = `${cacheFile(sha256)}.${process.pid}.tmp`;
-      await fs.promises.writeFile(temp, bytes);
-      await fs.promises.rename(temp, cacheFile(sha256));
-      return;
+      return bytes;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -315,7 +390,7 @@ async function readCapped(body: ReadableStream<Uint8Array>, max: number): Promis
     size += value.byteLength;
     if (size > max) {
       await reader.cancel();
-      throw new Error('The widget is too big');
+      throw new Error('Too big');
     }
     chunks.push(value);
   }

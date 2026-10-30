@@ -16,8 +16,17 @@ import { useWidgets } from '@/contexts/WidgetsContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useAuthor } from '@/hooks/useAuthor';
 import { contains } from '@/lib/monitors';
-import { builtinWidget, getWidgetsBridge, grantedDomains, WIDGET_SIZES, widgetTitle, type PlacedWidget } from '@/lib/widgets';
-import { DOMAIN_LABELS } from './domainLabels';
+import {
+  builtinWidget,
+  declaredDomains,
+  getWidgetsBridge,
+  grantedDomains,
+  isPermissionDomain,
+  WIDGET_SIZES,
+  widgetTitle,
+  type PlacedWidget,
+} from '@/lib/widgets';
+import { BuiltinIcon, NappletIcon, PermissionRow } from './permissions';
 import { WidgetFrame } from './WidgetFrame';
 import { WidgetGallery } from './WidgetGallery';
 
@@ -31,7 +40,8 @@ const GRID = 8;
 export function WidgetLayer() {
   const { widgets, editing, setEditing, move, remove } = useWidgets();
   const areas = useWorkAreas();
-  const [about, setAbout] = useState<PlacedWidget | null>(null);
+  const [aboutId, setAboutId] = useState<string | null>(null);
+  const about = widgets.find((w) => w.id === aboutId) ?? null;
   const [removing, setRemoving] = useState<PlacedWidget | null>(null);
 
   // Right-clicks main forwards from a widget's page open that widget's menu
@@ -87,7 +97,7 @@ export function WidgetLayer() {
 
   // Removing a widget that keeps things (a note's text) asks first.
   const askRemove = (w: PlacedWidget) => {
-    if (grantedDomains(w.source).includes('storage')) setRemoving(w);
+    if (grantedDomains(w.source, w.denied).includes('storage')) setRemoving(w);
     else remove(w.id);
   };
 
@@ -100,7 +110,7 @@ export function WidgetLayer() {
           {...place(w)}
           onDrop={onDrop}
           onGuest={onGuest}
-          onAbout={setAbout}
+          onAbout={(widget) => setAboutId(widget.id)}
           onRemove={askRemove}
         />
       ))}
@@ -113,7 +123,7 @@ export function WidgetLayer() {
         </div>
       )}
       <WidgetGallery />
-      <AboutWidget widget={about} onClose={() => setAbout(null)} />
+      <AboutWidget widget={about} onClose={() => setAboutId(null)} />
       <AlertDialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -138,49 +148,68 @@ export function WidgetLayer() {
   );
 }
 
+/** About This Widget: who made it, and its permissions, which can be turned off and on. */
 function AboutWidget({ widget, onClose }: { widget: PlacedWidget | null; onClose: () => void }) {
+  const { setDenied } = useWidgets();
   const source = widget?.source;
   const pubkey = source?.type === 'napplet' ? source.pubkey : undefined;
   const author = useAuthor(pubkey);
   const authorName = pubkey
     ? author.data?.metadata?.display_name || author.data?.metadata?.name || `${nip19.npubEncode(pubkey).slice(0, 16)}…`
     : 'Din';
-  const description = source?.type === 'builtin' ? builtinWidget(source.id)?.description : source?.description;
-  const domains = source ? grantedDomains(source).filter((d) => d !== 'shell') : [];
+  const manifest = source?.type === 'builtin' ? builtinWidget(source.id) : undefined;
+  const description = manifest?.description ?? (source?.type === 'napplet' ? source.description : '');
+  const asked = source ? declaredDomains(source).filter(isPermissionDomain) : [];
+  const denied = widget?.denied ?? [];
 
   return (
     <Dialog open={widget !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{source ? widgetTitle(source) : ''}</DialogTitle>
+        <DialogHeader className="items-center text-center sm:text-center">
+          {source?.type === 'napplet' ? (
+            <NappletIcon source={source} className="size-16 text-2xl" />
+          ) : (
+            <span className="grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-primary/25 to-primary/5 text-primary">
+              <BuiltinIcon name={manifest?.icon ?? ''} className="size-8" />
+            </span>
+          )}
+          <DialogTitle className="text-xl">{source ? widgetTitle(source) : ''}</DialogTitle>
+          <p className="text-sm text-muted-foreground">by {authorName}</p>
           <DialogDescription className="whitespace-pre-line">{description}</DialogDescription>
         </DialogHeader>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">Made by</dt>
-          <dd className="min-w-0 truncate">{authorName}</dd>
-          <dt className="text-muted-foreground">It can</dt>
-          <dd>
-            {domains.length === 0 ? (
-              'Only show itself'
-            ) : (
-              <ul className="space-y-1">
-                {domains.map((d) => <li key={d}>{DOMAIN_LABELS[d]}</li>)}
-              </ul>
+        <div className="rounded-2xl border px-4">
+          {asked.length === 0 ? (
+            <p className="py-4 text-sm text-muted-foreground">This widget uses no special permissions.</p>
+          ) : (
+            <div className="divide-y">
+              <p className="py-3 text-sm font-medium text-muted-foreground">Permissions</p>
+              {asked.map((domain) => (
+                <PermissionRow
+                  key={domain}
+                  domain={domain}
+                  allowed={!denied.includes(domain)}
+                  required={source?.type === 'napplet' ? source.requires.includes(domain) : true}
+                  onChange={(allowed) => {
+                    if (!widget) return;
+                    setDenied(widget.id, allowed ? denied.filter((d) => d !== domain) : [...denied, domain]);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        {source?.type === 'napplet' && (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+            {source.source && (
+              <>
+                <dt className="text-muted-foreground">Source</dt>
+                <dd className="min-w-0 break-all select-text">{source.source}</dd>
+              </>
             )}
-          </dd>
-          {source?.type === 'napplet' && source.source && (
-            <>
-              <dt className="text-muted-foreground">Source</dt>
-              <dd className="min-w-0 break-all select-text">{source.source}</dd>
-            </>
-          )}
-          {source?.type === 'napplet' && (
-            <>
-              <dt className="text-muted-foreground">Version</dt>
-              <dd className="min-w-0 truncate font-mono text-xs leading-5 select-text">{source.sha256.slice(0, 16)}</dd>
-            </>
-          )}
-        </dl>
+            <dt className="text-muted-foreground">Version</dt>
+            <dd className="min-w-0 truncate font-mono text-xs leading-5 select-text">{source.sha256.slice(0, 16)}</dd>
+          </dl>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -1,0 +1,93 @@
+.battery {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 12px;
+}
+
+.ring {
+  position: relative;
+  width: 116px;
+  height: 116px;
+  flex: none;
+}
+
+.ring > svg {
+  width: 100%;
+  height: 100%;
+  filter: var(--clear-drop);
+}
+
+.track {
+  fill: rgb(0 0 0 / 0.18);
+  stroke: rgb(255 255 255 / 0.28);
+  stroke-width: 9;
+}
+
+.level {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 9;
+  stroke-linecap: round;
+  transition: stroke-dasharray 400ms ease;
+}
+
+.level.low {
+  stroke: var(--red);
+}
+
+.inside {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+}
+
+.percent {
+  font-size: 36px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.percent span {
+  font-size: 16px;
+  font-weight: 600;
+  margin-left: 1px;
+}
+
+.bolt {
+  width: 16px;
+  height: 16px;
+  color: var(--green);
+  stroke: none;
+  filter: var(--clear-drop);
+}
+
+.caption {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+body[data-shape='wide'] .battery {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 24px;
+  padding: 16px 24px;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.detail {
+  font-size: 16px;
+  font-weight: 500;
+  margin-top: 4px;
+}

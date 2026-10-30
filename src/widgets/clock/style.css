@@ -1,103 +1,96 @@
 .clock {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 24px;
+  gap: 12px;
   height: 100%;
-  padding: 16px;
+  padding: 8px;
 }
 
 .face {
-  height: 100%;
-  max-width: 100%;
-  aspect-ratio: 1;
-  flex: none;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  filter: var(--clear-drop);
+  overflow: visible;
 }
 
-.dial {
-  fill: color-mix(in oklab, var(--background) 70%, transparent);
-  stroke: var(--faint);
-  stroke-width: 2;
-}
-
-.tick {
-  stroke: var(--muted);
+.disc {
+  fill: rgb(255 255 255 / 0.12);
+  stroke: rgb(255 255 255 / 0.4);
   stroke-width: 1.5;
+}
+
+.marker {
+  stroke: rgb(255 255 255 / 0.7);
+  stroke-width: 3;
   stroke-linecap: round;
 }
 
-.tick.major {
-  stroke: var(--text);
-  stroke-width: 3;
+.marker.major {
+  stroke: #fff;
+  stroke-width: 5;
 }
 
 .hand {
-  stroke: var(--text);
+  stroke: #fff;
   stroke-linecap: round;
 }
 
 .hour {
-  stroke-width: 7;
+  stroke-width: 8;
 }
 
 .minute {
-  stroke-width: 4.5;
+  stroke-width: 5;
 }
 
-.second {
-  stroke: #f97316;
-  stroke-width: 2;
+.second line {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.second circle {
+  fill: var(--accent);
 }
 
 .pin {
-  fill: #f97316;
+  fill: #1c1c1e;
 }
 
-.readout {
-  display: none;
-  min-width: 0;
-}
-
-.weekday,
 .date {
   font-size: 18px;
-  color: var(--muted);
-  white-space: nowrap;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+}
+
+.digital {
+  width: 100%;
+  padding: 0 16px;
 }
 
 .time {
-  font-size: 40px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-body[data-layout='wide'] .readout {
-  display: block;
-}
-
-body[data-layout='wide'] .face {
-  height: 100%;
-}
-
-body[data-layout='tall'] .clock {
-  flex-direction: column;
+  display: flex;
+  align-items: baseline;
   gap: 8px;
+  line-height: 1;
 }
 
-body[data-layout='tall'] .face {
-  height: auto;
-  width: 100%;
-  min-height: 0;
-  flex: 1;
+.digits {
+  font-size: 88px;
+  font-weight: 250;
+  letter-spacing: -0.04em;
 }
 
-body[data-layout='tall'] .readout {
-  display: block;
-  text-align: center;
+.period {
+  font-size: 24px;
+  font-weight: 500;
 }
 
-body[data-layout='tall'] .time {
-  display: none;
+.digital .date {
+  margin-top: 8px;
+  padding-left: 4px;
+  font-size: 20px;
 }

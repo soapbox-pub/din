@@ -1,0 +1,151 @@
+.calendar {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+}
+
+.today-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  flex: none;
+}
+
+body[data-shape='small'] .today-card {
+  flex: 1;
+}
+
+.weekday {
+  color: var(--red);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.number {
+  font-size: 72px;
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin: 4px 0;
+}
+
+.month {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px 0;
+  width: 100%;
+  text-align: center;
+}
+
+.head {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.day {
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 500;
+  height: 18px;
+}
+
+.day.weekend {
+  color: var(--glass-muted);
+}
+
+.day.today {
+  justify-self: center;
+  width: 20px;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Large: a month you can page through. */
+body[data-shape='large'] .calendar {
+  flex-direction: column;
+  gap: 12px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.navs {
+  display: flex;
+  gap: 4px;
+}
+
+.nav {
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--glass-faint);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--glass-text) 18%, transparent);
+}
+
+.nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.nav svg {
+  width: 18px;
+  height: 18px;
+}
+
+body[data-shape='large'] .grid {
+  flex: 1;
+  gap: 4px 0;
+  grid-auto-rows: 1fr;
+}
+
+body[data-shape='large'] .head {
+  font-size: 12px;
+  align-self: center;
+}
+
+body[data-shape='large'] .day {
+  height: auto;
+  font-size: 16px;
+}
+
+body[data-shape='large'] .day.today {
+  width: 32px;
+  height: 32px;
+}

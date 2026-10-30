@@ -1,0 +1,194 @@
+.world {
+  position: relative;
+  height: 100%;
+  padding: 8px;
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.faces {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  height: 100%;
+  align-items: center;
+}
+
+.faces li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mini {
+  width: 64px;
+  height: 64px;
+  filter: var(--clear-drop);
+  flex: none;
+}
+
+.mini.day .disc {
+  fill: rgb(255 255 255 / 0.92);
+}
+
+.mini.day .tick,
+.mini.day .hand {
+  stroke: #1c1c1e;
+}
+
+.mini.night .disc {
+  fill: rgb(18 18 22 / 0.7);
+  stroke: rgb(255 255 255 / 0.25);
+}
+
+.mini.night .tick,
+.mini.night .hand {
+  stroke: #fff;
+}
+
+.tick {
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.hand {
+  stroke-linecap: round;
+}
+
+.pin {
+  fill: var(--accent);
+}
+
+.city {
+  font-size: 14px;
+  font-weight: 650;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.offset {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+body[data-shape='small'] .faces {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+body[data-shape='small'] .mini {
+  width: 48px;
+  height: 48px;
+}
+
+body[data-shape='small'] .city {
+  font-size: 12px;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  padding: 4px 8px;
+}
+
+.rows li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rows .mini {
+  width: 36px;
+  height: 36px;
+}
+
+.where {
+  flex: 1;
+  min-width: 0;
+}
+
+.digital {
+  font-size: 24px;
+  font-weight: 350;
+}
+
+.edit {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.35);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.edit svg {
+  width: 14px;
+  height: 14px;
+}
+
+.world:hover .edit,
+.edit:focus-visible {
+  opacity: 1;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.pickers {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  align-content: start;
+}
+
+select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 8px;
+  background: var(--glass-faint);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+body[data-shape='large'] .pickers {
+  grid-template-columns: 1fr;
+}
+
+.done {
+  align-self: flex-end;
+  height: 28px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #1c1c1e;
+  font-weight: 650;
+  cursor: pointer;
+}

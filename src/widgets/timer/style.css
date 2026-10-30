@@ -1,0 +1,196 @@
+.timer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+}
+
+.ring {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 1;
+  flex: none;
+}
+
+.ring > svg {
+  width: 100%;
+  height: 100%;
+}
+
+.track {
+  fill: none;
+  stroke: var(--glass-faint);
+  stroke-width: 6;
+}
+
+.level {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dasharray 250ms linear;
+}
+
+.inside {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+}
+
+.left {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.of {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ring.done .left {
+  color: var(--accent);
+  animation: pulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes pulse {
+  to {
+    opacity: 0.35;
+  }
+}
+
+.side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.chip {
+  height: 28px;
+  padding: 0 4px;
+  border: 0;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--glass-faint);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: color-mix(in oklab, var(--glass-text) 18%, transparent);
+}
+
+.chip.on {
+  background: #fff;
+  color: #111827;
+}
+
+:root[data-scheme='light'] .chip.on {
+  background: #111827;
+  color: #fff;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+}
+
+.pill,
+.round {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--glass-faint);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pill {
+  flex: 1;
+  padding: 0 16px;
+}
+
+.round {
+  width: 36px;
+  flex: none;
+}
+
+.primary {
+  background: var(--accent);
+  color: #1c1c1e;
+}
+
+.pill svg,
+.round svg {
+  width: 16px;
+  height: 16px;
+}
+
+.round.small {
+  width: 28px;
+  height: 28px;
+}
+
+.round.small svg {
+  width: 12px;
+  height: 12px;
+}
+
+.round.corner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+}
+
+.round.corner svg {
+  width: 14px;
+  height: 14px;
+}
+
+body[data-shape='small'] .timer {
+  justify-content: center;
+  padding: 12px;
+}
+
+body[data-shape='small'] .left {
+  font-size: 24px;
+}
+
+body[data-shape='large'] .timer {
+  flex-direction: column;
+  padding: 20px;
+}
+
+body[data-shape='large'] .ring {
+  height: auto;
+  width: 192px;
+}
+
+body[data-shape='large'] .left {
+  font-size: 40px;
+}
+
+body[data-shape='large'] .side {
+  width: 100%;
+  flex: none;
+}

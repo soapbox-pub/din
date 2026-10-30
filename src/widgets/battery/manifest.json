@@ -1,0 +1,8 @@
+{
+  "name": "Battery",
+  "description": "How much charge is left, and how long until full or empty.",
+  "icon": "battery",
+  "domains": ["theme"],
+  "size": "small",
+  "sizes": ["small", "medium"]
+}

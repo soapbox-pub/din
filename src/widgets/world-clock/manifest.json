@@ -1,0 +1,8 @@
+{
+  "name": "World Clock",
+  "description": "The time in cities around the world.",
+  "icon": "earth",
+  "domains": ["theme", "storage"],
+  "size": "medium",
+  "sizes": ["small", "medium", "large"]
+}

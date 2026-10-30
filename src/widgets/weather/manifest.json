@@ -1,0 +1,8 @@
+{
+  "name": "Weather",
+  "description": "Current conditions and the forecast for a place you choose, from Open-Meteo.",
+  "icon": "weather",
+  "domains": ["resource", "storage", "theme"],
+  "size": "medium",
+  "sizes": ["small", "medium", "large"]
+}

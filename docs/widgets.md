@@ -1,10 +1,10 @@
 # Widgets
 
-> **Status: in place.** The built-in Clock, Sticky Note and Profile; widgets
-> from Nostr by `naddr` or from the gallery; the `shell`, `theme`,
-> `identity` and `storage` domains. Not yet: `relay`, `notify`, `resource`,
-> `link`, `media` and `intent`, updating a widget to a newer manifest, and
-> syncing the layout between computers.
+> **Status: in place.** Eight built-in widgets; widgets from Nostr by
+> `naddr` or from the gallery, with Android-style permissions; the `shell`,
+> `theme`, `identity`, `storage` and `resource` domains. Not yet: `relay`,
+> `notify`, `link`, `media` and `intent`, updating a widget to a newer
+> manifest, and syncing the layout between computers.
 
 Widgets sit on the desktop, over the wallpaper and under every window. Each
 is a **napplet**: a small, single-purpose page described by
@@ -14,16 +14,34 @@ the desktop only through the capabilities ("NAP domains",
 `window.napplet`. Users only ever see the word "widget", the way nsites are
 "apps".
 
-Right-click the desktop for **Add Widgets…** (the gallery) and **Edit
-Widgets** (drag to arrange, × to remove). Right-click a widget for Edit
-Widgets, Size (Small, Medium, Large), Reload, About This Widget… and
-Remove Widget.
+Right-click the desktop for **Add Widgets…** and **Edit Widgets** (drag to
+arrange, × to remove). Right-click a widget for Edit Widgets, Size (Small,
+Medium, Large), Reload, About This Widget… (who made it, and its
+permissions, each with a switch) and Remove Widget.
+
+The gallery lists the built-in widgets down the side; each shows live, in
+every size it comes in, on the user's own wallpaper, and clicking a size
+adds it. **From Nostr** lists kind 35129 widgets from the user's relays (or
+finds one by `naddr`), and picking one opens its permission screen: its
+icon and name, then a row for each permission it asks for (`identity`,
+`resource`, `storage`), each with a switch, then Add Widget or Cancel. What
+the user turns off is kept on that copy (`PlacedWidget.denied`) and can be
+turned back on in About This Widget; the widget reloads with the new set.
+
+## Transparency
+
+Din draws nothing behind a widget: no card, no border, no blur. The
+webview, its host page and the srcdoc iframe are all transparent, so a
+widget is exactly as transparent as its own page. One catch, from
+Chromium: a frame whose used `color-scheme` differs from its parent's gets
+an opaque backdrop, so a widget that wants to stay see-through should leave
+`color-scheme` unset (or `normal`) rather than setting `dark`.
 
 ## Where a widget runs
 
 ```
 ┌ the desktop (app://din) ───────────────────────────────────────────┐
-│  WidgetFrame: the card, the menu, the NAP host (useNappletHost)    │
+│  WidgetFrame: the menu, edit mode, the NAP host (useNappletHost)   │
 │      ▲ MessagePort (main made it; bound to the guest's URL)        │
 │ ┌────┴ <webview> in persist:widgets, a process of its own ───────┐ │
 │ │ widget://clock/ or napplet://<sha256 in base32>/               │ │
@@ -46,10 +64,11 @@ Remove Widget.
   its own (a busy widget can't stall the desktop) and keeps the desktop's
   own CSP untouched. Its host page carries the NIP-5D CSP as a header, so
   the srcdoc inherits it too.
-- **No network.** `connect-src 'none'`, `img-src data: blob:` and the rest,
-  and the `persist:widgets` session cancels every http(s) and ws(s)
-  request besides. Downloads, pop-ups, permissions and navigation away are
-  refused (`attachWidgetGuest`).
+- **No network of its own.** `connect-src 'none'`, `img-src data: blob:`
+  and the rest, and the `persist:widgets` session cancels every http(s) and
+  ws(s) request besides. Downloads, pop-ups, permissions and navigation
+  away are refused (`attachWidgetGuest`). A widget granted `resource` asks
+  the desktop, and main fetches for it.
 - **Nothing but `window.napplet`.** Widgets never get `window.din`,
   `window.nostr` or `window.dinos`; lint keeps `src/widgets/` from
   importing anything outside it.
@@ -76,9 +95,27 @@ envelope from that iframe (`event.source`) goes to the desktop as
 }
 ```
 
-`icon` is a lucide name for the gallery, `domains` what the widget may use
-(reviewed like an app's permissions), `size` where it starts. A widget lays
-itself out for whatever box it's in.
+`icon` names one of the gallery's lucide icons (`WIDGET_ICONS` in
+`src/components/desktop/widgets/widgetMeta.ts`), `domains` what the widget
+may use (reviewed like an app's permissions), `size` where it starts. A
+widget lays itself out for whatever box it's in (`followShape`: `small`,
+`wide` or `large`).
+
+| Widget | Looks | Uses |
+|---|---|---|
+| Clock | clear: an analog face, or big digits when medium | `theme` |
+| Calendar | glass: today, the month beside it, or a month to page through | `theme` |
+| Weather | sky gradient: now, the next hours, the next days, for a place you search for (Open-Meteo) | `resource`, `storage`, `theme` |
+| World Clock | clear: day and night faces, or a list, of cities you choose | `storage`, `theme` |
+| Battery | clear: a ring with the charge, and time left | `theme` (and `navigator.getBattery()`) |
+| Timer | glass: a ring, presets, a chime when done | `storage`, `theme` |
+| Sticky Note | paper in five colors | `storage` |
+| Profile | glass: your picture, name, address, bio and follows | `identity`, `resource`, `theme` |
+
+"Clear" widgets are white over the wallpaper with a soft shadow; "glass"
+ones a pane tinted light or dark with the desktop's theme (`.glass` and
+`data-scheme` in `src/widgets/shared/`). A widget can't blur what's behind
+it: that's another process's pixels.
 
 `scripts/build-widgets.mjs` builds each into one self-contained file,
 `dist/widgets/<id>/index.html`, script, styles and fonts inlined (a napplet
@@ -86,8 +123,9 @@ loads nothing), and copies the prelude beside them. It runs in `npm run
 build`, `npm test`, `npm run dev` and the Nix build; rerun it after changing
 a widget, since widgets aren't hot-reloaded. Built-in widgets go through
 the same frame, CSP and domains as any other: if one needs something, the
-others get it too. They share `src/widgets/shared/` (`napplet.ts`, typed
-`window.napplet`, and `base.css`).
+others get it too. They share `src/widgets/shared/`: `napplet.ts` (typed
+`window.napplet`, `followTheme`, `followShape`, `instanceStore`), `dom.ts`
+(no framework, just `h()` and `s()` for elements) and `base.css`.
 
 ## Widgets from Nostr: `napplet://<hash>/`
 
@@ -95,8 +133,10 @@ The gallery lists kind 35129 manifests from the user's relays, or finds one
 by `naddr1…`. `parseNappletManifest` (`src/lib/widgets.ts`) checks what
 NIP-5D asks: a manifest kind (5129, 15129, 35129), a valid signature,
 exactly one `x` tag, a description, a `d` tag only on 35129. Before adding
-one, the user sees what it will be able to do (and what it asks for that
-Din doesn't offer yet).
+one, the user sees its permission screen (and what it asks for that Din
+doesn't offer yet). Its `icon` tag is fetched the same way as the artifact
+(`dinos.widgets.icon`, 1 MB at most), checked against its hash, and shown
+only if it decodes as an image.
 
 The desktop asks main to `dinos.widgets.fetch(sha256, servers)`: main
 fetches the artifact from the manifest's `server` hints and Din's Blossom
@@ -109,8 +149,9 @@ pinned to the version it was added at.
 ## The domains Din answers
 
 `grantedDomains`: what the widget declared (`R` and `O` tags, or a built-in's
-`domains`), of `SUPPORTED_DOMAINS`, plus `shell`. Declarations never widen
-that. Messages for any other domain are dropped, as NIP-5D asks.
+`domains`), of `SUPPORTED_DOMAINS`, plus `shell`, less what the user turned
+off. Declarations never widen that. Messages for any other domain are
+dropped, as NIP-5D asks.
 
 | Domain | What Din does |
 |---|---|
@@ -118,6 +159,7 @@ that. Messages for any other domain are dropped, as NIP-5D asks.
 | `theme` | `theme.get` and `theme.changed`: Din's `background`, `foreground` and `primary` tokens as hex |
 | `identity` | `getPublicKey` (`""` signed out) and `identity.changed`, `getRelays` (NIP-65), `getProfile` (kind 0, through the desktop's profile cache), `getFollows` (kind 3). The rest answer `not supported` |
 | `storage` | `get`, `set`, `remove`, `keys`, shared (the widget) or `scope: "instance"` (this copy), 512 KB each, in the desktop's `localStorage` under `din:widget-storage:`. Removing a copy forgets its instance storage |
+| `resource` | `bytes(url)` for https URLs (`data:` the shim decodes itself), fetched by main (`dinos.widgets.resource`) from a cookieless in-memory session, never from a private or local address (checked again on every redirect), 10 MB at most. `info` and `bytesMany` answer `unsupported` |
 
 A widget's identity, for storage, is `builtin:<id>`, `35129:<pubkey>:<d>`,
 `15129:<pubkey>`, or a snapshot's event id: from the verified manifest,
@@ -131,5 +173,5 @@ never from the widget.
 | `electron/widget-preload.cjs` | The host page: the srcdoc frame and the relay |
 | `src/lib/widgets.ts` | Sizes, built-in manifests, manifest parsing, `dinos.widgets`, ports |
 | `src/lib/widgetStorage.ts` | NAP-STORAGE's areas |
-| `src/contexts/WidgetsContext.ts`, `src/components/desktop/widgets/` | The layout (`din:widgets`), the layer, each frame and its NAP host, the menu, the gallery |
+| `src/contexts/WidgetsContext.ts`, `src/components/desktop/widgets/` | The layout (`din:widgets`), the layer, each frame and its NAP host, the menu, the gallery, permissions and icons |
 | `src/widgets/` | The built-in widgets |
