@@ -215,6 +215,19 @@ changes the repository and branch, so anyone can run their own fork:
 whoever picks the source picks what runs as root. Older systems stay in the
 boot menu. Live sticks aren't updated.
 
+A computer's own changes live in `~/DinOS`, the user's copy of Din, built
+with `sudo nixos-rebuild boot --flake ~/DinOS/os#dinos` (the assistant's
+`dinos` skill, `os/opencode/skills/dinos`). Updates keep them: when the
+commit the newest system was built from isn't in the followed branch, the
+updater merges the branch's tip into that exact commit, which the user
+approved when they built it, and builds the merge. It reads the commit from
+`~/DinOS` as the user if its checkout lacks it, and never builds whatever
+else is there. A merge that conflicts or doesn't build, or a system built
+from uncommitted changes, fails with a reason; Din then offers **Fix with
+assistant**, which merges in `~/DinOS`, where sudo asks again. The
+checkout's `upstream` branch is the tip last fetched and `system` the last
+commit it staged, for `~/DinOS` to pull.
+
 New installs start from a disk image. To cut one, bump `os/version`, commit,
 tag `v<version>`, and run `npm run os:release -- -- --nbunksec-file <file>`
 (or pass any other `ngit release publish` signer option after the second

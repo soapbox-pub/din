@@ -199,7 +199,7 @@ import {
 } from '@/lib/updater';
 import type { UpdateState } from '@/lib/updater';
 import { cleanInstallerError } from '@/lib/installer';
-import { useUpdateState } from '@/hooks/useUpdater';
+import { useFixUpdateWithAssistant, useUpdateState } from '@/hooks/useUpdater';
 import { getFirmwareBridge } from '@/lib/firmware';
 import type { FirmwareState, FirmwareUpdate } from '@/lib/firmware';
 import { useFirmwareState } from '@/hooks/useFirmware';
@@ -4386,6 +4386,12 @@ function AboutSection() {
         {dinos && state?.current && (
           <p className="font-mono text-xs text-muted-foreground">Commit {shortRevision(state.current)}</p>
         )}
+        {dinos && state?.custom && (
+          <p className="text-xs text-muted-foreground">
+            Customized
+            {state.changes !== null && ` · ${state.changes} ${state.changes === 1 ? 'change' : 'changes'} of yours`}
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">A social computer.</p>
       </div>
 
@@ -4410,6 +4416,7 @@ function AboutSection() {
             {state.auto
               ? 'DinOS builds its updates from source by itself, while the computer is plugged in, and installs them when you restart.'
               : 'DinOS builds an update from source when you check for one, and installs it when you restart.'}
+            {state.custom && ' Your own changes, from ~/DinOS, are kept: each update merges into them.'}
           </p>
           <UpdateStatus state={state} />
           <UpdateAutoRow auto={state.auto} />
@@ -4652,7 +4659,34 @@ function UpdateStatus({ state }: { state: UpdateState }) {
         </Button>
       </div>
 
+      {state.phase === 'failed' && state.reason && <UpdateFixCard state={state} />}
+
       {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * An update your own changes stopped (`reason`): they conflict, weren't
+ * committed, or don't build with the branch. The assistant can merge them
+ * in ~/DinOS and build the result.
+ */
+function UpdateFixCard({ state }: { state: UpdateState }) {
+  const fixer = useFixUpdateWithAssistant();
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-foreground">Your changes need a hand</p>
+        <p className="text-xs text-muted-foreground">
+          {fixer.available
+            ? 'The assistant can merge the update into your changes in ~/DinOS, and build the result.'
+            : 'Turn the assistant on to have it bring ~/DinOS up to date, or merge the update there yourself.'}
+        </p>
+      </div>
+      <Button size="sm" disabled={!fixer.available || fixer.pending} onClick={() => fixer.fix(state)}>
+        {fixer.pending ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden /> : <Bot className="size-4" aria-hidden />}
+        Fix with assistant
+      </Button>
     </div>
   );
 }

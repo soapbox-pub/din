@@ -9,7 +9,14 @@
  * `available: false` off DinOS.
  */
 
-export type UpdateStep = 'fetch' | 'space' | 'build' | 'install';
+export type UpdateStep = 'fetch' | 'merge' | 'space' | 'build' | 'install';
+
+/**
+ * Why an update failed, when it's the user's changes that stopped it: they
+ * conflict with the branch, were never committed, aren't in ~/DinOS, or
+ * don't build merged with it.
+ */
+export type UpdateFailure = 'conflict' | 'dirty' | 'missing' | 'build';
 
 export interface UpdateState {
   available: boolean;
@@ -26,6 +33,13 @@ export interface UpdateState {
   branch: string | null;
   /** Whether the system updates by itself, rather than only when asked. */
   auto: boolean;
+  /**
+   * Whether the system has changes of the user's (from ~/DinOS), which
+   * updates merge the branch into.
+   */
+  custom: boolean;
+  /** How many commits of the user's it has, when known. */
+  changes: number | null;
   phase: 'idle' | 'checking' | 'updating' | 'failed';
   /** The commit being built and staged. */
   updatingTo: string | null;
@@ -35,6 +49,8 @@ export interface UpdateState {
   /** When a check last finished, in ms since the epoch. */
   checkedAt: number | null;
   error: string | null;
+  /** Set when the user's changes stopped the update, which the assistant can fix. */
+  reason: UpdateFailure | null;
 }
 
 export interface UpdaterBridge {
@@ -64,6 +80,7 @@ export function getUpdaterBridge(): UpdaterBridge | undefined {
 
 export const UPDATE_STEP_LABELS: Record<UpdateStep, string> = {
   fetch: 'Getting',
+  merge: 'Merging in',
   space: 'Making room for',
   build: 'Building',
   install: 'Installing',

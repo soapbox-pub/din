@@ -30,6 +30,23 @@
 #       The update itself, as din-update.service. Writes its progress to
 #       STATE as it goes.
 #
+# A system built from commits of the user's own (with nixos-rebuild, from
+# their copy of Din in ~/DinOS: the dinos skill) is custom: the commit it
+# was built from isn't in the branch's history. An update keeps those
+# changes, merging the branch's tip into that commit and building the
+# merge. Only that exact commit is merged, never whatever ~/DinOS holds
+# now: the user approved it, through sudo, when they built it. If the
+# checkout doesn't have it, it's read from ~/DinOS as its owner, so root
+# never runs git in a repository someone else controls, and a commit can't
+# be swapped for another under its hash. A merge that conflicts, or a
+# system built from uncommitted changes, which can't be carried forward,
+# fails with a `reason` Din offers to have the assistant fix (merging in
+# ~/DinOS, where sudo asks again).
+#
+# The checkout's `upstream` branch is the tip last fetched, and its `system`
+# branch the commit of the last system the updater staged, for ~/DinOS to
+# pull.
+#
 # Before it builds, a run makes sure there's room: the store on root has to
 # take what the build adds, and the build directory (nix.settings.build-dir,
 # on the home volume) its scratch space. It collects garbage if there isn't,
@@ -53,6 +70,12 @@ UNIT=din-update.service
 BUILD_DIR=/home/.nix-build
 # Systems kept in the profile: the boot menu's (configurationLimit).
 KEEP_GENERATIONS=5
+UPSTREAM_REF=refs/heads/upstream
+SYSTEM_REF=refs/heads/system
+# The user's copy of Din, and whose it is.
+FORK_USER=din
+FORK_HOME=~din
+FORK=$FORK_HOME/DinOS
 GIB=$((1024 * 1024 * 1024))
 # Room on root beyond what the build downloads, for what it builds.
 ROOT_HEADROOM_BYTES=$((4 * GIB))
@@ -93,6 +116,37 @@ source_branch() {
   src_git config dinos.branch 2>/dev/null || echo "$DEFAULT_BRANCH"
 }
 
+has_commit() {
+  src_git cat-file -e "$1^{commit}" 2>/dev/null
+}
+
+# The commit the newest system was built from: the next boot's.
+newest_revision() {
+  local revision
+  revision=$(revision_of "$PROFILE")
+  [[ -n $revision ]] || revision=$(revision_of /run/current-system)
+  echo "$revision"
+}
+
+# git in ~/DinOS, as its owner.
+fork_git() {
+  runuser -u "$FORK_USER" -- env HOME="$FORK_HOME" git -C "$FORK" "$@"
+}
+
+# Copy commit $1 and its history from ~/DinOS into the checkout, leaving
+# out what the tip $2 already brings if ~/DinOS has it. The checkout only
+# takes the objects in.
+import_from_fork() {
+  local commit=$1 tip=$2 have=""
+  [[ -d $FORK ]] || return 1
+  fork_git cat-file -e "$commit^{commit}" </dev/null 2>/dev/null || return 1
+  if fork_git cat-file -e "$tip^{commit}" </dev/null 2>/dev/null; then have="^$tip"; fi
+  printf '%s\n' "$commit" ${have:+"$have"} | fork_git pack-objects --revs --stdout -q |
+    src_git index-pack --stdin --fix-thin >/dev/null 2>&1 || return 1
+  # All of its history is here, not just the commit.
+  src_git rev-list --objects "$commit" >/dev/null 2>&1
+}
+
 # The checkout, made empty (to be fetched into) the first time.
 ensure_checkout() {
   [[ -d $SRC/.git ]] && return
@@ -106,22 +160,26 @@ ensure_checkout() {
 
 # --- The run's state, kept in STATE between runs ---------------------------
 
-phase=idle step="" percent=0 target="" error="" checked_at="" failed=""
+# `failed` is the attempt that failed to build (attempt below), not tried
+# again unless asked; `reason` why the last run failed, when it's for the
+# user to fix: `conflict`, `dirty`, `missing`, or `build`.
+phase=idle step="" percent=0 target="" error="" reason="" checked_at="" failed=""
 
 load_state() {
   [[ -f $STATE ]] || return 0
   phase=$(jq -r '.phase // "idle"' "$STATE")
   error=$(jq -r '.error // ""' "$STATE")
+  reason=$(jq -r '.reason // ""' "$STATE")
   checked_at=$(jq -r '.checkedAt // ""' "$STATE")
   failed=$(jq -r '.failed // ""' "$STATE")
 }
 
 save_state() {
   jq -n --arg phase "$phase" --arg step "$step" --argjson percent "$percent" \
-    --arg target "$target" --arg error "$error" --arg checkedAt "$checked_at" --arg failed "$failed" '
+    --arg target "$target" --arg error "$error" --arg reason "$reason" --arg checkedAt "$checked_at" --arg failed "$failed" '
     def orNull: if . == "" then null else . end;
     {phase: $phase, step: ($step | orNull), percent: $percent, target: ($target | orNull),
-     error: ($error | orNull), checkedAt: ($checkedAt | orNull | if . then tonumber else . end),
+     error: ($error | orNull), reason: ($reason | orNull), checkedAt: ($checkedAt | orNull | if . then tonumber else . end),
      failed: ($failed | orNull)}' >"$STATE.tmp"
   chmod 644 "$STATE.tmp"
   mv "$STATE.tmp" "$STATE"
@@ -145,9 +203,44 @@ finish() {
 
 fail() {
   error=$*
+  reason=""
   echo "$error" >&2
   finish failed
   exit 1
+}
+
+# Fail for a reason that's the user's to fix ($1).
+fail_for() {
+  local why=$1
+  shift
+  error=$*
+  reason=$why
+  echo "$error" >&2
+  finish failed
+  exit 1
+}
+
+# Whether the newest system is custom (above): built from uncommitted
+# changes, or from a commit that isn't in the branch's history as last
+# fetched. Then `changes` is how many commits of the user's it has, if the
+# checkout has them to count.
+custom=false changes=null
+find_custom() {
+  local head
+  head=$(newest_revision)
+  [[ -n $head ]] || return 0
+  if [[ $head == *-dirty ]]; then
+    custom=true
+    return
+  fi
+  src_git rev-parse -q --verify "$UPSTREAM_REF" >/dev/null 2>&1 || return 0
+  if has_commit "$head"; then
+    src_git merge-base --is-ancestor "$head" "$UPSTREAM_REF" 2>/dev/null && return
+    custom=true
+    changes=$(src_git rev-list --count --no-merges "$UPSTREAM_REF..$head" 2>/dev/null) || changes=null
+  elif [[ -d $FORK ]]; then
+    custom=true
+  fi
 }
 
 status() {
@@ -165,16 +258,20 @@ status() {
   if ! $active && [[ $phase == checking || $phase == updating ]]; then
     phase=failed
     error="The last update stopped before it finished."
+    reason=""
   fi
+  find_custom
   jq -n --argjson live "$live" --arg version "$version" --arg current "$current" \
     --arg staged "$staged" --arg url "$(source_url)" --arg branch "$(source_branch)" \
     --argjson auto "$auto" --arg phase "$phase" --argjson state "$(cat "$STATE" 2>/dev/null || echo '{}')" \
-    --arg error "$error" '
+    --arg error "$error" --arg reason "$reason" --argjson custom "$custom" --argjson changes "$changes" '
     def orNull: if . == "" then null else . end;
     {live: $live, version: ($version | orNull), current: ($current | orNull), staged: ($staged | orNull),
      url: $url, branch: $branch, auto: $auto, phase: $phase,
      step: $state.step, percent: ($state.percent // 0), target: $state.target,
-     error: (if $phase == "failed" then ($error | orNull) else null end), checkedAt: $state.checkedAt}'
+     error: (if $phase == "failed" then ($error | orNull) else null end),
+     reason: (if $phase == "failed" then ($reason | orNull) else null end),
+     custom: $custom, changes: $changes, checkedAt: $state.checkedAt}'
 }
 
 start() {
@@ -242,8 +339,8 @@ check_space() {
   local installable=$1 plan root_need root_free build_free
   if ! plan=$(nix build --dry-run "$installable" 2>&1); then
     # A commit that doesn't evaluate won't build either.
-    failed=$target
-    fail "Commit ${target:0:7} doesn't build: $(eval_error <<<"$plan")"
+    failed=$attempt
+    fail_build "${what^} doesn't build: $(eval_error <<<"$plan")"
   fi
   root_need=$(($(fetch_bytes "$plan") + ROOT_HEADROOM_BYTES))
   root_free=$(free_bytes /nix/store)
@@ -296,6 +393,16 @@ progress_of() {
       .out // empty)'
 }
 
+# What's being built, as the user would put it ("commit 1234abc"), and
+# what a failure to build it is keyed by (`failed`): the tip, or for a
+# merge both of its sides.
+what="" attempt="" merging=false
+
+# A build that failed: the user's to fix if it's their changes.
+fail_build() {
+  if $merging; then fail_for build "$*"; else fail "$*"; fi
+}
+
 # Build the system, as `built`.
 built=""
 build() {
@@ -315,8 +422,8 @@ build() {
   done < <(nix build --out-link "$RESULT" --log-format internal-json -v "$installable" 2>&1 >/dev/null | progress_of)
   built=$(readlink -f "$RESULT" 2>/dev/null || true)
   if [[ ! $built =~ ^/nix/store/[a-z0-9]{32}-nixos-system- ]]; then
-    failed=$target
-    fail "Couldn't build commit ${target:0:7}${reason:+: $reason}"
+    failed=$attempt
+    fail_build "Couldn't build $what${reason:+: $reason}"
   fi
 }
 
@@ -345,48 +452,81 @@ run() {
   fi
 
   # Its error is shown again if this run goes no further than finding the
-  # same failed commit.
-  local last_error=$error
+  # same failed attempt.
+  local last_error=$error last_reason=$reason
   error=""
+  reason=""
   phase=checking
   set_step fetch
   ensure_checkout
-  local url branch tip current staged
+  local url branch tip current head
   url=$(source_url)
   branch=$(source_branch)
   echo "Fetching $branch from $url"
   src_git fetch --quiet --no-tags origin "refs/heads/$branch" </dev/null ||
     fail "Couldn't get $branch from $url."
   tip=$(src_git rev-parse FETCH_HEAD)
+  src_git update-ref "$UPSTREAM_REF" "$tip"
   current=$(revision_of /run/current-system)
-  staged=$(revision_of "$PROFILE")
-  if contains "$current" "$tip" || contains "$staged" "$tip"; then
+  head=$(newest_revision)
+  if [[ -n $head && $head != *-dirty ]] && ! has_commit "$head"; then
+    import_from_fork "$head" "$tip" && echo "Took commit $head from $FORK"
+  fi
+  if contains "$current" "$tip" || contains "$head" "$tip"; then
     echo "Up to date at $tip"
-    error=""
     finish
     return
   fi
-  if ! $manual && [[ $tip == "$failed" ]]; then
-    echo "Not building $tip again: it failed before."
+
+  # Whether the newest system has changes of the user's to keep (status's
+  # custom).
+  if [[ $head == *-dirty ]]; then
+    fail_for dirty "DinOS was built with uncommitted changes, which an update can't keep. Commit them in ~/DinOS and build it again."
+  elif [[ -n $head ]] && ! src_git merge-base --is-ancestor "$head" "$tip" 2>/dev/null; then
+    if has_commit "$head"; then
+      merging=true
+    elif [[ -d $FORK ]]; then
+      fail_for missing "DinOS was built from commit ${head:0:7}, which isn't in ~/DinOS, so an update can't keep its changes."
+    fi
+  fi
+
+  if $merging; then
+    attempt="$head+$tip"
+    what="your changes with commit ${tip:0:7}"
+  else
+    attempt=$tip
+    what="commit ${tip:0:7}"
+  fi
+  if ! $manual && [[ $attempt == "$failed" ]]; then
+    echo "Not building $attempt again: it failed before."
     error=$last_error
+    reason=$last_reason
     finish failed
     return
   fi
 
-  # The checkout is exactly the commit: nothing of an earlier one is left
-  # for the flake to pick up.
-  src_git checkout -q --force --detach "$tip"
-  src_git clean -q -ffdx
-
   phase=updating
   target=$tip
+  # The checkout is exactly the commit: nothing of an earlier one is left
+  # for the flake to pick up.
+  if $merging; then
+    set_step merge
+    src_git checkout -q --force --detach "$head"
+    src_git clean -q -ffdx
+    echo "Merging $tip into $head"
+    merge_upstream "$tip" "$branch"
+  else
+    src_git checkout -q --force --detach "$tip"
+    src_git clean -q -ffdx
+  fi
+
   local installable="$SRC/os#nixosConfigurations.$SYSTEM_NAME.config.system.build.toplevel"
   set_step space
   check_space "$installable"
   set_step build
-  echo "Building $tip"
+  echo "Building $target"
   build "$installable"
-  [[ $(revision_of "$built") == "$tip" ]] || fail "Commit ${tip:0:7} didn't build as itself."
+  [[ $(revision_of "$built") == "$target" ]] || fail "${what^} didn't build as itself."
 
   set_step install
   nix-env --profile "$PROFILE" --set "$built"
@@ -394,10 +534,26 @@ run() {
   "$built/bin/switch-to-configuration" boot ||
     fail "Couldn't add the update to the boot menu."
   prune_generations
-  echo "Staged $tip"
+  src_git update-ref "$SYSTEM_REF" "$target"
+  echo "Staged $target"
   error=""
   failed=""
   finish
+}
+
+# Merge the tip $1 of branch $2 into the checked-out commit, the user's,
+# making the merge the `target`.
+merge_upstream() {
+  local tip=$1 branch=$2 conflicts
+  if src_git -c user.name=DinOS -c user.email=din-update@dinos -c commit.gpgSign=false \
+    merge -q --no-edit -m "Merge $branch into your changes" "$tip" >/dev/null 2>&1; then
+    target=$(src_git rev-parse HEAD)
+    return
+  fi
+  conflicts=$(src_git diff --name-only --diff-filter=U | head -n3 | paste -sd , || true)
+  src_git merge --abort 2>/dev/null || src_git reset -q --hard
+  src_git clean -q -ffdx
+  fail_for conflict "Your changes to DinOS conflict with commit ${tip:0:7} of $branch${conflicts:+, in ${conflicts//,/, }}."
 }
 
 case "${1:-}" in

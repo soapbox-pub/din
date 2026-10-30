@@ -30,9 +30,12 @@ const WATCH_INTERVAL_MS = 2_000;
 /** sudo may wait this long for the user to approve a new source. */
 const APPROVAL_TIMEOUT_MS = 11 * 60_000;
 
-type Step = 'fetch' | 'space' | 'build' | 'install';
+type Step = 'fetch' | 'merge' | 'space' | 'build' | 'install';
+/** Why an update failed, when it's the user's changes that stopped it (os/din-update.sh). */
+type Reason = 'conflict' | 'dirty' | 'missing' | 'build';
 
-const STEPS: readonly string[] = ['fetch', 'space', 'build', 'install'];
+const STEPS: readonly string[] = ['fetch', 'merge', 'space', 'build', 'install'];
+const REASONS: readonly string[] = ['conflict', 'dirty', 'missing', 'build'];
 const PHASES: readonly string[] = ['idle', 'checking', 'updating', 'failed'];
 
 interface UpdateState {
@@ -50,6 +53,13 @@ interface UpdateState {
   branch: string | null;
   /** Whether the system updates by itself, rather than only when asked. */
   auto: boolean;
+  /**
+   * Whether the system has changes of the user's (from ~/DinOS), which
+   * updates merge the branch into.
+   */
+  custom: boolean;
+  /** How many commits of the user's it has, when known. */
+  changes: number | null;
   phase: 'idle' | 'checking' | 'updating' | 'failed';
   /** The commit being built and staged. */
   updatingTo: string | null;
@@ -59,6 +69,8 @@ interface UpdateState {
   /** When a check last finished, in ms since the epoch. */
   checkedAt: number | null;
   error: string | null;
+  /** Set when the user's changes stopped the update, which the assistant can fix. */
+  reason: Reason | null;
 }
 
 /** os/din-update.sh's `status`. */
@@ -75,6 +87,9 @@ interface HelperStatus {
   percent: number;
   target: string | null;
   error: string | null;
+  reason: string | null;
+  custom: boolean;
+  changes: number | null;
   checkedAt: number | null;
 }
 
@@ -87,12 +102,15 @@ let state: UpdateState = {
   url: null,
   branch: null,
   auto: true,
+  custom: false,
+  changes: null,
   phase: 'idle',
   updatingTo: null,
   step: null,
   percent: 0,
   checkedAt: null,
   error: null,
+  reason: null,
 };
 
 function messageOf(error: unknown): string {
@@ -135,12 +153,15 @@ export function registerUpdaterHandlers(options: {
       url: status.url,
       branch: status.branch,
       auto: status.auto,
+      custom: status.custom === true,
+      changes: typeof status.changes === 'number' ? status.changes : null,
       phase,
       updatingTo: phase === 'updating' ? status.target : null,
       step: phase === 'updating' ? step : null,
       percent: Math.max(0, Math.min(100, Number(status.percent) || 0)),
       checkedAt: status.checkedAt,
       error: status.error,
+      reason: status.reason && REASONS.includes(status.reason) ? status.reason as Reason : null,
     };
     sendToShell('updater:progress', state);
   };
