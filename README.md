@@ -442,9 +442,17 @@ The app's gallery installs a system in one click
 (`electron/vm-installers.mts`): Din makes the machine at once, sized to this
 computer, then asks the system's own servers for its newest release and its
 SHA-256 (Ubuntu's `meta-release-lts` and `SHA256SUMS`, Fedora's
-`releases.json`), downloads it to `~/VMs/.installers/` (resumable, shared by
+`releases.json`, and for Windows Microsoft's download page, whose form a
+hidden Electron window fills in since Microsoft turns away scripted
+requests, and whose table lists each language's SHA-256), downloads it to `~/VMs/.installers/` (resumable, shared by
 machines installing the same release, checked against that hash), and
-installs it hands-free. Linux installers boot their own kernel straight from
+installs it hands-free. Windows starts from its disc (Din presses Enter
+for its "Press any key" prompt) with an `autounattend.xml` on a FAT drive
+QEMU makes from a folder: Windows 11 Pro with Microsoft's generic key
+(installed, not activated), the whole disk, and a local account with no
+password, so no Microsoft account and no questions. At its first logon it
+writes a line to the serial port, and Din ejects the disc and answer drive
+while it runs. Linux installers boot their own kernel straight from
 the disc image, with an answer file on a FAT drive QEMU makes from a folder
 (Ubuntu's autoinstall, Fedora's kickstart): the account is the computer's
 user's name, with no password, logged in automatically. The installer

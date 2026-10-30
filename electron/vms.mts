@@ -37,7 +37,18 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { ipcMain } from 'electron';
 import { trash } from './files.mts';
-import { download, forgetPartial, installer, INSTALLERS, INSTALLERS_DIR, prepareLinux, pruneDownloads, type InstallBoot } from './vm-installers.mts';
+import {
+  download,
+  forgetPartial,
+  installer,
+  INSTALLERS,
+  INSTALLERS_DIR,
+  prepareLinux,
+  prepareWindows,
+  pruneDownloads,
+  WINDOWS_READY,
+  type InstallBoot,
+} from './vm-installers.mts';
 import type {
   NewVm,
   VmConfig,
@@ -253,7 +264,9 @@ function cleanInstall(value: unknown): StoredInstall | null {
     iso: cleanPath(raw.iso),
     download: str(raw.download),
     boot:
-      boot && [boot.kernel, boot.initrd, boot.append, boot.seedDir, boot.seedLabel].every((v) => typeof v === 'string')
+      boot &&
+      [boot.seedDir, boot.seedLabel].every((v) => typeof v === 'string') &&
+      [boot.kernel, boot.initrd, boot.append].every((v) => v === undefined || typeof v === 'string')
         ? (boot as InstallBoot)
         : null,
     error: str(raw.error),
@@ -386,8 +399,8 @@ function installInfo(id: string, config: StoredConfig, diskUsed: number): VmInst
 }
 
 /** What a restart would change (the CD drive changes live, the name doesn't matter). */
-function hardware(config: VmConfig): unknown {
-  const { name: _n, cdrom: _c, ...rest } = config;
+function hardware(config: StoredConfig): unknown {
+  const { name: _n, cdrom: _c, install: _i, ...rest } = config;
   return rest;
 }
 
@@ -560,7 +573,7 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
   }
   // An installer's kernel (-kernel) takes the first place to start from itself.
   const boot = config.install?.step === 'install' ? config.install.boot : null;
-  const first = boot ? 1 : 0;
+  const first = boot?.kernel ? 1 : 0;
   args.push(
     '-drive', `if=none,id=disk0,format=qcow2,discard=unmap,file=${opt(diskPath(id))}`,
     // The disk first: one with nothing on it yet falls through to the CD.
@@ -587,17 +600,21 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
   if (config.audio) {
     args.push('-audiodev', 'pipewire,id=snd0', '-device', 'ich9-intel-hda', '-device', 'hda-duplex,audiodev=snd0');
   }
-  if (boot) {
+  if (boot?.kernel) {
     // The installer's own kernel, told to install by itself from the answer
-    // file on a FAT drive QEMU makes from a folder. Its reboot at the end
-    // turns the machine off instead, which is how Din hears it's done.
+    // file on the FAT drive below. Its reboot at the end turns the machine
+    // off instead, which is how Din hears it's done.
+    args.push('-kernel', boot.kernel, '-initrd', boot.initrd ?? '', '-append', boot.append ?? '', '-action', 'reboot=shutdown');
+  } else if (boot) {
+    // Windows Setup, which restarts several times on its way, says it's done
+    // on the first serial port (vm-installers' answer file).
+    args.push('-chardev', `file,id=ser0,path=${opt(path.join(rundir, 'serial.log'))}`, '-device', 'isa-serial,chardev=ser0');
+  }
+  if (boot) {
+    // The answer file, on a FAT drive QEMU makes from a folder.
     args.push(
-      '-kernel', boot.kernel,
-      '-initrd', boot.initrd,
-      '-append', boot.append,
-      '-action', 'reboot=shutdown',
       '-blockdev', JSON.stringify({ driver: 'vvfat', 'node-name': 'seed', dir: boot.seedDir, label: boot.seedLabel, 'read-only': true }),
-      '-device', 'usb-storage,bus=xhci.0,drive=seed,removable=on',
+      '-device', 'usb-storage,bus=xhci.0,drive=seed,removable=on,id=seeddev',
     );
   }
   if (windows) args.push('-rtc', 'base=localtime');
@@ -858,7 +875,7 @@ async function exited(id: string, m: Machine): Promise<void> {
   m.markExited();
   changed();
   // An installer turning the machine off by itself is it finishing.
-  if (byGuest && !m.poweredDown && m.config.install?.step === 'install' && m.config.install.boot) void finishInstall(id);
+  if (byGuest && !m.poweredDown && m.config.install?.step === 'install' && m.config.install.boot?.kernel) void finishInstall(id);
 }
 
 /** Machines still running from before Din (re)started, found by their pidfiles. */
@@ -948,6 +965,7 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
       // Stopping falls back on QMP alone.
     }
     await attach(id, m, qmp);
+    if (config.install?.step === 'install' && config.install.installer === 'windows') void pressAnyKey(m);
   } catch (error) {
     if (machines.get(id) === m) {
       m.stopping = true;
@@ -1016,8 +1034,6 @@ interface LiveInstall {
 /** Machines whose disc image is being fetched now. */
 const installing = new Map<string, LiveInstall>();
 
-const INSTALL_DISK_GIB = 64;
-
 async function writeInstall(id: string, patch: Partial<StoredInstall>): Promise<StoredConfig> {
   const config = await readConfig(id);
   if (!config.install) throw new Error('It isn’t being installed.');
@@ -1037,17 +1053,19 @@ async function install(which: unknown, options: unknown): Promise<VmInfo> {
   const taken = new Set((await ids()).map((n) => n.toLowerCase()));
   let name = typeof opts.name === 'string' && opts.name.trim() ? opts.name.trim() : info.name;
   if (!(typeof opts.name === 'string' && opts.name.trim())) for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${info.name} ${n}`;
+  const hw = info.hardware;
   const created = await create({
     name,
-    os: 'linux',
+    os: hw.os,
     system: which as VmInstallerId,
     // Half of this computer, up to what the system makes good use of.
-    memoryMiB: opts.memoryMiB ?? Math.max(2048, Math.min(8192, Math.floor(host.hostMemoryMiB / 2 / 512) * 512)),
+    memoryMiB: opts.memoryMiB ?? Math.max(hw.minMemoryMiB, Math.min(8192, Math.floor(host.hostMemoryMiB / 2 / 512) * 512)),
     cpus: opts.cpus ?? Math.max(1, Math.min(4, Math.floor(host.hostCpus / 2))),
-    diskGiB: opts.diskGiB ?? INSTALL_DISK_GIB,
+    diskGiB: opts.diskGiB ?? hw.diskGiB,
     firmware: 'uefi',
-    secureBoot: false,
-    tpm: false,
+    // What's missing, Windows' answer file tells Setup not to check for.
+    secureBoot: hw.secureBoot && host.secureBoot,
+    tpm: hw.tpm && host.tpm,
     cdrom: null,
     network: true,
     forwards: [],
@@ -1086,7 +1104,7 @@ async function runInstall(id: string): Promise<void> {
     }
     live.phase = 'verifying';
     changed();
-    const boot = await prepareLinux(stored.installer, iso, installDir(id));
+    const boot = stored.installer === 'windows' ? await prepareWindows(iso, installDir(id)) : await prepareLinux(stored.installer, iso, installDir(id));
     if (live.abort.signal.aborted) return;
     config = await readConfig(id);
     await writeConfig(id, { ...config, cdrom: iso, install: { ...config.install!, step: 'install', boot, error: null } });
@@ -1158,11 +1176,62 @@ async function keepOnlyUsedDownloads(): Promise<void> {
   await pruneDownloads(keep);
 }
 
-// While an installer runs, how far along it is (its disk filling) changes by itself.
-setInterval(() => {
-  for (const m of machines.values()) {
-    if (m.config.install?.step === 'install' && m.state === 'running') return changed();
+/**
+ * Windows Setup is done (it said so on the serial port, at its first logon):
+ * take its disc and answer file out while it runs, and it's an ordinary machine.
+ */
+async function finishWindowsInstall(id: string, m: Machine): Promise<void> {
+  try {
+    const config = await readConfig(id);
+    delete config.install;
+    await writeConfig(id, { ...config, cdrom: null });
+    // The machine's own copy too, so its settings don't read as changed.
+    delete m.config.install;
+    m.config.cdrom = null;
+    if (m.qmp) {
+      await changeMedium(id, null).catch(() => {});
+      await m.qmp.execute('device_del', { id: 'seeddev' }).catch(() => {});
+    }
+    await fsp.rm(installDir(id), { recursive: true, force: true });
+    void keepOnlyUsedDownloads();
+  } catch (error) {
+    console.error(`vms: finishing installing ${id} failed`, error);
   }
+  changed();
+}
+
+/**
+ * Windows' disc says "Press any key to boot from CD or DVD" and gives up
+ * after a few seconds: press Enter for it while the firmware gets there.
+ * Once Windows is on the disk, the disk starts first and this goes unread.
+ */
+async function pressAnyKey(m: Machine): Promise<void> {
+  for (const until = Date.now() + 25_000; Date.now() < until && m.qmp && !m.qmp.closed; ) {
+    await m.qmp.execute('send-key', { keys: [{ type: 'qcode', data: 'ret' }] }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 700));
+  }
+}
+
+const finishing = new Set<string>();
+
+// While an installer runs, how far along it is (its disk filling) changes by
+// itself; and Windows Setup may have said it's done.
+setInterval(() => {
+  let busy = false;
+  for (const [id, m] of machines) {
+    if (m.config.install?.step !== 'install' || m.state !== 'running') continue;
+    busy = true;
+    if (m.config.install.boot?.kernel || finishing.has(id)) continue;
+    void fsp.readFile(path.join(m.rundir, 'serial.log'), 'latin1').then(
+      (text) => {
+        if (!text.includes(WINDOWS_READY) || finishing.has(id)) return;
+        finishing.add(id);
+        void finishWindowsInstall(id, m).finally(() => finishing.delete(id));
+      },
+      () => {},
+    );
+  }
+  if (busy) changed();
 }, 3000).unref();
 
 /** Downloads cut off by Din stopping carry on. */

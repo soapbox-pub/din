@@ -1,8 +1,8 @@
 /**
  * The virtual machines bridge (`din.system.vms`, permission `vms`): QEMU
  * machines kept in ~/VMs, run by Electron main in electron/vms.mts, for the
- * Virtual Machines app (src/apps/virtual-machines/). Types only, shared by
- * both sides; main checks every argument itself.
+ * Virtual Machines app (src/apps/virtual-machines/) and the `din vms`
+ * commands. Shared by both sides; main checks every argument itself.
  */
 
 /** What's installed on the machine, which decides the hardware it gets. */
@@ -175,6 +175,22 @@ export interface VmsBridge {
   onDisplayClosed(callback: (connection: number) => void): () => void;
   /** Every machine, whenever one changes. */
   onChanged(callback: (vms: VmInfo[]) => void): () => void;
+}
+
+/** What the desktop has of it (`window.dinos.vms`), for the `din vms` commands: all but the screens. */
+export type VmsDesktopBridge = Omit<VmsBridge, 'openDisplay' | 'displayWrite' | 'closeDisplay' | 'onDisplayData' | 'onDisplayClosed'>;
+
+declare global {
+  interface Dinos {
+    /** Present only inside the Electron shell. */
+    vms?: VmsDesktopBridge;
+  }
+}
+
+/** The desktop's virtual machines, or undefined outside Electron. */
+export function getVmsBridge(): VmsDesktopBridge | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.dinos?.vms;
 }
 
 /** The hardware a new machine for this OS starts with. */

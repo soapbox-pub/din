@@ -4,6 +4,7 @@ import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, pri
 import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, specOf } from './parse';
 import { settingsArea } from './settings';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
+import { vmsArea } from './vms';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
 import { cleanError } from './util';
 
@@ -30,6 +31,7 @@ export const AREAS: readonly Area[] = [
   printersArea,
   powerArea,
   datetimeArea,
+  vmsArea,
   nostrArea,
   updateArea,
   firmwareArea,

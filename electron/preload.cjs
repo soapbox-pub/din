@@ -1608,6 +1608,24 @@ expose('passwords', {
   onOfferGone: (callback) => listen('passwords:offer-gone', (p) => callback(p.offerId)),
 });
 
+// Virtual machines (window.dinos.vms), backed by electron/vms.mts, for the
+// `din vms` commands; the Virtual Machines app has them, and machines'
+// screens, through its bridge port. Types in src/lib/vms.ts.
+/** @type {Record<string, (...args: unknown[]) => unknown>} */
+const vms = {};
+for (const method of [
+  'status', 'list', 'create', 'install', 'retryInstall', 'cancelInstall', 'update', 'remove', 'start', 'shutdown',
+  'forceStop', 'pause', 'resume', 'reset', 'setCdrom', 'resizeDisk', 'snapshots', 'takeSnapshot', 'restoreSnapshot',
+  'deleteSnapshot',
+]) {
+  vms[method] = (...args) => ipcRenderer.invoke(`vms:${method}`, ...args);
+}
+expose('vms', {
+  ...vms,
+  /** @param {(vms: unknown) => void} callback */
+  onChanged: (callback) => listen('vms:changed', callback),
+});
+
 // System Monitor bridge (window.dinos.systemMonitor), backed by
 // electron/system-monitor.mts: snapshots of what's running, pushed every few
 // seconds while someone is subscribed, and SIGTERM/SIGKILL for Din's user's
