@@ -37,6 +37,7 @@ export const AppConfigSchema = z.object({
   cursorShowMouse: z.boolean(),
   cursorFirePaint: z.boolean(),
   cursorWater: z.boolean(),
+  cursorThemeColor: z.boolean(),
   tilingEnabled: z.boolean(),
   tilingGap: z.number().min(0).max(64),
   dockMagnification: z.boolean(),

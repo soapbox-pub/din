@@ -9,6 +9,7 @@ import type { CursorImage } from '@/lib/cursorEffects/scene';
 import { portalContainer } from '@/lib/portalContainer';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
+import { useCursorEffectTint } from '@/components/desktop/useCursorEffectTint';
 
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
@@ -85,6 +86,11 @@ export function CursorEffectsLayer() {
   useEffect(() => {
     cursorEffects.setCursorImage(cursor);
   }, [cursor]);
+
+  const tint = useCursorEffectTint(config.cursorThemeColor);
+  useEffect(() => {
+    cursorEffects.setTint(tint);
+  }, [tint]);
 
   const width = layout?.width ?? window.innerWidth;
   const height = layout?.height ?? window.innerHeight;

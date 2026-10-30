@@ -8,7 +8,7 @@
  * same scene draws Settings' pictures offscreen as it draws the screen.
  */
 
-import { type Rgb, type SpriteKind, rampColor, sprite } from '@/lib/cursorEffects/sprites';
+import { type Rgb, type SpriteKind, rampColor, sprite, tintColor, toHsl } from '@/lib/cursorEffects/sprites';
 
 /** The most particles a scene keeps; past it, the oldest go first. */
 const MAX_PARTICLES = 3000;
@@ -161,9 +161,35 @@ export class Scene {
   /** The pointer's picture, for its copies. */
   cursor: CursorImage | null = null;
   readonly random: () => number;
+  /** A color particles and the ribbon take on instead of their own (tintColor), and it as HSL. */
+  private tint: Rgb | null = null;
+  private tintHsl: [number, number, number] | null = null;
+  /** Colors already tinted, by their RGB. */
+  private tinted = new Map<string, Rgb>();
 
   constructor(seed = (Math.random() * 2 ** 32) >>> 0) {
     this.random = seeded(seed);
+  }
+
+  /** Draw what's added from now on in `tint`'s hue (the theme's color), or in its own colors. */
+  setTint(tint: Rgb | null): void {
+    this.tint = tint;
+    this.tintHsl = tint ? toHsl(tint) : null;
+    this.tinted.clear();
+  }
+
+  private tintAll(colors: readonly Rgb[]): readonly Rgb[] {
+    const tint = this.tint;
+    if (!tint) return colors;
+    return colors.map((color) => {
+      const key = color.join(',');
+      let out = this.tinted.get(key);
+      if (!out) {
+        out = tintColor(color, tint);
+        this.tinted.set(key, out);
+      }
+      return out;
+    });
   }
 
   /** Whether anything is left to draw. */
@@ -188,6 +214,7 @@ export class Scene {
       sway: 0,
       delay: 0,
       ...spec,
+      colors: this.tintAll(spec.colors),
       group: spec.group,
       age: 0,
       seed: this.random() * 1000,
@@ -275,7 +302,10 @@ export class Scene {
         const t = b.age / this.ribbonLife;
         const width = Math.max(0.5, this.ribbonWidth * (1 - t));
         ctx.globalAlpha = Math.max(0, 1 - t) * 0.85;
-        ctx.strokeStyle = `hsl(${b.hue % 360} 100% 62%)`;
+        // Tinted, the rainbow shimmers either side of the tint's hue instead.
+        ctx.strokeStyle = this.tintHsl
+          ? `hsl(${this.tintHsl[0] + Math.sin((b.hue * Math.PI) / 180) * 20} ${Math.round(this.tintHsl[1] * 100)}% 62%)`
+          : `hsl(${b.hue % 360} 100% 62%)`;
         ctx.lineWidth = width;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);

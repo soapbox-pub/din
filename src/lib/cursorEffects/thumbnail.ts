@@ -7,6 +7,7 @@
 import { CLICK_EFFECTS, TRAIL_EFFECTS, along, burnPoint, showMouse, type Stroke } from '@/lib/cursorEffects/effects';
 import { PACKAGE_PREFIX, loadPackage } from '@/lib/cursorEffects/packages';
 import { Scene, arrowImage } from '@/lib/cursorEffects/scene';
+import type { Rgb } from '@/lib/cursorEffects/sprites';
 import type { PreviewKind } from '@/lib/cursorEffects/engine';
 import { Water } from '@/lib/cursorEffects/water';
 
@@ -87,11 +88,12 @@ function waterLayer(): { water: Water; picture: HTMLCanvasElement } | null {
   return { water, picture: picture.canvas };
 }
 
-async function draw(kind: PreviewKind, id: string): Promise<string | null> {
+async function draw(kind: PreviewKind, id: string, tint: Rgb | null): Promise<string | null> {
   const out = canvas();
   if (!out) return null;
   const { ctx } = out;
   const scene = new Scene(0x5eed);
+  scene.setTint(tint);
   const state = { carry: 0, hue: 200 };
   let pointer = { x: WIDTH / 2, y: HEIGHT / 2 };
   let water: { water: Water; picture: HTMLCanvasElement } | null = null;
@@ -145,12 +147,12 @@ async function draw(kind: PreviewKind, id: string): Promise<string | null> {
   return out.canvas.toDataURL('image/png');
 }
 
-/** A picture of an effect as a data URL, or null if it can't be drawn here. */
-export function cursorEffectThumbnail(kind: PreviewKind, id: string): Promise<string | null> {
-  const key = `${kind}:${id}`;
+/** A picture of an effect as a data URL (in `tint`'s hue, if given), or null if it can't be drawn here. */
+export function cursorEffectThumbnail(kind: PreviewKind, id: string, tint: Rgb | null = null): Promise<string | null> {
+  const key = `${tint?.join(',') ?? 'own'}|${kind}:${id}`;
   let promise = cache.get(key);
   if (!promise) {
-    promise = draw(kind, id).catch(() => null);
+    promise = draw(kind, id, tint).catch(() => null);
     cache.set(key, promise);
   }
   return promise;

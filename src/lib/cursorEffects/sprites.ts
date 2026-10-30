@@ -143,12 +143,40 @@ export function rampColor(ramp: readonly Rgb[], t: number, steps = 8): Rgb {
   ];
 }
 
-/** A hue (0 to 360) at full saturation, as RGB. */
-export function hueColor(hue: number, lightness = 0.6): Rgb {
+/** A hue (0 to 360), saturation and lightness (0 to 1), as RGB. */
+export function hslColor(hue: number, saturation: number, lightness: number): Rgb {
   const h = (((hue % 360) + 360) % 360) / 60;
-  const c = (1 - Math.abs(2 * lightness - 1));
+  const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
   const x = c * (1 - Math.abs((h % 2) - 1));
   const [r, g, b] = h < 1 ? [c, x, 0] : h < 2 ? [x, c, 0] : h < 3 ? [0, c, x] : h < 4 ? [0, x, c] : h < 5 ? [x, 0, c] : [c, 0, x];
   const m = lightness - c / 2;
   return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+/** A hue (0 to 360) at full saturation, as RGB. */
+export function hueColor(hue: number, lightness = 0.6): Rgb {
+  return hslColor(hue, 1, lightness);
+}
+
+/** RGB as hue (0 to 360), saturation and lightness (0 to 1). */
+export function toHsl([r, g, b]: Rgb): [number, number, number] {
+  const [rf, gf, bf] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rf, gf, bf);
+  const min = Math.min(rf, gf, bf);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === rf ? ((gf - bf) / d) % 6 : max === gf ? (bf - rf) / d + 2 : (rf - gf) / d + 4;
+  return [(h * 60 + 360) % 360, Math.min(1, s), l];
+}
+
+/**
+ * `color` in the tint's hue and saturation, at its own lightness: a glow's
+ * white heart stays white and its dark edge dark, and the rest takes on the
+ * tint, however pale or deep the tint itself is.
+ */
+export function tintColor(color: Rgb, tint: Rgb): Rgb {
+  const [h, s] = toHsl(tint);
+  return hslColor(h, s, toHsl(color)[2]);
 }

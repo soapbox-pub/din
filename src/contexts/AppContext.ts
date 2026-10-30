@@ -93,6 +93,8 @@ export interface AppConfig {
   cursorFirePaint: boolean;
   /** Compiz's Water: hold Super+Ctrl and move the mouse to stir the screen like a pond. */
   cursorWater: boolean;
+  /** Whether cursor effects take on the theme's color instead of their own. */
+  cursorThemeColor: boolean;
   /**
    * Whether windows tile, Hyprland style, instead of floating: they share
    * each monitor's workspace between them (see src/lib/tiling.ts). Kept on

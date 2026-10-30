@@ -67,6 +67,7 @@ const defaultConfig: AppConfig = {
   cursorShowMouse: false,
   cursorFirePaint: false,
   cursorWater: false,
+  cursorThemeColor: false,
   tilingEnabled: false,
   tilingGap: 8,
   dockMagnification: true,

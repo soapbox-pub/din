@@ -34,6 +34,7 @@ import {
 } from '@/lib/cursorEffects/effects';
 import { PACKAGE_PREFIX, loadPackage } from '@/lib/cursorEffects/packages';
 import { type Bounds, type CursorImage, Scene } from '@/lib/cursorEffects/scene';
+import type { Rgb } from '@/lib/cursorEffects/sprites';
 import { Water } from '@/lib/cursorEffects/water';
 import { getGuestInput } from '@/lib/guestInput';
 import { getScreenshotBridge } from '@/lib/screenshot';
@@ -196,6 +197,11 @@ class CursorEffectsEngine {
   /** The pointer's picture, for Mouse Trails' copies of it. */
   setCursorImage(image: CursorImage | null): void {
     this.scene.cursor = image;
+  }
+
+  /** The theme's color for effects to take on, or null for their own colors. */
+  setTint(tint: Rgb | null): void {
+    this.scene.setTint(tint);
   }
 
   /** Super+Shift+K: ring the pointer, or stop. */

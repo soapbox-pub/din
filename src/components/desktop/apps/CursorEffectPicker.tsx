@@ -31,7 +31,9 @@ import {
   forgetThumbnails,
   type PreviewKind,
 } from '@/lib/cursorEffects';
+import type { Rgb } from '@/lib/cursorEffects/sprites';
 import type { CursorEffectPackageInfo } from '@/lib/systemCursor';
+import { useCursorEffectTint } from '@/components/desktop/useCursorEffectTint';
 import { cn } from '@/lib/utils';
 
 interface Choice {
@@ -96,6 +98,7 @@ export function CursorEffectsSettings() {
   };
 
   const imported = packages.data ?? [];
+  const tint = useCursorEffectTint(config.cursorThemeColor);
   return (
     <div className="flex flex-col gap-3">
       <EffectCarousel
@@ -104,6 +107,7 @@ export function CursorEffectsSettings() {
         description="What the pointer leaves behind as it moves."
         choices={choicesFor('trail', imported)}
         value={config.cursorTrail}
+        tint={tint}
         onChange={(cursorTrail) => updateConfig((current) => ({ ...current, cursorTrail }))}
         onRemove={remove}
       />
@@ -113,14 +117,31 @@ export function CursorEffectsSettings() {
         description="What a click sets off where it lands."
         choices={choicesFor('click', imported)}
         value={config.cursorClick}
+        tint={tint}
         onChange={(cursorClick) => updateConfig((current) => ({ ...current, cursorClick }))}
         onRemove={remove}
       />
+      <div className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="min-w-0 flex-1">
+          <Label htmlFor="cursor-theme-color" className="cursor-pointer text-sm">
+            Match theme color
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Trails, click effects, Show Mouse and Fire Paint take on your theme’s color. Imported effects keep their own.
+          </p>
+        </div>
+        <Switch
+          id="cursor-theme-color"
+          checked={config.cursorThemeColor}
+          onCheckedChange={(cursorThemeColor) => updateConfig((current) => ({ ...current, cursorThemeColor }))}
+        />
+      </div>
       <PluginRow
         kind="show-mouse"
         title="Show Mouse"
         description="Press Super+Shift+K, or shake the mouse, to ring the pointer with light."
         checked={config.cursorShowMouse}
+        tint={tint}
         onCheckedChange={(cursorShowMouse) => updateConfig((current) => ({ ...current, cursorShowMouse }))}
       />
       <PluginRow
@@ -128,6 +149,7 @@ export function CursorEffectsSettings() {
         title="Fire Paint"
         description="Hold Super+Shift and drag to draw in fire. Super+Shift+C puts it out."
         checked={config.cursorFirePaint}
+        tint={tint}
         onCheckedChange={(cursorFirePaint) => updateConfig((current) => ({ ...current, cursorFirePaint }))}
       />
       <PluginRow
@@ -135,6 +157,7 @@ export function CursorEffectsSettings() {
         title="Water"
         description="Hold Super+Ctrl and move the mouse to stir the screen like a pond."
         checked={config.cursorWater}
+        tint={null}
         onCheckedChange={(cursorWater) => updateConfig((current) => ({ ...current, cursorWater }))}
       />
       <p className="text-xs text-muted-foreground">
@@ -151,6 +174,7 @@ function EffectCarousel({
   description,
   choices,
   value,
+  tint,
   onChange,
   onRemove,
 }: {
@@ -159,6 +183,8 @@ function EffectCarousel({
   description: string;
   choices: Choice[];
   value: string;
+  /** The theme's color the pictures show effects in, or null for their own. */
+  tint: Rgb | null;
   onChange: (value: string) => void;
   onRemove: (pkg: CursorEffectPackageInfo) => void;
 }) {
@@ -254,6 +280,7 @@ function EffectCarousel({
             choice={choice}
             selected={choice.id === value}
             tabbable={choice.id === tabbable}
+            tint={choice.pkg ? null : tint}
             onChoose={() => choose(choice.id)}
             onUse={() => {
               onChange(choice.id);
@@ -273,6 +300,7 @@ function EffectTile({
   choice,
   selected,
   tabbable,
+  tint,
   onChoose,
   onUse,
   onPreview,
@@ -282,6 +310,7 @@ function EffectTile({
   choice: Choice;
   selected: boolean;
   tabbable: boolean;
+  tint: Rgb | null;
   onChoose: () => void;
   onUse: () => void;
   onPreview: () => void;
@@ -312,7 +341,7 @@ function EffectTile({
               {choice.id === 'none' ? (
                 <div className="size-full bg-gradient-to-br from-indigo-950 via-indigo-900 to-slate-900" aria-hidden />
               ) : (
-                <EffectPicture kind={kind} id={choice.id} />
+                <EffectPicture kind={kind} id={choice.id} tint={tint} />
               )}
               {selected && (
                 <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
@@ -378,17 +407,17 @@ function EffectTile({
   );
 }
 
-function EffectPicture({ kind, id }: { kind: PreviewKind; id: string }) {
+function EffectPicture({ kind, id, tint }: { kind: PreviewKind; id: string; tint: Rgb | null }) {
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
-    cursorEffectThumbnail(kind, id).then((u) => {
+    cursorEffectThumbnail(kind, id, tint).then((u) => {
       if (live) setUrl(u);
     });
     return () => {
       live = false;
     };
-  }, [kind, id]);
+  }, [kind, id, tint]);
   if (url === undefined) return <Skeleton className="size-full rounded-none" aria-hidden />;
   if (url === null) return <div className="size-full bg-gradient-to-br from-indigo-950 via-indigo-900 to-slate-900" aria-hidden />;
   return <img src={url} alt="" draggable={false} className="size-full object-cover" />;
@@ -400,12 +429,14 @@ function PluginRow({
   title,
   description,
   checked,
+  tint,
   onCheckedChange,
 }: {
   kind: 'show-mouse' | 'fire-paint' | 'water';
   title: string;
   description: string;
   checked: boolean;
+  tint: Rgb | null;
   onCheckedChange: (checked: boolean) => void;
 }) {
   const row = useRef<HTMLDivElement>(null);
@@ -418,7 +449,7 @@ function PluginRow({
         aria-label={`Preview ${title}`}
         className="aspect-[8/5] w-24 shrink-0 overflow-hidden rounded-lg bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <EffectPicture kind={kind} id={kind} />
+        <EffectPicture kind={kind} id={kind} tint={tint} />
       </button>
       <div className="min-w-0 flex-1">
         <Label htmlFor={id} className="cursor-pointer text-sm">
