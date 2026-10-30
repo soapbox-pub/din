@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type Ref } from 'react';
-import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -354,8 +354,21 @@ export function SessionList({
           placeholder="Search"
           aria-label="Search conversations"
           title="Search conversations (Ctrl+K)"
-          className="h-8 rounded-full border-transparent bg-foreground/[0.06] pl-8 text-sm shadow-none dark:bg-foreground/[0.08] md:text-sm focus-visible:border-transparent focus-visible:ring-2"
+          className="h-8 rounded-full border-transparent bg-foreground/[0.06] pl-8 pr-8 text-sm shadow-none dark:bg-foreground/[0.08] md:text-sm focus-visible:border-transparent focus-visible:ring-2"
         />
+        {filter && (
+          <button
+            type="button"
+            // Focus stays in the field, if it was there.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setFilter('')}
+            aria-label="Clear search"
+            title="Clear search"
+            className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <X className="size-3.5" aria-hidden />
+          </button>
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
         {isLoading ? (
