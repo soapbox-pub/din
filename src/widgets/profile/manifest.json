@@ -1,0 +1,8 @@
+{
+  "name": "Profile",
+  "description": "Who you're signed in as: your name, address and bio.",
+  "icon": "user-round",
+  "domains": ["identity", "theme"],
+  "size": "medium",
+  "sizes": ["small", "medium", "large"]
+}

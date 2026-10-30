@@ -31,7 +31,7 @@ Runtime instrumentation exists only in profiling builds, gated on the compile-ti
 
 ## Project Structure
 
-- `/src/apps/` — the built-in apps (`din://<id>/`), each with `index.html`, `manifest.webmanifest`, `main.tsx` and its code; `/src/shared/` — code apps share (with each other or the desktop); `/src/sdk/` — `window.din` and its React pieces; `/src/platform/` — `GuestSurface`, the only code that knows `<webview>`.
+- `/src/apps/` — the built-in apps (`din://<id>/`), each with `index.html`, `manifest.webmanifest`, `main.tsx` and its code; `/src/shared/` — code apps share (with each other or the desktop); `/src/sdk/` — `window.din` and its React pieces; `/src/widgets/` — the built-in desktop widgets (`widget://<id>/`), napplets that get only `window.napplet` (`docs/widgets.md`); `/src/platform/` — `GuestSurface`, the only code that knows `<webview>`.
 - `/src/components/` — UI components. `ui/` holds shadcn/ui primitives; `auth/` holds login components (`LoginArea`, `AuthDialog`, `AccountSwitcher`).
 - `/src/hooks/` — custom hooks. Discover the full set with `ls src/hooks/`. Key ones: `useNostr`, `useAuthor`, `useCurrentUser`, `useNostrPublish`, `useUploadFile`, `useAppContext`, `useTheme`, `useToast`, `useLoggedInAccounts`, `useLoginActions`, `useIsMobile`.
 - `/src/pages/` — page components wired into React Router (`Index`, `NotFound`, `NIP19Page`).

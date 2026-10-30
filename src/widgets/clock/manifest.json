@@ -1,0 +1,8 @@
+{
+  "name": "Clock",
+  "description": "The time and date, on an analog face.",
+  "icon": "clock",
+  "domains": ["theme"],
+  "size": "small",
+  "sizes": ["small", "medium", "large"]
+}

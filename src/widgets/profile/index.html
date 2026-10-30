@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Profile</title>
+        <meta name="description" content="Who you're signed in as: your name, address and bio.">
+        <meta name="napplet-id" content="profile">
+        <meta name="napplet-requires" content="identity">
+        <meta name="napplet-optional" content="theme">
+    </head>
+    <body>
+        <main class="profile" aria-live="polite">
+            <div class="avatar" aria-hidden="true"></div>
+            <div class="details">
+                <div class="name"></div>
+                <div class="nip05"></div>
+                <p class="about"></p>
+                <div class="follows"></div>
+            </div>
+        </main>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

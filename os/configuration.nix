@@ -32,13 +32,15 @@ let
       # (electron/adblock.mts), the Electron host is compiled by
       # build-electron.mjs, and the cursor converter (electron/cursorConverter.mts)
       # is bundled by build-cursor-converter.mjs, and window.din's runtime into
-      # the app preload by build-din-runtime.mjs. `scripts` itself must pass for its files to.
+      # the app preload by build-din-runtime.mjs, and the built-in widgets by
+      # build-widgets.mjs. `scripts` itself must pass for its files to.
       || rel == "scripts"
       || rel == "scripts/build-electron.mjs"
       || rel == "scripts/build-adblock-engine.mjs"
       || rel == "scripts/adblock-engine-entry.js"
       || rel == "scripts/build-cursor-converter.mjs"
-      || rel == "scripts/build-din-runtime.mjs";
+      || rel == "scripts/build-din-runtime.mjs"
+      || rel == "scripts/build-widgets.mjs";
   };
 
   # The release this system is (os/version), which a release's tag repeats
@@ -53,7 +55,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-KeV0yUgrVuj2njqS26isiFD6Y01EXjg75WH8giQzuPk=";
+    npmDepsHash = "sha256-XMAJfeTNymd/23YLLnSp8zL7tUUIWYnzfeUzPIIS5qc=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -68,6 +70,7 @@ let
       node scripts/build-adblock-engine.mjs
       node scripts/build-cursor-converter.mjs
       node scripts/build-din-runtime.mjs
+      node scripts/build-widgets.mjs
       runHook postBuild
     '';
 

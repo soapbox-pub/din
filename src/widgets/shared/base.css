@@ -1,0 +1,39 @@
+/* What every built-in widget starts from. Fonts are inlined (a napplet loads nothing). */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+}
+
+:root {
+  --background: #ffffff;
+  --text: #0f172a;
+  --primary: #1e293b;
+  --muted: color-mix(in oklab, var(--text) 62%, transparent);
+  --faint: color-mix(in oklab, var(--text) 12%, transparent);
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Sticky Note</title>
+        <meta name="description" content="A note on the desktop that keeps what you write.">
+        <meta name="napplet-id" content="sticky-note">
+        <meta name="napplet-requires" content="storage">
+    </head>
+    <body>
+        <main class="note">
+            <textarea
+                aria-label="Note"
+                placeholder="Write something…"
+                spellcheck="true"
+                disabled
+            ></textarea>
+            <div
+                class="colors"
+                role="radiogroup"
+                aria-label="Color"
+            ></div>
+        </main>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

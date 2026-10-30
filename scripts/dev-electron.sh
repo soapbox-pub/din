@@ -31,6 +31,10 @@ node scripts/build-cursor-converter.mjs
 # Rerun it after changing src/sdk/runtime.ts: it isn't hot-reloaded.
 node scripts/build-din-runtime.mjs
 
+# The built-in widgets (src/widgets/, electron/widgets.mts), one file each.
+# Rerun it after changing a widget: widgets aren't hot-reloaded.
+node scripts/build-widgets.mjs
+
 ELECTRON="${ROOT_DIR}/node_modules/.bin/electron"
 if [ ! -x "${ELECTRON}" ]; then
   echo "Electron binary not found at ${ELECTRON}." >&2

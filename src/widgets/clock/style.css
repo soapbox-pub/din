@@ -1,0 +1,103 @@
+.clock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  height: 100%;
+  padding: 16px;
+}
+
+.face {
+  height: 100%;
+  max-width: 100%;
+  aspect-ratio: 1;
+  flex: none;
+}
+
+.dial {
+  fill: color-mix(in oklab, var(--background) 70%, transparent);
+  stroke: var(--faint);
+  stroke-width: 2;
+}
+
+.tick {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.tick.major {
+  stroke: var(--text);
+  stroke-width: 3;
+}
+
+.hand {
+  stroke: var(--text);
+  stroke-linecap: round;
+}
+
+.hour {
+  stroke-width: 7;
+}
+
+.minute {
+  stroke-width: 4.5;
+}
+
+.second {
+  stroke: #f97316;
+  stroke-width: 2;
+}
+
+.pin {
+  fill: #f97316;
+}
+
+.readout {
+  display: none;
+  min-width: 0;
+}
+
+.weekday,
+.date {
+  font-size: 18px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.time {
+  font-size: 40px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+body[data-layout='wide'] .readout {
+  display: block;
+}
+
+body[data-layout='wide'] .face {
+  height: 100%;
+}
+
+body[data-layout='tall'] .clock {
+  flex-direction: column;
+  gap: 8px;
+}
+
+body[data-layout='tall'] .face {
+  height: auto;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
+body[data-layout='tall'] .readout {
+  display: block;
+  text-align: center;
+}
+
+body[data-layout='tall'] .time {
+  display: none;
+}

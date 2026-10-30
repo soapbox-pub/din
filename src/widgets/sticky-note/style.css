@@ -1,0 +1,73 @@
+:root {
+  --paper: #fef08a;
+  --ink: #422006;
+}
+
+.note {
+  position: relative;
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 16px 16px 40px;
+  border: 0;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1.4;
+  user-select: text;
+}
+
+textarea:focus-visible {
+  outline: none;
+}
+
+textarea::placeholder {
+  color: color-mix(in oklab, var(--ink) 55%, transparent);
+}
+
+.colors {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.note:hover .colors,
+.colors:focus-within {
+  opacity: 1;
+}
+
+.colors button {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid color-mix(in oklab, var(--ink) 35%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.colors button[aria-checked='true'] {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .colors {
+    transition: none;
+  }
+}

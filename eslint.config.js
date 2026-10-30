@@ -68,6 +68,24 @@ export default defineConfig(
     },
   },
   {
+    // Built-in widgets are napplets: their own documents, reaching the
+    // desktop only through window.napplet (docs/widgets.md).
+    name: "app/widgets",
+    files: ["src/widgets/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        paths: [{ name: "electron", message: "Widgets reach the desktop only through window.napplet." }],
+        patterns: [
+          { group: ["@/*", "!@/widgets/*"], message: "Widgets are self-contained napplets: use window.napplet, and only code in src/widgets/." },
+        ],
+      }],
+      "no-restricted-syntax": ["error", {
+        selector: "MemberExpression[object.name='window'][property.name=/^(dinos|din|nostr)$/]",
+        message: "Widgets get window.napplet and nothing else.",
+      }],
+    },
+  },
+  {
     // The one place that knows the guest engine (docs/guest-surfaces.md).
     name: "app/platform",
     files: ["src/platform/**/*.{ts,tsx}"],
@@ -112,7 +130,7 @@ export default defineConfig(
     // directly (window/document/Element/requestAnimationFrame), so they need
     // browser globals on top of the electron block's node globals.
     name: "app/electron-dom-preload",
-    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/geolocation-preload.cjs", "electron/nostr-preload.cjs", "electron/adblock-preload.cjs", "electron/adblock-scriptlets-preload.cjs", "electron/popup-preload.cjs", "electron/print-preload.cjs", "electron/screen-share-preload.cjs", "electron/media-preload.cjs", "electron/napp-preload.cjs", "electron/web-push-preload.cjs", "electron/din-app-preload.cjs", "electron/preload.cjs"],
+    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/geolocation-preload.cjs", "electron/nostr-preload.cjs", "electron/adblock-preload.cjs", "electron/adblock-scriptlets-preload.cjs", "electron/popup-preload.cjs", "electron/print-preload.cjs", "electron/screen-share-preload.cjs", "electron/media-preload.cjs", "electron/napp-preload.cjs", "electron/web-push-preload.cjs", "electron/din-app-preload.cjs", "electron/widget-preload.cjs", "electron/preload.cjs"],
     languageOptions: {
       globals: globals.browser,
     },
@@ -137,6 +155,15 @@ export default defineConfig(
       "@html-eslint/use-baseline": "off",
       "custom/no-inline-script": "error",
       "custom/require-webmanifest": "error",
+    },
+  },
+  {
+    // A widget is one page with nothing to link: no web manifest or Open Graph.
+    name: "app/widgets-html",
+    files: ["src/widgets/**/*.html"],
+    rules: {
+      "@html-eslint/require-open-graph-protocol": "off",
+      "custom/require-webmanifest": "off",
     },
   },
 );

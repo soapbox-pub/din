@@ -25,6 +25,15 @@ import {
   isBridgeEvent,
   registerDinApps,
 } from './din-apps.mts';
+import {
+  attachWidgetGuest,
+  isWidgetGuest,
+  NAPPLET_SCHEME,
+  registerWidgets,
+  WIDGET_SCHEME,
+  widgetOf,
+  WIDGETS_PARTITION,
+} from './widgets.mts';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -187,6 +196,22 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       stream: true,
+    },
+  },
+  {
+    // Desktop widgets (electron/widgets.mts): a host page each, which only
+    // ever frames the widget's own bytes in a srcdoc.
+    scheme: WIDGET_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+    },
+  },
+  {
+    scheme: NAPPLET_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
     },
   },
   {
@@ -3179,6 +3204,8 @@ const NAPP_PRELOAD = path.join(import.meta.dirname, 'napp-preload.cjs');
 // Built-in apps' preload: their ports to the desktop and main, nothing else.
 // din-app-preload.cjs with window.din's runtime bundled in (scripts/build-din-runtime.mjs).
 const DIN_APP_PRELOAD = path.join(import.meta.dirname, 'din-app-preload.built.cjs');
+// Widgets' preload: frames the widget and relays its messages to the desktop.
+const WIDGET_PRELOAD = path.join(import.meta.dirname, 'widget-preload.cjs');
 
 /**
  * Absolute path to the session preload that gives websites Web Push and what
@@ -3276,6 +3303,45 @@ const GUEST_MOVE_INTERVAL_MS = 16;
  * but it never fires for <webview> guests (also verified), so the shell
  * treats a press as focusing the page instead.
  */
+/** The shell's own shortcuts, pressed in a built-in app or a widget, go to the shell. */
+function forwardShellShortcuts(contents: Electron.WebContents): void {
+  contents.on('before-input-event', (event, input) => {
+    const shortcut = shellShortcutForInput(input);
+    if (
+      shortcut?.action === 'cycle-windows' ||
+      shortcut?.action === 'apps-menu' ||
+      shortcut?.action === 'assistant' ||
+      shortcut?.action === 'dictation' ||
+      shortcut?.action === 'system-monitor' ||
+      shortcut?.action === 'security-options' ||
+      shortcut?.action === 'screenshot' ||
+      shortcut?.action === 'screenshot-area' ||
+      shortcut?.action === 'wm'
+    ) {
+      claimGuestKey(contents, event, input);
+      sendToShell('shortcut', shortcut);
+    }
+  });
+}
+
+/** Cut, copy and paste for a text field in a guest that draws its own menus. */
+function popupEditMenu(params: Electron.ContextMenuParams): void {
+  if (!params.isEditable) return;
+  const { editFlags } = params;
+  const menu = new Menu();
+  if (editFlags.canCut) menu.append(new MenuItem({ role: 'cut' }));
+  if (editFlags.canCopy) menu.append(new MenuItem({ role: 'copy' }));
+  if (editFlags.canPaste) menu.append(new MenuItem({ role: 'paste' }));
+  if (menu.items.length > 0) {
+    menu.append(new MenuItem({ type: 'separator' }));
+    menu.append(new MenuItem({ role: 'selectAll' }));
+  }
+  if (menu.items.length === 0) return;
+  setImmediate(() => {
+    if (shellWindow && !shellWindow.isDestroyed()) menu.popup({ window: shellWindow });
+  });
+}
+
 function forwardGuestInput(contents: Electron.WebContents): void {
   const wcId = contents.id;
   // Where the pointer is in the shell's own view, from the event's screen
@@ -4952,6 +5018,7 @@ const GUEST_PARTITIONS = new Set([
   WEBBROWSER_TOR_PARTITION,
   DEVTOOLS_PARTITION,
   DIN_APPS_PARTITION,
+  WIDGETS_PARTITION,
 ]);
 
 /** The session all devtools host <webview>s run in. */
@@ -5344,6 +5411,16 @@ app.whenReady().then(() => {
     },
     DIN_APP_PRELOAD,
   );
+  registerWidgets(
+    {
+      // In development dist/ may hold nothing but them (npm run dev builds them).
+      widgetsDir: DEV_URL ? path.resolve(import.meta.dirname, '..', 'dist', 'widgets') : path.join(DIST, 'widgets'),
+      cacheDir: path.join(app.getPath('userData'), 'Widgets'),
+      shell: () => (shellWindow && !shellWindow.webContents.isDestroyed() ? shellWindow.webContents : null),
+      assertShellSender,
+    },
+    WIDGET_PRELOAD,
+  );
   registerDinLaunch({
     sendToShell,
     hasShell: () => !!shellWindow && !shellWindow.webContents.isDestroyed(),
@@ -5605,6 +5682,21 @@ app.whenReady().then(() => {
     // transparent, so an app can draw its own window's shape.
     if (params.partition === DIN_APPS_PARTITION) {
       if (!appIdOf(typeof params.src === 'string' ? params.src : '')) {
+        event.preventDefault();
+        return;
+      }
+      attachingGuestSrc = params.src;
+      attachingGuestIsApp = false;
+      webPreferences.nodeIntegration = false;
+      webPreferences.contextIsolation = true;
+      webPreferences.sandbox = true;
+      webPreferences.nodeIntegrationInSubFrames = false;
+      delete webPreferences.preload;
+      return;
+    }
+    // A widget: widget:// or napplet:// only, sandboxed, no extra preloads.
+    if (params.partition === WIDGETS_PARTITION) {
+      if (!widgetOf(typeof params.src === 'string' ? params.src : '')) {
         event.preventDefault();
         return;
       }
@@ -5896,40 +5988,18 @@ app.on('web-contents-created', (_event, contents) => {
     attachAppGuest(contents, attachingGuestSrc, sendToShell);
     attachLaunchedGuest(contents, attachingGuestSrc);
     attachingGuestSrc = '';
-    contents.on('before-input-event', (event, input) => {
-      const shortcut = shellShortcutForInput(input);
-      if (
-        shortcut?.action === 'cycle-windows' ||
-        shortcut?.action === 'apps-menu' ||
-        shortcut?.action === 'assistant' ||
-        shortcut?.action === 'dictation' ||
-        shortcut?.action === 'system-monitor' ||
-        shortcut?.action === 'security-options' ||
-        shortcut?.action === 'screenshot' ||
-        shortcut?.action === 'screenshot-area' ||
-        shortcut?.action === 'wm'
-      ) {
-        claimGuestKey(contents, event, input);
-        sendToShell('shortcut', shortcut);
-      }
-    });
+    forwardShellShortcuts(contents);
     // Apps draw their own menus; text fields keep cut, copy and paste.
-    contents.on('context-menu', (_e, params) => {
-      if (!params.isEditable) return;
-      const { editFlags } = params;
-      const menu = new Menu();
-      if (editFlags.canCut) menu.append(new MenuItem({ role: 'cut' }));
-      if (editFlags.canCopy) menu.append(new MenuItem({ role: 'copy' }));
-      if (editFlags.canPaste) menu.append(new MenuItem({ role: 'paste' }));
-      if (menu.items.length > 0) {
-        menu.append(new MenuItem({ type: 'separator' }));
-        menu.append(new MenuItem({ role: 'selectAll' }));
-      }
-      if (menu.items.length === 0) return;
-      setImmediate(() => {
-        if (shellWindow && !shellWindow.isDestroyed()) menu.popup({ window: shellWindow });
-      });
-    });
+    contents.on('context-menu', (_e, params) => popupEditMenu(params));
+    return;
+  }
+
+  // A widget (electron/widgets.mts): the same, and the desktop draws its menu.
+  if (isWidgetGuest(contents)) {
+    attachWidgetGuest(contents, attachingGuestSrc, sendToShell);
+    attachingGuestSrc = '';
+    forwardShellShortcuts(contents);
+    contents.on('context-menu', (_e, params) => popupEditMenu(params));
     return;
   }
 

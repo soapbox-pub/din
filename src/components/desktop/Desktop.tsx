@@ -44,6 +44,8 @@ import { BluetoothPromptHost } from './BluetoothIndicator';
 import { VolumesHost } from './VolumesHost';
 import { PrintHost } from './PrintHost';
 import { PageFullscreenHost } from './PageFullscreenHost';
+import { WidgetsProvider } from './widgets/WidgetsProvider';
+import { WidgetLayer } from './widgets/WidgetLayer';
 import { isShown, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useMovingWindows } from '@/lib/windowGestures';
@@ -194,82 +196,86 @@ function DesktopSession() {
     <WindowManagerContext.Provider value={manager}>
       <WindowActionsContext.Provider value={manager.actions}>
         <WorkAreasContext.Provider value={areas}>
-          <FilePickerProvider>
-            <DesktopBackgroundProvider>
-              <DesktopAssistantHost>
-                <FilePickerBridgeHost />
-                <BrowserExtensionHost />
-                <ExtensionPopupHost />
-                <NostrBridgeHost />
-                <HighlightBridgeHost />
-                <NsiteBridgeHost />
-                <PromptHost />
-                <AdminPromptHost />
-                <ScreenSharePicker />
-                <DesktopHotkeys />
-                <AssistantHost />
-                <SecurityOptions />
-                <ScreenshotHost />
-                <SystemEventsHost />
-                <NativeLinksHost />
-                <LaunchHost />
-                <SystemNotificationsHost />
-                <GuestInputHost />
-                <CursorEffectsLayer />
-                <DinDragOverlay />
-                <InstallerAutoOpen />
-                <UpdateNotifier />
-                <AirPlayPromptHost />
-                <BluetoothPromptHost />
-                <VolumesHost />
-                <PrintHost />
-                <PageFullscreenHost />
-                <BootScreenSync />
-                <Wallpaper backdrop={<DesktopMenu />}>
-                  <MenuBar />
+          <WidgetsProvider>
+            <FilePickerProvider>
+              <DesktopBackgroundProvider>
+                <DesktopAssistantHost>
+                  <FilePickerBridgeHost />
+                  <BrowserExtensionHost />
+                  <ExtensionPopupHost />
+                  <NostrBridgeHost />
+                  <HighlightBridgeHost />
+                  <NsiteBridgeHost />
+                  <PromptHost />
+                  <AdminPromptHost />
+                  <ScreenSharePicker />
+                  <DesktopHotkeys />
+                  <AssistantHost />
+                  <SecurityOptions />
+                  <ScreenshotHost />
+                  <SystemEventsHost />
+                  <NativeLinksHost />
+                  <LaunchHost />
+                  <SystemNotificationsHost />
+                  <GuestInputHost />
+                  <CursorEffectsLayer />
+                  <DinDragOverlay />
+                  <InstallerAutoOpen />
+                  <UpdateNotifier />
+                  <AirPlayPromptHost />
+                  <BluetoothPromptHost />
+                  <VolumesHost />
+                  <PrintHost />
+                  <PageFullscreenHost />
+                  <BootScreenSync />
+                  <Wallpaper backdrop={<DesktopMenu />}>
+                    <MenuBar />
 
-                  {/* Workspace area - windows render here. It's the primary
-                      monitor below the menu bar, but windows may sit outside it on
-                      the other monitors (the Wallpaper clips to the whole screen,
-                      not to this). The Dock overlays its bottom edge and
-                      auto-hides, so windows can use the full height.
-                      `isolate` gives the window stack its own stacking context so
-                      each window's inline z-index (a counter that only climbs as
-                      windows are raised) stays contained here. Without it, a window
-                      whose z grew past a menu's z-50 or the top bar's z-20 would
-                      paint over the portaled app/menu-bar dropdowns and the top bar
-                      itself; isolation keeps those layers - and the Dock - on top no
-                      matter how high the window counter climbs. */}
-                  <main
-                    ref={workspaceRef}
-                    aria-label="Desktop"
-                    className="relative isolate flex-1"
-                  >
-                    <DesktopMenu />
-                    {manager.windows.map((win) => (
-                      <Window
-                        key={win.id}
-                        window={win}
-                        isTop={isShown(win) && win.z === topZ}
-                        covered={covered.has(win.id)}
-                      />
-                    ))}
-                  </main>
+                    {/* Workspace area - windows render here. It's the primary
+                        monitor below the menu bar, but windows may sit outside it on
+                        the other monitors (the Wallpaper clips to the whole screen,
+                        not to this). The Dock overlays its bottom edge and
+                        auto-hides, so windows can use the full height.
+                        `isolate` gives the window stack its own stacking context so
+                        each window's inline z-index (a counter that only climbs as
+                        windows are raised) stays contained here. Without it, a window
+                        whose z grew past a menu's z-50 or the top bar's z-20 would
+                        paint over the portaled app/menu-bar dropdowns and the top bar
+                        itself; isolation keeps those layers - and the Dock - on top no
+                        matter how high the window counter climbs. */}
+                    <main
+                      ref={workspaceRef}
+                      aria-label="Desktop"
+                      className="relative isolate flex-1"
+                    >
+                      <DesktopMenu />
+                      {/* Widgets: over the wallpaper, under every window. */}
+                      <WidgetLayer />
+                      {manager.windows.map((win) => (
+                        <Window
+                          key={win.id}
+                          window={win}
+                          isTop={isShown(win) && win.z === topZ}
+                          covered={covered.has(win.id)}
+                        />
+                      ))}
+                    </main>
 
-                  <Dock workspaceRef={workspaceRef} />
-                  <WindowSwitcher />
-                  <VolumeOsd />
-                  <WorkspaceOsd />
-                  <BrightnessOsd />
-                  <AirPlayOsd />
-                  <DictationOverlay />
-                  <ScreenDimmer />
-                  <NotificationPopups />
-                  <NativeDisplayHost />
-                </Wallpaper>
-              </DesktopAssistantHost>
-            </DesktopBackgroundProvider>
-          </FilePickerProvider>
+                    <Dock workspaceRef={workspaceRef} />
+                    <WindowSwitcher />
+                    <VolumeOsd />
+                    <WorkspaceOsd />
+                    <BrightnessOsd />
+                    <AirPlayOsd />
+                    <DictationOverlay />
+                    <ScreenDimmer />
+                    <NotificationPopups />
+                    <NativeDisplayHost />
+                  </Wallpaper>
+                </DesktopAssistantHost>
+              </DesktopBackgroundProvider>
+            </FilePickerProvider>
+          </WidgetsProvider>
         </WorkAreasContext.Provider>
       </WindowActionsContext.Provider>
     </WindowManagerContext.Provider>

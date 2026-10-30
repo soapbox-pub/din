@@ -107,6 +107,9 @@ interface Dinos {
 
   // Hosting din:// apps (below)
   apps: AppsBridge;
+
+  // Hosting widgets (../widgets.md)
+  widgets: WidgetsBridge;
 }
 ```
 
@@ -175,6 +178,13 @@ An app window's port to the desktop isn't a method: a port can't cross
 `contextBridge`, so the preload posts each one to the page as a window
 message (`dinos-apps:port`), which `onAppPort` in `src/lib/dinApps.ts`
 hands to the window's `DinAppFrame`.
+
+`dinos.widgets` (`WidgetsBridge` in `src/lib/widgets.ts`, handled by
+`electron/widgets.mts`) does the same for desktop widgets
+([../widgets.md](../widgets.md)): `fetch(sha256, servers)` has main fetch
+a widget from Blossom and keep it if its bytes match, `onContextMenu(cb)`
+hears right-clicks in a widget outside text fields, and each widget's port
+arrives as a `dinos-widgets:port` message for `onWidgetPort`.
 
 ## Conventions for adding to it
 

@@ -27,6 +27,7 @@ still apply, and moving apps out shrinks what code runs there.
 | The desktop | `app://din` | default | `preload.cjs` → `window.dinos` | the shell window's renderer |
 | Built-in apps | `din://<id>` | `persist:din-apps` | `din-app-preload.cjs` → `window.din` over ports it keeps | one per app window |
 | Apps the `din` command runs | `din://<origin>` | `persist:din-apps` | `din-app-preload.cjs` → `window.din` over ports it keeps | one per app window |
+| Desktop widgets ([widgets.md](widgets.md)) | `widget://<id>` or `napplet://<hash>`, the widget itself in an opaque-origin srcdoc | `persist:widgets` | `widget-preload.cjs`: frames the widget, relays its messages; the page gets only `window.napplet` | one per widget |
 | Browser tabs, installed web apps, nsites | their own | `persist:webbrowser` | nostr, napp, web push, … | one per site |
 | Private and Tor tabs | their own | in-memory sessions | fewer | one per site |
 

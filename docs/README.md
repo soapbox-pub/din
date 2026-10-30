@@ -64,6 +64,7 @@ So Din is splitting into three layers, each trusting only the one below it:
 | [building-an-app.md](building-an-app.md) | A built-in app from scratch |
 | [migrating-builtin-apps.md](migrating-builtin-apps.md) | Old desktop hooks and their `window.din` replacements, app by app |
 | [din-command.md](din-command.md) | The `din` command: an app from a folder or a dev server in a window |
+| [widgets.md](widgets.md) | Desktop widgets: napplets (NIP-5D) at `widget://` and `napplet://`, and the NAP domains Din answers |
 
 The types are the reference: [`src/sdk/din.d.ts`](../src/sdk/din.d.ts).
 Where a page and the types disagree, the types win and the page is a bug.
@@ -83,6 +84,8 @@ Where a page and the types disagree, the types win and the page is a bug.
 | `electron/din-launch.mts`, `electron/din-cli.py`, `src/lib/launchedApps.ts` | The `din` command: its socket and files, its client, and the desktop's side |
 | `src/apps/<id>/` | Each built-in app: `index.html`, `manifest.webmanifest`, `main.tsx`, its code |
 | `src/shared/` | Code apps and the desktop both use (it must not reach the desktop's internals) |
+| `electron/widgets.mts`, `electron/widget-preload.cjs` | Widgets: the `widget:` and `napplet:` schemes, their session, artifacts, ports ([widgets.md](widgets.md)) |
+| `src/widgets/<id>/`, `src/components/desktop/widgets/`, `src/lib/widgets.ts` | The built-in widgets; the desktop's widget layer, gallery and NAP host; manifests and ports |
 
 ## The plan
 

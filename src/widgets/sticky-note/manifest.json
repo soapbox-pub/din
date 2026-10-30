@@ -1,0 +1,8 @@
+{
+  "name": "Sticky Note",
+  "description": "A note on the desktop that keeps what you write.",
+  "icon": "sticky-note",
+  "domains": ["storage"],
+  "size": "small",
+  "sizes": ["small", "medium", "large"]
+}

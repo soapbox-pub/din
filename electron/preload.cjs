@@ -3258,6 +3258,34 @@ expose('apps', {
   },
 });
 
+// Widgets bridge (window.dinos.widgets): desktop widgets at widget://<id>/ and
+// napplet://<hash>/ (electron/widgets.mts, docs/widgets.md). Their ports
+// arrive as window messages, like apps' (src/lib/widgets.ts listens).
+ipcRenderer.on('dinos-widgets:port', (event, info) => {
+  window.postMessage({ type: 'dinos-widgets:port', info }, location.origin, [event.ports[0]]);
+});
+
+expose('widgets', {
+  /**
+   * Fetch a widget from Nostr by its artifact's sha256, verify and keep it.
+   * @param {string} sha256
+   * @param {string[]} servers Blossom servers to try, in order
+   * @returns {Promise<string>} the napplet:// host it's served at
+   */
+  fetch: (sha256, servers) => ipcRenderer.invoke('dinos-widgets:fetch', sha256, servers),
+  /**
+   * Hear right-clicks in widgets outside text fields, at a point in the widget.
+   * @param {(e: { webContentsId: number, x: number, y: number }) => void} callback
+   * @returns {() => void}
+   */
+  onContextMenu: (callback) => {
+    /** @param {unknown} _event @param {{ webContentsId: number, x: number, y: number }} e */
+    const listener = (_event, e) => callback(e);
+    ipcRenderer.on('dinos-widgets:contextMenu', listener);
+    return () => ipcRenderer.removeListener('dinos-widgets:contextMenu', listener);
+  },
+});
+
 // Launch bridge (window.dinos.launch): apps the `din` command runs from a
 // folder or a dev server (electron/din-launch.mts, src/lib/launchedApps.ts).
 expose('launch', {

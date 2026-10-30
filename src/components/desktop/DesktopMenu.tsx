@@ -1,4 +1,4 @@
-import { Monitor, Palette, Wallpaper } from 'lucide-react';
+import { LayoutGrid, Monitor, Palette, Plus, Wallpaper } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/context-menu';
 import { useDesktopBackground } from '@/contexts/DesktopBackgroundContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useWidgets } from '@/contexts/WidgetsContext';
 
 /**
  * The desktop's right-click menu, on a layer covering the bare wallpaper
@@ -16,6 +17,7 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 export function DesktopMenu() {
   const { chooseBackground } = useDesktopBackground();
   const { open } = useWindowActions();
+  const { widgets, editing, setEditing, setGalleryOpen } = useWidgets();
 
   return (
     <ContextMenu>
@@ -29,6 +31,15 @@ export function DesktopMenu() {
         <ContextMenuItem onSelect={() => open('settings', { section: 'appearance' })}>
           <Palette aria-hidden /> Customize…
         </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => setGalleryOpen(true)}>
+          <Plus aria-hidden /> Add Widgets…
+        </ContextMenuItem>
+        {widgets.length > 0 && (
+          <ContextMenuItem onSelect={() => setEditing(!editing)}>
+            <LayoutGrid aria-hidden /> {editing ? 'Done Editing Widgets' : 'Edit Widgets'}
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => open('settings', { section: 'display' })}>
           <Monitor aria-hidden /> Display Settings…

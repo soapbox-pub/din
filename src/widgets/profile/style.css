@@ -1,0 +1,103 @@
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 100%;
+  padding: 16px;
+}
+
+.avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--primary), color-mix(in oklab, var(--primary) 55%, #f97316));
+  color: #fff;
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.details {
+  min-width: 0;
+  flex: 1;
+}
+
+.name {
+  font-size: 20px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nip05,
+.follows {
+  font-size: 14px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about {
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.about:empty {
+  display: none;
+}
+
+.profile[data-state='loading'] .name::before {
+  content: '';
+  display: block;
+  width: 60%;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--faint);
+}
+
+.profile[data-state='signed-out'] .avatar,
+.profile[data-state='unavailable'] .avatar {
+  background: var(--faint);
+}
+
+/* Small: stacked and centered. Large: more of the bio. */
+@media (max-width: 240px) {
+  .profile {
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    text-align: center;
+  }
+
+  .about,
+  .follows {
+    display: none;
+  }
+}
+
+@media (min-height: 280px) {
+  .profile {
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .avatar {
+    width: 96px;
+    height: 96px;
+    font-size: 36px;
+  }
+
+  .about {
+    -webkit-line-clamp: 5;
+  }
+}
