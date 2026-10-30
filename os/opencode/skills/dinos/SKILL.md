@@ -16,7 +16,8 @@ then `sudo -n "$U" status` (JSON).
 
 **That copy is `~/DinOS`**, the user's fork. Always work there, so updates
 can find the changes and keep them. `/var/lib/dinos/src` is the updater's,
-owned by root: read it, never edit it.
+owned by root: read it, never edit it. `~/DinOS` may be a symlink to a
+developer's own checkout of Din; work in it all the same.
 
 ## Making a change
 
@@ -77,12 +78,20 @@ When that can't work, the update fails with a reason, and Din offers
 - `build`: they merge but don't build together. Same, then fix the build.
 - `dirty`: the system was built with uncommitted changes. Commit them in
   `~/DinOS` (if they're there), merge the branch, and build.
-- `missing`: the system's commit isn't in `~/DinOS`; it was built from
-  somewhere else. Bring that commit into `~/DinOS` (`git fetch <that
-  checkout> <commit>` and merge it), then build.
+- `missing`: the system was built from a commit that's neither on the
+  branch nor in `~/DinOS` (or there's no `~/DinOS`). The updater won't
+  build the branch over it, since that could take the system back to an
+  older Din. Find the checkout it was built from, bring the commit into
+  `~/DinOS` (`git fetch <that checkout> <commit>` and merge it), then
+  build. If the user would rather drop those changes, Settings → About
+  offers "Use <branch> instead" (`sudo -n "$U" replace`); that's theirs to
+  choose, not yours.
 
 Once the new build is staged, the updater sees it already has the branch's
-tip and has nothing to do.
+tip and has nothing to do. When the user's changes are taken upstream
+(even rebased), the next update notices its merge is the same as the
+branch's tip, builds the tip itself, and the system is no longer
+customized.
 
 ## Sharing a fork
 

@@ -251,6 +251,13 @@ export function registerUpdaterHandlers(options: {
     await run(helper, '-n', ['start']);
   });
 
+  ipcMain.handle('updater:replace', async (event) => {
+    assertShellSender(event);
+    const helper = helperOf();
+    if (state.live) throw new Error('A live system isn\'t updated. Install DinOS to get updates.');
+    await run(helper, '-n', ['replace']);
+  });
+
   ipcMain.handle('updater:setAuto', async (event, auto: unknown) => {
     assertShellSender(event);
     if (typeof auto !== 'boolean') throw new Error('Expected true or false');

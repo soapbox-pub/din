@@ -239,9 +239,16 @@ approved when they built it, and builds the merge. It reads the commit from
 `~/DinOS` as the user if its checkout lacks it, and never builds whatever
 else is there. A merge that conflicts or doesn't build, or a system built
 from uncommitted changes, fails with a reason; Din then offers **Fix with
-assistant**, which merges in `~/DinOS`, where sudo asks again. The
-checkout's `upstream` branch is the tip last fetched and `system` the last
-commit it staged, for `~/DinOS` to pull.
+assistant**, which merges in `~/DinOS`, where sudo asks again. So does a
+system built from a commit the updater can't find at all (not on the
+branch, nor in `~/DinOS`): building the branch over it could go back to an
+older Din, so it's left alone until the user picks **Use <branch>
+instead** (`din-update replace`). A merge that comes out the same as the
+branch's tip, once the user's changes are upstream, builds the tip itself,
+so the system stops being custom. The checkout's `upstream` branch is the
+tip last fetched and `system` the last commit it staged, for `~/DinOS` to
+pull. A developer can point `~/DinOS` at their own checkout with a
+symlink.
 
 New installs start from a disk image. To cut one, bump `os/version`, commit,
 tag `v<version>`, and run `npm run os:release -- -- --nbunksec-file <file>`

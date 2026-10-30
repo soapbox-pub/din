@@ -1800,6 +1800,9 @@ expose('updater', {
   /** Look for a newer commit now, and build and stage it. Progress arrives through onProgress. */
   check: () => ipcRenderer.invoke('updater:check'),
 
+  /** Build the branch's tip as it is, over the system's own changes. */
+  replace: () => ipcRenderer.invoke('updater:replace'),
+
   /**
    * Whether the system updates by itself.
    * @param {boolean} auto

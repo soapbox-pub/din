@@ -13,8 +13,8 @@ export type UpdateStep = 'fetch' | 'merge' | 'space' | 'build' | 'install';
 
 /**
  * Why an update failed, when it's the user's changes that stopped it: they
- * conflict with the branch, were never committed, aren't in ~/DinOS, or
- * don't build merged with it.
+ * conflict with the branch, were never committed, can't be found (not on
+ * the branch, nor in ~/DinOS), or don't build merged with it.
  */
 export type UpdateFailure = 'conflict' | 'dirty' | 'missing' | 'build';
 
@@ -68,6 +68,11 @@ export interface UpdaterBridge {
   state(): Promise<UpdateState>;
   /** Look for a newer commit now, and build and stage it. */
   check(): Promise<void>;
+  /**
+   * Build the branch's tip as it is, over whatever the system was built
+   * from: for a system whose commit the updater can't find (`missing`).
+   */
+  replace(): Promise<void>;
   /** Whether the system updates by itself. */
   setAuto(auto: boolean): Promise<void>;
   /** Build updates from another repository or branch. sudo asks the user first. */

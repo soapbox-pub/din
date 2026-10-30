@@ -167,6 +167,17 @@ import {
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { NostrLinkSettings } from '@/components/desktop/NostrLinkSettings';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -4705,20 +4716,57 @@ function UpdateStatus({ state }: { state: UpdateState }) {
  */
 function UpdateFixCard({ state }: { state: UpdateState }) {
   const fixer = useFixUpdateWithAssistant();
+  const [error, setError] = useState<string | null>(null);
+  const branch = state.branch ?? DEFAULT_UPDATE_BRANCH;
+
+  const replace = () => {
+    setError(null);
+    getUpdaterBridge()?.replace().catch((e: unknown) => setError(cleanInstallerError(e)));
+  };
+
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl border border-destructive/40 bg-destructive/10 p-4">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-foreground">Your changes need a hand</p>
-        <p className="text-xs text-muted-foreground">
-          {fixer.available
-            ? 'The assistant can merge the update into your changes in ~/DinOS, and build the result.'
-            : 'Turn the assistant on to have it bring ~/DinOS up to date, or merge the update there yourself.'}
-        </p>
+    <div className="flex flex-col gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">Your changes need a hand</p>
+          <p className="text-xs text-muted-foreground">
+            {fixer.available
+              ? 'The assistant can merge the update into your changes in ~/DinOS, and build the result.'
+              : 'Turn the assistant on to have it bring ~/DinOS up to date, or merge the update there yourself.'}
+          </p>
+        </div>
+        <Button size="sm" disabled={!fixer.available || fixer.pending} onClick={() => fixer.fix(state)}>
+          {fixer.pending ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden /> : <Bot className="size-4" aria-hidden />}
+          Fix with assistant
+        </Button>
       </div>
-      <Button size="sm" disabled={!fixer.available || fixer.pending} onClick={() => fixer.fix(state)}>
-        {fixer.pending ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden /> : <Bot className="size-4" aria-hidden />}
-        Fix with assistant
-      </Button>
+      {state.reason === 'missing' && (
+        <div className="flex items-center justify-between gap-4 border-t border-destructive/20 pt-3">
+          <p className="min-w-0 text-xs text-muted-foreground">
+            Or leave those changes behind and build <span className="font-mono">{branch}</span> as it is.
+          </p>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm">Use {branch} instead…</Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Replace this system with {branch}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  DinOS was built from a commit the updater can't find, so it can't tell whether {branch} is
+                  newer. Building {branch} as it is drops whatever changes that commit had, and may take DinOS
+                  back to an older version. The current system stays in the boot menu.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={replace}>Replace</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

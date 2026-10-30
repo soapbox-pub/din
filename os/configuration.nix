@@ -728,6 +728,8 @@ in
       # Not `source`: choosing what's built is choosing what runs as root.
       "${din-updater}/bin/din-update status"
       "${din-updater}/bin/din-update start"
+      # The branch already followed, built over the user's own changes.
+      "${din-updater}/bin/din-update replace"
       "${din-updater}/bin/din-update auto on"
       "${din-updater}/bin/din-update auto off"
       # The system the next boot starts anyway, and Din restarting.

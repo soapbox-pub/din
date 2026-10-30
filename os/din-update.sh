@@ -22,6 +22,12 @@
 #   din-update start
 #       Check for an update now. Unlike the timer's runs, this one goes ahead
 #       with updates off, on battery, or for a commit that failed to build.
+#   din-update replace
+#       Like `start`, but builds the branch's tip as it is, over whatever
+#       the system was built from: for a system whose commit the updater
+#       can't find (`missing`, below), or changes the user no longer wants.
+#       The branch is the source already chosen, so this chooses nothing
+#       new to trust.
 #   din-update auto on|off
 #       Whether the timer's runs update the system.
 #   din-update source <url> <branch>
@@ -49,7 +55,15 @@
 # be swapped for another under its hash. A merge that conflicts, or a
 # system built from uncommitted changes, which can't be carried forward,
 # fails with a `reason` Din offers to have the assistant fix (merging in
-# ~/DinOS, where sudo asks again).
+# ~/DinOS, where sudo asks again). So does a commit that's neither in the
+# checkout (which keeps everything it ever fetched or built) nor in
+# ~/DinOS: it was built by hand from somewhere else, and building the
+# branch over it could take the system back to an older Din. Only
+# `replace` does that, when the user asks.
+#
+# A merge that comes out the same as the branch's tip (the user's changes
+# have been taken upstream) builds the tip itself, so the system is no
+# longer custom.
 #
 # The checkout's `upstream` branch is the tip last fetched, and its `system`
 # branch the commit of the last system the updater staged, for ~/DinOS to
@@ -258,7 +272,7 @@ find_custom() {
     src_git merge-base --is-ancestor "$head" "$UPSTREAM_REF" 2>/dev/null && return
     custom=true
     changes=$(src_git rev-list --count --no-merges "$UPSTREAM_REF..$head" 2>/dev/null) || changes=null
-  elif [[ -d $FORK ]]; then
+  else
     custom=true
   fi
 }
@@ -337,10 +351,14 @@ needs_for() {
   [[ -z $running || $running == "$(din_command "$system")" ]] || echo din
 }
 
+# $1 is what was asked: `start`, or `replace`.
 start() {
   is_live && die "A live system isn't updated. Install DinOS to get updates."
-  systemctl is-active -q "$UNIT" && return
-  touch "$REQUEST"
+  if systemctl is-active -q "$UNIT"; then
+    [[ ${1:-start} == start ]] && return
+    die "An update is running. Try again when it finishes."
+  fi
+  echo "${1:-start}" >"$REQUEST"
   systemctl start --no-block "$UNIT"
 }
 
@@ -522,8 +540,9 @@ run() {
   flock -n 9 || die "An update is already running."
   load_state
 
-  local manual=false
+  local manual=false replace=false
   if [[ -e $REQUEST ]]; then manual=true; fi
+  [[ $(cat "$REQUEST" 2>/dev/null) == replace ]] && replace=true
   rm -f "$REQUEST"
   if ! $manual; then
     [[ -e $AUTO_OFF ]] && exit 0
@@ -552,7 +571,9 @@ run() {
   if [[ -n $head && $head != *-dirty ]] && ! has_commit "$head"; then
     import_from_fork "$head" "$tip" && echo "Took commit $head from $FORK"
   fi
-  if contains "$current" "$tip" || contains "$head" "$tip"; then
+  if $replace; then
+    echo "Replacing ${head:-the system} with $tip, as asked"
+  elif contains "$current" "$tip" || contains "$head" "$tip"; then
     echo "Up to date at $tip"
     finish
     return
@@ -560,13 +581,17 @@ run() {
 
   # Whether the newest system has changes of the user's to keep (status's
   # custom).
-  if [[ $head == *-dirty ]]; then
+  if $replace; then
+    :
+  elif [[ $head == *-dirty ]]; then
     fail_for dirty "DinOS was built with uncommitted changes, which an update can't keep. Commit them in ~/DinOS and build it again."
   elif [[ -n $head ]] && ! src_git merge-base --is-ancestor "$head" "$tip" 2>/dev/null; then
     if has_commit "$head"; then
       merging=true
     elif [[ -d $FORK ]]; then
       fail_for missing "DinOS was built from commit ${head:0:7}, which isn't in ~/DinOS, so an update can't keep its changes."
+    else
+      fail_for missing "DinOS was built from commit ${head:0:7}, which isn't on $branch, and there's no ~/DinOS to find it in, so an update could take it back to an older version."
     fi
   fi
 
@@ -628,6 +653,15 @@ merge_upstream() {
   if src_git -c user.name=DinOS -c user.email=din-update@dinos -c commit.gpgSign=false \
     merge -q --no-edit -m "Merge $branch into your changes" "$tip" >/dev/null 2>&1; then
     target=$(src_git rev-parse HEAD)
+    # The user's changes are all upstream now: build the tip, not a merge
+    # that's the same.
+    if src_git diff --quiet "$tip" HEAD; then
+      echo "Your changes are all in $tip already"
+      src_git checkout -q --force --detach "$tip"
+      target=$tip
+      merging=false
+      what="commit ${tip:0:7}"
+    fi
     return
   fi
   conflicts=$(src_git diff --name-only --diff-filter=U | head -n3 | paste -sd , || true)
@@ -639,6 +673,7 @@ merge_upstream() {
 case "${1:-}" in
   status) status ;;
   start) start ;;
+  replace) start replace ;;
   auto) auto "${2:-}" ;;
   source)
     [[ $# == 3 ]] || die "usage: din-update source <url> <branch>"
@@ -647,5 +682,5 @@ case "${1:-}" in
   apply) apply ;;
   restart-din) restart_din ;;
   run) run ;;
-  *) die "usage: din-update status | start | auto on|off | source <url> <branch> | apply | restart-din | run" ;;
+  *) die "usage: din-update status | start | replace | auto on|off | source <url> <branch> | apply | restart-din | run" ;;
 esac
