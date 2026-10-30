@@ -1,32 +1,40 @@
 import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type Ref } from 'react';
-import { ChevronRight, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
+import { useAssistantHost } from '@/shared/assistant/host';
 import { WindowDragRegion } from '@/sdk/react';
 import {
   useAssistantSessions,
   useAssistantWork,
   useHomeDirectory,
   useMainCheckouts,
+  useMoveSession,
   usePendingRequests,
   useProjectIcons,
 } from '@/hooks/useAssistant';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
-import { directoryName, relativeTime, sessionTitle, tildify, type SessionInfo } from '@/lib/assistant';
+import { cleanAssistantError, directoryName, relativeTime, sessionTitle, tildify, type SessionInfo } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 
 /** How many conversations a project shows before "Show more". */
 const PROJECT_LIMIT = 5;
+
+/** What a conversation dragged out of the list carries: its ID. */
+const SESSION_DRAG_TYPE = 'application/x-din-assistant-session';
 
 interface Project {
   key: string;
@@ -90,7 +98,8 @@ function inOrder<T>(items: T[], order: string[], id: (item: T) => string): T[] {
  * belongs to, with the ones waiting on the user pulled out on top so a
  * collapsed project can't hide them. Searching flattens it. Middle-clicking
  * a conversation opens it in a new tab; right-clicking one does that too, or
- * forks, renames or deletes it; right-clicking a project starts a conversation there.
+ * forks, moves, renames or deletes it; right-clicking a project starts a conversation there.
+ * Dragging a conversation onto another project moves it to that project's folder.
  */
 export function SessionList({
   selected,
@@ -129,6 +138,11 @@ export function SessionList({
   const [deleting, setDeleting] = useState<SessionInfo | null>(null);
   // Rename puts focus in the title field; the closing menu mustn't take it back.
   const keepFocus = useRef(false);
+  const move = useMoveSession();
+  const { notify } = useAssistantHost();
+  const [dragging, setDragging] = useState<string | null>(null);
+  const draggingRef = useRef(false);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const listed = useMemo(() => (sessions ?? []).filter((s) => !s.time.archived), [sessions]);
   const directories = useMemo(() => [...new Set(listed.map((s) => s.location.directory))], [listed]);
@@ -166,6 +180,25 @@ export function SessionList({
       needsYou: listed.filter((s) => waitingNow.has(s.id)).map((s) => s.id),
     });
 
+  const moveTo = (session: SessionInfo, project: Project) => {
+    if (projectOf.get(session.id)?.key === project.key) return;
+    // Open the project it goes to, so it doesn't vanish into a collapsed one.
+    setCollapsed((prev) => prev.filter((k) => k !== project.key));
+    move.mutate(
+      { sessionID: session.id, directory: project.root },
+      {
+        onError: (error) =>
+          notify({ title: 'Couldn’t move the conversation', description: cleanAssistantError(error), destructive: true }),
+      },
+    );
+  };
+  const draggedSession = dragging ? listed.find((s) => s.id === dragging) : undefined;
+  const endDrag = () => {
+    draggingRef.current = false;
+    setDragging(null);
+    setDropTarget(null);
+  };
+
   const needle = filter.trim().toLowerCase();
   const matches = needle
     ? listed.filter(
@@ -191,6 +224,24 @@ export function SessionList({
               running={busy.has(session.id)}
               waiting={waitingNow.has(session.id)}
               home={home}
+              dragged={session.id === dragging}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(SESSION_DRAG_TYPE, session.id);
+                e.dataTransfer.effectAllowed = 'move';
+                // The drag cancels the pointer, which then "leaves" the list;
+                // the order holds until the drop all the same.
+                draggingRef.current = true;
+                if (!held) hold();
+                setDragging(session.id);
+              }}
+              onDragEnd={(e) => {
+                endDrag();
+                const nav = e.currentTarget.closest('nav')?.getBoundingClientRect();
+                const inside =
+                  nav && e.clientX >= nav.left && e.clientX <= nav.right && e.clientY >= nav.top && e.clientY <= nav.bottom;
+                if (!inside) setHeld(null);
+              }}
               onSelect={() => onSelect(session.id)}
               onAuxClick={(e) => {
                 // Middle-click opens it in a new tab, like a link.
@@ -220,6 +271,23 @@ export function SessionList({
             <ContextMenuItem onSelect={() => onFork(session.id)}>
               <GitFork aria-hidden /> Fork
             </ContextMenuItem>
+            {projects.some((p) => p.key !== projectOf.get(session.id)?.key) && (
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>
+                  <FolderInput aria-hidden /> Move to Project
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent className="max-h-80 overflow-y-auto">
+                  {projects
+                    .filter((p) => p.key !== projectOf.get(session.id)?.key)
+                    .map((p) => (
+                      <ContextMenuItem key={p.key} title={tildify(p.root, home)} onSelect={() => moveTo(session, p)}>
+                        <ProjectIcon src={icons.get(p.root)} fallback={<Folder aria-hidden />} />
+                        <span className="truncate">{p.label}</span>
+                      </ContextMenuItem>
+                    ))}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+            )}
             <ContextMenuSeparator />
             <ContextMenuItem
               onSelect={() => {
@@ -251,7 +319,7 @@ export function SessionList({
     <nav
       aria-label="Conversations"
       onPointerEnter={hold}
-      onPointerLeave={() => setHeld(null)}
+      onPointerLeave={() => !draggingRef.current && setHeld(null)}
       style={style}
       className={cn('w-64 shrink-0 flex-col bg-muted/30', className)}>
       {/* The window's title bar runs across the list's top, so it drags the window too. */}
@@ -325,8 +393,33 @@ export function SessionList({
                 : sessions.filter((s, i) => i < PROJECT_LIMIT || s.id === selected || busy.has(s.id));
               const hidden = sessions.length - shown.length;
               if (sessions.length === 0) return null;
+              const accepts = draggedSession !== undefined && projectOf.get(draggedSession.id)?.key !== project.key;
               return (
-                <section key={project.key} aria-label={project.label}>
+                <section
+                  key={project.key}
+                  aria-label={project.label}
+                  onDragOver={(e) => {
+                    if (!accepts || !e.dataTransfer.types.includes(SESSION_DRAG_TYPE)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    setDropTarget(project.key);
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                      setDropTarget((key) => (key === project.key ? null : key));
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!accepts) return;
+                    e.preventDefault();
+                    moveTo(draggedSession, project);
+                    endDrag();
+                  }}
+                  className={cn(
+                    'rounded-lg motion-safe:transition-colors',
+                    dropTarget === project.key && accepts && 'bg-primary/10 ring-2 ring-primary/50',
+                  )}
+                >
                   <div className="group flex items-center gap-1">
                     <ContextMenu>
                       <ContextMenuTrigger asChild>
@@ -406,6 +499,7 @@ function SessionRow({
   running,
   waiting,
   home,
+  dragged,
   onSelect,
   ...props
 }: Omit<ComponentProps<'button'>, 'onSelect'> & {
@@ -418,6 +512,8 @@ function SessionRow({
   running: boolean;
   waiting: boolean;
   home?: string;
+  /** It's being dragged to another project. */
+  dragged?: boolean;
   onSelect: () => void;
 }) {
   const where = tildify(session.location.directory, home);
@@ -431,6 +527,7 @@ function SessionRow({
       className={cn(
         'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         selected ? 'bg-foreground/10' : 'hover:bg-foreground/5',
+        dragged && 'opacity-50',
       )}
     >
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{sessionTitle(session)}</span>

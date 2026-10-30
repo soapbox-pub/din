@@ -960,6 +960,15 @@ export function useRenameSession() {
   });
 }
 
+export function useMoveSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionID, directory }: { sessionID: string; directory: string }) =>
+      assistantApi.move(sessionID, directory),
+    onSuccess: (_data, { sessionID }) => invalidateSession(queryClient, sessionID),
+  });
+}
+
 export function useDeleteSession() {
   const queryClient = useQueryClient();
   return useMutation({

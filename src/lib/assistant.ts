@@ -499,6 +499,10 @@ export const assistantApi = {
 
   rename: (sessionID: string, title: string) => call<unknown>('PATCH', `/api/session/${id(sessionID)}`, { title }),
 
+  /** Carry a conversation on in another folder, the agent working there from then on. */
+  move: (sessionID: string, directory: string) =>
+    call<unknown>('POST', `/api/session/${id(sessionID)}/move`, { directory }),
+
   remove: (sessionID: string) => call<unknown>('DELETE', `/api/session/${id(sessionID)}`),
 
   /**
