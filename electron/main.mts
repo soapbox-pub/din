@@ -5841,6 +5841,13 @@ app.whenReady().then(() => {
     onUninstall: forgetNappSite,
   });
 
+  // Browser tabs (and installed apps, which share their session) say they're
+  // Chrome, as Chromium-based browsers do: Electron's default user agent
+  // names Electron, which sites like YouTube take as a sign of an ad blocker.
+  for (const s of [browserSession(), privateBrowserSession(), torBrowserSession()]) {
+    s.setUserAgent(s.getUserAgent().replace(/\s(Electron|din)\/\S+/gi, ''));
+  }
+
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
   setupChromeExtensions();
