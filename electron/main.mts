@@ -139,7 +139,7 @@ import { registerLoginSessionHandlers } from './login-session.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
-import { registerMediaHandlers, watchMediaGuest } from './media.mts';
+import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 import { registerProjectHandlers } from './project.mts';
@@ -2134,6 +2134,8 @@ interface AudioDevice {
   muted: boolean;
   /** True for the default sink/source (the `*` marker in wpctl). */
   isDefault: boolean;
+  /** Its freedesktop icon name, e.g. "audio-headset-bluetooth", when known. */
+  icon?: string;
 }
 
 /** A per-application playback stream from `wpctl status`. */
@@ -2379,6 +2381,11 @@ async function audioDevices(): Promise<AudioDevices> {
     ]);
     const { sinks, sources } = parseAudioStatus(status);
     await describeFilterDevices([...sinks, ...sources], [...pactlSinks, ...pactlSources]);
+    for (const device of [...sinks, ...sources]) {
+      const node = [...pactlSinks, ...pactlSources].find((n) => Number(n.properties?.['object.id']) === device.id);
+      const icon = node?.properties?.['device.icon_name'];
+      if (icon) device.icon = icon;
+    }
     const inactive = inactivePorts(cards);
     const unplugged = unpluggedNodeIds([...pactlSinks, ...pactlSources]);
     // The default stays listed even unplugged, so the panel shows what's in use.
@@ -2607,6 +2614,8 @@ function registerSystemEvents(): void {
         // A mute or default-source change made anywhere (Settings, an app,
         // pactl in the Terminal) moves the mic-mute LED with it.
         if (topic === 'audio') void syncMicMuteLed();
+        // Headphones that just came or went: switch to them, or pause.
+        if (topic === 'audio') followAudioDevices();
         // A network with a proxy of its own may have come up or gone down.
         if (topic === 'network') void refreshWifiProxy().catch(() => {});
         // Tor reconnects, or goes quiet, with the network.
@@ -2617,10 +2626,133 @@ function registerSystemEvents(): void {
     );
   };
   void syncMicMuteLed();
+  followAudioDevices();
   watchCommand('network', 'nmcli', ['monitor'], () => changed('network'));
   watchCommand('audio', 'pactl', ['subscribe'], (line) => {
     if (AUDIO_EVENT.test(line)) changed('audio');
   });
+}
+
+// ---------------------------------------------------------------------------
+// Headphones, as a Mac has them: plugging in or connecting a Bluetooth or USB
+// audio device makes it the output (and, for a headset, the input too), with
+// the volume display saying where sound now goes; taking away the device
+// that was playing pauses what was playing, instead of letting it carry on
+// out of the speakers. Devices are told apart by their card (`device.name`),
+// so a Bluetooth headset switching between its music and call profiles,
+// which swaps its nodes, is neither a new device nor a lost one.
+// ---------------------------------------------------------------------------
+
+/** How long after a device appears its outputs and inputs may still follow. */
+const AUDIO_ARRIVAL_MS = 5_000;
+/** How long a device must stay gone before it counts as taken away. */
+const AUDIO_DEPARTURE_MS = 1_000;
+
+/** One sound device, from its sinks and sources. */
+interface AudioCard {
+  description: string;
+  /** Plugged in or paired, rather than built in (Bluetooth or USB). */
+  external: boolean;
+  sink: string | null;
+  source: string | null;
+}
+
+interface AudioSnapshot {
+  cards: Map<string, AudioCard>;
+  defaultSinkCard: string | null;
+}
+
+/** The sound devices there are now; throws when pactl can't tell. */
+async function audioSnapshot(): Promise<AudioSnapshot> {
+  const list = async (what: 'sinks' | 'sources') => {
+    const parsed: unknown = JSON.parse(await pactl(['-f', 'json', 'list', what]));
+    if (!Array.isArray(parsed)) throw new Error('pactl gave no list');
+    return parsed as PactlNode[];
+  };
+  const [sinks, sources, defaultSink] = await Promise.all([
+    list('sinks'),
+    list('sources'),
+    pactl(['get-default-sink']).then((out) => out.trim()),
+  ]);
+  const cards = new Map<string, AudioCard>();
+  let defaultSinkCard: string | null = null;
+  const add = (node: PactlNode, kind: 'sink' | 'source') => {
+    const props = node.properties ?? {};
+    const card = props['device.name'];
+    // A sink's monitor is listed among the sources, but isn't an input.
+    if (!card || props['media.class'] !== (kind === 'sink' ? 'Audio/Sink' : 'Audio/Source')) return;
+    const entry = cards.get(card) ?? {
+      description: props['device.description'] ?? node.description ?? card,
+      external: props['device.bus'] === 'bluetooth' || props['device.bus'] === 'usb',
+      sink: null,
+      source: null,
+    };
+    entry[kind] ??= node.name;
+    cards.set(card, entry);
+    if (kind === 'sink' && node.name === defaultSink) defaultSinkCard = card;
+  };
+  for (const node of sinks) add(node, 'sink');
+  for (const node of sources) add(node, 'source');
+  return { cards, defaultSinkCard };
+}
+
+let audioSeen: AudioSnapshot | null = null;
+/** Devices that just appeared: when, and what of theirs Din has switched to. */
+const audioArrivals = new Map<string, { at: number; sink: boolean; source: boolean }>();
+let audioFollowing: Promise<void> = Promise.resolve();
+
+/** Look at the sound devices again (one look at a time). */
+function followAudioDevices(): void {
+  audioFollowing = audioFollowing.then(lookAtAudioDevices).catch(() => {});
+}
+
+async function lookAtAudioDevices(): Promise<void> {
+  let now: AudioSnapshot;
+  try {
+    now = await audioSnapshot();
+  } catch {
+    return;
+  }
+  const before = audioSeen;
+  audioSeen = now;
+  // The first look is how things stand, not something that just happened.
+  if (!before) return;
+
+  for (const [card, info] of now.cards) {
+    if (info.external && !before.cards.has(card)) audioArrivals.set(card, { at: Date.now(), sink: false, source: false });
+  }
+  for (const [card, arrival] of audioArrivals) {
+    const info = now.cards.get(card);
+    if (!info || Date.now() - arrival.at > AUDIO_ARRIVAL_MS) {
+      audioArrivals.delete(card);
+      continue;
+    }
+    if (info.sink && !arrival.sink) {
+      arrival.sink = true;
+      await pactl(['set-default-sink', info.sink]).catch(() => {});
+      now.defaultSinkCard = card;
+      void audioStatus()
+        .then((status) => sendToShell('audio:osd', { ...status, device: info.description }))
+        .catch(() => {});
+    }
+    // A headset's mic, not a webcam's or a USB microphone's on its own.
+    if (info.sink && info.source && !arrival.source) {
+      arrival.source = true;
+      await pactl(['set-default-source', info.source]).catch(() => {});
+    }
+  }
+
+  const playedThrough = before.defaultSinkCard;
+  if (playedThrough && before.cards.get(playedThrough)?.external && !now.cards.has(playedThrough)) {
+    setTimeout(() => {
+      audioFollowing = audioFollowing
+        .then(async () => {
+          const again = await audioSnapshot().catch(() => null);
+          if (again && !again.cards.has(playedThrough)) pauseAllMedia();
+        })
+        .catch(() => {});
+    }, AUDIO_DEPARTURE_MS);
+  }
 }
 
 /** Adjust the default sink and push the new state to the shell for the OSD. */

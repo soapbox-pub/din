@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import {
   AppWindow,
+  Check,
   Globe,
+  Headphones,
+  Mic,
   Music,
   Pause,
   Play,
   Settings2,
   SkipBack,
   SkipForward,
+  Speaker,
   Volume1,
   Volume2,
   VolumeX,
@@ -16,8 +20,8 @@ import { Button } from '@/components/ui/button';
 import { OverdriveSlider, type OverdriveSliderProps } from '@/components/ui/overdrive-slider';
 import { PopoverClose } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import { useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
-import { MAX_VOLUME, volumeText } from '@/lib/audio';
+import { useAudioDeviceMutations, useAudioDevices, useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
+import { MAX_VOLUME, volumeText, type AudioDevice } from '@/lib/audio';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { artworkSrc, controlMedia, useNowPlaying, type MediaSource } from '@/lib/nowPlaying';
 
@@ -115,6 +119,8 @@ export function VolumePopoverBody() {
         />
       </div>
 
+      <DeviceChoices />
+
       <footer className="border-t border-border/60 p-1.5">
         <PopoverClose asChild>
           <Button
@@ -129,6 +135,78 @@ export function VolumePopoverBody() {
         </PopoverClose>
       </footer>
     </div>
+  );
+}
+
+/**
+ * Where sound goes and comes from, one click to change, as a Mac's Sound
+ * menu has it. A list shows only when there's a choice to make.
+ */
+function DeviceChoices() {
+  const devices = useAudioDevices();
+  const { setDefault } = useAudioDeviceMutations();
+  const sinks = devices.data?.sinks ?? [];
+  const sources = devices.data?.sources ?? [];
+  const lists = [
+    { label: 'Output', devices: sinks, kind: 'output' as const },
+    { label: 'Input', devices: sources, kind: 'input' as const },
+  ].filter((list) => list.devices.length > 1);
+  if (lists.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 border-t border-border/60 px-1.5 py-1.5">
+      {lists.map((list) => (
+        <div key={list.kind} role="radiogroup" aria-label={`${list.label} device`}>
+          <p className="px-1.5 pb-0.5 pt-1 text-xs font-medium text-muted-foreground">{list.label}</p>
+          {list.devices.map((device) => (
+            <DeviceChoice
+              key={device.id}
+              device={device}
+              kind={list.kind}
+              onSelect={() => {
+                if (!device.isDefault) setDefault.mutate(device.id);
+              }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DeviceChoice({
+  device,
+  kind,
+  onSelect,
+}: {
+  device: AudioDevice;
+  kind: 'output' | 'input';
+  onSelect: () => void;
+}) {
+  const Icon = /head(set|phone)/.test(device.icon ?? '') ? Headphones : kind === 'input' ? Mic : Speaker;
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={device.isDefault}
+      onClick={onSelect}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left text-sm text-foreground',
+        'hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      )}
+    >
+      <span
+        className={cn(
+          'grid size-7 shrink-0 place-items-center rounded-full',
+          device.isDefault ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
+        )}
+      >
+        <Icon className="size-4" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1 truncate" title={device.name}>
+        {device.name}
+      </span>
+      {device.isDefault && <Check className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+    </button>
   );
 }
 

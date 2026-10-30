@@ -294,6 +294,19 @@ function controlGuest(guest: Guest, action: MediaAction): void {
   schedulePublish();
 }
 
+/**
+ * Pause everything playing: pages and apps alike. For headphones taken away
+ * mid-song, so it doesn't carry on out of the speakers.
+ */
+export function pauseAllMedia(): void {
+  for (const guest of guests.values()) {
+    if (guestSource(guest)?.playing) controlGuest(guest, 'pause');
+  }
+  for (const player of mprisPlayers()) {
+    if (player.status === 'Playing') void mprisControl(player.name, 'pause').catch(() => {});
+  }
+}
+
 /** Watch a <webview> guest's audio from the moment it's made. */
 export function watchMediaGuest(contents: WebContents): void {
   guestFor(contents);

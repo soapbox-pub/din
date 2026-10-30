@@ -37,6 +37,8 @@ export interface AudioDevice {
   muted: boolean;
   /** True for the current default sink/source. */
   isDefault: boolean;
+  /** Its freedesktop icon name, e.g. "audio-headset-bluetooth", when known. */
+  icon?: string;
 }
 
 /**
@@ -109,9 +111,10 @@ export interface AudioBridge {
   test(id: number): Promise<void>;
   /**
    * Subscribe to media-key volume changes (for the OSD). The callback receives
-   * the new state. Returns an unsubscribe fn.
+   * the new state, and the output's name when sound has just moved to a device
+   * plugged in or connected. Returns an unsubscribe fn.
    */
-  onOsd(callback: (status: AudioStatus) => void): () => void;
+  onOsd(callback: (status: AudioStatus & { device?: string }) => void): () => void;
   /**
    * Subscribe to mic-mute key presses (for the OSD). The callback receives the
    * default source's new state. Returns an unsubscribe fn.
