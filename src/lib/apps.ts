@@ -236,6 +236,9 @@ export const APPS: readonly AppDefinition[] = [
   // The password vault, which the Web Browser fills logins from. One
   // window, which the browser points at an item by its `item` launch param.
   dinApp('passwords'),
+  // Virtual machines in ~/VMs, run with QEMU and KVM by electron/vms.mts,
+  // with their screens in the window.
+  dinApp('virtual-machines'),
   {
     id: 'settings',
     name: 'Settings',

@@ -56,6 +56,7 @@ import type { InddBridge } from '@/lib/indd';
 import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
+import type { VmsBridge } from '@/lib/vms';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 
@@ -844,6 +845,23 @@ export function installDin(transport: Transport): void {
         }
         p.onChanged = (cb: (state: unknown) => void) => sys.on('passwords', 'passwords:changed', (s) => cb(s));
         system.passwords = p as unknown as PasswordsBridge;
+      }
+      if (permissions.has('vms')) {
+        await sys.ready('vms');
+        const v: Record<string, unknown> = {};
+        for (const m of [
+          'status', 'list', 'create', 'update', 'remove', 'start', 'shutdown', 'forceStop', 'pause', 'resume', 'reset',
+          'setCdrom', 'resizeDisk', 'snapshots', 'takeSnapshot', 'restoreSnapshot', 'deleteSnapshot', 'openDisplay',
+        ]) {
+          v[m] = (...args: unknown[]) => sys.call('vms', `vms:${m}`, args);
+        }
+        v.displayWrite = (...args: unknown[]) => sys.send('vms', 'vms:displayWrite', args);
+        v.closeDisplay = (...args: unknown[]) => sys.send('vms', 'vms:closeDisplay', args);
+        v.onDisplayData = (cb: (conn: number, data: Uint8Array) => void) =>
+          sys.on('vms', 'vms:display', (conn, data) => cb(conn as number, data as Uint8Array));
+        v.onDisplayClosed = (cb: (conn: number) => void) => sys.on('vms', 'vms:displayClosed', (conn) => cb(conn as number));
+        v.onChanged = (cb: (vms: unknown) => void) => sys.on('vms', 'vms:changed', (list) => cb(list));
+        system.vms = v as unknown as VmsBridge;
       }
     }
 

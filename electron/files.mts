@@ -135,7 +135,7 @@ function encodeTrashPath(p: string): string {
 }
 
 /** Move a path to the Trash; resolves to its name in Trash/files. */
-async function trash(target: string): Promise<string> {
+export async function trash(target: string): Promise<string> {
   const root = trashDir();
   const files = path.join(root, 'files');
   const info = path.join(root, 'info');

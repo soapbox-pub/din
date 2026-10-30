@@ -57,7 +57,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-sT+RHA1k+btvMbJEolIjN4J3Kn8MdviuU7I5WmyzsoM=";
+    npmDepsHash = "sha256-FixYNa8nqmZi56YgL4bFblsMfH51YR3ckXj0BIQjex4=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -439,6 +439,12 @@ let
     export DIN_WHISPER_MODEL=${whisper-model}
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
+    # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
+    # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
+    export DIN_QEMU=${pkgs.qemu_kvm}/bin/qemu-system-x86_64
+    export DIN_QEMU_IMG=${pkgs.qemu_kvm}/bin/qemu-img
+    export DIN_SWTPM=${pkgs.swtpm}/bin/swtpm
+    export DIN_OVMF=${pkgs.OVMFFull.fd}/FV
     # Din is the whole desktop: the session's services (the desktop portal's
     # file chooser) open their windows on its embedded display
     # (electron/native-display.mts).

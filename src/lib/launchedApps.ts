@@ -88,6 +88,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   volumes: 'Mount and eject disks',
   mail: 'Read and send email from your mail accounts',
   passwords: 'See and change all your saved passwords',
+  vms: 'Run virtual machines, with any of your files as their disks',
   'file-folders': 'Reach the folders of files you give it',
 };
 

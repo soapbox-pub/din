@@ -387,6 +387,31 @@ have becomes an offer to save it, and the toolbar shows a site's saved
 logins to fill or copy. Copied passwords and codes leave the clipboard after
 90 seconds.
 
+### Virtual machines
+
+The Virtual Machines app runs other systems (Windows, Linux, anything x86)
+with QEMU and KVM, no libvirt (`electron/vms.mts`, the `vms` permission).
+Each machine is a folder in `~/VMs`: `vm.json`, `disk.qcow2`, the UEFI
+firmware's variables (`vars.qcow2`) and the TPM's state (`tpm/`). A running
+machine is a detached `qemu-system-x86_64` as the user, with its QMP, VNC and
+swtpm sockets in `$XDG_RUNTIME_DIR/din-vms/<uuid>/`; it keeps running when the
+app closes, and Din finds it again after a restart by its pidfile. Its screen
+is QEMU's VNC server, drawn by noVNC in the app, whose bytes go over the
+app's bridge port (apps can't open sockets).
+
+Windows machines get what Windows 11's installer checks for and has drivers
+for: UEFI with Secure Boot and Microsoft's keys (OVMF's `OVMF_VARS.ms.fd`), a
+TPM 2.0 (swtpm), a SATA disk, an e1000e network card and Hyper-V
+enlightenments. Linux gets virtio, and its screen follows the window's size.
+The clipboard is shared with guests running spice-vdagent; sound goes through
+PipeWire. Snapshots are qcow2's own: taken while running, they keep memory
+too and come back running.
+
+DinOS passes QEMU, swtpm and OVMF to Din as `DIN_QEMU`, `DIN_QEMU_IMG`,
+`DIN_SWTPM` and `DIN_OVMF`; elsewhere Din looks on PATH and in the usual
+OVMF folders (`/usr/share/OVMF`, `/usr/share/edk2/ovmf`, …), and needs
+`/dev/kvm` to be read-writable by the user.
+
 ### Printing
 
 Printers need no setup on DinOS. CUPS runs with Avahi and ipp-usb, so a

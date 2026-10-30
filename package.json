@@ -49,6 +49,7 @@
     "@napplet/shim": "^0.32.0",
     "@nostrify/nostrify": "^0.55.1",
     "@nostrify/react": "^0.6.8",
+    "@novnc/novnc": "^1.7.0",
     "@radix-ui/react-toast": "^1.2.1",
     "@replit/codemirror-indentation-markers": "^6.5.3",
     "@replit/codemirror-minimap": "^0.5.2",

@@ -98,6 +98,7 @@ import { registerCursorHandlers } from './cursor.mts';
 import { registerIconThemeHandlers } from './icon-theme.mts';
 import { registerInddHandlers } from './indd.mts';
 import { registerMailHandlers } from './mail.mts';
+import { registerVmsHandlers } from './vms.mts';
 import {
   ensureNightLightTool,
   nightLightStatus,
@@ -5514,6 +5515,7 @@ app.whenReady().then(() => {
   });
   registerInddHandlers({ assertShellSender });
   registerMailHandlers({ assertShellSender, sendToShell });
+  registerVmsHandlers({ assertShellSender, sendToShell });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerOpenUri({ sendToShell });
   registerNotificationHandlers({
