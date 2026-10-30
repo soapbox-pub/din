@@ -37,6 +37,7 @@ const SYSTEM_PERMISSIONS = {
   assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request|passwords|answerPassword|approve)$/,
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|eject)$/,
+  mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|attachment|setFlags|move|remove|send|saveDraft)$/,
 } as const;
 export type SystemPermission = keyof typeof SYSTEM_PERMISSIONS;
 
@@ -48,6 +49,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   assistant: /^assistant:(status|event)$/,
   indd: null,
   volumes: /^volumes:(changed|event)$/,
+  mail: /^mail:changed$/,
 };
 
 /**

@@ -5,6 +5,7 @@ import { useNostrLinks } from '@/hooks/useNostrLinks';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { isNsiteUrl } from '@/lib/nsite';
 import { isNostrUri } from '@/lib/nostrUri';
+import { isMailtoUrl } from '@/lib/mailto';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
 
@@ -15,6 +16,8 @@ import { isWebviewAvailable } from '@/lib/isElectron';
  * installed Ditto app); otherwise open
  * it as a tab in the Web Browser app, launching a browser window first when
  * none is open.
+ *
+ * A `mailto:` link opens a new message in Mail.
  *
  * A `nostr:` link opens in the default app for its kind, or else as a
  * preview in the Web Browser, with buttons to open it in an app.
@@ -32,6 +35,11 @@ export function useOpenUrl(): (url: string) => void {
 
   return useCallback(
     (rawUrl: string) => {
+      if (isMailtoUrl(rawUrl)) {
+        open('mail', { mailto: rawUrl });
+        return;
+      }
+
       // The preview is the browser's own page, so it works without webviews.
       if (isNostrUri(rawUrl)) {
         void openNostrUri(rawUrl, (uri) => {

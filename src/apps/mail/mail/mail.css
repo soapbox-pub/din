@@ -1,0 +1,26 @@
+/* The message being written: lines like a letter, not a document's paragraphs. */
+.mail-compose p {
+  margin: 0;
+  min-height: 1.5em;
+}
+.mail-compose blockquote {
+  margin: 4px 0 4px 4px;
+  padding-left: 12px;
+  border-left: 2px solid var(--primary);
+  color: var(--muted-foreground);
+}
+.mail-compose ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+.mail-compose ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+}
+.mail-compose a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+.mail-compose img {
+  max-width: 100%;
+}

@@ -26,6 +26,7 @@ import type { FsBridge } from '@/lib/fs';
 import type { PtyBridge } from '@/lib/pty';
 import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
+import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
 
 export type Unsubscribe = () => void;
@@ -760,6 +761,8 @@ export type Permission =
   | 'indd'
   /** Removable disks: list, mount, eject (`din.system.volumes`). Files. */
   | 'volumes'
+  /** IMAP and SMTP accounts: read, file and send mail (`din.system.mail`). Mail. */
+  | 'mail'
   /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.
@@ -792,6 +795,7 @@ export interface DinSystem {
   assistant?: AssistantBridge;
   indd?: InddBridge;
   volumes?: VolumesBridge;
+  mail?: MailBridge;
 }
 
 // ---------------------------------------------------------------------------

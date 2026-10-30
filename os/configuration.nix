@@ -33,14 +33,16 @@ let
       # build-electron.mjs, and the cursor converter (electron/cursorConverter.mts)
       # is bundled by build-cursor-converter.mjs, and window.din's runtime into
       # the app preload by build-din-runtime.mjs, and the built-in widgets by
-      # build-widgets.mjs. `scripts` itself must pass for its files to.
+      # build-widgets.mjs; runtime-deps.mjs lists Mail's runtime modules
+      # (below). `scripts` itself must pass for its files to.
       || rel == "scripts"
       || rel == "scripts/build-electron.mjs"
       || rel == "scripts/build-adblock-engine.mjs"
       || rel == "scripts/adblock-engine-entry.js"
       || rel == "scripts/build-cursor-converter.mjs"
       || rel == "scripts/build-din-runtime.mjs"
-      || rel == "scripts/build-widgets.mjs";
+      || rel == "scripts/build-widgets.mjs"
+      || rel == "scripts/runtime-deps.mjs";
   };
 
   # The release this system is (os/version), which a release's tag repeats
@@ -55,7 +57,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-XMAJfeTNymd/23YLLnSp8zL7tUUIWYnzfeUzPIIS5qc=";
+    npmDepsHash = "sha256-cs04ERV6YYmbuXJPxfu9l+W+2LCTmvX5JreLMl3DO2k=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -109,6 +111,12 @@ let
         @remusao/smaz-decompress @remusao/trie; do
         mkdir -p "$(dirname $out/share/din/node_modules/$dep)"
         cp -r node_modules/$dep $out/share/din/node_modules/$dep
+      done
+      # Mail's IMAP, SMTP and parsing (electron/mail.mts), with everything
+      # they pull in; -T so a module the list above copied isn't nested.
+      for dir in $(node scripts/runtime-deps.mjs imapflow nodemailer mailparser); do
+        mkdir -p "$(dirname $out/share/din/$dir)"
+        cp -rT $dir $out/share/din/$dir
       done
       runHook postInstall
     '';

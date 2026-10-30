@@ -95,6 +95,7 @@ import {
 import { registerCursorHandlers } from './cursor.mts';
 import { registerIconThemeHandlers } from './icon-theme.mts';
 import { registerInddHandlers } from './indd.mts';
+import { registerMailHandlers } from './mail.mts';
 import {
   ensureNightLightTool,
   nightLightStatus,
@@ -4285,14 +4286,15 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
       return;
     }
     // A nostr: link (NIP-21) opens in the app the user chose for its kind,
-    // or as a preview in a tab beside the page (src/hooks/useNostrLinks.ts).
+    // or as a preview in a tab beside the page (src/hooks/useNostrLinks.ts);
+    // a mailto: link opens a new message in Mail.
     if (
       permission === 'openExternal' &&
       prompts &&
       'externalURL' in details &&
       typeof details.externalURL === 'string' &&
       details.externalURL.length <= 8192 &&
-      /^nostr:/i.test(details.externalURL)
+      /^(nostr|mailto):/i.test(details.externalURL)
     ) {
       sendToShell('crx:openTab', { url: details.externalURL, openerWcId: _contents.id });
       callback(false);
@@ -5476,6 +5478,7 @@ app.whenReady().then(() => {
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
   });
   registerInddHandlers({ assertShellSender });
+  registerMailHandlers({ assertShellSender, sendToShell });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerOpenUri({ sendToShell });
   registerNotificationHandlers({

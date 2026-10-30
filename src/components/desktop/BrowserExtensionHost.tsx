@@ -6,6 +6,7 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WEB_POPUP_APP_ID, popupWindowSize } from '@/lib/webPopup';
 import { useNostrLinks } from '@/hooks/useNostrLinks';
 import { isNostrUri } from '@/lib/nostrUri';
+import { isMailtoUrl } from '@/lib/mailto';
 
 /**
  * Desktop-lifetime listener for Chrome-extension tab commands (window.dinos.crx).
@@ -50,6 +51,10 @@ export function BrowserExtensionHost() {
       // window (at the deep link) instead of a browser tab.
       // A nostr: link a page clicked opens in the default app for its kind,
       // or else as a preview tab beside the page.
+      if (command.type === 'open' && isMailtoUrl(command.url)) {
+        open('mail', { mailto: command.url });
+        return;
+      }
       if (command.type === 'open' && isNostrUri(command.url)) {
         void openNostrUri(command.url, (uri) => {
           if (!hasTabConsumer(command)) open('web-browser');

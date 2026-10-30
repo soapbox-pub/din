@@ -176,6 +176,10 @@ export const APPS: readonly AppDefinition[] = [
     component: WebBrowser,
     defaultSize: { width: 960, height: 640 },
   },
+  // Email, Apple Mail style: IMAP and SMTP accounts, Favorites across
+  // them, a reader that holds remote content back. Launch params
+  // `{ compose: ComposeSeed }` or `{ mailto }` open a new message.
+  dinApp('mail'),
   dinApp('file-browser'),
   dinApp('terminal'),
   // Plain text and code, VS Code style: a folder, tabs, quick open and

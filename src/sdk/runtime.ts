@@ -53,6 +53,7 @@ import type {
 import type { FsBridge } from '@/lib/fs';
 import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
+import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
@@ -820,6 +821,15 @@ export function installDin(transport: Transport): void {
       if (permissions.has('indd')) {
         await sys.ready('indd');
         system.indd = { convert: (...args: unknown[]) => sys.call('indd', 'indd:convert', args) } as unknown as InddBridge;
+      }
+      if (permissions.has('mail')) {
+        await sys.ready('mail');
+        const m: Record<string, unknown> = {};
+        for (const c of ['accounts', 'discover', 'addAccount', 'updateAccount', 'removeAccount', 'mailboxes', 'messages', 'message', 'attachment', 'setFlags', 'move', 'remove', 'send', 'saveDraft']) {
+          m[c] = (...args: unknown[]) => sys.call('mail', `mail:${c}`, args);
+        }
+        m.onChanged = (cb: (change: unknown) => void) => sys.on('mail', 'mail:changed', (c) => cb(c));
+        system.mail = m as unknown as MailBridge;
       }
     }
 

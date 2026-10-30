@@ -82,6 +82,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   assistant: 'Use the Assistant',
   indd: 'Convert InDesign documents',
   volumes: 'Mount and eject disks',
+  mail: 'Read and send email from your mail accounts',
   'file-folders': 'Reach the folders of files you give it',
 };
 

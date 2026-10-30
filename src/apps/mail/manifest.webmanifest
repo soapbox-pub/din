@@ -1,0 +1,15 @@
+{
+  "name": "Mail",
+  "description": "Email from iCloud, Gmail, Outlook and any IMAP account, the way Apple Mail does it.",
+  "icons": [{ "src": "/icons/apps/mail.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "navigate-new" },
+  "shortcuts": [
+    { "name": "New Message", "url": "/", "din": { "id": "compose" } }
+  ],
+  "din": {
+    "permissions": ["mail", "notifications"],
+    "window": { "size": { "width": 1180, "height": 760 }, "frame": "custom" },
+    "keywords": ["email", "e-mail", "inbox", "imap", "smtp", "gmail", "icloud", "outlook", "thunderbird", "letters"]
+  }
+}
