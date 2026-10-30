@@ -3466,6 +3466,36 @@ expose('launch', {
    * @returns {Promise<void>}
    */
   release: (appId) => ipcRenderer.invoke('dinos-launch:release', appId),
+  /**
+   * Hear `din widget`: a folder's widget to offer, then answer with widgetAnswer().
+   * @param {(offer: unknown) => void} callback
+   * @returns {() => void}
+   */
+  onWidget: (callback) => {
+    /** @param {unknown} _event @param {unknown} offer */
+    const listener = (_event, offer) => callback(offer);
+    ipcRenderer.on('dinos-launch:widget', listener);
+    return () => ipcRenderer.removeListener('dinos-launch:widget', listener);
+  },
+  /**
+   * Hear that an offer's command went away (Ctrl-C): stop asking.
+   * @param {(offerId: string) => void} callback
+   * @returns {() => void}
+   */
+  onWidgetCancel: (callback) => {
+    /** @param {unknown} _event @param {string} offerId */
+    const listener = (_event, offerId) => callback(offerId);
+    ipcRenderer.on('dinos-launch:widget-cancel', listener);
+    return () => ipcRenderer.removeListener('dinos-launch:widget-cancel', listener);
+  },
+  /**
+   * Where an offer is: asking the user, added, or failed (with why).
+   * @param {string} offerId
+   * @param {'asking' | 'added' | 'failed'} state
+   * @param {string} [message]
+   * @returns {Promise<void>}
+   */
+  widgetAnswer: (offerId, state, message) => ipcRenderer.invoke('dinos-launch:widget-answer', offerId, state, message),
 });
 
 contextBridge.exposeInMainWorld('dinos', dinos);

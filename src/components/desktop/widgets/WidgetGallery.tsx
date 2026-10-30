@@ -425,7 +425,7 @@ function NappletAuthor({ pubkey }: { pubkey: string }) {
 }
 
 /** Android-style: who it is, then each permission it asks for with a switch, then Add or Cancel. */
-function PermissionScreen({ source, onCancel, onAdd }: { source: NappletSource | FileSource; onCancel: () => void; onAdd: (denied: PermissionDomain[]) => void }) {
+export function PermissionScreen({ source, onCancel, onAdd }: { source: NappletSource | FileSource; onCancel: () => void; onAdd: (denied: PermissionDomain[]) => void }) {
   const asked = declaredDomains(source).filter(isPermissionDomain);
   const missing = missingDomains(source);
   const [denied, setDenied] = useState<PermissionDomain[]>([]);

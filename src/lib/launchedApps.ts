@@ -34,6 +34,10 @@ export interface LaunchBridge {
   opened(launchId: string, error: string | null): Promise<void>;
   ended(launchId: string): Promise<void>;
   release(appId: string): Promise<void>;
+  /** `din widget`: a folder's widget to put on the desktop (WidgetOffer in electron/din-launch.mts). */
+  onWidget(callback: (offer: unknown) => void): () => void;
+  onWidgetCancel(callback: (offerId: string) => void): () => void;
+  widgetAnswer(offerId: string, state: 'asking' | 'added' | 'failed', message?: string): Promise<void>;
 }
 
 declare global {

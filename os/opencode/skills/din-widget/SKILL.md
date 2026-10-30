@@ -42,10 +42,16 @@ domains it declares, on `window.napplet`.
 
 ## Running it
 
-The user right-clicks the desktop, **Add Widgets… → From a Folder**, and
-picks the folder. It reloads whenever the folder changes. Its menu has
-**Publish to Nostr…**, which uploads it and signs a kind 35129 manifest.
-Only the user can do these steps.
+- `din widget ./folder` puts it on the desktop (`--size small|medium|large`).
+  If it asks for `identity`, `resource` or `storage`, the desktop shows its
+  permission screen and the command waits for the user to answer, so tell
+  them to look. One that asks for nothing goes on at once.
+- Once it's there, it reloads whenever a file in the folder changes; don't
+  add it again. To see it, screenshot the screen
+  (`WAYLAND_DISPLAY=din-shell grim /tmp/screen.png`) and look.
+- Its menu (right-click it) has Size, Reload, About This Widget… (its
+  permissions) and **Publish to Nostr…**, which uploads it and signs a
+  kind 35129 manifest. Publishing is the user's to do.
 
 ## References
 

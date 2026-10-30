@@ -33,6 +33,7 @@ import { BuiltinIcon, NappletIcon, PermissionRow } from './permissions';
 import { PublishWidget } from './PublishWidget';
 import { WidgetFrame, type WidgetRect } from './WidgetFrame';
 import { WidgetGallery } from './WidgetGallery';
+import { WidgetOffers } from './WidgetOffers';
 
 /** The Done bar's distance from the top of the screen. */
 const BAR_TOP = 16;
@@ -154,6 +155,7 @@ export function WidgetLayer() {
         </div>
       )}
       <WidgetGallery />
+      <WidgetOffers />
       <AboutWidget
         widget={about}
         onClose={() => setAboutId(null)}

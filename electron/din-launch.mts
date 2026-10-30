@@ -7,6 +7,8 @@
 // shells get $DIN_SOCKET either way). One connection is one launch: a JSON
 // request line, then lines back (opened, the window's console, closed). The
 // window closes when the connection does, unless the command detached.
+// `din widget` sends `{ widget: { dir, size } }` instead, and hears whether
+// the folder's widget was added to the desktop (offerWidget).
 //
 // Origins: a random din://tmp-<id>/ by default, whose storage is cleared
 // once its last window closes, or one the command names, which keeps its
@@ -432,6 +434,80 @@ export function attachLaunchedGuest(contents: Electron.WebContents, src: string)
 }
 
 // ---------------------------------------------------------------------------
+// Widgets
+// ---------------------------------------------------------------------------
+
+/** What the desktop gets to offer a folder's widget with (src/components/desktop/widgets/WidgetOffers.tsx). */
+export interface WidgetOffer {
+  offerId: string;
+  /** The folder, real and absolute. */
+  path: string;
+  size?: 'small' | 'medium' | 'large';
+}
+
+/** `din widget`s waiting on the desktop, by offer id. */
+const offers = new Map<string, { socket: net.Socket; timer: ReturnType<typeof setTimeout> | null }>();
+
+/**
+ * `din widget <folder>`: put a folder's widget on the desktop. The desktop
+ * shows it on the widget's permission screen, as Add Widgets does, unless
+ * it asks for nothing; the command hears when it's added, or why not.
+ */
+function offerWidget(socket: net.Socket, raw: unknown): void {
+  const opts = options;
+  if (!opts) return;
+  const fail = (message: string): void => {
+    socket.end(`${JSON.stringify({ type: 'error', message })}\n`);
+  };
+  const args = (typeof raw === 'object' && raw !== null ? raw : {}) as { dir?: unknown; size?: unknown };
+  if (typeof args.dir !== 'string' || !path.isAbsolute(args.dir)) return fail('Name a folder');
+  let dir: string;
+  try {
+    dir = appFolder(args.dir, opts.protectedPaths());
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+  if (args.size !== undefined && args.size !== null && !['small', 'medium', 'large'].includes(String(args.size))) {
+    return fail('--size takes small, medium or large');
+  }
+  if (!opts.hasShell()) return fail('Din’s desktop isn’t running');
+
+  const offerId = randomUUID();
+  const offer = {
+    socket,
+    timer: setTimeout(() => answerOffer(offerId, 'failed', 'Din’s desktop didn’t answer (is someone signed in?)'), OPEN_TIMEOUT_MS) as ReturnType<typeof setTimeout> | null,
+  };
+  offers.set(offerId, offer);
+  socket.on('close', () => {
+    if (!offers.has(offerId)) return;
+    // Ctrl-C: the permission screen goes too.
+    if (offer.timer) clearTimeout(offer.timer);
+    offers.delete(offerId);
+    opts.sendToShell('dinos-launch:widget-cancel', offerId);
+  });
+  const payload: WidgetOffer = { offerId, path: dir, ...(args.size ? { size: args.size as WidgetOffer['size'] } : {}) };
+  opts.sendToShell('dinos-launch:widget', payload);
+}
+
+/** The desktop on an offer: asking the user, added, or not (and why). */
+function answerOffer(offerId: unknown, state: unknown, message: unknown): void {
+  const offer = typeof offerId === 'string' ? offers.get(offerId) : undefined;
+  if (!offer) return;
+  if (offer.timer) clearTimeout(offer.timer);
+  offer.timer = null;
+  const say = (line: Record<string, unknown>) => {
+    if (!offer.socket.destroyed) offer.socket.write(`${JSON.stringify(line)}\n`);
+  };
+  if (state === 'asking') {
+    say({ type: 'asking' });
+    return;
+  }
+  offers.delete(offerId as string);
+  say(state === 'added' ? { type: 'added' } : { type: 'error', message: typeof message === 'string' && message ? message : 'It wasn’t added' });
+  offer.socket.end();
+}
+
+// ---------------------------------------------------------------------------
 // The socket
 // ---------------------------------------------------------------------------
 
@@ -471,7 +547,9 @@ function accept(socket: net.Socket): void {
       socket.end(`${JSON.stringify({ type: 'error', message: 'Bad request' })}\n`);
       return;
     }
-    void start(socket, request as LaunchArgs);
+    const widget = (request as { widget?: unknown }).widget;
+    if (widget !== undefined) offerWidget(socket, widget);
+    else void start(socket, request as LaunchArgs);
   });
 }
 
@@ -508,6 +586,10 @@ export function registerDinLaunch(opts: Options): void {
   ipcMain.handle('dinos-launch:release', (event, appId) => {
     opts.assertShellSender(event);
     if (typeof appId === 'string') release(appId);
+  });
+  ipcMain.handle('dinos-launch:widget-answer', (event, offerId, state, message) => {
+    opts.assertShellSender(event);
+    answerOffer(offerId, state, message);
   });
   void listen().catch((error: unknown) => console.error('din-launch: listening:', error));
 }

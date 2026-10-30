@@ -3,7 +3,8 @@
 > **Status: in place.** On DinOS `din` is on every shell's PATH; elsewhere,
 > run `python3 electron/din-cli.py` against a running Din.
 
-`din` runs a web app in a Din window, at `din://<origin>/`, the way Din
+`din` runs a web app in a Din window (and `din widget` puts a widget on
+the desktop, below), at `din://<origin>/`, the way Din
 runs its built-in apps: in the apps' session, with `window.din` defined
 before the page's scripts run, so a plain `index.html` can call
 `await din.ready; din.window.setTitle('…')` with no build step. It's for
@@ -64,6 +65,27 @@ desktop (`dinos.launch.onOpen`). `LaunchHost` registers the app
 Main hears back when the window opened, when it closed, and when the app
 has no windows left (`release`), which frees the origin and clears an
 ephemeral one's storage.
+
+## Widgets: `din widget`
+
+```sh
+din widget ./my-widget               # a folder with a napplet's index.html
+din widget ./my-widget --size large  # starting Large (or small, medium)
+```
+
+`din widget` puts a folder's widget on the desktop, as **Add Widgets… →
+From a Folder** does, in the first free cells. A widget that asks for none
+of the permissions the user is asked about (`identity`, `resource`,
+`storage`) goes straight on; any other opens its permission screen, and the
+command waits for the user to add it or not (Ctrl-C takes the screen back).
+It says which, and fails if that folder's widget is already on the desktop:
+it reloads by itself whenever a file in the folder changes, so there's no
+need to add it again.
+
+Main checks the folder as it does an app's (an `index.html`, not Din's
+profile) and hands the desktop `dinos-launch:widget`; `WidgetOffers`
+(`src/components/desktop/widgets/`) opens the folder (`dinos.widgets.folder`),
+reads its metadata and asks, then answers `asking`, `added` or `failed`.
 
 ## Apps from folders: `din+file://`
 
