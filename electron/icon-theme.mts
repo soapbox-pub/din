@@ -30,6 +30,25 @@ const SCHEMA = 'org.gnome.desktop.interface';
 /** The theme that stands for Din's own icons. */
 const DIN_THEME = 'Din';
 
+/**
+ * Din's theme, as os/configuration.nix installs it on DinOS: no icons of its
+ * own, so native apps fall through to Adwaita. Elsewhere Din writes it to
+ * ~/.local/share/icons the first time it's picked.
+ */
+const DIN_THEME_INDEX = `[Icon Theme]
+Name=Din
+Comment=Din's own icons
+Inherits=Adwaita,hicolor
+Directories=scalable/apps
+
+[scalable/apps]
+Size=64
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Applications
+`;
+
 /** A theme's directory name; it ends up as a gsettings argument and a path segment. */
 const THEME_NAME = /^(?![-.])[A-Za-z0-9_ .+-]+$/;
 
@@ -565,8 +584,12 @@ function restylesApps(theme: string): boolean {
  */
 async function themes(): Promise<IconTheme[]> {
   const current = await currentIconTheme();
-  const list: IconTheme[] = [];
-  for (const theme of installedThemes()) {
+  const installed = installedThemes();
+  // Din's own icons are always a choice, installed or not (see installDinTheme).
+  const list: IconTheme[] = installed.some((t) => t.id === DIN_THEME)
+    ? []
+    : [{ id: DIN_THEME, name: DIN_THEME, preview: [], limited: false }];
+  for (const theme of installed) {
     const offered = theme.id === DIN_THEME || restylesApps(theme.id);
     if (offered || theme.id === current) {
       list.push({ ...theme, preview: preview(theme.id), limited: !offered });
@@ -574,6 +597,14 @@ async function themes(): Promise<IconTheme[]> {
     await breathe();
   }
   return list;
+}
+
+/** Put Din's theme in ~/.local/share/icons, where a system without it (not DinOS) can pick it. */
+function installDinTheme(): void {
+  if (installedThemes().some((t) => t.id === DIN_THEME)) return;
+  const dir = path.join(dataHome(), 'icons', DIN_THEME);
+  fs.mkdirSync(path.join(dir, 'scalable/apps'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'index.theme'), DIN_THEME_INDEX);
 }
 
 // ---------------------------------------------------------------------------
@@ -612,6 +643,7 @@ export function registerIconThemeHandlers(options: {
   ipcMain.handle('icon-theme:set', async (event, theme: unknown) => {
     assertShellSender(event);
     if (!canChange()) throw new Error('Din can\'t change the icons on this system');
+    if (theme === DIN_THEME) installDinTheme();
     if (typeof theme !== 'string' || !installedThemes().some((t) => t.id === theme)) {
       throw new Error('Unknown icon theme');
     }
