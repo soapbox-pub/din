@@ -131,7 +131,7 @@ export function subscribeAssistantEvents(listener: (event: AssistantEvent) => vo
 /** How long a burst of events for one session is gathered before refetching. */
 const REFRESH_DELAY_MS = 150;
 
-const SESSION_LIST_EVENTS = /^session\.(created|deleted|updated|renamed|moved|archived|unarchived|execution\.)/;
+const SESSION_LIST_EVENTS = /^session\.(created|deleted|updated|renamed|moved|archived|unarchived|execution\.|revert\.)/;
 
 const SHELL_EVENTS = /^session\.(execution\.|tool\.(called|success|failed)|synthetic|background|shell\.|deleted)/;
 
@@ -899,6 +899,29 @@ export function useInterruptSession() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (sessionID: string) => assistantApi.interrupt(sessionID),
+    onSuccess: (_data, sessionID) => invalidateSession(queryClient, sessionID),
+  });
+}
+
+/** Undo back to before the user's message `messageID`, stopping the agent first if it's working. */
+export function useUndoMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionID, messageID, running }: { sessionID: string; messageID: string; running: boolean }) => {
+      if (running) {
+        await assistantApi.interrupt(sessionID);
+        await assistantApi.wait(sessionID);
+      }
+      return assistantApi.undo(sessionID, messageID);
+    },
+    onSuccess: (_data, { sessionID }) => invalidateSession(queryClient, sessionID),
+  });
+}
+
+export function useRedoMessages() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionID: string) => assistantApi.redo(sessionID),
     onSuccess: (_data, sessionID) => invalidateSession(queryClient, sessionID),
   });
 }

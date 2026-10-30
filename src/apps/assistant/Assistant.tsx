@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, SquarePen } from 'lucide-react';
+import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, Redo2, SquarePen, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
-import { Composer, type SlashCommand } from '@/shared/assistant/Composer';
+import { Composer, type ComposerHandle, type SlashCommand } from '@/shared/assistant/Composer';
 import { ModelPicker } from '@/shared/assistant/ModelPicker';
 import { FileLinkBaseContext } from '@/shared/assistant/fileLinks';
 import { FindBar, type FindBarHandle } from '@/shared/assistant/FindBar';
@@ -59,6 +59,7 @@ import {
   useMarkViewedSession,
   usePendingRequests,
   usePreferredModel,
+  useRedoMessages,
   useRenameSession,
   useSendPrompt,
   useSessionForms,
@@ -70,6 +71,7 @@ import {
   useStartConversation,
   useSwitchAgent,
   useSwitchModel,
+  useUndoMessage,
 } from '@/hooks/useAssistant';
 import {
   backgroundOnly,
@@ -81,6 +83,7 @@ import {
   modelKey,
   sessionTitle,
   tildify,
+  type FileDiff,
   type PromptAttachment,
   type SessionInfo,
 } from '@/lib/assistant';
@@ -109,7 +112,22 @@ const CONVERSATION_COMMANDS: SlashCommand[] = [
   { name: 'new', description: 'Start a new conversation in this folder', instant: true },
   { name: 'rename', args: '[title]', description: 'Rename this conversation' },
   { name: 'stop', description: 'Stop the agent', instant: true },
+  { name: 'undo', description: 'Take back your last message, what the agent did and the files it changed', instant: true },
 ];
+
+/** And once something is undone, a way to bring it back. */
+const UNDONE_COMMANDS: SlashCommand[] = [
+  ...CONVERSATION_COMMANDS.slice(0, 3),
+  { name: 'redo', description: 'Bring back what /undo took away, files too', instant: true },
+  ...CONVERSATION_COMMANDS.slice(3),
+];
+
+/** A user message's files that can be attached again (pasted ones aren't kept). */
+function reattachable(message: UserMessage): PromptAttachment[] {
+  return (message.files ?? []).flatMap((file) =>
+    file.source?.type === 'uri' ? [{ uri: file.source.uri, name: file.name }] : [],
+  );
+}
 
 /** A new conversation has only the server's: there is nothing yet to compact or rename. */
 const NO_COMMANDS: SlashCommand[] = [];
@@ -693,13 +711,23 @@ function Conversation({
   const switchAgent = useSwitchAgent();
   const compact = useCompactSession();
   const rename = useRenameSession();
+  const undo = useUndoMessage();
+  const redo = useRedoMessages();
   const { notify } = useAssistantHost();
   const [forking, setForking] = useState(false);
   const [finding, setFinding] = useState(false);
   const findBarRef = useRef<FindBarHandle>(null);
+  const composer = useRef<ComposerHandle>(null);
   const running = active.includes(sessionID);
-  const messages = transcript?.messages;
-  const commands = useSlashCommands(session?.location.directory, CONVERSATION_COMMANDS);
+  // What /undo took away stays on the server until Redo or the next message; it isn't shown.
+  const revert = session?.revert;
+  const { messages, undone } = useMemo(() => {
+    const all = transcript?.messages;
+    const at = revert && all ? all.findIndex((m) => m.id === revert.messageID) : -1;
+    if (!all || at === -1) return { messages: all, undone: 0 };
+    return { messages: all.slice(0, at), undone: all.slice(at).filter((m) => m.type === 'user').length };
+  }, [transcript?.messages, revert]);
+  const commands = useSlashCommands(session?.location.directory, revert ? UNDONE_COMMANDS : CONVERSATION_COMMANDS);
   const directory = session?.location.directory;
   const fileLinkBase = useMemo(() => ({ directory, home }), [directory, home]);
   useMarkViewedSession(sessionID);
@@ -790,6 +818,24 @@ function Conversation({
 
   const toBackground = () => background.mutate(sessionID, { onError: fail('Couldn’t move it to the background') });
 
+  // As in OpenCode's TUI: a message still waiting is just taken back; otherwise
+  // the conversation goes back to before the last one, and it's back in the
+  // composer to edit and send again.
+  const undoLast = async () => {
+    const waiting = queued?.at(-1);
+    if (waiting) {
+      await cancelQueued.mutateAsync({ sessionID, id: waiting.id }, { onError: fail('Couldn’t undo') });
+      composer.current?.fill(waiting.payload.text);
+      return;
+    }
+    const last = messages?.findLast((m): m is UserMessage => m.type === 'user' && !!m.text.trim());
+    if (!last) return notify({ title: 'Nothing to undo' });
+    await undo.mutateAsync({ sessionID, messageID: last.id, running }, { onError: fail('Couldn’t undo') });
+    composer.current?.fill(last.text, reattachable(last));
+  };
+
+  const redoAll = () => redo.mutateAsync(sessionID, { onError: fail('Couldn’t redo') });
+
   const runCommand = (name: string, args: string, files: PromptAttachment[]) => {
     stick.current = true;
     switch (name) {
@@ -804,6 +850,10 @@ function Conversation({
         return rename.mutateAsync({ sessionID, title: args }, { onError: fail('Couldn’t rename') });
       case 'stop':
         return interrupt.mutateAsync(sessionID, { onError: fail('Couldn’t stop') });
+      case 'undo':
+        return undoLast();
+      case 'redo':
+        return redoAll();
       default:
         return send.mutateAsync({ command: name, text: args, files }, { onError: fail(`Couldn’t run /${name}`) });
     }
@@ -866,6 +916,9 @@ function Conversation({
                     }
                     onFork={onFork}
                   />
+                  {revert && undone > 0 && (
+                    <UndoneNotice count={undone} files={revert.files ?? []} busy={redo.isPending} onRedo={redoAll} />
+                  )}
                 </FileLinkBaseContext>
               </>
             )}
@@ -903,10 +956,11 @@ function Conversation({
         ))}
         <div ref={composerRef} hidden={forms.length > 0}>
           <Composer
+            ref={composer}
             autoFocus
             draftKey={sessionID}
             running={running}
-            busy={send.isPending || compact.isPending}
+            busy={send.isPending || compact.isPending || undo.isPending || redo.isPending}
             placeholder={running ? 'Add something while it works…' : 'Reply, or type / for commands…'}
             onSubmit={(text, files) => {
               stick.current = true;
@@ -936,6 +990,49 @@ function Conversation({
           <StatusLine session={session} home={home} context={messages ? contextUsage(messages, models) : null} />
         )}
       </div>
+    </div>
+  );
+}
+
+/** Below the transcript after /undo: what was taken back, and Redo. */
+function UndoneNotice({
+  count,
+  files,
+  busy,
+  onRedo,
+}: {
+  count: number;
+  files: FileDiff[];
+  busy: boolean;
+  onRedo: () => unknown;
+}) {
+  return (
+    <div className="mt-6 rounded-xl border border-dashed border-border px-4 py-3 text-sm">
+      <div className="flex items-center gap-3">
+        <Undo2 className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <p className="min-w-0 flex-1">
+          {count === 1 ? 'Undid a message' : `Undid ${count} messages`}
+          {files.length > 0 && ` and the changes to ${files.length === 1 ? 'a file' : `${files.length} files`}`}.{' '}
+          <span className="text-muted-foreground">Sending a message makes it final.</span>
+        </p>
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => void onRedo()} className="shrink-0">
+          {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Redo2 aria-hidden />}
+          Redo
+        </Button>
+      </div>
+      {files.length > 0 && (
+        <ul className="mt-2 space-y-0.5 pl-7 font-mono text-xs text-muted-foreground">
+          {files.map((file) => (
+            <li key={file.file} className="flex gap-2">
+              <span className="min-w-0 truncate" title={file.file}>
+                {file.file}
+              </span>
+              {file.additions > 0 && <span className="text-emerald-700 dark:text-emerald-400">+{file.additions}</span>}
+              {file.deletions > 0 && <span className="text-red-700 dark:text-red-400">−{file.deletions}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

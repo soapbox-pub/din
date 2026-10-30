@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { ArrowUp, Mic, Paperclip, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
@@ -12,6 +12,11 @@ const MAX_PASTE_BYTES = 8 * 1024 * 1024;
 
 /** How soon a second Escape has to follow the first to stop the agent. */
 const STOP_ESCAPE_MS = 1500;
+
+export interface ComposerHandle {
+  /** Replace what's written with `text` and `files` (an undone message, back to edit). */
+  fill: (text: string, files?: PromptAttachment[]) => void;
+}
 
 /** A file:// URL for a path, each segment escaped. */
 function fileUri(path: string): string {
@@ -94,7 +99,9 @@ export function Composer({
   className,
   textareaRef,
   draftKey,
+  ref: handleRef,
 }: {
+  ref?: Ref<ComposerHandle>;
   /** Resolves once sent; the text stays put if it rejects. */
   onSubmit: (text: string, files: PromptAttachment[]) => Promise<unknown> | void;
   commands?: SlashCommand[];
@@ -170,6 +177,17 @@ export function Composer({
     }
     return true;
   };
+
+  useImperativeHandle(handleRef, () => ({
+    fill: (value, attached = []) => {
+      setText(value);
+      setFiles(attached);
+      const textarea = ref.current;
+      if (!textarea) return;
+      textarea.focus();
+      requestAnimationFrame(() => textarea.setSelectionRange(textarea.value.length, textarea.value.length));
+    },
+  }));
 
   const canSend = !disabled && !busy && text.trim().length > 0;
 
@@ -382,6 +400,11 @@ export function Composer({
           >
             <Mic className={cn('size-4', dictating && 'motion-safe:animate-pulse')} aria-hidden />
           </Button>
+        )}
+        {running && onStop && (
+          <span role="status" className="shrink-0 px-1 text-xs text-muted-foreground">
+            {stopArmed && 'Esc again to stop'}
+          </span>
         )}
         {running && onStop && (
           <Button

@@ -125,6 +125,21 @@ export interface SessionInfo {
   outcome?: 'succeeded' | 'failed' | 'interrupted';
   time: { created: number; updated: number; idle?: number; viewed?: number; archived?: number };
   location: { directory: string };
+  /**
+   * Undone back to before `messageID`: that message and what came after are
+   * hidden, and `files` put back as they were. Redo brings it all back; the
+   * next message sent makes it final.
+   */
+  revert?: { messageID: string; files?: FileDiff[] };
+}
+
+/** How a turn changed a file. */
+export interface FileDiff {
+  file: string;
+  patch: string;
+  additions: number;
+  deletions: number;
+  status: 'added' | 'deleted' | 'modified';
 }
 
 /** A command the server is running for a session: a tool call's, in the foreground or the background. */
@@ -450,6 +465,20 @@ export const assistantApi = {
     call<unknown>('DELETE', `/api/session/${id(sessionID)}/inbox/${id(inboxID)}`),
 
   interrupt: (sessionID: string) => call<unknown>('POST', `/api/session/${id(sessionID)}/interrupt`),
+
+  /** Resolves once the session has stopped working. */
+  wait: (sessionID: string) => call<unknown>('POST', `/api/experimental/session/${id(sessionID)}/wait`),
+
+  /**
+   * Undo back to before `messageID`: hide it and what came after, and put
+   * the files those turns changed back. Again with an earlier message goes
+   * further back. Refused while the session works.
+   */
+  undo: (sessionID: string, messageID: string) =>
+    call<unknown>('POST', `/api/session/${id(sessionID)}/revert/stage`, { messageID }),
+
+  /** Bring back everything undone, files too. */
+  redo: (sessionID: string) => call<unknown>('DELETE', `/api/session/${id(sessionID)}/revert`),
 
   /**
    * Move the commands and subagents the agent is waiting on to the
