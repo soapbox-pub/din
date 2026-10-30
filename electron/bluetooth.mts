@@ -16,14 +16,19 @@
 // is up to answer (`bluetooth:prompts`), so the login screen, where phone
 // login uses Bluetooth too, behaves as if this bridge weren't here.
 //
-// Sound devices need nothing more: WirePlumber picks up a connected headset
-// and it shows up in Settings → Sound.
+// Sound devices need little more: WirePlumber picks up a connected headset
+// and it shows up in Settings → Sound (main.mts switches sound to it). Like a
+// Mac, Din connects again by itself to the headphones last in use, when the
+// desktop comes up, when Bluetooth is turned back on, and on waking, since
+// many headsets wait to be called rather than calling. Headphones the user
+// disconnects here, or forgets, are left alone until connected again.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
 import fs from 'node:fs/promises';
-import { ipcMain } from 'electron';
+import path from 'node:path';
+import { app, ipcMain, powerMonitor } from 'electron';
 import { DBusConnection, DBusError, unwrap, Variant, type Message } from './dbus.mts';
 
 const BLUEZ = 'org.bluez';
@@ -47,6 +52,10 @@ const CONNECT_TIMEOUT_MS = 45_000;
 /** How long a pairing prompt waits for an answer. */
 const REQUEST_TIMEOUT_MS = 60_000;
 const EMIT_DELAY_MS = 100;
+/** How long to try each remembered headset, which may well be switched off. */
+const RECONNECT_TIMEOUT_MS = 15_000;
+/** How long after waking the adapter takes to be back. */
+const RESUME_DELAY_MS = 3_000;
 
 export interface BluetoothAdapter {
   /** What other devices see this computer as. */
@@ -282,6 +291,10 @@ async function load(b: DBusConnection): Promise<void> {
       if (iface === DEVICE && values.has('Paired') && request?.device === message.path && request?.kind.startsWith('display-')) {
         cancelRequest();
       }
+      if (iface === DEVICE && props.get('Connected') === true && values.has('Connected') && isAudio(props)) {
+        void remember(String(props.get('Address') ?? ''), true);
+      }
+      if (iface === ADAPTER && values.get('Powered') !== undefined && props.get('Powered') === true) void reconnectAudio();
       changed();
     }),
   ];
@@ -297,6 +310,7 @@ async function load(b: DBusConnection): Promise<void> {
   }
   await syncAgent(b);
   changed();
+  void reconnectAudio();
 }
 
 function call(member: string, path: string, iface: string, signature = '', body: unknown[] = [], timeout?: number) {
@@ -440,6 +454,59 @@ function answer(id: unknown, accept: unknown, value: unknown): void {
     resolve(value);
   } else {
     resolve('');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reconnecting headphones
+// ---------------------------------------------------------------------------
+
+function isAudio(props: Map<string, unknown>): boolean {
+  return /^audio-/.test(String(props.get('Icon') ?? ''));
+}
+
+function rememberedPath(): string {
+  return path.join(app.getPath('userData'), 'bluetooth-audio.json');
+}
+
+/** Addresses of the headphones to connect again, last used first. */
+async function remembered(): Promise<string[]> {
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(rememberedPath(), 'utf8'));
+    return Array.isArray(parsed) ? parsed.filter((a): a is string => typeof a === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Remember (or stop remembering) a headset to connect again. */
+async function remember(address: string, on: boolean): Promise<void> {
+  if (!address) return;
+  const before = await remembered();
+  const after = on ? [address, ...before.filter((a) => a !== address)].slice(0, 8) : before.filter((a) => a !== address);
+  if (after.join() === before.join()) return;
+  await fs.writeFile(rememberedPath(), JSON.stringify(after)).catch(() => {});
+}
+
+let reconnecting = false;
+
+/**
+ * Call the remembered headphones that aren't connected, one at a time and
+ * quietly: they may be off, or away. Only once the desktop is up.
+ */
+async function reconnectAudio(): Promise<void> {
+  const adapter = adapterPath();
+  if (reconnecting || !promptsWanted || !adapter || objects.get(adapter)?.get(ADAPTER)?.get('Powered') !== true) return;
+  reconnecting = true;
+  try {
+    for (const address of await remembered()) {
+      const found = [...objects].find(([, ifaces]) => ifaces.get(DEVICE)?.get('Address') === address);
+      const props = found?.[1].get(DEVICE);
+      if (!found || props?.get('Paired') !== true || props.get('Connected') === true || busy.has(found[0])) continue;
+      await call('Connect', found[0], DEVICE, '', [], RECONNECT_TIMEOUT_MS).catch(() => {});
+    }
+  } finally {
+    reconnecting = false;
   }
 }
 
@@ -593,12 +660,15 @@ async function connect(path: string): Promise<void> {
 }
 
 async function disconnect(path: string): Promise<void> {
+  // Disconnected on purpose: not to be called back.
+  await remember(String(deviceProps(path)?.get('Address') ?? ''), false);
   await withBusy(path, 'disconnecting', () => call('Disconnect', path, DEVICE, '', [], CONNECT_TIMEOUT_MS));
 }
 
 async function forget(path: string): Promise<void> {
   const adapter = deviceProps(path)?.get('Adapter');
   if (typeof adapter !== 'string') throw new Error('No such device.');
+  await remember(String(deviceProps(path)?.get('Address') ?? ''), false);
   await call('RemoveDevice', adapter, ADAPTER, 'o', [path]).catch((error) => {
     throw explain(error);
   });
@@ -637,7 +707,10 @@ export function registerBluetoothHandlers(options: {
     promptsWanted = enabled === true;
     const b = await connection();
     if (b) await syncAgent(b);
+    void reconnectAudio();
   });
+
+  powerMonitor.on('resume', () => setTimeout(() => void reconnectAudio(), RESUME_DELAY_MS));
 
   handle('bluetooth:setPowered', (on) => setPowered(on === true));
   handle('bluetooth:discover', (on) => discover(on === true));
