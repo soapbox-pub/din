@@ -58,7 +58,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-FixYNa8nqmZi56YgL4bFblsMfH51YR3ckXj0BIQjex4=";
+    npmDepsHash = "sha256-WT9H9XK1QG4jIbTeI0i8vmr6sSaeBiQDmnodNMntwrY=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -94,11 +94,12 @@ let
       # The ad blocker's extension, with its engine bundle built above.
       cp -r electron/adblock-extension $out/share/din/adblock-extension
 
-      # Every package electron/ imports, with everything they pull in,
-      # read from the sources so a new one can't be forgotten here.
-      # Resolved relative to main.mjs, so they live in a node_modules
-      # directory beside it.
-      for dir in $(node scripts/runtime-deps.mjs --electron); do
+      # package.json's dependencies, which are what Electron main loads
+      # (`npm test` checks it), and theirs; Vite bundled the rest. Beside
+      # main.mjs, which resolves them from there. Not `npm prune
+      # --omit=dev`: it keeps peers too, which here are the electron
+      # package (Electron provides its own) and TypeScript.
+      for dir in $(node scripts/runtime-deps.mjs); do
         mkdir -p "$(dirname $out/share/din/$dir)"
         cp -rT $dir $out/share/din/$dir
       done

@@ -1,13 +1,19 @@
 /**
- * Prints the node_modules directories some packages need at runtime: the
- * packages and their dependencies (optional ones where installed), one per
- * line, relative to the repo. Directories nested in another's
- * node_modules are left out, since copying the outer one brings them.
- * --electron names every package electron/ imports, for os/configuration.nix
- * and scripts/session.mjs, which copy all of them beside Electron main.
+ * package.json's `dependencies` are what Electron main loads at runtime;
+ * everything Vite bundles is a devDependency. DinOS ships just those (its
+ * build prunes the rest), and so do the login session's builds.
  *
- *   node scripts/runtime-deps.mjs --electron
- *   node scripts/runtime-deps.mjs imapflow nodemailer mailparser
+ * Prints the node_modules directories `dependencies` need: the packages and
+ * theirs (optional ones where installed), one per line, relative to the repo,
+ * for scripts/session.mjs. Directories nested in another's node_modules are
+ * left out, since copying the outer one brings them.
+ *
+ * --check (in `npm test`) fails unless `dependencies` are exactly the
+ * packages electron/ imports: a runtime package left out is missing from
+ * DinOS, and Din doesn't start; a bundled one put in ships for nothing.
+ *
+ *   node scripts/runtime-deps.mjs
+ *   node scripts/runtime-deps.mjs --check
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -56,8 +62,18 @@ function electronImports() {
   return [...names];
 }
 
-const names = process.argv[2] === "--electron" ? electronImports() : process.argv.slice(2);
-for (const name of names) walk(name, root, false);
+const runtime = Object.keys(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies ?? {});
+
+if (process.argv[2] === "--check") {
+  const imports = electronImports();
+  const missing = imports.filter((name) => !runtime.includes(name));
+  const unused = runtime.filter((name) => !imports.includes(name));
+  for (const name of missing) console.error(`runtime-deps: electron/ imports ${name}, so it belongs in package.json's dependencies`);
+  for (const name of unused) console.error(`runtime-deps: electron/ doesn't import ${name}, so it belongs in package.json's devDependencies`);
+  process.exit(missing.length || unused.length ? 1 : 0);
+}
+
+for (const name of runtime) walk(name, root, false);
 
 const dirs = [...found].map((d) => relative(root, d)).sort();
 for (const dir of dirs) {

@@ -395,7 +395,7 @@ async function build() {
     copy(path.join(ROOT, "electron", entry), path.join(app, entry));
   }
   copy(path.join(ROOT, "dist"), path.join(app, "dist"));
-  const deps = output(process.execPath, [path.join(ROOT, "scripts/runtime-deps.mjs"), "--electron"], {
+  const deps = output(process.execPath, [path.join(ROOT, "scripts/runtime-deps.mjs")], {
     cwd: ROOT,
     env: childEnv({ ELECTRON_RUN_AS_NODE: "1" }),
   });
