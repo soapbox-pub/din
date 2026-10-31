@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { replaceBadges, type AppBadge } from '@/lib/appBadges';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import type { WindowState } from '@/hooks/useWindows';
@@ -14,7 +15,7 @@ import {
   type NotificationSource,
 } from '@/lib/notificationCenter';
 import { nsiteAppId } from '@/lib/nsiteApps';
-import { getSystemNotificationsBridge, type SystemNotification } from '@/lib/systemNotifications';
+import { getSystemNotificationsBridge, type BadgeSource, type SystemNotification } from '@/lib/systemNotifications';
 import { getWebPushHost } from '@/lib/webPush';
 import { guestWindowId } from '@/platform/guest';
 
@@ -31,6 +32,9 @@ const MIN_POPUP_MS = 2000;
  * service worker may then move (clients.openWindow, see electron/napp.mts).
  * A website's service worker decides for itself what a click on its
  * notification opens or focuses (electron/web-push.mts), as in Chrome.
+ *
+ * Also puts the badges installed web apps, nsites and Linux apps set on
+ * their Dock tiles (navigator.setAppBadge(), LauncherEntry).
  */
 export function SystemNotificationsHost() {
   const { windows, focus, open } = useWindowManager();
@@ -169,8 +173,50 @@ export function SystemNotificationsHost() {
   }, [focus, open]);
 
   useCloseBlockedSites();
+  useSystemBadges();
 
   return null;
+}
+
+/**
+ * Badges from the main process, filed under the apps they belong to: a
+ * website's under its installed web app (none, if it isn't installed, as in
+ * Chrome), an nsite's under its app, a Linux app's under its own. Filed again
+ * as apps are installed and removed.
+ */
+function useSystemBadges() {
+  const { getApp, findAppIdForUrl } = useInstalledApps();
+  const [raw, setRaw] = useState(() => new Map<string, { source: BadgeSource; badge: AppBadge }>());
+
+  useEffect(() => {
+    const bridge = getSystemNotificationsBridge();
+    if (!bridge) return;
+    const keyOf = (source: BadgeSource) =>
+      source.kind === 'web' ? `web:${source.origin}` : source.kind === 'site' ? `site:${source.host}` : `native:${source.appId}`;
+    const off = bridge.onBadge(({ source, badge }) =>
+      setRaw((prev) => {
+        const next = new Map(prev);
+        if (badge === null) next.delete(keyOf(source));
+        else next.set(keyOf(source), { source, badge });
+        return next;
+      }),
+    );
+    void bridge.badges().then(
+      (list) => setRaw((prev) => new Map([...list.map((b) => [keyOf(b.source), b] as const), ...prev])),
+      () => {},
+    );
+    return off;
+  }, []);
+
+  useEffect(() => {
+    const filed = new Map<string, { appId: string; badge: AppBadge }>();
+    for (const [key, { source, badge }] of raw) {
+      const appId =
+        source.kind === 'web' ? findAppIdForUrl(`${source.origin}/`) : source.kind === 'site' ? nsiteAppId(source.host) : source.appId;
+      if (appId && getApp(appId)) filed.set(key, { appId, badge });
+    }
+    replaceBadges('system:', filed);
+  }, [raw, getApp, findAppIdForUrl]);
 }
 
 /**

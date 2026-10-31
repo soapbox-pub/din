@@ -21,6 +21,11 @@
 // Other websites' registration.showNotification (a push, typically) comes
 // from web-push.mts the same way.
 //
+// App badges, the number or mark on an app's Dock tile, come the same ways:
+// websites' and nsites' navigator.setAppBadge() (web-push.mts, napp.mts),
+// and Linux apps' com.canonical.Unity.LauncherEntry signals (the server).
+// They're kept here, so a reloaded shell gets them back (`notifications:badges`).
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
@@ -91,6 +96,7 @@ async function startServer(): Promise<void> {
     onMessage: (message) => {
       if (message.type === 'notify') void show(message);
       else if (message.type === 'close') sendToShell('notifications:close', `dbus:${message.id}`);
+      else if (message.type === 'badge') void badgeFromServer(message);
     },
     onExit: () => {
       if (server !== service) return;
@@ -130,6 +136,54 @@ async function show(message: Extract<ServerMessage, { type: 'notify' }>): Promis
     worker: null,
   };
   sendToShell('notifications:show', notification);
+}
+
+// ---------------------------------------------------------------------------
+// App badges
+// ---------------------------------------------------------------------------
+
+/** Who set a badge: a website (an installed web app's), an nsite, or a Linux app. */
+export type BadgeSource =
+  | { kind: 'web'; origin: string }
+  | { kind: 'site'; host: string }
+  | { kind: 'native'; appId: string };
+
+/** A count, a plain mark, or none. */
+export type Badge = number | 'flag' | null;
+
+const badges = new Map<string, { source: BadgeSource; badge: Exclude<Badge, null> }>();
+
+function badgeKey(source: BadgeSource): string {
+  return source.kind === 'web' ? `web\0${source.origin}` : source.kind === 'site' ? `site\0${source.host}` : `native\0${source.appId}`;
+}
+
+/** What navigator.setAppBadge() was given, as a badge: no argument is a mark, 0 is none. */
+export function badgeFromSite(value: unknown): Badge {
+  if (value === undefined || value === null) return 'flag';
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) throw new TypeError('The badge must be a non-negative number');
+  return Math.min(Math.floor(count), 1_000_000) || null;
+}
+
+/** Set (or, with null, clear) a badge, and tell the shell. */
+export function setAppBadge(source: BadgeSource, badge: Badge): void {
+  const key = badgeKey(source);
+  const current = badges.get(key);
+  if ((current?.badge ?? null) === badge) return;
+  if (badge === null) badges.delete(key);
+  else badges.set(key, { source, badge });
+  sendToShell('notifications:badge', { source, badge });
+}
+
+async function badgeFromServer(message: Extract<ServerMessage, { type: 'badge' }>): Promise<void> {
+  const appId = appIdForPid(message.pid) ?? nativeAppIdForUri(message.appUri);
+  if (appId) setAppBadge({ kind: 'native', appId }, message.count);
+}
+
+/** `application://org.telegram.desktop.desktop` as Din's id for it. */
+function nativeAppIdForUri(uri: string): string | null {
+  const match = /^application:\/\/(.+?)(\.desktop)?$/.exec(uri);
+  return match ? `native:${match[1]}` : null;
 }
 
 /** A notification from DinOS itself, for the notification center. */
@@ -471,7 +525,7 @@ function parseId(id: unknown): { kind: NotificationKind; id: number } | null {
 
 /** Register the notifications IPC surface (window.dinos.systemNotifications) and start the server. */
 export function registerNotificationHandlers(options: {
-  isShellSender: (event: Electron.IpcMainEvent) => boolean;
+  isShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => boolean;
   sendToShell: (channel: string, payload?: unknown) => void;
   /** Whether a site may show notifications, as the user answered. */
   webPermission: (s: Electron.Session, origin: string) => NotificationPermission;
@@ -497,6 +551,11 @@ export function registerNotificationHandlers(options: {
     else if (target.kind === 'napp') siteHandlers?.closed(target.id, why);
     else if (target.kind === 'sw') workerHandlers?.closed(target.id, why);
     else webEvent(target.id, 'close');
+  });
+
+  ipcMain.handle('notifications:badges', (event) => {
+    if (!isShellSender(event)) return [];
+    return [...badges.values()];
   });
 
   registerWebHandlers(options.webPermission, options.remembersPermission);

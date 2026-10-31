@@ -19,6 +19,11 @@
 // image and desktop-entry hints), CloseNotification, GetCapabilities,
 // GetServerInformation, and the NotificationClosed and ActionInvoked signals.
 //
+// It also hears the badge counts apps put on their launcher icons, as Unity's
+// com.canonical.Unity.LauncherEntry Update signal (Telegram, Thunderbird,
+// Signal and other Qt and GTK apps send it), for their Dock tiles. A badge
+// goes when its app leaves the bus.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
@@ -68,7 +73,9 @@ export type ServerMessage =
       /** ms; -1 is the server's choice, 0 never. */
       timeout: number;
     }
-  | { type: 'close'; id: number };
+  | { type: 'close'; id: number }
+  /** A launcher badge: `count` null when the app hides it, or has gone. */
+  | { type: 'badge'; pid: number | null; appUri: string; count: number | null };
 
 /** What the main process tells this one. */
 export type ServerCommand =
@@ -81,6 +88,10 @@ let busAddress: string | undefined;
 let lastId = 0;
 /** Ids handed out and not closed yet. */
 const live = new Set<number>();
+/** The apps showing a launcher badge, by their unique bus name: their URI and pid. */
+const badged = new Map<string, { appUri: string; pid: number | null }>();
+/** What each app last said of its count and whether it shows. */
+const lastCounts = new Map<string, { count: number; visible: boolean }>();
 
 function post(message: ServerMessage): void {
   port?.postMessage(message);
@@ -137,8 +148,17 @@ async function connect(): Promise<void> {
     (message) => {
       const [name, , next] = message.body as [string, string, string];
       if (name === NAME && !next) void connection.bus('RequestName', 'su', [NAME, DO_NOT_QUEUE]).catch(() => {});
+      if (!next) lastCounts.delete(name);
+      const gone = !next ? badged.get(name) : undefined;
+      if (gone) {
+        badged.delete(name);
+        post({ type: 'badge', pid: gone.pid, appUri: gone.appUri, count: null });
+      }
     },
   );
+  connection.subscribe({ interface: 'com.canonical.Unity.LauncherEntry', member: 'Update' }, (message) => {
+    void launcherUpdate(connection, message.sender, message.body);
+  });
   const [reply] = await connection.bus('RequestName', 'su', [NAME, DO_NOT_QUEUE]).catch(() => [0]);
   if (reply !== PRIMARY_OWNER) console.log('notifications: another notification server is running');
 }
@@ -207,6 +227,31 @@ async function notify(call: MethodCall): Promise<number> {
     timeout: Number.isInteger(timeout) ? timeout : -1,
   });
   return id;
+}
+
+/** An app's LauncherEntry Update: (s app_uri, a{sv} properties), count shown only while count-visible. */
+async function launcherUpdate(connection: DBusConnection, sender: string | undefined, body: unknown[]): Promise<void> {
+  const [appUri, properties] = body as [unknown, unknown];
+  if (!sender || typeof appUri !== 'string' || !appUri.startsWith('application://') || appUri.length > 512) return;
+  if (!(properties instanceof Map)) return;
+  const known = badged.get(sender);
+  const [pid] = known
+    ? [known.pid]
+    : await connection.bus('GetConnectionUnixProcessID', 's', [sender]).catch(() => [null]);
+  const entry = { appUri, pid: typeof pid === 'number' ? pid : null };
+  const count = unwrap(properties.get('count'));
+  const visible = unwrap(properties.get('count-visible'));
+  // Either may come alone: the other keeps what it last said.
+  const last = lastCounts.get(sender) ?? { count: 0, visible: false };
+  const next = {
+    count: typeof count === 'number' || typeof count === 'bigint' ? Number(count) : last.count,
+    visible: typeof visible === 'boolean' ? visible : last.visible,
+  };
+  lastCounts.set(sender, next);
+  const shown = next.visible && next.count > 0 ? Math.min(Math.floor(next.count), 1_000_000) : null;
+  if (shown === null) badged.delete(sender);
+  else badged.set(sender, entry);
+  post({ type: 'badge', pid: entry.pid, appUri, count: shown });
 }
 
 function nextId(): number {

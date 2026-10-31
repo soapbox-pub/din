@@ -133,9 +133,9 @@ const MAX_DOTS = 4;
  *
  * Shows pinned apps first (kept on this device), then any
  * running apps that aren't pinned. Each tile groups its app's windows, with
- * a dot under it per window (and, for any but a Linux app, a badge on the
- * icon's corner: the one the app set, else a count of its unread
- * notifications): click launches, toggles, or cycles through
+ * a dot under it per window (and a badge on the icon's corner: the one the
+ * app set, else a count of its unread notifications): click launches,
+ * toggles, or cycles through
  * them, the scroll wheel cycles too, middle-click always opens a new window,
  * right-click offers pin/unpin, close, and uninstall, dragging an
  * unpinned tile left among the pinned ones pins it, and dragging a pinned
@@ -224,7 +224,7 @@ export function Dock({
   const entryIds = [...pinnedIds, ...unpinnedIds];
 
   // Unread notifications in the notification center, per tile, for the
-  // apps that sent them (Linux apps badge their own icons, if at all).
+  // apps that sent them.
   const { notifications } = useNotificationCenter();
   const unread = new Map<string, number>();
   for (const n of notifications) {
@@ -233,7 +233,8 @@ export function Dock({
     const tile = tileOf(appId);
     unread.set(tile, (unread.get(tile) ?? 0) + 1);
   }
-  // What apps set on their tiles themselves (navigator.setAppBadge()) wins.
+  // What apps set on their tiles themselves wins: navigator.setAppBadge()
+  // from built-in apps, web apps and nsites, a Linux app's LauncherEntry.
   const appBadges = useAppBadges();
   const badgeOf = (appId: string): AppBadge | null => {
     let own: AppBadge | null = null;
@@ -773,7 +774,7 @@ export function Dock({
                   isPinned={pinned.includes(appId)}
                   reordering={dragging}
                   dropping={dropTarget === appId}
-                  badge={app.native ? null : badgeOf(appId)}
+                  badge={badgeOf(appId)}
                   onTogglePin={togglePin}
                   onDragPointerDown={reorder.onPointerDown}
                   onUninstall={canUninstall(appId) ? uninstall : undefined}

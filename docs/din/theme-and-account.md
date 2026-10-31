@@ -98,5 +98,13 @@ about (opened the message, looked at the pane), so the notification
 center and the Dock only count what's still news. A tile shows the badge
 the app set, else its count of unread notifications.
 
+Every other kind of app works the same way. Installed web apps and nsites
+get `navigator.setAppBadge()` in their pages and service workers (so a push
+can badge a closed app), and keep the badge until they clear it; a site in
+a browser tab that isn't installed has no tile, and its badge goes nowhere,
+as in Chrome. Linux apps badge their tiles with Unity's
+`com.canonical.Unity.LauncherEntry` signal, the badge going when the app
+quits. A built-in app's badge goes with its window.
+
 Toasts need no permission: there's no web API for them, so `din.toast`
 is Din's.

@@ -18,6 +18,9 @@
 //     `notificationclick` in the worker, and dismissing one
 //     `notificationclose`; the worker may then use clients.openWindow or
 //     WindowClient.focus for a minute.
+//   - navigator.setAppBadge / clearAppBadge, from the page and the worker,
+//     for the Dock tile of the site's installed web app (the shell drops a
+//     badge from a site that isn't installed, as Chrome does).
 //
 // Websites in the Web Browser's session get it, in tabs and in installed web
 // apps' windows, which share it (and so a site's worker and subscription).
@@ -37,7 +40,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import v8 from 'node:v8';
-import { closeWorkerNotification, setWorkerNotificationHandlers, showWorkerNotification } from './notifications.mts';
+import { badgeFromSite, closeWorkerNotification, setAppBadge, setWorkerNotificationHandlers, showWorkerNotification } from './notifications.mts';
 import {
   base64url,
   decryptPushMessage,
@@ -581,6 +584,16 @@ function failure(error: string, name = 'Error'): Reply {
 async function call(caller: Caller, method: unknown, params: unknown): Promise<Reply> {
   const worker = caller.scope !== null;
   try {
+    // The site's, whatever registration (if any) asks.
+    if (method === 'badge.set') {
+      const value = params && typeof params === 'object' ? (params as Record<string, unknown>).value : undefined;
+      setAppBadge({ kind: 'web', origin: caller.origin }, badgeFromSite(value));
+      return { ok: true, result: null };
+    }
+    if (method === 'badge.clear') {
+      setAppBadge({ kind: 'web', origin: caller.origin }, null);
+      return { ok: true, result: null };
+    }
     const scope = scopeFor(caller, params);
     const args = params && typeof params === 'object' ? (params as Record<string, unknown>) : {};
     let result: unknown = null;

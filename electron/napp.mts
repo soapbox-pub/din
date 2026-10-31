@@ -13,6 +13,8 @@
 //   - registration.periodicSync: the worker woken on a schedule, at most every
 //     15 minutes, after the user allows "Refresh in the background".
 //   - window.ENV: per-device variables the user sets in the app's info.
+//   - navigator.setAppBadge / clearAppBadge, from the page and the worker,
+//     for the app's Dock tile.
 //
 // Only installed nsites get any of it, in their app's window and in a browser
 // tab alike: both are the same site, in the browser's session, sharing one
@@ -49,7 +51,7 @@ import {
   type SitePush,
 } from './napp-push.mts';
 import { isInstalledSite, nsiteStoreReady, parseCanonicalHost } from './nsite-store.mts';
-import { closeSiteNotification, setSiteNotificationHandlers, showSiteNotification } from './notifications.mts';
+import { badgeFromSite, closeSiteNotification, setAppBadge, setSiteNotificationHandlers, showSiteNotification } from './notifications.mts';
 import { WorkerEvents, type DispatchResult } from './worker-events.mts';
 
 /** A capability a site asks the user for, as main.mts files it. */
@@ -589,6 +591,12 @@ async function call(caller: { host: string; worker: boolean }, method: unknown, 
       case 'notification.close':
         closeNotification(host, params);
         break;
+      case 'badge.set':
+        setAppBadge({ kind: 'site', host }, badgeFromSite(params));
+        break;
+      case 'badge.clear':
+        setAppBadge({ kind: 'site', host }, null);
+        break;
       case 'fetch.start':
         result = await fetchStart(host, params as NappFetchRequest).catch((error: Error) => {
           throw new NappError(error.message, 'TypeError');
@@ -657,6 +665,7 @@ export function forgetNappSite(host: string): void {
   delete stored.env[host];
   save();
   closeAllNotifications(host);
+  setAppBadge({ kind: 'site', host }, null);
   fetchAbortAll(host);
   events.forget(host);
   lastInteraction.delete(host);

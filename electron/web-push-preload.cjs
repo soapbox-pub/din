@@ -11,6 +11,8 @@
 //   - registration.showNotification / getNotifications, into Din's
 //     notification center (Electron shows none from a registration)
 //   - registration.unregister, which ends the registration's subscription
+//   - navigator.setAppBadge / clearAppBadge, for the Dock tile of the site's
+//     installed web app (top documents only, in a frame)
 // In the service worker:
 //   - clients.openWindow / WindowClient.focus, through the shell
 //   - the push, pushsubscriptionchange, notificationclick and
@@ -52,6 +54,21 @@ function installWebPush(bridge) {
   const Registration = scope.ServiceWorkerRegistration;
   if (typeof Registration !== 'function') return;
   const proto = Registration.prototype;
+
+  if (inWorker || window.top === window.self) {
+    /** @param {string} method @param {Record<string, unknown>} [params] */
+    const badge = async (method, params) => {
+      const reply = await bridge.call(method, params);
+      if (!reply.ok) throw reply.name === 'Error' ? new TypeError(reply.error) : new DOMException(reply.error, reply.name);
+    };
+    const navProto = Object.getPrototypeOf(navigator);
+    const own = { writable: true, configurable: true, enumerable: false };
+    Object.defineProperty(navProto, 'setAppBadge', {
+      ...own,
+      value: (/** @type {number | undefined} */ contents) => badge('badge.set', { value: contents }),
+    });
+    Object.defineProperty(navProto, 'clearAppBadge', { ...own, value: () => badge('badge.clear') });
+  }
 
   /** @param {Reply & { ok: false }} reply */
   const toError = (reply) => {

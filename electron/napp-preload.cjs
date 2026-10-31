@@ -11,6 +11,7 @@
 //   - registration.showNotification / getNotifications, into Din's
 //     notification center (Chromium's would go to libnotify)
 //   - registration.periodicSync, and its permission in navigator.permissions
+//   - navigator.setAppBadge / clearAppBadge, for the app's Dock tile
 // In every frame of the site's own origin: window.ENV, when the user has set
 // variables for the site.
 // In every frame and the service worker, installed or not: the Cache API,
@@ -24,6 +25,7 @@
 //     only: a site subscribes from its page, with napp.push.set) and
 //     periodicSync
 //   - clients.openWindow / WindowClient.focus, which move the app's window
+//   - navigator.setAppBadge / clearAppBadge
 //   - the push, notificationclick, notificationclose and periodicsync events
 //     napp.mts raises, with waitUntil() waited on before it's told they ran
 //
@@ -292,6 +294,22 @@ function installNapp(bridge) {
       });
       getter(proto, 'pushManager', () => pushManager);
     }
+  }
+
+  // navigator.setAppBadge: the Dock tile's. A site that isn't installed has
+  // no tile, and its badge goes nowhere, as in Chrome.
+  if (bridge.installed && (inWorker || bridge.top)) {
+    const navProto = Object.getPrototypeOf(navigator);
+    /** @param {string} method @param {unknown} [params] */
+    const badge = async (method, params) => {
+      try {
+        await call(method, params);
+      } catch (error) {
+        if (!notInstalled(error)) throw error;
+      }
+    };
+    define(navProto, 'setAppBadge', (/** @type {number | undefined} */ contents) => badge('badge.set', contents));
+    define(navProto, 'clearAppBadge', () => badge('badge.clear'));
   }
 
   // -------------------------------------------------------------------------

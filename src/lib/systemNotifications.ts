@@ -49,6 +49,12 @@ export interface SystemNotification {
   worker: { origin: string } | null;
 }
 
+/** Who set a Dock badge outside Din's own apps (electron/notifications.mts). */
+export type BadgeSource =
+  | { kind: 'web'; origin: string }
+  | { kind: 'site'; host: string }
+  | { kind: 'native'; appId: string };
+
 export interface SystemNotificationsBridge {
   onShow(callback: (notification: SystemNotification) => void): () => void;
   /** The sender closed one (its id). */
@@ -56,6 +62,10 @@ export interface SystemNotificationsBridge {
   /** The user clicked it (`'default'`) or one of its actions. */
   activate(id: string, action: string): void;
   closed(id: string, reason: NotificationCloseReason): void;
+  /** A website (navigator.setAppBadge()), nsite or Linux app (LauncherEntry) set or cleared its badge. */
+  onBadge(callback: (change: { source: BadgeSource; badge: number | 'flag' | null }) => void): () => void;
+  /** The badges set so far. */
+  badges(): Promise<{ source: BadgeSource; badge: number | 'flag' }[]>;
 }
 
 declare global {

@@ -1208,6 +1208,24 @@ expose('systemNotifications', {
    * @param {'expired' | 'dismissed' | 'closed'} reason
    */
   closed: (id, reason) => ipcRenderer.send('notifications:closed', id, reason),
+
+  /**
+   * Subscribe to badges websites, nsites and Linux apps set on their Dock
+   * tiles. Returns an unsubscribe fn.
+   * @param {(change: unknown) => void} callback
+   */
+  onBadge: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} change
+     */
+    const handler = (_event, change) => callback(change);
+    ipcRenderer.on('notifications:badge', handler);
+    return () => ipcRenderer.removeListener('notifications:badge', handler);
+  },
+
+  /** The badges set so far. */
+  badges: () => ipcRenderer.invoke('notifications:badges'),
 });
 
 // Zoom bridge (window.dinos.zoom). Sets Chromium's page zoom for the shell window -
