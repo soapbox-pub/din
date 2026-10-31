@@ -647,30 +647,18 @@ function AssistantWindow() {
 
 /**
  * A tab's icon: whether its conversation is working or waiting on the user,
- * else its project's favicon, if it has one; with a dot on its corner while
- * the conversation has unread notifications.
+ * else a dot while it has unread notifications, else its project's favicon,
+ * if it has one.
  */
 function TabIcon({ state, favicon, unread }: { state: TabInfo['state']; favicon?: string; unread?: boolean }) {
-  if (!unread) return <TabStateIcon state={state} favicon={favicon} />;
-  return (
-    <span className="relative grid size-3.5 place-items-center">
-      <TabStateIcon state={state} favicon={favicon} />
-      <span
-        className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-red-600 ring-2 ring-background"
-        aria-label="Unread notification"
-      />
-    </span>
-  );
-}
-
-function TabStateIcon({ state, favicon }: { state: TabInfo['state']; favicon?: string }) {
+  if (state === 'waiting' || (state === 'idle' && unread)) {
+    return (
+      <span className="grid size-3.5 place-items-center" aria-label={state === 'waiting' ? 'Waiting for you' : 'Unread notification'}>
+        <span className="size-2 rounded-full bg-primary" />
+      </span>
+    );
+  }
   switch (state) {
-    case 'waiting':
-      return (
-        <span className="grid size-3.5 place-items-center" aria-label="Waiting for you">
-          <span className="size-2 rounded-full bg-primary" />
-        </span>
-      );
     case 'running':
       return <Loader2 className="size-3.5 animate-spin" aria-label="Working" />;
     case 'new':

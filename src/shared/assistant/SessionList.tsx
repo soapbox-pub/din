@@ -550,7 +550,6 @@ function SessionRow({
         dragged && 'opacity-50',
       )}
     >
-      {unread && <span className="size-2 shrink-0 rounded-full bg-red-600" aria-label="Unread notification" />}
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{sessionTitle(session)}</span>
       {tag && <span className="max-w-20 shrink-0 truncate text-xs text-muted-foreground">{tag}</span>}
       {worktree && (
@@ -560,6 +559,8 @@ function SessionRow({
         <span className="size-2 shrink-0 rounded-full bg-primary" aria-label="Waiting for you" />
       ) : running ? (
         <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Working" />
+      ) : unread ? (
+        <span className="size-2 shrink-0 rounded-full bg-primary" aria-label="Unread notification" />
       ) : (
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{relativeTime(session.time.updated)}</span>
       )}
