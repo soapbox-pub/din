@@ -96,8 +96,9 @@ function isAssistantKeyPressed(): boolean {
  *   and Alt+Left/Right (history), plus Ctrl+PageUp/PageDown (cycle tabs),
  *   Alt+D / F6 (address bar), Ctrl+Shift+T (reopen a closed tab), Ctrl+N /
  *   Ctrl+Shift+N (new normal / private window), Ctrl+Shift+W (close the
- *   window), Ctrl+Shift+Delete (clear browsing data), and Ctrl+= / Ctrl+- /
- *   Ctrl+0 (page zoom). These are NOT intercepted in the
+ *   window), Ctrl+Shift+Delete (clear browsing data), Ctrl+= / Ctrl+- /
+ *   Ctrl+0 (page zoom), and F11 (the page in full screen). These are NOT
+ *   intercepted in the
  *   plain-browser dev loop, where the host browser needs them itself
  *   (its own find bar, reload, tab and history navigation).
  *
@@ -330,6 +331,12 @@ export function DesktopHotkeys() {
       // Alt+D / F6: the address bar.
       if (e.key === 'F6' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
         publish({ action: 'focus-address' });
+        return;
+      }
+      // F11: the page in full screen, and back.
+      if (e.key === 'F11' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+        if (e.repeat) e.preventDefault();
+        else publish({ action: 'fullscreen' });
         return;
       }
       if (

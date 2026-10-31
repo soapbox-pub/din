@@ -70,6 +70,8 @@ export interface BrowserViewHandle {
   goForward: () => void;
   /** Give the page keyboard focus. */
   focus: () => void;
+  /** Put the page in full screen, or take it out (F11). Webview only. */
+  toggleFullscreen: () => void;
   /**
    * Harvest the page's icon hints (link rel=icon / apple-touch-icon /
    * mask-icon plus web-app-manifest icons) for choosing an install icon.
@@ -224,6 +226,7 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       goBack: () => {},
       goForward: () => {},
       focus: () => iframeRef.current?.focus(),
+      toggleFullscreen: () => {},
       // The iframe fallback can't reach into cross-origin guest DOM.
       collectIcons: () => Promise.resolve([]),
       collectNostrHandler: () => Promise.resolve(null),
@@ -283,6 +286,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       goBack: () => surface.current?.goBack(),
       goForward: () => surface.current?.goForward(),
       focus: () => surface.current?.focus(),
+      toggleFullscreen: () => surface.current?.toggleFullscreen(),
       collectIcons: async () => {
         try {
           const result = await surface.current?.executeJavaScript(COLLECT_ICONS_JS);

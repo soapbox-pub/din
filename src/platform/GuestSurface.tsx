@@ -17,6 +17,8 @@ export interface GuestSurfaceHandle {
   goBack(): void;
   goForward(): void;
   focus(): void;
+  /** Put the page in full screen, or take it out. */
+  toggleFullscreen(): void;
   /** Run script in the page: Din's own probes of web pages only, never of apps. */
   executeJavaScript(code: string): Promise<unknown>;
   /** Style the current document: Din's own styles only (the blank page's backdrop). */
@@ -135,6 +137,9 @@ export function GuestSurface({
     goBack: () => elRef.current && guest.goBack(elRef.current),
     goForward: () => elRef.current && guest.goForward(elRef.current),
     focus: () => elRef.current?.focus(),
+    toggleFullscreen: () => {
+      if (elRef.current) void guest.toggleFullscreen(elRef.current);
+    },
     executeJavaScript: (code) =>
       elRef.current ? guest.executeJavaScript(elRef.current, code) : Promise.reject(new Error('No guest')),
     insertCSS: async (css) => {

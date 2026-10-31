@@ -5470,7 +5470,8 @@ type ShellShortcut =
         | 'clear-data'
         | 'zoom-in'
         | 'zoom-out'
-        | 'zoom-reset';
+        | 'zoom-reset'
+        | 'fullscreen';
     }
   | { action: 'reload'; force: boolean }
   | { action: 'cycle-tab'; backward: boolean }
@@ -5549,6 +5550,10 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   // Alt+D / F6: the address bar.
   if (input.key === 'F6' && !input.control && !input.alt && !input.meta && !input.shift) {
     return { action: 'focus-address' };
+  }
+  // F11: the page in full screen, and back.
+  if (input.key === 'F11' && !input.control && !input.alt && !input.meta && !input.shift) {
+    return input.isAutoRepeat ? null : { action: 'fullscreen' };
   }
   if (
     input.alt &&

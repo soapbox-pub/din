@@ -1818,6 +1818,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'zoom-reset':
           zoomTab(activeIdRef.current, 0);
           break;
+        case 'fullscreen':
+          views.current.get(activeIdRef.current)?.toggleFullscreen();
+          break;
       }
     });
   }, [
@@ -1909,6 +1912,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           break;
         case 'zoom-reset':
           zoomTab(tab.id, 0);
+          break;
+        case 'fullscreen':
+          views.current.get(tab.id)?.toggleFullscreen();
           break;
       }
     });
