@@ -242,7 +242,8 @@ export const notificationsArea: Area = {
   commands: [
     command('notifications', 'list', 'Notifications in the list, newest first', [], () => ({
       data: getNotificationState().notifications.map((n) => ({
-        id: n.id, from: n.source.name, title: n.title, body: n.body, read: n.read, actions: n.actions.map((a) => a.id).join(' '),
+        id: n.id, from: n.source.name, title: n.title, body: n.body, read: n.read,
+        actions: n.onScreenOnly ? '' : n.actions.map((a) => a.id).join(' '),
       })),
     })),
     command('notifications', 'send', 'Show a notification', [
@@ -262,7 +263,11 @@ export const notificationsArea: Area = {
       { name: 'id', type: 'string', positional: true, help: 'Its id' },
       { name: 'action', type: 'string', optional: true, help: 'The button’s id (default: the notification itself)' },
     ], (args) => {
-      activateNotification(args.string('id'), args.optString('action') ?? 'default');
+      const id = args.string('id');
+      if (getNotificationState().notifications.find((n) => n.id === id)?.onScreenOnly) {
+        throw new CommandError('Only you can answer this one, on screen');
+      }
+      activateNotification(id, args.optString('action') ?? 'default');
     }),
     command('notifications', 'dismiss', 'Dismiss a notification', [
       { name: 'id', type: 'string', positional: true, help: 'Its id' },

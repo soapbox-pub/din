@@ -59,6 +59,8 @@ export interface DesktopNotification {
   resident: boolean;
   /** Notifications with the same key replace each other (a web page's `tag`). */
   replaceKey?: string;
+  /** Only the user, clicking it on screen, can act on it: the din command can't (approving sudo). */
+  onScreenOnly?: boolean;
   createdAt: number;
   read: boolean;
   /** Clicked (`'default'`) or one of its actions picked. */

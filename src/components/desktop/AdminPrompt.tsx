@@ -215,6 +215,7 @@ export function AdminPromptHost() {
               ]
             : undefined,
           replaceKey: `askpass:${request.requestId}`,
+          onScreenOnly: request.approve,
           onActivate: (action) => {
             if (request.approve && (action === 'allow' || action === 'deny')) {
               void bridge.approve(request.requestId, action === 'allow').catch(() => {});

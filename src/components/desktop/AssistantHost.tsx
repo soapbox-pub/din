@@ -188,6 +188,7 @@ function useAssistantNotifications() {
                 { id: 'reject', label: 'Deny' },
               ],
               replaceKey: `assistant:password:${request.requestId}`,
+              onScreenOnly: true,
               onActivate: (action) => {
                 if (action === 'once' || action === 'reject') latest.current.approve({ request, decision: action });
                 else latest.current.showPassword(request.sessionID);
