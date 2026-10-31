@@ -4,8 +4,8 @@
 // in the main process.
 //
 // The lists come from Ghostery's CDN, which is what Ghostery's own extension
-// reads: uBlock Origin's and EasyList's lists, mirrored within hours of
-// upstream and with scriptlet arguments already normalized for this engine,
+// reads: uBlock Origin's and EasyList's lists, mirrored about once a day
+// from upstream and with scriptlet arguments already normalized for this engine,
 // plus the scriptlet code that goes with them. (@ghostery/adblocker's
 // `adsAndTrackingLists` point at a copy in its GitHub repo instead, which is
 // refreshed by hand and was two months behind - long enough for YouTube to

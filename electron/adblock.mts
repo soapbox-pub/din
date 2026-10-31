@@ -27,6 +27,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { app, ipcMain, utilityProcess, webContents } from 'electron';
 import { FiltersEngine, Request } from '@ghostery/adblocker';
@@ -289,6 +290,29 @@ function blockInSession(session: Electron.Session): void {
 
 // --- Cosmetic filtering ----------------------------------------------------
 
+/** Whether each scriptlet the engine has given out parses, by its code. */
+const scriptletParses = new Map<string, boolean>();
+
+/**
+ * Whether a scriptlet compiles. The preload runs them all in one function,
+ * where one that doesn't would stop every other from running.
+ */
+function parses(script: string): boolean {
+  let ok = scriptletParses.get(script);
+  if (ok === undefined) {
+    try {
+      new vm.Script(`(function(){try{${script}}catch{}})`);
+      ok = true;
+    } catch (error) {
+      console.error('adblock: dropping a scriptlet that does not parse:', error);
+      ok = false;
+    }
+    if (scriptletParses.size > 2000) scriptletParses.clear();
+    scriptletParses.set(script, ok);
+  }
+  return ok;
+}
+
 /**
  * Ghostery's page preload asks for a page's cosmetics through these, but its
  * scriptlets come from adblock-scriptlets-preload.cjs, which has to have them
@@ -312,7 +336,7 @@ function registerCosmeticHandlers(): void {
       getExtendedRules: false,
       getRulesFromHostname: true,
       getRulesFromDOM: false,
-    }).scripts;
+    }).scripts.filter(parses);
   });
   ipcMain.handle(
     '@ghostery/adblocker/inject-cosmetic-filters',

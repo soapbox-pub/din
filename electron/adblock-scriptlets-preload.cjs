@@ -22,13 +22,16 @@ const { ipcRenderer, webFrame } = require('electron');
 if (/^https?:$/.test(location.protocol)) {
   /** @type {unknown} */
   const scripts = ipcRenderer.sendSync('adblock:scriptlets', location.href);
-  if (Array.isArray(scripts)) {
+  if (Array.isArray(scripts) && scripts.length > 0) {
     // webFrame.executeJavaScript runs the code before it returns, outside the
-    // page's CSP, which would refuse an eval. Each scriptlet gets a block of
-    // its own, as Ghostery's content script does: they all declare the same
-    // helper classes, which would clash at the top level.
-    for (const script of scripts) {
-      if (typeof script === 'string') webFrame.executeJavaScript(`try{${script}}catch{}`).catch(() => {});
-    }
+    // page's CSP, which would refuse an eval. All the scriptlets run in one
+    // function, as uBO's do: at the top level their helpers (scriptletGlobals,
+    // safeSelf, …) would be left on window, where a page can look for them,
+    // and YouTube does. Sharing the function's scope also gives them one
+    // scriptletGlobals, which they need to share safeSelf. Each still gets a
+    // block of its own, since they declare the same helper classes. (The main
+    // process drops any that don't parse, which would take the rest down.)
+    const blocks = scripts.filter((s) => typeof s === 'string').map((s) => `try{${s}}catch{}`);
+    webFrame.executeJavaScript(`(function(){${blocks.join('\n')}})();`).catch(() => {});
   }
 }
