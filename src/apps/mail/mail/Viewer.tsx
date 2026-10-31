@@ -200,12 +200,13 @@ export function Viewer() {
   // Badge: unread mail in every inbox.
   const inboxUnseen = useMemo(() => [...boxes.values()].flat().filter((b) => b.special === 'inbox').reduce((n, b) => n + b.unseen, 0), [boxes]);
   useEffect(() => {
-    din.notifications.setBadge(inboxUnseen || null);
-  }, [din, inboxUnseen]);
-  useEffect(() => () => din.notifications.setBadge(null), [din]);
+    void (inboxUnseen ? navigator.setAppBadge(inboxUnseen) : navigator.clearAppBadge()).catch(() => {});
+  }, [inboxUnseen]);
 
-  // New mail while the window isn't in front: a notification per message.
+  // New mail while the window isn't in front: a notification per message,
+  // which opens it when clicked.
   const lastUnseen = useRef(new Map<string, number>());
+  const notified = useRef(new Map<string, Notification>());
   useEffect(() => {
     if (!mail) return;
     for (const [accountId, list] of boxes) {
@@ -218,32 +219,30 @@ export function Viewer() {
       void mail.messages(accountId, inbox.path, { filter: 'unread', limit: Math.min(fresh, 5) }).then((page) => {
         for (const m of page.messages) {
           if (Date.now() - m.date > 30 * 60_000) continue;
-          void din.notifications.show(displayName(m.from[0]) || 'New Mail', {
+          const key = itemKey(accountId, inbox.path, m.uid);
+          const notification = new Notification(displayName(m.from[0]) || 'New Mail', {
             body: [m.subject, m.preview].filter(Boolean).join('\n'),
-            tag: itemKey(accountId, inbox.path, m.uid),
+            tag: key,
           });
+          notified.current.get(key)?.close();
+          notified.current.set(key, notification);
+          notification.onclose = () => {
+            if (notified.current.get(key) === notification) notified.current.delete(key);
+          };
+          notification.onclick = () => {
+            din.window.focus();
+            setSelection({ kind: 'mailbox', accountId, path: inbox.path });
+            setSelected(new Set([key]));
+          };
         }
       }).catch(() => {});
     }
-  }, [boxes, mail, din]);
+  }, [boxes, mail, din, setSelection]);
 
   // A message on screen is read: its notification has nothing more to say.
   useEffect(() => {
-    for (const key of selected) din.notifications.close(key);
-  }, [din, selected]);
-
-  useEffect(
-    () =>
-      din.notifications.onAction(({ tag }) => {
-        din.window.focus();
-        if (!tag) return;
-        const [accountId, path] = tag.split('\u0000');
-        if (!accountId || !path) return;
-        setSelection({ kind: 'mailbox', accountId, path });
-        setSelected(new Set([tag]));
-      }),
-    [din, setSelection],
-  );
+    for (const key of selected) notified.current.get(key)?.close();
+  }, [selected]);
 
   // Choosing a message reads it.
   const onRemoved = useCallback(

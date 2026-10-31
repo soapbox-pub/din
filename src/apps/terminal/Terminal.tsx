@@ -155,6 +155,8 @@ const setSharedFontSize = (size: number) => {
 
 /** Commands that run at least this long notify when they finish out of sight. */
 const NOTIFY_AFTER_SECONDS = 10;
+/** Each pane's "finished" notification, while it's up. */
+const paneNotifications = new Map<string, Notification>();
 
 /** "45s", "2m 14s", "1h 3m". */
 function formatDuration(seconds: number): string {
@@ -1239,13 +1241,15 @@ function paneSession(
       host?.current.onLabel(paneId, { command });
     }
     if (done.seconds < NOTIFY_AFTER_SECONDS || host?.current.visible) return;
-    void din.notifications.show(done.command || 'Command', {
+    const notification = new Notification(done.command || 'Command', {
       body: `Finished after ${formatDuration(done.seconds)}`,
       tag: paneId,
-    }).catch(() => {});
-  });
-  const offNotification = din.notifications.onAction(({ tag }) => {
-    if (tag === paneId) host?.current.onReveal(paneId);
+    });
+    paneNotifications.set(paneId, notification);
+    notification.onclick = () => host?.current.onReveal(paneId);
+    notification.onclose = () => {
+      if (paneNotifications.get(paneId) === notification) paneNotifications.delete(paneId);
+    };
   });
 
   term.onData((data) => {
@@ -1299,7 +1303,6 @@ function paneSession(
     offExit();
     offCommandStart();
     offCommandDone();
-    offNotification();
     oscHandler.dispose();
     clipboardHandler.dispose();
     linkProvider.dispose();
@@ -1460,8 +1463,8 @@ const TerminalSession = memo(function TerminalSession({
 
   // Seeing the pane is seeing its command finish: that notification goes.
   useEffect(() => {
-    if (active && isTop) din.notifications.close(paneId);
-  }, [din, paneId, active, isTop]);
+    if (active && isTop) paneNotifications.get(paneId)?.close();
+  }, [paneId, active, isTop]);
 
   useEffect(() => {
     const container = containerRef.current;

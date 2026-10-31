@@ -26,6 +26,7 @@ import { poof } from '@/lib/dockPoof';
 import { getFsBridge } from '@/lib/fs';
 import { registerDockTile } from '@/lib/dockTiles';
 import { useNotificationCenter } from '@/lib/notificationCenter';
+import { useAppBadges, type AppBadge } from '@/lib/appBadges';
 import { cn } from '@/lib/utils';
 import { appsDockedAs } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
@@ -132,8 +133,9 @@ const MAX_DOTS = 4;
  *
  * Shows pinned apps first (kept on this device), then any
  * running apps that aren't pinned. Each tile groups its app's windows, with
- * a dot under it per window (and, for any but a Linux app, a
- * count of its unread notifications on the icon's corner): click launches, toggles, or cycles through
+ * a dot under it per window (and, for any but a Linux app, a badge on the
+ * icon's corner: the one the app set, else a count of its unread
+ * notifications): click launches, toggles, or cycles through
  * them, the scroll wheel cycles too, middle-click always opens a new window,
  * right-click offers pin/unpin, close, and uninstall, dragging an
  * unpinned tile left among the pinned ones pins it, and dragging a pinned
@@ -231,6 +233,16 @@ export function Dock({
     const tile = tileOf(appId);
     unread.set(tile, (unread.get(tile) ?? 0) + 1);
   }
+  // What apps set on their tiles themselves (navigator.setAppBadge()) wins.
+  const appBadges = useAppBadges();
+  const badgeOf = (appId: string): AppBadge | null => {
+    let own: AppBadge | null = null;
+    for (const [id, badge] of appBadges) {
+      if (tileOf(id) !== appId) continue;
+      own = typeof badge === 'number' ? (typeof own === 'number' ? own : 0) + badge : (own ?? 'flag');
+    }
+    return own ?? (unread.get(appId) || null);
+  };
 
   // The Din window that currently holds focus: highest z among visible ones.
   const activeWindow = focusedWindow(windows);
@@ -761,7 +773,7 @@ export function Dock({
                   isPinned={pinned.includes(appId)}
                   reordering={dragging}
                   dropping={dropTarget === appId}
-                  unread={app.native ? 0 : (unread.get(appId) ?? 0)}
+                  badge={app.native ? null : badgeOf(appId)}
                   onTogglePin={togglePin}
                   onDragPointerDown={reorder.onPointerDown}
                   onUninstall={canUninstall(appId) ? uninstall : undefined}
@@ -805,7 +817,7 @@ const DockItem = memo(function DockItem({
   isPinned,
   reordering,
   dropping,
-  unread,
+  badge,
   onTogglePin,
   onDragPointerDown,
   onUninstall,
@@ -826,8 +838,8 @@ const DockItem = memo(function DockItem({
   reordering: boolean;
   /** Files dragged over the tile that its app opens: dropping them opens them. */
   dropping: boolean;
-  /** Unread notifications the app sent, badged on the tile. */
-  unread: number;
+  /** On the icon's corner: a count, or a plain mark. */
+  badge: AppBadge | null;
   onTogglePin: (appId: string) => void;
   /** Starts a drag to reorder the tiles. */
   onDragPointerDown: (appId: string, e: React.PointerEvent<HTMLElement>) => void;
@@ -904,7 +916,7 @@ const DockItem = memo(function DockItem({
         (appWindows.length > 0
           ? `${app.name} (${appWindows.length} window${appWindows.length > 1 ? 's' : ''})`
           : `Open ${app.name}`) +
-        (unread > 0 ? `, ${unread} unread notification${unread > 1 ? 's' : ''}` : '')
+        (badge === 'flag' ? ', has news' : badge ? `, ${badge} new` : '')
       }
       onClick={handleClick}
       onWheel={handleWheel}
@@ -927,17 +939,18 @@ const DockItem = memo(function DockItem({
         web={app.web}
         className={cn('size-[82%] text-foreground drop-shadow-md', launching && 'motion-safe:animate-dock-bounce')}
       />
-      {/* Unread notifications, on the icon's corner as on macOS. */}
-      {unread > 0 && (
+      {/* On the icon's corner, as on macOS. */}
+      {badge !== null && (
         <span
           aria-hidden
           data-dock-badge=""
           className={cn(
-            'pointer-events-none absolute top-0 right-0 flex h-5 min-w-5 items-center justify-center rounded-full px-1.5',
+            'pointer-events-none absolute top-0 right-0 flex items-center justify-center rounded-full',
             'bg-red-600 text-[11px] leading-none font-semibold text-white tabular-nums shadow-md ring-1 ring-black/10',
+            badge === 'flag' ? 'size-3' : 'h-5 min-w-5 px-1.5',
           )}
         >
-          {unread > 99 ? '99+' : unread}
+          {badge === 'flag' ? null : badge > 99 ? '99+' : badge}
         </span>
       )}
       {/* Name label, floating above the (possibly magnified) icon. */}
@@ -1100,7 +1113,7 @@ const DockItem = memo(function DockItem({
   prev.isPinned === next.isPinned &&
   prev.reordering === next.reordering &&
   prev.dropping === next.dropping &&
-  prev.unread === next.unread &&
+  prev.badge === next.badge &&
   prev.onTogglePin === next.onTogglePin &&
   prev.onDragPointerDown === next.onDragPointerDown &&
   prev.onUninstall === next.onUninstall &&

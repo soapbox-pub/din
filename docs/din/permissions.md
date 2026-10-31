@@ -29,7 +29,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `fs` | `din.system.fs`: the whole filesystem by path; `path` on handles | Files, Text Editor |
 | `pty` | `din.system.pty`: terminals | Terminal |
 | `printing` | `din.print`: Din's print dialog for HTML or a file the app holds | Word Processor, Publisher, Preview |
-| `notifications` | Notification center entries, the Dock badge | Assistant |
+| `notifications` | `new Notification()` and `navigator.setAppBadge()` | Assistant, Mail, Terminal |
 | `media-session` | `din.media`: report what's playing; hear the media keys and Din's media controls | Media Player |
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
 | `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |

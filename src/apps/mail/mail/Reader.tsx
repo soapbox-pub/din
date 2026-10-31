@@ -56,7 +56,7 @@ function useSaveAttachment(item: Item) {
         const file = await mail.attachment(item.accountId, item.path, item.uid, a.index);
         await handle.write(file.content);
       } catch (error) {
-        void din.notifications.show('Couldn’t save the attachment', { body: error instanceof Error ? error.message : String(error), transient: true });
+        din.toast('Couldn’t save the attachment', { body: error instanceof Error ? error.message : String(error) });
       }
     },
     [din, mail, item.accountId, item.path, item.uid],

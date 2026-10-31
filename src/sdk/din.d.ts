@@ -65,7 +65,7 @@ export interface Din {
   clipboard: DinClipboard;
   theme: DinTheme;
   account: DinAccount;
-  notifications: DinNotifications;
+  toast: DinToast;
   print: DinPrint;
   media: DinMedia;
   desktop: DinDesktop;
@@ -589,33 +589,16 @@ export interface Nip07 {
 }
 
 // ---------------------------------------------------------------------------
-// din.notifications
+// din.toast
 // ---------------------------------------------------------------------------
 
-export interface DinNotificationOptions {
-  body?: string;
-  icon?: string;
-  /** Replaces an earlier notification with the same tag. */
-  tag?: string;
-  /** Buttons on the notification; their ids come back through `onAction`. */
-  actions?: { id: string; label: string }[];
-  /** A short-lived toast that never goes to the notification center. */
-  transient?: boolean;
-}
-
-export interface DinNotifications {
-  show(title: string, options?: DinNotificationOptions): Promise<void>;
-  /**
-   * Take down the app's notification with this tag, once what it was about
-   * has been seen to (the message read, the conversation looked at), as a
-   * web page's `Notification.close()` does. Nothing happens if it's gone.
-   */
-  close(tag: string): void;
-  /** A notification (or one of its buttons, by id; `default` for the body) was clicked. */
-  onAction(cb: (e: { tag: string | null; action: string }) => void): Unsubscribe;
-  /** A number on the app's Dock tile, or null to clear it. */
-  setBadge(count: number | null): void;
-}
+/**
+ * A short-lived popup from the app that never goes to the notification
+ * center. Notifications are the web's own: `new Notification()`, its
+ * `close()` and click events, and `navigator.setAppBadge()` (permission
+ * `notifications`).
+ */
+export type DinToast = (title: string, options?: { body?: string }) => void;
 
 // ---------------------------------------------------------------------------
 // din.media (permission `media-session`)

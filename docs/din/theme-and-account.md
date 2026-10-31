@@ -66,27 +66,37 @@ own origin). The desktop's NostrProvider connection isn't shared; a
 small app opening a few sockets is fine, and keeps a hung relay query in
 one app from affecting another.
 
-## `din.notifications`
+## Notifications, the Dock badge, and `din.toast`
 
-Toasts (`transient: true`) need no permission; notifications that go to
-the notification center, and the Dock badge, need `notifications`.
+Notifications are the web's own API: `new Notification()`, its click and
+close events and `close()`, and `navigator.setAppBadge()` /
+`clearAppBadge()` for the Dock tile. Din backs them with its notification
+center, so they carry the app's name and icon and respect Do Not Disturb.
+They need the `notifications` permission: without it,
+`Notification.permission` is `'denied'` and setting a badge rejects.
 
 ```ts
-await din.notifications.show('Export finished', {
+const n = new Notification('Export finished', {
   body: 'holiday.pdf is in Documents.',
-  tag: 'export',
-  actions: [{ id: 'open', label: 'Open' }],
+  tag: 'export',                                 // replaces an earlier one with this tag
 });
-din.notifications.onAction(({ tag, action }) => { if (action === 'open') openExport(); });
-din.notifications.close('export');                        // seen to: take it down
+n.onclick = () => openExport();                  // Din has focused the window already
+n.close();                                       // seen to some other way: take it down
 
-din.notifications.show('Saved', { transient: true });   // a toast, not kept in the center
-din.notifications.setBadge(unread);                       // a number on the Dock tile
+navigator.setAppBadge(unread);                   // a number on the Dock tile
+navigator.setAppBadge();                         // a plain mark
+navigator.clearAppBadge();                       // back to counting unread notifications
+
+din.toast('Saved', { body: 'holiday.pdf' });     // a toast, never kept in the center
 ```
 
-Notifications carry the app's name and icon, respect Do Not Disturb, and
-clicking one focuses the app's window before `onAction`. An app takes
-down a notification itself, by its tag, once the user has seen to what it
-was about some other way (opened the message, looked at the conversation),
-so the notification center and the Dock badge only count what's still
-news.
+Clicking a notification focuses the app's window before its click event.
+As in Chrome's service workers, `actions: [{ action, title }]` adds
+buttons, on `new Notification()` too; a button's click event carries its
+`action`. Close a notification once the user has seen to what it was
+about (opened the message, looked at the pane), so the notification
+center and the Dock only count what's still news. A tile shows the badge
+the app set, else its count of unread notifications.
+
+Toasts need no permission: there's no web API for them, so `din.toast`
+is Din's.

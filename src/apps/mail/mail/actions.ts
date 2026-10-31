@@ -41,7 +41,7 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
 
   const fail = useCallback(
     (title: string, error: unknown) => {
-      void din.notifications.show(title, { body: error instanceof Error ? error.message : String(error), transient: true });
+      din.toast(title, { body: error instanceof Error ? error.message : String(error) });
     },
     [din],
   );

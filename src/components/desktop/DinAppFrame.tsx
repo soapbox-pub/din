@@ -38,7 +38,8 @@ import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { appForFile } from '@/lib/fileTypes';
 import { getFsBridge } from '@/lib/fs';
-import { closeNotificationByKey, notify } from '@/lib/notificationCenter';
+import { closeNotification, notify } from '@/lib/notificationCenter';
+import { setWindowBadge } from '@/lib/appBadges';
 import { printFile, printHtml } from '@/lib/printing';
 import { areaFor } from '@/lib/monitors';
 import { isDarkThemeColor } from '@/lib/themeColor';
@@ -911,28 +912,40 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         setFileClipboard(handles.length === 0 ? null : { op: cut ? 'cut' : 'copy', paths: handles.map((id) => grantOf(id).path) });
       },
 
-      'notifications.show': ({ title, options }) => {
-        if (!options.transient) need('notifications');
+      // The page's `new Notification()`: its id is the page's own, so a
+      // window can only reach its own notifications.
+      'notifications.show': ({ id, title, options }) => {
+        need('notifications');
         notify({
+          id: `${windowId}:${Number(id)}`,
           source: { appId, name: appName, icon: manifestIcon(manifest) },
           title: String(title).slice(0, 200),
           body: typeof options.body === 'string' ? options.body.slice(0, 2000) : '',
           image: options.icon ? sanitizeImageUrl(options.icon) : null,
           actions: (options.actions ?? []).slice(0, 3).map((a) => ({ id: String(a.id), label: String(a.label) })),
-          history: !options.transient,
-          replaceKey: options.tag ? `${appId}:${options.tag}` : undefined,
+          replaceKey: options.tag ? `${appId}:${String(options.tag)}` : undefined,
+          ...(options.requireInteraction ? { timeout: 0 } : {}),
           onActivate: (action) => {
             live.current.actions.focus(windowId);
-            push({ type: 'notificationAction', tag: options.tag ?? null, action });
+            push({ type: 'notification', id, event: 'click', action: action === 'default' ? null : action });
           },
+          onClose: () => push({ type: 'notification', id, event: 'close', action: null }),
         });
       },
-      // Only its own: the key is the one show() gave it.
-      'notifications.close': ({ tag }) => {
-        if (typeof tag === 'string') closeNotificationByKey(`${appId}:${tag}`);
+      'notifications.close': ({ id }) => {
+        closeNotification(`${windowId}:${Number(id)}`, 'closed');
       },
-      'notifications.setBadge': () => {
+      'notifications.setBadge': ({ badge }) => {
         need('notifications');
+        setWindowBadge(windowId, appId, badge === 'flag' ? 'flag' : typeof badge === 'number' && badge > 0 ? Math.floor(badge) : null);
+      },
+      'toast': ({ title, body }) => {
+        notify({
+          source: { appId, name: appName, icon: manifestIcon(manifest) },
+          title: String(title).slice(0, 200),
+          body: typeof body === 'string' ? body.slice(0, 2000) : '',
+          history: false,
+        });
       },
 
       'print.html': async ({ title, html }) => {
@@ -1220,6 +1233,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     return () => {
       appWindows.delete(windowId);
       setViewedSession(windowId, null);
+      setWindowBadge(windowId, appId, null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowId, appId, push]);

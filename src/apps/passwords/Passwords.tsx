@@ -166,7 +166,7 @@ function Vault({ state }: { state: PasswordsState }) {
   const selected = chosen && (!list || list.items.some((i) => i.id === chosen)) ? chosen : null;
 
   const notify = useCallback(
-    (title: string, body?: string) => void din.notifications.show(title, { body, transient: true }),
+    (title: string, body?: string) => din.toast(title, { body }),
     [din],
   );
   const fail = useCallback((err: unknown) => notify('Passwords couldn’t do that', cleanPasswordsError(err)), [notify]);

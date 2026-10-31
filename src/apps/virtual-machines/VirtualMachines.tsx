@@ -131,7 +131,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
   }, [scale]);
 
   const fail = useCallback(
-    (err: unknown) => void din.notifications.show('Virtual Machines couldn’t do that', { body: cleanVmsError(err), transient: true }),
+    (err: unknown) => din.toast('Virtual Machines couldn’t do that', { body: cleanVmsError(err) }),
     [din],
   );
 
@@ -164,9 +164,8 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         case 'shutdown':
           return void busy(id, async () => {
             await bridge.shutdown(id);
-            void din.notifications.show(`Asked “${target.config.name}” to shut down`, {
+            din.toast(`Asked “${target.config.name}” to shut down`, {
               body: 'If it doesn’t, its system isn’t listening for the power button: use Force Off.',
-              transient: true,
             });
           });
         case 'pause':

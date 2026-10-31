@@ -85,7 +85,7 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
         const [picked] = await din.files.open({ title, directory: true, writable: false, startIn: await startIn(din, initialPath) });
         return picked?.path ?? null;
       },
-      notify: ({ title, description }) => void din.notifications.show(title, { body: description, transient: true }),
+      notify: ({ title, description }) => din.toast(title, { body: description }),
       useDictation: (ref) => useAppDictation(din, ref),
     }),
     [din, settings.directory, settings.colorfulReplies],

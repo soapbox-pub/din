@@ -17,7 +17,6 @@ import type {
   ThemeSnapshot,
   WindowChrome,
   WindowState,
-  DinNotificationOptions,
   AssistantSettings,
   DictationStatus,
   Edge,
@@ -171,9 +170,12 @@ export interface Requests {
   'clipboard.readFiles': [void, { files: HandleData[]; cut: boolean } | null];
   'clipboard.writeFiles': [{ handles: string[]; cut: boolean }, void];
 
-  'notifications.show': [{ title: string; options: DinNotificationOptions }, void];
-  'notifications.close': [{ tag: string }, void];
-  'notifications.setBadge': [{ count: number | null }, void];
+  /** A page's `new Notification()`, by an id of its own; `close()` names the same id. */
+  'notifications.show': [{ id: number; title: string; options: NotificationData }, void];
+  'notifications.close': [{ id: number }, void];
+  /** navigator.setAppBadge(): a count, a plain mark, or none. */
+  'notifications.setBadge': [{ badge: number | 'flag' | null }, void];
+  'toast': [{ title: string; body?: string }, void];
 
   'print.html': [{ title: string; html: string }, void];
   'print.file': [{ handle: string }, void];
@@ -219,12 +221,21 @@ export type Push =
   | { type: 'tabDetached'; tabType: string; state: unknown; at: Point }
   | { type: 'fileChange'; handle: string; change: 'modified' | 'removed' }
   | { type: 'clipboardFiles'; has: { count: number; cut: boolean } | null }
-  | { type: 'notificationAction'; tag: string | null; action: string }
+  | { type: 'notification'; id: number; event: 'click' | 'close'; action: string | null }
   | { type: 'mediaAction'; action: MediaAction }
   | { type: 'dictation'; status: DictationStatus; here: boolean }
   | { type: 'windowMessage'; from: string; data: unknown }
   | { type: 'tabHover'; at: Point | null }
   | { type: 'assistantSettings'; settings: AssistantSettings };
+
+/** What a page's Notification tells the desktop to show. */
+export interface NotificationData {
+  body: string;
+  icon: string;
+  tag: string;
+  requireInteraction: boolean;
+  actions: { id: string; label: string }[];
+}
 
 export type FromDesktop = Hello | ReplyMessage | Push;
 export type FromApp = RequestMessage;

@@ -31,7 +31,6 @@ import type {
   DinFileHandle,
   DinFiles,
   DinMenus,
-  DinNotifications,
   DinPermissions,
   DinPrint,
   DinSystem,
@@ -57,7 +56,7 @@ import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { VmsBridge } from '@/lib/vms';
-import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
+import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 
 /** How the runtime reaches the desktop: the preload's ports, or a port posted into a frame. */
@@ -99,6 +98,113 @@ class Emitter<T> {
   emit(value: T): void {
     for (const l of [...this.listeners]) l(value);
   }
+}
+
+/** What the page's Notification and badge need from the desktop. */
+interface NotificationHost {
+  permission: () => NotificationPermission;
+  ready: Promise<void>;
+  show: (id: number, title: string, options: NotificationData) => void;
+  close: (id: number) => void;
+  setBadge: (badge: number | 'flag' | null) => Promise<void>;
+  onEvent: (cb: (id: number, event: 'click' | 'close', action: string | null) => void) => Unsubscribe;
+}
+
+type Handler = ((this: Notification, event: Event) => unknown) | null;
+
+/**
+ * The web Notification API and navigator.setAppBadge(), backed by Din's
+ * notification center and the app's Dock tile. Beyond the standard,
+ * `actions` work on `new Notification()` too, not only in service workers:
+ * a button's click event carries its `action`.
+ */
+function installNotifications(host: NotificationHost): void {
+  const live = new Map<number, AppNotification>();
+  let nextId = 1;
+  host.onEvent((id, event, action) => {
+    const n = live.get(id);
+    if (!n) return;
+    if (event === 'close') live.delete(id);
+    n.fire(event, action);
+  });
+
+  class AppNotification extends EventTarget {
+    static get permission(): NotificationPermission {
+      return host.permission();
+    }
+    static async requestPermission(callback?: NotificationPermissionCallback): Promise<NotificationPermission> {
+      await host.ready;
+      const permission = host.permission();
+      callback?.(permission);
+      return permission;
+    }
+    static get maxActions(): number {
+      return 3;
+    }
+
+    readonly title: string;
+    readonly body: string;
+    readonly icon: string;
+    readonly tag: string;
+    readonly data: unknown;
+    readonly silent: boolean | null;
+    readonly requireInteraction: boolean;
+    readonly dir: NotificationDirection;
+    readonly lang: string;
+    readonly badge: string;
+    onclick: Handler = null;
+    onclose: Handler = null;
+    onerror: Handler = null;
+    onshow: Handler = null;
+    private readonly id = nextId++;
+
+    constructor(title: string, options: NotificationOptions & { actions?: { action: string; title: string }[] } = {}) {
+      super();
+      this.title = String(title);
+      this.body = options.body ?? '';
+      this.icon = options.icon ?? '';
+      this.tag = options.tag ?? '';
+      this.data = options.data ?? null;
+      this.silent = options.silent ?? null;
+      this.requireInteraction = options.requireInteraction ?? false;
+      this.dir = options.dir ?? 'auto';
+      this.lang = options.lang ?? '';
+      this.badge = options.badge ?? '';
+      void host.ready.then(() => {
+        if (host.permission() !== 'granted') return this.fire('error', null);
+        live.set(this.id, this);
+        host.show(this.id, this.title, {
+          body: this.body,
+          icon: this.icon,
+          tag: this.tag,
+          requireInteraction: this.requireInteraction,
+          actions: (options.actions ?? []).slice(0, 3).map((a) => ({ id: String(a.action), label: String(a.title) })),
+        });
+        this.fire('show', null);
+      });
+    }
+
+    close(): void {
+      if (live.has(this.id)) host.close(this.id);
+    }
+
+    /** @internal */
+    fire(type: 'click' | 'close' | 'error' | 'show', action: string | null): void {
+      const event = new Event(type, { cancelable: type === 'click' });
+      if (type === 'click' && action) Object.defineProperty(event, 'action', { value: action });
+      this.dispatchEvent(event);
+      const handler = { click: this.onclick, close: this.onclose, error: this.onerror, show: this.onshow }[type];
+      handler?.call(this as unknown as Notification, event);
+    }
+  }
+
+  Object.defineProperty(window, 'Notification', { value: AppNotification, writable: true, configurable: true });
+  Object.defineProperty(navigator, 'setAppBadge', {
+    value: (contents?: number) =>
+      host.setBadge(contents === undefined ? 'flag' : Math.max(0, Math.floor(Number(contents))) || null),
+    configurable: true,
+  });
+  Object.defineProperty(navigator, 'clearAppBadge', { value: () => host.setBadge(null), configurable: true });
 }
 
 function rename(error: { name: string; message: string }): Error {
@@ -664,17 +770,22 @@ export function installDin(transport: Transport): void {
     },
   };
 
-  // ---- notifications, printing, permissions ----
-  const notificationActions = new Emitter<{ tag: string | null; action: string }>();
-  pushes.on((p) => {
-    if (p.type === 'notificationAction') notificationActions.emit({ tag: p.tag, action: p.action });
+  // ---- notifications (the web's own API), toasts, printing, permissions ----
+  installNotifications({
+    permission: () => (h ? (permissions.has('notifications') ? 'granted' : 'denied') : 'default'),
+    ready,
+    show: (id, title, options) => tell('notifications.show', { id, title, options }),
+    close: (id) => tell('notifications.close', { id }),
+    setBadge: async (badge) => {
+      await ready;
+      if (!permissions.has('notifications')) throw new DOMException('The app may not badge its icon', 'NotAllowedError');
+      tell('notifications.setBadge', { badge });
+    },
+    onEvent: (cb) => pushes.on((p) => {
+      if (p.type === 'notification') cb(p.id, p.event, p.action);
+    }),
   });
-  const notifications: DinNotifications = {
-    show: (title, options = {}) => request('notifications.show', { title, options }),
-    close: (tag) => tell('notifications.close', { tag }),
-    onAction: (cb) => notificationActions.on(cb),
-    setBadge: (count) => tell('notifications.setBadge', { count }),
-  };
+  const toast: Din['toast'] = (title, options = {}) => tell('toast', { title: String(title), body: options.body });
   const print: DinPrint = {
     get available() {
       return h?.printAvailable ?? false;
@@ -780,7 +891,7 @@ export function installDin(transport: Transport): void {
     clipboard,
     theme,
     account,
-    notifications,
+    toast,
     print,
     media,
     desktop,

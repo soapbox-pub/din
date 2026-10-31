@@ -134,7 +134,7 @@ export function Sidebar({
   ];
 
   const failed = (title: string, error: unknown) =>
-    void window.din?.notifications.show(title, { body: cleanVolumesError(error) });
+    new Notification(title, { body: cleanVolumesError(error) });
 
   /** Open a place; a disk that isn't mounted is mounted first. */
   const openPlace = (place: Place, open: (path: string) => void) => {

@@ -41,7 +41,7 @@ din.app.ready();
 | `din.menus` | [menus.md](menus.md): the menu bar and menus that leave the window |
 | `din.files`, `din.clipboard` | [files.md](files.md) |
 | `din.drag` | [drag-and-drop.md](drag-and-drop.md) |
-| `din.theme`, `din.account`, `din.notifications` | [theme-and-account.md](theme-and-account.md) |
+| `din.theme`, `din.account`, `din.toast`, `Notification`, `navigator.setAppBadge` | [theme-and-account.md](theme-and-account.md) |
 | `din.media`, `din.desktop`, `din.dictation`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
 | `din.permissions`, `din.system` | [permissions.md](permissions.md) |
 | The manifest | [manifest.md](manifest.md) |
