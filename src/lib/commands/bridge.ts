@@ -1,10 +1,13 @@
 import type { Answer } from './index';
+import type { CommandProgress } from './types';
 
 /** What the desktop's preload exposes for `din` commands (electron/preload.cjs). */
 export interface CommandBridge {
   /** CommandRequest in electron/din-launch.mts, unchecked. */
   onRun(callback: (request: unknown) => void): () => void;
   taken(id: string): Promise<void>;
+  /** How a command still running is getting on. */
+  progress(id: string, update: CommandProgress): Promise<void>;
   answer(id: string, answer: Answer): Promise<void>;
 }
 

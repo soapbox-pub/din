@@ -76,6 +76,12 @@ export interface CommandResult {
   text?: string;
 }
 
+/** Where a long command has got to: what it's doing, and how far along, when known. */
+export interface CommandProgress {
+  text: string;
+  percent?: number;
+}
+
 /** A failure to report: `usage` for a command used wrongly (exit 2), else it failed (exit 1). */
 export class CommandError extends Error {
   readonly kind: 'usage' | 'failed';
@@ -105,6 +111,8 @@ export interface CommandContext {
   openUrl(url: string): void;
   /** Ask the user on screen; resolves with their answer. For what gives trust away or can't be undone. */
   confirm(request: { title: string; description: string; action: string; destructive?: boolean }): Promise<boolean>;
+  /** Say how a long command is getting on, for the `din` command to show while it waits. */
+  progress?(update: CommandProgress): void;
   /** Where the command was run, for relative paths; empty when unknown. */
   readonly cwd: string;
   /** The Assistant conversation that ran it, if one did, for sudo to ask there. */

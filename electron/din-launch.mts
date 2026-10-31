@@ -5,7 +5,7 @@
 //
 // - `{ command: argv, cwd, session? }`, or `{ path, input, cwd }`: one of the
 //   desktop's commands (src/lib/commands/), which runs it and answers once
-//   (runCommand).
+//   (runCommand), after `progress` lines if it's a long one.
 // - `din apps run`: a web app from a folder (a build's dist/) or from a dev
 //   server, run as a Din app at din://<origin>/ with window.din like a
 //   built-in app's. Lines back: opened, the window's console, closed. The
@@ -576,6 +576,17 @@ function commandTaken(id: unknown): void {
   if (pending) pending.timer = null;
 }
 
+/** How a command still running is getting on, as a line before its answer. */
+function commandProgress(id: unknown, update: unknown): void {
+  const pending = typeof id === 'string' ? commands.get(id) : undefined;
+  if (!pending || pending.socket.destroyed || typeof update !== 'object' || update === null) return;
+  const { text, percent } = update as { text?: unknown; percent?: unknown };
+  if (typeof text !== 'string') return;
+  const line: Record<string, unknown> = { type: 'progress', text: text.slice(0, 200) };
+  if (typeof percent === 'number' && Number.isFinite(percent)) line.percent = Math.max(0, Math.min(100, Math.round(percent)));
+  pending.socket.write(`${JSON.stringify(line)}\n`);
+}
+
 function answerCommand(id: unknown, answer: unknown): void {
   const pending = typeof id === 'string' ? commands.get(id) : undefined;
   if (!pending) return;
@@ -687,6 +698,10 @@ export function registerDinLaunch(opts: Options): void {
   ipcMain.handle('dinos-command:taken', (event, id) => {
     opts.assertShellSender(event);
     commandTaken(id);
+  });
+  ipcMain.handle('dinos-command:progress', (event, id, update) => {
+    opts.assertShellSender(event);
+    commandProgress(id, update);
   });
   ipcMain.handle('dinos-command:answer', (event, id, answer) => {
     opts.assertShellSender(event);

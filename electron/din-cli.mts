@@ -195,6 +195,47 @@ async function widgetsAddFolder(argv: string[]): Promise<number> {
 // Everything else: the desktop's
 // ---------------------------------------------------------------------------
 
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const SPIN_MS = 100;
+
+/**
+ * A long command's progress on stderr: on a terminal, one line kept up to
+ * date with a spinner, so it never looks stuck; otherwise (a log, the
+ * Assistant) a line each time what it's doing changes, without the percent.
+ */
+function progressLine() {
+  const tty = process.stderr.isTTY === true;
+  let text = '';
+  let percent: number | undefined;
+  let frame = 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const draw = () => {
+    const shown = percent === undefined ? text : `${text} ${percent}%`;
+    process.stderr.write(`\r\x1b[K${SPINNER[frame++ % SPINNER.length]} ${shown}`);
+  };
+  return {
+    update(message: Message) {
+      const next = String(message.text ?? '');
+      if (!tty) {
+        if (next && next !== text) process.stderr.write(`din: ${next}…\n`);
+        text = next;
+        return;
+      }
+      text = next;
+      percent = typeof message.percent === 'number' ? message.percent : undefined;
+      if (!timer) timer = setInterval(draw, SPIN_MS);
+      draw();
+    },
+    /** Take the line away, before the answer's printed. */
+    clear() {
+      if (!timer) return;
+      clearInterval(timer);
+      timer = null;
+      process.stderr.write('\r\x1b[K');
+    },
+  };
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   // Options of the command itself, wherever they are on the line (before a `--`).
@@ -212,8 +253,11 @@ async function main(): Promise<number> {
   if (argv[0] === 'widgets' && argv[1] === 'add-folder') return widgetsAddFolder(argv.slice(2));
 
   // The Assistant's conversation, if it ran this, for sudo to ask there.
-  return request({ command: argv, cwd: process.cwd(), session: process.env.OPENCODE_SESSION_ID }, (message) => {
+  const progress = progressLine();
+  const code = await request({ command: argv, cwd: process.cwd(), session: process.env.OPENCODE_SESSION_ID }, (message) => {
+    if (message.type === 'progress') return progress.update(message);
     if (message.type !== 'answer') return;
+    progress.clear();
     if (message.ok !== true) {
       process.stderr.write(`din: ${String(message.error ?? 'failed')}\n`);
       return message.usage === true ? 2 : 1;
@@ -222,6 +266,9 @@ async function main(): Promise<number> {
     else if (typeof message.text === 'string' && message.text) process.stdout.write(`${message.text}\n`);
     return 0;
   });
+  // Ctrl-C, or Din went away.
+  progress.clear();
+  return code;
 }
 
 process.exitCode = await main();

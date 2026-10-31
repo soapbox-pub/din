@@ -49,14 +49,28 @@ export const updateArea: Area = {
       { name: 'ref', type: 'string', positional: true, optional: true, help: 'The branch or commit (default: main)' },
       { name: 'restart', type: 'boolean', optional: true, help: 'Restart Din if it changed (default: on; --no-restart leaves that to din update restart)' },
     ], async (args, ctx) => {
-      const { commit, restart } = await call(updater().buildLocal(args.optString('ref') ?? 'main', ctx.session));
-      const built = `Built commit ${shortRevision(commit)}`;
+      const bridge = updater();
+      const ref = args.optString('ref') ?? 'main';
+      ctx.progress?.({ text: `Starting ${ref}` });
+      // The build's own steps, then the switch to it once the service is done.
+      let built = false;
+      const stop = bridge.onProgress((state) => {
+        if (state.phase === 'updating' && state.step) {
+          built = true;
+          const what = `${UPDATE_STEP_LABELS[state.step]} ${state.updatingTo ? shortRevision(state.updatingTo) : ref}`;
+          ctx.progress?.(state.step === 'build' ? { text: what, percent: state.percent } : { text: what });
+        } else if (built && state.phase === 'idle') {
+          ctx.progress?.({ text: 'Switching to it' });
+        }
+      });
+      const { commit, restart } = await call(bridge.buildLocal(ref, ctx.session)).finally(stop);
+      const done = `Built commit ${shortRevision(commit)}`;
       const data = { commit, restart };
-      if (restart === 'reboot') return { data, text: `${built}. It starts when the computer restarts.` };
-      if (restart !== 'din') return { data, text: `${built}. It's live.` };
-      if (args.optBool('restart') === false) return { data, text: `${built}. It starts when Din restarts (din update restart).` };
-      restartDinSoon();
-      return { data, text: `${built}. Din is restarting.` };
+      if (restart === 'reboot') return { data, text: `${done}. It starts when the computer restarts.` };
+      if (restart !== 'din') return { data, text: `${done}. It's live.` };
+      if (args.optBool('restart') === false) return { data, text: `${done}. It starts when Din restarts (din update restart).` };
+      restartDinSoon(bridge);
+      return { data, text: `${done}. Din is restarting.` };
     }),
     command('update', 'restart', 'Restart Din, closing every app, as Restart Din does (asks on screen first)', [], async (_args, ctx) => {
       const bridge = updater();

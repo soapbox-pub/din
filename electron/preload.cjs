@@ -3642,6 +3642,13 @@ expose('commands', {
    */
   taken: (id) => ipcRenderer.invoke('dinos-command:taken', id),
   /**
+   * How a command still running is getting on.
+   * @param {string} id
+   * @param {{ text: string, percent?: number }} update
+   * @returns {Promise<void>}
+   */
+  progress: (id, update) => ipcRenderer.invoke('dinos-command:progress', id, update),
+  /**
    * A command's answer.
    * @param {string} id
    * @param {unknown} answer

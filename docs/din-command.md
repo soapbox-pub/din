@@ -78,7 +78,12 @@ named pipe `\\.\pipe\din-<user>`), and prints the answer. Main hands it to
 the desktop (`dinos.commands`, `dinos-command:run`), where `CommandHost`
 runs it with the desktop as it is now and answers. A command may take as
 long as it needs (a confirmation, a firmware install); only the desktop's
-taking it is timed, so a signed-out Din says so instead of hanging.
+taking it is timed, so a signed-out Din says so instead of hanging. A
+long one says how it's getting on (`ctx.progress`, sent back as
+`progress` lines before the answer): on a terminal the client keeps one
+line on stderr up to date with a spinner, and elsewhere prints a line
+each time what it's doing changes (`din update local` reports its build
+steps this way).
 `runStructured` runs a command from a path and an object of arguments
 instead of a command line, for tools.
 

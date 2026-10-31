@@ -71,6 +71,7 @@ export function CommandHost() {
         confirm: (question) => new Promise<boolean>((resolve) => {
           setAsking((queue) => [...queue, { ...question, resolve }]);
         }),
+        progress: (update) => void bridge.progress(request.id, update),
         cwd: request.cwd,
         session: 'session' in request ? request.session : undefined,
       };
