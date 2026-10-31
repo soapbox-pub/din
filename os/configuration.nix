@@ -34,8 +34,8 @@ let
       # is bundled by build-cursor-converter.mjs, and window.din's runtime into
       # the app preload (and the caret finder into power mode's) by
       # build-din-runtime.mjs, and the built-in widgets by
-      # build-widgets.mjs; runtime-deps.mjs lists Mail's runtime modules
-      # (below). `scripts` itself must pass for its files to.
+      # build-widgets.mjs; runtime-deps.mjs lists Electron main's runtime
+      # modules (below). `scripts` itself must pass for its files to.
       || rel == "scripts"
       || rel == "scripts/build-electron.mjs"
       || rel == "scripts/build-adblock-engine.mjs"
@@ -94,29 +94,11 @@ let
       # The ad blocker's extension, with its engine bundle built above.
       cp -r electron/adblock-extension $out/share/din/adblock-extension
 
-      # Runtime node modules for main.mts's Chrome extension support
-      # (electron-chrome-extensions + electron-chrome-web-store and their
-      # transitive runtime deps). Resolved relative to main.mts, so they
-      # live in a node_modules directory beside it.
-      mkdir -p $out/share/din/node_modules
-      # The ad blocker's filter engine (electron/adblock.mts) and its
-      # page preload come along too, nostr-tools for Din's NIP-46
-      # remote signer (electron/bunker.mts), Passwords' KeePass
-      # library and Argon2 (electron/passwords.mts), and fflate for
-      # Virtual Machines' installers (electron/vm-installers.mts).
-      for dep in nostr-tools @noble/ciphers @noble/curves @noble/hashes @scure/base \
-        kdbxweb @xmldom/xmldom hash-wasm fflate \
-        electron-chrome-extensions electron-chrome-web-store electron-chrome-context-menu debug ms adm-zip pbf \
-        @ghostery/adblocker @ghostery/adblocker-content @ghostery/adblocker-extended-selectors \
-        @ghostery/adblocker-electron-preload @ghostery/url-parser tldts-experimental tldts-core \
-        @remusao/guess-url-type @remusao/small @remusao/smaz @remusao/smaz-compress \
-        @remusao/smaz-decompress @remusao/trie; do
-        mkdir -p "$(dirname $out/share/din/node_modules/$dep)"
-        cp -r node_modules/$dep $out/share/din/node_modules/$dep
-      done
-      # Mail's IMAP, SMTP and parsing (electron/mail.mts), with everything
-      # they pull in; -T so a module the list above copied isn't nested.
-      for dir in $(node scripts/runtime-deps.mjs imapflow nodemailer mailparser); do
+      # Every package electron/ imports, with everything they pull in,
+      # read from the sources so a new one can't be forgotten here.
+      # Resolved relative to main.mjs, so they live in a node_modules
+      # directory beside it.
+      for dir in $(node scripts/runtime-deps.mjs --electron); do
         mkdir -p "$(dirname $out/share/din/$dir)"
         cp -rT $dir $out/share/din/$dir
       done

@@ -3,12 +3,11 @@
  * packages and their dependencies (optional ones where installed), one per
  * line, relative to the repo. Directories nested in another's
  * node_modules are left out, since copying the outer one brings them.
- * For os/configuration.nix, which copies Electron main's runtime modules
- * beside it. --electron names every package electron/ imports, for
- * scripts/session.mjs, which copies all of them.
+ * --electron names every package electron/ imports, for os/configuration.nix
+ * and scripts/session.mjs, which copy all of them beside Electron main.
  *
- *   node scripts/runtime-deps.mjs imapflow nodemailer mailparser
  *   node scripts/runtime-deps.mjs --electron
+ *   node scripts/runtime-deps.mjs imapflow nodemailer mailparser
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
