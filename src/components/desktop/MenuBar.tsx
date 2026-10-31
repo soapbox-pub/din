@@ -140,7 +140,7 @@ export function MenuBar() {
             : !accent &&
               // The window's default chrome, layer for layer: its frosted
               // card body under the title bar's background wash.
-              'bg-card/90 backdrop-blur-xl before:absolute before:inset-0 before:-z-10 before:bg-background/60',
+              'bg-card/90 backdrop-blur-xl before:absolute before:inset-0 before:-z-10 before:bg-background/80',
       )}
     >
       <div className="flex min-w-0 items-center gap-1.5">

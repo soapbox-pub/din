@@ -1634,11 +1634,10 @@ export const Window = memo(function Window({
           className={cn(
             // At least 36px; a tab strip makes it 40.
             'flex min-h-9 shrink-0 items-center gap-2 rounded-t-[inherit] pr-3',
-            !accent && 'bg-background/60',
-            // An app whose toolbar continues the title bar (the browser's)
-            // marks it; the title bar then takes the content area's
-            // background, so a toolbar with none of its own matches it.
-            !accent && '[[data-window-id]:has([data-titlebar-seamless])>&]:bg-background/80',
+            // The content area's background, so the two read as one surface
+            // (and a toolbar with none of its own, like the browser's,
+            // continues it).
+            !accent && 'bg-background/80',
             titlebar ? 'pl-2' : 'pl-3',
           )}
         >
