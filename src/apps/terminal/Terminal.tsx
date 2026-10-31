@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm, type ILink } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SerializeAddon } from '@xterm/addon-serialize';
@@ -439,6 +439,20 @@ export function Terminal() {
   const bridge = getPtyBridge();
   const dark = useDinTheme().scheme === 'dark';
   useLayoutEffect(() => setDinDark(dark), [dark]);
+  // The whole window is the terminal's color: the header's tokens follow its
+  // palette, and the accent carries it to the window controls and to the
+  // menu bar over a fullscreen window.
+  const palette = terminalTheme(dark);
+  const surface = {
+    background: palette.background,
+    '--background': palette.background,
+    '--foreground': palette.foreground,
+    '--muted-foreground': dark ? 'rgb(229 229 229 / 0.7)' : 'rgb(31 35 40 / 0.7)',
+  } as CSSProperties;
+  useEffect(() => {
+    din.window.setAccent(palette.background);
+    return () => din.window.setAccent(null);
+  }, [din, palette.background]);
   const closeWindow = useCallback(() => din.window.close(), [din]);
 
   // A window opened for a tab torn off another one starts empty, and gets
@@ -702,7 +716,7 @@ export function Terminal() {
 
   if (!bridge) {
     return (
-      <div className="flex h-full w-full flex-col">
+      <div className="flex h-full w-full flex-col rounded-[inherit] text-foreground" style={surface}>
         {header}
         <div className="grid flex-1 place-items-center p-6">
           <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
@@ -719,13 +733,10 @@ export function Terminal() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col">
+    <div className="flex h-full w-full flex-col rounded-[inherit] text-foreground" style={surface}>
       {header}
       {/* overflow-clip: background tabs park outside it (see TerminalTab). */}
-      <div
-        className="relative min-h-0 w-full flex-1 overflow-clip rounded-b-[inherit]"
-        style={{ background: terminalTheme(dark).background }}
-      >
+      <div className="relative min-h-0 w-full flex-1 overflow-clip rounded-b-[inherit]">
         {/* All tabs stay mounted so background tabs keep their scrollback
             and running programs; only the active one is visible. */}
         {tabs.map((tab) => (
