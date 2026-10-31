@@ -63,7 +63,7 @@ use smithay::{
             LoopHandle, RegistrationToken,
             timer::{TimeoutAction, Timer},
         },
-        drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
+        drm::control::{Device as ControlDevice, ModeFlags, ModeTypeFlags, connector, crtc},
         input::{DeviceCapability, Libinput},
         rustix::fs::OFlags,
         wayland_protocols::wp::{
@@ -488,11 +488,19 @@ impl State {
         );
         let id = self.backend.next_id;
         self.backend.next_id += 1;
-        let mode = *modes
+        let preferred = *modes
             .iter()
             .find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
             .unwrap_or(&modes[0]);
-        output.set_preferred(WlMode::from(mode));
+        output.set_preferred(WlMode::from(preferred));
+        // The native resolution at the fastest rate it has: a monitor's
+        // preferred mode is usually 60 Hz, even one made for 165. Din puts
+        // back a rate the user chose (electron/main.mts).
+        let mode = *modes
+            .iter()
+            .filter(|m| m.size() == preferred.size() && !m.flags().contains(ModeFlags::INTERLACE))
+            .max_by_key(|m| WlMode::from(**m).refresh)
+            .unwrap_or(&preferred);
         // To the right of the displays already on, as a new monitor goes;
         // Din puts back an arrangement it remembers.
         let x = self.layout_right();
@@ -516,6 +524,16 @@ impl State {
         });
         if let Err(err) = self.enable_head(id) {
             warn!("{err}");
+            // The fastest rate may be more than the link carries: the
+            // monitor's own choice, then.
+            if mode != preferred {
+                if let Some(head) = self.backend.heads.iter_mut().find(|h| h.id == id) {
+                    head.mode = preferred;
+                }
+                if let Err(err) = self.enable_head(id) {
+                    warn!("{err}");
+                }
+            }
         }
     }
 

@@ -19,6 +19,7 @@
 
 import { keepAccelerated } from '@/lib/cpuCanvas';
 import { getFileClipboard, setFileClipboard } from '@/lib/fileClipboard';
+import type { Monitor, Rect } from '@/lib/monitors';
 import { noteNativeFrame, noteNativeInput } from '@/lib/nativeLatency';
 
 /** One X window as the shell knows it. */
@@ -189,6 +190,7 @@ export function startNativeDisplay(): void {
     port?.close();
     port = event.ports[0];
     port.onmessage = (e: MessageEvent<WorkerMessage>) => onMessage(e.data);
+    if (monitorRects.length > 0) send({ type: 'monitors', monitors: monitorRects });
   });
   // GPU frames are drawn by the preload; acking them is what paces the apps.
   window.dinos?.nativeDisplay?.onPresented(() => {
@@ -531,6 +533,21 @@ export function setNativeGeometry(
   surface.height = height;
   resizeCanvas(surface.canvas, width, height);
   send({ type: 'geometry', id, x, y, width, height });
+}
+
+/** Din's monitors as last reported, primary first, for a new connection. */
+let monitorRects: Rect[] = [];
+
+/**
+ * Tell the compositor where Din's monitors are, so apps see each one (a
+ * game in full screen fills its monitor) rather than one screen spanning
+ * them all.
+ */
+export function setNativeMonitors(monitors: Monitor[]): void {
+  monitorRects = [...monitors]
+    .sort((a, b) => Number(b.primary) - Number(a.primary))
+    .map(({ x, y, width, height }) => ({ x, y, width, height }));
+  send({ type: 'monitors', monitors: monitorRects });
 }
 
 /** The toplevel holding Din's keyboard focus (0: none). */

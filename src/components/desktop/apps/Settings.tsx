@@ -61,10 +61,12 @@ import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState } from '@
 import {
   cleanDisplayError,
   formatMode,
+  formatRefresh,
   friendlyOutputName,
   getDisplayBridge,
   isInternalOutput,
   preferredMode,
+  refreshRates,
   uniqueModes,
 } from '@/lib/display';
 import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
@@ -818,7 +820,8 @@ function BluetoothDeviceRow({
 /**
  * A single output's slot in the editable draft layout the Display panel works
  * on: its chosen mode, position in the shared virtual screen, and on/off +
- * primary flags. `modes` is de-duplicated to unique resolutions.
+ * primary flags. `modes` is de-duplicated to unique resolutions; `allModes`
+ * keeps every rate of each.
  */
 interface DisplayDraft {
   name: string;
@@ -830,7 +833,10 @@ interface DisplayDraft {
   y: number;
   width: number;
   height: number;
+  /** Hz; 0 where the output doesn't say. */
+  refresh: number;
   modes: DisplayMode[];
+  allModes: DisplayMode[];
 }
 
 /** Seed the editable draft from the reported outputs. */
@@ -848,7 +854,9 @@ function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
       y: output.position.y,
       width: output.current?.width ?? fallback?.width ?? 0,
       height: output.current?.height ?? fallback?.height ?? 0,
+      refresh: output.current?.refresh ?? fallback?.refresh ?? 0,
       modes,
+      allModes: output.modes,
     };
   });
 }
@@ -856,7 +864,7 @@ function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
 /** A stable signature of the arrangement, for dirty-checking and re-seeding. */
 function layoutSignature(drafts: DisplayDraft[]): string {
   return JSON.stringify(
-    drafts.map((d) => [d.name, d.enabled, d.primary, d.x, d.y, d.width, d.height]),
+    drafts.map((d) => [d.name, d.enabled, d.primary, d.x, d.y, d.width, d.height, d.refresh]),
   );
 }
 
@@ -873,6 +881,7 @@ function toPlacements(drafts: DisplayDraft[]): DisplayPlacement[] {
     y: d.enabled ? d.y - minY : 0,
     width: d.width,
     height: d.height,
+    ...(d.refresh > 0 && { refresh: d.refresh }),
   }));
 }
 
@@ -1001,8 +1010,13 @@ function DisplaySection() {
   };
   const setPrimary = (name: string) =>
     setDraft((ds) => ds.map((d) => ({ ...d, primary: d.name === name })));
+  // A new resolution starts at its fastest rate.
   const setModeFor = (name: string, width: number, height: number) =>
-    setDraft((ds) => ds.map((d) => (d.name === name ? { ...d, width, height } : d)));
+    setDraft((ds) =>
+      ds.map((d) => (d.name === name ? { ...d, width, height, refresh: refreshRates(d.allModes, width, height)[0] ?? 0 } : d)),
+    );
+  const setRefreshFor = (name: string, refresh: number) =>
+    setDraft((ds) => ds.map((d) => (d.name === name ? { ...d, refresh } : d)));
   const moveTo = (name: string, x: number, y: number) =>
     setDraft((ds) => ds.map((d) => (d.name === name ? { ...d, x, y } : d)));
 
@@ -1075,6 +1089,7 @@ function DisplaySection() {
             onToggle={setEnabled}
             onPrimary={setPrimary}
             onMode={setModeFor}
+            onRefresh={setRefreshFor}
           />
         ))}
       </ul>
@@ -1319,6 +1334,7 @@ function DisplayControlRow({
   onToggle,
   onPrimary,
   onMode,
+  onRefresh,
 }: {
   draft: DisplayDraft;
   canDisable: boolean;
@@ -1326,11 +1342,19 @@ function DisplayControlRow({
   onToggle: (name: string, enabled: boolean) => void;
   onPrimary: (name: string) => void;
   onMode: (name: string, width: number, height: number) => void;
+  onRefresh: (name: string, refresh: number) => void;
 }) {
   const d = draft;
   const Icon = d.internal ? Laptop : Monitor;
   const selectId = `resolution-${d.name}`;
+  const refreshId = `refresh-${d.name}`;
   const currentValue = `${d.width}x${d.height}`;
+  const rates = refreshRates(d.allModes, d.width, d.height);
+  const selectClass = cn(
+    'h-8 rounded-md border border-border/60 bg-background px-2 text-sm text-foreground',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    'disabled:cursor-not-allowed disabled:opacity-60',
+  );
 
   return (
     <li
@@ -1394,11 +1418,7 @@ function DisplayControlRow({
                 const [width, height] = e.target.value.split('x').map(Number);
                 if (Number.isFinite(width) && Number.isFinite(height)) onMode(d.name, width, height);
               }}
-              className={cn(
-                'h-8 rounded-md border border-border/60 bg-background px-2 text-sm text-foreground',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                'disabled:cursor-not-allowed disabled:opacity-60',
-              )}
+              className={selectClass}
             >
               {d.modes.map((mode) => (
                 <option key={`${mode.width}x${mode.height}`} value={`${mode.width}x${mode.height}`}>
@@ -1407,6 +1427,25 @@ function DisplayControlRow({
                 </option>
               ))}
             </select>
+            {rates.length > 1 && (
+              <>
+                <Label htmlFor={refreshId} className="sr-only">
+                  Refresh rate for {d.friendly}
+                </Label>
+                <select
+                  id={refreshId}
+                  value={String(rates.find((rate) => Math.abs(rate - d.refresh) < 0.01) ?? rates[0])}
+                  onChange={(e) => onRefresh(d.name, Number(e.target.value))}
+                  className={selectClass}
+                >
+                  {rates.map((rate) => (
+                    <option key={rate} value={String(rate)}>
+                      {formatRefresh(rate)}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
         </div>
       )}

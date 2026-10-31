@@ -1,6 +1,6 @@
 import { getAudioBridge, MAX_VOLUME, type AudioDevices } from '@/lib/audio';
 import { getBrightnessBridge, MIN_BRIGHTNESS, MIN_TEMPERATURE, MAX_TEMPERATURE, type NightLightSchedule } from '@/lib/brightness';
-import { getDisplayBridge, friendlyOutputName, type DisplayPlacement } from '@/lib/display';
+import { getDisplayBridge, formatRefresh, friendlyOutputName, refreshRates, type DisplayPlacement } from '@/lib/display';
 import { getPowerBridge, summarizePower, describePowerProfile } from '@/lib/power';
 import { getKeyboardBridge } from '@/lib/keyboard';
 import { getDateTimeBridge } from '@/lib/datetime';
@@ -140,14 +140,19 @@ export const displayArea: Area = {
       return {
         data: status.outputs,
         text: status.outputs.map((o) => [
-          `${o.primary ? '*' : ' '} ${o.name} (${friendlyOutputName(o.name)}): ${o.enabled && o.current ? `${o.current.width}x${o.current.height} at ${o.position.x},${o.position.y}` : 'off'}`,
-          `    modes: ${[...new Set(o.modes.map((m) => `${m.width}x${m.height}`))].join(' ')}`,
+          `${o.primary ? '*' : ' '} ${o.name} (${friendlyOutputName(o.name)}): ${o.enabled && o.current ? `${o.current.width}x${o.current.height}${o.current.refresh ? ` @ ${formatRefresh(o.current.refresh)}` : ''} at ${o.position.x},${o.position.y}` : 'off'}`,
+          `    modes: ${[...new Set(o.modes.map((m) => `${m.width}x${m.height}`))].map((size) => {
+            const [width, height] = size.split('x').map(Number);
+            const rates = refreshRates(o.modes, width, height);
+            return rates.length > 1 ? `${size} (${rates.map((r) => formatRefresh(r).replace(' Hz', '')).join('/')} Hz)` : size;
+          }).join(' ')}`,
         ].join('\n')).join('\n'),
       };
     }),
-    command('display', 'set', 'Change one monitor: its mode, position, whether it’s on or primary', [
+    command('display', 'set', 'Change one monitor: its mode, refresh rate, position, whether it’s on or primary', [
       { name: 'output', type: 'string', positional: true, help: 'Its name, e.g. HDMI-A-1' },
       { name: 'mode', type: 'string', optional: true, help: 'WIDTHxHEIGHT, one it offers' },
+      { name: 'refresh', type: 'number', optional: true, help: 'Hz, one it offers at that size (e.g. 165); a new mode alone gets its fastest' },
       { name: 'x', type: 'integer', optional: true, help: 'Its left edge on the shared screen' },
       { name: 'y', type: 'integer', optional: true, help: 'Its top edge' },
       { name: 'enabled', type: 'boolean', optional: true, help: 'On, or off (--no-enabled)' },
@@ -161,6 +166,20 @@ export const displayArea: Area = {
       if (mode && !size) throw new CommandError('--mode takes WIDTHxHEIGHT', 'usage');
       if (size && !target.modes.some((m) => m.width === Number(size[1]) && m.height === Number(size[2]))) {
         throw new CommandError(`${target.name} doesn’t offer ${mode}`);
+      }
+      const targetSize = size
+        ? { width: Number(size[1]), height: Number(size[2]) }
+        : target.current ?? target.modes.find((m) => m.preferred) ?? target.modes[0] ?? { width: 0, height: 0 };
+      const rates = refreshRates(target.modes, targetSize.width, targetSize.height);
+      const wanted = args.optNumber('refresh');
+      // Near enough: 165 picks 164.999.
+      const refresh = wanted === undefined
+        ? (size ? rates[0] : undefined)
+        : rates.find((r) => Math.abs(r - wanted) < 0.5);
+      if (wanted !== undefined && refresh === undefined) {
+        throw new CommandError(
+          `${target.name} doesn’t offer ${wanted} Hz at ${targetSize.width}x${targetSize.height}${rates.length ? ` (it offers ${rates.map(formatRefresh).join(', ')})` : ''}`,
+        );
       }
       const primary = args.optBool('primary') === true;
       const placements: DisplayPlacement[] = outputs.map((o) => {
@@ -177,6 +196,7 @@ export const displayArea: Area = {
           x: args.optNumber('x') ?? base.x,
           y: args.optNumber('y') ?? base.y,
           ...(size ? { width: Number(size[1]), height: Number(size[2]) } : {}),
+          ...(refresh !== undefined && { refresh }),
         };
       });
       if (!placements.some((p) => p.enabled)) throw new CommandError('That would turn every monitor off');

@@ -81,6 +81,12 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const gestureRef = useRef(false);
   /** Whether the app was last told it's in full screen. */
   const fullscreenRef = useRef(false);
+  /** Full screen ended because another window came up: it comes back with this one. */
+  const resumeFullscreenRef = useRef(false);
+  const isTopRef = useRef(isTop);
+  useEffect(() => {
+    isTopRef.current = isTop;
+  }, [isTop]);
   const { monitors } = useMonitors();
   const monitorsRef = useRef(monitors);
   useEffect(() => {
@@ -168,6 +174,22 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [xid, syncGeometry]);
 
+  /**
+   * Back into the full screen another window took this one out of. Blink
+   * allows it only just after a click or key (the Alt+Tab, the Dock click
+   * that brought the window back); refused, the next click in it tries again.
+   */
+  const resumeFullscreen = useCallback(() => {
+    const host = hostRef.current;
+    if (!host || !resumeFullscreenRef.current) return;
+    host.requestFullscreen().then(
+      () => {
+        resumeFullscreenRef.current = false;
+      },
+      () => {},
+    );
+  }, []);
+
   // The window on top holds the app's keyboard focus.
   useEffect(() => {
     if (!xid) return;
@@ -175,13 +197,17 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     if (isTop) {
       syncGeometry();
       hostRef.current?.focus({ preventScroll: true });
+      resumeFullscreen();
     } else if (hostRef.current && document.fullscreenElement === hostRef.current) {
-      // Another window came up (Alt+Tab, a launch): full screen ends.
+      // Another window came up (Alt+Tab, a launch): full screen ends, until
+      // this one is back on top. Left in a window meanwhile, a game sat
+      // under the menu bar and Dock until it was put back in full screen.
+      resumeFullscreenRef.current = true;
       void document.exitFullscreen();
     }
-  }, [xid, isTop, syncGeometry]);
+  }, [xid, isTop, syncGeometry, resumeFullscreen]);
 
-  // Full screen ended, or began, on the shell's side too (Escape, another
+  // Full screen ended, or began, on the shell's side too (Escape held, another
   // window): the app is told either way, and fits the new box.
   useEffect(() => {
     const host = hostRef.current;
@@ -192,6 +218,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       if (fullscreen === fullscreenRef.current) return;
       fullscreenRef.current = fullscreen;
       setNativeFullscreen(xid, fullscreen);
+      syncEscapeLock();
       if (fullscreen) host.focus({ preventScroll: true });
       // After PageFullscreenHost has moved the box onto its monitor.
       requestAnimationFrame(syncGeometry);
@@ -199,7 +226,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     document.addEventListener('fullscreenchange', onChange);
     return () => {
       document.removeEventListener('fullscreenchange', onChange);
-      if (document.fullscreenElement === host) void document.exitFullscreen();
+      if (document.fullscreenElement === host) void document.exitFullscreen().finally(syncEscapeLock);
     };
   }, [xid, syncGeometry]);
   useEffect(() => () => setNativeFocus(xid, false), [xid]);
@@ -221,6 +248,10 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
                 lockedRef.current = false;
                 sendNativePointerUnlock(xid);
               }
+              // The app let go while the lock was on its way (opening a
+              // menu): left on, it froze the pointer under a menu that
+              // wanted it free.
+              if (locked && !lockedRef.current && document.pointerLockElement === host) document.exitPointerLock();
             });
           } else if (!event.locked && document.pointerLockElement === host) document.exitPointerLock();
         }
@@ -263,6 +294,10 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         }
         if (event.type === 'minimize') minimize(windowId);
         if (event.type === 'fullscreen') {
+          // The app's own say about full screen wins over coming back to
+          // it - but not its echo of being taken out while another window
+          // is up.
+          if (event.fullscreen || isTopRef.current) resumeFullscreenRef.current = false;
           const host = hostRef.current;
           const fullscreen = !!host && document.fullscreenElement === host;
           if (event.fullscreen && host && !fullscreen) {
@@ -396,8 +431,12 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       onPointerDown={(event) => {
         pointerRef.current = { clientX: event.clientX, clientY: event.clientY, held: true };
         pressRef.current = { clientX: event.clientX, clientY: event.clientY };
-        event.currentTarget.setPointerCapture(event.pointerId);
+        // Capturing a locked pointer throws, which took the press with it:
+        // every click in a game with mouse-look was lost. Locked, every
+        // event comes here anyway.
+        if (!document.pointerLockElement) event.currentTarget.setPointerCapture(event.pointerId);
         event.currentTarget.focus({ preventScroll: true });
+        resumeFullscreen();
         syncGeometry();
         const [x, y] = localPoint(event.currentTarget, event);
         if (import.meta.env.VITE_PROFILE === '1') noteNativeInput('button', event.timeStamp);
@@ -460,12 +499,33 @@ const RAW_POINTER = typeof window !== 'undefined' && 'onpointerrawupdate' in win
 function forwardMotion(xid: number, host: HTMLElement, event: PointerEvent): void {
   // Locked, the pointer stays put and only its movement counts.
   if (document.pointerLockElement === host) {
+    if (import.meta.env.VITE_PROFILE === '1') noteNativeInput('motion', event.timeStamp);
     sendNativeRelative(xid, event.movementX, event.movementY);
     return;
   }
   const [x, y] = localPoint(host, event);
   if (import.meta.env.VITE_PROFILE === '1') noteNativeInput('motion', event.timeStamp);
   sendNativeMotion(xid, x, y, { dx: event.movementX, dy: event.movementY });
+}
+
+/** The Keyboard Lock API, which TypeScript's DOM types don't have. */
+interface KeyboardLock {
+  lock(codes?: string[]): Promise<void>;
+  unlock(): void;
+}
+
+/**
+ * While a native app is in full screen, Escape is the app's (a game's pause
+ * menu) rather than Chromium's way out, which also kept the key from ever
+ * reaching the app; holding it down still leaves, as in Chrome. The lock is
+ * the shell document's, shared by every native window, so it follows
+ * whether any of them is in full screen.
+ */
+function syncEscapeLock(): void {
+  const keyboard = (navigator as Navigator & { keyboard?: KeyboardLock }).keyboard;
+  if (!keyboard) return;
+  if (document.querySelector('[data-native-window]:fullscreen')) void keyboard.lock(['Escape']).catch(() => {});
+  else keyboard.unlock();
 }
 
 /**

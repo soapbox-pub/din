@@ -2,8 +2,11 @@
 //! the shell, rendering what changed, pacing apps by the shell's acks, and
 //! applying the shell's input and window-management messages.
 
+use std::time::Duration;
+
 use serde_json::{Value, json};
 use smithay::{
+    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     backend::{
         input::{Axis, AxisSource, ButtonState, KeyState},
         renderer::utils::{import_surface_tree, with_renderer_surface_state},
@@ -17,13 +20,14 @@ use smithay::{
         pointer::{AxisFrame, ButtonEvent, CursorImageSurfaceData, GrabStartData, MotionEvent},
     },
     reexports::{
+        calloop::timer::{TimeoutAction, Timer},
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             Resource,
             protocol::{wl_data_device_manager::DndAction, wl_surface::WlSurface},
         },
     },
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size, Transform},
     wayland::{
         compositor::with_states,
         selection::data_device::{SourceMetadata, set_data_device_selection, start_dnd},
@@ -60,6 +64,9 @@ struct Description {
 const MAX_IN_FLIGHT_CPU: u32 = 2;
 const MAX_IN_FLIGHT_GPU: u32 = 1;
 
+/// Outputs past this many are left off (a hostile or broken message).
+const MAX_MONITORS: usize = 16;
+
 /// Linux input button codes, by X button number (1 left, 2 middle, 3 right,
 /// 8 back, 9 forward) - the numbering the shell speaks for both servers.
 fn linux_button(button: u32) -> Option<u32> {
@@ -95,7 +102,7 @@ fn render(
 }
 
 impl State {
-    fn frame_done(&self, surface: &WlSurface) {
+    pub fn frame_done(&self, surface: &WlSurface) {
         let output = self.output.clone();
         send_frames_surface_tree(surface, &self.output, self.start.elapsed(), None, |_, _| {
             Some(output.clone())
@@ -769,6 +776,70 @@ impl State {
         });
     }
 
+    /// Din's monitors, in viewport pixels, primary first. Each gets an
+    /// output of its own, so apps see the monitors they're on: a game going
+    /// full screen sizes itself to its monitor (from Xwayland's RandR), not
+    /// to the union of them all, which Din would show boxed into one.
+    fn set_monitors(&mut self, message: &Value) {
+        let rects: Vec<Rectangle<i32, Logical>> = message["monitors"]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|m| {
+                        let n = |key: &str| m.get(key).and_then(Value::as_f64).filter(|v| v.is_finite()).map(f64::round);
+                        let (x, y, w, h) = (n("x")?, n("y")?, n("width")?, n("height")?);
+                        (w >= 1.0 && h >= 1.0 && w <= 16384.0 && h <= 16384.0)
+                            .then(|| Rectangle::new((x.max(0.0) as i32, y.max(0.0) as i32).into(), (w as i32, h as i32).into()))
+                    })
+                    .take(MAX_MONITORS)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if rects.is_empty() {
+            return;
+        }
+        let apply = |output: &Output, rect: &Rectangle<i32, Logical>| {
+            let mode = Mode { size: (rect.size.w, rect.size.h).into(), refresh: 60_000 };
+            if output.current_mode() == Some(mode) && output.current_location() == rect.loc {
+                return;
+            }
+            output.change_current_state(Some(mode), None, None, Some(rect.loc));
+            output.set_preferred(mode);
+        };
+        apply(&self.output, &rects[0]);
+        for (index, rect) in rects.iter().enumerate().skip(1) {
+            if let Some((output, _)) = self.extra_outputs.get(index - 1) {
+                apply(output, rect);
+                continue;
+            }
+            let output = Output::new(
+                format!("DIN-{}", index + 1),
+                PhysicalProperties {
+                    size: (0, 0).into(),
+                    subpixel: Subpixel::Unknown,
+                    make: "Din".into(),
+                    model: "Embedded display".into(),
+                },
+            );
+            let mode = Mode { size: (rect.size.w, rect.size.h).into(), refresh: 60_000 };
+            output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some(rect.loc));
+            output.set_preferred(mode);
+            let global = output.create_global::<State>(&self.dh);
+            self.extra_outputs.push((output, global));
+        }
+        for (_, global) in self.extra_outputs.drain(rects.len() - 1..) {
+            // Clients get time to let go of the output before it's gone.
+            self.dh.disable_global::<State>(global.clone());
+            let dh = self.dh.clone();
+            let _ = self.handle.insert_source(Timer::from_duration(Duration::from_secs(10)), move |_, _, _| {
+                dh.remove_global::<State>(global.clone());
+                TimeoutAction::Drop
+            });
+        }
+        let union = rects.iter().skip(1).fold(rects[0], |union, rect| union.merge(*rect));
+        self.screen = (union.loc.x + union.size.w, union.loc.y + union.size.h).into();
+    }
+
     /// Switch the keyboard layout. Every client gets the new keymap,
     /// Xwayland included, which applies it to its X keyboard.
     fn set_keymap(&mut self, message: &Value) {
@@ -871,6 +942,7 @@ impl State {
             "button" => self.button(id, num("x"), num("y"), num("button") as u32, message["down"] == true),
             "key" => self.key(num("keycode") as u32, message["down"] == true),
             "keymap" => self.set_keymap(message),
+            "monitors" => self.set_monitors(message),
             "leave" => self.leave(),
             "clipboard" => {
                 if let Some(contents) = Contents::from_shell(message) {

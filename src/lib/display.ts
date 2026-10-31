@@ -19,6 +19,8 @@
 export interface DisplayMode {
   width: number;
   height: number;
+  /** Refresh rate in Hz; 0 where the display tool didn't say. */
+  refresh: number;
   /** The mode currently in use on this output. */
   current: boolean;
   /** The output's preferred (native) mode. */
@@ -34,7 +36,7 @@ export interface DisplayOutput {
   /** Whether the output is currently on (driving a mode). */
   enabled: boolean;
   /** The mode currently in use, or null if the output is off. */
-  current: { width: number; height: number } | null;
+  current: { width: number; height: number; refresh: number } | null;
   /** Top-left position in the shared virtual screen (px); {0,0} when off. */
   position: { x: number; y: number };
   /** Available modes, as the display tool reports them. */
@@ -63,6 +65,8 @@ export interface DisplayPlacement {
   /** Chosen mode. Must be one the output reports. Ignored when off. */
   width: number;
   height: number;
+  /** Refresh rate in Hz, one the output offers at that size. Omitted keeps the current one. */
+  refresh?: number;
 }
 
 export interface DisplayBridge {
@@ -126,11 +130,26 @@ export function uniqueModes(modes: DisplayMode[]): DisplayMode[] {
     byResolution.set(key, {
       width: mode.width,
       height: mode.height,
+      // The fastest the resolution goes.
+      refresh: Math.max(existing?.refresh ?? 0, mode.refresh),
       current: (existing?.current ?? false) || mode.current,
       preferred: (existing?.preferred ?? false) || mode.preferred,
     });
   }
   return [...byResolution.values()].sort((a, b) => b.width - a.width || b.height - a.height);
+}
+
+/** The refresh rates an output offers at a resolution, fastest first (none where unknown). */
+export function refreshRates(modes: DisplayMode[], width: number, height: number): number[] {
+  const rates = modes.filter((m) => m.width === width && m.height === height && m.refresh > 0).map((m) => m.refresh);
+  return [...new Set(rates)].sort((a, b) => b - a);
+}
+
+/** "165 Hz", "59.94 Hz": a rate as people know it. */
+export function formatRefresh(hz: number): string {
+  const rounded = Math.round(hz);
+  // 59.999 is "60"; 59.94 (NTSC) stays itself.
+  return `${Math.abs(hz - rounded) < 0.05 ? rounded : hz.toFixed(2)} Hz`;
 }
 
 /** The output's best default mode: preferred, else current, else the largest. */

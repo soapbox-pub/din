@@ -20,7 +20,7 @@ use smithay::{
     input::{
         Seat, SeatHandler, SeatState,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState, XkbConfig},
-        pointer::CursorImageStatus,
+        pointer::{CursorImageStatus, CursorImageSurfaceData},
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
@@ -31,7 +31,7 @@ use smithay::{
         },
         wayland_server::{
             Client, DisplayHandle, Resource,
-            backend::{ClientData, ClientId, DisconnectReason},
+            backend::{ClientData, ClientId, DisconnectReason, GlobalId},
             protocol::{wl_buffer, wl_output, wl_seat, wl_surface::WlSurface},
         },
     },
@@ -42,7 +42,7 @@ use smithay::{
         seat::WaylandFocus,
         xwayland_shell::{XWaylandShellHandler, XWaylandShellState},
         buffer::BufferHandler,
-        compositor::{CompositorClientState, CompositorHandler, CompositorState, get_parent},
+        compositor::{CompositorClientState, CompositorHandler, CompositorState, get_parent, with_states},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         output::{OutputHandler, OutputManagerState},
@@ -280,7 +280,10 @@ pub struct State {
     _decoration_state: XdgDecorationState,
     _cursor_shape_state: CursorShapeManagerState,
     pub seat: Seat<State>,
+    /// The primary monitor, or the whole screen until the shell names them.
     pub output: Output,
+    /// The other monitors, one output each (see set_monitors).
+    pub extra_outputs: Vec<(Output, GlobalId)>,
     /// Software renderer: the CPU path, and cursor images in either path.
     pub renderer: PixmanRenderer,
     /// The GPU path, when there is a GPU (see gpu.rs).
@@ -369,8 +372,9 @@ impl State {
         seat.add_keyboard(XkbConfig::default(), 500, 30).expect("keymap");
         seat.add_pointer();
 
-        // One virtual monitor the size of the shell's viewport: apps size
-        // and constrain popups against it.
+        // One virtual monitor the size of the shell's viewport, until the
+        // shell says where its monitors are: apps size and constrain popups
+        // against it.
         let output = Output::new(
             "DIN-1".into(),
             PhysicalProperties {
@@ -400,6 +404,7 @@ impl State {
             _cursor_shape_state: cursor_shape_state,
             seat,
             output,
+            extra_outputs: Vec::new(),
             renderer: PixmanRenderer::new().expect("pixman"),
             gpu,
             buffers,
@@ -548,6 +553,14 @@ impl CompositorHandler for State {
 
         if self.cursor_surface.as_ref() == Some(&root) {
             self.render_cursor();
+            return;
+        }
+        // A cursor image that isn't the cursor (yet, or any more: its
+        // set_cursor was dropped, or the cursor was hidden first) still has
+        // its frame answered. Xwayland holds every later cursor change until
+        // it is, so the pointer stayed hidden in a game's menus.
+        if with_states(&root, |states| states.data_map.get::<CursorImageSurfaceData>().is_some()) {
+            self.frame_done(&root);
             return;
         }
         if let Some(t) = self.toplevels.iter_mut().find(|t| t.wl_surface().as_ref() == Some(&root)) {

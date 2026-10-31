@@ -103,6 +103,78 @@ export function nativeLatencyReport(): NativeLatencyRow[] {
   return rows;
 }
 
+/** How often startNativeLatencyLog reports. */
+const LOG_MS = 10_000;
+/** A shell frame this long is a hitch worth naming. */
+const LONG_FRAME_MS = 50;
+/** Long frames kept per report. */
+const MAX_LONG_FRAMES = 20;
+
+/**
+ * Every LOG_MS, one `[din perf]` line on the console: the latencies above
+ * (p50/p90/max per input and stage, then reset) and the shell's own frame
+ * intervals. A profiling session's main process sends those lines to the
+ * journal (electron/main.mts), where they can be read while an app runs.
+ */
+export function startNativeLatencyLog(): void {
+  const gaps: number[] = [];
+  let last = 0;
+  const tick = (time: number) => {
+    if (last) gaps.push(time - last);
+    last = time;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  // The shell's long frames, and what ran in them: where its hitches go.
+  const long: { ms: number; blocking: number; render: number; scripts: string[] }[] = [];
+  if (PerformanceObserver.supportedEntryTypes?.includes('long-animation-frame')) {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.duration < LONG_FRAME_MS || long.length >= MAX_LONG_FRAMES) continue;
+        const frame = entry as PerformanceEntry & {
+          blockingDuration?: number;
+          renderStart?: number;
+          scripts?: { duration: number; invoker?: string; sourceURL?: string; sourceFunctionName?: string }[];
+        };
+        const scripts = [...(frame.scripts ?? [])]
+          .sort((a, b) => b.duration - a.duration)
+          .slice(0, 3)
+          .map((s) => {
+            let where = '';
+            try {
+              where = s.sourceURL ? new URL(s.sourceURL).pathname.split('/').pop() ?? '' : '';
+            } catch {
+              // An unparseable source is left out.
+            }
+            return `${Math.round(s.duration)}ms ${s.invoker?.split('?')[0] ?? ''} ${s.sourceFunctionName ?? ''} ${where}`.trim();
+          });
+        long.push({
+          ms: Math.round(frame.duration),
+          blocking: Math.round(frame.blockingDuration ?? 0),
+          // From the frame's start to its rendering (style, layout, paint) starting.
+          render: frame.renderStart ? Math.round(frame.startTime + frame.duration - frame.renderStart) : 0,
+          scripts,
+        });
+      }
+    }).observe({ type: 'long-animation-frame' });
+  }
+  window.setInterval(() => {
+    const native: Record<string, [number, number, number]> = {};
+    for (const row of nativeLatencyReport()) native[`${row.input}.${row.stage}`] = [row.p50, row.p90, row.max];
+    const counts = Object.fromEntries([...samples].map(([input, list]) => [input, list.length]));
+    const frames = gaps.splice(0);
+    const shellFrames = {
+      count: frames.length,
+      p50: percentile(frames, 50),
+      p99: percentile(frames, 99),
+      max: percentile(frames, 100),
+    };
+    const longFrames = long.splice(0);
+    console.info(`[din perf] ${JSON.stringify({ native, samples: counts, shellFrames, longFrames })}`);
+    samples.clear();
+  }, LOG_MS);
+}
+
 export function printNativeLatency(reset = false): NativeLatencyRow[] {
   const rows = nativeLatencyReport();
   console.log('%c[din perf: native input latency, ms]', 'color:#c586ff;font-weight:bold');
