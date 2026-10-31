@@ -1,10 +1,11 @@
 /**
  * Pictures of cursor effects for Settings' tiles: each effect run offscreen
  * on a little night-sky desktop, along a made-up pointer path (or after a
- * made-up click), and snapped mid-flight. Made once per effect and kept.
+ * made-up click), and snapped mid-flight. Power mode's too, typed into a
+ * made-up editor. Made once per effect and kept.
  */
 
-import { CLICK_EFFECTS, SHOW_MOUSE_SPIN, TRAIL_EFFECTS, along, burnPoint, showMouse, type Stroke } from '@/lib/cursorEffects/effects';
+import { CLICK_EFFECTS, SHOW_MOUSE_SPIN, TRAIL_EFFECTS, along, burnPoint, showMouse, sparks, type Stroke } from '@/lib/cursorEffects/effects';
 import { PACKAGE_PREFIX, loadPackage } from '@/lib/cursorEffects/packages';
 import { Scene, arrowImage } from '@/lib/cursorEffects/scene';
 import type { Rgb } from '@/lib/cursorEffects/sprites';
@@ -18,6 +19,13 @@ const SCALE = 2;
 const STEP_MS = 16;
 
 const cache = new Map<string, Promise<string | null>>();
+
+/** What Settings has pictures of: the cursor effects, and power mode with and without its shake. */
+export type ThumbnailKind = PreviewKind | 'power-mode' | 'power-mode-shake';
+
+/** The made-up editor's text, and the line being typed (and its sparks). */
+const TEXT: Rgb = [203, 213, 225];
+const TYPED: Rgb = [125, 211, 252];
 
 /** A desktop to draw on: a dusky gradient with a window or two. */
 function backdrop(ctx: CanvasRenderingContext2D): void {
@@ -88,7 +96,73 @@ function waterLayer(): { water: Water; picture: HTMLCanvasElement } | null {
   return { water, picture: picture.canvas };
 }
 
-async function draw(kind: PreviewKind, id: string, tint: Rgb | null): Promise<string | null> {
+/** A text editor's window at an offset, with a few lines typed and the caret where `typed` ends; returns the caret. */
+function editor(ctx: CanvasRenderingContext2D, dx: number, dy: number, alpha: number): { x: number; y: number } {
+  const rgba = ([r, g, b]: Rgb, a: number) => `rgba(${r},${g},${b},${a * alpha})`;
+  const x = 18 + dx;
+  const y = 16 + dy;
+  ctx.fillStyle = `rgba(15,23,42,${0.9 * alpha})`;
+  ctx.beginPath();
+  ctx.roundRect(x, y, 124, 68, 5);
+  ctx.fill();
+  ctx.fillStyle = `rgba(255,255,255,${0.1 * alpha})`;
+  ctx.fillRect(x, y, 124, 9);
+  const line = (row: number, words: number[], color: Rgb, a: number) => {
+    let at = x + 9;
+    for (const w of words) {
+      ctx.fillStyle = rgba(color, a);
+      ctx.beginPath();
+      ctx.roundRect(at, y + 18 + row * 11, w, 4, 2);
+      ctx.fill();
+      at += w + 4;
+    }
+    return at - 4;
+  };
+  line(0, [22, 14, 30], TEXT, 0.55);
+  line(1, [12, 26, 18, 20], TEXT, 0.55);
+  line(2, [30, 16], TEXT, 0.55);
+  const end = line(3, [18, 24, 10], TYPED, 0.9);
+  ctx.fillStyle = rgba(TYPED, 1);
+  ctx.fillRect(end + 2, y + 15 + 3 * 11, 1.5, 10);
+  return { x: end + 3, y: y + 20 + 3 * 11 };
+}
+
+/** Power mode mid-streak: sparks flying from the caret, and the window knocked aside with `shake`. */
+function drawPowerMode(shake: boolean): string | null {
+  const out = canvas();
+  if (!out) return null;
+  const { ctx } = out;
+  const g = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
+  g.addColorStop(0, '#1e1b4b');
+  g.addColorStop(0.6, '#312e81');
+  g.addColorStop(1, '#0f172a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  if (shake) {
+    editor(ctx, -4, 2, 0.4);
+    editor(ctx, 3, -2, 0.4);
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (const [x, y, len] of [[10, 34, 6], [8, 46, 8], [10, 58, 6], [150, 40, 6], [152, 52, 8], [150, 64, 6]]) {
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + len);
+    }
+    ctx.stroke();
+  }
+  const caret = editor(ctx, shake ? 1 : 0, shake ? -1 : 0, 1);
+  const scene = new Scene(0x5eed);
+  for (let i = 0; i < 4; i++) {
+    sparks(scene, caret.x, caret.y, TYPED);
+    run(5, scene);
+  }
+  scene.draw(ctx);
+  return out.canvas.toDataURL('image/png');
+}
+
+async function draw(kind: ThumbnailKind, id: string, tint: Rgb | null): Promise<string | null> {
+  if (kind === 'power-mode' || kind === 'power-mode-shake') return drawPowerMode(kind === 'power-mode-shake');
   const out = canvas();
   if (!out) return null;
   const { ctx } = out;
@@ -148,7 +222,7 @@ async function draw(kind: PreviewKind, id: string, tint: Rgb | null): Promise<st
 }
 
 /** A picture of an effect as a data URL (in `tint`'s hue, if given), or null if it can't be drawn here. */
-export function cursorEffectThumbnail(kind: PreviewKind, id: string, tint: Rgb | null = null): Promise<string | null> {
+export function cursorEffectThumbnail(kind: ThumbnailKind, id: string, tint: Rgb | null = null): Promise<string | null> {
   const key = `${tint?.join(',') ?? 'own'}|${kind}:${id}`;
   let promise = cache.get(key);
   if (!promise) {

@@ -10,6 +10,7 @@ export { cursorEffects } from '@/lib/cursorEffects/engine';
 export type { CursorEffectSettings, PreviewKind } from '@/lib/cursorEffects/engine';
 export { PACKAGE_PREFIX, forgetPackage } from '@/lib/cursorEffects/packages';
 export { cursorEffectThumbnail, forgetThumbnails } from '@/lib/cursorEffects/thumbnail';
+export type { ThumbnailKind } from '@/lib/cursorEffects/thumbnail';
 
 export const DEFAULT_CURSOR_TRAIL = 'none';
 export const DEFAULT_CURSOR_CLICK = 'none';

@@ -291,6 +291,29 @@ export const TRAIL_EFFECTS: TrailEffect[] = [
 ];
 
 /** A burst of `count` particles thrown out from (x, y). */
+/**
+ * Power mode's sparks (src/lib/powerMode.ts): a spray of dots in the text's
+ * color from the caret at (x, y), falling as they fade.
+ */
+export function sparks(scene: Scene, x: number, y: number, color: Rgb): void {
+  const count = 5 + Math.floor(scene.random() * 11);
+  for (let i = 0; i < count; i++) {
+    scene.add({
+      x,
+      y,
+      vx: (scene.random() * 2 - 1) * 60,
+      vy: -90 - scene.random() * 120,
+      gravity: 270,
+      life: 700 + scene.random() * 500,
+      size: 3 + scene.random() * 3,
+      kind: 'dot',
+      colors: [color],
+      additive: false,
+      untinted: true,
+    });
+  }
+}
+
 function burst(scene: Scene, x: number, y: number, count: number, make: (angle: number, speed: number) => Parameters<Scene['add']>[0]) {
   for (let i = 0; i < count; i++) {
     const angle = (i / count) * Math.PI * 2 + between(scene, -0.15, 0.15);

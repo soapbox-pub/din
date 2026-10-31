@@ -71,12 +71,16 @@ export function typed(spot: CaretSpot, win: HTMLElement | null): void {
   if (shaking && win) shakeWindow(win);
 }
 
-/** Show power mode off over a rectangle of the screen, as Settings does on switching it on. */
-export function previewPowerMode(rect: { x: number; y: number; width: number; height: number }, color: string): void {
+/**
+ * Show power mode off over a rectangle of the screen, as Settings does on
+ * switching it on, shaking `win` (Settings' window) with it if given.
+ */
+export function previewPowerMode(rect: { x: number; y: number; width: number; height: number }, color: string, win: HTMLElement | null = null): void {
   const steps = 14;
   for (let i = 0; i < steps; i++) {
     window.setTimeout(() => {
       cursorEffects.sparks(rect.x + rect.width * (0.15 + (0.7 * i) / (steps - 1)), rect.y + rect.height / 2, rgbOf(color) ?? [255, 255, 255]);
+      if (win && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) shakeWindow(win);
     }, i * 70);
   }
 }

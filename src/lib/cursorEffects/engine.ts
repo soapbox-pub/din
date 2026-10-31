@@ -32,6 +32,7 @@ import {
   burnPoint,
   SHOW_MOUSE_SPIN,
   showMouse,
+  sparks,
 } from '@/lib/cursorEffects/effects';
 import { PACKAGE_PREFIX, loadPackage } from '@/lib/cursorEffects/packages';
 import { type CursorImage, Scene } from '@/lib/cursorEffects/scene';
@@ -237,29 +238,10 @@ class CursorEffectsEngine {
     this.scene.clear('paint');
   }
 
-  /**
-   * Power mode's sparks (src/lib/powerMode.ts): a spray of dots in the
-   * text's color from the caret at (x, y), falling as they fade.
-   */
+  /** Power mode's sparks from the caret at (x, y), in the text's color. */
   sparks(x: number, y: number, color: Rgb): void {
     if (!this.enabled || !this.host) return;
-    const random = this.scene.random;
-    const count = 5 + Math.floor(random() * 11);
-    for (let i = 0; i < count; i++) {
-      this.scene.add({
-        x,
-        y,
-        vx: (random() * 2 - 1) * 60,
-        vy: -90 - random() * 120,
-        gravity: 270,
-        life: 700 + random() * 500,
-        size: 3 + random() * 3,
-        kind: 'dot',
-        colors: [color],
-        additive: false,
-        untinted: true,
-      });
-    }
+    sparks(this.scene, x, y, color);
     this.wake();
   }
 

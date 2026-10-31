@@ -30,6 +30,7 @@ import {
   forgetPackage,
   forgetThumbnails,
   type PreviewKind,
+  type ThumbnailKind,
 } from '@/lib/cursorEffects';
 import type { Rgb } from '@/lib/cursorEffects/sprites';
 import type { CursorEffectPackageInfo } from '@/lib/systemCursor';
@@ -407,7 +408,8 @@ function EffectTile({
   );
 }
 
-function EffectPicture({ kind, id, tint }: { kind: PreviewKind; id: string; tint: Rgb | null }) {
+/** A picture of an effect (cursorEffectThumbnail), with a skeleton while it's drawn. */
+export function EffectPicture({ kind, id, tint }: { kind: ThumbnailKind; id: string; tint: Rgb | null }) {
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
