@@ -341,7 +341,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
             onShowScreen={isOn(vm) ? () => toggleScreen(vm.id) : undefined}
             onStart={() => act(vm, 'start')}
             onRetry={() => void busy(vm.id, () => bridge.retryInstall(vm.id))}
-            onChooseIso={() => void pick().then((file) => file && busy(vm.id, () => bridge.retryInstall(vm.id, { iso: file.path })))}
+            onChooseIso={() => void pick(vm.install?.installer).then((file) => file && busy(vm.id, () => bridge.retryInstall(vm.id, { iso: file.path })))}
             onCancel={() => act(vm, 'cancelInstall')}
           />
         ) : isOn(vm) ? (

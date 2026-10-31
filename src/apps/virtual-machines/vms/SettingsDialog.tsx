@@ -129,7 +129,7 @@ export function SettingsDialog({
                   required
                 />
               </Field>
-              <Field label="Operating system" hint="Windows gets hardware its installer has drivers for; Linux gets faster virtio devices.">
+              <Field label="Operating system" hint="Windows gets hardware its installer has drivers for; macOS gets a Mac’s, with OpenCore to start it; Linux gets faster virtio devices.">
                 <OsPicker value={config.os} onChange={(os) => patch({ os })} />
               </Field>
               <Field label="Folder">

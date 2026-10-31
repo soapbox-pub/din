@@ -428,10 +428,11 @@ logins to fill or copy. Copied passwords and codes leave the clipboard after
 
 ### Virtual machines
 
-The Virtual Machines app runs other systems (Windows, Linux, anything x86)
-with QEMU and KVM, no libvirt (`electron/vms.mts`, the `vms` permission).
+The Virtual Machines app runs other systems (Windows, macOS, Linux, anything
+x86) with QEMU and KVM, no libvirt (`electron/vms.mts`, the `vms` permission).
 Each machine is a folder in `~/VMs`: `vm.json`, `disk.qcow2`, the UEFI
-firmware's variables (`vars.qcow2`) and the TPM's state (`tpm/`). A running
+firmware's variables (`vars.qcow2`), the TPM's state (`tpm/`) and macOS's
+boot loader (`opencore/`). A running
 machine is a detached `qemu-system-x86_64` as the user, with its QMP, VNC and
 swtpm sockets in `$XDG_RUNTIME_DIR/din-vms/<uuid>/`; it keeps running when the
 app closes, and Din finds it again after a restart by its pidfile. Its screen
@@ -462,10 +463,29 @@ a restart. Right-clicking a system offers Custom Install, the full form with
 that system filled in; when a download fails, the app links to the system's
 own download page and installs from the disc image the user chooses.
 
+macOS is the newest release Apple's Internet Recovery offers the last Intel
+iMac (iMac20,1's board, so macOS Tahoe 26), asked for as a Mac asks
+(`osrecovery.apple.com`) and checked chunk by chunk against the chunklist
+Apple signs with its EFI key. QEMU reads the `.dmg` itself, as a disk.
+OpenCore, from acidanthera's newest GitHub release (checked against the
+SHA-256 GitHub lists), starts it from a FAT drive QEMU makes of the machine's
+`opencore/`, with a config made from the release's own `Sample.plist`: no
+kexts, Apple Secure Boot off, and the machine's own iMac20,1 serial numbers.
+Recovery has no answer file, so once its menu bar shows (Din reads the screen
+over QMP) Din opens its Terminal with Shift-Command-T and types one command,
+which runs a script on the answer drive: it erases the disk and runs
+Apple's `startosinstall`, which downloads the full installer and restarts
+the machine to install it. That restart is Din's part done: it takes the
+answer drive out, and the app shows the screen, where Apple's installer
+goes on through its own restarts to Setup Assistant, which the user answers.
+
 Windows machines get what Windows 11's installer checks for and has drivers
 for: UEFI with Secure Boot and Microsoft's keys (OVMF's `OVMF_VARS.ms.fd`), a
 TPM 2.0 (swtpm), a SATA disk, an e1000e network card and Hyper-V
-enlightenments. Linux gets virtio, and its screen follows the window's size.
+enlightenments. macOS gets an Intel CPU model (on AMD hosts too, with the
+TSC's rate given so it can still be saved running), QEMU's Apple SMC, USB
+input and a SATA SSD, and no sound (it has no driver for QEMU's); its
+screen is 2560×1600, which macOS draws at Retina scale. Linux gets virtio, and its screen follows the window's size.
 The clipboard is shared with guests running spice-vdagent; sound goes through
 PipeWire. Snapshots are qcow2's own: taken while running, they keep memory
 too and come back running.

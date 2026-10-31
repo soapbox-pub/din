@@ -6,7 +6,7 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
-import type { VmInfo, VmOs, VmsBridge, VmState } from '@/lib/vms';
+import type { VmInfo, VmInstallerId, VmOs, VmsBridge, VmState } from '@/lib/vms';
 
 const KEY = ['vms'] as const;
 
@@ -55,13 +55,19 @@ export function useSnapshots(id: string | null) {
   });
 }
 
-/** Pick a disc image with Din's file picker; resolves with its path, or null. */
-export function usePickDiscImage(): () => Promise<{ path: string; name: string } | null> {
+/**
+ * Pick a disc image with Din's file picker; resolves with its path, or null.
+ * For installing macOS (`system`), it's a recovery image: Apple's BaseSystem.dmg.
+ */
+export function usePickDiscImage(): (system?: VmInstallerId | null) => Promise<{ path: string; name: string } | null> {
   const din = useDin();
-  return async () => {
+  return async (system) => {
     const [file] = await din.files.open({
-      title: 'Choose a Disc Image',
-      types: [{ description: 'Disc images', extensions: ['.iso', '.img'] }],
+      title: system === 'macos' ? 'Choose a macOS Recovery Image' : 'Choose a Disc Image',
+      types:
+        system === 'macos'
+          ? [{ description: 'Recovery images', extensions: ['.dmg', '.img'] }]
+          : [{ description: 'Disc images', extensions: ['.iso', '.img'] }],
       writable: false,
       startIn: 'downloads',
       confirmLabel: 'Choose',
@@ -80,6 +86,7 @@ export const STATE_LABELS: Record<VmState, string> = {
 
 export const OS_LABELS: Record<VmOs, string> = {
   windows: 'Windows',
+  macos: 'macOS',
   linux: 'Linux',
   other: 'Other',
 };

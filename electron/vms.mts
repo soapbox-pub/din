@@ -3,9 +3,9 @@
 //
 // Plain QEMU with KVM, no libvirt: each machine is a folder in ~/VMs with its
 // settings (vm.json), its disk (disk.qcow2), and for UEFI its firmware's
-// variables (vars.qcow2, qcow2 so live snapshots can include them) and for a
-// TPM swtpm's state (tpm/). The folder is the whole machine, to copy or
-// back up.
+// variables (vars.qcow2, qcow2 so live snapshots can include them), for a
+// TPM swtpm's state (tpm/), and for macOS its boot loader (opencore/). The
+// folder is the whole machine, to copy or back up.
 //
 // A running machine is a qemu-system-x86_64 in a transient unit of the
 // user's systemd (din-vm-<uuid>, and din-vm-<uuid>-tpm for its swtpm), so it
@@ -19,8 +19,10 @@
 // e1000e network card, which its installer has drivers for, Hyper-V
 // enlightenments, a TPM 2.0 and Secure Boot with Microsoft's keys (OVMF's
 // OVMF_VARS.ms.fd). Linux gets virtio, and the screen follows the window's
-// size. The clipboard is shared over QEMU's vdagent wherever the guest runs
-// spice-vdagent.
+// size. macOS gets what a Mac would have: an Intel CPU (whatever the host's
+// is), Apple's SMC (QEMU's applesmc), USB input, and OpenCore to start it
+// from a FAT drive QEMU makes of opencore/. The clipboard is shared over
+// QEMU's vdagent wherever the guest runs spice-vdagent.
 //
 // Snapshots are qcow2's internal ones: savevm/loadvm while running (which
 // keep memory too), qemu-img while off. Types are src/lib/vms.ts. Runs as
@@ -43,7 +45,14 @@ import {
   installer,
   INSTALLERS,
   INSTALLERS_DIR,
+  MACOS_COMMAND,
+  MACOS_FAILED,
+  MACOS_SCREEN,
+  MACOS_STARTED,
+  openCoreReady,
   prepareLinux,
+  prepareMacos,
+  prepareOpenCore,
   prepareWindows,
   pruneDownloads,
   WINDOWS_READY,
@@ -223,6 +232,8 @@ interface StoredConfig extends VmConfig {
   uuid: string;
   created: number;
   install?: StoredInstall;
+  /** macOS: the TSC's rate it was first started with, which QEMU needs to save it running (it tells macOS the TSC is invariant). */
+  tscHz?: number;
 }
 
 const dirOf = (id: string) => path.join(VMS_DIR, id);
@@ -233,6 +244,7 @@ const tpmDir = (id: string) => path.join(dirOf(id), 'tpm');
 const logPath = (id: string) => path.join(dirOf(id), 'qemu.log');
 /** The installer's kernel and answer file, while it's being installed. */
 const installDir = (id: string) => path.join(dirOf(id), 'install');
+const openCoreDir = (id: string) => path.join(dirOf(id), 'opencore');
 const runDir = (config: StoredConfig) => path.join(RUN_ROOT, config.uuid);
 
 function requireId(id: unknown): string {
@@ -246,6 +258,7 @@ async function readConfig(id: string): Promise<StoredConfig> {
   const config = { ...cleanConfig(raw as Partial<VmConfig>, { name: id, os: 'other' }), name: id, version: 1, uuid: '', created: 0 } as StoredConfig;
   config.uuid = typeof raw.uuid === 'string' && /^[0-9a-f-]{36}$/.test(raw.uuid) ? raw.uuid : randomUUID();
   config.created = typeof raw.created === 'number' ? raw.created : Date.now();
+  if (typeof raw.tscHz === 'number' && Number.isInteger(raw.tscHz) && raw.tscHz > 0) config.tscHz = raw.tscHz;
   const install = cleanInstall(raw.install);
   if (install) config.install = install;
   if (config.uuid !== raw.uuid) await writeConfig(id, config);
@@ -266,7 +279,7 @@ function cleanInstall(value: unknown): StoredInstall | null {
     boot:
       boot &&
       [boot.seedDir, boot.seedLabel].every((v) => typeof v === 'string') &&
-      [boot.kernel, boot.initrd, boot.append].every((v) => v === undefined || typeof v === 'string')
+      [boot.kernel, boot.initrd, boot.append, boot.disk].every((v) => v === undefined || typeof v === 'string')
         ? (boot as InstallBoot)
         : null,
     error: str(raw.error),
@@ -309,7 +322,7 @@ function cleanConfig(input: Partial<VmConfig>, base: Pick<VmConfig, 'name' | 'os
   const firmware = pick('firmware') === 'bios' ? 'bios' : 'uefi';
   return {
     name: typeof input.name === 'string' && input.name.trim() ? input.name.trim().slice(0, 64) : base.name,
-    os: osValue === 'windows' || osValue === 'linux' ? osValue : 'other',
+    os: osValue === 'windows' || osValue === 'macos' || osValue === 'linux' ? osValue : 'other',
     system: (['windows', 'macos', 'ubuntu', 'fedora'] as unknown[]).includes(pick('system')) ? (pick('system') as VmInstallerId) : null,
     memoryMiB: int(pick('memoryMiB'), 128, MAX_MEMORY_MIB, 2048),
     cpus: int(pick('cpus'), 1, 256, 2),
@@ -360,7 +373,7 @@ async function info(id: string): Promise<VmInfo> {
   const { size, used } = await diskSize(id);
   // A live snapshot's memory is often kept in the firmware's variables.
   const varsUsed = await fsp.stat(varsPath(id)).then((s) => s.blocks * 512, () => 0);
-  const { version: _v, uuid: _u, created: _c, install: _i, ...shown } = config;
+  const { version: _v, uuid: _u, created: _c, install: _i, tscHz: _t, ...shown } = config;
   return {
     id,
     dir: dirOf(id),
@@ -538,24 +551,43 @@ const opt = (value: string) => value.replace(/,/g, ',,');
 /** The hardware each OS gets. */
 const DEVICES: Record<VmOs, { disk: string; nic: string; vga: string }> = {
   windows: { disk: 'ide-hd,bus=ide.0', nic: 'e1000e', vga: 'VGA,vgamem_mb=64' },
+  // An SSD on SATA, so macOS TRIMs it; and the screen OpenCore picks (vm-installers).
+  macos: {
+    disk: 'ide-hd,bus=ide.0,rotation_rate=1',
+    nic: 'virtio-net-pci',
+    vga: `VGA,vgamem_mb=64,xres=${MACOS_SCREEN.width},yres=${MACOS_SCREEN.height}`,
+  },
   linux: { disk: 'virtio-blk-pci', nic: 'virtio-net-pci', vga: 'virtio-vga' },
   other: { disk: 'ide-hd,bus=ide.0', nic: 'e1000', vga: 'VGA,vgamem_mb=64' },
 };
+
+/**
+ * The CPU macOS gets: an Intel one, on AMD hosts too, with the TSC's rate
+ * given so QEMU can save it running though macOS is told the TSC is
+ * invariant (+invtsc), and that rate in VMware's CPUID leaf, where
+ * OpenCore reads it.
+ */
+const macosCpu = (tscHz: number) => `Skylake-Client,-hle,-rtm,-pcid,kvm=on,vendor=GenuineIntel,+invtsc,tsc-frequency=${tscHz},vmware-cpuid-freq=on`;
+
+/** What a Mac's SMC answers when macOS asks for its key; macOS won't start without it. */
+const APPLE_SMC_KEY = 'ourhardworkbythesewordsguardedpleasedontsteal(c)AppleComputerInc';
 
 function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: string | null): string[] {
   const t = getTools();
   const devices = DEVICES[config.os];
   const windows = config.os === 'windows';
+  const mac = config.os === 'macos';
   const args = [
     '-name', opt(config.name),
     '-uuid', config.uuid,
     '-machine', `q35,accel=kvm${config.firmware === 'uefi' ? ',smm=on' : ''}`,
-    '-cpu', windows ? 'host,hv_relaxed,hv_vapic,hv_spinlocks=0x1fff,hv_vpindex,hv_runtime,hv_synic,hv_stimer,hv_time,hv_frequencies' : 'host',
-    '-smp', String(config.cpus),
+    '-cpu', windows ? 'host,hv_relaxed,hv_vapic,hv_spinlocks=0x1fff,hv_vpindex,hv_runtime,hv_synic,hv_stimer,hv_time,hv_frequencies' : mac ? macosCpu(config.tscHz ?? 0) : 'host',
+    '-smp', mac ? `${config.cpus},sockets=1,cores=${config.cpus},threads=1` : String(config.cpus),
     '-m', `${config.memoryMiB}M`,
     '-nodefaults',
     '-no-user-config',
   ];
+  if (mac) args.push('-device', `isa-applesmc,osk=${APPLE_SMC_KEY}`, '-smbios', 'type=2');
   if (config.firmware === 'uefi') {
     const firmware = need(t.firmware, 'UEFI firmware (OVMF)');
     args.push(
@@ -571,9 +603,9 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
       '-device', 'tpm-crb,tpmdev=tpm0',
     );
   }
-  // An installer's kernel (-kernel) takes the first place to start from itself.
+  // An installer's kernel (-kernel), or OpenCore, takes the first place to start from itself.
   const boot = config.install?.step === 'install' ? config.install.boot : null;
-  const first = boot?.kernel ? 1 : 0;
+  const first = boot?.kernel || mac ? 1 : 0;
   args.push(
     '-drive', `if=none,id=disk0,format=qcow2,discard=unmap,file=${opt(diskPath(id))}`,
     // The disk first: one with nothing on it yet falls through to the CD.
@@ -587,12 +619,32 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
   }
   args.push(
     '-device', devices.vga,
-    '-device', 'qemu-xhci,id=xhci',
+    // Ports enough for every USB device without a hub, behind which macOS sometimes misses the tablet.
+    '-device', `qemu-xhci,id=xhci${mac ? ',p2=8,p3=8' : ''}`,
     '-device', 'usb-tablet,bus=xhci.0',
-    // Clipboard sharing, through spice-vdagent in the guest.
-    '-chardev', 'qemu-vdagent,id=vdagent,name=vdagent,clipboard=on',
-    '-device', 'virtio-serial-pci',
-    '-device', 'virtserialport,chardev=vdagent,name=com.redhat.spice.0',
+  );
+  if (mac) {
+    args.push(
+      // macOS has no PS/2 driver.
+      '-device', 'usb-kbd,bus=xhci.0',
+      '-blockdev', JSON.stringify({ driver: 'vvfat', 'node-name': 'opencore', dir: openCoreDir(id), label: 'OPENCORE', 'read-only': true }),
+      '-device', 'usb-storage,bus=xhci.0,drive=opencore,removable=on,bootindex=0',
+    );
+    if (boot?.disk) {
+      // Recovery, on a disk of its own with its writes kept aside (it won't start read-only).
+      const format = /\.dmg$/i.test(boot.disk) ? 'dmg' : 'raw';
+      args.push('-drive', `if=none,id=recovery,format=${format},snapshot=on,file=${opt(boot.disk)}`, '-device', 'ide-hd,bus=ide.2,drive=recovery');
+    }
+  }
+  if (!mac) {
+    // Clipboard sharing, through spice-vdagent in the guest (macOS has none).
+    args.push(
+      '-chardev', 'qemu-vdagent,id=vdagent,name=vdagent,clipboard=on',
+      '-device', 'virtio-serial-pci',
+      '-device', 'virtserialport,chardev=vdagent,name=com.redhat.spice.0',
+    );
+  }
+  args.push(
     '-device', 'virtio-balloon-pci',
     '-object', 'rng-random,id=rng0,filename=/dev/urandom',
     '-device', 'virtio-rng-pci,rng=rng0',
@@ -607,7 +659,8 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
     args.push('-kernel', boot.kernel, '-initrd', boot.initrd ?? '', '-append', boot.append ?? '', '-action', 'reboot=shutdown');
   } else if (boot) {
     // Windows Setup, which restarts several times on its way, says it's done
-    // on the first serial port (vm-installers' answer file).
+    // on the first serial port (vm-installers' answer file), and Din's
+    // script in macOS's Recovery says there how it's going.
     args.push('-chardev', `file,id=ser0,path=${opt(path.join(rundir, 'serial.log'))}`, '-device', 'isa-serial,chardev=ser0');
   }
   if (boot) {
@@ -854,6 +907,7 @@ async function attach(id: string, m: Machine, qmp: Qmp): Promise<void> {
     else if (event === 'RESUME') setState(m, 'running');
     // Not POWERDOWN, the button being pressed: the guest may not listen.
     else if (event === 'SHUTDOWN') setState(m, 'stopping');
+    else if (event === 'RESET') void installerRestarted(id, m);
   };
   qmp.onClose = () => void exited(id, m);
   const result = (await qmp.execute('query-status')) as { running?: boolean; status?: string };
@@ -913,6 +967,35 @@ async function rediscover(): Promise<void> {
   }
 }
 
+/** The TSC's rate KVM gives a guest on this computer, from a QEMU that's started and quit at once. */
+async function hostTscHz(qemu: string): Promise<number> {
+  const child = spawn(qemu, ['-machine', 'q35,accel=kvm', '-cpu', 'host', '-S', '-nodefaults', '-display', 'none', '-qmp', 'stdio'], {
+    stdio: ['pipe', 'pipe', 'ignore'],
+  });
+  const timer = setTimeout(() => child.kill(), 10_000);
+  let out = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => (out += chunk));
+  child.stdin.end(
+    [
+      { execute: 'qmp_capabilities' },
+      { execute: 'qom-get', arguments: { path: '/machine/unattached/device[0]', property: 'tsc-frequency' } },
+      { execute: 'quit' },
+    ].map((c) => JSON.stringify(c)).join('\n') + '\n',
+  );
+  await new Promise((resolve) => child.once('close', resolve));
+  clearTimeout(timer);
+  for (const line of out.split('\n')) {
+    try {
+      const reply = JSON.parse(line) as { return?: unknown };
+      if (typeof reply.return === 'number' && reply.return > 0) return reply.return;
+    } catch {
+      // Not JSON.
+    }
+  }
+  throw new Error('QEMU didn’t say how fast this computer’s TSC is.');
+}
+
 async function waitForSocket(file: string, deadline: number): Promise<void> {
   while (!fs.existsSync(file)) {
     if (Date.now() > deadline) throw new Error('The TPM didn’t start.');
@@ -943,6 +1026,15 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
   const unit = `din-vm-${config.uuid}`;
   let qemuProcess: Launched | null = null;
   try {
+    if (config.os === 'macos') {
+      if (config.firmware !== 'uefi') throw new Error('macOS needs UEFI firmware: turn it on in Settings.');
+      if (!config.tscHz) {
+        config.tscHz = await hostTscHz(qemu);
+        await writeConfig(id, config);
+      }
+      // A machine made by hand gets its boot loader the first time it starts.
+      if (!openCoreReady(openCoreDir(id))) await prepareOpenCore(openCoreDir(id), config.uuid, AbortSignal.timeout(5 * 60_000));
+    }
     if (config.tpm) {
       const swtpm = need(t.swtpm, 'swtpm (for the TPM)');
       await fsp.mkdir(tpmDir(id), { recursive: true, mode: 0o700 });
@@ -966,6 +1058,7 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
     }
     await attach(id, m, qmp);
     if (config.install?.step === 'install' && config.install.installer === 'windows') void pressAnyKey(m);
+    if (config.install?.step === 'install' && config.install.installer === 'macos') void startMacosInstall(m);
   } catch (error) {
     if (machines.get(id) === m) {
       m.stopping = true;
@@ -1069,7 +1162,8 @@ async function install(which: unknown, options: unknown): Promise<VmInfo> {
     cdrom: null,
     network: true,
     forwards: [],
-    audio: true,
+    // macOS has no driver for QEMU's sound card.
+    audio: hw.os !== 'macos',
   } satisfies NewVm);
   const config = await readConfig(created.id);
   config.install = { installer: which as VmInstallerId, label: info.name, step: 'download', iso, download: null, boot: null, error: null };
@@ -1104,10 +1198,20 @@ async function runInstall(id: string): Promise<void> {
     }
     live.phase = 'verifying';
     changed();
-    const boot = stored.installer === 'windows' ? await prepareWindows(iso, installDir(id)) : await prepareLinux(stored.installer, iso, installDir(id));
+    let boot: InstallBoot;
+    if (stored.installer === 'macos') {
+      await prepareOpenCore(openCoreDir(id), config.uuid, live.abort.signal);
+      boot = await prepareMacos(iso, installDir(id));
+    } else if (stored.installer === 'windows') {
+      boot = await prepareWindows(iso, installDir(id));
+    } else {
+      boot = await prepareLinux(stored.installer, iso, installDir(id));
+    }
     if (live.abort.signal.aborted) return;
     config = await readConfig(id);
-    await writeConfig(id, { ...config, cdrom: iso, install: { ...config.install!, step: 'install', boot, error: null } });
+    // macOS's recovery image goes in as a disk, not a disc.
+    const cdrom = boot.disk ? config.cdrom : iso;
+    await writeConfig(id, { ...config, cdrom, install: { ...config.install!, step: 'install', boot, error: null } });
     installing.delete(id);
     void keepOnlyUsedDownloads();
     await start(id);
@@ -1171,16 +1275,19 @@ async function keepOnlyUsedDownloads(): Promise<void> {
   for (const id of await ids()) {
     const config = await readConfig(id).catch(() => null);
     if (config?.cdrom?.startsWith(INSTALLERS_DIR)) keep.add(config.cdrom);
+    const disk = config?.install?.step === 'install' ? config.install.boot?.disk : undefined;
+    if (disk?.startsWith(INSTALLERS_DIR)) keep.add(disk);
     if (config?.install?.download && config.install.step === 'download') keep.add(path.join(INSTALLERS_DIR, config.install.download));
   }
   await pruneDownloads(keep);
 }
 
 /**
- * Windows Setup is done (it said so on the serial port, at its first logon):
- * take its disc and answer file out while it runs, and it's an ordinary machine.
+ * Windows Setup is done (it said so on the serial port, at its first
+ * logon), or macOS's installer has taken over from Din: take the disc and
+ * answer drive out while it runs, and it's an ordinary machine.
  */
-async function finishWindowsInstall(id: string, m: Machine): Promise<void> {
+async function finishSaidInstall(id: string, m: Machine): Promise<void> {
   try {
     const config = await readConfig(id);
     delete config.install;
@@ -1212,21 +1319,154 @@ async function pressAnyKey(m: Machine): Promise<void> {
   }
 }
 
+/**
+ * Recovery has no answer file: once it's showing, open its Terminal
+ * (Shift-Command-T) and, once the Terminal's window has appeared, type the
+ * command that runs vm-installers' script, until the script says it's
+ * begun. Nothing's typed into Recovery's own window, where Return would
+ * choose what's selected. Once macOS's installer has started from the
+ * disk, Recovery isn't shown again and nothing's typed.
+ */
+async function startMacosInstall(m: Machine): Promise<void> {
+  const file = path.join(m.rundir, 'screen.ppm');
+  const live = () => !!m.qmp && !m.qmp.closed;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let last: Screen | null = null;
+  for (const until = Date.now() + 20 * 60_000; Date.now() < until && live(); ) {
+    await sleep(5000);
+    if (await macosBegun(m)) return;
+    const before = await screenshot(m, file);
+    // Recovery, and settled: nothing else is opening by itself.
+    const settled = !!before && !!last && recoveryShowing(before) && !windowOpened(last, before);
+    last = before;
+    if (!before || !settled) continue;
+    await sendKeys(m, ['shift', 'meta_l', 't']);
+    await sleep(3000);
+    const after = await screenshot(m, file);
+    last = after;
+    if (!after || !windowOpened(before, after)) continue;
+    await typeText(m, `${MACOS_COMMAND}\n`);
+    // The script says it's begun at once; the disk fills within a minute or two.
+    await sleep(45_000);
+    last = null;
+  }
+}
+
+/**
+ * Whether Din's script in Recovery has begun: it says so on the serial port,
+ * or Apple's installer is filling the disk (an erased one holds a few MB).
+ */
+async function macosBegun(m: Machine): Promise<boolean> {
+  if ((await fsp.readFile(path.join(m.rundir, 'serial.log'), 'latin1').catch(() => '')).includes(MACOS_STARTED)) return true;
+  return (await diskSize(m.config.name)).used > 1024 ** 3;
+}
+
+/**
+ * macOS's installer restarting the machine, once Din's script has begun, is
+ * Apple's installer taking over: it goes on from the disk by itself, on the
+ * screen, and ends at Setup Assistant, which is the user's to answer.
+ */
+async function installerRestarted(id: string, m: Machine): Promise<void> {
+  const install = m.config.install;
+  if (install?.step !== 'install' || install.installer !== 'macos' || finishing.has(id)) return;
+  if (!(await macosBegun(m)) || finishing.has(id)) return;
+  finishing.add(id);
+  await finishSaidInstall(id, m).finally(() => finishing.delete(id));
+}
+
+interface Screen {
+  width: number;
+  height: number;
+  /** RGB, a row at a time. */
+  pixels: Buffer;
+}
+
+/** What's on the machine's screen now, from QEMU's screendump (a PPM). */
+async function screenshot(m: Machine, file: string): Promise<Screen | null> {
+  try {
+    await m.qmp!.execute('screendump', { filename: file });
+    const ppm = await fsp.readFile(file);
+    const header = /^P6\s+(\d+)\s+(\d+)\s+255\s/.exec(ppm.toString('latin1', 0, 32));
+    if (!header) return null;
+    return { width: Number(header[1]), height: Number(header[2]), pixels: ppm.subarray(header[0].length) };
+  } catch {
+    return null;
+  } finally {
+    void fsp.rm(file, { force: true });
+  }
+}
+
+const pixelAt = (screen: Screen, x: number, y: number) => {
+  const at = (y * screen.width + x) * 3;
+  return [screen.pixels[at], screen.pixels[at + 1], screen.pixels[at + 2]];
+};
+
+/**
+ * Whether Recovery's menu bar is up: light text at its left on a dark bar
+ * (at either scale macOS draws it). Before, the screen is plain grey, or
+ * black: OpenCore's text and the Apple logo are on black, and a key
+ * pressed then would stop OpenCore at its menu.
+ */
+function recoveryShowing(screen: Screen): boolean {
+  let light = 0;
+  for (let y = 4; y < 48; y++) for (let x = 40; x < 480; x++) if (pixelAt(screen, x, y).every((c) => c > 200)) light++;
+  let bar = 0;
+  let samples = 0;
+  for (let x = screen.width / 2; x < screen.width - 200; x += 8, samples++) bar += Math.max(...pixelAt(screen, x, 10));
+  return light > 30 && bar / samples > 12 && bar / samples < 90;
+}
+
+/** Whether a window appeared between two screenshots: a good part of the screen changed. */
+function windowOpened(before: Screen, after: Screen): boolean {
+  if (before.width !== after.width || before.height !== after.height) return false;
+  let changed = 0;
+  let samples = 0;
+  // Faint changes count: Terminal's window is translucent, dark over dark.
+  for (let at = 0; at + 2 < before.pixels.length; at += 3 * 16, samples++) {
+    const diff = [0, 1, 2].reduce((n, c) => n + Math.abs(before.pixels[at + c] - after.pixels[at + c]), 0);
+    if (diff > 24) changed++;
+  }
+  return changed / samples > 0.05;
+}
+
+async function sendKeys(m: Machine, keys: string[]): Promise<void> {
+  await m.qmp?.execute('send-key', { keys: keys.map((data) => ({ type: 'qcode', data })) }).catch(() => {});
+}
+
+const QCODES: Record<string, string> = { ' ': 'spc', '\n': 'ret', '/': 'slash', '.': 'dot', '-': 'minus' };
+
+/** Type plain ASCII on a US keyboard, as macOS starts with. */
+async function typeText(m: Machine, text: string): Promise<void> {
+  for (const char of text) {
+    const lower = char.toLowerCase();
+    await sendKeys(m, [...(char !== lower ? ['shift'] : []), QCODES[lower] ?? lower]);
+    await new Promise((r) => setTimeout(r, 40));
+  }
+}
+
 const finishing = new Set<string>();
 
 // While an installer runs, how far along it is (its disk filling) changes by
-// itself; and Windows Setup may have said it's done.
+// itself; and Windows Setup may have said it's done, or macOS's script that
+// it couldn't go on.
 setInterval(() => {
   let busy = false;
   for (const [id, m] of machines) {
-    if (m.config.install?.step !== 'install' || m.state !== 'running') continue;
+    const install = m.config.install;
+    if (install?.step !== 'install' || m.state !== 'running') continue;
     busy = true;
-    if (m.config.install.boot?.kernel || finishing.has(id)) continue;
-    void fsp.readFile(path.join(m.rundir, 'serial.log'), 'latin1').then(
+    if (install.boot?.kernel || finishing.has(id)) continue;
+    void fsp.readFile(path.join(m.rundir, 'serial.log'), 'utf8').then(
       (text) => {
-        if (!text.includes(WINDOWS_READY) || finishing.has(id)) return;
+        if (finishing.has(id)) return;
+        const failed = new RegExp(`^${MACOS_FAILED} (.*)$`, 'm').exec(text);
+        if (failed && install.installer === 'macos' && !install.error) {
+          install.error = failed[1].trim();
+          void writeInstall(id, { error: install.error }).catch(() => {});
+        }
+        if (install.installer === 'macos' || !text.includes(WINDOWS_READY)) return;
         finishing.add(id);
-        void finishWindowsInstall(id, m).finally(() => finishing.delete(id));
+        void finishSaidInstall(id, m).finally(() => finishing.delete(id));
       },
       () => {},
     );

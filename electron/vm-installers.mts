@@ -14,15 +14,22 @@
 // drive QEMU makes from a folder: Ubuntu's autoinstall (cloud-init's CIDATA)
 // and Fedora's kickstart (Anaconda's OEMDRV). Windows comes from Microsoft's
 // download page, driven in a hidden window, and starts from its disc with
-// an autounattend.xml on that drive. Runs as TypeScript directly via Node's
-// native type stripping - erasable syntax only.
+// an autounattend.xml on that drive.
+//
+// macOS is Apple's Internet Recovery, asked for the newest release as a Mac
+// asks for it and checked against the chunklist Apple signs, started by
+// OpenCore (acidanthera's boot loader, from its GitHub releases). Recovery
+// has no answer file: electron/vms.mts opens its Terminal and types one
+// command, which runs the script on the FAT drive. Runs as TypeScript
+// directly via Node's native type stripping - erasable syntax only.
 
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes, verify as verifySignature } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, net, session } from 'electron';
+import { unzipSync } from 'fflate';
 import type { VmInstallerId } from '../src/lib/vms.ts';
 
 export const INSTALLERS_DIR = path.join(os.homedir(), 'VMs', '.installers');
@@ -30,10 +37,13 @@ export const INSTALLERS_DIR = path.join(os.homedir(), 'VMs', '.installers');
 export interface InstallerFile {
   /** What it's kept as in INSTALLERS_DIR. */
   name: string;
-  /** Where to get it now (Windows' links are signed and expire, so it's asked each time). */
-  url: () => Promise<string>;
-  sha256: string;
+  /** Where to get it now (Windows' and Apple's links are signed and expire, so it's asked each time). */
+  url: () => Promise<string | { url: string; headers: Record<string, string> }>;
+  /** What it's checked against; null for a file `verify` checks instead. */
+  sha256: string | null;
   size: number | null;
+  /** Check the downloaded file some other way, throwing when it's wrong. */
+  verify?: (file: string, onProgress: (checked: number, total: number) => void) => Promise<void>;
 }
 
 export interface Release {
@@ -47,8 +57,8 @@ export interface InstallerInfo {
   manualUrl: string;
   /** About what an installed system takes up on its disk, for the progress bar. */
   installedBytes: number;
-  /** The hardware it gets: Windows 11's needs, or virtio for Linux. */
-  hardware: { os: 'windows' | 'linux'; diskGiB: number; minMemoryMiB: number; secureBoot: boolean; tpm: boolean };
+  /** The hardware it gets: Windows 11's needs, a Mac's, or virtio for Linux. */
+  hardware: { os: 'windows' | 'macos' | 'linux'; diskGiB: number; minMemoryMiB: number; secureBoot: boolean; tpm: boolean };
   resolve: () => Promise<Release>;
 }
 
@@ -275,6 +285,126 @@ async function resolveWindows(): Promise<Release> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// macOS, from Apple's Internet Recovery
+// ---------------------------------------------------------------------------
+
+const RECOVERY = 'http://osrecovery.apple.com/';
+const RECOVERY_AGENT = 'InternetRecovery/1.0';
+/** iMac20,1's board, the last Intel Mac's: Apple gives it the newest macOS that runs on Intel. */
+export const MACOS_BOARD = 'Mac-CFF7D910A743CAAF';
+export const MACOS_MODEL = 'iMac20,1';
+/** macOS draws it at twice the scale, as on a Retina display: 1280×800 points. */
+export const MACOS_SCREEN = { width: 2560, height: 1600 };
+
+/** Apple's key for the chunklists that come with recovery images (the EFI ROM's). */
+const CHUNKLIST_KEY = createPublicKey({
+  key: {
+    kty: 'RSA',
+    e: 'AQAB',
+    n: Buffer.from(
+      'C3E748CAD9CD384329E10E25A91E43E1A762FF529ADE578C935BDDF9B13F2179D4855E6FC89E9E29CA12517D17DFA1EDCE0BEBF0EA7B461FFE61D94E2BDF72C196F89ACD3536B644064014DAE25A15DB6BB0852ECBD120916318D1CCDEA3C84C92ED743FC176D0BACA920D3FCF3158AFF731F88CE0623182A8ED67E650515F75745909F07D415F55FC15A35654D118C55A462D37A3ACDA08612F3F3F6571761EFCCBCC299AEE99B3A4FD6212CCFFF5EF37A2C334E871191F7E1C31960E010A54E86FA3F62E6D6905E1CD57732410A3EB0C6B4DEFDABE9F59BF1618758C751CD56CEF851D1C0EAA1C558E37AC108DA9089863D20E2E7E4BF475EC66FE6B3EFDCF',
+      'hex',
+    ).toString('base64url'),
+  },
+  format: 'jwk',
+});
+
+/** A recovery image's chunks, from its chunklist, once Apple's signature on it checks out. */
+function readChunklist(list: Buffer): { size: number; sha256: Buffer }[] {
+  const bad = () => new Error('Apple’s chunklist for macOS didn’t check out.');
+  if (list.length < 0x24 || list.toString('latin1', 0, 4) !== 'CNKL') throw bad();
+  const count = Number(list.readBigUInt64LE(12));
+  const signatureAt = Number(list.readBigUInt64LE(28));
+  // Version 1, SHA-256 chunks, an RSA signature (method 2 is unsigned, and turned away).
+  if (list.readUInt32LE(4) !== 0x24 || list[8] !== 1 || list[9] !== 1 || list[10] !== 1) throw bad();
+  if (Number(list.readBigUInt64LE(20)) !== 0x24 || signatureAt !== 0x24 + 0x24 * count || list.length !== signatureAt + 256) throw bad();
+  // PKCS#1 v1.5 over SHA-256, stored little-endian.
+  const signature = Buffer.from(list.subarray(signatureAt)).reverse();
+  if (!verifySignature('sha256', list.subarray(0, signatureAt), CHUNKLIST_KEY, signature)) throw bad();
+  return Array.from({ length: count }, (_, i) => {
+    const at = 0x24 + 0x24 * i;
+    return { size: list.readUInt32LE(at), sha256: list.subarray(at + 4, at + 36) };
+  });
+}
+
+/** Check a recovery image chunk by chunk against its chunklist. */
+async function checkChunks(file: string, chunks: { size: number; sha256: Buffer }[], onProgress: (checked: number, total: number) => void): Promise<void> {
+  const total = chunks.reduce((n, c) => n + c.size, 0);
+  const handle = await fsp.open(file, 'r');
+  try {
+    if ((await handle.stat()).size !== total) throw new Error('The macOS download isn’t the size Apple signed.');
+    let at = 0;
+    for (const chunk of chunks) {
+      const data = await readAt(handle, at, chunk.size);
+      if (data.length !== chunk.size || !createHash('sha256').update(data).digest().equals(chunk.sha256)) {
+        throw new Error('The macOS download didn’t match what Apple signed, so it was thrown away.');
+      }
+      at += chunk.size;
+      onProgress(at, total);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+interface RecoveryImage {
+  /** Apple's product number for the release ("140-93589"). */
+  product: string;
+  image: { url: string; token: string };
+  chunklist: { url: string; token: string };
+}
+
+/** Ask Apple's recovery server for the newest recovery image, as a Mac in Internet Recovery does. */
+async function recoveryImage(): Promise<RecoveryImage> {
+  const ses = session.fromPartition('din-vm-downloads');
+  const hello = await ses.fetch(RECOVERY, { headers: { 'user-agent': RECOVERY_AGENT }, signal: AbortSignal.timeout(30_000) });
+  const cookie = /session=[^;]+/.exec(hello.headers.get('set-cookie') ?? '')?.[0];
+  if (!cookie) throw new Error('Apple’s recovery server didn’t answer.');
+  const id = (length: number) => randomBytes(length / 2).toString('hex').toUpperCase();
+  const response = await ses.fetch(`${RECOVERY}InstallationPayload/RecoveryImage`, {
+    method: 'POST',
+    headers: { 'user-agent': RECOVERY_AGENT, cookie, 'content-type': 'text/plain' },
+    // A serial number of zeros, which gets the board's newest release.
+    body: [`cid=${id(16)}`, 'sn=00000000000000000', `bid=${MACOS_BOARD}`, `k=${id(64)}`, `fg=${id(64)}`, 'os=latest'].join('\n'),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Apple’s recovery server answered ${response.status}.`);
+  const fields = new Map((await response.text()).split('\n').map((line) => line.split(': ') as [string, string]));
+  const [product, imageUrl, imageToken, listUrl, listToken] = ['AP', 'AU', 'AT', 'CU', 'CT'].map((k) => fields.get(k)?.trim());
+  if (!product || !imageUrl || !imageToken || !listUrl || !listToken) throw new Error('Apple’s recovery server didn’t offer macOS.');
+  return { product, image: { url: imageUrl, token: imageToken }, chunklist: { url: listUrl, token: listToken } };
+}
+
+const recoveryRequest = (asset: { url: string; token: string }) => ({
+  url: asset.url,
+  headers: { 'user-agent': RECOVERY_AGENT, cookie: `AssetToken=${asset.token}` },
+});
+
+async function resolveMacos(): Promise<Release> {
+  let fresh: RecoveryImage | null = await recoveryImage();
+  const { product } = fresh;
+  const listResponse = await net.fetch(fresh.chunklist.url, { ...recoveryRequest(fresh.chunklist), signal: AbortSignal.timeout(30_000) });
+  if (!listResponse.ok) throw new Error(`Apple’s download server answered ${listResponse.status}.`);
+  const chunks = readChunklist(Buffer.from(await listResponse.arrayBuffer()));
+  return {
+    label: 'macOS',
+    file: {
+      name: `macOS-Recovery-${product}.dmg`,
+      // Its links expire within the hour: a download that's resumed later asks again.
+      url: async () => {
+        const image = fresh ?? (await recoveryImage());
+        fresh = null;
+        if (image.product !== product) throw new Error('Apple has released a newer macOS since this download began. Try again.');
+        return recoveryRequest(image.image);
+      },
+      sha256: null,
+      size: chunks.reduce((n, c) => n + c.size, 0),
+      verify: (file, onProgress) => checkChunks(file, chunks, onProgress),
+    },
+  };
+}
+
 const LINUX = { os: 'linux', diskGiB: 64, minMemoryMiB: 2048, secureBoot: false, tpm: false } as const;
 
 export const INSTALLERS: Partial<Record<VmInstallerId, InstallerInfo>> = {
@@ -284,6 +414,15 @@ export const INSTALLERS: Partial<Record<VmInstallerId, InstallerInfo>> = {
     installedBytes: 20 * GiB,
     hardware: { os: 'windows', diskGiB: 128, minMemoryMiB: 4096, secureBoot: true, tpm: true },
     resolve: resolveWindows,
+  },
+  macos: {
+    name: 'macOS',
+    // Apple offers recovery images only to Macs (and this).
+    manualUrl: '',
+    // The full installer, which Recovery downloads onto the disk, and then the system.
+    installedBytes: 40 * GiB,
+    hardware: { os: 'macos', diskGiB: 128, minMemoryMiB: 4096, secureBoot: false, tpm: false },
+    resolve: resolveMacos,
   },
   ubuntu: { name: 'Ubuntu', manualUrl: 'https://ubuntu.com/download/desktop', installedBytes: 10 * GiB, hardware: LINUX, resolve: resolveUbuntu },
   fedora: { name: 'Fedora', manualUrl: 'https://fedoraproject.org/workstation/download', installedBytes: 7 * GiB, hardware: LINUX, resolve: resolveFedora },
@@ -365,7 +504,7 @@ async function fetchFile(file: InstallerFile, onProgress: DownloadProgress, sign
   // What's already here goes into the hash first.
   let have = await fsp.stat(part).then((s) => s.size, () => 0);
   let hash = createHash('sha256');
-  if (have) {
+  if (have && file.sha256) {
     let hashed = 0;
     await hashFile(part, have, hash, (n) => onProgress('verifying', (hashed += n), have));
   }
@@ -377,7 +516,9 @@ async function fetchFile(file: InstallerFile, onProgress: DownloadProgress, sign
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const response = await net.fetch(await file.url(), { headers: have ? { range: `bytes=${have}-` } : {}, signal });
+      const where = await file.url();
+      const { url, headers } = typeof where === 'string' ? { url: where, headers: {} } : where;
+      const response = await net.fetch(url, { headers: have ? { ...headers, range: `bytes=${have}-` } : headers, signal });
       if (response.status === 416 && have && have === total) break;
       if (!response.ok || !response.body) throw new Error(`The download server answered ${response.status}.`);
       // A server that won't resume sends it all again.
@@ -392,7 +533,7 @@ async function fetchFile(file: InstallerFile, onProgress: DownloadProgress, sign
           const { done: end, value } = await reader.read();
           if (end) break;
           await out.write(value);
-          hash.update(value);
+          if (file.sha256) hash.update(value);
           have += value.byteLength;
           const now = Date.now();
           if (now - last > 250) {
@@ -416,7 +557,14 @@ async function fetchFile(file: InstallerFile, onProgress: DownloadProgress, sign
   }
 
   onProgress('verifying', have, have);
-  if (hash.digest('hex') !== file.sha256) {
+  if (file.verify) {
+    try {
+      await file.verify(part, (checked, of) => onProgress('verifying', checked, of));
+    } catch (error) {
+      await fsp.rm(part, { force: true });
+      throw error;
+    }
+  } else if (hash.digest('hex') !== file.sha256) {
     await fsp.rm(part, { force: true });
     throw new Error('The download didn’t match its published SHA-256, so it was thrown away.');
   }
@@ -555,6 +703,8 @@ export interface InstallBoot {
   /** A folder QEMU shows the machine as a FAT drive with this label. */
   seedDir: string;
   seedLabel: string;
+  /** macOS's recovery image, shown as a disk (QEMU reads Apple's .dmg itself). */
+  disk?: string;
 }
 
 // A throwaway password's hash: the installers want one, and it's removed
@@ -764,4 +914,221 @@ export async function prepareWindows(iso: string, dir: string): Promise<InstallB
   await fsp.mkdir(seedDir, { recursive: true });
   await fsp.writeFile(path.join(seedDir, 'autounattend.xml'), windowsAnswerFile(windowsCulture(iso)));
   return { seedDir, seedLabel: 'WINSETUP' };
+}
+
+// ---------------------------------------------------------------------------
+// macOS: OpenCore, and the script Recovery runs
+// ---------------------------------------------------------------------------
+
+type Plist = string | number | boolean | Buffer | Plist[] | { [key: string]: Plist };
+type PlistDict = { [key: string]: Plist };
+
+const xmlText = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+
+/** An XML property list's value: what OpenCore's sample config needs (no dates or reals). */
+function parsePlist(text: string): Plist {
+  const tokens = text.replace(/<\?xml[^>]*\?>|<!DOCTYPE[^>]*>|<!--[\s\S]*?-->/g, '').matchAll(/<(\/?)(\w+)(\/?)>([^<]*)/g);
+  const next = () => {
+    const t = tokens.next();
+    if (t.done) throw new Error('OpenCore’s sample config ended early.');
+    return { close: t.value[1] === '/', tag: t.value[2], empty: t.value[3] === '/', text: t.value[4] };
+  };
+  const value = (open: ReturnType<typeof next>): Plist => {
+    const leaf = () => {
+      if (open.empty) return '';
+      const text = open.text;
+      next();
+      return xmlText(text);
+    };
+    switch (open.tag) {
+      case 'dict': {
+        const dict: PlistDict = {};
+        if (open.empty) return dict;
+        for (let t = next(); !t.close; t = next()) {
+          const key = xmlText(t.text);
+          next();
+          dict[key] = value(next());
+        }
+        return dict;
+      }
+      case 'array': {
+        const array: Plist[] = [];
+        if (open.empty) return array;
+        for (let t = next(); !t.close; t = next()) array.push(value(t));
+        return array;
+      }
+      case 'string':
+        return leaf();
+      case 'integer':
+        return Number(leaf());
+      case 'data':
+        return Buffer.from(leaf().replace(/\s+/g, ''), 'base64');
+      case 'true':
+      case 'false':
+        return open.tag === 'true';
+      default:
+        throw new Error(`OpenCore’s sample config has a <${open.tag}>.`);
+    }
+  };
+  return value(next());
+}
+
+function writePlist(root: Plist): string {
+  const write = (v: Plist, indent: string): string => {
+    if (typeof v === 'string') return `<string>${xml(v)}</string>`;
+    if (typeof v === 'number') return `<integer>${v}</integer>`;
+    if (typeof v === 'boolean') return v ? '<true/>' : '<false/>';
+    if (Buffer.isBuffer(v)) return `<data>${v.toString('base64')}</data>`;
+    const inner = `${indent}\t`;
+    if (Array.isArray(v)) return v.length ? `<array>\n${v.map((x) => inner + write(x, inner)).join('\n')}\n${indent}</array>` : '<array/>';
+    const entries = Object.entries(v);
+    return entries.length ? `<dict>\n${entries.map(([k, x]) => `${inner}<key>${xml(k)}</key>\n${inner}${write(x, inner)}`).join('\n')}\n${indent}</dict>` : '<dict/>';
+  };
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+${write(root, '')}
+</plist>
+`;
+}
+
+const OPENCORE_DRIVERS = ['OpenRuntime.efi', 'OpenHfsPlus.efi'];
+
+/** A random serial number in Apple's form, for the machine's own SMBIOS. */
+const serial = (length: number) => Array.from(randomBytes(length), (b) => '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ'[b % 34]).join('');
+
+/**
+ * OpenCore's sample config, made for a virtual machine: no kexts or ACPI
+ * tables (QEMU's applesmc is the SMC, and nothing else is missing), Apple
+ * Secure Boot off, the machine's own iMac20,1 identity, and only internal
+ * disks to start from, so the drive OpenCore itself is on isn't offered.
+ */
+function openCoreConfig(sample: string, uuid: string): string {
+  const config = parsePlist(sample) as Record<string, PlistDict>;
+  for (const key of Object.keys(config)) if (key.startsWith('#')) delete config[key];
+  const { ACPI, Booter, DeviceProperties, Kernel, Misc, NVRAM, PlatformInfo, UEFI } = config;
+  const dict = (v: Plist) => v as PlistDict;
+  ACPI.Add = [];
+  ACPI.Patch = [];
+  Object.assign(dict(ACPI.Quirks), { ResetLogoStatus: false });
+  Object.assign(dict(Booter.Quirks), { EnableSafeModeSlide: false, FixupAppleEfiImages: false, ProvideCustomSlide: false, ResizeAppleGpuBars: 0, SetupVirtualMap: false });
+  DeviceProperties.Add = {};
+  Kernel.Add = [];
+  Kernel.Block = [];
+  Kernel.Force = [];
+  Kernel.Patch = [];
+  Object.assign(dict(Kernel.Emulate), { DummyPowerManagement: true });
+  // ThirdPartyDrives: TRIM on QEMU's disk, which says it's an SSD, so what macOS deletes leaves the disk file.
+  Object.assign(dict(Kernel.Quirks), { ProvideCurrentCpuInfo: true, ThirdPartyDrives: true });
+  Object.assign(dict(Misc.Boot), { HideAuxiliary: true, PickerMode: 'Builtin', PollAppleHotKeys: true, ShowPicker: false });
+  Object.assign(dict(Misc.Debug), { Target: 0 });
+  // Locked to APFS and HFS+ on SATA, NVMe and PCI disks.
+  Object.assign(dict(Misc.Security), { AllowSetDefault: true, ScanPolicy: 0x1090303, SecureBootModel: 'Disabled', Vault: 'Optional' });
+  Misc.Entries = [];
+  Misc.Tools = [];
+  Object.assign(dict(dict(NVRAM.Add)['7C436110-AB2A-4BBB-A880-FE41995C9F82']), { 'boot-args': 'keepsyms=1', 'prev-lang:kbd': Buffer.from('en-US:0') });
+  Object.assign(dict(PlatformInfo.Generic), {
+    SystemProductName: MACOS_MODEL,
+    SystemSerialNumber: `C02${serial(9)}`,
+    MLB: `C02${serial(14)}`,
+    SystemUUID: uuid.toUpperCase(),
+    ROM: randomBytes(6),
+  });
+  Object.assign(dict(UEFI.APFS), { MinDate: -1, MinVersion: -1 });
+  UEFI.Drivers = OPENCORE_DRIVERS.map((Path) => ({ Arguments: '', Comment: Path, Enabled: true, LoadEarly: false, Path }));
+  // The screen QEMU's VGA offers (vms.mts), which macOS keeps: it has no driver to change it.
+  Object.assign(dict(UEFI.Output), { Resolution: `${MACOS_SCREEN.width}x${MACOS_SCREEN.height}@32` });
+  // New OVMF's security policy refuses OpenCore's drivers.
+  Object.assign(dict(UEFI.Quirks), { DisableSecurityPolicy: true });
+  return writePlist(config);
+}
+
+interface GithubRelease {
+  tag_name: string;
+  assets: { name: string; browser_download_url: string; digest?: string | null; size: number }[];
+}
+
+/** OpenCore's newest release, checked against the SHA-256 GitHub lists for it. */
+async function openCoreRelease(): Promise<InstallerFile> {
+  const release = JSON.parse(await get('https://api.github.com/repos/acidanthera/OpenCorePkg/releases/latest')) as GithubRelease;
+  const asset = release.assets.find((a) => /^OpenCore-[\d.]+-RELEASE\.zip$/.test(a.name));
+  const sha256 = /^sha256:([0-9a-f]{64})$/.exec(asset?.digest ?? '')?.[1];
+  if (!asset || !sha256) throw new Error('OpenCore’s newest release has nothing Din can check.');
+  return { name: asset.name, url: async () => asset.browser_download_url, sha256, size: asset.size };
+}
+
+const openCoreBoot = (dir: string) => path.join(dir, 'EFI', 'OC', 'OpenCore.efi');
+
+export const openCoreReady = (dir: string) => fs.existsSync(openCoreBoot(dir));
+
+/**
+ * The machine's boot loader in `dir`, a folder QEMU shows it as a FAT drive:
+ * OpenCore's newest release, with a config for this machine (`uuid` is its
+ * SMBIOS UUID, and its serial numbers are made up once, here).
+ */
+export async function prepareOpenCore(dir: string, uuid: string, signal: AbortSignal): Promise<void> {
+  const zip = await download(await openCoreRelease(), () => {}, signal);
+  const wanted = new Map([
+    ['X64/EFI/BOOT/BOOTx64.efi', 'EFI/BOOT/BOOTx64.efi'],
+    ['X64/EFI/OC/OpenCore.efi', 'EFI/OC/OpenCore.efi'],
+    ...OPENCORE_DRIVERS.map((d) => [`X64/EFI/OC/Drivers/${d}`, `EFI/OC/Drivers/${d}`] as [string, string]),
+    ['Docs/Sample.plist', ''],
+  ]);
+  const files = unzipSync(await fsp.readFile(zip), { filter: (f) => wanted.has(f.name) });
+  if (Object.keys(files).length !== wanted.size) throw new Error('OpenCore’s release isn’t laid out as Din expected.');
+  const tmp = `${dir}.tmp`;
+  await fsp.rm(tmp, { recursive: true, force: true });
+  for (const [from, to] of wanted) {
+    if (!to) continue;
+    await fsp.mkdir(path.dirname(path.join(tmp, to)), { recursive: true });
+    await fsp.writeFile(path.join(tmp, to), files[from]);
+  }
+  await fsp.writeFile(path.join(tmp, 'EFI', 'OC', 'config.plist'), openCoreConfig(Buffer.from(files['Docs/Sample.plist']).toString('utf8'), uuid));
+  await fsp.rm(dir, { recursive: true, force: true });
+  await fsp.rename(tmp, dir);
+}
+
+/** What the script in Recovery says on the first serial port. */
+export const MACOS_STARTED = 'DIN-MACOS-STARTED';
+export const MACOS_FAILED = 'DIN-MACOS-FAILED';
+/** The command vms.mts types into Recovery's Terminal. */
+export const MACOS_COMMAND = 'sh /Volumes/DINSETUP/install.sh';
+
+/**
+ * Run in Recovery: erase the machine's disk (the biggest internal one) and
+ * have Apple's installer download and install macOS onto it, agreeing to
+ * Apple's licence as autounattend.xml does Microsoft's. The installer
+ * restarts the machine to go on, and macOS's Setup Assistant greets the
+ * user at the end.
+ */
+function macosInstallScript(): string {
+  return `#!/bin/sh
+# Din's hands-free install of macOS, run in Recovery's Terminal.
+mkdir /tmp/din-install 2>/dev/null || exit 0
+# The serial port can be slow to open: it mustn't hold the install up.
+say() { echo "$*"; ( echo "$*" > /dev/cu.serial1 ) 2>/dev/null & }
+say ${MACOS_STARTED}
+target= best=0
+for d in $(diskutil list internal physical | awk '/^\\/dev\\/disk/ {print $1}'); do
+  size=$(diskutil info -plist "$d" | plutil -extract TotalSize raw -o - -)
+  if [ "$size" -gt "$best" ]; then best=$size target=$d; fi
+done
+[ -n "$target" ] || { say ${MACOS_FAILED} "There’s no disk to install macOS on."; exit 1; }
+diskutil eraseDisk APFS "Macintosh HD" GPT "$target" || { say ${MACOS_FAILED} "The disk couldn’t be erased."; exit 1; }
+for app in /Install\\ macOS*.app; do
+  "$app/Contents/Resources/startosinstall" --agreetolicense --volume "/Volumes/Macintosh HD" --nointeraction 2>&1 | while read -r line; do say "DIN-MACOS-LOG $line"; done
+done
+# Done well, it's restarting the machine by now.
+sleep 120
+say ${MACOS_FAILED} "Apple’s installer stopped."
+`;
+}
+
+/** Get macOS ready to install by itself: its recovery image, and the script in `dir`/seed. */
+export async function prepareMacos(image: string, dir: string): Promise<InstallBoot> {
+  const seedDir = path.join(dir, 'seed');
+  await fsp.rm(dir, { recursive: true, force: true });
+  await fsp.mkdir(seedDir, { recursive: true });
+  await fsp.writeFile(path.join(seedDir, 'install.sh'), macosInstallScript());
+  return { seedDir, seedLabel: 'DINSETUP', disk: image };
 }

@@ -52,7 +52,11 @@ function describe(install: VmInstall, name: string, rate: number): { title: stri
         value: install.totalBytes ? install.receivedBytes / install.totalBytes : null,
       };
     case 'installing':
-      return { title: `Setting up ${install.label || name}…`, detail: 'It restarts by itself when it’s done.', value: install.progress };
+      return {
+        title: `Setting up ${install.label || name}…`,
+        detail: install.installer === 'macos' ? 'Apple’s installer takes over on the screen once it’s ready.' : 'It restarts by itself when it’s done.',
+        value: install.installer === 'macos' ? null : install.progress,
+      };
     case 'failed':
       return { title: `${name} couldn’t be installed`, detail: install.error ?? '', value: null };
   }
@@ -114,7 +118,9 @@ export function InstallCard({
         {failed && (
           <div className="space-y-3 text-sm text-muted-foreground">
             <p>
-              You can download {name} yourself from its website, then choose the disc image here. It still installs by itself.
+              {install.installer === 'macos'
+                ? 'If you have macOS’s recovery image (BaseSystem.dmg), you can choose it here. It still installs by itself.'
+                : `You can download ${name} yourself from its website, then choose the disc image here. It still installs by itself.`}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               {install.manualUrl && (

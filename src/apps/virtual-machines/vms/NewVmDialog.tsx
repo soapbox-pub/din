@@ -5,7 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cleanVmsError, vmDefaults, type NewVm, type VmInfo, type VmInstallerId, type VmOs, type VmsStatus } from '@/lib/vms';
-import { guessName, guessOs, useBridge, usePickDiscImage } from './bridge';
+import { guessName, guessOs, OS_LABELS, useBridge, usePickDiscImage } from './bridge';
 import { CdromField, CpuField, Field, MemoryField, OsBadge, OsPicker, SliderField, SwitchRow } from './fields';
 import { SYSTEMS } from './systems';
 
@@ -49,7 +49,7 @@ export function NewVmDialog({
   const [cdrom, setCdrom] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [nameEdited, setNameEdited] = useState(false);
-  const systemOs: VmOs = system === 'windows' ? 'windows' : system ? 'linux' : 'windows';
+  const systemOs: VmOs = system === 'windows' || system === 'macos' ? system : system ? 'linux' : 'windows';
   const systemName = SYSTEMS.find((s) => s.id === system)?.name ?? null;
   const [vm, setVm] = useState(() => defaultsFor(systemOs, status, system));
   const [advanced, setAdvanced] = useState(false);
@@ -72,7 +72,7 @@ export function NewVmDialog({
   };
 
   const chooseImage = async () => {
-    const file = await pick();
+    const file = await pick(system);
     if (!file) return;
     setCdrom(file.path);
     if (!system) setVm(defaultsFor(guessOs(file.name), status));
@@ -84,7 +84,7 @@ export function NewVmDialog({
     if (!nameEdited && !cdrom) setName('');
   };
 
-  const shownName = name || uniqueName(systemName ?? (vm.os === 'windows' ? 'Windows' : vm.os === 'linux' ? 'Linux' : 'Virtual Machine'));
+  const shownName = name || uniqueName(systemName ?? (vm.os === 'other' ? 'Virtual Machine' : OS_LABELS[vm.os]));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -129,7 +129,9 @@ export function NewVmDialog({
               {systemName ? `Install ${systemName}` : 'New Virtual Machine'}
             </DialogTitle>
             <DialogDescription>
-              {systemName
+              {system === 'macos'
+                ? 'It installs by itself; at the end, macOS’s Setup Assistant asks you a few questions. Everything here can be changed later in Settings.'
+                : systemName
                 ? `It sets itself up without asking anything. Everything here can be changed later in Settings.`
                 : 'Choose the installer’s disc image, and the machine is set up to suit it.'}
             </DialogDescription>

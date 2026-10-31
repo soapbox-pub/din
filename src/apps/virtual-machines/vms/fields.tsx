@@ -30,7 +30,7 @@ export function OsPicker({ value, onChange }: { value: VmOs; onChange: (os: VmOs
       className="w-full"
       aria-label="Operating system"
     >
-      {(['windows', 'linux', 'other'] as const).map((os) => (
+      {(['windows', 'macos', 'linux', 'other'] as const).map((os) => (
         <ToggleGroupItem key={os} value={os} className="flex-1 gap-2">
           <OsBadge os={os} className="size-5 rounded-md" />
           {OS_LABELS[os]}

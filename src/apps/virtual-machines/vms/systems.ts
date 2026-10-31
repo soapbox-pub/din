@@ -15,6 +15,7 @@ type Glyph = (p: { className?: string }) => ReactNode;
 
 export const OS_STYLE: Record<VmOs, { icon: Glyph; className: string }> = {
   windows: { icon: WindowsGlyph, className: 'bg-gradient-to-b from-sky-500 to-blue-600' },
+  macos: { icon: AppleGlyph, className: 'bg-gradient-to-b from-zinc-600 to-zinc-900' },
   linux: { icon: Terminal, className: 'bg-gradient-to-b from-amber-500 to-orange-600' },
   other: { icon: Box, className: 'bg-gradient-to-b from-zinc-400 to-zinc-600' },
 };
@@ -22,7 +23,7 @@ export const OS_STYLE: Record<VmOs, { icon: Glyph; className: string }> = {
 /** The systems Din installs by itself, in their own colours. */
 export const SYSTEM_STYLE: Record<VmInstallerId, { icon: Glyph; className: string }> = {
   windows: OS_STYLE.windows,
-  macos: { icon: AppleGlyph, className: 'bg-gradient-to-b from-zinc-600 to-zinc-900' },
+  macos: OS_STYLE.macos,
   ubuntu: { icon: UbuntuGlyph, className: 'bg-gradient-to-b from-orange-500 to-[#c34113]' },
   fedora: { icon: FedoraGlyph, className: 'bg-gradient-to-b from-[#3c6eb4] to-[#294172]' },
 };

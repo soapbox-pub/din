@@ -46,7 +46,7 @@ a missing or bad argument).
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
 | `sound`, `display`, `brightness`, `keyboard`, `printers`, `power`, `datetime` | Settings' Devices and System sections |
 | `disks` | Removable disks, as Files' sidebar has them: list them, mount, unlock an encrypted one with its passphrase, eject |
-| `vms` | Virtual machines: list them, install Windows, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them |
+| `vms` | Virtual machines: list them, install Windows, macOS, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them |
 | `nostr` | Who's signed in, and the relay and Blossom server lists (published, as Settings does) |
 | `update`, `firmware` | DinOS updates and firmware, as Settings → About |
 

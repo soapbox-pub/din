@@ -6,7 +6,7 @@
  */
 
 /** What's installed on the machine, which decides the hardware it gets. */
-export type VmOs = 'windows' | 'linux' | 'other';
+export type VmOs = 'windows' | 'macos' | 'linux' | 'other';
 
 export type VmFirmware = 'uefi' | 'bios';
 
@@ -200,6 +200,12 @@ export function vmDefaults(os: VmOs): Omit<NewVm, 'name' | 'cdrom'> {
       return {
         os, system: null, memoryMiB: 8192, cpus: 4, diskGiB: 80, firmware: 'uefi', secureBoot: true, tpm: true,
         network: true, forwards: [], audio: true,
+      };
+    case 'macos':
+      // No sound: macOS has no driver for QEMU's sound card.
+      return {
+        os, system: null, memoryMiB: 8192, cpus: 4, diskGiB: 128, firmware: 'uefi', secureBoot: false, tpm: false,
+        network: true, forwards: [], audio: false,
       };
     case 'linux':
       return {
