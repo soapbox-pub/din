@@ -172,6 +172,7 @@ export interface Requests {
   'clipboard.writeFiles': [{ handles: string[]; cut: boolean }, void];
 
   'notifications.show': [{ title: string; options: DinNotificationOptions }, void];
+  'notifications.close': [{ tag: string }, void];
   'notifications.setBadge': [{ count: number | null }, void];
 
   'print.html': [{ title: string; html: string }, void];

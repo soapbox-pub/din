@@ -227,6 +227,11 @@ export function Viewer() {
     }
   }, [boxes, mail, din]);
 
+  // A message on screen is read: its notification has nothing more to say.
+  useEffect(() => {
+    for (const key of selected) din.notifications.close(key);
+  }, [din, selected]);
+
   useEffect(
     () =>
       din.notifications.onAction(({ tag }) => {

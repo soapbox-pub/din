@@ -188,6 +188,14 @@ export function closeNotificationsFrom(origin: string): void {
   for (const n of [...state.notifications]) if (n.source.origin === origin) remove(n.id, 'closed');
 }
 
+/**
+ * Take down the notification with this `replaceKey`, if it's still there:
+ * its sender saw to what it was about (a web page's `Notification.close()`).
+ */
+export function closeNotificationByKey(replaceKey: string): void {
+  for (const n of [...state.notifications]) if (n.replaceKey === replaceKey) remove(n.id, 'closed');
+}
+
 /** Dismiss everything in the list. */
 export function clearNotifications(): void {
   for (const n of [...state.notifications]) remove(n.id, 'dismissed');

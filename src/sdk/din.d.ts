@@ -605,6 +605,12 @@ export interface DinNotificationOptions {
 
 export interface DinNotifications {
   show(title: string, options?: DinNotificationOptions): Promise<void>;
+  /**
+   * Take down the app's notification with this tag, once what it was about
+   * has been seen to (the message read, the conversation looked at), as a
+   * web page's `Notification.close()` does. Nothing happens if it's gone.
+   */
+  close(tag: string): void;
   /** A notification (or one of its buttons, by id; `default` for the body) was clicked. */
   onAction(cb: (e: { tag: string | null; action: string }) => void): Unsubscribe;
   /** A number on the app's Dock tile, or null to clear it. */

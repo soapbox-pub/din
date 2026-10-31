@@ -17,6 +17,7 @@ import {
   useApprovePassword,
   useAssistantReady,
   usePendingRequests,
+  useViewedSession,
   usePreferredModel,
   useReplyPermission,
   useStartConversation,
@@ -37,7 +38,7 @@ import {
   onToggleAssistantPrompt,
 } from '@/lib/assistantPrompt';
 import { cancelDictation, elementTarget, getDictationState, startDictation } from '@/lib/dictation';
-import { closeNotification, notify } from '@/lib/notificationCenter';
+import { closeNotification, closeNotificationByKey, notify } from '@/lib/notificationCenter';
 import { focusedWindow, type WindowState } from '@/hooks/useWindows';
 
 const ASSISTANT_APP_ID = 'assistant';
@@ -56,7 +57,7 @@ const SOURCE = { appId: ASSISTANT_APP_ID, name: 'Assistant' };
  *   Deny on the notification too) - unless the
  *   Assistant is the window in front - and when a conversation started here
  *   finishes while the Assistant isn't open (when it is, it says so itself:
- *   src/apps/assistant).
+ *   src/apps/assistant), which goes once that conversation is in front.
  * - The prompt: Super+A anywhere opens a box to ask the assistant something;
  *   Enter starts a conversation and shows it in the Assistant window.
  */
@@ -81,7 +82,25 @@ export const AssistantHost = memo(function AssistantHost() {
 /** Subscribes to window state (to know what's on screen), so kept apart. */
 function AssistantNotifications() {
   useAssistantNotifications();
+  useDismissWhenViewed();
   return null;
+}
+
+/**
+ * A conversation's "done" notification goes once the window in front shows
+ * that conversation: there's nothing left in it to tell.
+ */
+function useDismissWhenViewed() {
+  const { windows } = useWindowManager();
+  const viewed = useViewedSession(focusedWindow(windows)?.id ?? null);
+  useEffect(() => {
+    if (viewed) closeNotificationByKey(doneKey(viewed));
+  }, [viewed]);
+}
+
+/** The `replaceKey` of a conversation's "done" notification. */
+function doneKey(sessionID: string): string {
+  return `assistant:done:${sessionID}`;
 }
 
 /**
@@ -238,7 +257,7 @@ function useAssistantNotifications() {
                 ? `Stopped with an error: ${error.message}`
                 : 'Stopped with an error'
               : reply || 'Done',
-            replaceKey: `assistant:done:${sessionID}`,
+            replaceKey: doneKey(sessionID),
             onActivate: () => latest.current.show(sessionID),
           }),
         );

@@ -671,6 +671,7 @@ export function installDin(transport: Transport): void {
   });
   const notifications: DinNotifications = {
     show: (title, options = {}) => request('notifications.show', { title, options }),
+    close: (tag) => tell('notifications.close', { tag }),
     onAction: (cb) => notificationActions.on(cb),
     setBadge: (count) => tell('notifications.setBadge', { count }),
   };

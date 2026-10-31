@@ -38,7 +38,7 @@ import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { appForFile } from '@/lib/fileTypes';
 import { getFsBridge } from '@/lib/fs';
-import { notify } from '@/lib/notificationCenter';
+import { closeNotificationByKey, notify } from '@/lib/notificationCenter';
 import { printFile, printHtml } from '@/lib/printing';
 import { areaFor } from '@/lib/monitors';
 import { isDarkThemeColor } from '@/lib/themeColor';
@@ -926,6 +926,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
             push({ type: 'notificationAction', tag: options.tag ?? null, action });
           },
         });
+      },
+      // Only its own: the key is the one show() gave it.
+      'notifications.close': ({ tag }) => {
+        if (typeof tag === 'string') closeNotificationByKey(`${appId}:${tag}`);
       },
       'notifications.setBadge': () => {
         need('notifications');

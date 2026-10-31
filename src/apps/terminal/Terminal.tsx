@@ -1458,6 +1458,11 @@ const TerminalSession = memo(function TerminalSession({
     };
   });
 
+  // Seeing the pane is seeing its command finish: that notification goes.
+  useEffect(() => {
+    if (active && isTop) din.notifications.close(paneId);
+  }, [din, paneId, active, isTop]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!bridge || !container) return;

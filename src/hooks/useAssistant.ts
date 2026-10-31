@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   AssistantError,
@@ -816,6 +816,7 @@ export function followDinSession(sessionID: string): void {
 
 /** The conversation each window shows, by window id (the desktop's side). */
 const viewedSessions = new Map<string, string>();
+const viewedListeners = new Set<() => void>();
 
 /** Whether a window shows this conversation now. */
 export function isViewedIn(windowId: string, sessionID: string): boolean {
@@ -824,8 +825,21 @@ export function isViewedIn(windowId: string, sessionID: string): boolean {
 
 /** The desktop hears what an app window shows (DinAppFrame). */
 export function setViewedSession(windowId: string, sessionID: string | null): void {
+  if ((viewedSessions.get(windowId) ?? null) === sessionID) return;
   if (sessionID) viewedSessions.set(windowId, sessionID);
   else viewedSessions.delete(windowId);
+  for (const listener of viewedListeners) listener();
+}
+
+/** The conversation a window shows, re-rendering as it changes (the desktop's side). */
+export function useViewedSession(windowId: string | null): string | null {
+  return useSyncExternalStore(
+    (listener) => {
+      viewedListeners.add(listener);
+      return () => viewedListeners.delete(listener);
+    },
+    () => (windowId ? (viewedSessions.get(windowId) ?? null) : null),
+  );
 }
 
 /** Called by the window showing a conversation, as it shows and stops showing it. */

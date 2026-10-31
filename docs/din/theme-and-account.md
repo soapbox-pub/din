@@ -78,10 +78,15 @@ await din.notifications.show('Export finished', {
   actions: [{ id: 'open', label: 'Open' }],
 });
 din.notifications.onAction(({ tag, action }) => { if (action === 'open') openExport(); });
+din.notifications.close('export');                        // seen to: take it down
 
 din.notifications.show('Saved', { transient: true });   // a toast, not kept in the center
 din.notifications.setBadge(unread);                       // a number on the Dock tile
 ```
 
 Notifications carry the app's name and icon, respect Do Not Disturb, and
-clicking one focuses the app's window before `onAction`.
+clicking one focuses the app's window before `onAction`. An app takes
+down a notification itself, by its tag, once the user has seen to what it
+was about some other way (opened the message, looked at the conversation),
+so the notification center and the Dock badge only count what's still
+news.
