@@ -703,6 +703,12 @@ export interface DinAssistant {
   follow(sessionID: string): void;
   /** The conversation this window shows now, or null. */
   setViewing(sessionID: string | null): void;
+  /**
+   * The conversations with unread notifications in the notification center
+   * (the ones behind the app's Dock badge), so the app can mark them.
+   */
+  readonly unread: readonly string[];
+  onUnreadChange(cb: (sessionIDs: readonly string[]) => void): Unsubscribe;
 }
 
 // ---------------------------------------------------------------------------

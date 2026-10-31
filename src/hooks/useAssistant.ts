@@ -850,6 +850,17 @@ export function useMarkViewedSession(sessionID: string): void {
   }, [sessionID]);
 }
 
+const NO_SESSIONS: readonly string[] = [];
+
+/** The conversations with unread notifications (an app's side: din.assistant). */
+export function useUnreadSessions(): ReadonlySet<string> {
+  const unread = useSyncExternalStore(
+    (listener) => window.din?.assistant.onUnreadChange(listener) ?? (() => {}),
+    () => window.din?.assistant.unread ?? NO_SESSIONS,
+  );
+  return useMemo(() => new Set(unread), [unread]);
+}
+
 // ---------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------

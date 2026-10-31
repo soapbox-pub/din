@@ -78,6 +78,8 @@ export interface Hello {
   dictation: { available: boolean; status: DictationStatus; here: boolean };
   /** Din's assistant settings, for apps with the assistant permission. */
   assistant: AssistantSettings | null;
+  /** The conversations with unread notifications, for apps with the assistant permission. */
+  assistantUnread: string[];
   /** For apps with fs: the URL base to load files from by path (din-file://<token>). */
   fsUrlBase: string | null;
   printAvailable: boolean;
@@ -226,7 +228,8 @@ export type Push =
   | { type: 'dictation'; status: DictationStatus; here: boolean }
   | { type: 'windowMessage'; from: string; data: unknown }
   | { type: 'tabHover'; at: Point | null }
-  | { type: 'assistantSettings'; settings: AssistantSettings };
+  | { type: 'assistantSettings'; settings: AssistantSettings }
+  | { type: 'assistantUnread'; sessionIDs: string[] };
 
 /** What a page's Notification tells the desktop to show. */
 export interface NotificationData {

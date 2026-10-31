@@ -109,10 +109,13 @@ export function SessionList({
   onFork,
   onDeleted,
   searchRef,
+  unread,
   className,
   style,
 }: {
   selected: string | null;
+  /** Conversations with unread notifications. */
+  unread?: ReadonlySet<string>;
   onSelect: (id: string) => void;
   onOpenInNewTab: (id: string) => void;
   /** Start a new conversation, in `directory` when given. */
@@ -223,6 +226,7 @@ export function SessionList({
               selected={session.id === selected}
               running={busy.has(session.id)}
               waiting={waitingNow.has(session.id)}
+              unread={unread?.has(session.id) ?? false}
               home={home}
               dragged={session.id === dragging}
               draggable
@@ -511,6 +515,7 @@ function SessionRow({
   selected,
   running,
   waiting,
+  unread,
   home,
   dragged,
   onSelect,
@@ -524,6 +529,8 @@ function SessionRow({
   selected: boolean;
   running: boolean;
   waiting: boolean;
+  /** It has unread notifications. */
+  unread: boolean;
   home?: string;
   /** It's being dragged to another project. */
   dragged?: boolean;
@@ -543,6 +550,7 @@ function SessionRow({
         dragged && 'opacity-50',
       )}
     >
+      {unread && <span className="size-2 shrink-0 rounded-full bg-red-600" aria-label="Unread notification" />}
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{sessionTitle(session)}</span>
       {tag && <span className="max-w-20 shrink-0 truncate text-xs text-muted-foreground">{tag}</span>}
       {worktree && (

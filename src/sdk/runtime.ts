@@ -860,11 +860,22 @@ export function installDin(transport: Transport): void {
     assistantSettings = p.settings;
     assistantChanges.emit(p.settings);
   });
+  let assistantUnread: readonly string[] = [];
+  const assistantUnreadChanges = new Emitter<readonly string[]>();
+  pushes.on((p) => {
+    if (p.type !== 'assistantUnread') return;
+    assistantUnread = p.sessionIDs;
+    assistantUnreadChanges.emit(p.sessionIDs);
+  });
   const assistant: DinAssistant = {
     get settings() {
       return assistantSettings;
     },
     onSettingsChange: (cb) => assistantChanges.on(cb),
+    get unread() {
+      return assistantUnread;
+    },
+    onUnreadChange: (cb) => assistantUnreadChanges.on(cb),
     setSettings: (patch) => {
       need('assistant');
       tell('assistant.setSettings', patch);
@@ -942,6 +953,7 @@ export function installDin(transport: Transport): void {
     dictationStatus = hello.dictation.status;
     dictationHere = hello.dictation.here;
     assistantSettings = hello.assistant ?? NO_ASSISTANT;
+    assistantUnread = hello.assistantUnread;
     if (permissions.has('nostr') && !('nostr' in window)) {
       Object.defineProperty(window, 'nostr', { value: nostr, configurable: false });
     }

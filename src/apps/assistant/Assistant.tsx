@@ -72,6 +72,7 @@ import {
   useSwitchAgent,
   useSwitchModel,
   useUndoMessage,
+  useUnreadSessions,
 } from '@/hooks/useAssistant';
 import {
   backgroundOnly,
@@ -176,6 +177,8 @@ interface TabInfo {
   state: 'new' | 'idle' | 'running' | 'waiting';
   /** The folder its conversation works in, for the project's favicon. */
   directory?: string;
+  /** Its conversation has unread notifications. */
+  unread?: boolean;
 }
 
 /** `tab`, selected, beside the selected one, or in its place when that one is blank. */
@@ -333,6 +336,7 @@ function AssistantWindow() {
   // Busy while it works, or a command or subagent it started still runs.
   const work = useAssistantWork(sessions.flatMap((s) => (s.session ? [s.session.location.directory] : [])));
   const pending = usePendingRequests();
+  const unread = useUnreadSessions();
   const waiting = new Set(
     [...pending.permissions, ...pending.forms, ...pending.passwords].map((request) => request.sessionID),
   );
@@ -346,6 +350,7 @@ function AssistantWindow() {
         title: session ? sessionTitle(session) : 'Loading…',
         state: waiting.has(tab.sessionID) ? 'waiting' : work.busy.has(tab.sessionID) ? 'running' : 'idle',
         directory: session?.location.directory,
+        unread: unread.has(tab.sessionID) || undefined,
       };
     }),
   );
@@ -518,6 +523,7 @@ function AssistantWindow() {
         onNew={startNew}
         onFork={forkSession}
         onDeleted={(id) => removeSessions(new Set([id]))}
+        unread={unread}
         searchRef={searchRef}
         style={{ width: listWidth }}
         className={cn(
@@ -560,7 +566,7 @@ function AssistantWindow() {
             tabs={stripTabs.map((t) => ({
               id: t.id,
               title: t.title,
-              icon: <TabIcon state={t.state} favicon={t.directory && icons.get(t.directory)} />,
+              icon: <TabIcon state={t.state} favicon={t.directory && icons.get(t.directory)} unread={t.unread} />,
             }))}
             activeId={activeId}
             label="Assistant tabs"
@@ -641,9 +647,23 @@ function AssistantWindow() {
 
 /**
  * A tab's icon: whether its conversation is working or waiting on the user,
- * else its project's favicon, if it has one.
+ * else its project's favicon, if it has one; with a dot on its corner while
+ * the conversation has unread notifications.
  */
-function TabIcon({ state, favicon }: { state: TabInfo['state']; favicon?: string }) {
+function TabIcon({ state, favicon, unread }: { state: TabInfo['state']; favicon?: string; unread?: boolean }) {
+  if (!unread) return <TabStateIcon state={state} favicon={favicon} />;
+  return (
+    <span className="relative grid size-3.5 place-items-center">
+      <TabStateIcon state={state} favicon={favicon} />
+      <span
+        className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-red-600 ring-2 ring-background"
+        aria-label="Unread notification"
+      />
+    </span>
+  );
+}
+
+function TabStateIcon({ state, favicon }: { state: TabInfo['state']; favicon?: string }) {
   switch (state) {
     case 'waiting':
       return (

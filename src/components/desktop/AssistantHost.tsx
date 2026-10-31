@@ -38,10 +38,10 @@ import {
   onToggleAssistantPrompt,
 } from '@/lib/assistantPrompt';
 import { cancelDictation, elementTarget, getDictationState, startDictation } from '@/lib/dictation';
+import { ASSISTANT_APP_ID, assistantNotificationKey } from '@/lib/assistantNotifications';
 import { closeNotification, closeNotificationByKey, notify } from '@/lib/notificationCenter';
 import { focusedWindow, type WindowState } from '@/hooks/useWindows';
 
-const ASSISTANT_APP_ID = 'assistant';
 const SOURCE = { appId: ASSISTANT_APP_ID, name: 'Assistant' };
 
 /**
@@ -100,7 +100,7 @@ function useDismissWhenViewed() {
 
 /** The `replaceKey` of a conversation's "done" notification. */
 function doneKey(sessionID: string): string {
-  return `assistant:done:${sessionID}`;
+  return assistantNotificationKey(sessionID, 'done');
 }
 
 /**
@@ -170,7 +170,7 @@ function useAssistantNotifications() {
           // itself is the first field's.
           body: form.fields[0]?.description || form.fields[0]?.title || form.title,
           urgency: 'critical',
-          replaceKey: `assistant:form:${form.id}`,
+          replaceKey: assistantNotificationKey(form.sessionID, `form:${form.id}`),
           onActivate: () => latest.current.show(form.sessionID),
         }),
       );
@@ -187,7 +187,7 @@ function useAssistantNotifications() {
                 { id: 'once', label: 'Allow' },
                 { id: 'reject', label: 'Deny' },
               ],
-              replaceKey: `assistant:password:${request.requestId}`,
+              replaceKey: assistantNotificationKey(request.sessionID, `password:${request.requestId}`),
               onScreenOnly: true,
               onActivate: (action) => {
                 if (action === 'once' || action === 'reject') latest.current.approve({ request, decision: action });
@@ -199,7 +199,7 @@ function useAssistantNotifications() {
               title: request.action ? `The assistant needs your password to ${request.action}` : 'The assistant needs your password',
               body: request.detail ?? request.command,
               urgency: 'critical',
-              replaceKey: `assistant:password:${request.requestId}`,
+              replaceKey: assistantNotificationKey(request.sessionID, `password:${request.requestId}`),
               onActivate: () => latest.current.showPassword(request.sessionID),
             }),
       );
@@ -221,7 +221,7 @@ function useAssistantNotifications() {
           { id: 'once', label: 'Allow' },
           { id: 'reject', label: 'Deny' },
         ],
-        replaceKey: `assistant:permission:${request.id}`,
+        replaceKey: assistantNotificationKey(request.sessionID, `permission:${request.id}`),
         onActivate: (action) => {
           if (action === 'once' || action === 'reject') latest.current.reply({ request, decision: action });
           else latest.current.show(request.sessionID);

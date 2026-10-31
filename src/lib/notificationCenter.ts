@@ -231,6 +231,11 @@ export function getNotificationState(): Readonly<State> {
   return state;
 }
 
+/** Hear every change to the notification center, outside React. */
+export function subscribeNotifications(listener: () => void): () => void {
+  return subscribe(listener);
+}
+
 /** The notification center's state, re-rendering on every change. */
 export function useNotificationCenter(): State {
   return useSyncExternalStore(subscribe, getState);

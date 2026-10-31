@@ -38,7 +38,8 @@ import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { appForFile } from '@/lib/fileTypes';
 import { getFsBridge } from '@/lib/fs';
-import { closeNotification, notify } from '@/lib/notificationCenter';
+import { unreadAssistantSessions } from '@/lib/assistantNotifications';
+import { closeNotification, getNotificationState, notify, subscribeNotifications } from '@/lib/notificationCenter';
 import { setWindowBadge } from '@/lib/appBadges';
 import { printFile, printHtml } from '@/lib/printing';
 import { areaFor } from '@/lib/monitors';
@@ -1122,6 +1123,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       printAvailable: getPrintingBridge() !== undefined,
       scopedFs,
       assistant: permissions.includes('assistant') ? assistantSettings() : null,
+      assistantUnread: permissions.includes('assistant') ? unreadAssistantSessions(getNotificationState().notifications) : [],
     };
     if (session.current === s) port.postMessage(hello);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1221,6 +1223,21 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     push({ type: 'assistantSettings', settings: assistantSettings() });
     return subscribeStoredModel(() => push({ type: 'assistantSettings', settings: assistantSettings() }));
   }, [assistantJson, push]);
+
+  // The conversations with unread notifications, for the Assistant to mark.
+  const hasAssistant = permissions.includes('assistant');
+  useEffect(() => {
+    if (!hasAssistant) return;
+    let last = '';
+    const update = () => {
+      const sessionIDs = unreadAssistantSessions(getNotificationState().notifications);
+      if (sessionIDs.join(' ') === last) return;
+      last = sessionIDs.join(' ');
+      push({ type: 'assistantUnread', sessionIDs });
+    };
+    update();
+    return subscribeNotifications(update);
+  }, [hasAssistant, push]);
 
   // Reachable by the app's other windows (din.app.postToWindow, tab drags).
   useEffect(() => {
