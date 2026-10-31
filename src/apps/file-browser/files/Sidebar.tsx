@@ -4,6 +4,7 @@ import {
   HardDrive,
   Home,
   LoaderCircle,
+  Lock,
   MemoryStick,
   Star,
   Trash2,
@@ -24,6 +25,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { UnlockVolumeDialog } from '@/shared/UnlockVolumeDialog';
 import { USER_DIRS } from '@/shared/userDirs';
 import { canDropInto, draggedFiles, dropCopies, takeDrop } from './drag';
 
@@ -33,7 +35,7 @@ interface Place {
   icon: LucideIcon;
   bookmark?: boolean;
   trash?: boolean;
-  /** A removable disk; its path is empty until it's mounted. */
+  /** A removable disk; its path is empty until it's mounted (and unlocked). */
   volume?: Volume;
 }
 
@@ -82,6 +84,8 @@ export function Sidebar({
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   // Whether a drag that could add a favorite is over the sidebar.
   const [offeringFavorite, setOfferingFavorite] = useState(false);
+  /** A locked disk being unlocked, and where to open it once it is. */
+  const [unlocking, setUnlocking] = useState<{ volume: Volume; open: (path: string) => void } | null>(null);
 
   useEffect(() => {
     const clear = () => {
@@ -136,7 +140,7 @@ export function Sidebar({
   const failed = (title: string, error: unknown) =>
     new Notification(title, { body: cleanVolumesError(error) });
 
-  /** Open a place; a disk that isn't mounted is mounted first. */
+  /** Open a place; a disk that isn't mounted is mounted first, and unlocked before that. */
   const openPlace = (place: Place, open: (path: string) => void) => {
     const volume = place.volume;
     if (!volume || volume.mountPoint) {
@@ -144,6 +148,10 @@ export function Sidebar({
       return;
     }
     if (volume.busy) return;
+    if (volume.locked) {
+      setUnlocking({ volume, open });
+      return;
+    }
     volumeActions.mount.mutate(volume.id, {
       onSuccess: (mountPoint) => open(mountPoint),
       onError: (error) => failed(`Can’t open “${volume.name}”`, error),
@@ -254,6 +262,15 @@ export function Sidebar({
       </Section>
 
       <Section label="Devices">{devices.map(renderPlace)}</Section>
+
+      <UnlockVolumeDialog
+        volume={unlocking?.volume ?? null}
+        onClose={() => setUnlocking(null)}
+        onUnlocked={(mountPoint) => {
+          unlocking?.open(mountPoint);
+          setUnlocking(null);
+        }}
+      />
     </nav>
   );
 }
@@ -336,11 +353,17 @@ function SidebarItem({
           >
             <place.icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
             <span className="truncate">{place.name}</span>
+            {volume?.locked && (
+              <>
+                <Lock className="ml-auto size-3 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="sr-only">(locked)</span>
+              </>
+            )}
           </button>
           {volume && (busy ? (
             <span className="flex size-6 shrink-0 items-center justify-center" role="status">
               <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-hidden />
-              <span className="sr-only">{busy === 'ejecting' ? `Ejecting ${place.name}` : `Opening ${place.name}`}</span>
+              <span className="sr-only">{busy === 'ejecting' ? `Ejecting ${place.name}` : busy === 'unlocking' ? `Unlocking ${place.name}` : `Opening ${place.name}`}</span>
             </span>
           ) : (
             <button
@@ -360,7 +383,7 @@ function SidebarItem({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={() => onNavigate(place.path)}>Open</ContextMenuItem>
+        <ContextMenuItem onSelect={() => onNavigate(place.path)}>{volume?.locked ? 'Unlock…' : 'Open'}</ContextMenuItem>
         <ContextMenuItem onSelect={() => onOpenInNewTab(place.path)}>Open in New Tab</ContextMenuItem>
         <ContextMenuItem onSelect={() => onOpenInNewWindow(place.path)}>Open in New Window</ContextMenuItem>
         <ContextMenuSeparator />

@@ -976,7 +976,7 @@ export function installDin(transport: Transport): void {
       if (permissions.has('volumes')) {
         await sys.ready('volumes');
         const v: Record<string, unknown> = {};
-        for (const m of ['state', 'mount', 'eject']) v[m] = (...args: unknown[]) => sys.call('volumes', `volumes:${m}`, args);
+        for (const m of ['state', 'mount', 'unlock', 'eject']) v[m] = (...args: unknown[]) => sys.call('volumes', `volumes:${m}`, args);
         v.onChanged = (cb: (state: unknown) => void) => sys.on('volumes', 'volumes:changed', (s) => cb(s));
         v.onEvent = (cb: (event: unknown) => void) => sys.on('volumes', 'volumes:event', (e) => cb(e));
         system.volumes = v as unknown as VolumesBridge;

@@ -1539,6 +1539,13 @@ expose('volumes', {
   mount: (id) => ipcRenderer.invoke('volumes:mount', id),
 
   /**
+   * Unlock an encrypted volume and mount what's in it; resolves to where.
+   * @param {string} id
+   * @param {string} passphrase
+   */
+  unlock: (id, passphrase) => ipcRenderer.invoke('volumes:unlock', id, passphrase),
+
+  /**
    * Unmount everything on a volume's disk and power it off.
    * @param {string} id
    */
@@ -1559,8 +1566,8 @@ expose('volumes', {
   },
 
   /**
-   * Subscribe to disks becoming ready, safe to remove, pulled out, or
-   * unreadable. Returns an unsubscribe fn.
+   * Subscribe to disks becoming ready, locked, safe to remove, pulled out,
+   * or unreadable. Returns an unsubscribe fn.
    * @param {(event: unknown) => void} callback
    */
   onEvent: (callback) => {

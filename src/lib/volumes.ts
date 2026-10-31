@@ -3,12 +3,12 @@
  * (`window.dinos.volumes`, see electron/preload.cjs + electron/volumes.mts).
  *
  * Backed by UDisks2 over the system bus: removable disks are mounted as
- * they're plugged in, and the main process pushes the whole state whenever
+ * they're plugged in (encrypted ones once they're unlocked), and the main process pushes the whole state whenever
  * it changes. Absent in a plain browser; callers feature-detect via
  * `getVolumesBridge()`.
  */
 
-export type VolumeBusy = 'mounting' | 'ejecting';
+export type VolumeBusy = 'mounting' | 'unlocking' | 'ejecting';
 
 export interface Volume {
   /** udisks' object path for the filesystem, which the actions take. */
@@ -19,8 +19,10 @@ export interface Volume {
   /** The device node, e.g. /dev/sdb1. */
   device: string;
   sizeBytes: number;
-  /** The filesystem type, e.g. vfat, exfat, ntfs, ext4. */
+  /** The filesystem type, e.g. vfat, exfat, ntfs, ext4; crypto_LUKS when locked. */
   fsType: string;
+  /** Encrypted and not unlocked yet: unlock it with its passphrase to open it. */
+  locked: boolean;
   readOnly: boolean;
   /** "usb", "sdio" (an SD card), or "" when udisks doesn't say. */
   bus: string;
@@ -35,6 +37,7 @@ export interface VolumesState {
 
 export type VolumeEvent =
   | { type: 'mounted'; name: string; mountPoint: string }
+  | { type: 'locked'; id: string; name: string }
   | { type: 'ejected'; name: string }
   | { type: 'pulled'; name: string }
   | { type: 'unreadable'; name: string; error: string };
@@ -43,6 +46,8 @@ export interface VolumesBridge {
   state(): Promise<VolumesState>;
   /** Mount a volume; resolves to where. */
   mount(id: string): Promise<string>;
+  /** Unlock an encrypted volume and mount what's in it; resolves to where. */
+  unlock(id: string, passphrase: string): Promise<string>;
   /** Unmount everything on a volume's disk and power it off. */
   eject(id: string): Promise<void>;
   onChanged(callback: (state: VolumesState) => void): () => void;

@@ -756,7 +756,7 @@ export type Permission =
   | 'assistant'
   /** InDesign conversion (`din.system.indd`). Publisher. */
   | 'indd'
-  /** Removable disks: list, mount, eject (`din.system.volumes`). Files. */
+  /** Removable disks: list, mount, unlock, eject (`din.system.volumes`). Files. */
   | 'volumes'
   /** IMAP and SMTP accounts: read, file and send mail (`din.system.mail`). Mail. */
   | 'mail'

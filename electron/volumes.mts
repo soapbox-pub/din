@@ -17,10 +17,17 @@
 // partition, or its drive holds a filesystem the system itself mounted (the
 // stick a live boot runs from). udisks mounts it under /run/media/<user>,
 // owned by Din's user; os/configuration.nix lets that user do so without a
-// polkit prompt. Encrypted volumes are left alone.
+// polkit prompt.
 //
-// Ejecting unmounts everything on the drive, then ejects the media or powers
-// the drive off, whichever it can, so the light goes out before it's pulled.
+// Encrypted volumes (LUKS) on removable media are listed locked, and their
+// decision is to tell the user (`locked`), who unlocks one with its
+// passphrase from the notification or Files. Unlocking mounts what's inside;
+// that filesystem then stands in for its container, which udisks keeps as
+// its CryptoBackingDevice, and takes its drive and hints from it.
+//
+// Ejecting unmounts everything on the drive, locks what was unlocked, then
+// ejects the media or powers the drive off, whichever it can, so the light
+// goes out before it's pulled.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -36,6 +43,7 @@ const BLOCK = 'org.freedesktop.UDisks2.Block';
 const FILESYSTEM = 'org.freedesktop.UDisks2.Filesystem';
 const PARTITION = 'org.freedesktop.UDisks2.Partition';
 const DRIVE = 'org.freedesktop.UDisks2.Drive';
+const ENCRYPTED = 'org.freedesktop.UDisks2.Encrypted';
 
 const SYSTEM_BUS = process.env.DBUS_SYSTEM_BUS_ADDRESS || 'unix:path=/run/dbus/system_bus_socket';
 
@@ -44,6 +52,10 @@ const ESP_TYPES = new Set(['c12a7328-f81f-11d2-ba4b-00a0c93ec93b', '0xef']);
 
 /** Mounting may check the filesystem first; ejecting flushes writes. */
 const MOUNT_TIMEOUT_MS = 60_000;
+/** Unlocking derives the key from the passphrase, slowly on purpose. */
+const UNLOCK_TIMEOUT_MS = 120_000;
+/** How long an unlocked volume's filesystem may take to show up. */
+const CLEARTEXT_WAIT_MS = 10_000;
 const EJECT_TIMEOUT_MS = 120_000;
 /**
  * A mount that went away this long before its disk did went with it:
@@ -52,7 +64,7 @@ const EJECT_TIMEOUT_MS = 120_000;
 const PULLED_WINDOW_MS = 3000;
 const EMIT_DELAY_MS = 100;
 
-export type VolumeBusy = 'mounting' | 'ejecting';
+export type VolumeBusy = 'mounting' | 'unlocking' | 'ejecting';
 
 export interface Volume {
   /** udisks' object path for the filesystem, which the actions take. */
@@ -63,8 +75,10 @@ export interface Volume {
   /** The device node, e.g. /dev/sdb1. */
   device: string;
   sizeBytes: number;
-  /** The filesystem type, e.g. vfat, exfat, ntfs, ext4. */
+  /** The filesystem type, e.g. vfat, exfat, ntfs, ext4; crypto_LUKS when locked. */
   fsType: string;
+  /** Encrypted and not unlocked yet: unlock it with its passphrase to open it. */
+  locked: boolean;
   readOnly: boolean;
   /** "usb", "sdio" (an SD card), or "" when udisks doesn't say. */
   bus: string;
@@ -79,6 +93,7 @@ export interface VolumesState {
 
 export type VolumeEvent =
   | { type: 'mounted'; name: string; mountPoint: string }
+  | { type: 'locked'; id: string; name: string }
   | { type: 'ejected'; name: string }
   | { type: 'pulled'; name: string }
   | { type: 'unreadable'; name: string; error: string };
@@ -94,6 +109,8 @@ const objects = new Map<string, Interfaces>();
 /** Filesystems that have had their mount-or-not decision. */
 const decided = new Set<string>();
 const busy = new Map<string, VolumeBusy>();
+/** Encrypted volumes being unlocked, whose filesystems unlock() mounts itself. */
+const unlocking = new Set<string>();
 /** Drives being ejected, whose filesystems are meant to go away. */
 const ejecting = new Set<string>();
 /** When each filesystem's mount went away without Din unmounting it. */
@@ -139,25 +156,53 @@ function volumeName(block: Map<string, unknown>): string {
   const label = String(block.get('IdLabel') ?? '').trim() || String(block.get('HintName') ?? '').trim();
   if (label) return label;
   const size = Number(block.get('Size') ?? 0);
-  return size > 0 ? `${formatSize(size)} Volume` : 'Untitled';
+  const kind = block.get('IdUsage') === 'crypto' ? 'Encrypted Volume' : 'Volume';
+  return size > 0 ? `${formatSize(size)} ${kind}` : 'Untitled';
+}
+
+/** The block a path is on the disk: an unlocked filesystem's encrypted container. */
+function backingOf(path: string): string {
+  const backing = objects.get(path)?.get(BLOCK)?.get('CryptoBackingDevice');
+  return typeof backing === 'string' && backing !== '/' && objects.has(backing) ? backing : path;
 }
 
 function driveOf(path: string): string | null {
-  const drive = objects.get(path)?.get(BLOCK)?.get('Drive');
+  const drive = objects.get(backingOf(path))?.get(BLOCK)?.get('Drive');
   return typeof drive === 'string' && drive !== '/' ? drive : null;
 }
 
-/** Whether a filesystem is removable media the user would plug in and out. */
-function isRemovable(path: string): boolean {
-  const ifaces = objects.get(path);
+/** Whether a block is on removable media the user would plug in and out. */
+function onRemovableMedia(path: string): boolean {
+  const ifaces = objects.get(backingOf(path));
   const block = ifaces?.get(BLOCK);
-  if (!block || !ifaces?.has(FILESYSTEM)) return false;
-  if (block.get('IdUsage') !== 'filesystem') return false;
+  if (!block) return false;
   if (block.get('HintIgnore') === true || block.get('HintSystem') === true || block.get('HintAuto') !== true) {
     return false;
   }
-  const type = String(ifaces.get(PARTITION)?.get('Type') ?? '').toLowerCase();
+  const type = String(ifaces?.get(PARTITION)?.get('Type') ?? '').toLowerCase();
   return !ESP_TYPES.has(type);
+}
+
+/** Whether a path is a filesystem on removable media. */
+function isRemovable(path: string): boolean {
+  const ifaces = objects.get(path);
+  if (!ifaces?.has(FILESYSTEM) || ifaces.get(BLOCK)?.get('IdUsage') !== 'filesystem') return false;
+  return onRemovableMedia(path);
+}
+
+/** The block unlocked from an encrypted one, or null while it's locked. */
+function cleartextOf(path: string): string | null {
+  for (const [other, ifaces] of objects) {
+    if (ifaces.get(BLOCK)?.get('CryptoBackingDevice') === path) return other;
+  }
+  return null;
+}
+
+/** Whether a path is a locked encrypted volume on removable media. */
+function isLocked(path: string): boolean {
+  const ifaces = objects.get(path);
+  if (!ifaces?.has(ENCRYPTED) || ifaces.get(BLOCK)?.get('IdUsage') !== 'crypto') return false;
+  return onRemovableMedia(path) && cleartextOf(path) === null;
 }
 
 /** Whether something on a drive is mounted by the system, not for the user. */
@@ -174,7 +219,8 @@ function holdsSystemMount(drive: string): boolean {
 function state(): VolumesState {
   const volumes: Volume[] = [];
   for (const [path, ifaces] of objects) {
-    if (!isRemovable(path)) continue;
+    const locked = isLocked(path);
+    if (!locked && !isRemovable(path)) continue;
     const block = ifaces.get(BLOCK)!;
     const drive = driveOf(path);
     if (drive && holdsSystemMount(drive)) continue;
@@ -185,6 +231,7 @@ function state(): VolumesState {
       device: bytesToString(block.get('PreferredDevice')) || bytesToString(block.get('Device')),
       sizeBytes: Number(block.get('Size') ?? 0),
       fsType: String(block.get('IdType') ?? ''),
+      locked,
       readOnly: block.get('ReadOnly') === true,
       bus: String((drive && objects.get(drive)?.get(DRIVE)?.get('ConnectionBus')) ?? ''),
       busy: busy.get(path) ?? (drive && ejecting.has(drive) ? 'ejecting' : null),
@@ -215,13 +262,20 @@ function announce(event: VolumeEvent): void {
 // Mounting what's plugged in
 // ---------------------------------------------------------------------------
 
-/** Give every new removable filesystem its one decision. */
+/** Give every new removable filesystem, or locked volume, its one decision. */
 function autoMount(): void {
   for (const path of objects.keys()) {
-    if (decided.has(path) || !isRemovable(path)) continue;
+    if (decided.has(path)) continue;
+    const locked = isLocked(path);
+    if (!locked && !isRemovable(path)) continue;
     decided.add(path);
     const drive = driveOf(path);
-    if (isInstalling() || mountPoints(path).length > 0 || (drive && holdsSystemMount(drive))) continue;
+    if (isInstalling() || (drive && holdsSystemMount(drive))) continue;
+    if (locked) {
+      announce({ type: 'locked', id: path, name: names.get(path) ?? 'Untitled' });
+      continue;
+    }
+    if (mountPoints(path).length > 0 || unlocking.has(backingOf(path))) continue;
     void mount(path).then(
       (mountPoint) => announce({ type: 'mounted', name: names.get(path) ?? 'Untitled', mountPoint }),
       (error) => {
@@ -325,7 +379,7 @@ async function load(b: DBusConnection): Promise<void> {
       const before = mountPoints(path);
       const drive = driveOf(path);
       for (const iface of ifaces) entry.delete(iface);
-      if (!entry.has(BLOCK) || !entry.has(FILESYSTEM)) forget(path, before, drive);
+      if (!entry.has(BLOCK) || !(entry.has(FILESYSTEM) || entry.has(ENCRYPTED))) forget(path, before, drive);
       if (entry.size === 0) objects.delete(path);
       if (ifaces.includes(DRIVE)) ejecting.delete(path);
       changed();
@@ -379,6 +433,9 @@ function explain(error: unknown): Error {
   if (/unknown filesystem type/i.test(message)) {
     return new Error('This computer can’t read its format.');
   }
+  if (/operation not permitted|no key available|incorrect passphrase|wrong passphrase/i.test(message)) {
+    return new Error('That passphrase isn’t right.');
+  }
   return new Error(message || error.type);
 }
 
@@ -411,13 +468,50 @@ async function mount(path: string): Promise<string> {
   });
 }
 
+/** Wait for udisks to report an unlocked block's filesystem; false if it never does. */
+function filesystemShowsUp(path: string): Promise<boolean> {
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (isRemovable(path)) resolve(true);
+      else if (Date.now() - start > CLEARTEXT_WAIT_MS || !bus) resolve(false);
+      else setTimeout(check, 100);
+    };
+    check();
+  });
+}
+
+/** Unlock an encrypted volume with its passphrase and mount what's in it; resolves to where. */
+async function unlock(path: string, passphrase: string): Promise<string> {
+  const cleartext = await withBusy(path, 'unlocking', async () => {
+    unlocking.add(path);
+    try {
+      const [opened] = await call('Unlock', path, ENCRYPTED, 'sa{sv}', [passphrase, NO_PROMPT], UNLOCK_TIMEOUT_MS).catch((error) => {
+        throw explain(error);
+      });
+      const cleartext = String(opened);
+      if (!(await filesystemShowsUp(cleartext))) {
+        await call('Lock', path, ENCRYPTED, 'a{sv}', [NO_PROMPT]).catch(() => {});
+        throw new Error('It unlocked, but there’s nothing on it this computer can open.');
+      }
+      return cleartext;
+    } finally {
+      unlocking.delete(path);
+    }
+  });
+  return mount(cleartext);
+}
+
 /** Unmount everything on a filesystem's drive, then let the drive go. */
 async function eject(path: string): Promise<void> {
   const drive = driveOf(path);
   const name = names.get(path) ?? 'Untitled';
   const filesystems = drive
-    ? [...objects].filter(([, ifaces]) => ifaces.get(BLOCK)?.get('Drive') === drive && ifaces.has(FILESYSTEM)).map(([p]) => p)
+    ? [...objects.keys()].filter((p) => driveOf(p) === drive && objects.get(p)?.has(FILESYSTEM))
     : [path];
+  const encrypted = drive
+    ? [...objects.keys()].filter((p) => driveOf(p) === drive && objects.get(p)?.has(ENCRYPTED))
+    : [backingOf(path)].filter((p) => objects.get(p)?.has(ENCRYPTED));
   if (drive && ejecting.has(drive)) return;
   if (drive) ejecting.add(drive);
   changed();
@@ -426,6 +520,13 @@ async function eject(path: string): Promise<void> {
       if (mountPoints(filesystem).length === 0) continue;
       await call('Unmount', filesystem, FILESYSTEM, 'a{sv}', [NO_PROMPT], EJECT_TIMEOUT_MS).catch((error) => {
         if (error instanceof DBusError && error.type === 'org.freedesktop.UDisks2.Error.NotMounted') return;
+        throw explain(error);
+      });
+    }
+    for (const container of encrypted) {
+      if (!cleartextOf(container)) continue;
+      await call('Lock', container, ENCRYPTED, 'a{sv}', [NO_PROMPT], EJECT_TIMEOUT_MS).catch((error) => {
+        if (error instanceof DBusError && error.type === 'org.freedesktop.UDisks2.Error.NotUnlocked') return;
         throw explain(error);
       });
     }
@@ -478,7 +579,7 @@ export async function releaseDisk(disk: string): Promise<void> {
 }
 
 function requireVolume(path: unknown): string {
-  if (typeof path !== 'string' || !isRemovable(path)) throw new Error('No such disk.');
+  if (typeof path !== 'string' || !(isRemovable(path) || isLocked(path))) throw new Error('No such disk.');
   return path;
 }
 
@@ -505,7 +606,18 @@ export function registerVolumesHandlers(options: {
   ipcMain.handle('volumes:mount', async (event, path: unknown) => {
     assertShellSender(event);
     if (!(await connection()) || !udisksOwner) throw new Error("Can't reach the disk service.");
-    return mount(requireVolume(path));
+    const volume = requireVolume(path);
+    if (isLocked(volume)) throw new Error('It’s locked. Unlock it with its passphrase first.');
+    return mount(volume);
+  });
+
+  ipcMain.handle('volumes:unlock', async (event, path: unknown, passphrase: unknown) => {
+    assertShellSender(event);
+    if (!(await connection()) || !udisksOwner) throw new Error("Can't reach the disk service.");
+    const volume = requireVolume(path);
+    if (!isLocked(volume)) throw new Error('It isn’t locked.');
+    if (typeof passphrase !== 'string' || !passphrase) throw new Error('Enter its passphrase.');
+    return unlock(volume, passphrase);
   });
 
   ipcMain.handle('volumes:eject', async (event, path: unknown) => {

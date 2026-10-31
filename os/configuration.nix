@@ -599,7 +599,8 @@ in
   # udisks backs the USB sticks and SD cards Din mounts as they're plugged in
   # and ejects from Files (electron/volumes.mts), under /run/media/din. Din's
   # session has no seat, so udisks would ask for an admin password even for
-  # removable media; this lets `din` mount, unmount and eject it without one.
+  # removable media; this lets `din` mount, unlock, unmount and eject it
+  # without one.
   # Internal disks still need the password (filesystem-mount-system), and so
   # does unmounting anything Din didn't mount (filesystem-unmount-others):
   # that would include /boot and /home.
@@ -610,6 +611,8 @@ in
       var allowed = [
         "org.freedesktop.udisks2.filesystem-mount",
         "org.freedesktop.udisks2.filesystem-mount-other-seat",
+        "org.freedesktop.udisks2.encrypted-unlock",
+        "org.freedesktop.udisks2.encrypted-unlock-other-seat",
         "org.freedesktop.udisks2.eject-media",
         "org.freedesktop.udisks2.eject-media-other-seat",
         "org.freedesktop.udisks2.power-off-drive",

@@ -1,5 +1,6 @@
 import { appsArea, notificationsArea, openArea, screenshotArea, widgetsArea, windowsArea, workspaceArea } from './desktop';
 import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
+import { disksArea } from './disks';
 import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, printersArea, soundArea } from './devices';
 import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, specOf } from './parse';
 import { settingsArea } from './settings';
@@ -29,6 +30,7 @@ export const AREAS: readonly Area[] = [
   brightnessArea,
   keyboardArea,
   printersArea,
+  disksArea,
   powerArea,
   datetimeArea,
   vmsArea,
