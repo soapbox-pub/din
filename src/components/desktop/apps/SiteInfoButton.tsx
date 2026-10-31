@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AppWindow, Lock, RotateCw, TriangleAlert } from 'lucide-react';
+import { AppWindow, Loader2, Lock, RotateCw, Trash2, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
+import { useToast } from '@/hooks/useToast';
+import { getBrowserBridge, siteOriginOf, type SiteInfo } from '@/lib/browser';
 import { getPopupsBridge } from '@/lib/popups';
 import { isOnionUrl } from '@/lib/tor';
 import { AppIcon } from '@/components/desktop/AppIcon';
@@ -18,16 +19,6 @@ import { Switch } from '@/components/ui/switch';
 
 /** What every website may be asked for, listed in its site info even unanswered. */
 const ALWAYS_SHOWN = new Set<SiteCapability>(['camera', 'microphone', 'geolocation', 'notifications']);
-
-/** The origin a page's permissions are filed under (as electron/main.mts's siteOriginOf). */
-function siteOriginOf(url: string): string | null {
-  try {
-    const { protocol, host } = new URL(url);
-    return /^(https?|nsite):$/.test(protocol) && host ? `${protocol}//${host}` : null;
-  } catch {
-    return null;
-  }
-}
 
 /** The name a site goes by in the address bar: its host. */
 function siteName(url: string): string {
@@ -71,7 +62,8 @@ const SECURITY: Record<Security, { title: string; detail: string; warn: boolean 
  * warning for a page that isn't secure. Clicking it shows how the connection
  * stands and what the site may do (camera, microphone, location,
  * notifications, pop-ups), each of which can be allowed, blocked, or left to
- * ask, whether or not the site has asked yet.
+ * ask, whether or not the site has asked yet. Its cookies and storage can be
+ * deleted from here too, as Chrome's "Delete site data".
  * Renders nothing for pages that aren't websites (the new tab page, settings).
  */
 export function SiteInfoButton({
@@ -89,6 +81,8 @@ export function SiteInfoButton({
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<SiteInfo | null>(null);
   const [changed, setChanged] = useState(false);
+  const [deleting, setDeleting] = useState<'idle' | 'confirm' | 'busy'>('idle');
+  const { toast } = useToast();
 
   const origin = siteOriginOf(url);
   const scheme = origin?.slice(0, origin.indexOf(':'));
@@ -164,10 +158,33 @@ export function SiteInfoButton({
     bridge.setSitePermission(origin, capability, allow, isPrivate).catch(() => {});
   };
 
+  const deleteSiteData = async () => {
+    if (!bridge) return;
+    setDeleting('busy');
+    try {
+      await bridge.clearSiteData(origin, isPrivate);
+      // The page still holds what it read; it starts over without it.
+      onReload();
+      setChanged(false);
+      setOpen(false);
+      toast({ title: `Deleted ${site}'s data` });
+    } catch {
+      toast({ title: `Couldn't delete ${site}'s data`, variant: 'destructive' });
+    } finally {
+      setDeleting('idle');
+    }
+  };
+
   const label = `${title}. View site information`;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setDeleting('idle');
+      }}
+    >
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -303,6 +320,52 @@ export function SiteInfoButton({
               <p className="text-xs text-muted-foreground">
                 In a private window, answers are forgotten when it closes.
               </p>
+            )}
+          </div>
+        )}
+
+        {bridge && (
+          <div className="space-y-2 border-t border-border/60 pt-4">
+            <p className="text-xs font-medium text-muted-foreground">Cookies and site data</p>
+            {deleting === 'idle' ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => setDeleting('confirm')}
+              >
+                <Trash2 className="size-3.5" aria-hidden />
+                Delete site data
+              </Button>
+            ) : (
+              <div role="alertdialog" aria-labelledby="site-data-confirm" className="space-y-3 rounded-lg bg-destructive/10 p-3">
+                <p id="site-data-confirm" className="text-xs">
+                  This signs you out of {site} and deletes everything it saved on this computer. It can't be undone.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={deleting === 'busy'}
+                    onClick={() => setDeleting('idle')}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    autoFocus
+                    disabled={deleting === 'busy'}
+                    onClick={() => void deleteSiteData()}
+                  >
+                    {deleting === 'busy' && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+                    Delete
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         )}

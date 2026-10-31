@@ -144,6 +144,11 @@ export interface BrowserBridge {
     allow: boolean | null,
     isPrivate: boolean,
   ): Promise<void>;
+  /**
+   * Delete a site's cookies (its subdomains' too) and storage: localStorage,
+   * IndexedDB, service workers, cache storage. Its permissions stay.
+   */
+  clearSiteData(origin: string, isPrivate: boolean): Promise<void>;
   /** Every site with a remembered answer for a capability (not private windows'). */
   listSitePermissions(capability: SiteCapability): Promise<{ origin: string; allow: boolean }[]>;
   /** A remembered answer changed. Returns an unsubscribe fn. */
@@ -162,6 +167,16 @@ declare global {
   interface Dinos {
     /** Present only inside the Electron shell. */
     browser?: BrowserBridge;
+  }
+}
+
+/** The origin a page's permissions and data are filed under (as electron/main.mts's siteOriginOf). */
+export function siteOriginOf(url: string): string | null {
+  try {
+    const { protocol, host } = new URL(url);
+    return /^(https?|nsite):$/.test(protocol) && host ? `${protocol}//${host}` : null;
+  } catch {
+    return null;
   }
 }
 

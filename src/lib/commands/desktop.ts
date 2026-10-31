@@ -1,4 +1,5 @@
 import { activeWorkspace, isShown, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
+import { getBrowserBridge, siteOriginOf } from '@/lib/browser';
 import { appForFile } from '@/lib/fileTypes';
 import { getFsBridge } from '@/lib/fs';
 import {
@@ -15,8 +16,8 @@ import { bare, call, command, need, pick } from './util';
 
 /**
  * `din apps`, `din windows`, `din workspace`, `din widgets`,
- * `din notifications`, `din screenshot`, `din open`: what the Dock, the
- * apps menu, window chrome and the menu bar do.
+ * `din notifications`, `din screenshot`, `din browser`, `din open`: what the
+ * Dock, the apps menu, window chrome, the menu bar and the Web Browser do.
  */
 
 function appRow(ctx: CommandContext, id: string) {
@@ -321,6 +322,31 @@ export const screenshotArea: Area = {
       if (!finished) throw new CommandError('The screen isn’t being recorded');
       if (!finished.path) throw new CommandError(finished.error ?? 'Nothing was recorded');
       return { data: { path: finished.path, seconds: Math.round(finished.durationMs / 1000) }, text: finished.path };
+    }),
+  ],
+};
+
+export const browserArea: Area = {
+  name: 'browser',
+  summary: 'The Web Browser’s site data',
+  commands: [
+    command('browser', 'clear-site-data', 'Delete a site’s cookies and storage, as its site info’s Delete site data (asks on screen first)', [
+      { name: 'site', type: 'string', positional: true, help: 'The site’s URL, e.g. https://example.com' },
+    ], async (args, ctx) => {
+      const site = args.string('site');
+      const origin = siteOriginOf(site);
+      if (!origin) throw new CommandError(`Not a website’s URL: ${site}`, 'usage');
+      const browser = need(getBrowserBridge(), 'The Web Browser');
+      const name = origin.slice(origin.indexOf('//') + 2);
+      const ok = await ctx.confirm({
+        title: `Delete ${name}’s data?`,
+        description: `A command asked to delete ${name}’s cookies and everything it saved on this computer, signing you out of it.`,
+        action: 'Delete',
+        destructive: true,
+      });
+      if (!ok) throw new CommandError('You didn’t allow it');
+      await call(browser.clearSiteData(origin, false));
+      return { text: `Deleted ${name}’s data` };
     }),
   ],
 };

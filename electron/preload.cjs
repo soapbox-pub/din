@@ -2462,6 +2462,14 @@ expose('browser', {
     ipcRenderer.invoke('site-permissions:set', origin, capability, allow, isPrivate),
 
   /**
+   * Delete one site's cookies and storage, in the private window's session
+   * if `isPrivate`. Its permissions stay.
+   * @param {string} origin
+   * @param {boolean} isPrivate
+   */
+  clearSiteData: (origin, isPrivate) => ipcRenderer.invoke('site-data:clear', origin, isPrivate),
+
+  /**
    * Every site that has a remembered answer for a capability.
    * @param {string} capability
    */

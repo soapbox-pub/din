@@ -41,6 +41,7 @@ a missing or bad argument).
 | `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace; show a workspace |
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
 | `notifications` | List, send, click, dismiss, clear |
+| `browser` | The Web Browser's site data: delete one site's cookies and storage, as its site info does |
 | `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save or record the screen; lock it |
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
 | `sound`, `display`, `brightness`, `keyboard`, `printers`, `power`, `datetime` | Settings' Devices and System sections |
@@ -56,8 +57,8 @@ areas' commands rather than `settings` keys, since they act on the system.
 
 Commands act at once, as the user's own clicks would, except where Din
 asks the user anyway or the act can't be taken back: restarting or shutting
-down (`din power restart|off`), restarting Din (`din update restart`) and
-installing firmware put the question on
+down (`din power restart|off`), restarting Din (`din update restart`),
+installing firmware and deleting a site's data (`din browser clear-site-data`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps
 aren't commands; the user changes those in Settings.

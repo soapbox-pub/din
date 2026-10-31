@@ -675,11 +675,14 @@ export function webPushPermissionChanged(origin: string, capability: string, all
   closeNotificationsWhere((n) => n.origin === origin);
 }
 
-/** The browser's site data was cleared: its service workers, and their subscriptions, went with it. */
-export function forgetWebPushSubscriptions(): void {
+/**
+ * The browser's site data was cleared, every site's or one `origin`'s: its
+ * service workers, and their subscriptions, went with it.
+ */
+export function forgetWebPushSubscriptions(origin?: string): void {
   if (!options) return;
-  forgetWhere(() => true, 200, 'site data cleared');
-  closeNotificationsWhere(() => true);
+  forgetWhere((sub) => !origin || sub.scope.startsWith(`${origin}/`), 200, 'site data cleared');
+  closeNotificationsWhere((n) => !origin || n.origin === origin);
 }
 
 // ---------------------------------------------------------------------------

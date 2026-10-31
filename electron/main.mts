@@ -4645,6 +4645,25 @@ function registerSitePermissionHandlers(): void {
     decide(s, origin, capability, allow);
   });
 
+  // The site info's "Delete site data", as Chrome's: one site's cookies and
+  // storage (localStorage, IndexedDB, service workers, cache storage, ...),
+  // its subdomains' cookies with them. Its answers stay; resetting those is
+  // the site info's own button.
+  ipcMain.handle('site-data:clear', async (event, rawOrigin, isPrivate) => {
+    assertShellSender(event);
+    const { origin, s } = resolve(rawOrigin, isPrivate);
+    await s.clearStorageData({ origin });
+    const host = hostOf(origin);
+    if (host) {
+      for (const cookie of await s.cookies.get({ domain: host })) {
+        const domain = (cookie.domain ?? host).replace(/^\./, '');
+        const url = `${cookie.secure ? 'https' : 'http'}://${domain}${cookie.path ?? '/'}`;
+        await s.cookies.remove(url, cookie.name).catch(() => {});
+      }
+    }
+    if (s === browserSession()) forgetWebPushSubscriptions(origin);
+  });
+
   // What a page's navigator.permissions.query reports (permissions-preload.cjs):
   // Electron's check can only say yes or no, and an unanswered "no" stops
   // pages that look first from ever asking.
