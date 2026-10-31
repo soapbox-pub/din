@@ -24,15 +24,9 @@ import { app, net } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import path from 'node:path';
-import type { Event as NostrEvent } from 'nostr-tools/pure';
-
-// nostr-tools loads when it's first used, so Din still starts without it
-// (a missing package fails nsites alone).
-const require = createRequire(import.meta.url);
-const pure = () => require('nostr-tools/pure') as typeof import('nostr-tools/pure');
-const nip19 = () => require('nostr-tools/nip19') as typeof import('nostr-tools/nip19');
+import { verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
+import * as nip19 from 'nostr-tools/nip19';
 
 export type { NostrEvent };
 
@@ -188,7 +182,7 @@ function base36ToPubkey(label: string): string | null {
 /** The canonical host for a site, or null for a `d` tag no host can carry. */
 export function canonicalHostFor(pubkey: string, dtag: string | null): string | null {
   if (!HASH_RE.test(pubkey)) return null;
-  if (dtag === null) return nip19().npubEncode(pubkey);
+  if (dtag === null) return nip19.npubEncode(pubkey);
   return isValidDtag(dtag) ? `${pubkeyToBase36(pubkey)}${dtag}` : null;
 }
 
@@ -197,7 +191,7 @@ export function parseCanonicalHost(host: string): { pubkey: string; dtag: string
   if (typeof host !== 'string' || host !== host.toLowerCase()) return null;
   if (host.startsWith('npub1')) {
     try {
-      const decoded = nip19().decode(host);
+      const decoded = nip19.decode(host);
       if (decoded.type === 'npub') return { pubkey: decoded.data, dtag: null };
     } catch {
       // Fall through to the named-site shape.
@@ -247,7 +241,7 @@ function manifestHost(event: unknown): string | null {
   if (!host) return null;
   // Copy before verifying: nostr-tools caches the verdict on the object, and
   // this one came over IPC.
-  return pure().verifyEvent({ ...event }) ? host : null;
+  return verifyEvent({ ...event }) ? host : null;
 }
 
 function isServerListFor(event: unknown, pubkey: string): event is NostrEvent {
@@ -255,7 +249,7 @@ function isServerListFor(event: unknown, pubkey: string): event is NostrEvent {
     isEventShaped(event) &&
     event.kind === SERVER_LIST_KIND &&
     event.pubkey === pubkey &&
-    pure().verifyEvent({ ...event })
+    verifyEvent({ ...event })
   );
 }
 

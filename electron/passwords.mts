@@ -39,13 +39,13 @@ import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { app, clipboard, ipcMain, webContents } from 'electron';
 import type { WebContents, WebFrameMain } from 'electron';
-import type { CryptoEngine, Kdbx, KdbxEntry, KdbxGroup } from 'kdbxweb';
+import type { Kdbx, KdbxEntry, KdbxGroup } from 'kdbxweb';
+import { getDomain } from 'tldts-experimental';
 import type { KdfRequest } from './passwords-kdf.mts';
 import { deleteSecret, lookupSecret, storeSecret } from './secret-service.mts';
 
-// kdbxweb and tldts load when Passwords first uses them, so Din still starts
-// without them (a missing package fails Passwords alone).
 const require = createRequire(import.meta.url);
+const kdbxweb = require('kdbxweb') as typeof import('kdbxweb');
 
 const KDF_WORKER = path.join(import.meta.dirname, `passwords-kdf${path.extname(import.meta.filename)}`);
 const DATA_HOME = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
@@ -183,7 +183,7 @@ function runKdf(request: KdfRequest): Promise<Uint8Array> {
   });
 }
 
-const argon2: CryptoEngine.Argon2Fn = async (password, salt, memory, iterations, length, parallelism, type, version) => {
+kdbxweb.CryptoEngine.setArgon2Impl(async (password, salt, memory, iterations, length, parallelism, type, version) => {
   if (version !== 0x13) throw new Error('This vault uses an old version of Argon2. Open it in KeePassXC and save it again.');
   const saltId = Buffer.from(salt).toString('base64');
   if (knownKey && !bypassKnownKey && knownKey.salt === saltId) return arrayBuffer(knownKey.key);
@@ -198,19 +198,7 @@ const argon2: CryptoEngine.Argon2Fn = async (password, salt, memory, iterations,
   });
   lastDerived = { salt: saltId, key };
   return arrayBuffer(key);
-};
-
-let argon2Set = false;
-
-/** kdbxweb, deriving Argon2 keys in the KDF worker. */
-function kdbx(): typeof import('kdbxweb') {
-  const kdbxweb = require('kdbxweb') as typeof import('kdbxweb');
-  if (!argon2Set) {
-    kdbxweb.CryptoEngine.setArgon2Impl(argon2);
-    argon2Set = true;
-  }
-  return kdbxweb;
-}
+});
 
 // ---------------------------------------------------------------------------
 // The vault
@@ -289,7 +277,6 @@ function kdfSalt(db: Kdbx): string | null {
 }
 
 function usesArgon2(db: Kdbx): boolean {
-  const kdbxweb = kdbx();
   if (db.versionMajor < 4) return false;
   const uuid = db.header.kdfParameters?.get('$UUID');
   if (!(uuid instanceof ArrayBuffer)) return false;
@@ -298,7 +285,6 @@ function usesArgon2(db: Kdbx): boolean {
 }
 
 function useOurKdf(db: Kdbx): void {
-  const kdbxweb = kdbx();
   if (db.versionMajor < 4) db.upgrade();
   db.setKdf(kdbxweb.Consts.KdfId.Argon2id);
   const params = db.header.kdfParameters;
@@ -314,7 +300,6 @@ const freshSalt = new WeakSet<Kdbx>();
 
 /** Keep the KDF salt across saves, so the key in the keyring keeps opening the file. */
 function pinKdfSalt(db: Kdbx): void {
-  const kdbxweb = kdbx();
   const header = db.header;
   const generate = header.generateSalts.bind(header);
   header.generateSalts = () => {
@@ -359,7 +344,6 @@ async function rememberKey(): Promise<void> {
 }
 
 function isWrongKey(error: unknown): boolean {
-  const kdbxweb = kdbx();
   return error instanceof kdbxweb.KdbxError && error.code === kdbxweb.Consts.ErrorCodes.InvalidKey;
 }
 
@@ -373,7 +357,6 @@ function opened(db: Kdbx, stamp: string | null): void {
 }
 
 async function unlockWithPassword(password: string): Promise<void> {
-  const kdbxweb = kdbx();
   if (vault) return;
   knownKey = null;
   lastDerived = null;
@@ -399,7 +382,6 @@ async function unlockWithPassword(password: string): Promise<void> {
 type AutoUnlock = 'unlocked' | 'retry' | 'no';
 
 async function unlockFromKeyring(): Promise<AutoUnlock> {
-  const kdbxweb = kdbx();
   if (vault) return 'unlocked';
   if (!settings.autoUnlock || lockedByUser || !(await exists())) return 'no';
   const found = await lookupSecret(KEYRING_ATTRIBUTES);
@@ -454,7 +436,6 @@ function lock(): void {
 }
 
 async function create(password: string): Promise<void> {
-  const kdbxweb = kdbx();
   if (vault || (await exists())) throw new Error('There\'s already a vault');
   if (!password) throw new Error('A password is needed');
   knownKey = null;
@@ -467,7 +448,6 @@ async function create(password: string): Promise<void> {
 
 /** Read in what another app saved meanwhile. */
 async function mergeFromDisk(open: OpenVault): Promise<boolean> {
-  const kdbxweb = kdbx();
   try {
     const remote = await kdbxweb.Kdbx.load(await readVaultFile(), open.db.credentials);
     open.db.merge(remote);
@@ -505,7 +485,6 @@ async function save(): Promise<void> {
 
 /** Whether `password` is the open vault's. */
 async function isVaultPassword(password: string): Promise<boolean> {
-  const kdbxweb = kdbx();
   const open = vault;
   if (!open || !knownKey || !open.db.header.kdfParameters) return false;
   const credentials = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(password));
@@ -523,7 +502,6 @@ async function isVaultPassword(password: string): Promise<boolean> {
 }
 
 async function setVaultPassword(password: string): Promise<void> {
-  const kdbxweb = kdbx();
   const open = vault;
   if (!open) throw new Error('Passwords is locked');
   await open.db.credentials.setPassword(kdbxweb.ProtectedValue.fromString(password));
@@ -564,7 +542,6 @@ function fieldText(entry: KdbxEntry, name: string): string {
 }
 
 function setField(entry: KdbxEntry, name: string, value: string, isProtected: boolean): void {
-  const kdbxweb = kdbx();
   entry.fields.set(name, isProtected ? kdbxweb.ProtectedValue.fromString(value) : value);
 }
 
@@ -762,7 +739,6 @@ function siteOf(url: string): Site | null {
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
   const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
   if (!host) return null;
-  const { getDomain } = require('tldts-experimental') as typeof import('tldts-experimental');
   return { protocol: parsed.protocol, host, domain: getDomain(host, { allowPrivateDomains: true }) };
 }
 

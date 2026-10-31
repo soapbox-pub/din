@@ -30,15 +30,10 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { app, ipcMain, utilityProcess, webContents } from 'electron';
-import type { FiltersEngine, Request } from '@ghostery/adblocker';
+import { FiltersEngine, Request } from '@ghostery/adblocker';
+import { parse as parseDomain } from 'tldts-experimental';
 
-// The engine's libraries load when it does, so Din still starts without them:
-// a missing package leaves the engine null, and nothing blocked.
 const require = createRequire(import.meta.url);
-
-function parseDomain(url: string) {
-  return (require('tldts-experimental') as typeof import('tldts-experimental')).parse(url);
-}
 
 /** The extension's id, fixed by the `key` in its manifest. */
 export const ADBLOCK_EXTENSION_ID = 'gmmdegmbkcjkjfbacghangmkafhmkoeb';
@@ -145,7 +140,6 @@ function activeFor(contents: Electron.WebContents): boolean {
 
 function loadEngine(): boolean {
   try {
-    const { FiltersEngine } = require('@ghostery/adblocker') as typeof import('@ghostery/adblocker');
     engine = FiltersEngine.deserialize(new Uint8Array(fs.readFileSync(engineFile())));
     return true;
   } catch {
@@ -235,7 +229,6 @@ function isExtensionSender(event: Electron.IpcMainEvent | Electron.IpcMainInvoke
 // --- Network blocking in the private session -------------------------------
 
 function requestOf(details: Electron.OnBeforeRequestListenerDetails | Electron.OnHeadersReceivedListenerDetails): Request {
-  const { Request } = require('@ghostery/adblocker') as typeof import('@ghostery/adblocker');
   return Request.fromRawDetails({
     requestId: `${details.id}`,
     tabId: details.webContentsId,
@@ -487,15 +480,10 @@ export function setupAdblock(options: {
   for (const s of options.privateSessions) blockInSession(s);
 
   // Cosmetic filtering in both sessions.
-  let cosmeticPreload: string | null = null;
-  try {
-    cosmeticPreload = require.resolve('@ghostery/adblocker-electron-preload');
-  } catch (error) {
-    console.error('adblock: no cosmetic filtering:', error);
-  }
+  const cosmeticPreload = require.resolve('@ghostery/adblocker-electron-preload');
   for (const s of [options.browserSession, ...options.privateSessions]) {
     s.registerPreloadScript({ id: 'din-adblock-scriptlets', type: 'frame', filePath: SCRIPTLETS_PRELOAD });
-    if (cosmeticPreload) s.registerPreloadScript({ id: 'din-adblock-cosmetics', type: 'frame', filePath: cosmeticPreload });
+    s.registerPreloadScript({ id: 'din-adblock-cosmetics', type: 'frame', filePath: cosmeticPreload });
   }
   registerCosmeticHandlers();
 

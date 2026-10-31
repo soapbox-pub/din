@@ -44,7 +44,11 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { app, BrowserWindow, clipboard, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme } from 'electron';
-import type { ElectronChromeExtensions } from 'electron-chrome-extensions';
+import { ElectronChromeExtensions } from 'electron-chrome-extensions';
+import {
+  installChromeWebStore,
+  uninstallExtension,
+} from 'electron-chrome-web-store';
 import { DevtoolsBridge } from './devtools-bridge.mts';
 import {
   registerUserscriptHandlers,
@@ -143,11 +147,11 @@ import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol }
 import { registerProjectHandlers } from './project.mts';
 import { startWatchdog } from './watchdog.mts';
 
-// Packages load where they're used, never with a top-level import: Node
-// resolves every static import before main runs a line, so one missing
-// package would keep Din from starting at all. Loaded this way, it fails
-// only its own feature (the Chrome extension packages here; Mail, Passwords,
-// the ad blocker, nsites and the bunker in their own modules).
+// electron-chrome-context-menu ships CJS only, but exports the builder as a
+// named export too, which Node's ESM-CJS interop resolves statically.
+import { buildChromeContextMenu } from 'electron-chrome-context-menu';
+
+// require.resolve for ensureBrowserActionPreload (no ESM equivalent).
 const require = createRequire(import.meta.url);
 
 /** An IPC event from either ipcMain.on or ipcMain.handle. */
@@ -4135,8 +4139,6 @@ function ensureBrowserActionPreload(): string {
 }
 
 function setupChromeExtensions(): void {
-  const { ElectronChromeExtensions } = require('electron-chrome-extensions') as typeof import('electron-chrome-extensions');
-  const { installChromeWebStore } = require('electron-chrome-web-store') as typeof import('electron-chrome-web-store');
   chromeExtensions = new ElectronChromeExtensions({
     // din is AGPL-3.0-or-later, compatible with the library's GPL-3.0.
     license: 'GPL-3.0',
@@ -5276,7 +5278,6 @@ function registerCrxHandlers(): void {
     if (typeof extensionId !== 'string' || !/^[a-p]{32}$/.test(extensionId)) {
       throw new Error('Invalid extension id');
     }
-    const { uninstallExtension } = require('electron-chrome-web-store') as typeof import('electron-chrome-web-store');
     await uninstallExtension(extensionId, {
       session: browserSession(),
       extensionsPath: extensionsPath(),
@@ -5899,11 +5900,7 @@ app.whenReady().then(() => {
 
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
-  try {
-    setupChromeExtensions();
-  } catch (error) {
-    console.error('chrome extensions: setup failed, so the browser has none:', error);
-  }
+  setupChromeExtensions();
 
   // The built-in ad blocker (electron/adblock.mts). Also before the first
   // <webview>: its extension and preloads must be in place for the first tab.
@@ -6610,13 +6607,6 @@ app.on('web-contents-created', (_event, contents) => {
   // actions, plus any items extensions registered via chrome.contextMenus
   // (e.g. uBlock Origin's "Block element...").
   contents.on('context-menu', (_e, params) => {
-    let buildChromeContextMenu: typeof import('electron-chrome-context-menu').buildChromeContextMenu;
-    try {
-      ({ buildChromeContextMenu } = require('electron-chrome-context-menu') as typeof import('electron-chrome-context-menu'));
-    } catch (error) {
-      console.error('context menu: unavailable:', error);
-      return;
-    }
     let menu = buildChromeContextMenu({
       params,
       webContents: contents,
