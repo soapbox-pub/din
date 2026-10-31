@@ -46,6 +46,7 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { MIN_HEIGHT, MIN_WIDTH, windowRect, type WindowState } from '@/hooks/useWindows';
 import { areaFor, areaNear, hasNeighbor, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
+import { guestElements, isGuestFullscreen } from '@/platform/guest';
 
 /**
  * Dragging with the pointer within this many pixels of a monitor's top edge
@@ -347,13 +348,27 @@ export const Window = memo(function Window({
       setCoverSettled(false);
     };
   }, [covered]);
-  const hiddenBehind = covered && coverSettled;
   // For gesture handlers, which shouldn't re-bind whenever monitors change.
   const areasRef = useRef(areas);
   useLayoutEffect(() => {
     areasRef.current = areas;
   });
   const sectionRef = useRef<HTMLElement>(null);
+  // A page in full screen is on top of everything, whatever the windows say
+  // (its window was moved under another, off a monitor that went away).
+  // Hidden, it would leave Blink holding the desktop inert behind it.
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const update = () => {
+      const el = sectionRef.current;
+      setFullscreen(
+        !!el && (!!el.querySelector(':fullscreen') || guestElements().some((g) => el.contains(g) && isGuestFullscreen(g))),
+      );
+    };
+    document.addEventListener('fullscreenchange', update);
+    return () => document.removeEventListener('fullscreenchange', update);
+  }, []);
+  const hiddenBehind = covered && coverSettled && !fullscreen;
   // Drag state: pointer origin, window origin, and the latest position (so
   // pointer-up/cancel can commit without needing event coordinates). The
   // workspace origin is cached at grab time (it can't change mid-drag) so

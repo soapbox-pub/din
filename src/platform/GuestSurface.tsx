@@ -234,15 +234,16 @@ export function GuestSurface({
     };
   }, [pageHidden]);
 
-  // A fullscreen page whose tab goes to the background (it opened a link in
-  // a new tab) would stay fullscreen out of sight, and Blink would keep the
-  // rest of the desktop inert, ignoring every click. It leaves fullscreen.
+  // A fullscreen page that stops showing (its tab went to the background, its
+  // window was minimized or hidden) would stay fullscreen out of sight, and
+  // Blink would keep the rest of the desktop inert, ignoring every click and
+  // key. It leaves fullscreen.
   useEffect(() => {
     const el = elRef.current;
-    if (!hidden || !el || !isGuestFullscreen(el)) return;
+    if (!pageHidden || !el || !isGuestFullscreen(el)) return;
     if (document.fullscreenElement === el) void document.exitFullscreen().catch(() => {});
     guest.executeJavaScript(el, 'document.fullscreenElement && document.exitFullscreen().catch(() => {})').catch(() => {});
-  }, [hidden]);
+  }, [pageHidden]);
 
   // Files dragged from Files: the drag goes to the page as paths it can't
   // open, so the desktop covers the page and has main drop the files
