@@ -36,14 +36,17 @@ export interface AirPlayState {
   scanning: boolean;
   receivers: AirPlayReceiver[];
   sessions: AirPlaySession[];
-  /** The last session that ended with an error. */
-  failure: { target: string; message: string; at: number } | null;
+  /** The last session that ended with an error: CONNECTING when it never streamed. */
+  failure: { target: string; message: string; connecting: boolean; at: number } | null;
 }
 
 export interface AirPlayBridge {
   state(): Promise<AirPlayState>;
   scan(): Promise<void>;
-  /** Connect the way the receiver was last shared, extending by default. */
+  /**
+   * Connect the way the receiver was last shared, extending by default.
+   * Resolves once it streams, or once it failed: the failure is in the state.
+   */
   connect(target: string): Promise<void>;
   /** Remember MODE for the receiver, and switch it over if it's streaming. */
   mode(target: string, mode: AirPlayMode): Promise<void>;

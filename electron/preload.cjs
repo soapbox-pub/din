@@ -1936,7 +1936,8 @@ expose('airplay', {
 
   /**
    * Start sharing with a receiver the way it was last shared (extending by
-   * default); resolves once it's streaming.
+   * default); resolves once it's streaming, or once it failed, which the
+   * state's `failure` says.
    * @param {string} target
    */
   connect: (target) => ipcRenderer.invoke('airplay:connect', target),

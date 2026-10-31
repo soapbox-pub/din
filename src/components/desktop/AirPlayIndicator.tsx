@@ -165,7 +165,7 @@ export function AirPlayReceiverList({ className }: { className?: string }) {
 
       {(error ?? failure) && (
         <p role="alert" className="text-xs text-destructive">
-          {error ?? `${failure?.target}: ${failure?.message}`}
+          {error ?? failure?.message}
         </p>
       )}
     </div>
@@ -336,7 +336,9 @@ export function AirPlayPromptHost() {
     if (announced.current !== null || Date.now() - failure.at < 10_000) {
       toast({
         variant: 'destructive',
-        title: `Stopped sharing with ${failure.target}`,
+        title: failure.connecting
+          ? `Couldn’t connect to ${failure.target}`
+          : `Stopped sharing with ${failure.target}`,
         description: failure.message,
       });
     }

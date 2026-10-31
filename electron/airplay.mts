@@ -20,7 +20,11 @@
 // it lasts, so sound plays there and the volume keys reach it.
 //
 // Connecting to a receiver uses the way it was last shared, extending by
-// default, as a monitor keeps its place when it's plugged back in. Switching
+// default, as a monitor keeps its place when it's plugged back in. A receiver
+// that refuses or drops the connection while it wakes up is tried again for
+// a while by deckmon, the session staying `connecting`, as a Mac does; only
+// when that gives up is it said, in a sentence (explainFailure), never in
+// deckmon's own words, which go to the log. Switching
 // a receiver that's streaming moves the session over without reconnecting
 // (deckmon's `switch`; an older deckmon reconnects it, keeping the pairing,
 // so no PIN again), and is remembered for next time.
@@ -98,8 +102,11 @@ export interface AirPlayState {
   scanning: boolean;
   receivers: AirPlayReceiver[];
   sessions: AirPlaySession[];
-  /** The last session that ended with an error, for the shell to say so. */
-  failure: { target: string; message: string; at: number } | null;
+  /**
+   * The last session that ended with an error, for the shell to say so:
+   * CONNECTING when it never streamed (it couldn't connect).
+   */
+  failure: { target: string; message: string; connecting: boolean; at: number } | null;
 }
 
 /** deckmon's SessionInfo, as far as it's used here. */
@@ -390,14 +397,38 @@ export function registerAirPlayHandlers(options: {
 
   /** Receivers that answered the connection being made to them (asked for a code, or streamed). */
   const answered = new Set<string>();
+  /** Sessions that have streamed since they were last asked to connect. */
+  const streamed = new Set<string>();
+  /** Receivers the user stopped sharing with, whose session ending isn't a failure. */
+  const cancelled = new Set<string>();
   /**
-   * Why connecting failed, in words. A receiver the last scan didn't find
-   * that never answered is most likely one remembered from before that isn't
-   * there any more, or is off; deckmon's own error would be about the address.
+   * Why sharing with TARGET failed, in a sentence, from deckmon's MESSAGE.
+   * deckmon has already tried again where that could help. A receiver the
+   * last scan didn't find that never answered is most likely one remembered
+   * from before that isn't there any more, or is off.
    */
   const explainFailure = (target: string, message: string): string => {
-    if (answered.has(target) || seen.get(target)?.misses === 0) return message;
-    return `${target} isn’t answering. Check that it’s on and on the same network as this computer.`;
+    if (!answered.has(target) && seen.get(target)?.misses !== 0) {
+      return `${target} isn’t answering. Check that it’s on and on the same network as this computer.`;
+    }
+    if (/refused|reset|fill whole buffer|broken pipe|timed out|unreachable|no route|stopped answering|closed/i.test(message)) {
+      return `${target} stopped answering. Check that it’s on, then try again.`;
+    }
+    if (/password|pairing|\bpin\b|authenticat|credential/i.test(message)) {
+      return `${target} didn’t accept the code. Try again.`;
+    }
+    if (/already/i.test(message)) return message;
+    return `Couldn’t share the screen with ${target}. Try again.`;
+  };
+  /** Say that sharing with TARGET failed, once, unless the user stopped it. */
+  const reportFailure = (target: string, error: string) => {
+    if (cancelled.has(target)) return;
+    console.warn(`airplay: ${target}: ${error}`);
+    const at = Date.now();
+    const last = state.failure;
+    if (last?.target === target && at - last.at < 5_000) return;
+    const message = explainFailure(target, error);
+    state = { ...state, failure: { target, message, connecting: !streamed.has(target), at } };
   };
   const watch = () => {
     const socket = net.createConnection(socketPath());
@@ -415,11 +446,11 @@ export function registerAirPlayHandlers(options: {
       if (session) {
         sessions.set(session.target, session);
         if (session.state !== 'connecting') answered.add(session.target);
+        if (session.state === 'streaming') streamed.add(session.target);
       } else if (typeof raw.target === 'string') {
         sessions.delete(raw.target);
         if (raw.state === 'ended' && typeof raw.error === 'string' && raw.error) {
-          const message = explainFailure(raw.target, raw.error);
-          state = { ...state, failure: { target: raw.target, message, at: Date.now() } };
+          reportFailure(raw.target, raw.error);
         }
       }
       publishSessions();
@@ -596,6 +627,8 @@ export function registerAirPlayHandlers(options: {
     const range = portRange();
     state = { ...state, failure: null };
     answered.delete(target);
+    streamed.delete(target);
+    cancelled.delete(target);
     await send(
       {
         cmd: 'connect',
@@ -613,10 +646,13 @@ export function registerAirPlayHandlers(options: {
   ipcMain.handle('airplay:connect', async (event, rawTarget) => {
     assertShellSender(event);
     const target = knownReceiver(rawTarget);
+    // A failure is said the way a session that stops is (failure), so the
+    // shell says it once even if it closed the menu meanwhile.
     try {
       await start(target, readConfig().modes[target] ?? 'extend');
     } catch (error) {
-      throw new Error(explainFailure(target, messageOf(error)), { cause: error });
+      reportFailure(target, messageOf(error));
+      publishSessions();
     }
   });
 
@@ -665,7 +701,7 @@ export function registerAirPlayHandlers(options: {
     sendToShell('airplay:osd', { name: session.name, mode });
     switching = setMode(session.target, mode)
       .catch((error: unknown) => {
-        state = { ...state, failure: { target: session.target, message: messageOf(error), at: Date.now() } };
+        reportFailure(session.target, messageOf(error));
         publishSessions();
       })
       .finally(() => {
@@ -685,6 +721,7 @@ export function registerAirPlayHandlers(options: {
   ipcMain.handle('airplay:disconnect', async (event, rawTarget) => {
     assertShellSender(event);
     const target = sessionTarget(rawTarget);
+    cancelled.add(target);
     // Taking the display away and putting the sound back can take a moment.
     await send({ cmd: 'disconnect', target }, 30_000);
   });

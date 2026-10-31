@@ -388,7 +388,9 @@ the desktop by default as a separate display arranged in Settings like any
 other; while connected it can be switched to mirroring the primary display
 and back, from the menu or with the display-switch key (F7 on ThinkPads), and
 that is remembered (`airplay.json` in Din's config). Sound goes to the
-receiver too. The
+receiver too. A receiver that drops or refuses the connection while it wakes
+up is tried again for half a minute, still "Connecting…", as a Mac does; if
+that gives up, Din says so in a sentence. The
 sending is [deckmon](https://git.shakespeare.diy)'s, a daemon DinOS runs as a
 user service (the flake's `deckmon` input) and Din talks to over its socket
 (`electron/airplay.mts`). It captures the screen through din-shell's wlroots
