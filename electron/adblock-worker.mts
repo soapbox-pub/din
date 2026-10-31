@@ -46,6 +46,17 @@ const LISTS = [
 ];
 const RESOURCES = 'ublock-resources-json';
 
+/**
+ * What the lists' `!#if` directives see: uBlock Origin on Chromium. Without
+ * this the engine keeps both sides of every `!#if`, and on YouTube that runs
+ * a Firefox-only json-prune on JSON.parse that YouTube catches.
+ */
+const ENV: [string, boolean][] = [
+  ['ext_ublock', true],
+  ['env_chromium', true],
+  ['cap_user_stylesheet', true],
+];
+
 const out = process.argv[2];
 const revisionsFile = `${out}.revisions`;
 
@@ -91,7 +102,8 @@ try {
     if (!revisions[name]) throw new Error(`${name} is unavailable`);
   }
 
-  const key = JSON.stringify(revisions);
+  // The environment is part of what was built, so changing it rebuilds.
+  const key = JSON.stringify({ ...revisions, env: ENV });
   let previous = '';
   try {
     previous = fs.readFileSync(revisionsFile, 'utf8');
@@ -112,7 +124,9 @@ try {
     enableMutationObserver: true,
     loadCosmeticFilters: true,
     loadNetworkFilters: true,
+    loadPreprocessors: true,
   });
+  engine.updateEnv(new Map(ENV));
   engine.updateResources(resources, revisions[RESOURCES]);
 
   const partial = `${out}.partial`;
