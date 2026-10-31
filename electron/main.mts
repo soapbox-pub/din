@@ -282,6 +282,21 @@ protocol.registerSchemesAsPrivileged([
 // leaves the Terminal on its DOM renderer until Din restarts.
 app.disableDomainBlockingFor3DAPIs();
 
+// safeStorage (Mail's passwords, the bunker's keys, Chromium's cookies) picks
+// its Linux keyring by XDG_CURRENT_DESKTOP, and knows only the big desktops:
+// for Din's own session ("Din", or nothing at all on DinOS) it would settle
+// for basic_text, a key written into Chromium, and isEncryptionAvailable()
+// says false. The login keyring is the Secret Service (gnome-keyring on
+// DinOS), so it's libsecret, except under KDE, where Chromium's own choice
+// of KWallet is right. An explicit --password-store wins.
+if (
+  process.platform === 'linux' &&
+  !app.commandLine.hasSwitch('password-store') &&
+  !/kde/i.test(process.env.XDG_CURRENT_DESKTOP ?? '')
+) {
+  app.commandLine.appendSwitch('password-store', 'gnome-libsecret');
+}
+
 // Each of Din's subsystems (shells, mail, push, askpass, printing, …) stops
 // itself on will-quit, once: more than Node's default 10, and not a leak.
 app.setMaxListeners(30);

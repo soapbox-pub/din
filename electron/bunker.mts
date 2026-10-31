@@ -190,6 +190,14 @@ function load(): void {
   } catch {
     connections = [];
   }
+  // Keys saved while there was no keyring are sealed once there is.
+  if (safeStorage.isEncryptionAvailable() && connections.some((c) => c.key.startsWith('hex:'))) {
+    for (const c of connections) {
+      const secretKey = secretKeys.get(c.id);
+      if (c.key.startsWith('hex:') && secretKey) c.key = sealKey(secretKey);
+    }
+    save();
+  }
 }
 
 function save(): void {

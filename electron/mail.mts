@@ -3,7 +3,8 @@
 //
 // Apps can't open sockets, so the accounts live here. Each account's
 // settings are kept in userData/mail/accounts.json with its password sealed
-// by safeStorage (the login keyring), and never go back to the app. Each
+// by safeStorage (the login keyring, see main.mts's --password-store; only
+// base64 where there's none), and never go back to the app. Each
 // account gets one IMAP connection for what the app asks (imapflow queues
 // commands behind its mailbox locks) and one more that idles on the inbox,
 // so new mail shows up as it arrives; both close after a while without
@@ -92,6 +93,11 @@ function load(): void {
     accounts = Array.isArray(list) ? list.filter(isStoredAccount) : [];
   } catch {
     accounts = [];
+  }
+  // Passwords saved while there was no keyring are sealed once there is.
+  if (safeStorage.isEncryptionAvailable() && accounts.some((a) => a.password.startsWith('plain:'))) {
+    for (const a of accounts) if (a.password.startsWith('plain:')) a.password = seal(unseal(a.password));
+    save();
   }
 }
 
