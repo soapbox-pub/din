@@ -1633,15 +1633,11 @@ export const Window = memo(function Window({
           style={accent ? { backgroundColor: accent } : undefined}
           className={cn(
             // At least 36px; a tab strip makes it 40.
-            'flex min-h-9 shrink-0 items-center gap-2 rounded-t-[inherit] border-b pr-3',
-            accent
-              ? accentDark ? 'border-white/10' : 'border-black/10'
-              : 'border-border/60 bg-background/60',
+            'flex min-h-9 shrink-0 items-center gap-2 rounded-t-[inherit] pr-3',
+            !accent && 'bg-background/60',
             // An app whose toolbar continues the title bar (the browser's)
-            // marks it; the title bar then drops the line between them, and
-            // takes the content area's background, so a toolbar with none of
-            // its own matches it.
-            '[[data-window-id]:has([data-titlebar-seamless])>&]:border-b-transparent',
+            // marks it; the title bar then takes the content area's
+            // background, so a toolbar with none of its own matches it.
             !accent && '[[data-window-id]:has([data-titlebar-seamless])>&]:bg-background/80',
             titlebar ? 'pl-2' : 'pl-3',
           )}
