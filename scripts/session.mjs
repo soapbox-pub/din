@@ -7,6 +7,9 @@
  *   npm run session:install            build this checkout and add Din to the login screen
  *   npm run session:install -- --default   ...and make it the session you log in to
  *   npm run session:update             rebuild from the checkout and use that next login
+ *   npm run session:update -- --profile   ...as a profiling build, whose measurements go to
+ *                                      the journal (journalctl --user -g 'din perf|din-compositor:');
+ *                                      a plain update goes back
  *   npm run session -- rollback        go back to the build before
  *   npm run session -- default         make Din the session you log in to
  *   npm run session -- restore         go back to the session you had before Din
@@ -274,7 +277,7 @@ function copy(from, to) {
 }
 
 /** The session: Din's compositor on the screen, running Din. */
-function sessionScript() {
+function sessionScript({ profile }) {
   return `#!/bin/sh
 # Din, as a login session: Din's compositor on the screen, running Din (the
 # launcher beside this). Written by Din's scripts/session.mjs.
@@ -289,7 +292,10 @@ export DIN_DESKTOP_SESSION=1
 export DIN_SESSION_RELEASE="$release"
 export DIN_COMPOSITOR="$here/bin/din-compositor"
 export DIN_FD_ADDON="$here/lib/libdin_fd.so"
-
+${profile ? `# A profiling build: the shell's measurements and the compositor's stats go to
+# stderr, and from there to the journal.
+export DIN_PROFILE=1 DIN_COMPOSITOR_STATS=1
+` : ""}
 # The pointer the compositor draws before Din sets its own, from GSettings.
 if command -v gsettings >/dev/null 2>&1; then
   theme=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'")
@@ -360,7 +366,7 @@ exec "$@"
 `;
 }
 
-async function build() {
+async function build({ profile = false } = {}) {
   const problems = missingBuildTools();
   if (problems.length > 0) throw new Failure(problems.join("\n\n"));
   const cargo = cargoBinary();
@@ -370,12 +376,12 @@ async function build() {
   log("Building din-fd…");
   await run(cargo, ["build", "--release", "--manifest-path", path.join(ROOT, "native/din-fd/Cargo.toml")]);
   log("Building Din…");
-  await run("npm", ["run", "build"], { cwd: ROOT });
+  await run("npm", ["run", profile ? "build:profile" : "build"], { cwd: ROOT });
   await run(process.execPath, [path.join(ROOT, "scripts/build-adblock-engine.mjs")], { cwd: ROOT, env: childEnv({ ELECTRON_RUN_AS_NODE: "1" }) });
 
   const revision = checkoutRevision();
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-  const id = `${revision ? revision.commit.slice(0, 12) : "unknown"}${revision?.dirty ? "-dirty" : ""}-${stamp}`;
+  const id = `${revision ? revision.commit.slice(0, 12) : "unknown"}${revision?.dirty ? "-dirty" : ""}${profile ? "-profile" : ""}-${stamp}`;
   const staging = path.join(RELEASES, `.${id}`);
   const release = path.join(RELEASES, id);
   fs.rmSync(staging, { recursive: true, force: true });
@@ -410,11 +416,11 @@ async function build() {
   copy(path.join(ROOT, "native/din-compositor/target/release/din-compositor"), path.join(staging, "bin/din-compositor"));
   copy(path.join(ROOT, "native/din-fd/target/release/libdin_fd.so"), path.join(staging, "lib/libdin_fd.so"));
 
-  fs.writeFileSync(path.join(staging, "din-session"), sessionScript(), { mode: 0o755 });
+  fs.writeFileSync(path.join(staging, "din-session"), sessionScript({ profile }), { mode: 0o755 });
   fs.writeFileSync(path.join(staging, "din"), dinScript(), { mode: 0o755 });
   fs.writeFileSync(
     path.join(staging, "release.json"),
-    `${JSON.stringify({ id, commit: revision?.commit ?? null, dirty: revision?.dirty ?? false, built: new Date().toISOString() }, null, 2)}\n`,
+    `${JSON.stringify({ id, commit: revision?.commit ?? null, dirty: revision?.dirty ?? false, profile, built: new Date().toISOString() }, null, 2)}\n`,
   );
   fs.renameSync(staging, release);
   return id;
@@ -642,11 +648,11 @@ async function install({ makeDefault }) {
   }
 }
 
-async function update() {
+async function update({ profile }) {
   const reason = unsupported();
   if (reason) throw new Failure(reason);
   requireInstalled();
-  const id = await build();
+  const id = await build({ profile });
   writeText(path.join(SESSION, "source"), ROOT);
   if (!systemFilesCurrent()) await installSystemFiles();
   activate(id);
@@ -751,7 +757,7 @@ async function main() {
       await install({ makeDefault: rest.includes("--default") });
       break;
     case "update":
-      await update();
+      await update({ profile: rest.includes("--profile") });
       break;
     case "rollback":
       rollback();

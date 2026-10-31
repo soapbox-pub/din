@@ -745,6 +745,8 @@ function displayTool(args: string[], timeout = DISPLAY_TIMEOUT_MS): Promise<stri
 interface DisplayMode {
   width: number;
   height: number;
+  /** Hz, 0 where the tool didn't say. */
+  refresh: number;
   current: boolean;
   preferred: boolean;
 }
@@ -755,7 +757,7 @@ interface DisplayOutput {
   connected: boolean;
   primary: boolean;
   enabled: boolean;
-  current: { width: number; height: number } | null;
+  current: { width: number; height: number; refresh: number } | null;
   position: { x: number; y: number };
   modes: DisplayMode[];
   /** The AirPlay receiver this display is, for the ones deckmon adds. */
@@ -767,6 +769,8 @@ interface OutputPlacement {
   name: string;
   width: number;
   height: number;
+  /** Hz, one the output offers at this size; absent keeps whichever rate it has. */
+  refresh?: number;
   x: number;
   y: number;
   primary: boolean;
@@ -775,8 +779,8 @@ interface OutputPlacement {
 /**
  * Parse `xrandr --query` into a list of outputs. Each output header looks like
  *   eDP connected primary 1920x1200+0+0 (normal ...) 302mm x 188mm
- * followed by indented mode lines
- *   1920x1200     60.00*+     ('*' = current mode, '+' = preferred/native)
+ * followed by indented mode lines, one per resolution with each of its rates
+ *   1920x1200     60.00*+  48.00     ('*' = current mode, '+' = preferred/native)
  */
 function parseXrandr(stdout: string): DisplayOutput[] {
   const outputs: DisplayOutput[] = [];
@@ -792,21 +796,29 @@ function parseXrandr(stdout: string): DisplayOutput[] {
         connected: head[2] === 'connected',
         primary: Boolean(head[3]),
         enabled: on,
-        current: on ? { width: Number(head[4]), height: Number(head[5]) } : null,
+        current: on ? { width: Number(head[4]), height: Number(head[5]), refresh: 0 } : null,
         position: on ? { x: Number(head[6]), y: Number(head[7]) } : { x: 0, y: 0 },
         modes: [],
       };
       outputs.push(current);
       continue;
     }
-    const mode = line.match(/^\s+(\d+)x(\d+)\s+(.*)$/);
+    const mode = line.match(/^\s+(\d+)x(\d+)\S*\s+(.*)$/);
     if (mode && current) {
-      current.modes.push({
-        width: Number(mode[1]),
-        height: Number(mode[2]),
-        current: mode[3].includes('*'),
-        preferred: mode[3].includes('+'),
-      });
+      const width = Number(mode[1]);
+      const height = Number(mode[2]);
+      const rates = [...mode[3].matchAll(/(\d+(?:\.\d+)?)([*+ ]*)/g)];
+      for (const [, rate, flags] of rates.length > 0 ? rates : [['', '0', mode[3]]]) {
+        const entry = {
+          width,
+          height,
+          refresh: Number(rate),
+          current: flags.includes('*'),
+          preferred: flags.includes('+'),
+        };
+        current.modes.push(entry);
+        if (entry.current && current.current) current.current.refresh = entry.refresh;
+      }
     }
   }
   return outputs;
@@ -817,7 +829,7 @@ interface WlrHead {
   name?: unknown;
   enabled?: unknown;
   position?: { x?: unknown; y?: unknown };
-  modes?: { width?: unknown; height?: unknown; current?: unknown; preferred?: unknown }[];
+  modes?: { width?: unknown; height?: unknown; refresh?: unknown; current?: unknown; preferred?: unknown }[];
 }
 
 /** Parse `wlr-randr --json`. Primary is left unset: it's Din's to decide. */
@@ -829,6 +841,8 @@ function parseWlrRandr(stdout: string): DisplayOutput[] {
     const modes = (Array.isArray(head.modes) ? head.modes : []).map((m) => ({
       width: Number(m.width) || 0,
       height: Number(m.height) || 0,
+      // To the millihertz the compositor counts in.
+      refresh: Math.round((Number(m.refresh) || 0) * 1000) / 1000,
       current: m.current === true,
       preferred: m.preferred === true,
     }));
@@ -839,7 +853,7 @@ function parseWlrRandr(stdout: string): DisplayOutput[] {
       connected: true,
       primary: false,
       enabled,
-      current: now ? { width: now.width, height: now.height } : null,
+      current: now ? { width: now.width, height: now.height, refresh: now.refresh } : null,
       position: enabled
         ? { x: Number(head.position?.x) || 0, y: Number(head.position?.y) || 0 }
         : { x: 0, y: 0 },
@@ -941,6 +955,16 @@ function preferredMode(output: DisplayOutput): DisplayMode | null {
   );
 }
 
+/** The fastest rate an output offers at a size (0 where it doesn't say). */
+function fastestRefresh(output: DisplayOutput, width: number, height: number): number {
+  return Math.max(0, ...output.modes.filter((m) => m.width === width && m.height === height).map((m) => m.refresh));
+}
+
+/** Whether two rates are the same mode's (tools round them differently). */
+function sameRefresh(a: number, b: number): boolean {
+  return Math.abs(a - b) < 0.01;
+}
+
 /** The bounding box of a set of rectangles. */
 function unionRect(rects: { x: number; y: number; width: number; height: number }[]): Electron.Rectangle {
   const x = Math.min(...rects.map((r) => r.x));
@@ -968,6 +992,7 @@ async function applyOutputLayout(
   if (DISPLAY_TOOL === 'xrandr') {
     for (const e of enabled) {
       args.push('--output', e.name, '--mode', `${e.width}x${e.height}`, '--pos', `${e.x}x${e.y}`);
+      if (e.refresh) args.push('--rate', e.refresh.toFixed(2));
       if (e.primary) args.push('--primary');
     }
     for (const name of disabled) args.push('--output', name, '--off');
@@ -975,10 +1000,14 @@ async function applyOutputLayout(
     const byName = new Map(outputs.map((o) => [o.name, o]));
     for (const e of enabled) {
       args.push('--output', e.name, '--on');
-      // Re-setting the current size could drop it to another refresh rate.
-      const now = byName.get(e.name)?.current;
-      if (!now || now.width !== e.width || now.height !== e.height) {
-        args.push('--mode', `${e.width}x${e.height}`);
+      // A size alone is whichever of its rates wlr-randr finds first: the
+      // rate is always named, and the current mode is left alone.
+      const output = byName.get(e.name);
+      const now = output?.current;
+      const refresh = e.refresh || (now && now.width === e.width && now.height === e.height ? now.refresh : 0)
+        || (output ? fastestRefresh(output, e.width, e.height) : 0);
+      if (!now || now.width !== e.width || now.height !== e.height || !sameRefresh(now.refresh, refresh)) {
+        args.push('--mode', refresh ? `${e.width}x${e.height}@${refresh.toFixed(3)}Hz` : `${e.width}x${e.height}`);
       }
       args.push('--pos', `${e.x},${e.y}`);
     }
@@ -1022,10 +1051,21 @@ function placementsFor(
     if (!output.modes.some((m) => m.width === width && m.height === height)) {
       throw new Error(`Unsupported mode for ${output.name}`);
     }
+    const refresh = p.refresh === undefined || p.refresh === null ? undefined : Number(p.refresh);
+    if (
+      refresh !== undefined &&
+      !output.modes.some((m) => m.width === width && m.height === height && sameRefresh(m.refresh, refresh))
+    ) {
+      throw new Error(`Unsupported refresh rate for ${output.name}`);
+    }
     enabled.push({
       name: output.name,
       width,
       height,
+      // The output's own figure for it, which the tool matches exactly.
+      ...(refresh !== undefined && {
+        refresh: output.modes.find((m) => m.width === width && m.height === height && sameRefresh(m.refresh, refresh))?.refresh,
+      }),
       x: Math.max(0, Math.round(Number(p.x)) || 0),
       y: Math.max(0, Math.round(Number(p.y)) || 0),
       primary: Boolean(p.primary),
@@ -1051,6 +1091,7 @@ function layoutMatches(outputs: DisplayOutput[], layout: SavedLayout): boolean {
         o?.enabled &&
         o.current?.width === e.width &&
         o.current?.height === e.height &&
+        (!e.refresh || sameRefresh(o.current.refresh, e.refresh)) &&
         o.position.x === e.x &&
         o.position.y === e.y
       );
@@ -1630,6 +1671,7 @@ function packLeftToRight(
       name: output.name,
       width: mode.width,
       height: mode.height,
+      refresh: fastestRefresh(output, mode.width, mode.height) || undefined,
       x,
       y: 0,
       primary: enabled.length === 0,
@@ -3286,6 +3328,15 @@ function watchEvdevKeys(): void {
   const scan = () => {
     for (const node of keyboardEventNodes()) {
       if (watched.has(node)) continue;
+      // Outside the input group (Din's session on another distribution)
+      // none can be read, and spawning a `cat` for each on every rescan
+      // forked this whole process six times every ten seconds, stalling
+      // Din's frames by ~130 ms each time.
+      try {
+        fs.accessSync(node, fs.constants.R_OK);
+      } catch {
+        continue;
+      }
       let leftover: Buffer = Buffer.alloc(0);
       // Read through `cat` and a pipe, not fs.createReadStream: a file stream
       // parks one of libuv's four threadpool threads in read() for as long as
@@ -5983,6 +6034,14 @@ app.whenReady().then(() => {
   win.on('closed', () => {
     if (shellWindow === win) shellWindow = null;
   });
+
+  // A profiling session (`npm run session:update -- --profile`): the shell's
+  // periodic measurements go to stderr, and from there to the journal.
+  if (process.env.DIN_PROFILE === '1') {
+    win.webContents.on('console-message', (event) => {
+      if (event.message.startsWith('[din perf]')) process.stderr.write(`${event.message}\n`);
+    });
+  }
 
   // The shell preload follows its window across navigations, so the shell must
   // never leave its own origin: a remote page loaded here would inherit

@@ -1095,7 +1095,9 @@ type ShellMessage =
   /** Files dragged from the shell over a window, dropped there, or let go elsewhere (Wayland only). */
   | { type: 'drag-enter'; id: number; x: number; y: number; files: string[] }
   | { type: 'drag-drop'; id: number; x: number; y: number }
-  | { type: 'drag-end' };
+  | { type: 'drag-end' }
+  /** Din's monitors in viewport pixels, primary first (Wayland only: this X server has one screen). */
+  | { type: 'monitors'; monitors: { x: number; y: number; width: number; height: number }[] };
 
 function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -1238,6 +1240,7 @@ function route(message: ShellMessage): void {
       return;
     }
     case 'drag-end':
+    case 'monitors':
       bridge.send(message);
       return;
     case 'motion':

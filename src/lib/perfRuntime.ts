@@ -22,7 +22,7 @@
 
 import { isWebviewAvailable } from "@/lib/isElectron";
 import { readMemoryProbes } from "@/lib/memoryProbes";
-import { printNativeLatency } from "@/lib/nativeLatency";
+import { printNativeLatency, startNativeLatencyLog } from "@/lib/nativeLatency";
 import { perfReport, perfReset, type PerfReport } from "@/lib/perf";
 
 function now(): number {
@@ -1245,6 +1245,7 @@ export function installRuntimeProfiler(): void {
   }
   // This timer goes through the patched setInterval: a known 10s baseline in the report.
   window.setInterval(takeSample, SAMPLE_MS);
+  guard(startNativeLatencyLog);
 
   const reader = (window as unknown as { __dinPerf?: Record<string, unknown> }).__dinPerf;
   if (reader) {

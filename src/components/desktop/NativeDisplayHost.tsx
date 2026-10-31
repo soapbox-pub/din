@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
+import { useMonitors } from '@/contexts/MonitorsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { getNativeAppsBridge } from '@/lib/nativeApps';
@@ -19,6 +20,7 @@ import {
   nativePopups,
   sendNativeButton,
   sendNativeMotion,
+  setNativeMonitors,
   startNativeDisplay,
   subscribeNativeDisplay,
   windowChrome,
@@ -54,9 +56,13 @@ export function NativeDisplayHost() {
   // A window that ignored being asked to close, pending a force-quit choice.
   const [stuck, setStuck] = useState<NativeSurface | null>(null);
 
+  const { monitors } = useMonitors();
+
   useEffect(() => {
     if (available) startNativeDisplay();
   }, [available]);
+
+  useEffect(() => setNativeMonitors(monitors), [monitors]);
 
   useEffect(() => {
     return subscribeNativeDisplay((event) => {
