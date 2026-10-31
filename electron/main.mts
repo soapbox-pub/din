@@ -141,6 +141,7 @@ import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
 import { registerScreenRecorderHandlers, stopScreenRecording } from './screen-recorder.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
+import { registerPowerModeHandlers } from './power-mode.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 import { registerProjectHandlers } from './project.mts';
@@ -3443,6 +3444,14 @@ const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
 const PASSWORDS_PRELOAD = path.join(import.meta.dirname, 'passwords-preload.cjs');
 
 /**
+ * Absolute path to the session preload that tells Din where the caret is as
+ * keys are typed in web pages, while power mode is on (electron/power-mode.mts);
+ * power-mode-preload.cjs with src/shared/caret.ts bundled in
+ * (scripts/build-din-runtime.mjs).
+ */
+const POWER_MODE_PRELOAD = path.join(import.meta.dirname, 'power-mode-preload.built.cjs');
+
+/**
  * Absolute path to the session preload that gives installed nsites the napp
  * runtime (see electron/napp.mts): window.napp, notifications and periodic
  * sync from the page and the service worker, and window.ENV. Registered on
@@ -5654,6 +5663,7 @@ app.whenReady().then(() => {
     s.registerPreloadScript({ id: 'din-screen-share', type: 'frame', filePath: SCREEN_SHARE_PRELOAD });
     s.registerPreloadScript({ id: 'din-media', type: 'frame', filePath: MEDIA_PRELOAD });
     s.registerPreloadScript({ id: 'din-passwords', type: 'frame', filePath: PASSWORDS_PRELOAD });
+    s.registerPreloadScript({ id: 'din-power-mode', type: 'frame', filePath: POWER_MODE_PRELOAD });
     allowScreenSharing(s);
   }
   registerScreenShareHandlers({
@@ -5670,6 +5680,12 @@ app.whenReady().then(() => {
     assertShellSender,
     sendToShell,
     isMediaGuest: (contents) =>
+      shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
+  });
+  registerPowerModeHandlers({
+    assertShellSender,
+    sendToShell,
+    isPageGuest: (contents) =>
       shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
   });
   // And a window.nostr backed by Din's signer, for tabs and installed apps;

@@ -4,15 +4,33 @@
  * color from the caret, and (if chosen) shakes the window. A pause breaks
  * the streak, and the next one has to build up again.
  *
- * Keystrokes come from the desktop's own fields, heard here, and from
- * built-in apps' (window.din's runtime finds their caret and tells
- * DinAppFrame, which hands it on). Web pages aren't followed. The sparks
- * are drawn by the cursor effects engine, on its layer over the screen.
+ * Keystrokes come from the desktop's own fields, heard here; from built-in
+ * apps' (window.din's runtime finds their caret and tells DinAppFrame,
+ * which hands it on); and from web pages' and nsites', whose preload finds
+ * it and main passes on (`window.dinos.powerMode`, electron/power-mode.mts).
+ * Only where the caret is ever leaves a page, never what's typed, and
+ * nothing at all while power mode is off. The sparks are drawn by the
+ * cursor effects engine, on its layer over the screen.
  */
 
 import { cursorEffects } from '@/lib/cursorEffects';
 import type { Rgb } from '@/lib/cursorEffects/sprites';
+import { findGuest } from '@/platform/guest';
 import { caretSpot, typesText, type CaretSpot } from '@/shared/caret';
+
+/** What the Electron preload exposes as `window.dinos.powerMode`. */
+export interface PowerModeBridge {
+  set(on: boolean): Promise<void>;
+  /** Keys typed in web pages: the caret in the page's CSS pixels, the page's width in them, and the text's color. */
+  onTyped(callback: (typed: { wcId: number; x: number; y: number; width: number; color: string }) => void): () => void;
+}
+
+declare global {
+  interface Dinos {
+    /** Present only inside the Electron shell. */
+    powerMode?: PowerModeBridge;
+  }
+}
 
 /** Keystrokes in a row before the sparks start (the plugin's first threshold). */
 const ACTIVATION = 20;
@@ -48,6 +66,7 @@ export function setPowerMode(enabled: boolean, shake: boolean): void {
   if (enabled === on) return;
   on = enabled;
   streak = 0;
+  void window.dinos?.powerMode?.set(on).catch(() => {});
   if (on) stopListening = listenToDesktop();
   else {
     stopListening?.();
@@ -96,7 +115,18 @@ function listenToDesktop(): () => void {
     });
   };
   window.addEventListener('keydown', onKeyDown, true);
-  return () => window.removeEventListener('keydown', onKeyDown, true);
+  // Web pages' caret is in the page's CSS pixels, which its own zoom scales.
+  const stopPages = window.dinos?.powerMode?.onTyped(({ wcId, x, y, width, color }) => {
+    const guest = findGuest(wcId);
+    if (!guest) return;
+    const rect = guest.getBoundingClientRect();
+    const scale = rect.width / width;
+    typed({ x: rect.left + x * scale, y: rect.top + y * scale, color }, guest.closest<HTMLElement>('[data-window-id]'));
+  });
+  return () => {
+    window.removeEventListener('keydown', onKeyDown, true);
+    stopPages?.();
+  };
 }
 
 /** Knock the window a few pixels aside, to spring back; `translate` leaves its `transform` to drags and wobbles. */

@@ -26,8 +26,10 @@ electron/adblock-extension/engine.js
 
 # The cursor converter's bundle (scripts/build-cursor-converter.mjs)
 electron/cursor-converter.js
-# The app preload with window.din's runtime (scripts/build-din-runtime.mjs)
+# The app preload with window.din's runtime, and the power mode preload with
+# the caret finder (scripts/build-din-runtime.mjs)
 electron/din-app-preload.built.cjs
+electron/power-mode-preload.built.cjs
 
 # Tooling caches
 .eslintcache

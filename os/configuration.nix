@@ -32,7 +32,8 @@ let
       # (electron/adblock.mts), the Electron host is compiled by
       # build-electron.mjs, and the cursor converter (electron/cursorConverter.mts)
       # is bundled by build-cursor-converter.mjs, and window.din's runtime into
-      # the app preload by build-din-runtime.mjs, and the built-in widgets by
+      # the app preload (and the caret finder into power mode's) by
+      # build-din-runtime.mjs, and the built-in widgets by
       # build-widgets.mjs; runtime-deps.mjs lists Mail's runtime modules
       # (below). `scripts` itself must pass for its files to.
       || rel == "scripts"

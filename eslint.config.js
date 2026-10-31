@@ -9,7 +9,7 @@ import htmlEslint from "@html-eslint/eslint-plugin";
 import customRules from "./eslint-rules/index.js";
 
 export default defineConfig(
-  globalIgnores(["dist", "dist-perf", "perf-reports", ".agents", "electron/adblock-extension/engine.js", "electron/cursor-converter.js", "electron/din-app-preload.built.cjs", "electron/*.mjs"]),
+  globalIgnores(["dist", "dist-perf", "perf-reports", ".agents", "electron/adblock-extension/engine.js", "electron/cursor-converter.js", "electron/din-app-preload.built.cjs", "electron/power-mode-preload.built.cjs", "electron/*.mjs"]),
   {
     name: "app/ts",
     files: ["**/*.{ts,tsx}"],
@@ -130,7 +130,7 @@ export default defineConfig(
     // directly (window/document/Element/requestAnimationFrame), so they need
     // browser globals on top of the electron block's node globals.
     name: "app/electron-dom-preload",
-    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/geolocation-preload.cjs", "electron/permissions-preload.cjs", "electron/nostr-preload.cjs", "electron/adblock-preload.cjs", "electron/adblock-scriptlets-preload.cjs", "electron/popup-preload.cjs", "electron/print-preload.cjs", "electron/screen-share-preload.cjs", "electron/media-preload.cjs", "electron/passwords-preload.cjs", "electron/napp-preload.cjs", "electron/web-push-preload.cjs", "electron/din-app-preload.cjs", "electron/widget-preload.cjs", "electron/preload.cjs"],
+    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/geolocation-preload.cjs", "electron/permissions-preload.cjs", "electron/nostr-preload.cjs", "electron/adblock-preload.cjs", "electron/adblock-scriptlets-preload.cjs", "electron/popup-preload.cjs", "electron/print-preload.cjs", "electron/screen-share-preload.cjs", "electron/media-preload.cjs", "electron/passwords-preload.cjs", "electron/power-mode-preload.cjs", "electron/napp-preload.cjs", "electron/web-push-preload.cjs", "electron/din-app-preload.cjs", "electron/widget-preload.cjs", "electron/preload.cjs"],
     languageOptions: {
       globals: globals.browser,
     },

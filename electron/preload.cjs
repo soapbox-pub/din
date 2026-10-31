@@ -3369,6 +3369,28 @@ expose('screenRecorder', {
 
 // Media playing in web pages and native apps (window.dinos.media), backed by
 // electron/media.mts, for the volume menu's media controls.
+// Power mode in web pages (see electron/power-mode.mts / src/lib/powerMode.ts).
+expose('powerMode', {
+  /**
+   * Switch it on or off in web pages.
+   * @param {boolean} on
+   */
+  set: (on) => ipcRenderer.invoke('power-mode:set', on),
+
+  /**
+   * Hear keys typed in web pages while it's on: where the caret is in the
+   * page (CSS pixels, and the page's width in them) and the text's color.
+   * Returns an unsubscribe fn.
+   * @param {(typed: { wcId: number, x: number, y: number, width: number, color: string }) => void} callback
+   */
+  onTyped: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, typed: { wcId: number, x: number, y: number, width: number, color: string }) => void} */
+    const listener = (_event, typed) => callback(typed);
+    ipcRenderer.on('power-mode:typed', listener);
+    return () => ipcRenderer.removeListener('power-mode:typed', listener);
+  },
+});
+
 expose('media', {
   /** What's playing (or paused) now. */
   list: () => ipcRenderer.invoke('media:list'),
