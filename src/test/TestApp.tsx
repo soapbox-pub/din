@@ -51,6 +51,8 @@ export function TestApp({ children }: TestAppProps) {
     cursorFirePaint: false,
     cursorWater: false,
     cursorThemeColor: false,
+    powerMode: false,
+    powerModeShake: true,
     tilingEnabled: false,
     tilingGap: 8,
     dockMagnification: true,

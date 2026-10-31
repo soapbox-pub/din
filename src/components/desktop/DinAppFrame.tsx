@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Hourglass, RotateCw, Unplug } from 'lucide-react';
@@ -42,6 +42,7 @@ import { unreadAssistantSessions } from '@/lib/assistantNotifications';
 import { closeNotification, getNotificationState, notify, subscribeNotifications } from '@/lib/notificationCenter';
 import { setWindowBadge } from '@/lib/appBadges';
 import { printFile, printHtml } from '@/lib/printing';
+import { powerModeOn, subscribePowerMode, typed } from '@/lib/powerMode';
 import { areaFor } from '@/lib/monitors';
 import { isDarkThemeColor } from '@/lib/themeColor';
 import { getFileClipboard, setFileClipboard, subscribeFileClipboard } from '@/lib/fileClipboard';
@@ -877,6 +878,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const op = permissions.includes('fs') ? (entry.accepted?.operation ?? operation) : 'copy';
         return { kind: 'files', files: await grantPaths(entry.paths), operation: op };
       },
+      'window.typed': ({ x, y, color }) => {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        const p = toDesktop({ x, y });
+        typed({ x: p.clientX, y: p.clientY, color: typeof color === 'string' ? color.slice(0, 100) : '' }, sectionOf());
+      },
       'drag.over': ({ at }) => {
         const p = toDesktop(at);
         if (currentDrag()) setDragPoint({ x: p.clientX, y: p.clientY });
@@ -1119,6 +1125,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       recentFiles: recent,
       drag: dragInfo(currentDrag()),
       dictation: { available: hasDictationBridge(), status: getDictationState().status, here: dictationHere() },
+      powerMode: powerModeOn(),
       fsUrlBase,
       printAvailable: getPrintingBridge() !== undefined,
       scopedFs,
@@ -1261,6 +1268,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   }, [manifest.theme_color, publishAccent]);
 
   // ---- pushes ----
+  const powerMode = useSyncExternalStore(subscribePowerMode, powerModeOn);
+  useEffect(() => {
+    push({ type: 'powerMode', on: powerMode });
+  }, [powerMode, push]);
   const stateJson = JSON.stringify(windowState(win));
   useEffect(() => {
     push({ type: 'state', state: JSON.parse(stateJson) as WindowState });

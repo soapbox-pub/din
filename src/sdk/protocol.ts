@@ -80,6 +80,8 @@ export interface Hello {
   assistant: AssistantSettings | null;
   /** The conversations with unread notifications, for apps with the assistant permission. */
   assistantUnread: string[];
+  /** Power mode is on: the app tells the desktop where its caret is as keys are typed. */
+  powerMode: boolean;
   /** For apps with fs: the URL base to load files from by path (din-file://<token>). */
   fsUrlBase: string | null;
   printAvailable: boolean;
@@ -134,6 +136,8 @@ export interface Requests {
   'window.setCloseGuard': [{ on: boolean }, void];
   /** The app's answer to a `closeRequest` push. */
   'window.closeAnswer': [{ request: number; keep: boolean }, void];
+  /** A key typed into text, with power mode on: the caret, in the app's CSS pixels, and the text's color. */
+  'window.typed': [{ x: number; y: number; color: string }, void];
   /** The window menu (Minimize, Maximize, workspaces…), drawn by the desktop. */
   'window.menu': [{ at: Point }, void];
 
@@ -229,7 +233,8 @@ export type Push =
   | { type: 'windowMessage'; from: string; data: unknown }
   | { type: 'tabHover'; at: Point | null }
   | { type: 'assistantSettings'; settings: AssistantSettings }
-  | { type: 'assistantUnread'; sessionIDs: string[] };
+  | { type: 'assistantUnread'; sessionIDs: string[] }
+  | { type: 'powerMode'; on: boolean };
 
 /** What a page's Notification tells the desktop to show. */
 export interface NotificationData {

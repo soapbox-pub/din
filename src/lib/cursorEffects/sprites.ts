@@ -1,13 +1,13 @@
 /**
  * The soft little pictures particles are stamped from: a glow, a twinkling
- * star, a puff of smoke, a ring, a bubble. Each is drawn once per color and
- * kept, so a frame of a few hundred particles is a few hundred drawImage
- * calls and nothing else.
+ * star, a puff of smoke, a ring, a bubble, a plain dot. Each is drawn once
+ * per color and kept, so a frame of a few hundred particles is a few hundred
+ * drawImage calls and nothing else.
  */
 
 export type Rgb = readonly [number, number, number];
 
-export type SpriteKind = 'glow' | 'star' | 'smoke' | 'ring' | 'bubble' | 'heart';
+export type SpriteKind = 'glow' | 'star' | 'smoke' | 'ring' | 'bubble' | 'heart' | 'dot';
 
 /** A sprite's size in pixels; particles scale it to theirs. */
 const SIZE = 64;
@@ -97,6 +97,11 @@ function draw(kind: SpriteKind, color: Rgb, ctx: CanvasRenderingContext2D): void
     shine.addColorStop(1, rgba([255, 255, 255], 0));
     ctx.fillStyle = shine;
     ctx.fillRect(0, 0, SIZE, SIZE);
+  } else if (kind === 'dot') {
+    ctx.fillStyle = rgba(color, 1);
+    ctx.beginPath();
+    ctx.arc(c, c, c - 2, 0, Math.PI * 2);
+    ctx.fill();
   } else {
     const g = ctx.createRadialGradient(c, c * 0.8, 0, c, c, c);
     g.addColorStop(0, rgba([255, 255, 255], 1));

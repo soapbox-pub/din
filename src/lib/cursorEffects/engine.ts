@@ -237,6 +237,32 @@ class CursorEffectsEngine {
     this.scene.clear('paint');
   }
 
+  /**
+   * Power mode's sparks (src/lib/powerMode.ts): a spray of dots in the
+   * text's color from the caret at (x, y), falling as they fade.
+   */
+  sparks(x: number, y: number, color: Rgb): void {
+    if (!this.enabled || !this.host) return;
+    const random = this.scene.random;
+    const count = 5 + Math.floor(random() * 11);
+    for (let i = 0; i < count; i++) {
+      this.scene.add({
+        x,
+        y,
+        vx: (random() * 2 - 1) * 60,
+        vy: -90 - random() * 120,
+        gravity: 270,
+        life: 700 + random() * 500,
+        size: 3 + random() * 3,
+        kind: 'dot',
+        colors: [color],
+        additive: false,
+        untinted: true,
+      });
+    }
+    this.wake();
+  }
+
   /** Show off an effect inside `rect` (CSS pixels of the screen), as Settings does on choosing one. */
   preview(kind: PreviewKind, id: string, rect: { x: number; y: number; width: number; height: number }): void {
     if (!this.enabled || !this.host) return;

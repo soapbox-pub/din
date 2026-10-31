@@ -52,6 +52,8 @@ const SETTINGS: Setting[] = [
   { key: 'appearance.show-mouse', field: 'cursorShowMouse', help: 'Super+Shift+K, or shaking the mouse, rings the pointer with light', param: bool },
   { key: 'appearance.fire-paint', field: 'cursorFirePaint', help: 'Super+Shift and drag to draw in fire', param: bool },
   { key: 'appearance.water', field: 'cursorWater', help: 'Hold Super+Ctrl and move the mouse to stir the screen', param: bool },
+  { key: 'appearance.power-mode', field: 'powerMode', help: 'Type a while without stopping and keystrokes throw sparks from the caret', param: bool },
+  { key: 'appearance.power-mode-shake', field: 'powerModeShake', help: 'Power mode shakes the window being typed in', param: bool },
   { key: 'windows.tiling', field: 'tilingEnabled', help: 'Windows tile instead of floating', param: bool },
   { key: 'windows.gaps', field: 'tilingGap', help: 'Pixels between tiled windows', param: { type: 'integer', min: 0, max: 32 } },
   { key: 'dock.size', field: 'dockSize', help: 'The size of a Dock icon, in pixels', param: { type: 'integer', min: 32, max: 160 } },

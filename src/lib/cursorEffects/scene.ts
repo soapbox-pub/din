@@ -49,9 +49,11 @@ export interface ParticleSpec {
   delay?: number;
   /** A name to clear it by (Fire Paint's flames). */
   group?: string;
+  /** Keep its colors under a tint (power mode's sparks are the text's color). */
+  untinted?: boolean;
 }
 
-interface Particle extends Required<Omit<ParticleSpec, 'group'>> {
+interface Particle extends Required<Omit<ParticleSpec, 'group' | 'untinted'>> {
   age: number;
   seed: number;
   group: string | undefined;
@@ -216,7 +218,7 @@ export class Scene {
       sway: 0,
       delay: 0,
       ...spec,
-      colors: this.tintAll(spec.colors),
+      colors: spec.untinted ? spec.colors : this.tintAll(spec.colors),
       group: spec.group,
       age: 0,
       seed: this.random() * 1000,

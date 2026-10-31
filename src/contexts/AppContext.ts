@@ -96,6 +96,13 @@ export interface AppConfig {
   /** Whether cursor effects take on the theme's color instead of their own. */
   cursorThemeColor: boolean;
   /**
+   * Power mode (after activate-power-mode): once you've typed a while without
+   * stopping, every keystroke throws sparks from the caret (src/lib/powerMode.ts).
+   */
+  powerMode: boolean;
+  /** Whether power mode also shakes the window being typed in. */
+  powerModeShake: boolean;
+  /**
    * Whether windows tile, Hyprland style, instead of floating: they share
    * each monitor's workspace between them (see src/lib/tiling.ts). Kept on
    * this device, like wobbly windows.

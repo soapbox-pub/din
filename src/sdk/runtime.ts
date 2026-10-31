@@ -58,6 +58,7 @@ import type { PasswordsBridge } from '@/lib/passwords';
 import type { VmsBridge } from '@/lib/vms';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
+import { caretSpot, typesText } from '@/shared/caret';
 
 /** How the runtime reaches the desktop: the preload's ports, or a port posted into a frame. */
 export interface Transport {
@@ -913,6 +914,24 @@ export function installDin(transport: Transport): void {
   };
   Object.defineProperty(window, 'din', { value: din, configurable: false, writable: false, enumerable: true });
 
+  // ---- power mode: where the caret is as keys are typed, while it's on ----
+  let powerMode = false;
+  pushes.on((p) => {
+    if (p.type === 'powerMode') powerMode = p.on;
+  });
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (!powerMode || !typesText(e)) return;
+      // After the key has gone in, so the caret has moved.
+      requestAnimationFrame(() => {
+        const spot = caretSpot(document);
+        if (spot) tell('window.typed', spot);
+      });
+    },
+    true,
+  );
+
   // ---- the hello: what the desktop says this window is and may do ----
   void helloArrived.then(async (hello) => {
     h = hello;
@@ -954,6 +973,7 @@ export function installDin(transport: Transport): void {
     dictationHere = hello.dictation.here;
     assistantSettings = hello.assistant ?? NO_ASSISTANT;
     assistantUnread = hello.assistantUnread;
+    powerMode = hello.powerMode;
     if (permissions.has('nostr') && !('nostr' in window)) {
       Object.defineProperty(window, 'nostr', { value: nostr, configurable: false });
     }

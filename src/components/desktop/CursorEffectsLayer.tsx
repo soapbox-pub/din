@@ -7,6 +7,7 @@ import { useSystemCursorStatus } from '@/hooks/useSystemCursor';
 import { cursorEffects } from '@/lib/cursorEffects';
 import type { CursorImage } from '@/lib/cursorEffects/scene';
 import { portalContainer } from '@/lib/portalContainer';
+import { setPowerMode } from '@/lib/powerMode';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 import { useCursorEffectTint } from '@/components/desktop/useCursorEffectTint';
@@ -53,7 +54,8 @@ function useCursorImage(wanted: boolean, zoom: number): CursorImage | null {
 /**
  * The layer cursor effects draw on (src/lib/cursorEffects): over the whole
  * screen, above everything, taking no input. Feeds the engine the user's
- * choices, the screen's size, and whether the system asks for less motion.
+ * choices, the screen's size, and whether the system asks for less motion,
+ * and switches power mode (src/lib/powerMode.ts), whose sparks it draws.
  * It's in the desktop's layer, not <body>, so it stays on top while that
  * layer is a modal dialog for something fullscreen on another monitor.
  */
@@ -82,6 +84,10 @@ export function CursorEffectsLayer() {
       water: config.cursorWater,
     });
   }, [config.cursorTrail, config.cursorClick, config.cursorShowMouse, config.cursorFirePaint, config.cursorWater]);
+
+  useEffect(() => {
+    setPowerMode(config.powerMode && !reduced, config.powerModeShake);
+  }, [config.powerMode, config.powerModeShake, reduced]);
 
   useEffect(() => {
     cursorEffects.setCursorImage(cursor);

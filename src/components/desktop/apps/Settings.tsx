@@ -190,6 +190,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { WindowEffectPicker } from '@/components/desktop/apps/WindowEffectPicker';
 import { CursorEffectsSettings } from '@/components/desktop/apps/CursorEffectPicker';
+import { PowerModeSettings } from '@/components/desktop/apps/PowerModeSettings';
 import { PACKAGE_PREFIX, forgetPackage, forgetThumbnails } from '@/lib/cursorEffects';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
@@ -3408,6 +3409,9 @@ function AppearanceSection({ windowId }: { windowId: string }) {
 
       <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor effects</p>
       <CursorEffectsSettings />
+
+      <p className="mb-3 mt-4 text-sm text-muted-foreground">Typing</p>
+      <PowerModeSettings />
     </SectionShell>
   );
 }

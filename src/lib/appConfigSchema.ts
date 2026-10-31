@@ -38,6 +38,8 @@ export const AppConfigSchema = z.object({
   cursorFirePaint: z.boolean(),
   cursorWater: z.boolean(),
   cursorThemeColor: z.boolean(),
+  powerMode: z.boolean(),
+  powerModeShake: z.boolean(),
   tilingEnabled: z.boolean(),
   tilingGap: z.number().min(0).max(64),
   dockMagnification: z.boolean(),
