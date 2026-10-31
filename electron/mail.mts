@@ -24,11 +24,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dns from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { app, ipcMain, net, safeStorage } from 'electron';
-import { ImapFlow, type FetchMessageObject, type ListResponse, type MessageAddressObject, type MessageStructureObject, type SearchObject } from 'imapflow';
-import { createTransport } from 'nodemailer';
-import MailComposer from 'nodemailer/lib/mail-composer';
-import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
+import type { FetchMessageObject, ImapFlow, ListResponse, MessageAddressObject, MessageStructureObject, SearchObject } from 'imapflow';
+import type MailComposer from 'nodemailer/lib/mail-composer';
+import type { AddressObject, ParsedMail } from 'mailparser';
 import type {
   MailAccount,
   MailAccountPatch,
@@ -45,6 +45,10 @@ import type {
   OutgoingMessage,
   SpecialMailbox,
 } from '../src/lib/mail.ts';
+
+// The mail libraries load when Mail first uses them, so Din still starts
+// without them (a missing package fails Mail alone).
+const require = createRequire(import.meta.url);
 
 interface Deps {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
@@ -243,6 +247,7 @@ function isLocal(host: string): boolean {
 }
 
 function imapClient(server: MailServer, password: string, idle?: { autoIdleDelay: number; maxIdleTime: number }): ImapFlow {
+  const { ImapFlow } = require('imapflow') as typeof import('imapflow');
   return new ImapFlow({
     ...idle,
     host: server.host,
@@ -261,6 +266,7 @@ function imapClient(server: MailServer, password: string, idle?: { autoIdleDelay
 }
 
 function smtpTransport(server: MailServer, password: string) {
+  const { createTransport } = require('nodemailer') as typeof import('nodemailer');
   return createTransport({
     host: server.host,
     port: server.port,
@@ -696,6 +702,7 @@ async function parsedMessage(a: StoredAccount, mailbox: string, uid: number): Pr
     if (!('content' in download) || !download.content) throw new Error('That message is gone.');
     const chunks: Buffer[] = [];
     for await (const chunk of download.content) chunks.push(chunk as Buffer);
+    const { simpleParser } = require('mailparser') as typeof import('mailparser');
     const mail = await simpleParser(Buffer.concat(chunks));
     const entry = { summary: summary(meta), mail };
     parsed.set(key, entry);
@@ -819,6 +826,7 @@ function outgoing(v: unknown): OutgoingMessage {
 }
 
 function composer(a: StoredAccount, m: OutgoingMessage, messageId: string): MailComposer {
+  const { default: MailComposer } = require('nodemailer/lib/mail-composer') as typeof import('nodemailer/lib/mail-composer');
   return new MailComposer({
     messageId,
     from: { name: a.fullName, address: a.email },

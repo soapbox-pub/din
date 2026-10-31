@@ -29,7 +29,6 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, net, session } from 'electron';
-import { unzipSync } from 'fflate';
 import type { VmInstallerId } from '../src/lib/vms.ts';
 
 export const INSTALLERS_DIR = path.join(os.homedir(), 'VMs', '.installers');
@@ -1074,6 +1073,7 @@ export async function prepareOpenCore(dir: string, uuid: string, signal: AbortSi
     ...OPENCORE_DRIVERS.map((d) => [`X64/EFI/OC/Drivers/${d}`, `EFI/OC/Drivers/${d}`] as [string, string]),
     ['Docs/Sample.plist', ''],
   ]);
+  const { unzipSync } = await import('fflate');
   const files = unzipSync(await fsp.readFile(zip), { filter: (f) => wanted.has(f.name) });
   if (Object.keys(files).length !== wanted.size) throw new Error('OpenCore’s release isn’t laid out as Din expected.');
   const tmp = `${dir}.tmp`;

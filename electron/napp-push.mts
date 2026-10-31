@@ -34,7 +34,12 @@
 // syntax only, like the rest of electron/.
 
 import crypto from 'node:crypto';
-import { verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
+import { createRequire } from 'node:module';
+import type { Event as NostrEvent } from 'nostr-tools/pure';
+
+// nostr-tools loads when it's first used, so Din still starts without it
+// (a missing package fails push alone).
+const require = createRequire(import.meta.url);
 
 export const MAX_SUBSCRIPTIONS = 10;
 const MAX_FILTERS = 10;
@@ -565,6 +570,7 @@ export class PushPool {
       stats.duplicates++;
       return;
     }
+    const { verifyEvent } = require('nostr-tools/pure') as typeof import('nostr-tools/pure');
     if (!verifyEvent(event)) {
       stats.badSignatures++;
       this.log(`${relay}: bad signature on ${event.id} for ${site}`);

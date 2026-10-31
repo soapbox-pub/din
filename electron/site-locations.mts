@@ -10,10 +10,14 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import { createRequire } from 'node:module';
 import { ipcMain } from 'electron';
-import * as nip19 from 'nostr-tools/nip19';
 import { NSITE_NAMED_KIND, NSITE_ROOT_KIND, parseCanonicalHost } from './nsite-store.mts';
 import { isOnionUrl } from './tor.mts';
+
+// nostr-tools loads when it's first used, so Din still starts without it
+// (a missing package fails nsites alone).
+const require = createRequire(import.meta.url);
 
 /** Where else a page says it can be found. */
 export interface SiteLocations {
@@ -62,7 +66,8 @@ function isNsiteHost(host: string): boolean {
   if (parseCanonicalHost(host)) return true;
   if (!host.startsWith('naddr1')) return false;
   try {
-    const decoded = nip19.decode(host);
+    const { decode } = require('nostr-tools/nip19') as typeof import('nostr-tools/nip19');
+    const decoded = decode(host);
     return decoded.type === 'naddr' && (decoded.data.kind === NSITE_ROOT_KIND || decoded.data.kind === NSITE_NAMED_KIND);
   } catch {
     return false;

@@ -24,11 +24,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { app, ipcMain, safeStorage } from 'electron';
-import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent, type Event } from 'nostr-tools/pure';
-import * as nip04 from 'nostr-tools/nip04';
-import * as nip44 from 'nostr-tools/nip44';
-import { SimplePool, type SubCloser } from 'nostr-tools/pool';
+import type { Event, EventTemplate } from 'nostr-tools/pure';
+import type { SimplePool, SubCloser } from 'nostr-tools/pool';
+
+// nostr-tools loads when the bunker first uses it, so Din still starts
+// without it (a missing package fails the bunker alone).
+const require = createRequire(import.meta.url);
+const pure = () => require('nostr-tools/pure') as typeof import('nostr-tools/pure');
+const nip04 = () => require('nostr-tools/nip04') as typeof import('nostr-tools/nip04');
+const nip44 = () => require('nostr-tools/nip44') as typeof import('nostr-tools/nip44');
 
 const KIND = 24133;
 
@@ -169,7 +175,7 @@ function load(): void {
       if (typeof c.id !== 'string' || !HEX64.test(c.id) || typeof c.key !== 'string') continue;
       if (typeof c.account !== 'string' || !HEX64.test(c.account)) continue;
       const secretKey = unsealKey(c.key);
-      if (!secretKey || getPublicKey(secretKey) !== c.id) continue;
+      if (!secretKey || pure().getPublicKey(secretKey) !== c.id) continue;
       secretKeys.set(c.id, secretKey);
       const grants = (c.grants ?? {}) as Record<string, unknown>;
       connections.push({
@@ -237,13 +243,14 @@ function list(): BunkerConnectionInfo[] {
 // --- Relays ------------------------------------------------------------------
 
 function getPool(): SimplePool {
+  const { SimplePool } = require('nostr-tools/pool') as typeof import('nostr-tools/pool');
   pool ??= new SimplePool({ enableReconnect: true });
   return pool;
 }
 
 /** Relay AUTH is signed with the connection's key, never the account's. */
 function authFor(secretKey: Uint8Array) {
-  return async (template: Parameters<typeof finalizeEvent>[0]) => finalizeEvent(template, secretKey);
+  return async (template: EventTemplate) => pure().finalizeEvent(template, secretKey);
 }
 
 function listen(c: StoredConnection): void {
@@ -270,9 +277,9 @@ async function send(c: StoredConnection, to: string, message: unknown, useNip04:
   if (!secretKey) return;
   const plaintext = JSON.stringify(message);
   const content = useNip04
-    ? nip04.encrypt(secretKey, to, plaintext)
-    : nip44.encrypt(plaintext, nip44.getConversationKey(secretKey, to));
-  const event = finalizeEvent(
+    ? nip04().encrypt(secretKey, to, plaintext)
+    : nip44().encrypt(plaintext, nip44().getConversationKey(secretKey, to));
+  const event = pure().finalizeEvent(
     { kind: KIND, content, tags: [['p', to]], created_at: Math.floor(Date.now() / 1000) },
     secretKey,
   );
@@ -376,15 +383,15 @@ async function receive(id: string, event: Event): Promise<void> {
 
   const c = connections.find((x) => x.id === id);
   const secretKey = secretKeys.get(id);
-  if (!c || !secretKey || event.kind !== KIND || !verifyEvent(event)) return;
+  if (!c || !secretKey || event.kind !== KIND || !pure().verifyEvent(event)) return;
   if (event.created_at < Math.floor(Date.now() / 1000) - MAX_REQUEST_AGE_S) return;
 
   const useNip04 = event.content.includes('?iv=');
   let request: { id?: unknown; method?: unknown; params?: unknown };
   try {
     const plaintext = useNip04
-      ? nip04.decrypt(secretKey, event.pubkey, event.content)
-      : nip44.decrypt(event.content, nip44.getConversationKey(secretKey, event.pubkey));
+      ? nip04().decrypt(secretKey, event.pubkey, event.content)
+      : nip44().decrypt(event.content, nip44().getConversationKey(secretKey, event.pubkey));
     request = JSON.parse(plaintext);
   } catch {
     return;
@@ -413,8 +420,8 @@ async function receive(id: string, event: Event): Promise<void> {
 // --- Managing connections ------------------------------------------------------
 
 function newConnection(account: string, relays: string[]): StoredConnection {
-  const secretKey = generateSecretKey();
-  const id = getPublicKey(secretKey);
+  const secretKey = pure().generateSecretKey();
+  const id = pure().getPublicKey(secretKey);
   secretKeys.set(id, secretKey);
   return {
     id,

@@ -126,6 +126,23 @@ export default defineConfig(
     },
   },
   {
+    // The main process loads packages where they're used (electron/main.mts):
+    // a static import of one that's missing keeps Din from starting at all.
+    // The workers run in processes of their own, so they may.
+    name: "app/electron-main",
+    files: ["electron/**/*.mts"],
+    ignores: ["electron/adblock-worker.mts", "electron/passwords-kdf.mts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": ["error", {
+        patterns: [{
+          regex: "^(?!node:|electron$|\\.)",
+          allowTypeImports: true,
+          message: "Load packages where they're used (require from createRequire, or await import()), so a missing one fails only its feature instead of Din's startup.",
+        }],
+      }],
+    },
+  },
+  {
     // The guest preloads run in the guest renderer and drive the page DOM
     // directly (window/document/Element/requestAnimationFrame), so they need
     // browser globals on top of the electron block's node globals.
