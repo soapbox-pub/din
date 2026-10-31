@@ -1517,6 +1517,7 @@ export const Window = memo(function Window({
   // requestAnimationFrame loops.
   // So is a window on a workspace its monitor isn't showing.
   if (win.minimized || win.away || hiddenBehind) geometry.visibility = 'hidden';
+  if (win.accent && !win.frameless) geometry.backgroundColor = win.accent;
 
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
@@ -1602,7 +1603,13 @@ export const Window = memo(function Window({
         // Not clipped, so the resize handles can reach past the edges; the
         // title bar and the content round their own corners instead.
         'absolute flex flex-col',
-        !frameless && 'bg-card/90 backdrop-blur-xl',
+        // The window's color is painted here once, under both the title bar
+        // and the content, which paint none of their own: two backgrounds
+        // meeting at an edge leave a sliver of whatever is beneath showing
+        // between them while the window is scaled (the open animation). An
+        // accent (inline, below) replaces it; otherwise it's the frosted
+        // card with the theme's background over it.
+        !frameless && !accent && 'bg-card/90 bg-linear-to-b from-background/80 to-background/80 backdrop-blur-xl',
         // Open/close animations: a quick macOS-style pop in (fade + zoom
         // from 95%) on mount, and its reverse on close - swapping the
         // classes restarts the element's animation as the exit. CSS
@@ -1630,14 +1637,9 @@ export const Window = memo(function Window({
       <WindowFrameContext.Provider value={frame}>
       {!frameless && !ownsHeader && (
         <WindowDragRegion
-          style={accent ? { backgroundColor: accent } : undefined}
           className={cn(
             // At least 36px; a tab strip makes it 40.
             'flex min-h-9 shrink-0 items-center gap-2 rounded-t-[inherit] pr-3',
-            // The content area's background, so the two read as one surface
-            // (and a toolbar with none of its own, like the browser's,
-            // continues it).
-            !accent && 'bg-background/80',
             titlebar ? 'pl-2' : 'pl-3',
           )}
         >
@@ -1666,7 +1668,6 @@ export const Window = memo(function Window({
         className={cn(
           'relative flex-1 overflow-hidden',
           ownsHeader ? 'rounded-[inherit]' : 'rounded-b-[inherit]',
-          !frameless && 'bg-background/80',
         )}
       >
         <WindowOwnHeaderContext.Provider value={setOwnHeader}>
