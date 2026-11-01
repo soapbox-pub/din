@@ -50,9 +50,9 @@ const MAX_DELAY = 3_600_000;
 const MAX_OUTPUT_BYTES = 256 * MiB;
 
 /** A cursor's file name in a theme. */
-const CURSOR_NAME = /^(?!\.)[A-Za-z0-9_.+-]{1,64}$/;
+export const CURSOR_NAME = /^(?!\.)[A-Za-z0-9_.+-]{1,64}$/;
 /** A theme name we'll write into Inherits=. */
-const INHERIT_NAME = /^(?![-.])[A-Za-z0-9_ .+-]{1,64}$/;
+export const INHERIT_NAME = /^(?![-.])[A-Za-z0-9_ .+-]{1,64}$/;
 
 /** What the converter may say went wrong; anything else reads as DAMAGED. */
 const DAMAGED = 'The file is damaged or not in a format Din can read.';
@@ -66,7 +66,7 @@ const CONVERTER_MESSAGES = new Set([
 ]);
 
 /** A theme, checked and ready to write. */
-interface ImportedTheme {
+export interface ImportedTheme {
   name: string;
   inherits: string[];
   /** Cursor name → XCursor file. */
@@ -267,7 +267,16 @@ function slug(name: string): string {
   );
 }
 
-async function install(theme: ImportedTheme, base: string, id: string): Promise<void> {
+/**
+ * Write a theme into `base/<id>`, replacing whatever was there. `keys` are
+ * more index.theme keys, such as where a theme from Nostr was published.
+ */
+export async function installCursorTheme(
+  theme: ImportedTheme,
+  base: string,
+  id: string,
+  keys: Record<string, string> = {},
+): Promise<void> {
   await fs.mkdir(base, { recursive: true });
   const staging = await fs.mkdtemp(path.join(base, '.din-cursor-'));
   try {
@@ -284,6 +293,7 @@ async function install(theme: ImportedTheme, base: string, id: string): Promise<
         'Comment=Imported by Din',
         `Inherits=${inherits.join(',')}`,
         `${IMPORTED_KEY}=true`,
+        ...Object.entries(keys).map(([key, value]) => `${key}=${value}`),
         '',
       ].join('\n'),
     );
@@ -325,7 +335,7 @@ export async function importCursorThemes(
     const stem = slug(theme.name);
     let id = stem;
     for (let n = 2; ids.includes(id) || (await options.taken(id)); n++) id = `${stem}-${n}`;
-    await install(theme, options.base, id);
+    await installCursorTheme(theme, options.base, id);
     ids.push(id);
   }
   return { themes: ids, effects: await installEffects(effects, options.effectsBase) };

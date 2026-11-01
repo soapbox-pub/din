@@ -81,6 +81,35 @@ export interface CursorEffectPackage extends CursorEffectPackageInfo {
   trail: (EffectSprite & { mode: 'always' | 'down' | 'up'; rate: number }) | null;
 }
 
+/** A theme's cursors as they're published (src/lib/themePackages.ts). */
+export interface CursorThemeExport {
+  id: string;
+  name: string;
+  inherits: string[];
+  /** One XCursor file per cursor. */
+  files: { name: string; data: Uint8Array }[];
+  /** Other names for those cursors: [alias, the cursor it stands for]. */
+  links: [string, string][];
+}
+
+/** A theme installed from Nostr, and where it was published. */
+export interface PublishedThemeInstall {
+  id: string;
+  source: { coordinate: string; publishedAt: number };
+}
+
+/** What Din needs to install a published cursor theme. */
+export interface CursorThemeManifest {
+  identifier: string;
+  name: string;
+  coordinate: string;
+  publishedAt: number;
+  inherits: string[];
+  servers: string[];
+  cursors: { name: string; sha256: string }[];
+  links: [string, string][];
+}
+
 export interface SystemCursorBridge {
   status(): Promise<SystemCursorStatus>;
   themes(): Promise<SystemCursorTheme[]>;
@@ -93,6 +122,12 @@ export interface SystemCursorBridge {
   importTheme(source: string): Promise<{ themes: string[]; effects: string[] }>;
   /** Delete a theme Din imported. */
   removeTheme(id: string): Promise<void>;
+  /** A theme's cursors, for publishing it. */
+  exportTheme(id: string): Promise<CursorThemeExport>;
+  /** The themes installed from Nostr. */
+  published(): Promise<PublishedThemeInstall[]>;
+  /** Download and install (or update) a published theme; resolves with its id. */
+  installPublished(manifest: CursorThemeManifest): Promise<string>;
   /** The imported effect packages, without their pixels. */
   effects(): Promise<CursorEffectPackageInfo[]>;
   /** One effect package with its pixels, or null if it's gone. */

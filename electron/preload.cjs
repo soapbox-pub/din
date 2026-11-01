@@ -1026,6 +1026,21 @@ expose('cursor', {
    */
   removeTheme: (id) => ipcRenderer.invoke('cursor:remove', id),
 
+  /**
+   * A theme's cursors for publishing: { id, name, inherits, files: { name, data }[], links: [alias, target][] }.
+   * @param {string} id
+   */
+  exportTheme: (id) => ipcRenderer.invoke('cursor:export', id),
+
+  /** The themes installed from Nostr: { id, source: { coordinate, publishedAt } }[]. */
+  published: () => ipcRenderer.invoke('cursor:published'),
+
+  /**
+   * Download and install a published theme; resolves with its id.
+   * @param {object} manifest
+   */
+  installPublished: (manifest) => ipcRenderer.invoke('cursor:install-published', manifest),
+
   /** The imported effect packages, without their pixels. */
   effects: () => ipcRenderer.invoke('cursor:effects'),
 
@@ -1064,6 +1079,27 @@ expose('iconTheme', {
    * @param {string} theme
    */
   set: (theme) => ipcRenderer.invoke('icon-theme:set', theme),
+
+  /**
+   * A theme for publishing: { id, name, inherits, archive (a .tar.gz), previews: { name, mime, data }[] }.
+   * @param {string} id
+   */
+  exportTheme: (id) => ipcRenderer.invoke('icon-theme:export', id),
+
+  /** The themes installed from Nostr: { id, source: { coordinate, publishedAt } }[]. */
+  published: () => ipcRenderer.invoke('icon-theme:published'),
+
+  /**
+   * Download and install a published theme; resolves with { id, missing }, missing being parents it lacks.
+   * @param {object} manifest
+   */
+  installPublished: (manifest) => ipcRenderer.invoke('icon-theme:install-published', manifest),
+
+  /**
+   * Delete a theme Din installed.
+   * @param {string} id
+   */
+  removeTheme: (id) => ipcRenderer.invoke('icon-theme:remove', id),
 
   /**
    * Subscribe to theme changes. Returns an unsubscribe fn.

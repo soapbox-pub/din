@@ -9,6 +9,8 @@
  * (KDE) it's only shown. In a plain browser the bridge is absent.
  */
 
+import type { PublishedThemeInstall } from '@/lib/systemCursor';
+
 export interface IconThemeInfo {
   /** Directory name, e.g. "Papirus-Dark". */
   id: string;
@@ -18,6 +20,30 @@ export interface IconThemeInfo {
   preview: string[];
   /** Listed only because it's the system's theme; it has too few app icons to restyle Din's apps. */
   limited: boolean;
+  /** Whether Din installed it, and so can remove it. */
+  imported: boolean;
+}
+
+/** A theme as it's published (src/lib/themePackages.ts). */
+export interface IconThemeExport {
+  id: string;
+  name: string;
+  inherits: string[];
+  /** Its directory as a .tar.gz. */
+  archive: Uint8Array;
+  /** A few of its icons, for the store to show. */
+  previews: { name: string; mime: string; data: Uint8Array }[];
+}
+
+/** What Din needs to install a published icon theme. */
+export interface IconThemeManifest {
+  identifier: string;
+  name: string;
+  coordinate: string;
+  publishedAt: number;
+  inherits: string[];
+  servers: string[];
+  archive: { sha256: string };
 }
 
 export interface IconThemeStatus {
@@ -43,6 +69,14 @@ export interface IconThemeBridge {
   /** The theme's icons as data URLs, keyed by each request's first name; missing ones are left out. */
   lookup(requests: IconRequest[]): Promise<Record<string, string>>;
   set(theme: string): Promise<void>;
+  /** A theme's archive and preview icons, for publishing it. */
+  exportTheme(id: string): Promise<IconThemeExport>;
+  /** The themes installed from Nostr. */
+  published(): Promise<PublishedThemeInstall[]>;
+  /** Download and install (or update) a published theme; `missing` are parents it names that aren't installed. */
+  installPublished(manifest: IconThemeManifest): Promise<{ id: string; missing: string[] }>;
+  /** Delete a theme Din installed. */
+  removeTheme(id: string): Promise<void>;
   onChanged(callback: () => void): () => void;
 }
 

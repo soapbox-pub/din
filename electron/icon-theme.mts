@@ -19,13 +19,36 @@
 // syntax only, like the rest of electron/.
 
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ipcMain, nativeImage } from 'electron';
+import { IMPORTED_KEY } from './cursorImport.mts';
 import { settingsOwner } from './desktop-settings.mts';
 import { runCommand } from './system.mts';
+import {
+  PUBLISHED_KEY,
+  SOURCE_KEY,
+  checkPackageBase,
+  fetchBlobs,
+  installId,
+  installStaged,
+  installedFromNostr,
+  isSha256,
+  PackageError,
+  packTarGz,
+  safeRelative,
+  stampDinKeys,
+  stripDinKeys,
+  themeKey,
+  unpackTarGz,
+  type TarEntry,
+} from './themePackages.mts';
 
 const SCHEMA = 'org.gnome.desktop.interface';
+
+/** A published icon theme's kind (NIP.md). */
+const ICON_THEME_KIND = 34642;
 
 /** The theme that stands for Din's own icons. */
 const DIN_THEME = 'Din';
@@ -87,6 +110,8 @@ interface IconTheme {
    * to restyle Din's apps (Adwaita, a base theme for GTK's symbolic icons).
    */
   limited: boolean;
+  /** Whether Din installed it (from Nostr), and so can remove it. */
+  imported: boolean;
 }
 
 interface IconThemeStatus {
@@ -588,15 +613,230 @@ async function themes(): Promise<IconTheme[]> {
   // Din's own icons are always a choice, installed or not (see installDinTheme).
   const list: IconTheme[] = installed.some((t) => t.id === DIN_THEME)
     ? []
-    : [{ id: DIN_THEME, name: DIN_THEME, preview: [], limited: false }];
+    : [{ id: DIN_THEME, name: DIN_THEME, preview: [], limited: false, imported: false }];
   for (const theme of installed) {
     const offered = theme.id === DIN_THEME || restylesApps(theme.id);
     if (offered || theme.id === current) {
-      list.push({ ...theme, preview: preview(theme.id), limited: !offered });
+      list.push({ ...theme, preview: preview(theme.id), limited: !offered, imported: isImported(theme.id) });
     }
     await breathe();
   }
   return list;
+}
+
+/** Where Din installs themes: the user's own icon themes. */
+function importBase(): string {
+  return path.join(dataHome(), 'icons');
+}
+
+/** Whether Din installed a theme, and so may remove it. */
+function isImported(id: string): boolean {
+  try {
+    const text = fs.readFileSync(path.join(importBase(), id, 'index.theme'), 'utf8');
+    return themeKey(text, IMPORTED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Publishing and installing from Nostr (themePackages.mts)
+//
+// A theme travels as one gzipped tarball of its directory: every file once,
+// and every other name for the same file (a link in the theme, or into a
+// package store, as on NixOS) as a link to it. A handful of its icons go
+// alongside, for the store to show.
+// ---------------------------------------------------------------------------
+
+/** Names whose icons show a theme in the store, the first few it has. */
+const PUBLISH_PREVIEW: { names: string[]; kind: IconKind }[] = [
+  ...PREVIEW,
+  { names: ['user-home', 'folder-home'], kind: 'files' },
+  { names: ['user-trash'], kind: 'files' },
+  { names: ['audio-x-generic'], kind: 'files' },
+  { names: ['video-x-generic'], kind: 'files' },
+  { names: ['accessories-calculator', 'org.gnome.Calculator'], kind: 'apps' },
+  { names: ['utilities-system-monitor', 'org.gnome.SystemMonitor'], kind: 'apps' },
+  { names: ['accessories-text-editor', 'org.gnome.TextEditor'], kind: 'apps' },
+  { names: ['multimedia-video-player', 'totem'], kind: 'apps' },
+];
+
+const PUBLISH_PREVIEW_COUNT = 12;
+
+interface IconThemeExport {
+  id: string;
+  name: string;
+  inherits: string[];
+  /** The theme's directory as a .tar.gz. */
+  archive: Uint8Array;
+  previews: { name: string; mime: string; data: Uint8Array }[];
+}
+
+/** The directory a theme's index.theme is in, first on the search path. */
+function themeRoot(id: string): string | null {
+  for (const root of iconRoots()) {
+    if (fs.existsSync(path.join(root, id, 'index.theme'))) return path.join(root, id);
+  }
+  return null;
+}
+
+/** A theme's directory as tar entries, each file once. */
+async function collectTheme(root: string): Promise<TarEntry[]> {
+  const entries: TarEntry[] = [];
+  const first = new Map<string, string>();
+  let count = 0;
+  const walk = async (dir: string, relative: string, ancestors: Set<string>): Promise<void> => {
+    const realDir = await fsp.realpath(dir);
+    if (ancestors.has(realDir)) return;
+    const inner = new Set([...ancestors, realDir]);
+    for (const name of (await fsp.readdir(dir)).sort()) {
+      if (name === 'icon-theme.cache') continue;
+      const full = path.join(dir, name);
+      const inside = relative ? `${relative}/${name}` : name;
+      let real: string;
+      let stat: fs.Stats;
+      try {
+        real = await fsp.realpath(full);
+        stat = await fsp.stat(real);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        await walk(full, inside, inner);
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      const seen = first.get(real);
+      if (seen) {
+        entries.push({ path: inside, type: 'link', target: path.posix.relative(path.posix.dirname(inside), seen) });
+      } else {
+        first.set(real, inside);
+        let data: Uint8Array = await fsp.readFile(real);
+        if (inside === 'index.theme') data = Buffer.from(stripDinKeys(Buffer.from(data).toString('utf8')));
+        entries.push({ path: inside, type: 'file', data });
+      }
+      if (++count % 500 === 0) await breathe();
+    }
+  };
+  await walk(root, '', new Set());
+  return entries;
+}
+
+const PREVIEW_MIME: Record<string, string> = { '.svg': 'image/svg+xml', '.png': 'image/png' };
+
+async function exportTheme(id: string): Promise<IconThemeExport> {
+  if (id === DIN_THEME) throw new Error('Din’s own icons aren’t a theme to publish');
+  const root = themeRoot(id);
+  const parsed = root && parseIndexTheme(path.join(root, 'index.theme'));
+  if (!root || !parsed) throw new Error('Unknown icon theme');
+
+  const chain = lookupChain(id);
+  const previews: IconThemeExport['previews'] = [];
+  for (const { names, kind } of PUBLISH_PREVIEW) {
+    const file = findIcon(chain, names, kind);
+    if (!file) continue;
+    previews.push({ name: names[0], mime: PREVIEW_MIME[path.extname(file).toLowerCase()], data: await fsp.readFile(file) });
+    if (previews.length === PUBLISH_PREVIEW_COUNT) break;
+  }
+
+  const entries = await collectTheme(root);
+  return {
+    id,
+    name: parsed.name || id,
+    inherits: parsed.inherits.filter((name) => THEME_NAME.test(name) && name !== id),
+    archive: await packTarGz(entries),
+    previews,
+  };
+}
+
+/** Whether any icon root has something called `id`. */
+async function exists(id: string): Promise<boolean> {
+  for (const root of iconRoots()) {
+    try {
+      await fsp.lstat(path.join(root, id));
+      return true;
+    } catch {
+      // not here
+    }
+  }
+  return false;
+}
+
+/**
+ * Where a link at `at` ends up, followed through other links, as a file in
+ * the archive; null if it leaves the theme, loops, or ends in nothing.
+ */
+function resolveLink(at: string, links: Map<string, string>, files: Map<string, Buffer>, depth = 0): string | null {
+  const target = links.get(at);
+  if (target === undefined || depth > 16 || target.startsWith('/')) return null;
+  const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(at), target));
+  if (resolved === '..' || resolved.startsWith('../')) return null;
+  if (files.has(resolved)) return resolved;
+  return links.has(resolved) ? resolveLink(resolved, links, files, depth + 1) : null;
+}
+
+/** Download a published theme's archive and install it; resolves with its id and the parents it lacks. */
+async function installPublished(manifest: unknown): Promise<{ id: string; missing: string[] }> {
+  const pkg = checkPackageBase(manifest, ICON_THEME_KIND, THEME_NAME);
+  const archive = (pkg.archive ?? {}) as { sha256?: unknown };
+  if (!isSha256(archive.sha256)) throw new PackageError('Not an icon theme');
+  const data = (await fetchBlobs([archive.sha256], pkg.servers)).get(archive.sha256);
+  if (!data) throw new PackageError('The theme couldn’t be downloaded.');
+
+  const files = new Map<string, Buffer>();
+  const links = new Map<string, string>();
+  for (const entry of await unpackTarGz(data)) {
+    const relative = safeRelative(entry.path);
+    if (!relative || relative.split('/').pop() === 'icon-theme.cache') continue;
+    if (entry.type === 'file') files.set(relative, Buffer.from(entry.data));
+    else links.set(relative, entry.target);
+  }
+  const index = files.get('index.theme');
+  if (!index) throw new PackageError('The theme’s archive has no index.theme.');
+
+  const base = importBase();
+  const id = await installId(base, ICON_THEME_KIND, pkg, THEME_NAME, exists);
+  await installStaged(base, id, async (staging) => {
+    for (const [relative, bytes] of files) {
+      const dest = path.join(staging, relative);
+      await fsp.mkdir(path.dirname(dest), { recursive: true });
+      const content = relative === 'index.theme'
+        ? stampDinKeys(bytes.toString('utf8'), {
+            [IMPORTED_KEY]: 'true',
+            [SOURCE_KEY]: pkg.coordinate,
+            [PUBLISHED_KEY]: String(pkg.publishedAt),
+          })
+        : bytes;
+      try {
+        await fsp.writeFile(dest, content, { flag: 'wx' });
+      } catch {
+        throw new PackageError('The theme’s archive is damaged.');
+      }
+      await breathe();
+    }
+    // Links are written as Din works them out, to files it wrote, never as
+    // the archive spells them, so none can lead out of the theme.
+    for (const relative of links.keys()) {
+      if (files.has(relative)) continue;
+      const target = resolveLink(relative, links, files);
+      if (!target) continue;
+      const dest = path.join(staging, relative);
+      try {
+        await fsp.mkdir(path.dirname(dest), { recursive: true });
+        await fsp.symlink(path.posix.relative(path.posix.dirname(relative), target), dest);
+      } catch {
+        // Clashes with a file or another link: left out.
+      }
+    }
+  });
+
+  // An updated theme keeps its paths, so what was read from them is stale.
+  const dir = path.join(base, id) + path.sep;
+  for (const file of iconDataUrls.keys()) if (file.startsWith(dir)) iconDataUrls.delete(file);
+  forgetIconIndex();
+
+  const have = new Set(['hicolor', ...installedThemes().map((t) => t.id)]);
+  return { id, missing: pkg.inherits.filter((name) => !have.has(name) && !themeIndex(name)) };
 }
 
 /** Put Din's theme in ~/.local/share/icons, where a system without it (not DinOS) can pick it. */
@@ -640,6 +880,20 @@ export function registerIconThemeHandlers(options: {
     return lookup(valid);
   });
 
+  const changed = () => {
+    const shell = options.shell();
+    shell?.send('icon-theme:changed');
+    // Native apps' icons come from the theme too.
+    shell?.send('native-apps:changed');
+  };
+
+  const setTheme = async (theme: string) => {
+    await gsettings('set', SCHEMA, 'icon-theme', theme);
+    themeRead = Promise.resolve(theme);
+    forgetIconIndex();
+    changed();
+  };
+
   ipcMain.handle('icon-theme:set', async (event, theme: unknown) => {
     assertShellSender(event);
     if (!canChange()) throw new Error('Din can\'t change the icons on this system');
@@ -647,12 +901,42 @@ export function registerIconThemeHandlers(options: {
     if (typeof theme !== 'string' || !installedThemes().some((t) => t.id === theme)) {
       throw new Error('Unknown icon theme');
     }
-    await gsettings('set', SCHEMA, 'icon-theme', theme);
-    themeRead = Promise.resolve(theme);
+    await setTheme(theme);
+  });
+
+  // A theme's directory as an archive, and a few of its icons, for publishing it.
+  ipcMain.handle('icon-theme:export', async (event, id: unknown) => {
+    assertShellSender(event);
+    if (typeof id !== 'string' || !THEME_NAME.test(id)) throw new Error('Unknown icon theme');
+    return exportTheme(id);
+  });
+
+  // The themes installed from Nostr, with where each was published.
+  ipcMain.handle('icon-theme:published', async (event) => {
+    assertShellSender(event);
+    return installedFromNostr(importBase(), ICON_THEME_KIND);
+  });
+
+  // Install (or update) a theme someone published.
+  ipcMain.handle('icon-theme:install-published', async (event, manifest: unknown) => {
+    assertShellSender(event);
+    if (!canChange()) throw new Error('Din can\'t change the icons on this system');
+    const result = await installPublished(manifest);
+    if ((await currentIconTheme()) === result.id) changed();
+    return result;
+  });
+
+  ipcMain.handle('icon-theme:remove', async (event, id: unknown) => {
+    assertShellSender(event);
+    if (!canChange()) throw new Error('Din can\'t change the icons on this system');
+    if (typeof id !== 'string' || !THEME_NAME.test(id) || id === DIN_THEME) throw new Error('Unknown icon theme');
+    if (!isImported(id)) throw new Error('Only icons Din installed can be removed');
+    if ((await currentIconTheme()) === id) {
+      installDinTheme();
+      await setTheme(DIN_THEME);
+    }
+    await fsp.rm(path.join(importBase(), id), { recursive: true, force: true });
     forgetIconIndex();
-    const shell = options.shell();
-    shell?.send('icon-theme:changed');
-    // Native apps' icons come from the theme too.
-    shell?.send('native-apps:changed');
+    changed();
   });
 }

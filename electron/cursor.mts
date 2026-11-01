@@ -23,9 +23,30 @@ import path from 'node:path';
 import { app, ipcMain } from 'electron';
 import { listEffects, readEffects, removeEffects } from './cursorEffects.mts';
 import { settingsOwner } from './desktop-settings.mts';
-import { FALLBACK_THEME, IMPORTED_KEY, importCursorThemes } from './cursorImport.mts';
+import {
+  CURSOR_NAME,
+  FALLBACK_THEME,
+  IMPORTED_KEY,
+  INHERIT_NAME,
+  importCursorThemes,
+  installCursorTheme,
+} from './cursorImport.mts';
 import { runCommand } from './system.mts';
-import { decodeXcursor, xcursorSizes } from './xcursor.mts';
+import {
+  PUBLISHED_KEY,
+  SOURCE_KEY,
+  checkPackageBase,
+  fetchBlobs,
+  installId,
+  installedFromNostr,
+  isSha256,
+  PackageError,
+  themeKey,
+} from './themePackages.mts';
+import { decodeXcursor, isXcursor, xcursorSizes } from './xcursor.mts';
+
+/** A published cursor theme's kind (NIP.md). */
+const CURSOR_THEME_KIND = 34628;
 
 const SCHEMA = 'org.gnome.desktop.interface';
 
@@ -244,6 +265,116 @@ async function previews(id: string, size: number): Promise<CursorPreview[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Publishing and installing from Nostr (themePackages.mts)
+// ---------------------------------------------------------------------------
+
+/** A theme's cursors as they're published: one XCursor file per cursor, the rest aliases. */
+interface CursorExport {
+  id: string;
+  name: string;
+  inherits: string[];
+  files: { name: string; data: Uint8Array }[];
+  links: [alias: string, target: string][];
+}
+
+async function exportTheme(id: string): Promise<CursorExport> {
+  const dir = await cursorsDir(id);
+  if (!dir) throw new Error('Not a cursor theme');
+  const index = await indexTheme(path.dirname(dir));
+
+  // Names that are the same file, whether by a link in the theme or into a
+  // package store, are published once, the rest as aliases of it.
+  const groups = new Map<string, { names: string[]; own: string | null }>();
+  for (const name of (await fs.readdir(dir)).sort()) {
+    if (!CURSOR_NAME.test(name)) continue;
+    const full = path.join(dir, name);
+    let real: string;
+    try {
+      real = await fs.realpath(full);
+      if (!(await fs.stat(real)).isFile()) continue;
+    } catch {
+      continue;
+    }
+    const group = groups.get(real) ?? { names: [], own: null };
+    group.names.push(name);
+    if (!group.own && !(await fs.lstat(full)).isSymbolicLink()) group.own = name;
+    groups.set(real, group);
+  }
+
+  const files: CursorExport['files'] = [];
+  const links: CursorExport['links'] = [];
+  for (const [real, group] of groups) {
+    const data = await fs.readFile(real);
+    if (!isXcursor(data)) continue;
+    const main = group.own ?? group.names[0];
+    files.push({ name: main, data });
+    for (const name of group.names) if (name !== main) links.push([name, main]);
+  }
+  if (!files.length) throw new Error('This theme has no cursors Din can read');
+
+  const inherits = (themeKey(index, 'Inherits') ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => INHERIT_NAME.test(name) && name !== id);
+  return { id, name: themeKey(index, 'Name') || id, inherits, files, links };
+}
+
+/** Whether anything on the search path, or in the import directory, is called `id`. */
+async function exists(id: string): Promise<boolean> {
+  for (const base of new Set([...searchPath(), importBase()])) {
+    try {
+      await fs.lstat(path.join(base, id));
+      return true;
+    } catch {
+      // not here
+    }
+  }
+  return false;
+}
+
+/** Download a published theme's cursors and install it; resolves with its directory name. */
+async function installPublished(manifest: unknown): Promise<string> {
+  const pkg = checkPackageBase(manifest, CURSOR_THEME_KIND, INHERIT_NAME);
+  const cursors = Array.isArray(pkg.cursors) ? pkg.cursors : [];
+  const rawLinks = Array.isArray(pkg.links) ? pkg.links : [];
+  const wanted = new Map<string, string>();
+  for (const cursor of cursors) {
+    const { name, sha256 } = (cursor ?? {}) as { name?: unknown; sha256?: unknown };
+    if (typeof name !== 'string' || !CURSOR_NAME.test(name) || !isSha256(sha256) || wanted.has(name)) {
+      throw new PackageError('Not a cursor theme');
+    }
+    wanted.set(name, sha256);
+  }
+  if (!wanted.size) throw new PackageError('Not a cursor theme');
+
+  const links = new Map<string, string>();
+  for (const link of rawLinks) {
+    if (!Array.isArray(link)) continue;
+    const [alias, target] = link as unknown[];
+    if (typeof alias !== 'string' || typeof target !== 'string' || !CURSOR_NAME.test(alias)) continue;
+    if (!wanted.has(target) || wanted.has(alias)) continue;
+    links.set(alias, target);
+  }
+  if (!wanted.has('left_ptr') && !links.has('left_ptr')) throw new PackageError('This theme has no arrow cursor.');
+
+  const blobs = await fetchBlobs([...wanted.values()], pkg.servers);
+  const files = new Map<string, Buffer>();
+  for (const [name, hash] of wanted) {
+    const data = blobs.get(hash);
+    if (!data || !isXcursor(data)) throw new PackageError(`The theme’s ${name} cursor is damaged.`);
+    files.set(name, data);
+  }
+
+  const base = importBase();
+  const id = await installId(base, CURSOR_THEME_KIND, pkg, THEME_NAME, exists);
+  await installCursorTheme({ name: pkg.name, inherits: pkg.inherits, files, links }, base, id, {
+    [SOURCE_KEY]: pkg.coordinate,
+    [PUBLISHED_KEY]: String(pkg.publishedAt),
+  });
+  return id;
+}
+
+// ---------------------------------------------------------------------------
 
 export function registerCursorHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
@@ -297,6 +428,34 @@ export function registerCursorHandlers(options: {
       await apply(ids.themes[0], size);
     }
     return ids;
+  });
+
+  // A theme's cursor files and aliases, for publishing it.
+  ipcMain.handle('cursor:export', async (event, id: unknown) => {
+    assertShellSender(event);
+    if (typeof id !== 'string' || !THEME_NAME.test(id)) throw new Error('Not a cursor theme');
+    return exportTheme(id);
+  });
+
+  // The themes installed from Nostr, with where each was published.
+  ipcMain.handle('cursor:published', async (event) => {
+    assertShellSender(event);
+    return installedFromNostr(importBase(), CURSOR_THEME_KIND);
+  });
+
+  // Install (or update) a theme someone published; resolves with its id.
+  ipcMain.handle('cursor:install-published', async (event, manifest: unknown) => {
+    assertShellSender(event);
+    if (!canChange()) throw new Error('Din can\'t change the cursor on this system');
+    const id = await installPublished(manifest);
+    // A theme updated in place keeps its name, which GTK doesn't pass on as
+    // a change; go through another theme so the new cursors show.
+    const { theme, size } = await current();
+    if (theme === id) {
+      await apply(FALLBACK_THEME, size);
+      await apply(id, size);
+    }
+    return id;
   });
 
   // Effect packages, for the cursor effects Din plays. Listing and playing
