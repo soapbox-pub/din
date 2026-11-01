@@ -1,64 +1,18 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { z } from 'zod';
-import { useAppData } from '@/hooks/useAppData';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import {
+  clearBrowserHistory,
+  frecency,
+  getBrowserHistory,
+  loadBrowserHistory,
+  recordBrowserFavicon,
+  recordBrowserTitle,
+  recordBrowserVisit,
+  subscribeBrowserHistory,
+  type BrowserHistoryEntry,
+} from '@/lib/browserHistoryStore';
 
-/** One visited page in the browser's history (most recent first). */
-export interface BrowserHistoryEntry {
-  /**
-   * The visited https URL, or for an nsite its canonical URL - so visits
-   * through a name and through the npub land on the same entry.
-   */
-  url: string;
-  /** Last page title seen for this URL, when one arrived. */
-  title: string | null;
-  /** Unix seconds of the most recent visit. */
-  visitedAt: number;
-  /** Total number of visits to this URL. */
-  visits: number;
-  /** Last favicon URL the page reported (http(s) only), for top-site tiles. */
-  favicon?: string;
-}
-
-const browserHistorySchema: z.ZodType<BrowserHistoryEntry[]> = z.array(
-  z.object({
-    url: z.string(),
-    title: z.string().nullable(),
-    visitedAt: z.number(),
-    visits: z.number(),
-    favicon: z.string().optional(),
-  }),
-);
-
-const EMPTY_HISTORY: BrowserHistoryEntry[] = [];
-
-const MAX_ENTRIES = 500;
-/**
- * Budget for the serialized history. The whole list is NIP-44 encrypted into
- * a single event, and NIP-44 caps plaintext at 64 KB — stay well under it.
- */
-const MAX_SERIALIZED_LENGTH = 48_000;
-/** Very long URLs (session tokens, giant queries) aren't worth remembering. */
-const MAX_URL_LENGTH = 1024;
-const MAX_TITLE_LENGTH = 160;
-
-/**
- * Whether a URL belongs in history: real https destinations, plus nsite://
- * sites, whose canonical URLs are key-derived and so stay meaningful (and
- * private — history is NIP-44 encrypted to the user).
- */
-function isRecordable(url: string): boolean {
-  if (url.length > MAX_URL_LENGTH) return false;
-  return url.startsWith('https://') || url.startsWith('nsite://');
-}
-
-/** Enforce the entry count and serialized-size caps, dropping oldest first. */
-function trimHistory(entries: BrowserHistoryEntry[]): BrowserHistoryEntry[] {
-  let out = entries.length > MAX_ENTRIES ? entries.slice(0, MAX_ENTRIES) : entries;
-  while (out.length > 1 && JSON.stringify(out).length > MAX_SERIALIZED_LENGTH) {
-    out = out.slice(0, Math.ceil(out.length * 0.9));
-  }
-  return out;
-}
+export type { BrowserHistoryEntry };
 
 /** A site worth a tile on the new-tab page. */
 export interface TopSite {
@@ -74,8 +28,6 @@ export interface TopSite {
   nsiteHost?: string;
 }
 
-/** Visits lose half their weight every two weeks. */
-const FRECENCY_HALF_LIFE_DAYS = 14;
 /**
  * The head start a default site gets, in recent visits: another site has to
  * be visited more than this often lately to rank above the defaults.
@@ -117,8 +69,7 @@ export function topSites(
   for (const entry of history) {
     const key = siteKey(entry.url);
     if (!key) continue;
-    const ageDays = Math.max(0, now - entry.visitedAt) / 86_400;
-    const score = entry.visits * 0.5 ** (ageDays / FRECENCY_HALF_LIFE_DAYS);
+    const score = frecency(entry, now);
     const isRoot = new URL(entry.url).pathname === '/';
     const site = sites.get(key);
     if (!site) {
@@ -305,75 +256,30 @@ export function historyDestination(history: BrowserHistoryEntry[], text: string)
 }
 
 /**
- * The web browser's persistent history, stored per-user via `useAppData`
- * on this device only; it never syncs to relays.
- *
- * Entries are unique by URL and ordered most-recent-first; revisiting a URL
- * moves it to the front and bumps its visit count.
+ * The web browser's history for the signed-in account (see
+ * `browserHistoryStore`), kept on this device only; it never syncs to relays.
+ * Most recent first; empty until it loads off disk.
  */
 export function useBrowserHistory() {
-  const [history, setHistory] = useAppData(
-    'browser-history',
-    browserHistorySchema,
-    EMPTY_HISTORY,
-    { localOnly: true },
-  );
+  const { user } = useCurrentUser();
+  const owner = user?.pubkey ?? 'local';
 
-  // Mirror for callbacks that only need to read (recordTitle's no-op check).
-  const historyRef = useRef(history);
   useEffect(() => {
-    historyRef.current = history;
-  }, [history]);
+    void loadBrowserHistory(owner);
+  }, [owner]);
 
-  const recordVisit = useCallback(
-    (url: string) => {
-      if (!isRecordable(url)) return;
-      setHistory((prev) => {
-        const existing = prev.find((e) => e.url === url);
-        const entry: BrowserHistoryEntry = {
-          url,
-          title: existing?.title ?? null,
-          favicon: existing?.favicon,
-          visitedAt: Math.floor(Date.now() / 1000),
-          visits: (existing?.visits ?? 0) + 1,
-        };
-        return trimHistory([entry, ...prev.filter((e) => e.url !== url)]);
-      });
-    },
-    [setHistory],
-  );
+  const history = useSyncExternalStore(subscribeBrowserHistory, () => getBrowserHistory(owner));
 
+  const recordVisit = useCallback((url: string) => recordBrowserVisit(owner, url), [owner]);
   const recordTitle = useCallback(
-    (url: string, title: string) => {
-      const clean = title.trim().slice(0, MAX_TITLE_LENGTH);
-      if (!clean) return;
-      // Skip the write when nothing
-      // changes — pages retitle themselves constantly.
-      const current = historyRef.current.find((e) => e.url === url);
-      if (!current || current.title === clean) return;
-      setHistory((prev) =>
-        prev.map((e) => (e.url === url ? { ...e, title: clean } : e)),
-      );
-    },
-    [setHistory],
+    (url: string, title: string) => recordBrowserTitle(owner, url, title),
+    [owner],
   );
-
   const recordFavicon = useCallback(
-    (url: string, favicon: string | null) => {
-      // Only plain http(s) icons: data: URIs would eat the size budget.
-      if (!favicon || !/^https?:\/\//i.test(favicon) || favicon.length > MAX_URL_LENGTH) return;
-      const current = historyRef.current.find((e) => e.url === url);
-      if (!current || current.favicon === favicon) return;
-      setHistory((prev) =>
-        prev.map((e) => (e.url === url ? { ...e, favicon } : e)),
-      );
-    },
-    [setHistory],
+    (url: string, favicon: string | null) => recordBrowserFavicon(owner, url, favicon),
+    [owner],
   );
-
-  const clearHistory = useCallback(() => {
-    setHistory(() => EMPTY_HISTORY);
-  }, [setHistory]);
+  const clearHistory = useCallback(() => clearBrowserHistory(owner), [owner]);
 
   return { history, recordVisit, recordTitle, recordFavicon, clearHistory };
 }
