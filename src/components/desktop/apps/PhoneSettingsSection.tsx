@@ -7,7 +7,7 @@ import {
   RefreshCw,
   Smartphone,
   Trash2,
-  TriangleAlert,
+  Plus,
   Wifi,
 } from 'lucide-react';
 import {
@@ -35,25 +35,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { QRCodeCanvas } from '@/components/ui/qrcode';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { usePhoneActions, usePhoneDiscovery, usePhoneState } from '@/hooks/usePhone';
+import { usePhoneActions, usePhoneState } from '@/hooks/usePhone';
 import { useToast } from '@/hooks/useToast';
-import { describePhone, getPhoneDesktopBridge, type PhoneCandidate, type PhoneDevice, type PhonePairing } from '@/lib/phone';
+import { describePhone, getPhoneDesktopBridge, type PhoneDevice } from '@/lib/phone';
 import { cleanPhoneError } from '@/shared/phone';
 import { cn } from '@/lib/utils';
-
-/** KDE Connect on Google Play; F-Droid has it too. */
-const KDE_CONNECT_URL = 'https://play.google.com/store/apps/details?id=org.kde.kdeconnect_tp';
+import { PhoneSetupWizard } from './PhoneSetupWizard';
 
 /**
  * Settings → Phone: the phones whose texts show up in Messages and
- * notifications (electron/phone.mts), and adding one. An iPhone is paired in
- * Bluetooth first and then picked here; an Android phone runs KDE Connect on
- * the same network and is paired here, with a key to compare on both
- * screens. While this is open, Din looks for Android phones and takes their
- * pairing requests; at other times it ignores them.
+ * notifications (electron/phone.mts), and Add a phone, which walks through
+ * pairing one (PhoneSetupWizard). Din looks for Android phones on the
+ * network only while the wizard is on that step.
  */
 export function PhoneSettingsSection() {
   const bridge = getPhoneDesktopBridge();
@@ -62,19 +57,23 @@ export function PhoneSettingsSection() {
   const { open } = useWindowActions();
   const { toast } = useToast();
   const [forgetting, setForgetting] = useState<PhoneDevice | null>(null);
-  usePhoneDiscovery();
+  const [adding, setAdding] = useState(false);
 
   const failed = (title: string) => (error: unknown) =>
     toast({ title, description: cleanPhoneError(error), variant: 'destructive' });
 
   const data = status.data;
-  const bluetooth = data?.candidates.filter((c) => c.kind === 'bluetooth') ?? [];
-  const android = data?.candidates.filter((c) => c.kind === 'kdeconnect') ?? [];
 
   return (
     <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
       <header className="flex items-center justify-between gap-2">
         <h2 className="font-[family-name:var(--font-title)] text-lg font-semibold text-foreground">Phone</h2>
+        {bridge && data && data.phones.length > 0 && (
+          <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+            <Plus className="size-4" aria-hidden />
+            Add a phone
+          </Button>
+        )}
       </header>
 
       {!bridge ? (
@@ -93,105 +92,36 @@ export function PhoneSettingsSection() {
         </div>
       ) : status.isError || !data ? (
         <Fallback>Couldn’t read the phones: {cleanPhoneError(status.error)}</Fallback>
-      ) : (
-        <div className="flex flex-col gap-6">
-          <p className="text-sm text-muted-foreground">
-            Read and answer your texts on this computer, in Messages and in notifications. Messages are kept on this
-            computer only.
+      ) : data.phones.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+          <Smartphone className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
+          <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+            Read and answer your texts on this computer, in Messages and in notifications. Works with iPhone and Android.
           </p>
-
-          {data.pairing && (
-            <PairingCard
-              pairing={data.pairing}
-              busy={actions.answer.isPending}
-              onAnswer={(accept) =>
-                actions.answer.mutate({ id: data.pairing!.id, accept }, { onError: failed('Couldn’t answer the phone') })
-              }
-            />
-          )}
-
-          {data.phones.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <SubHeading>My phones</SubHeading>
-              <ul className="flex flex-col gap-1" aria-label="My phones">
-                {data.phones.map((phone) => (
-                  <PhoneRow
-                    key={phone.id}
-                    phone={phone}
-                    onOpen={() => open('messages', messagesParams(phone))}
-                    onRefresh={() => actions.refresh.mutate(phone.id, { onError: failed(`Couldn’t reach ${phone.name}`) })}
-                    onForget={() => setForgetting(phone)}
-                  />
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-3">
-            <SubHeading>Add an iPhone</SubHeading>
-            <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm text-foreground/90">
-              <li>
-                Pair it with this computer in{' '}
-                <button
-                  type="button"
-                  className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => open('settings', { section: 'bluetooth' })}
-                >
-                  Bluetooth settings
-                </button>
-                .
-              </li>
-              <li>
-                On the iPhone, open Settings → Bluetooth, tap ⓘ beside this computer, and turn on{' '}
-                <span className="font-medium">Show Notifications</span> (and{' '}
-                <span className="font-medium">Sync Contacts</span>, for names).
-              </li>
-              <li>Add it here.</li>
-            </ol>
-            {!data.bluetooth ? (
-              <Hint icon={Bluetooth}>Bluetooth isn’t available, so iPhones can’t be added.</Hint>
-            ) : bluetooth.length === 0 ? (
-              <Hint icon={Bluetooth}>No paired phones yet.</Hint>
-            ) : (
-              <CandidateList candidates={bluetooth} action="Add" pending={actions.add.isPending ? actions.add.variables : undefined} onAdd={(c) => actions.add.mutate(c.id, { onError: failed(`Couldn’t add ${c.name}`) })} />
-            )}
-            <p className="text-xs text-muted-foreground">
-              An iPhone shares texts that arrive while it’s nearby and connected, not older ones, and no pictures or
-              group conversations. That’s up to Apple, and the same on Windows.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <SubHeading>Add an Android phone</SubHeading>
-            <div className="flex items-start gap-4">
-              <ol className="flex flex-1 list-decimal flex-col gap-1.5 pl-5 text-sm text-foreground/90">
-                <li>
-                  Install <span className="font-medium">KDE Connect</span> from Google Play or F-Droid (scan the code).
-                </li>
-                <li>Open it while the phone is on the same Wi-Fi as this computer.</li>
-                <li>
-                  Pair it here, or tap “{data.name}” in the app. Check that both screens show the same key.
-                </li>
-                <li>In KDE Connect, allow SMS and Contacts when it asks.</li>
-              </ol>
-              <div className="shrink-0 rounded-lg bg-white p-1.5">
-                <QRCodeCanvas value={KDE_CONNECT_URL} size={96} className="size-24" />
-              </div>
-            </div>
-            {data.network.error ? (
-              <Hint icon={TriangleAlert} tone="error">
-                {data.network.error}
-              </Hint>
-            ) : android.length === 0 ? (
-              <Hint icon={Wifi} busy={data.network.listening}>
-                Looking for phones with KDE Connect open…
-              </Hint>
-            ) : (
-              <CandidateList candidates={android} action="Pair" pending={actions.add.isPending ? actions.add.variables : undefined} onAdd={(c) => actions.add.mutate(c.id, { onError: failed(`Couldn’t pair with ${c.name}`) })} />
-            )}
-          </div>
+          <Button className="mt-6" onClick={() => setAdding(true)}>
+            <Plus className="size-4" aria-hidden />
+            Add a phone
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <SubHeading>My phones</SubHeading>
+          <ul className="flex flex-col gap-1" aria-label="My phones">
+            {data.phones.map((phone) => (
+              <PhoneRow
+                key={phone.id}
+                phone={phone}
+                onOpen={() => open('messages', messagesParams(phone.id))}
+                onRefresh={() => actions.refresh.mutate(phone.id, { onError: failed(`Couldn’t reach ${phone.name}`) })}
+                onForget={() => setForgetting(phone)}
+              />
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">Messages are kept on this computer only.</p>
         </div>
       )}
+
+      <PhoneSetupWizard open={adding} onOpenChange={setAdding} onOpenMessages={(id) => open('messages', messagesParams(id))} />
 
       <AlertDialog open={forgetting !== null} onOpenChange={(o) => !o && setForgetting(null)}>
         <AlertDialogContent>
@@ -222,37 +152,8 @@ export function PhoneSettingsSection() {
   );
 }
 
-function messagesParams(phone: PhoneDevice) {
-  return { phoneId: phone.id, nonce: Date.now() };
-}
-
-function PairingCard({ pairing, busy, onAnswer }: { pairing: PhonePairing; busy: boolean; onAnswer: (accept: boolean) => void }) {
-  return (
-    <div role="alertdialog" aria-label={`Pair with ${pairing.name}`} className="flex flex-col gap-3 rounded-xl border border-primary/40 bg-primary/5 p-4">
-      <div className="flex items-center gap-3">
-        <Smartphone className="size-5 shrink-0 text-primary" aria-hidden />
-        <p className="text-sm font-medium text-foreground">
-          {pairing.incoming ? `${pairing.name} wants to pair` : `Pairing with ${pairing.name}…`}
-        </p>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        {pairing.incoming
-          ? 'Pair only if the phone shows this key too:'
-          : 'Accept on the phone if it shows this key too:'}
-      </p>
-      <p className="font-mono text-2xl font-semibold tracking-[0.3em] text-foreground">{pairing.key}</p>
-      <div className="flex gap-2">
-        {pairing.incoming && (
-          <Button size="sm" disabled={busy} onClick={() => onAnswer(true)}>
-            Pair
-          </Button>
-        )}
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => onAnswer(false)}>
-          Cancel
-        </Button>
-      </div>
-    </div>
-  );
+function messagesParams(phoneId: string) {
+  return { phoneId, nonce: Date.now() };
 }
 
 function PhoneRow({
@@ -333,57 +234,6 @@ function PhoneRow({
         </p>
       )}
     </li>
-  );
-}
-
-function CandidateList({
-  candidates,
-  action,
-  pending,
-  onAdd,
-}: {
-  candidates: PhoneCandidate[];
-  action: string;
-  pending: string | undefined;
-  onAdd: (candidate: PhoneCandidate) => void;
-}) {
-  return (
-    <ul className="flex flex-col gap-1">
-      {candidates.map((c) => (
-        <li key={c.id} className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2">
-          <Smartphone className="size-5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{c.name}</span>
-          <Button variant="outline" size="sm" disabled={pending !== undefined} onClick={() => onAdd(c)}>
-            {pending === c.id && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
-            {action}
-          </Button>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function Hint({
-  icon: Icon,
-  busy,
-  tone,
-  children,
-}: {
-  icon: typeof Wifi;
-  busy?: boolean;
-  tone?: 'error';
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        'flex items-center gap-2 rounded-lg border border-dashed px-3 py-3 text-sm',
-        tone === 'error' ? 'border-destructive/50 text-destructive' : 'border-border/60 text-muted-foreground',
-      )}
-    >
-      {busy ? <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden /> : <Icon className="size-4 shrink-0" aria-hidden />}
-      <span>{children}</span>
-    </div>
   );
 }
 
