@@ -71,8 +71,6 @@ start fresh there), and the Web Browser its tabs.
 
 A window that brings Din down mustn't keep it down:
 
-- For a moment before the windows come back, **Start without them** (or
-  Esc) leaves them closed.
 - If Din stops within two minutes of reopening windows, twice in a row,
   the next start leaves them closed.
 - `touch ~/.config/din/skip-restore` (from a text console, Ctrl+Alt+F2)

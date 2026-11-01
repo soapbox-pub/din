@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { toast } from '@/hooks/useToast';
@@ -42,8 +41,6 @@ const NATIVE_GRACE_MS = 3_000;
  * while after it opens, not just at once.
  */
 const SETTLED_MS = 2 * 60_000;
-/** How long "Reopening your windows" waits for "Start without them". */
-const PROMPT_MS = 2_500;
 
 /** Private browser windows leave nothing behind. */
 const keep = (w: LiveSession['windows'][number]) => !(w.appId === 'web-browser' && w.params?.private === true);
@@ -74,11 +71,8 @@ export function WindowSessionHost() {
   useLayoutEffect(() => {
     live.current = { getApp, nativeAvailable, actions, enabled };
   });
-  /** Whether saving has begun: not before the saved session is read (or while it's offered). */
+  /** Whether saving has begun: not before the saved session is read. */
   const begun = useRef(false);
-  /** The session about to be reopened, while "Start without them" is offered. */
-  const [offered, setOffered] = useState<SavedSession | null>(null);
-  const offeredRef = useRef<SavedSession | null>(null);
   const pending = useRef<Pending | null>(null);
 
   const save = useCallback(() => {
@@ -181,39 +175,10 @@ export function WindowSessionHost() {
       .catch(() => false)
       .then((skipped) => {
         if (skipped) return skip(session, 'You asked Din to start without them.');
-        offeredRef.current = session;
-        setOffered(session);
+        begun.current = true;
+        restore(session);
       });
-  }, [monitorsReady, skip]);
-
-  /** "Reopen now", or the prompt running out. */
-  const accept = useCallback(() => {
-    const session = offeredRef.current;
-    offeredRef.current = null;
-    setOffered(null);
-    if (!session) return;
-    begun.current = true;
-    restore(session);
-  }, [restore]);
-  const decline = useCallback(() => {
-    const session = offeredRef.current;
-    offeredRef.current = null;
-    setOffered(null);
-    if (session) skip(session, 'Reopen them when you’re ready.');
-  }, [skip]);
-
-  useEffect(() => {
-    if (!offered) return;
-    const timer = setTimeout(accept, PROMPT_MS);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') decline();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('keydown', onKey, true);
-    };
-  }, [offered, accept, decline]);
+  }, [monitorsReady, restore, skip]);
 
   // Apps listed since (native apps, nsites, folders) bring their windows back.
   useEffect(advance, [getApp, nativeAvailable, advance]);
@@ -245,19 +210,5 @@ export function WindowSessionHost() {
     return () => window.removeEventListener('pagehide', save);
   }, [save]);
 
-  if (!offered) return null;
-  return (
-    <div
-      role="status"
-      className="fixed bottom-24 left-1/2 z-[10002] flex -translate-x-1/2 items-center gap-3 rounded-xl border bg-background/90 py-2 pl-4 pr-2 text-sm text-foreground shadow-lg backdrop-blur motion-safe:animate-in motion-safe:fade-in"
-    >
-      <span>Reopening your windows…</span>
-      <Button size="sm" variant="secondary" onClick={decline}>
-        Start without them
-      </Button>
-      <Button size="sm" variant="ghost" onClick={accept}>
-        Reopen now
-      </Button>
-    </div>
-  );
+  return null;
 }
