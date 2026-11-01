@@ -194,6 +194,8 @@ import {
   UPDATE_STEP_LABELS,
 } from '@/lib/updater';
 import type { UpdateState } from '@/lib/updater';
+import { dismissUpdateNotice, useUpdateNoticePending } from '@/lib/updateNotice';
+import { useWindowIsTop } from '@/contexts/WindowFocusContext';
 import { cleanInstallerError } from '@/lib/installer';
 import { useFixUpdateWithAssistant, useUpdateState } from '@/hooks/useUpdater';
 import { getFirmwareBridge } from '@/lib/firmware';
@@ -318,6 +320,14 @@ export function Settings({ params, windowId }: AppComponentProps) {
   const searchRef = useRef<HTMLInputElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   useSearchHighlight(paneRef, searching ? terms : NO_TERMS);
+
+  // A DinOS update's notice dots About until About is seen.
+  const updatePending = useUpdateNoticePending();
+  const isTop = useWindowIsTop();
+  const seeingAbout = !searching && section === 'about' && isTop;
+  useEffect(() => {
+    if (seeingAbout && updatePending) dismissUpdateNotice();
+  }, [seeingAbout, updatePending]);
 
   const onKeyDownCapture = (e: React.KeyboardEvent) => {
     if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'f') {
@@ -467,6 +477,9 @@ export function Settings({ params, windowId }: AppComponentProps) {
                 >
                   <s.icon className="size-4 shrink-0" aria-hidden />
                   <span className="truncate">{s.name}</span>
+                  {s.id === 'about' && updatePending && (
+                    <span className="ml-auto size-2 shrink-0 rounded-full bg-primary" aria-label="Update available" />
+                  )}
                 </button>
               </Fragment>
             );

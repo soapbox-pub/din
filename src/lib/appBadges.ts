@@ -9,7 +9,9 @@ import { useSyncExternalStore } from 'react';
  *   is its own document;
  * - `system:<…>`: an installed web app's or nsite's site, from its pages or
  *   service worker, or a Linux app's LauncherEntry badge (all kept in the
- *   main process, see SystemNotificationsHost), until it clears it.
+ *   main process, see SystemNotificationsHost), until it clears it;
+ * - `din:<…>`: Din's own, for something waiting in one of its apps (an
+ *   update in Settings, see UpdateNotifier), until that's seen to.
  *
  * A tile shows its app's badges together.
  */
@@ -37,6 +39,11 @@ function setBadge(key: string, appId: string, badge: AppBadge | null): void {
 /** A window's badge, or null to clear it (it also goes when the window does). */
 export function setWindowBadge(windowId: string, appId: string, badge: AppBadge | null): void {
   setBadge(`window:${windowId}`, appId, badge);
+}
+
+/** One of Din's own badges, or null to clear it. */
+export function setDinBadge(key: string, appId: string, badge: AppBadge | null): void {
+  setBadge(`din:${key}`, appId, badge);
 }
 
 /** Replace every badge under a key prefix at once (the main process's, as resolved to apps). */

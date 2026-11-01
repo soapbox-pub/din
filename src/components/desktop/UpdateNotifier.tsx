@@ -3,7 +3,9 @@ import { useFixUpdateWithAssistant, useUpdateState } from '@/hooks/useUpdater';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { cleanInstallerError } from '@/lib/installer';
+import { setDinBadge } from '@/lib/appBadges';
 import { getUpdaterBridge, shortRevision } from '@/lib/updater';
+import { dismissUpdateNotice, UPDATE_NOTICE_KEY, useUpdateNoticePending } from '@/lib/updateNotice';
 
 /** The commit already announced this boot, so a re-login doesn't repeat it. */
 const NOTIFIED_KEY = 'updater:notified';
@@ -17,6 +19,8 @@ const FAILURE_NOTIFIED_KEY = 'updater:failure-notified';
  * restart; once when a system switched to (by Apply now, or nixos-rebuild
  * switch) needs Din or the computer restarted to be all there; and
  * when the user's own changes stopped one, offers the assistant to fix it.
+ * Until the update's notice is seen (in Settings → About) or dismissed,
+ * Settings' Dock tile carries a dot.
  */
 export function UpdateNotifier() {
   const state = useUpdateState();
@@ -36,6 +40,7 @@ export function UpdateNotifier() {
     if (stagedNeeds === 'reboot') {
       toast({
         title: 'A DinOS update is ready',
+        replaceKey: UPDATE_NOTICE_KEY,
         description: `Restart the computer to finish updating to commit ${commit}.`,
         actions: [{ id: 'details', label: 'Details' }],
         onAction: () => open('settings', { section: 'about' }),
@@ -44,6 +49,7 @@ export function UpdateNotifier() {
     }
     toast({
       title: 'A DinOS update is ready',
+      replaceKey: UPDATE_NOTICE_KEY,
       description: stagedNeeds === 'din'
         ? `Apply commit ${commit} now, then restart Din to finish.`
         : `Apply commit ${commit} now. Nothing needs to restart.`,
@@ -72,6 +78,7 @@ export function UpdateNotifier() {
     const din = restart.endsWith(':din');
     toast({
       title: din ? 'Restart Din to finish updating' : 'Restart to finish updating',
+      replaceKey: UPDATE_NOTICE_KEY,
       description: din
         ? 'The system is up to date, but Din keeps running the version it started with until it restarts. Open apps will close.'
         : 'The system is up to date, but its new kernel loads when the computer starts.',
@@ -92,6 +99,18 @@ export function UpdateNotifier() {
       },
     });
   }, [restart, toast, open]);
+
+  // Once there's nothing left to do (applied, or another update took its
+  // place and finished), the notice is stale.
+  const settled = !!state && !staged && !state.restart;
+  useEffect(() => {
+    if (settled) dismissUpdateNotice();
+  }, [settled]);
+
+  const pending = useUpdateNoticePending();
+  useEffect(() => {
+    setDinBadge('update', 'settings', pending ? 'flag' : null);
+  }, [pending]);
 
   // The latest, for the notification's action.
   const latest = useRef({ state, fixer });

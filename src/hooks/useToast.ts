@@ -15,11 +15,13 @@ export interface Toast {
   /** Buttons on the notification; `onAction` gets the picked one's id. */
   actions?: NotificationAction[];
   onAction?: (action: string) => void;
+  /** Toasts with the same key replace each other. */
+  replaceKey?: string;
 }
 
 const DIN: NotificationSource = { name: 'Din' };
 
-function show({ title, description, variant, actions, onAction }: Toast, source: NotificationSource): string {
+function show({ title, description, variant, actions, onAction, replaceKey }: Toast, source: NotificationSource): string {
   return notify({
     source,
     title,
@@ -27,6 +29,7 @@ function show({ title, description, variant, actions, onAction }: Toast, source:
     actions,
     history: variant === 'destructive' || !!actions?.length,
     onActivate: onAction,
+    replaceKey,
   });
 }
 
