@@ -32,8 +32,8 @@ declare global {
   }
 }
 
-/** Keystrokes in a row before the sparks start (the plugin's first threshold). */
-const ACTIVATION = 20;
+/** Keystrokes in a row before the sparks start (twice the plugin's first threshold). */
+const ACTIVATION = 40;
 /** A pause this long breaks the streak (the plugin's timeout). */
 const STREAK_TIMEOUT_MS = 10_000;
 /** How far, at most, a keystroke throws the window, in CSS pixels, and how long it takes to settle. */
