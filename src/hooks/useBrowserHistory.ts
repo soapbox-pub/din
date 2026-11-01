@@ -270,7 +270,10 @@ export function useBrowserHistory() {
 
   const history = useSyncExternalStore(subscribeBrowserHistory, () => getBrowserHistory(owner));
 
-  const recordVisit = useCallback((url: string) => recordBrowserVisit(owner, url), [owner]);
+  const recordVisit = useCallback(
+    (url: string, typed?: boolean) => recordBrowserVisit(owner, url, typed),
+    [owner],
+  );
   const recordTitle = useCallback(
     (url: string, title: string) => recordBrowserTitle(owner, url, title),
     [owner],

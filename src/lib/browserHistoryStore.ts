@@ -24,6 +24,14 @@ export interface BrowserHistoryEntry {
   visitedAt: number;
   /** Total number of visits to this URL. */
   visits: number;
+  /** How many of those visits were typed or picked in the address bar. */
+  typed?: number;
+  /**
+   * Visits weighted by how they came (typed ones count for more) and decayed
+   * with age, as of `visitedAt`; see `frecency`. Absent on entries from
+   * before it was kept, which count their raw visits.
+   */
+  score?: number;
   /** Last favicon URL the page reported (http(s) only), for top-site tiles. */
   favicon?: string;
 }
@@ -33,6 +41,8 @@ const entrySchema: z.ZodType<BrowserHistoryEntry> = z.object({
   title: z.string().nullable(),
   visitedAt: z.number(),
   visits: z.number(),
+  typed: z.number().optional(),
+  score: z.number().optional(),
   favicon: z.string().optional(),
 });
 
@@ -47,11 +57,22 @@ const MAX_TITLE_LENGTH = 160;
 
 /** Visits lose half their weight every two weeks. */
 const FRECENCY_HALF_LIFE_DAYS = 14;
+/**
+ * What a typed visit counts for against a followed link: an address the user
+ * types is one they mean to come back to (Chrome weighs them the same way).
+ */
+const TYPED_VISIT_WEIGHT = 5;
 
-/** An entry's visits, decayed by the age of its last one. */
+function decay(score: number, from: number, to: number): number {
+  return score * 0.5 ** (Math.max(0, to - from) / 86_400 / FRECENCY_HALF_LIFE_DAYS);
+}
+
+/**
+ * How much an entry is used: its weighted visits, each fading by half every
+ * two weeks.
+ */
 export function frecency(entry: BrowserHistoryEntry, now = Date.now() / 1000): number {
-  const ageDays = Math.max(0, now - entry.visitedAt) / 86_400;
-  return entry.visits * 0.5 ** (ageDays / FRECENCY_HALF_LIFE_DAYS);
+  return decay(entry.score ?? entry.visits, entry.visitedAt, now);
 }
 
 /**
@@ -200,6 +221,8 @@ function merge(a: BrowserHistoryEntry, b: BrowserHistoryEntry): BrowserHistoryEn
     title: newer.title ?? older.title,
     favicon: newer.favicon ?? older.favicon,
     visits: newer.visits + older.visits,
+    typed: (newer.typed ?? 0) + (older.typed ?? 0),
+    score: (newer.score ?? newer.visits) + frecency(older, newer.visitedAt),
   };
 }
 
@@ -265,16 +288,23 @@ function update(owner: string, entry: BrowserHistoryEntry): void {
   notify(account);
 }
 
-/** Record a visit to `url`: moves it to the front and bumps its visit count. */
-export function recordBrowserVisit(owner: string, url: string): void {
+/**
+ * Record a visit to `url`: moves it to the front and bumps its visit count.
+ * `typed` is a visit the user asked for in the address bar (typed, or picked
+ * from its suggestions), rather than a link or redirect.
+ */
+export function recordBrowserVisit(owner: string, url: string, typed = false): void {
   if (!isRecordable(url)) return;
   const existing = getAccount(owner).entries.get(url);
+  const now = Math.floor(Date.now() / 1000);
   update(owner, {
     url,
     title: existing?.title ?? null,
     favicon: existing?.favicon,
-    visitedAt: Math.floor(Date.now() / 1000),
+    visitedAt: now,
     visits: (existing?.visits ?? 0) + 1,
+    typed: (existing?.typed ?? 0) + (typed ? 1 : 0),
+    score: (existing ? frecency(existing, now) : 0) + (typed ? TYPED_VISIT_WEIGHT : 1),
   });
 }
 

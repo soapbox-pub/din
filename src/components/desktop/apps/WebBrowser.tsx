@@ -502,11 +502,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // Persistent browsing history (feeds address-bar autocomplete).
   const { history: browsingHistory, recordVisit, recordTitle, recordFavicon, clearHistory } =
     useBrowserHistory();
-  // The https address each tab was last sent to from the address bar, until
-  // its load commits. A server redirect commits somewhere else
+  // The https address each tab was last sent to, and whether the user typed
+  // it, until its load commits. A server redirect commits somewhere else
   // (fastmail.com → app.fastmail.com), so the address that was typed is
   // recorded too, or it could never autocomplete.
-  const typedUrls = useRef(new Map<string, string>());
+  const typedUrls = useRef(new Map<string, { url: string; typed: boolean }>());
   // For navigateTab, which resolves a typed site to the address visited.
   const historyRef = useRef(browsingHistory);
   useEffect(() => {
@@ -1114,10 +1114,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // fires this event - it records in navigateTab / go instead.
           // Private windows keep no history.
           if (!isPrivate) {
-            const typed = typedUrls.current.get(id);
+            const sent = typedUrls.current.get(id);
             typedUrls.current.delete(id);
-            if (typed && typed !== event.url) recordVisit(typed);
-            recordVisit(event.url);
+            if (sent && sent.url !== event.url) recordVisit(sent.url, sent.typed);
+            recordVisit(event.url, sent?.typed);
           }
           break;
         case 'loadError':
@@ -1496,8 +1496,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     [installUserscript, toast],
   );
 
+  /** `typed`: the user asked for `raw` in the address bar or new-tab page's search box. */
   const navigateTab = useCallback(
-    (id: string, raw: string) => {
+    (id: string, raw: string, typed = false) => {
       const resolved = resolveNavigation(historyDestination(historyRef.current, raw) ?? raw);
       if (!resolved) return;
       // A .user.js address is a script install, not a page visit (mirrors
@@ -1529,8 +1530,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       else views.current.get(id)?.loadURL(surfaceUrl(resolved));
       // The iframe fallback emits no navigate events, so record here (never
       // in a private window).
-      if (!webviewMode && !isPrivate) recordVisit(resolved);
-      if (webviewMode && resolved.startsWith('https://')) typedUrls.current.set(id, resolved);
+      if (!webviewMode && !isPrivate) recordVisit(resolved, typed);
+      if (webviewMode && resolved.startsWith('https://')) {
+        typedUrls.current.set(id, { url: resolved, typed });
+      }
       else typedUrls.current.delete(id);
     },
     [updateTab, clearLoadError, webviewMode, recordVisit, userscriptsBridge, promptUserscriptInstall, isPrivate],
@@ -1546,7 +1549,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   }, [navigateTab]);
 
   const navigate = useCallback(
-    (raw: string) => navigateTab(activeId, raw),
+    (raw: string, typed?: boolean) => navigateTab(activeId, raw, typed),
     [navigateTab, activeId],
   );
 
@@ -1935,7 +1938,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          navigate(activeTab.address);
+          navigate(activeTab.address, true);
         }}
         style={toolbarTint}
         // No background of its own: the title bar, tabs or not, takes the
@@ -2261,7 +2264,7 @@ function AddressBar({
   onChangeValue: (text: string) => void;
   /** Where Enter would go now changed (the user typed or arrowed); lets the browser connect ahead. */
   onPredict?: (text: string) => void;
-  onNavigate: (raw: string) => void;
+  onNavigate: (raw: string, typed?: boolean) => void;
   /** Open the onion service or nsite the page names, in a new tab beside it. */
   onOpenLocation: (url: string) => void;
   /** The onion service the page names (Onion-Location), offered at the end of the bar. */
@@ -2459,7 +2462,7 @@ function AddressBar({
               aria-selected={i === highlighted}
               onClick={() => {
                 dismiss();
-                onNavigate(entry.url);
+                onNavigate(entry.url, true);
               }}
               className={cn(
                 'flex cursor-default items-center gap-2.5 px-3 py-1.5 text-sm',
@@ -3691,7 +3694,7 @@ const TabSurface = memo(function TabSurface({
   /** The nostr: link this tab previews, or null. */
   nostrUri: string | null;
   /** Navigate this tab to a URL/search (from the new-tab page). */
-  onNavigate: (id: string, raw: string) => void;
+  onNavigate: (id: string, raw: string, typed?: boolean) => void;
   /** Where the new-tab page would go changed (see predictNavigation). */
   onPredict?: (raw: string) => void;
   /** Open a URL in a new background tab / a new window (from the new-tab page). */
@@ -3841,7 +3844,7 @@ const TabSurface = memo(function TabSurface({
         <NewTabPage
           isPrivate={isPrivate}
           sites={sites}
-          onNavigate={(raw) => onNavigateToUrl(id, raw)}
+          onNavigate={(raw, typed) => onNavigateToUrl(id, raw, typed)}
           onPredict={onPredict}
           onOpenTab={onOpenTab}
           onOpenWindow={onOpenWindow}
@@ -4100,7 +4103,8 @@ function NewTabPage({
   isPrivate: boolean;
   /** Most-visited sites, defaults included (see `topSites`). */
   sites: TopSite[];
-  onNavigate: (raw: string) => void;
+  /** `typed` when it came from the search box rather than a tile. */
+  onNavigate: (raw: string, typed?: boolean) => void;
   /** Where a click or Enter would go changed; lets the browser connect ahead. */
   onPredict?: (raw: string) => void;
   onOpenTab: (url: string) => void;
@@ -4144,7 +4148,7 @@ function NewTabPage({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            onNavigate(query);
+            onNavigate(query, true);
           }}
           className="relative w-full"
         >
