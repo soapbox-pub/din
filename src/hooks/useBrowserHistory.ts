@@ -136,35 +136,81 @@ export function historyDisplayUrl(entry: BrowserHistoryEntry): string {
   return entry.url.startsWith('nsite://') ? entry.url : bareUrl(entry.url);
 }
 
+/** How well one typed word matched a page, Chrome's omnibox's way. */
+const MATCH_QUALITY = {
+  /** The start of the address. */
+  urlStart: 1,
+  /** The start of a word in the address (after `.`, `/`, `-`, …). */
+  urlWord: 0.8,
+  /** The start of a word in the page title. */
+  titleWord: 0.7,
+  /** Inside a word, for words of three letters or more. */
+  inside: 0.4,
+};
+
+function isWordChar(char: string | undefined): boolean {
+  return !!char && /[\p{L}\p{N}]/u.test(char);
+}
+
+/** Whether `term` starts a word somewhere in `text`. */
+function startsWord(text: string, term: string): boolean {
+  // A term that opens with punctuation ("/din", ".dev") is its own boundary.
+  if (!isWordChar(term[0])) return text.includes(term);
+  for (let i = text.indexOf(term); i >= 0; i = text.indexOf(term, i + 1)) {
+    if (!isWordChar(text[i - 1])) return true;
+  }
+  return false;
+}
+
+/** The best quality `term` matches with, or 0 when it doesn't. */
+function termQuality(term: string, url: string, title: string): number {
+  if (url.startsWith(term)) return MATCH_QUALITY.urlStart;
+  if (startsWord(url, term)) return MATCH_QUALITY.urlWord;
+  if (startsWord(title, term)) return MATCH_QUALITY.titleWord;
+  if (term.length >= 3 && (url.includes(term) || title.includes(term))) return MATCH_QUALITY.inside;
+  return 0;
+}
+
 /**
- * Rank history entries against address-bar input. Matches on the URL (scheme
- * ignored) and the page title; URL-prefix matches rank highest, then any URL
- * substring, then title substrings.
- * Frequent and recent visits break ties.
+ * Rank history entries against address-bar input, the way Chrome's omnibox
+ * does: the input is split into words, and every word has to match the URL
+ * (scheme ignored) or the page title, best at the start of the address or of
+ * a word in either. How well the words match and how much the page is used
+ * (see `frecency`) make one score, so a page used every day can outrank a
+ * one-off whose address happens to match better.
  */
 export function matchHistory(
   history: BrowserHistoryEntry[],
   query: string,
   limit = 6,
+  now = Date.now() / 1000,
 ): BrowserHistoryEntry[] {
   const q = query.trim().toLowerCase().replace(/^(?:https?|nsite):\/\/(www\.)?/, '');
-  if (!q) return [];
+  const terms = q.split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
 
-  const scored: { entry: BrowserHistoryEntry; score: number }[] = [];
+  const scored: { entry: BrowserHistoryEntry; score: number; frecency: number }[] = [];
   for (const entry of history) {
     const url = bareUrl(entry.url).toLowerCase();
     const title = entry.title?.toLowerCase() ?? '';
-    let score = 0;
-    if (url.startsWith(q)) score = 3;
-    else if (url.includes(q)) score = 2;
-    else if (title.includes(q)) score = 1;
-    if (score > 0) scored.push({ entry, score });
+    let quality = 0;
+    for (const term of terms) {
+      const match = termQuality(term, url, title);
+      if (!match) {
+        quality = 0;
+        break;
+      }
+      quality += match / terms.length;
+    }
+    if (!quality) continue;
+    const used = frecency(entry, now);
+    scored.push({ entry, score: quality * (1 + Math.log1p(used)), frecency: used });
   }
 
   scored.sort(
     (a, b) =>
       b.score - a.score ||
-      b.entry.visits - a.entry.visits ||
+      b.frecency - a.frecency ||
       b.entry.visitedAt - a.entry.visitedAt,
   );
 
