@@ -47,6 +47,10 @@ const RETRY_MAX_MS = 5 * 60_000;
 /** Bluetooth changes try again at most this often. */
 const POKE_MS = 10_000;
 const CONTACTS_MS = 12 * 60 * 60_000;
+/** Contacts that couldn't be fetched are tried again this often. */
+const CONTACTS_RETRY_MS = 5 * 60_000;
+/** How long the first inbox read waits for contacts, so new texts come with names. */
+const CONTACTS_WAIT_MS = 20_000;
 /** How many of each folder's newest messages a listing asks for. */
 const LIST_COUNT = 60;
 
@@ -203,6 +207,8 @@ export class MapConnection implements PhoneConnection {
   private retryMs = RETRY_MIN_MS;
   private lastTry = 0;
   private contactsAt = 0;
+  private contactsTried = 0;
+  private contactsPulling: Promise<void> | null = null;
   /** What's been reported, by MAP handle. */
   private known = new Map<string, Known>();
 
@@ -323,9 +329,13 @@ export class MapConnection implements PhoneConnection {
       await this.enterMessages();
       this.retryMs = RETRY_MIN_MS;
       this.hooks.status({ status: 'connected', error: null });
+      // Contacts first, so texts announced on connecting come with names.
+      await Promise.race([this.maybePullContacts(true), new Promise((resolve) => setTimeout(resolve, CONTACTS_WAIT_MS))]);
       await this.sync();
-      this.pollTimer = setInterval(() => void this.sync(), POLL_MS);
-      if (Date.now() - this.contactsAt > CONTACTS_MS) void this.pullContacts();
+      this.pollTimer = setInterval(() => {
+        void this.sync();
+        void this.maybePullContacts(false);
+      }, POLL_MS);
     } catch (error) {
       const away = !this.session;
       this.close();
@@ -433,6 +443,18 @@ export class MapConnection implements PhoneConnection {
     }
   }
 
+  /** Fetch contacts if they're stale, and failed ones again after a while. */
+  private maybePullContacts(now: boolean): Promise<void> {
+    if (this.contactsPulling) return this.contactsPulling;
+    if (Date.now() - this.contactsAt < CONTACTS_MS) return Promise.resolve();
+    if (!now && Date.now() - this.contactsTried < CONTACTS_RETRY_MS) return Promise.resolve();
+    this.contactsTried = Date.now();
+    this.contactsPulling = this.pullContacts().finally(() => {
+      this.contactsPulling = null;
+    });
+    return this.contactsPulling;
+  }
+
   private async pullContacts(): Promise<void> {
     if (!(await obex())) return;
     let session: string | null = null;
@@ -444,10 +466,14 @@ export class MapConnection implements PhoneConnection {
       const [transfer] = await call('PullAll', session, PBAP, 'sa{sv}', [file, filters], SESSION_TIMEOUT_MS);
       await waitTransfer(transfer as string);
       const contacts = parseVCards(await fs.readFile(file, 'utf8'));
-      this.contactsAt = Date.now();
-      if (contacts.length) this.hooks.contacts(contacts);
-    } catch {
+      // None is what a phone with Sync Contacts off sends: ask again later.
+      if (contacts.length) {
+        this.contactsAt = Date.now();
+        this.hooks.contacts(contacts);
+      }
+    } catch (error) {
       // Contacts are a nicety: the phone may not share them ("Sync Contacts" off).
+      console.warn('phone: fetching contacts failed', error instanceof Error ? error.message : error);
     } finally {
       void fs.rm(file, { force: true });
       if (session) void call('RemoveSession', '/org/bluez/obex', CLIENT, 'o', [session]).catch(() => {});

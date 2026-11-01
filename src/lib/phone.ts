@@ -107,6 +107,8 @@ export interface PhoneIncoming {
   name: string;
   /** The sender's name, when it's a group. */
   from: string;
+  /** Names for one already announced (contacts arrived after it): change its notification if it's still there, without popping it up again. */
+  update?: boolean;
 }
 
 export interface PhoneBridge {

@@ -341,15 +341,29 @@ function upsert(phoneId: string, incoming: BackendMessage[]): void {
   scheduleSave(phoneId);
   deps.sendToShell('phone:messages', { phoneId, threadIds: [...touched] });
   changed();
-  for (const message of announce.slice(-5)) {
-    const thread = d.threads[message.threadId];
-    const addresses = thread?.messages.at(-1)?.addresses ?? message.addresses;
-    deps.sendToShell('phone:incoming', {
-      message,
-      name: conversationName(d, addresses),
-      from: message.sender ? nameOf(d, message.sender) : '',
-    });
+  for (const message of announce.slice(-5)) announceText(phoneId, message, false);
+}
+
+/** Texts announced lately, to name again when contacts arrive after them. */
+const announced: { phoneId: string; message: PhoneMessage; name: string; from: string; at: number }[] = [];
+
+function announceText(phoneId: string, message: PhoneMessage, update: boolean): void {
+  const d = phoneData(phoneId);
+  const addresses = d.threads[message.threadId]?.messages.at(-1)?.addresses ?? message.addresses;
+  const name = conversationName(d, addresses);
+  const from = message.sender ? nameOf(d, message.sender) : '';
+  const now = Date.now();
+  const at = announced.findIndex((a) => a.phoneId === phoneId && a.message.id === message.id);
+  if (update) {
+    const before = announced[at];
+    if (!before || (before.name === name && before.from === from)) return;
+    announced[at] = { ...before, name, from };
+  } else {
+    if (at >= 0) announced.splice(at, 1);
+    announced.push({ phoneId, message, name, from, at: now });
   }
+  while (announced.length && (announced.length > 20 || now - announced[0].at > NEW_MS)) announced.shift();
+  deps.sendToShell('phone:incoming', { message, name, from, update });
 }
 
 function conversations(phoneId?: string): PhoneConversation[] {
@@ -465,6 +479,8 @@ function hooks(phoneId: string): PhoneHooks {
       scheduleSave(phoneId);
       deps.sendToShell('phone:messages', { phoneId, threadIds: Object.keys(d.threads) });
       changed();
+      // Notifications that went up with a number get the name.
+      for (const a of announced.filter((x) => x.phoneId === phoneId)) announceText(phoneId, a.message, true);
     },
   };
 }

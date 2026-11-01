@@ -165,6 +165,15 @@ function remove(id: string, reason: NotificationCloseReason): void {
   notification.onClose?.(reason);
 }
 
+/**
+ * Change what the notification with this `replaceKey` says, if it's still
+ * there, in place: it doesn't pop up again or restart its popup's clock.
+ */
+export function updateNotificationByKey(replaceKey: string, patch: Partial<Pick<DesktopNotification, 'title' | 'body' | 'reply'>>): void {
+  if (!state.notifications.some((n) => n.replaceKey === replaceKey)) return;
+  setState({ ...state, notifications: state.notifications.map((n) => (n.replaceKey === replaceKey ? { ...n, ...patch } : n)) });
+}
+
 /** Remove a notification: the user dismissed it, or its sender closed it. */
 export function closeNotification(id: string, reason: NotificationCloseReason = 'dismissed'): void {
   remove(id, reason);
