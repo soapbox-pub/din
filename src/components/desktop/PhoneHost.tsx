@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, Smartphone } from 'lucide-react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
-import { notify, updateNotificationByKey } from '@/lib/notificationCenter';
-import { getPhoneDesktopBridge } from '@/lib/phone';
+import { appForFile } from '@/lib/fileTypes';
+import { parentPath } from '@/lib/fs';
+import { closeNotificationByKey, notify, updateNotificationByKey, type NotifyInput } from '@/lib/notificationCenter';
+import { getPhoneDesktopBridge, type PhoneReceive } from '@/lib/phone';
 import { cleanPhoneError, formatAddress } from '@/shared/phone';
 
 /**
@@ -10,6 +12,11 @@ import { cleanPhoneError, formatAddress } from '@/shared/phone';
  * with a reply field, the way a Mac shows iMessages. One per conversation:
  * a newer text replaces the one before. A click opens the conversation in
  * Messages; none shows while Messages is the window in front.
+ *
+ * Files a phone shares over Bluetooth (electron/phone-receive.mts) get one
+ * notification per share: progress with Cancel while a file takes more than
+ * a moment, then what arrived, with Open or Show in Files. The user just
+ * shared from the phone in their hand, so nothing asks first.
  */
 export function PhoneHost() {
   const { windows, open } = useWindowManager();
@@ -60,5 +67,90 @@ export function PhoneHost() {
     });
   }, []);
 
+  useEffect(() => {
+    const phone = getPhoneDesktopBridge();
+    if (!phone) return;
+    /** Shares whose progress is on screen, and ones waiting a moment before it is. */
+    const shown = new Set<string>();
+    const waiting = new Map<string, number>();
+    const latest = new Map<string, PhoneReceive>();
+    const source = { name: 'Phone', icon: Smartphone };
+    const key = (id: string) => `phone-receive:${id}`;
+
+    const progress = (r: PhoneReceive): Pick<NotifyInput, 'title' | 'body' | 'progress'> => ({
+      title: r.files.length === 0 && r.current ? `Receiving ${r.current.name}` : `Receiving ${r.files.length + 1} files`,
+      body: `From ${r.phoneName}`,
+      progress: r.current?.size ? r.current.transferred / r.current.size : null,
+    });
+
+    const showProgress = (id: string) => {
+      waiting.delete(id);
+      const r = latest.get(id);
+      if (!r || r.status !== 'receiving') return;
+      shown.add(id);
+      notify({
+        source,
+        ...progress(r),
+        replaceKey: key(id),
+        actions: [{ id: 'cancel', label: 'Cancel' }],
+        timeout: 0,
+        resident: true,
+        onActivate: (action) => {
+          if (action === 'cancel') void phone.cancelReceive(id);
+        },
+      });
+    };
+
+    const showFile = (file: { name: string; path: string }) => openRef.current(appForFile(file.name), { path: file.path });
+    const showInFiles = (file: { name: string; path: string }) =>
+      openRef.current('file-browser', { path: parentPath(file.path), select: file.name });
+
+    const showResult = (r: PhoneReceive) => {
+      if (r.status === 'cancelled') return closeNotificationByKey(key(r.id));
+      const missed = r.failed.length
+        ? `${r.failed.length === 1 ? `${r.failed[0]} didn’t arrive` : `${r.failed.length} didn’t arrive`}${r.error ? `: ${r.error}` : '.'}`
+        : '';
+      if (r.status === 'failed') {
+        const what = r.failed.length === 1 ? r.failed[0] : r.failed.length ? `${r.failed.length} files` : 'files';
+        notify({ source, title: `Couldn’t receive ${what} from ${r.phoneName}`, body: r.error ?? 'The phone stopped sending.', replaceKey: key(r.id) });
+        return;
+      }
+      const single = r.files.length === 1 ? r.files[0] : null;
+      const last = r.files[r.files.length - 1];
+      notify({
+        source,
+        title: single ? `Received ${single.name}` : `Received ${r.files.length} files`,
+        body: [`From ${r.phoneName}, in Downloads.`, missed].filter(Boolean).join(' '),
+        replaceKey: key(r.id),
+        actions: single ? [{ id: 'open', label: 'Open' }, { id: 'show', label: 'Show in Files' }] : [{ id: 'show', label: 'Show in Files' }],
+        onActivate: (action) => {
+          if (single && action !== 'show') showFile(single);
+          else showInFiles(last);
+        },
+      });
+    };
+
+    const off = phone.onReceive((r) => {
+      latest.set(r.id, r);
+      if (r.status === 'receiving') {
+        if (shown.has(r.id)) updateNotificationByKey(key(r.id), progress(r));
+        else if (!waiting.has(r.id)) waiting.set(r.id, window.setTimeout(() => showProgress(r.id), RECEIVE_QUIET_MS));
+        return;
+      }
+      window.clearTimeout(waiting.get(r.id));
+      waiting.delete(r.id);
+      shown.delete(r.id);
+      latest.delete(r.id);
+      showResult(r);
+    });
+    return () => {
+      off();
+      for (const timer of waiting.values()) window.clearTimeout(timer);
+    };
+  }, []);
+
   return null;
 }
+
+/** A share done within this long shows only what arrived, never its progress. */
+const RECEIVE_QUIET_MS = 1000;

@@ -16,10 +16,12 @@ import {
   ActionButtons,
   DetailsError,
   DetailsHero,
+  DetailsGroup,
   DetailsPage,
   DeviceRowButton,
   InfoList,
   InfoRow,
+  ToggleRow,
 } from '@/components/desktop/apps/DetailsPage';
 import {
   AlertDialog,
@@ -129,6 +131,10 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
           connectPending={actions.refresh.isPending && actions.refresh.variables === viewing}
           disconnectPending={actions.disconnect.isPending && actions.disconnect.variables === viewing}
           onBack={() => setViewing(null)}
+          onReceiveFiles={(on) =>
+            phone &&
+            actions.setReceiveFiles.mutate({ id: phone.id, on }, { onError: failed(`Couldn’t change ${phone.name}`) })
+          }
           {...(phone ? rowActions(phone) : NO_ACTIONS)}
         />
         {forgetDialog}
@@ -321,12 +327,13 @@ function PhoneRow({
   );
 }
 
-/** One phone's page: open its texts, connect or disconnect it, forget it, and how it's doing. */
+/** One phone's page: open its texts, connect or disconnect it, forget it, whether it can send files, and how it's doing. */
 function PhoneDetails({
   phone,
   connectPending,
   disconnectPending,
   onBack,
+  onReceiveFiles,
   onOpen,
   onConnect,
   onDisconnect,
@@ -336,6 +343,7 @@ function PhoneDetails({
   connectPending: boolean;
   disconnectPending: boolean;
   onBack: () => void;
+  onReceiveFiles: (on: boolean) => void;
 } & PhoneActions) {
   const connected = phone?.status === 'connected';
   return (
@@ -372,6 +380,15 @@ function PhoneDetails({
           </ActionButtons>
 
           {phone.error && <DetailsError>{phone.error}</DetailsError>}
+
+          <DetailsGroup>
+            <ToggleRow
+              label="Receive files"
+              description="Files you share to this computer from the phone over Bluetooth are saved to Downloads."
+              checked={phone.receiveFiles}
+              onChange={onReceiveFiles}
+            />
+          </DetailsGroup>
 
           <InfoList>
             <InfoRow label="Connects over" value="Bluetooth" />

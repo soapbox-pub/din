@@ -5,7 +5,7 @@ import { call, command, need, pick } from './util';
 
 /**
  * `din phone`: the phones in Settings → Phone and their texts, as Messages
- * shows them (electron/phone.mts). Sending a text asks on screen first: it
+ * shows them (electron/phone.mts), and whether they can send files here. Sending a text asks on screen first: it
  * can't be taken back. Pairing a phone is Bluetooth's (`din bluetooth pair`).
  */
 
@@ -111,6 +111,17 @@ export const phoneArea: Area = {
     }),
     command('phone', 'disconnect', 'Stop talking to a phone until it’s connected again (din phone refresh)', [PHONE], async (args) => {
       await call(phone().disconnect((await device(args.optString('phone'))).id));
+    }),
+    command('phone', 'receive-files', 'Whether files the phone shares over Bluetooth are saved to Downloads', [
+      { name: 'state', type: 'string', positional: true, optional: true, help: 'on or off (leave out to see which)' },
+      PHONE,
+    ], async (args) => {
+      const p = await device(args.optString('phone'));
+      const state = args.optString('state');
+      if (state === undefined) return { data: { receiveFiles: p.receiveFiles }, text: `Receiving files from ${p.name} is ${p.receiveFiles ? 'on' : 'off'}` };
+      if (state !== 'on' && state !== 'off') throw new CommandError('Say on or off', 'usage');
+      await call(phone().setReceiveFiles(p.id, state === 'on'));
+      return { text: `Receiving files from ${p.name} is ${state}` };
     }),
     command('phone', 'add', 'Add a phone paired in Bluetooth (din bluetooth pair) to read its texts here', [
       { name: 'name', type: 'string', positional: true, help: 'The phone’s name' },

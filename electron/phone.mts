@@ -17,6 +17,10 @@
 // conversations changed) and `phone:incoming` (a new text, for the desktop's
 // notification) to the shell and to apps granted `phone`.
 //
+// Files a phone shares over Bluetooth land in Downloads (phone-receive.mts),
+// from phones here with "Receive files" on; `phone:receive` (the shell's
+// alone) tells the desktop how each share is going.
+//
 // Types are src/lib/phone.ts. Runs as TypeScript directly via Node's native
 // type stripping - erasable syntax only, like the rest of electron/.
 
@@ -25,6 +29,7 @@ import path from 'node:path';
 import { app, ipcMain, safeStorage } from 'electron';
 import { bluetoothPhones, onBluetoothChanged } from './bluetooth.mts';
 import { MapConnection } from './phone-map.mts';
+import { cancelReceive, startReceiving } from './phone-receive.mts';
 import type {
   PhoneCandidate,
   PhoneContact,
@@ -73,6 +78,8 @@ interface StoredPhone {
   address: string;
   addedAt: number;
   lastSeen: number | null;
+  /** Off only once turned off: files it shares are saved unless so. */
+  receiveFiles?: boolean;
 }
 
 interface Thread {
@@ -223,6 +230,7 @@ function state(): PhoneState {
       charging: l?.charging ?? null,
       unread: Object.values(d.threads).reduce((n, t) => n + unread(t), 0),
       lastSeen: p.lastSeen,
+      receiveFiles: p.receiveFiles !== false,
     };
   });
   const candidates = bluetoothCandidates.filter((c) => !added.has(c.id));
@@ -489,6 +497,23 @@ function refresh(phoneId: string): void {
   if (p) start(p);
 }
 
+function setReceiveFiles(phoneId: string, on: boolean): void {
+  const p = phones.find((x) => x.id === phoneId);
+  if (!p) return;
+  p.receiveFiles = on;
+  savePhones();
+  changed();
+}
+
+/** The phone a file from this Bluetooth address comes from, if it may send files: still paired, and receiving. */
+async function fileSender(address: string): Promise<{ phoneId: string; name: string } | null> {
+  const p = phones.find((x) => x.address.toUpperCase() === address.toUpperCase());
+  if (!p || p.receiveFiles === false) return null;
+  const paired = await bluetoothPhones().catch(() => null);
+  if (!paired?.some((x) => x.address.toUpperCase() === p.address.toUpperCase())) return null;
+  return { phoneId: p.id, name: p.name };
+}
+
 function forget(phoneId: string): void {
   const p = phones.find((x) => x.id === phoneId);
   if (!p) return;
@@ -559,6 +584,11 @@ export function registerPhoneHandlers(options: Deps): void {
     return add(id);
   });
   handle('phone:forget', (phoneId) => forget(phoneArg(phoneId)));
+  handle('phone:setReceiveFiles', (phoneId, on) => setReceiveFiles(phoneArg(phoneId), on === true));
+  handle('phone:cancelReceive', (id) => {
+    if (typeof id !== 'string') throw new Error('No such transfer.');
+    cancelReceive(id);
+  });
 
   onBluetoothChanged(() => {
     void refreshBluetoothCandidates();
@@ -568,6 +598,7 @@ export function registerPhoneHandlers(options: Deps): void {
   // safeStorage needs the app to be ready, which it is by now.
   for (const p of phones) start(p);
   void refreshBluetoothCandidates();
+  startReceiving({ sender: fileSender, emit: (update) => deps.sendToShell('phone:receive', update) });
 
   app.on('will-quit', () => {
     for (const id of [...saveTimers.keys()]) flush(id);

@@ -67,7 +67,17 @@ const waiters = new Map<string, (status: string) => void>();
 /** Sessions that went away, to their connection. */
 const sessionGone = new Map<string, () => void>();
 
-async function obex(): Promise<DBusConnection | null> {
+/** Hear obexd come and go (phone-receive.mts registers its agent each time it comes). */
+const obexdListeners = new Set<(bus: DBusConnection, owner: string | null) => void>();
+
+export function onObexd(listener: (bus: DBusConnection, owner: string | null) => void): () => void {
+  obexdListeners.add(listener);
+  if (bus) listener(bus, obexOwner);
+  return () => obexdListeners.delete(listener);
+}
+
+/** The session bus, with obexd started on it, or null if it can't be. */
+export async function obex(): Promise<DBusConnection | null> {
   if (bus && obexOwner) return bus;
   connecting ??= (async () => {
     if (!bus) {
@@ -108,6 +118,7 @@ function follow(b: DBusConnection, owner: string | null): void {
   unfollow?.();
   unfollow = null;
   obexOwner = owner;
+  for (const listener of obexdListeners) listener(b, owner);
   if (!owner) return;
   const subscriptions = [
     b.subscribe({ sender: owner, interface: PROPERTIES, member: 'PropertiesChanged' }, (message: Message) => {

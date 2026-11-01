@@ -58,6 +58,8 @@ export interface DesktopNotification {
   actions: NotificationAction[];
   /** A text field to answer in, right in the notification (a text message's). */
   reply?: NotificationReply;
+  /** A progress bar, from 0 to 1, or null for one that's busy without a measure (a file arriving). */
+  progress?: number | null;
   urgency: NotificationUrgency;
   /** How long the popup stays, in ms; 0 keeps it until dismissed. */
   timeout: number;
@@ -169,7 +171,10 @@ function remove(id: string, reason: NotificationCloseReason): void {
  * Change what the notification with this `replaceKey` says, if it's still
  * there, in place: it doesn't pop up again or restart its popup's clock.
  */
-export function updateNotificationByKey(replaceKey: string, patch: Partial<Pick<DesktopNotification, 'title' | 'body' | 'reply'>>): void {
+export function updateNotificationByKey(
+  replaceKey: string,
+  patch: Partial<Pick<DesktopNotification, 'title' | 'body' | 'reply' | 'progress' | 'actions' | 'onActivate'>>,
+): void {
   if (!state.notifications.some((n) => n.replaceKey === replaceKey)) return;
   setState({ ...state, notifications: state.notifications.map((n) => (n.replaceKey === replaceKey ? { ...n, ...patch } : n)) });
 }

@@ -1636,13 +1636,14 @@ expose('passwords', {
 });
 
 // Phones (window.dinos.phone), backed by electron/phone.mts: text messages
-// from the user's phones, for Settings → Phone, new-message notifications and
-// the `din phone` commands; Messages has them through its bridge port. Types
+// from the user's phones, and files they share, for Settings → Phone,
+// notifications and the `din phone` commands; Messages has them through its bridge port. Types
 // in src/lib/phone.ts.
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const phone = {};
 for (const method of [
   'state', 'conversations', 'messages', 'contacts', 'send', 'markRead', 'deleteConversation', 'refresh', 'disconnect', 'add', 'forget',
+  'setReceiveFiles', 'cancelReceive',
 ]) {
   phone[method] = (...args) => ipcRenderer.invoke(`phone:${method}`, ...args);
 }
@@ -1654,6 +1655,8 @@ expose('phone', {
   onMessages: (callback) => listen('phone:messages', callback),
   /** @param {(incoming: unknown) => void} callback */
   onIncoming: (callback) => listen('phone:incoming', callback),
+  /** @param {(receive: unknown) => void} callback */
+  onReceive: (callback) => listen('phone:receive', callback),
 });
 
 // Virtual machines (window.dinos.vms), backed by electron/vms.mts, for the

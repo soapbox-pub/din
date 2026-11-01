@@ -35,5 +35,8 @@ export function usePhoneActions() {
     refresh: useMutation({ mutationFn: (id: string) => requireBridge().refresh(id) }),
     disconnect: useMutation({ mutationFn: (id: string) => requireBridge().disconnect(id) }),
     forget: useMutation({ mutationFn: (id: string) => requireBridge().forget(id) }),
+    setReceiveFiles: useMutation({
+      mutationFn: ({ id, on }: { id: string; on: boolean }) => requireBridge().setReceiveFiles(id, on),
+    }),
   };
 }

@@ -111,6 +111,25 @@ export function NotificationCard({
             </div>
           </button>
 
+          {notification.progress !== undefined && (
+            <div
+              role="progressbar"
+              aria-label={notification.title}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={notification.progress === null ? undefined : Math.round(notification.progress * 100)}
+              className="h-1.5 overflow-hidden rounded-full bg-foreground/10"
+            >
+              <div
+                className={cn(
+                  'h-full rounded-full bg-primary motion-safe:transition-[width]',
+                  notification.progress === null && 'w-1/3 motion-safe:animate-pulse',
+                )}
+                style={notification.progress === null ? undefined : { width: `${Math.min(1, Math.max(0, notification.progress)) * 100}%` }}
+              />
+            </div>
+          )}
+
           {notification.reply && replying ? (
             <ReplyField
               reply={notification.reply}

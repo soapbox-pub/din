@@ -25,6 +25,8 @@ export interface PhoneDevice {
   unread: number;
   /** When it last connected (ms), or null if it never has. */
   lastSeen: number | null;
+  /** Whether files it shares over Bluetooth are saved to Downloads (electron/phone-receive.mts). */
+  receiveFiles: boolean;
 }
 
 /** A phone that could be added: one paired over Bluetooth, or one found on the network. */
@@ -92,6 +94,23 @@ export interface PhoneIncoming {
   update?: boolean;
 }
 
+/** Files a phone is sharing to this computer, one share's worth, as it goes. */
+export interface PhoneReceive {
+  id: string;
+  phoneId: string;
+  phoneName: string;
+  /** `done` once the share is over and something arrived; `failed` or `cancelled` if nothing did. */
+  status: 'receiving' | 'done' | 'failed' | 'cancelled';
+  /** The files saved so far, in Downloads. */
+  files: { name: string; path: string }[];
+  /** Names of files that didn't arrive. */
+  failed: string[];
+  /** The file arriving now; `size` is null when the phone didn't say. */
+  current: { name: string; transferred: number; size: number | null } | null;
+  /** Why something didn't arrive, in words for the user. */
+  error: string | null;
+}
+
 export interface PhoneBridge {
   state(): Promise<PhoneState>;
   /** Every conversation, newest first; one phone's with `phoneId`. */
@@ -112,13 +131,18 @@ export interface PhoneBridge {
   add(candidateId: string): Promise<void>;
   /** Remove a phone and its messages from this computer (it stays paired in Bluetooth). */
   forget(phoneId: string): Promise<void>;
+  /** Save files the phone shares over Bluetooth to Downloads, or turn them away. */
+  setReceiveFiles(phoneId: string, on: boolean): Promise<void>;
+  /** Stop files arriving in a share (a PhoneReceive's id). */
+  cancelReceive(id: string): Promise<void>;
   onChanged(cb: (state: PhoneState) => void): () => void;
   onMessages(cb: (change: PhoneMessagesChange) => void): () => void;
   onIncoming(cb: (incoming: PhoneIncoming) => void): () => void;
+  onReceive(cb: (receive: PhoneReceive) => void): () => void;
 }
 
-/** What Messages has of it (`din.system.phone`): the messages, not adding, disconnecting or forgetting phones. */
-export type PhoneAppBridge = Omit<PhoneBridge, 'add' | 'disconnect' | 'forget'>;
+/** What Messages has of it (`din.system.phone`): the messages, not adding, disconnecting or forgetting phones, or their files. */
+export type PhoneAppBridge = Omit<PhoneBridge, 'add' | 'disconnect' | 'forget' | 'setReceiveFiles' | 'cancelReceive' | 'onReceive'>;
 
 declare global {
   interface Dinos {

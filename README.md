@@ -613,6 +613,12 @@ files — `git add` new source files before `npm run os:build`.
   (`electron/phone-map.mts`), as Windows does for iPhones; no pictures or
   group conversations. New texts pop up as notifications with a reply field.
   Messages are kept only on this computer, sealed with the login keyring.
+- A phone added there can share files to the computer over Bluetooth (the
+  share sheet's Bluetooth target): `electron/phone-receive.mts` is obexd's
+  agent, saving them to Downloads without asking, with one notification per
+  share for its progress and then Open or Show in Files. Other devices are
+  turned away; "Receive files" on the phone's page (`din phone
+  receive-files`) turns it off.
 - On hardware, Din runs GPU-accelerated (Mesa via `hardware.graphics`, plus
   redistributable firmware). Only the QEMU demo variant passes
   `--disable-gpu` (no virgl) and falls back to software rendering.
