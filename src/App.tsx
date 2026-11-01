@@ -63,7 +63,7 @@ const defaultConfig: AppConfig = {
   minimizeEffect: 'magic-lamp',
   closeEffect: 'pop',
   cursorTrail: 'none',
-  cursorClick: 'none',
+  cursorClick: 'fireworks',
   cursorShowMouse: false,
   cursorFirePaint: false,
   cursorWater: false,
