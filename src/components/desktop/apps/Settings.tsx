@@ -251,8 +251,8 @@ import type { SectionId } from '@/lib/settingsSections';
  * Super-key shortcuts for windows and workspaces (src/lib/wmBindings.ts).
  * Dock turns its magnification on or off and picks its backdrop, as its own
  * right-click menu does.
- * Developers holds debug utilities such as intentionally crashing the shell
- * to test the error boundary. About shows Din's logo and DinOS's version, and
+ * Developers holds debug utilities: restarting Din (DinOS) and intentionally
+ * crashing the shell to test the error boundary. About shows Din's logo and DinOS's version, and
  * the update it's building through `window.dinos.updater`, offers the restart
  * that finishes one and the repository it's built from, and firmware updates
  * through `window.dinos.firmware`; elsewhere on Linux, it puts Din on the login
@@ -3821,21 +3821,55 @@ function SystemCursorPreview({ id }: { id: string }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Developer utilities. Currently a single control that crashes the shell on
- * purpose: clicking "Crash" arms a state flag, and the next render throws.
- * Throwing during render (rather than in the click handler) matters — React
- * error boundaries only catch render errors, so this is the reliable way to
- * exercise the root <ErrorBoundary> death screen.
+ * Developer utilities. Restart Din does what About's does after an update
+ * (DinOS only). Crash crashes the shell on purpose: clicking it arms a state
+ * flag, and the next render throws. Throwing during render (rather than in
+ * the click handler) matters — React error boundaries only catch render
+ * errors, so this is the reliable way to exercise the root <ErrorBoundary>
+ * death screen.
  */
 function DevelopersSection() {
   const [armed, setArmed] = useState(false);
+  const updateState = useUpdateState();
+  // Din going down keeps it pending until it does.
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   if (armed) {
     throw new Error('Intentional crash triggered from Settings → Developers');
   }
 
+  const restartDin = () => {
+    const bridge = getUpdaterBridge();
+    if (!bridge) return;
+    setRestarting(true);
+    setRestartError(null);
+    bridge.restartDin().catch((e: unknown) => {
+      setRestarting(false);
+      setRestartError(cleanInstallerError(e));
+    });
+  };
+
   return (
     <SectionShell title="Developers">
+      {updateState?.available && (
+        <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm text-foreground">Restart Din</p>
+              <p className="text-xs text-muted-foreground">
+                Restarts Din as an update does, to load a new build. Open apps
+                will close.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" disabled={restarting} onClick={restartDin}>
+              {restarting ? <Loader2 className="motion-safe:animate-spin" aria-hidden /> : <RotateCw aria-hidden />}
+              Restart Din
+            </Button>
+          </div>
+          {restartError && <p className="text-xs text-destructive">{restartError}</p>}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
         <div className="min-w-0">
           <p className="text-sm text-foreground">Trigger an error</p>
