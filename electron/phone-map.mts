@@ -7,8 +7,9 @@
 // folder, where there is one) every POLL_MS while it's up; obexd also hears
 // the phone's own new-message events and turns them into listing changes, so
 // polling is only the floor. A message's text is the listing's subject when
-// that's all of it, else the message is fetched, which some phones count as
-// reading it, so a fetched unread message is set back to unread. Sending
+// that's all of it; a longer one is fetched whole only once it's read, since
+// fetching reads it on an iPhone (which ignores setting it back to unread),
+// so an unread one shows its first lines until it's opened. Sending
 // pushes a bMessage to the outbox. Contacts come over the Phone Book Access
 // Profile (the iPhone's "Sync Contacts"), in a session of their own.
 //
@@ -185,7 +186,9 @@ function digits(address: string): string {
 
 interface Known {
   read: boolean;
-  body: string;
+  /** Only the listing's subject so far: the whole text waits until it's read. */
+  partial: boolean;
+  message: BackendMessage;
 }
 
 export class MapConnection implements PhoneConnection {
@@ -249,13 +252,28 @@ export class MapConnection implements PhoneConnection {
   markRead(ids: string[]): void {
     const session = this.session;
     if (!session) return;
-    for (const id of ids) {
-      const handle = id.startsWith('bt:') ? id.slice(3) : null;
-      if (!handle) continue;
-      const known = this.known.get(handle);
-      if (known) known.read = true;
-      void call('Set', `${session}/message${handle}`, PROPERTIES, 'ssv', [MESSAGE, 'Read', new Variant('b', true)]).catch(() => {});
-    }
+    void (async () => {
+      const whole: BackendMessage[] = [];
+      for (const id of ids) {
+        const handle = id.startsWith('bt:') ? id.slice(3) : null;
+        if (!handle) continue;
+        const objectPath = `${session}/message${handle}`;
+        const known = this.known.get(handle);
+        if (known?.partial) {
+          // Fetching it is what reads it, on an iPhone.
+          const body = await this.fetch(objectPath).catch(() => '');
+          if (body) {
+            known.partial = false;
+            known.message = { ...known.message, body, read: true };
+            whole.push(known.message);
+          }
+        } else {
+          await call('Set', objectPath, PROPERTIES, 'ssv', [MESSAGE, 'Read', new Variant('b', true)]).catch(() => {});
+        }
+        if (known) known.read = true;
+      }
+      if (whole.length) this.hooks.messages(whole);
+    })();
   }
 
   private close(): void {
@@ -368,40 +386,47 @@ export class MapConnection implements PhoneConnection {
       const handle = objectPath.slice(objectPath.lastIndexOf('/message') + '/message'.length);
       const read = props.get('Read') === true;
       const known = this.known.get(handle);
-      if (known && known.read === read) continue;
+      if (known && known.read === read && !(read && known.partial)) continue;
       const subject = String(props.get('Subject') ?? '');
-      let body = known?.body ?? subject;
-      if (!known) {
-        const size = Number(props.get('Size') ?? 0);
-        if (subject.length >= 250 || size > Buffer.byteLength(subject, 'utf8') + 2) {
-          body = (await this.fetch(objectPath, read).catch(() => '')) || subject;
+      const size = Number(props.get('Size') ?? 0);
+      // The listing's subject is the text, cut short (an iPhone's at 128 characters).
+      const cut = !known?.message.body && (size > Buffer.byteLength(subject, 'utf8') + 2);
+      let partial = known ? known.partial : cut;
+      let body = known?.message.body ?? subject;
+      // A whole text is fetched only once it's read: fetching reads it, on an
+      // iPhone, and it can't be set back to unread.
+      if (partial && read) {
+        const whole = await this.fetch(objectPath).catch(() => '');
+        if (whole) {
+          body = whole;
+          partial = false;
         }
       }
-      this.known.set(handle, { read, body });
       const outgoing = folder !== 'inbox';
       const other = String((outgoing ? props.get('RecipientAddress') ?? props.get('Recipient') : props.get('SenderAddress') ?? props.get('Sender')) ?? '');
-      out.push({
+      const message: BackendMessage = {
         id: `bt:${handle}`,
         threadId: digits(other) || other || 'unknown',
         addresses: other ? [other] : [],
         sender: outgoing ? null : other || null,
-        body,
+        body: partial && !body.endsWith('…') ? `${body}…` : body,
         time: parseTimestamp(props.get('Timestamp')),
         outgoing,
         read: outgoing || read,
         images: [],
-      });
+      };
+      this.known.set(handle, { read, partial, message });
+      out.push(message);
     }
     return out;
   }
 
-  /** A message's whole text; one that was unread is left unread. */
-  private async fetch(objectPath: string, read: boolean): Promise<string> {
+  /** A message's whole text. */
+  private async fetch(objectPath: string): Promise<string> {
     const file = scratchFile('bmsg');
     try {
       const [transfer] = await call('Get', objectPath, MESSAGE, 'sb', [file, false], SESSION_TIMEOUT_MS);
       await waitTransfer(transfer as string);
-      if (!read) void call('Set', objectPath, PROPERTIES, 'ssv', [MESSAGE, 'Read', new Variant('b', false)]).catch(() => {});
       return bMessageText(await fs.readFile(file, 'utf8'));
     } finally {
       void fs.rm(file, { force: true });
