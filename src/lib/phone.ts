@@ -106,6 +106,8 @@ export interface PhoneBridge {
   deleteConversation(phoneId: string, threadId: string): Promise<void>;
   /** Ask the phone for what's new, and connect again if it isn't connected. */
   refresh(phoneId: string): Promise<void>;
+  /** Stop talking to a phone until `refresh` connects it again (or Din starts again). */
+  disconnect(phoneId: string): Promise<void>;
   /** Add a phone paired in Bluetooth, and start connecting to it. */
   add(candidateId: string): Promise<void>;
   /** Remove a phone and its messages from this computer (it stays paired in Bluetooth). */
@@ -115,8 +117,8 @@ export interface PhoneBridge {
   onIncoming(cb: (incoming: PhoneIncoming) => void): () => void;
 }
 
-/** What Messages has of it (`din.system.phone`): the messages, not adding or forgetting phones. */
-export type PhoneAppBridge = Omit<PhoneBridge, 'add' | 'forget'>;
+/** What Messages has of it (`din.system.phone`): the messages, not adding, disconnecting or forgetting phones. */
+export type PhoneAppBridge = Omit<PhoneBridge, 'add' | 'disconnect' | 'forget'>;
 
 declare global {
   interface Dinos {

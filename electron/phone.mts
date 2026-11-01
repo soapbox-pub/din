@@ -472,6 +472,23 @@ function add(candidateId: string): void {
   changed();
 }
 
+/** Stop talking to a phone until it's asked to connect again (or Din starts again). */
+function disconnect(phoneId: string): void {
+  connections.get(phoneId)?.stop();
+  connections.delete(phoneId);
+  const before = live.get(phoneId);
+  live.set(phoneId, { status: 'offline', error: null, battery: before?.battery ?? null, charging: before?.charging ?? null });
+  changed();
+}
+
+/** Ask a phone for what's new, connecting again after a disconnect. */
+function refresh(phoneId: string): void {
+  const connection = connections.get(phoneId);
+  if (connection) return connection.refresh();
+  const p = phones.find((x) => x.id === phoneId);
+  if (p) start(p);
+}
+
 function forget(phoneId: string): void {
   const p = phones.find((x) => x.id === phoneId);
   if (!p) return;
@@ -535,7 +552,8 @@ export function registerPhoneHandlers(options: Deps): void {
   });
   handle('phone:markRead', (phoneId, threadId) => markRead(phoneArg(phoneId), threadArg(threadId)));
   handle('phone:deleteConversation', (phoneId, threadId) => deleteConversation(phoneArg(phoneId), threadArg(threadId)));
-  handle('phone:refresh', (phoneId) => connections.get(phoneArg(phoneId))?.refresh());
+  handle('phone:refresh', (phoneId) => refresh(phoneArg(phoneId)));
+  handle('phone:disconnect', (phoneId) => disconnect(phoneArg(phoneId)));
   handle('phone:add', (id) => {
     if (typeof id !== 'string') throw new Error('No such phone.');
     return add(id);

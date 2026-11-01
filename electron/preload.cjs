@@ -1642,7 +1642,7 @@ expose('passwords', {
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const phone = {};
 for (const method of [
-  'state', 'conversations', 'messages', 'contacts', 'send', 'markRead', 'deleteConversation', 'refresh', 'add', 'forget',
+  'state', 'conversations', 'messages', 'contacts', 'send', 'markRead', 'deleteConversation', 'refresh', 'disconnect', 'add', 'forget',
 ]) {
   phone[method] = (...args) => ipcRenderer.invoke(`phone:${method}`, ...args);
 }

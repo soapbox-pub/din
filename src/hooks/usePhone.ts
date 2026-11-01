@@ -33,6 +33,7 @@ export function usePhoneActions() {
   return {
     add: useMutation({ mutationFn: (id: string) => requireBridge().add(id) }),
     refresh: useMutation({ mutationFn: (id: string) => requireBridge().refresh(id) }),
+    disconnect: useMutation({ mutationFn: (id: string) => requireBridge().disconnect(id) }),
     forget: useMutation({ mutationFn: (id: string) => requireBridge().forget(id) }),
   };
 }

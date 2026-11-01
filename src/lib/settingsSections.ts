@@ -82,14 +82,14 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Connections',
     name: 'Bluetooth',
     icon: Bluetooth,
-    search: ['My devices', 'Devices nearby', 'pair', 'headphones', 'speaker', 'mouse', 'keyboard', 'wireless', 'device'],
+    search: ['Connected devices', 'Saved devices', 'Devices nearby', 'Device details', 'pair', 'headphones', 'speaker', 'mouse', 'keyboard', 'wireless', 'device'],
   },
   {
     id: 'phone',
     group: 'Connections',
     name: 'Phone',
     icon: Smartphone,
-    search: ['My phones', 'Add a phone', 'Show Notifications', 'Sync Contacts', 'Allow access to messages', 'Bluetooth', 'Messages', 'texts', 'SMS', 'iMessage', 'Phone Link', 'Android', 'iPhone', 'mobile', 'cell'],
+    search: ['Connected phones', 'My phones', 'Phone details', 'Add a phone', 'Show Notifications', 'Sync Contacts', 'Allow access to messages', 'Bluetooth', 'Messages', 'texts', 'SMS', 'iMessage', 'Phone Link', 'Android', 'iPhone', 'mobile', 'cell'],
   },
   {
     id: 'themes',

@@ -1,14 +1,24 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Check, Copy, Loader2, Pencil, QrCode, Trash2, Wifi, WifiOff } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { Check, Copy, Loader2, Pencil, QrCode, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
+import {
+  ActionButton,
+  ActionButtons,
+  DetailsError,
+  DetailsGroup,
+  DetailsHero,
+  DetailsPage,
+  DetailsSkeleton,
+  DetailsSubHeading,
+  InfoList,
+  InfoRow,
+  ToggleRow,
+} from '@/components/desktop/apps/DetailsPage';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { QRCodeCanvas } from '@/components/ui/qrcode';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Switch } from '@/components/ui/switch';
 import { useWifiDetails, useWifiMutations } from '@/hooks/useWifi';
-import { cn } from '@/lib/utils';
 import {
   bandLabel,
   cleanWifiError,
@@ -64,13 +74,7 @@ export function WifiNetworkDetails({
   };
 
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" aria-label="Back to Wi-Fi" onClick={onBack}>
-          <ArrowLeft className="size-4" />
-        </Button>
-        <h2 className="truncate text-lg font-semibold text-foreground">{data?.ssid ?? 'Network details'}</h2>
-      </header>
+    <DetailsPage title={data?.ssid ?? 'Network details'} backLabel="Back to Wi-Fi" onBack={onBack}>
 
       {details.isLoading ? (
         <DetailsSkeleton />
@@ -80,9 +84,20 @@ export function WifiNetworkDetails({
         </div>
       ) : (
         <>
-          <DetailsHero details={data} scanned={scanned} />
+          <DetailsHero
+            icon={
+              data.active || scanned ? (
+                <WifiSignalIcon signal={data.live?.signal || scanned?.signal || 0} />
+              ) : (
+                <WifiOff aria-hidden />
+              )
+            }
+            name={data.ssid}
+            status={data.active ? 'Connected' : scanned ? 'Saved' : 'Not in range'}
+            active={data.active}
+          />
 
-          <div className="grid grid-cols-3 gap-2">
+          <ActionButtons>
             <ActionButton
               icon={Trash2}
               label="Forget"
@@ -120,15 +135,11 @@ export function WifiNetworkDetails({
               disabled={data.security === 'wpa-eap'}
               onClick={() => setSharing(true)}
             />
-          </div>
+          </ActionButtons>
 
-          {error !== null && (
-            <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {error}
-            </p>
-          )}
+          {error !== null && <DetailsError>{error}</DetailsError>}
 
-          <Group>
+          <DetailsGroup>
             <ToggleRow
               label="Auto-connect"
               description="Join this network whenever it's in range."
@@ -156,12 +167,12 @@ export function WifiNetworkDetails({
                 onChange={(mac) => save({ mac })}
               />
             </Row>
-          </Group>
+          </DetailsGroup>
 
           {data.live && <LiveDetailsGroup details={data} />}
 
-          <SubHeading>Advanced</SubHeading>
-          <Group>
+          <DetailsSubHeading>Advanced</DetailsSubHeading>
+          <DetailsGroup>
             {data.security === 'wpa-eap' ? (
               <EapEditor details={data} pending={update.isPending} onSave={save} />
             ) : data.security === 'wpa-psk' || data.security === 'sae' || data.security === 'wep' ? (
@@ -178,109 +189,17 @@ export function WifiNetworkDetails({
             />
             <IpEditor details={data} pending={update.isPending} onSave={save} />
             <ProxyEditor details={data} pending={update.isPending} onSave={save} />
-          </Group>
+          </DetailsGroup>
         </>
       )}
 
       {sharing && data && <ShareDialog details={data} onClose={() => setSharing(false)} />}
-    </section>
-  );
-}
-
-function DetailsHero({ details, scanned }: { details: WifiDetails; scanned: WifiNetwork | undefined }) {
-  const signal = details.live?.signal || scanned?.signal || 0;
-  const inRange = details.active || scanned !== undefined;
-  return (
-    <div className="flex flex-col items-center gap-2 rounded-xl border border-border/60 bg-gradient-to-b from-primary/10 to-transparent px-4 py-6 text-center">
-      <div
-        className={cn(
-          'flex size-14 items-center justify-center rounded-full',
-          details.active ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-muted-foreground',
-        )}
-      >
-        {inRange ? <WifiSignalIcon signal={signal} className="size-7" /> : <WifiOff className="size-7" aria-hidden />}
-      </div>
-      <p className="max-w-full truncate text-base font-semibold text-foreground">{details.ssid}</p>
-      <p className={cn('text-sm', details.active ? 'text-primary' : 'text-muted-foreground')}>
-        {details.active ? 'Connected' : inRange ? 'Saved' : 'Not in range'}
-      </p>
-    </div>
-  );
-}
-
-function ActionButton({
-  icon: Icon,
-  label,
-  onClick,
-  pending,
-  disabled,
-}: {
-  icon: LucideIcon;
-  label: string;
-  onClick: () => void;
-  pending?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <Button
-      variant="outline"
-      className="h-auto flex-col gap-1.5 py-3"
-      disabled={disabled || pending}
-      onClick={onClick}
-    >
-      {pending ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Icon className="size-5" aria-hidden />}
-      <span className="text-xs">{label}</span>
-    </Button>
-  );
-}
-
-function SubHeading({ children }: { children: React.ReactNode }) {
-  return <h3 className="mt-2 text-sm font-medium text-muted-foreground">{children}</h3>;
-}
-
-function Group({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col divide-y divide-border/60 rounded-xl border border-border/60 bg-background/40">
-      {children}
-    </div>
+    </DetailsPage>
   );
 }
 
 function Row({ children }: { children: React.ReactNode }) {
   return <div className="px-4 py-3">{children}</div>;
-}
-
-function ToggleRow({
-  label,
-  description,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  description?: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
-      <span className="min-w-0">
-        <span className="block text-sm text-foreground">{label}</span>
-        {description && <span className="block text-xs text-muted-foreground">{description}</span>}
-      </span>
-      <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} />
-    </label>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5 px-4 py-2.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
-      <dt className="shrink-0 text-sm text-foreground">{label}</dt>
-      <dd className="min-w-0 break-all text-sm text-muted-foreground select-text sm:text-right">{value}</dd>
-    </div>
-  );
 }
 
 function LiveDetailsGroup({ details }: { details: WifiDetails }) {
@@ -289,8 +208,8 @@ function LiveDetailsGroup({ details }: { details: WifiDetails }) {
   const speed = live.linkSpeed || live.maxSpeed;
   return (
     <>
-      <SubHeading>Network details</SubHeading>
-      <dl className="flex flex-col divide-y divide-border/60 rounded-xl border border-border/60 bg-background/40">
+      <DetailsSubHeading>Network details</DetailsSubHeading>
+      <InfoList>
         <InfoRow label="Signal strength" value={live.signal ? `${signalLabel(live.signal)} (${live.signal}%)` : 'Unknown'} />
         {speed > 0 && <InfoRow label="Link speed" value={`${speed} Mbps`} />}
         <InfoRow
@@ -326,7 +245,7 @@ function LiveDetailsGroup({ details }: { details: WifiDetails }) {
             ))}
           />
         )}
-      </dl>
+      </InfoList>
     </>
   );
 }
@@ -581,19 +500,5 @@ function ShareDialog({ details, onClose }: { details: WifiDetails; onClose: () =
         )}
       </DialogContent>
     </Dialog>
-  );
-}
-
-function DetailsSkeleton() {
-  return (
-    <div className="flex flex-col gap-4" aria-hidden>
-      <Skeleton className="h-40 rounded-xl bg-foreground/10" />
-      <div className="grid grid-cols-3 gap-2">
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-16 rounded-md bg-foreground/10" />
-        ))}
-      </div>
-      <Skeleton className="h-48 rounded-xl bg-foreground/10" />
-    </div>
   );
 }

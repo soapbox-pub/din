@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, ChevronRight, EthernetPort, Loader2, Lock, Plus, RotateCw, Settings2, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { ArrowLeft, ChevronRight, EthernetPort, Loader2, Lock, Plus, RotateCw, Settings2, Trash2, Wifi, WifiOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { TorControls } from '@/components/desktop/TorControls';
 import { VpnControls } from '@/components/desktop/VpnControls';
 import { WifiSignalIcon } from '@/components/desktop/WifiIndicator';
+import { DeviceRowButton } from '@/components/desktop/apps/DetailsPage';
 import { AddNetworkDialog } from '@/components/desktop/apps/WifiForms';
 import { WifiNetworkDetails } from '@/components/desktop/apps/WifiNetworkDetails';
 import { Button } from '@/components/ui/button';
@@ -166,6 +167,32 @@ function NetworkListView({
   };
 
   const available = status.data?.available ?? false;
+  const scanned = radioEnabled && hasAdapter ? (networks.data ?? []) : [];
+  const connected = scanned.filter((n) => n.inUse);
+  const others = scanned.filter((n) => !n.inUse);
+
+  const networkRow = (network: WifiNetwork) => (
+    <NetworkRow
+      key={network.ssid}
+      network={network}
+      saved={savedFor(saved, network.ssid)}
+      isJoining={joining === network.ssid}
+      connectPending={connect.isPending && connect.variables?.ssid === network.ssid}
+      disconnectPending={disconnect.isPending}
+      error={opError?.ssid === network.ssid ? opError.message : null}
+      onSelect={() => select(network)}
+      onDetails={onDetails}
+      onForget={(uuid) => forgetNetwork(network, uuid)}
+      onCancelJoin={() => setJoining(null)}
+      onConnect={(password) => joinNetwork(network, password)}
+      onDisconnect={() => {
+        setOpError(null);
+        disconnect.mutate(undefined, {
+          onError: (error) => setOpError({ ssid: network.ssid, message: cleanWifiError(error) }),
+        });
+      }}
+    />
+  );
 
   return (
     <Shell
@@ -206,19 +233,26 @@ function NetworkListView({
           Couldn't refresh: {cleanWifiError(rescan.error)}. The networks below may be out of date.
         </p>
       )}
-      {ethernet && (
-        <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-accent/40 px-3 py-2.5">
-          <EthernetPort className="size-5 shrink-0 text-primary" aria-hidden />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-foreground">Connected via Ethernet</p>
-            {status.data?.ethernet?.iface && (
-              <p className="truncate text-xs text-muted-foreground">
-                {status.data.ethernet.iface}
-                {status.data.ethernet.connection ? ` · ${status.data.ethernet.connection}` : ''}
-              </p>
+      {(ethernet || connected.length > 0) && (
+        <div className="flex flex-col gap-2">
+          <SubHeading>Connected</SubHeading>
+          <ul className="flex flex-col gap-1" aria-label="Connected">
+            {ethernet && (
+              <li className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2">
+                <EthernetPort className="size-5 shrink-0 text-primary" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-primary">Ethernet</p>
+                  {status.data?.ethernet?.iface && (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {status.data.ethernet.iface}
+                      {status.data.ethernet.connection ? ` · ${status.data.ethernet.connection}` : ''}
+                    </p>
+                  )}
+                </div>
+              </li>
             )}
-          </div>
-          <Check className="size-4 shrink-0 text-primary" aria-hidden />
+            {connected.map(networkRow)}
+          </ul>
         </div>
       )}
       {status.isLoading ? (
@@ -242,33 +276,21 @@ function NetworkListView({
         <NetworkListSkeleton />
       ) : networks.isError ? (
         <Fallback>Scan failed: {cleanWifiError(networks.error)}</Fallback>
-      ) : (networks.data?.length ?? 0) === 0 ? (
+      ) : scanned.length === 0 ? (
         <Fallback icon={Wifi}>No networks found nearby.</Fallback>
       ) : (
-        <ul className="flex flex-col gap-1" aria-label="Available networks">
-          {networks.data?.map((network) => (
-            <NetworkRow
-              key={network.ssid}
-              network={network}
-              saved={savedFor(saved, network.ssid)}
-              isJoining={joining === network.ssid}
-              connectPending={connect.isPending && connect.variables?.ssid === network.ssid}
-              disconnectPending={disconnect.isPending}
-              error={opError?.ssid === network.ssid ? opError.message : null}
-              onSelect={() => select(network)}
-              onDetails={onDetails}
-              onForget={(uuid) => forgetNetwork(network, uuid)}
-              onCancelJoin={() => setJoining(null)}
-              onConnect={(password) => joinNetwork(network, password)}
-              onDisconnect={() => {
-                setOpError(null);
-                disconnect.mutate(undefined, {
-                  onError: (error) => setOpError({ ssid: network.ssid, message: cleanWifiError(error) }),
-                });
-              }}
-            />
-          ))}
-        </ul>
+        <div className="flex flex-col gap-2">
+          <SubHeading>Available networks</SubHeading>
+          {others.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
+              No other networks found nearby.
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-1" aria-label="Available networks">
+              {others.map(networkRow)}
+            </ul>
+          )}
+        </div>
       )}
 
       {available && (
@@ -349,56 +371,43 @@ function NetworkRow({
     <li className="rounded-lg border border-border/60 bg-background/40">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="flex items-center gap-1 pr-2">
-            <button
-              type="button"
-              onClick={onSelect}
-              disabled={connectPending}
-              className="flex min-w-0 flex-1 items-center gap-3 rounded-l-lg px-3 py-2 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <WifiSignalIcon
-                signal={network.signal}
-                className={cn('size-5 shrink-0', network.inUse ? 'text-primary' : 'text-muted-foreground')}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-foreground">{network.ssid}</span>
-                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {connectPending ? (
-                    <>
-                      <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
-                      Connecting…
-                    </>
-                  ) : network.inUse ? (
-                    <span className="font-medium text-primary">Connected</span>
-                  ) : (
-                    <>
-                      {secured && <Lock className="size-3 shrink-0" aria-label="Secured" />}
-                      <span>{securityText}</span>
-                      {saved && <span aria-hidden>·</span>}
-                      {saved && <span>Saved</span>}
-                    </>
-                  )}
-                </span>
-              </span>
-            </button>
-
-            {network.inUse && (
-              <Button variant="outline" size="sm" disabled={disconnectPending} onClick={onDisconnect}>
-                {disconnectPending ? 'Disconnecting…' : 'Disconnect'}
-              </Button>
-            )}
-            {saved && (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Settings for ${network.ssid}`}
-                title="Network details"
-                onClick={() => onDetails(saved.uuid)}
-              >
-                <Settings2 className="size-4" />
-              </Button>
-            )}
-          </div>
+          <DeviceRowButton
+            icon={<WifiSignalIcon signal={network.signal} />}
+            name={network.ssid}
+            connected={network.inUse}
+            pending={connectPending || (network.inUse && disconnectPending)}
+            disabled={connectPending || (network.inUse && !saved)}
+            chevron={network.inUse && saved !== undefined}
+            onClick={network.inUse && saved ? () => onDetails(saved.uuid) : onSelect}
+            detail={
+              connectPending ? (
+                'Connecting…'
+              ) : network.inUse && disconnectPending ? (
+                'Disconnecting…'
+              ) : (
+                <>
+                  {secured && <Lock className="size-3 shrink-0" aria-label="Secured" />}
+                  <span>{securityText}</span>
+                  {saved && !network.inUse && <span aria-hidden>·</span>}
+                  {saved && !network.inUse && <span>Saved</span>}
+                </>
+              )
+            }
+            trailing={
+              saved &&
+              !network.inUse && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Settings for ${network.ssid}`}
+                  title="Network details"
+                  onClick={() => onDetails(saved.uuid)}
+                >
+                  <Settings2 className="size-4" />
+                </Button>
+              )
+            }
+          />
         </ContextMenuTrigger>
         <ContextMenuContent
           onCloseAutoFocus={(e) => {
@@ -616,6 +625,10 @@ function SavedNetworksView({
       )}
     </Shell>
   );
+}
+
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-sm font-medium text-muted-foreground">{children}</h3>;
 }
 
 function Shell({

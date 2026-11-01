@@ -109,6 +109,9 @@ export const phoneArea: Area = {
     command('phone', 'refresh', 'Check a phone for new messages, connecting again if need be', [PHONE], async (args) => {
       await call(phone().refresh((await device(args.optString('phone'))).id));
     }),
+    command('phone', 'disconnect', 'Stop talking to a phone until it’s connected again (din phone refresh)', [PHONE], async (args) => {
+      await call(phone().disconnect((await device(args.optString('phone'))).id));
+    }),
     command('phone', 'add', 'Add a phone paired in Bluetooth (din bluetooth pair) to read its texts here', [
       { name: 'name', type: 'string', positional: true, help: 'The phone’s name' },
     ], async (args) => {
