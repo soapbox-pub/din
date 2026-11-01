@@ -434,9 +434,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       : passed
         ? { window: passed, others: [] }
         : claimBrowserSession(windowId);
-    if (claim) return { ...restoreTabs(claim.window), otherWindows: restored ? [] : claim.others };
+    // A window saved with only blank tabs kept none of them (saveTabs).
+    if (claim && claim.window.tabs.length > 0) {
+      return { ...restoreTabs(claim.window), otherWindows: restored ? [] : claim.others };
+    }
     const tab = createTab(NEW_TAB_URL);
-    return { tabs: [tab], activeId: tab.id, otherWindows: [] };
+    return { tabs: [tab], activeId: tab.id, otherWindows: claim && !restored ? claim.others : [] };
   });
   const [tabs, setTabs] = useState<Tab[]>(initial.tabs);
   const [activeId, setActiveId] = useState<string>(initial.activeId);
