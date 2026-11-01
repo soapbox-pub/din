@@ -1,7 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isGuestElement } from '@/platform/guest';
 import { Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
-import { z } from 'zod';
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -17,7 +16,7 @@ import {
 } from '@/components/ui/context-menu';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useAppContext } from '@/hooks/useAppContext';
-import { useAppData } from '@/hooks/useAppData';
+import { usePinnedApps, useTileBadges } from '@/hooks/usePinnedApps';
 import { useDragReorder } from '@/hooks/useDragReorder';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
 import { DRAG_MIME, acceptDrag, currentDrag, subscribeDrag } from '@/lib/dinDrag';
@@ -25,8 +24,7 @@ import { dockTakes, openDropped, type DroppedItem } from '@/lib/dockDrop';
 import { poof } from '@/lib/dockPoof';
 import { getFsBridge } from '@/lib/fs';
 import { registerDockTile } from '@/lib/dockTiles';
-import { useNotificationCenter } from '@/lib/notificationCenter';
-import { useAppBadges, type AppBadge } from '@/lib/appBadges';
+import type { AppBadge } from '@/lib/appBadges';
 import { cn } from '@/lib/utils';
 import { appsDockedAs } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
@@ -59,11 +57,6 @@ interface DockControls {
   /** Close every window of the app. */
   closeAll: (appId: string, windows: DockWindow[]) => void;
 }
-
-/** Apps kept in the Dock out of the box. */
-const DEFAULT_PINNED = ['file-browser', 'settings', 'web-browser', 'app-store'];
-
-const PinnedAppsSchema = z.array(z.string());
 
 /**
  * Width and height of one dock slot at rest in the previews, in px (icon plus
@@ -156,14 +149,7 @@ export function Dock({
   const dinActions = useWindowActions();
   const { closeApp } = dinActions;
   const { getApp, canUninstall, uninstallApp } = useInstalledApps();
-  // Pinned apps belong to this device and never sync to relays, seeded from
-  // the pre-app-data localStorage key on first run.
-  const [pinned, setPinned] = useAppData<string[]>(
-    'pinned-apps',
-    PinnedAppsSchema,
-    DEFAULT_PINNED,
-    { legacyKey: 'desktop:pinned-apps', localOnly: true },
-  );
+  const [pinned, setPinned] = usePinnedApps();
 
   // Stable handlers so memo(DockItem) isn't defeated by fresh closures on
   // every dock re-render (the dock re-renders on every window commit).
@@ -223,27 +209,7 @@ export function Dock({
     .sort((a, b) => rank(a) - rank(b));
   const entryIds = [...pinnedIds, ...unpinnedIds];
 
-  // Unread notifications in the notification center, per tile, for the
-  // apps that sent them.
-  const { notifications } = useNotificationCenter();
-  const unread = new Map<string, number>();
-  for (const n of notifications) {
-    const appId = n.source.appId;
-    if (!n.history || n.read || !appId) continue;
-    const tile = tileOf(appId);
-    unread.set(tile, (unread.get(tile) ?? 0) + 1);
-  }
-  // What apps set on their tiles themselves wins: navigator.setAppBadge()
-  // from built-in apps, web apps and nsites, a Linux app's LauncherEntry.
-  const appBadges = useAppBadges();
-  const badgeOf = (appId: string): AppBadge | null => {
-    let own: AppBadge | null = null;
-    for (const [id, badge] of appBadges) {
-      if (tileOf(id) !== appId) continue;
-      own = typeof badge === 'number' ? (typeof own === 'number' ? own : 0) + badge : (own ?? 'flag');
-    }
-    return own ?? (unread.get(appId) || null);
-  };
+  const badgeOf = useTileBadges(tileOf);
 
   // The Din window that currently holds focus: highest z among visible ones.
   const activeWindow = focusedWindow(windows);
