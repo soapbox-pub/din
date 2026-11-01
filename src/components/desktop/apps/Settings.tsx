@@ -340,7 +340,7 @@ export function Settings({ params, windowId }: AppComponentProps) {
     ) : id === 'bluetooth' ? (
       <BluetoothSection />
     ) : id === 'phone' ? (
-      <PhoneSettingsSection />
+      <PhoneSettingsSection addRequest={params?.add === true ? params.nonce ?? true : undefined} />
     ) : id === 'display' ? (
       <DisplaySection />
     ) : id === 'brightness' ? (

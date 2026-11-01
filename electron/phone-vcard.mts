@@ -1,4 +1,4 @@
-// vCards and bMessages, for phones (phone-map.mts, phone-kdeconnect.mts):
+// vCards and bMessages, for phones (phone-map.mts):
 // the contacts both kinds of phone send, and the Bluetooth Message Access
 // Profile's message format, which is vCard-shaped too.
 //

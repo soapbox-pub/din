@@ -176,9 +176,6 @@ let
   # three per session; the firewall lets them in (below).
   airplayPorts = { from = 7010; to = 7039; };
 
-  # KDE Connect's ports, for Android phones in Messages (below).
-  kdeConnectPorts = { from = 1714; to = 1764; };
-
   # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
   # runs 32- and 64-bit programs without 32-bit host libraries. The Full
   # variant is the one that embeds the Wine Mono and Gecko installers (.NET
@@ -1893,14 +1890,7 @@ in
   # got to say goodbye. Ordering it after network.target stops it first.
   systemd.services."user@".after = [ "network.target" ];
   networking.firewall.allowedUDPPorts = [ 5353 ];
-  networking.firewall.allowedUDPPortRanges = [ airplayPorts kdeConnectPorts ];
-
-  # Android phones in Messages (electron/phone-kdeconnect.mts) speak KDE
-  # Connect's protocol: they announce themselves over UDP and connect over
-  # TCP, both on kdeConnectPorts. Din listens only while a phone is paired or
-  # Settings → Phone is looking for one. (iPhones go over Bluetooth, through
-  # BlueZ's obexd, which D-Bus starts in the session when Din asks for it.)
-  networking.firewall.allowedTCPPortRanges = [ kdeConnectPorts ];
+  networking.firewall.allowedUDPPortRanges = [ airplayPorts ];
 
   # Man and info pages, like any Unix. Skip /share/doc and the NixOS manual to
   # keep the image lean-ish.

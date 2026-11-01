@@ -2,16 +2,11 @@
 // src/apps/messages/): the user's text messages, read and answered from the
 // computer, as Phone Link does on Windows.
 //
-// Two ways to reach a phone, behind one interface:
-//
-//   - Bluetooth (phone-map.mts): the Message Access Profile, through BlueZ's
-//     obexd on the session bus. It's what an iPhone offers (once "Show
-//     Notifications" is on for this computer in its Bluetooth settings), and
-//     what Windows uses for iPhones too: new texts as they come and replies,
-//     but no history from before, and no pictures or groups.
-//   - KDE Connect (phone-kdeconnect.mts): its protocol, spoken here, to the
-//     free KDE Connect app on an Android phone on the same network. Every
-//     conversation with its history, pictures (as thumbnails) and groups.
+// Phones are reached over Bluetooth (phone-map.mts): the Message Access
+// Profile, through BlueZ's obexd on the session bus. iPhones offer it once
+// "Show Notifications" is on for this computer in their Bluetooth settings,
+// and Android phones once they're allowed to share messages; it's what
+// Windows uses for iPhones too. Texts and replies, but no pictures or groups.
 //
 // The phones and their messages live here. Each phone's messages are kept in
 // userData/phone/<id>.json, sealed with safeStorage (the login keyring) so
@@ -30,7 +25,6 @@ import path from 'node:path';
 import { app, ipcMain, safeStorage } from 'electron';
 import { bluetoothPhones, onBluetoothChanged } from './bluetooth.mts';
 import { MapConnection } from './phone-map.mts';
-import { KdeConnect } from './phone-kdeconnect.mts';
 import type {
   PhoneCandidate,
   PhoneContact,
@@ -38,7 +32,6 @@ import type {
   PhoneDevice,
   PhoneKind,
   PhoneMessage,
-  PhonePairing,
   PhoneState,
   PhoneStatus,
 } from '../src/lib/phone.ts';
@@ -66,8 +59,6 @@ export interface PhoneConnection {
   send(addresses: string[], body: string): Promise<void>;
   /** Ask for what's new, connecting again if need be. */
   refresh(): void;
-  /** Ask for a conversation's history (phones that have it). */
-  loadThread?(threadId: string): void;
   /** Tell the phone these were read (phones that take it). */
   markRead?(ids: string[]): void;
   /** Something about Bluetooth's devices changed (the phone came in range, say). */
@@ -78,10 +69,8 @@ interface StoredPhone {
   id: string;
   kind: PhoneKind;
   name: string;
-  /** The Bluetooth address, or KDE Connect's device id. */
+  /** The Bluetooth address. */
   address: string;
-  /** KDE Connect: the phone's certificate (PEM), checked on every connection. */
-  cert?: string;
   addedAt: number;
   lastSeen: number | null;
 }
@@ -107,10 +96,6 @@ const NEW_MS = 10 * 60_000;
 const ECHO_MS = 10 * 60_000;
 const SAVE_DELAY_MS = 1000;
 const EMIT_DELAY_MS = 100;
-/** Settings looks for phones while it's open; this ends a search it forgot. */
-const DISCOVERY_MS = 10 * 60_000;
-/** A conversation's history is asked for at most this often. */
-const HISTORY_INTERVAL_MS = 60_000;
 const MAX_BODY = 5000;
 
 type Deps = {
@@ -124,11 +109,8 @@ const data = new Map<string, PhoneData>();
 const live = new Map<string, LiveStatus>();
 const connections = new Map<string, PhoneConnection>();
 const saveTimers = new Map<string, NodeJS.Timeout>();
-const historyAsked = new Map<string, number>();
-let kde: KdeConnect | null = null;
 let bluetoothCandidates: PhoneCandidate[] = [];
 let bluetoothAvailable = false;
-let discoveryTimer: NodeJS.Timeout | null = null;
 let nextLocal = 1;
 
 // ---------------------------------------------------------------------------
@@ -162,7 +144,7 @@ function loadPhones(): void {
     const parsed: unknown = JSON.parse(fs.readFileSync(path.join(dir(), 'phones.json'), 'utf8'));
     const list = (parsed as { phones?: unknown }).phones;
     phones = Array.isArray(list)
-      ? list.filter((p): p is StoredPhone => typeof p?.id === 'string' && (p.kind === 'bluetooth' || p.kind === 'kdeconnect') && typeof p.address === 'string')
+      ? list.filter((p): p is StoredPhone => typeof p?.id === 'string' && p.kind === 'bluetooth' && typeof p.address === 'string')
       : [];
   } catch {
     phones = [];
@@ -239,21 +221,15 @@ function state(): PhoneState {
       error: l?.error ?? null,
       battery: l?.battery ?? null,
       charging: l?.charging ?? null,
-      history: p.kind === 'kdeconnect',
-      pictures: p.kind === 'kdeconnect',
       unread: Object.values(d.threads).reduce((n, t) => n + unread(t), 0),
       lastSeen: p.lastSeen,
     };
   });
-  const candidates = [...bluetoothCandidates, ...(kde?.candidates() ?? [])].filter((c) => !added.has(c.id));
-  const pairing: PhonePairing | null = kde?.pairing() ?? null;
+  const candidates = bluetoothCandidates.filter((c) => !added.has(c.id));
   return {
     phones: devices,
     candidates,
-    pairing,
     bluetooth: bluetoothAvailable,
-    network: kde?.network() ?? { listening: false, error: null },
-    name: KdeConnect.deviceName(),
   };
 }
 
@@ -382,12 +358,6 @@ function conversations(phoneId?: string): PhoneConversation[] {
 }
 
 function messages(phoneId: string, threadId: string): PhoneMessage[] {
-  const connection = connections.get(phoneId);
-  const key = `${phoneId}\u0000${threadId}`;
-  if (connection?.loadThread && !threadId.startsWith('new:') && Date.now() - (historyAsked.get(key) ?? 0) > HISTORY_INTERVAL_MS) {
-    historyAsked.set(key, Date.now());
-    connection.loadThread(threadId);
-  }
   return phoneData(phoneId).threads[threadId]?.messages ?? [];
 }
 
@@ -487,51 +457,18 @@ function hooks(phoneId: string): PhoneHooks {
 
 function start(p: StoredPhone): void {
   if (connections.has(p.id)) return;
-  if (p.kind === 'bluetooth') {
-    connections.set(p.id, new MapConnection(p.address, hooks(p.id)));
-  } else if (kde && p.cert) {
-    connections.set(p.id, kde.connection(p.address, p.cert, hooks(p.id)));
-  }
+  connections.set(p.id, new MapConnection(p.address, hooks(p.id)));
 }
 
-function syncKde(): void {
-  if (!kde) return;
-  const paired = phones.filter((p) => p.kind === 'kdeconnect');
-  kde.setActive(paired.length > 0);
-}
-
-function add(candidateId: string): Promise<void> | void {
+function add(candidateId: string): void {
   if (phones.some((p) => p.id === candidateId)) return;
   const bt = bluetoothCandidates.find((c) => c.id === candidateId);
-  if (bt) {
-    const address = bt.id.slice(3).match(/../g)?.join(':').toUpperCase() ?? '';
-    const p: StoredPhone = { id: bt.id, kind: 'bluetooth', name: bt.name, address, addedAt: Date.now(), lastSeen: null };
-    phones.push(p);
-    savePhones();
-    start(p);
-    changed();
-    return;
-  }
-  if (!kde) throw new Error('Android phones can’t be reached here.');
-  return kde.pair(candidateId);
-}
-
-/** KDE Connect finished pairing with a phone. */
-function paired(deviceId: string, name: string, cert: string): void {
-  const id = KdeConnect.phoneId(deviceId);
-  const existing = phones.find((p) => p.id === id);
-  if (existing) {
-    existing.cert = cert;
-    existing.name = name;
-    connections.get(id)?.stop();
-    connections.delete(id);
-  } else {
-    phones.push({ id, kind: 'kdeconnect', name, address: deviceId, cert, addedAt: Date.now(), lastSeen: null });
-  }
+  if (!bt) throw new Error('Pair the phone in Bluetooth first.');
+  const address = bt.id.slice(3).match(/../g)?.join(':').toUpperCase() ?? '';
+  const p: StoredPhone = { id: bt.id, kind: 'bluetooth', name: bt.name, address, addedAt: Date.now(), lastSeen: null };
+  phones.push(p);
   savePhones();
-  const p = phones.find((x) => x.id === id);
-  if (p) start(p);
-  syncKde();
+  start(p);
   changed();
 }
 
@@ -540,7 +477,6 @@ function forget(phoneId: string): void {
   if (!p) return;
   connections.get(phoneId)?.stop();
   connections.delete(phoneId);
-  if (p.kind === 'kdeconnect') kde?.unpair(p.address);
   phones = phones.filter((x) => x !== p);
   savePhones();
   clearTimeout(saveTimers.get(phoneId));
@@ -548,15 +484,7 @@ function forget(phoneId: string): void {
   data.delete(phoneId);
   live.delete(phoneId);
   fs.rmSync(dataFile(phoneId), { force: true });
-  syncKde();
   changed();
-}
-
-function discover(on: boolean): void {
-  if (discoveryTimer) clearTimeout(discoveryTimer);
-  discoveryTimer = on ? setTimeout(() => discover(false), DISCOVERY_MS) : null;
-  kde?.setDiscovering(on);
-  if (on) void refreshBluetoothCandidates();
 }
 
 // ---------------------------------------------------------------------------
@@ -586,14 +514,6 @@ export function registerPhoneHandlers(options: Deps): void {
   const { assertShellSender } = options;
   loadPhones();
 
-  kde = new KdeConnect({
-    changed,
-    paired,
-    unpaired: (deviceId) => {
-      hooks(KdeConnect.phoneId(deviceId)).status({ status: 'offline', error: 'The phone removed the pairing. Forget it here and pair it again.' });
-    },
-  });
-
   const handle = (channel: string, fn: (...args: unknown[]) => unknown) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       assertShellSender(event);
@@ -616,31 +536,23 @@ export function registerPhoneHandlers(options: Deps): void {
   handle('phone:markRead', (phoneId, threadId) => markRead(phoneArg(phoneId), threadArg(threadId)));
   handle('phone:deleteConversation', (phoneId, threadId) => deleteConversation(phoneArg(phoneId), threadArg(threadId)));
   handle('phone:refresh', (phoneId) => connections.get(phoneArg(phoneId))?.refresh());
-  handle('phone:discover', (on) => discover(on === true));
   handle('phone:add', (id) => {
     if (typeof id !== 'string') throw new Error('No such phone.');
     return add(id);
-  });
-  handle('phone:answer', (id, accept) => {
-    if (typeof id !== 'string') throw new Error('No such pairing.');
-    kde?.answer(id, accept === true);
   });
   handle('phone:forget', (phoneId) => forget(phoneArg(phoneId)));
 
   onBluetoothChanged(() => {
     void refreshBluetoothCandidates();
-    for (const p of phones) if (p.kind === 'bluetooth') connections.get(p.id)?.bluetoothChanged?.();
+    for (const p of phones) connections.get(p.id)?.bluetoothChanged?.();
   });
 
   // safeStorage needs the app to be ready, which it is by now.
   for (const p of phones) start(p);
-  syncKde();
   void refreshBluetoothCandidates();
 
   app.on('will-quit', () => {
     for (const id of [...saveTimers.keys()]) flush(id);
     for (const c of connections.values()) c.stop();
-    kde?.setActive(false);
-    kde?.setDiscovering(false);
   });
 }

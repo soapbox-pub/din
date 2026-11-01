@@ -83,7 +83,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Connections',
     name: 'Phone',
     icon: Smartphone,
-    search: ['My phones', 'Add a phone', 'Show Notifications', 'Sync Contacts', 'KDE Connect', 'Messages', 'texts', 'SMS', 'iMessage', 'Phone Link', 'Android', 'iPhone', 'mobile', 'cell'],
+    search: ['My phones', 'Add a phone', 'Show Notifications', 'Sync Contacts', 'Allow access to messages', 'Bluetooth', 'Messages', 'texts', 'SMS', 'iMessage', 'Phone Link', 'Android', 'iPhone', 'mobile', 'cell'],
   },
   {
     id: 'appearance',

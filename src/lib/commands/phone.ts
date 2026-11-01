@@ -6,8 +6,7 @@ import { call, command, need, pick } from './util';
 /**
  * `din phone`: the phones in Settings → Phone and their texts, as Messages
  * shows them (electron/phone.mts). Sending a text asks on screen first: it
- * can't be taken back. Pairing an Android phone is confirmed on its screen and
- * this one, never here.
+ * can't be taken back. Pairing a phone is Bluetooth's (`din bluetooth pair`).
  */
 
 const phone = () => need(getPhoneDesktopBridge(), 'Phones');
@@ -44,7 +43,7 @@ export const phoneArea: Area = {
       return {
         data: { phones, candidates: state.candidates },
         text: phones.length
-          ? phones.map((p) => `${p.name}  ${p.kind === 'bluetooth' ? 'Bluetooth' : 'KDE Connect'}  ${p.status}${p.unread ? `  ${p.unread} unread` : ''}${p.error ? `\n  ${p.error}` : ''}`).join('\n')
+          ? phones.map((p) => `${p.name}  ${p.status}${p.unread ? `  ${p.unread} unread` : ''}${p.error ? `\n  ${p.error}` : ''}`).join('\n')
           : 'No phones yet; add one in Settings → Phone',
       };
     }),
@@ -110,24 +109,14 @@ export const phoneArea: Area = {
     command('phone', 'refresh', 'Check a phone for new messages, connecting again if need be', [PHONE], async (args) => {
       await call(phone().refresh((await device(args.optString('phone'))).id));
     }),
-    command('phone', 'add', 'Add a phone paired in Bluetooth, or ask an Android phone running KDE Connect to pair', [
+    command('phone', 'add', 'Add a phone paired in Bluetooth (din bluetooth pair) to read its texts here', [
       { name: 'name', type: 'string', positional: true, help: 'The phone’s name' },
     ], async (args) => {
       const bridge = phone();
-      // Android phones are found while Settings looks for them; look meanwhile.
-      await call(bridge.discover(true));
-      let candidates = (await call(bridge.state())).candidates;
-      for (let i = 0; i < 10 && !candidates.some((c) => c.name.toLowerCase().includes(args.string('name').toLowerCase())); i++) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        candidates = (await call(bridge.state())).candidates;
-      }
-      const candidate = pick(candidates, args.string('name'), (c) => [c.id, c.name], 'phone to add');
+      const { candidates } = await call(bridge.state());
+      const candidate = pick(candidates, args.string('name'), (c) => [c.id, c.name], 'paired phone to add');
       await call(bridge.add(candidate.id));
-      return {
-        text: candidate.kind === 'kdeconnect'
-          ? `Asked ${candidate.name} to pair: accept on the phone if its key matches the one in Settings → Phone`
-          : `Added ${candidate.name}`,
-      };
+      return { text: `Added ${candidate.name}` };
     }),
     command('phone', 'forget', 'Remove a phone and its messages from this computer (asks on screen first)', [
       { name: 'phone', type: 'string', positional: true, help: 'The phone, by name' },

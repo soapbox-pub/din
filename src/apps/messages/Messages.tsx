@@ -186,7 +186,7 @@ export function Messages() {
       <Shell>
         <Empty icon={Smartphone} title="Text from your computer">
           Connect your iPhone or Android phone to read and answer its texts here.
-          <Button className="mt-6" onClick={() => void din.app.open('settings', { section: 'phone' })}>
+          <Button className="mt-6" onClick={() => void din.app.open('settings', { section: 'phone', add: true, nonce: Date.now() })}>
             Set Up a Phone
           </Button>
         </Empty>
@@ -370,7 +370,6 @@ function ConversationPane({
         loading={messages.isPending}
         group={group}
         nameOf={nameOf}
-        note={phone && !phone.history ? `Texts from before ${phone.name} connected aren’t here: an iPhone shares only new ones.` : null}
         onRetry={onRetry}
       />
       <Composer
@@ -436,7 +435,7 @@ function NewMessage({
       </WindowDragRegion>
       <Recipients recipients={recipients} contacts={contacts.data ?? []} onChange={onRecipients} />
       <div className="flex-1 p-6 text-center text-xs text-muted-foreground">
-        {phone?.kind === 'bluetooth' && recipients.length > 1 && 'An iPhone sends this to each of them separately.'}
+        {recipients.length > 1 && 'The phone sends this to each of them separately.'}
       </div>
       <Composer
         draftKey="new"
@@ -453,9 +452,7 @@ function sendBlocked(phone: PhoneDevice | undefined): string | null {
   if (!phone) return 'This phone has been removed.';
   if (phone.status === 'connected') return null;
   if (phone.status === 'connecting') return `Connecting to ${phone.name}…`;
-  return phone.kind === 'bluetooth'
-    ? `${phone.name} isn’t connected. Bring it near this computer.`
-    : `${phone.name} isn’t connected. Open KDE Connect on it, on the same Wi-Fi.`;
+  return `${phone.name} isn’t connected. Bring it near this computer.`;
 }
 
 /** The phones, when one needs attention: not connected, or a problem. */

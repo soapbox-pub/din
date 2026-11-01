@@ -10,7 +10,7 @@ function requireBridge() {
   return phone;
 }
 
-/** The phones, the ones that could be added, and any pairing; main pushes changes, so this never polls. */
+/** The phones, and the paired ones that could be added; main pushes changes, so this never polls. */
 export function usePhoneState() {
   const phone = getPhoneDesktopBridge();
   const queryClient = useQueryClient();
@@ -29,29 +29,9 @@ export function usePhoneState() {
   });
 }
 
-/**
- * Look for Android phones on the network, and take their pairing requests,
- * while a component showing them is mounted. Main gives up on a search after
- * ten minutes, so this asks again every few.
- */
-export function usePhoneDiscovery() {
-  useEffect(() => {
-    const phone = getPhoneDesktopBridge();
-    if (!phone) return;
-    const start = () => void phone.discover(true).catch(() => {});
-    start();
-    const timer = setInterval(start, 5 * 60_000);
-    return () => {
-      clearInterval(timer);
-      void phone.discover(false).catch(() => {});
-    };
-  }, []);
-}
-
 export function usePhoneActions() {
   return {
     add: useMutation({ mutationFn: (id: string) => requireBridge().add(id) }),
-    answer: useMutation({ mutationFn: ({ id, accept }: { id: string; accept: boolean }) => requireBridge().answer(id, accept) }),
     refresh: useMutation({ mutationFn: (id: string) => requireBridge().refresh(id) }),
     forget: useMutation({ mutationFn: (id: string) => requireBridge().forget(id) }),
   };

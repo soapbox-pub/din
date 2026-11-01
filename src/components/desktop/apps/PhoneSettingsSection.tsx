@@ -47,22 +47,31 @@ import { PhoneSetupWizard } from './PhoneSetupWizard';
 /**
  * Settings → Phone: the phones whose texts show up in Messages and
  * notifications (electron/phone.mts), and Add a phone, which walks through
- * pairing one (PhoneSetupWizard). Din looks for Android phones on the
- * network only while the wizard is on that step.
+ * pairing one in this same pane (PhoneSetupWizard). Launched with
+ * `{ add: true, nonce }` (Messages' Set Up a Phone), it starts there.
  */
-export function PhoneSettingsSection() {
+export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
   const bridge = getPhoneDesktopBridge();
   const status = usePhoneState();
   const actions = usePhoneActions();
   const { open } = useWindowActions();
   const { toast } = useToast();
   const [forgetting, setForgetting] = useState<PhoneDevice | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(addRequest !== undefined);
+  const [handledRequest, setHandledRequest] = useState(addRequest);
+  if (addRequest !== handledRequest) {
+    setHandledRequest(addRequest);
+    if (addRequest !== undefined) setAdding(true);
+  }
 
   const failed = (title: string) => (error: unknown) =>
     toast({ title, description: cleanPhoneError(error), variant: 'destructive' });
 
   const data = status.data;
+
+  if (adding && bridge) {
+    return <PhoneSetupWizard onClose={() => setAdding(false)} onOpenMessages={(id) => open('messages', messagesParams(id))} />;
+  }
 
   return (
     <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
@@ -120,8 +129,6 @@ export function PhoneSettingsSection() {
           <p className="text-xs text-muted-foreground">Messages are kept on this computer only.</p>
         </div>
       )}
-
-      <PhoneSetupWizard open={adding} onOpenChange={setAdding} onOpenMessages={(id) => open('messages', messagesParams(id))} />
 
       <AlertDialog open={forgetting !== null} onOpenChange={(o) => !o && setForgetting(null)}>
         <AlertDialogContent>

@@ -36,8 +36,8 @@
 //     assistant's mic button and holding Super+A
 //   - window.dinos.bluetooth: BlueZ adapter and devices (pairing, connecting), for
 //     the menu bar and Settings
-//   - window.dinos.phone: text messages from the user's phones (Bluetooth for
-//     iPhones, KDE Connect for Android), for Settings and notifications
+//   - window.dinos.phone: text messages from the user's phones over Bluetooth,
+//     for Settings and notifications
 //   - window.dinos.printing: printers, the print dialog's previews and jobs, and
 //     the print queue, for the print dialog and Settings
 //   - window.dinos.indd: InDesign documents read into IDML, for Publisher
@@ -1642,8 +1642,7 @@ expose('passwords', {
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const phone = {};
 for (const method of [
-  'state', 'conversations', 'messages', 'contacts', 'send', 'markRead', 'deleteConversation', 'refresh', 'discover',
-  'add', 'answer', 'forget',
+  'state', 'conversations', 'messages', 'contacts', 'send', 'markRead', 'deleteConversation', 'refresh', 'add', 'forget',
 ]) {
   phone[method] = (...args) => ipcRenderer.invoke(`phone:${method}`, ...args);
 }

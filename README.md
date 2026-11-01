@@ -608,12 +608,11 @@ files — `git add` new source files before `npm run os:build`.
   to compare or type) appear on the desktop. Headsets show up in the Sound
   panel through WirePlumber once connected.
 - Messages reads and answers the texts on the user's phones, added in
-  Settings → Phone (`electron/phone.mts`): iPhones over Bluetooth's Message
-  Access Profile through BlueZ's obexd (`electron/phone-map.mts`; new texts
-  only, as on Windows), Android phones over KDE Connect's protocol with the
-  KDE Connect app (`electron/phone-kdeconnect.mts`; history, pictures and
-  groups). New texts pop up as notifications with a reply field. Messages
-  are kept only on this computer, sealed with the login keyring.
+  Settings → Phone (`electron/phone.mts`): iPhones and Android phones alike
+  over Bluetooth's Message Access Profile, through BlueZ's obexd
+  (`electron/phone-map.mts`), as Windows does for iPhones; no pictures or
+  group conversations. New texts pop up as notifications with a reply field.
+  Messages are kept only on this computer, sealed with the login keyring.
 - On hardware, Din runs GPU-accelerated (Mesa via `hardware.graphics`, plus
   redistributable firmware). Only the QEMU demo variant passes
   `--disable-gpu` (no virgl) and falls back to software rendering.

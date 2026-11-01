@@ -10,6 +10,6 @@
   "din": {
     "permissions": ["phone"],
     "window": { "size": { "width": 980, "height": 680 }, "frame": "custom" },
-    "keywords": ["texts", "sms", "mms", "imessage", "phone", "iphone", "android", "phone link", "kde connect", "chat"]
+    "keywords": ["texts", "sms", "mms", "imessage", "phone", "iphone", "android", "phone link", "chat"]
   }
 }

@@ -1,15 +1,14 @@
 /**
  * The phone bridge (`window.dinos.phone` on the desktop, `din.system.phone`
  * with the `phone` permission): text messages from the user's phones, run in
- * Electron main by electron/phone.mts. iPhones connect over Bluetooth's
- * Message Access Profile (electron/phone-map.mts), Android phones over KDE
- * Connect's protocol on the local network (electron/phone-kdeconnect.mts).
+ * Electron main by electron/phone.mts. iPhones and Android phones alike
+ * connect over Bluetooth's Message Access Profile (electron/phone-map.mts).
  * Types shared by both sides (main checks every argument itself), and the
  * desktop's getter; Messages' is in src/shared/phone.ts.
  */
 
-/** How a phone is reached: Bluetooth (iPhones, any phone with MAP) or KDE Connect (Android). */
-export type PhoneKind = 'bluetooth' | 'kdeconnect';
+/** How a phone is reached: Bluetooth, for now the only way. */
+export type PhoneKind = 'bluetooth';
 
 export type PhoneStatus = 'connected' | 'connecting' | 'offline';
 
@@ -22,10 +21,6 @@ export interface PhoneDevice {
   error: string | null;
   battery: number | null;
   charging: boolean | null;
-  /** Whether it sends messages from before it connected (Android does; iPhones only send new ones). */
-  history: boolean;
-  /** Whether it sends pictures and group conversations. */
-  pictures: boolean;
   /** Unread messages across its conversations. */
   unread: number;
   /** When it last connected (ms), or null if it never has. */
@@ -39,25 +34,11 @@ export interface PhoneCandidate {
   name: string;
 }
 
-/** A pairing in progress with an Android phone: compare `key` with the one on its screen. */
-export interface PhonePairing {
-  id: string;
-  name: string;
-  key: string;
-  /** The phone asked (rather than this computer). */
-  incoming: boolean;
-}
-
 export interface PhoneState {
   phones: PhoneDevice[];
   candidates: PhoneCandidate[];
-  pairing: PhonePairing | null;
-  /** Whether Bluetooth is there to reach iPhones with. */
+  /** Whether Bluetooth is there to reach phones with. */
   bluetooth: boolean;
-  /** Whether Din is listening for Android phones on the network, and why not if it can't. */
-  network: { listening: boolean; error: string | null };
-  /** What Android phones see this computer as. */
-  name: string;
 }
 
 export interface PhoneMessage {
@@ -115,7 +96,7 @@ export interface PhoneBridge {
   state(): Promise<PhoneState>;
   /** Every conversation, newest first; one phone's with `phoneId`. */
   conversations(phoneId?: string): Promise<PhoneConversation[]>;
-  /** A conversation's messages, oldest first; a phone that has history is asked for more. */
+  /** A conversation's messages, oldest first. */
   messages(phoneId: string, threadId: string): Promise<PhoneMessage[]>;
   contacts(phoneId: string): Promise<PhoneContact[]>;
   /** Send a text to these addresses; resolves with its conversation's id. */
@@ -125,13 +106,9 @@ export interface PhoneBridge {
   deleteConversation(phoneId: string, threadId: string): Promise<void>;
   /** Ask the phone for what's new, and connect again if it isn't connected. */
   refresh(phoneId: string): Promise<void>;
-  /** Look for Android phones on the network, and take pairing requests from them, while on. */
-  discover(on: boolean): Promise<void>;
-  /** Add a candidate: a Bluetooth phone starts connecting, an Android phone is asked to pair. */
+  /** Add a phone paired in Bluetooth, and start connecting to it. */
   add(candidateId: string): Promise<void>;
-  /** Accept or turn down the pairing on screen. */
-  answer(id: string, accept: boolean): Promise<void>;
-  /** Remove a phone, its messages on this computer, and (for Android) the pairing. */
+  /** Remove a phone and its messages from this computer (it stays paired in Bluetooth). */
   forget(phoneId: string): Promise<void>;
   onChanged(cb: (state: PhoneState) => void): () => void;
   onMessages(cb: (change: PhoneMessagesChange) => void): () => void;
@@ -139,7 +116,7 @@ export interface PhoneBridge {
 }
 
 /** What Messages has of it (`din.system.phone`): the messages, not adding or forgetting phones. */
-export type PhoneAppBridge = Omit<PhoneBridge, 'discover' | 'add' | 'answer' | 'forget'>;
+export type PhoneAppBridge = Omit<PhoneBridge, 'add' | 'forget'>;
 
 declare global {
   interface Dinos {
@@ -161,6 +138,6 @@ export function describePhone(phone: PhoneDevice): string {
     const battery = phone.battery === null ? '' : ` · ${phone.battery}%${phone.charging ? ', charging' : ''}`;
     return `Connected${battery}`;
   }
-  if (!phone.lastSeen) return phone.kind === 'bluetooth' ? 'Not connected yet. Is it nearby?' : 'Not connected yet. Is KDE Connect open on it?';
+  if (!phone.lastSeen) return 'Not connected yet. Is it nearby?';
   return `Not connected · last seen ${new Date(phone.lastSeen).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
 }

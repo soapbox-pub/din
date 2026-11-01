@@ -27,15 +27,12 @@ export function Thread({
   loading,
   group,
   nameOf,
-  note,
   onRetry,
 }: {
   messages: PhoneMessage[];
   loading: boolean;
   group: boolean;
   nameOf: (address: string) => string;
-  /** Said above the messages (an iPhone's missing history). */
-  note: string | null;
   onRetry: (message: PhoneMessage) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -72,7 +69,6 @@ export function Thread({
       aria-label="Messages"
     >
       <div className="mx-auto flex max-w-3xl flex-col">
-        {note && <p className="mx-auto mb-4 max-w-sm text-center text-xs text-muted-foreground">{note}</p>}
         {loading && messages.length === 0 ? (
           <div className="flex flex-col gap-3" aria-hidden>
             <Skeleton className="h-9 w-48 rounded-2xl" />

@@ -13,9 +13,9 @@
 // pushes a bMessage to the outbox. Contacts come over the Phone Book Access
 // Profile (the iPhone's "Sync Contacts"), in a session of their own.
 //
-// An iPhone shares only what arrives while it's connected, and no pictures or
-// groups: that's Apple's side, the same on Windows. Conversations are by the
-// other person's number, since MAP has no threads.
+// MAP carries no pictures or group conversations; that's the profile's limit,
+// the same on Windows. Conversations are by the other person's number, since
+// MAP has no threads.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
