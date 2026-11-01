@@ -6,6 +6,12 @@ export type Theme = "dark" | "light" | "system";
 /** 12- or 24-hour time, or whichever the locale uses. */
 export type ClockFormat = "auto" | "12" | "24";
 
+/**
+ * How the desktop is laid out: a menu bar along the top and the Dock along
+ * the bottom, or one taskbar along the bottom with a Start menu, Windows style.
+ */
+export type DesktopLayout = "dock" | "taskbar";
+
 /** What the Dock sits on: nothing, or a macOS Dock's backdrop of today or of old. */
 export type DockStyle = "none" | "modern" | "classic";
 
@@ -115,6 +121,11 @@ export interface AppConfig {
    * where it was (src/lib/windowSession.ts). Kept on this device.
    */
   restoreWindows: boolean;
+  /**
+   * The menu bar and Dock (default), or a taskbar along the bottom of the
+   * screen in their place, with the Start menu, open windows and status icons.
+   */
+  desktopLayout: DesktopLayout;
   /** Whether Dock icons grow as the pointer sweeps across them. */
   dockMagnification: boolean;
   /** How large an icon under the pointer grows, as a multiple of its size (1.5 = half again). */

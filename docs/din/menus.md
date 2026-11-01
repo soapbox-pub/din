@@ -40,6 +40,11 @@ din.menus.onAction((id) => commands[id]?.());
   focused, and switches them as focus moves between its windows. Each
   window has its own menu bar; an app with several windows sets it in
   each.
+- In the taskbar layout (Settings → Dock & Taskbar) there is no menu bar:
+  each window shows its menus in a strip under its title bar instead,
+  focused or not. A frameless window has no strip, so its menus don't show
+  there; an app that draws its own title bar should offer its commands
+  another way too.
 - **Accelerators** work wherever focus is in the window, and they're shown
   in the menu. Keys go to the app's document, not the desktop's, so
   `window.din` matches them there (`src/sdk/accelerators.ts`; Ctrl and Meta count

@@ -56,6 +56,7 @@ export function TestApp({ children }: TestAppProps) {
     tilingEnabled: false,
     tilingGap: 8,
     restoreWindows: true,
+    desktopLayout: 'dock',
     dockMagnification: true,
     dockMagnificationScale: 1.5,
     dockSize: 80,

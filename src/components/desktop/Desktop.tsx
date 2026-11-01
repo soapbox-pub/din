@@ -9,6 +9,7 @@ import { SecurityOptions } from './SecurityOptions';
 import { ScreenshotHost } from './ScreenshotHost';
 import { ScreenRecordingHost } from './ScreenRecordingHost';
 import { MenuBar } from './MenuBar';
+import { Taskbar } from './Taskbar';
 import { VolumeOsd } from './VolumeOsd';
 import { WorkspaceOsd } from './WorkspacesIndicator';
 import { DictationOverlay } from './DictationOverlay';
@@ -97,7 +98,10 @@ function coveredWindows(
   return covered;
 }
 
-/** The desktop session: top menu bar, wallpaper workspace, bottom dock. */
+/**
+ * The desktop session: top menu bar, wallpaper workspace, bottom dock; or
+ * the workspace above a taskbar (AppConfig's desktopLayout).
+ */
 export function Desktop() {
   return (
     <InstalledAppsProvider>
@@ -172,6 +176,7 @@ function DesktopSession() {
     () => ({ enabled: config.tilingEnabled, gap: config.tilingGap }),
     [config.tilingEnabled, config.tilingGap],
   );
+  const taskbar = config.desktopLayout === 'taskbar';
   const tilingRef = useRef(tiling);
   const getTiling = useCallback(() => tilingRef.current, []);
 
@@ -249,13 +254,14 @@ function DesktopSession() {
                   <BootScreenSync />
                   <WindowSessionHost />
                   <Wallpaper backdrop={<DesktopMenu />}>
-                    <MenuBar />
+                    {!taskbar && <MenuBar />}
 
                     {/* Workspace area - windows render here. It's the primary
                         monitor below the menu bar, but windows may sit outside it on
                         the other monitors (the Wallpaper clips to the whole screen,
                         not to this). The Dock overlays its bottom edge and
-                        auto-hides, so windows can use the full height.
+                        auto-hides, so windows can use the full height; the
+                        taskbar takes its own room below it instead.
                         `isolate` gives the window stack its own stacking context so
                         each window's inline z-index (a counter that only climbs as
                         windows are raised) stays contained here. Without it, a window
@@ -281,7 +287,7 @@ function DesktopSession() {
                       ))}
                     </main>
 
-                    <Dock workspaceRef={workspaceRef} />
+                    {taskbar ? <Taskbar /> : <Dock workspaceRef={workspaceRef} />}
                     <WindowSwitcher />
                     <VolumeOsd />
                     <WorkspaceOsd />

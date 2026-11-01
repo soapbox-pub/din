@@ -110,7 +110,7 @@ import {
   useTimeZones,
 } from '@/hooks/useDateTime';
 import { useClock } from '@/hooks/useClock';
-import type { ClockFormat } from '@/contexts/AppContext';
+import type { ClockFormat, DesktopLayout } from '@/contexts/AppContext';
 import {
   useKeyboardLayouts,
   useKeyboardStatus,
@@ -3323,15 +3323,89 @@ function WindowsSection() {
   );
 }
 
+/** The desktop's layouts, for the picker at the top of the Dock & Taskbar section. */
+const DESKTOP_LAYOUTS: { value: DesktopLayout; name: string }[] = [
+  { value: 'dock', name: 'Menu bar and Dock' },
+  { value: 'taskbar', name: 'Taskbar' },
+];
+
 /**
- * The Dock's size, magnification and backdrop. Its own right-click menu
- * offers the last two, less the magnification level.
+ * The desktop's layout, then the Dock's size, magnification and backdrop.
+ * The Dock's own right-click menu offers the last two, less the
+ * magnification level; the taskbar's offers the way back to the Dock.
  */
 function DockSection() {
   const { config, updateConfig } = useAppContext();
 
   return (
-    <SectionShell title="Dock">
+    <SectionShell title="Dock & Taskbar">
+      <SubHeading>Layout</SubHeading>
+      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Desktop layout">
+        {DESKTOP_LAYOUTS.map((option) => {
+          const active = config.desktopLayout === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => updateConfig((current) => ({ ...current, desktopLayout: option.value }))}
+              className={cn(
+                'flex min-w-0 flex-col items-center gap-2 rounded-xl border p-2',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                active
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+              )}
+            >
+              <LayoutPreview layout={option.value} />
+              <span className="text-xs">{option.name}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        The taskbar puts the Start menu, your apps and windows, and the status icons and clock in one bar along the bottom of the screen, Windows style. It keeps the Dock’s pinned apps, and apps’ menus move into their windows.
+      </p>
+      {config.desktopLayout === 'dock' && <DockOptions />}
+    </SectionShell>
+  );
+}
+
+/** A small picture of a desktop layout over a wallpaper, for its choice in the picker. */
+function LayoutPreview({ layout }: { layout: DesktopLayout }) {
+  return (
+    <span aria-hidden className="relative flex h-20 w-full flex-col overflow-hidden rounded-lg bg-linear-to-br from-sky-400 via-indigo-500 to-fuchsia-500">
+      {layout === 'dock' && <span className="h-2 w-full shrink-0 bg-linear-to-b from-black/30 to-transparent" />}
+      <span className="relative flex-1">
+        <span className="absolute top-3 left-1/4 h-8 w-1/2 rounded-sm bg-white/80 shadow" />
+      </span>
+      {layout === 'dock' ? (
+        <span className="mx-auto mb-1 flex gap-1 rounded-md bg-white/30 px-1.5 py-1 backdrop-blur">
+          {['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'].map((color) => (
+            <span key={color} className={cn('size-3 rounded-[3px]', color)} />
+          ))}
+        </span>
+      ) : (
+        <span className="flex h-4 w-full shrink-0 items-center gap-1 bg-black/45 px-1">
+          <span className="size-3 rounded-full bg-sky-400 ring-1 ring-white/40" />
+          {['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'].map((color) => (
+            <span key={color} className={cn('size-2.5 rounded-[2px]', color)} />
+          ))}
+          <span className="ml-auto h-1.5 w-4 rounded-full bg-white/60" />
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The Dock's size, magnification and backdrop. */
+function DockOptions() {
+  const { config, updateConfig } = useAppContext();
+
+  return (
+    <>
+      <SubHeading>Dock</SubHeading>
       <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="dock-size" className="text-sm">Size</Label>
@@ -3411,7 +3485,7 @@ function DockSection() {
       <p className="text-xs text-muted-foreground">
         Modern is the frosted panel of macOS today, and Classic the glass shelf of Mac OS X Leopard. You can also right-click the Dock between its icons to change these.
       </p>
-    </SectionShell>
+    </>
   );
 }
 

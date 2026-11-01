@@ -57,6 +57,7 @@ const SETTINGS: Setting[] = [
   { key: 'windows.tiling', field: 'tilingEnabled', help: 'Windows tile instead of floating', param: bool },
   { key: 'windows.gaps', field: 'tilingGap', help: 'Pixels between tiled windows', param: { type: 'integer', min: 0, max: 32 } },
   { key: 'windows.reopen', field: 'restoreWindows', help: 'Din reopens your windows when it starts again', param: bool },
+  { key: 'desktop.layout', field: 'desktopLayout', help: 'The menu bar and Dock, or a taskbar along the bottom', param: { type: 'string', choices: ['dock', 'taskbar'] } },
   { key: 'dock.size', field: 'dockSize', help: 'The size of a Dock icon, in pixels', param: { type: 'integer', min: 32, max: 160 } },
   { key: 'dock.magnification', field: 'dockMagnification', help: 'Dock icons grow under the pointer', param: bool },
   { key: 'dock.magnification-scale', field: 'dockMagnificationScale', help: 'How much they grow (1.5 is half again)', param: { type: 'number', min: 1, max: 3 } },
@@ -110,7 +111,7 @@ const KEY: Param = { name: 'key', type: 'string', positional: true, help: 'The s
 
 export const settingsArea: Area = {
   name: 'settings',
-  summary: 'Din’s preferences: theme, effects, Dock, tiling, clock, sync…',
+  summary: 'Din’s preferences: theme, effects, Dock or taskbar, tiling, clock, sync…',
   commands: [
     command('settings', 'list', 'Every setting, with its value', [
       { name: 'prefix', type: 'string', positional: true, optional: true, help: 'Only those under it, e.g. dock' },

@@ -347,7 +347,8 @@ export interface Menu {
 export interface DinMenus {
   /**
    * The app's menus in Din's menu bar, shown while one of its windows is
-   * focused. Replaces the whole set; null for none. Accelerators are bound
+   * focused (or under each window's title bar in the taskbar layout, which
+   * has no menu bar). Replaces the whole set; null for none. Accelerators are bound
    * by the desktop, so they work wherever focus is in the window.
    */
   setMenuBar(menus: Menu[] | null): void;
