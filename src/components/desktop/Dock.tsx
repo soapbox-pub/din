@@ -1,6 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isGuestElement } from '@/platform/guest';
-import { Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -34,29 +33,8 @@ import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
 import { focusedWindow, windowRect, type WindowState } from '@/hooks/useWindows';
 import type { DockStyle } from '@/contexts/AppContext';
 import { DOCK_STYLES } from '@/lib/dockStyles';
-
-/** One window in a Dock tile. */
-interface DockWindow {
-  id: string;
-  /** Stacking order; the frontmost window has the highest. */
-  z: number;
-  minimized: boolean;
-  /** What the window's app says it's showing, if anything. */
-  title: string | null;
-  /** The icon the window's app gave it, if any. */
-  icon: string | null;
-}
-
-/** How a tile acts on its app and its windows. */
-interface DockControls {
-  /** Launch a new instance. */
-  open: (appId: string, params?: Record<string, unknown>) => void;
-  /** Raise and focus a window. */
-  focus: (id: string) => void;
-  minimize: (id: string) => void;
-  /** Close every window of the app. */
-  closeAll: (appId: string, windows: DockWindow[]) => void;
-}
+import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
+import { TileMenuContent } from '@/components/desktop/TileMenuContent';
 
 /**
  * Width and height of one dock slot at rest in the previews, in px (icon plus
@@ -813,46 +791,10 @@ const DockItem = memo(function DockItem({
   /** Present only for installed web apps; removes the app entirely. */
   onUninstall?: (appId: string) => void;
 }) {
-  const { open, focus, minimize, closeAll } = controls;
+  const { open, focus } = controls;
   const isAppActive = appWindows.some((w) => w.id === activeWindowId);
-
-  /** Focus a window, or minimize it if it's already the active one. */
-  const toggleWindow = (win: DockWindow) => {
-    if (win.id === activeWindowId) {
-      minimize(win.id);
-    } else {
-      focus(win.id);
-    }
-  };
-
-  /**
-   * Raise the window `step` places from the active one, in launch order. If
-   * none of the app's windows is active, bring its frontmost one forward
-   * instead (preferring one that isn't minimized).
-   */
-  const cycle = (step: number) => {
-    if (appWindows.length === 0) return;
-    const current = appWindows.findIndex((w) => w.id === activeWindowId);
-    if (current === -1) {
-      const frontmost = appWindows.reduce((top, w) =>
-        (w.minimized === top.minimized ? w.z > top.z : top.minimized) ? w : top,
-      );
-      focus(frontmost.id);
-      return;
-    }
-    const n = appWindows.length;
-    focus(appWindows[(((current + step) % n) + n) % n].id);
-  };
-
-  const handleClick = () => {
-    if (appWindows.length === 0) {
-      open(app.id);
-    } else if (appWindows.length === 1) {
-      toggleWindow(appWindows[0]);
-    } else {
-      cycle(1);
-    }
-  };
+  const cycle = (step: number) => cycleTile(appWindows, activeWindowId, step, focus);
+  const handleClick = () => clickTile(app.id, appWindows, activeWindowId, controls);
 
   // Wheel travel since the last step, and when that step happened. Wheels
   // report anywhere from one big delta per notch to a stream of small
@@ -937,69 +879,16 @@ const DockItem = memo(function DockItem({
   );
 
   const menu = (
-    <ContextMenuContent className="z-[10000] w-52">
-      {/* Every window by what it's showing, to jump straight to one rather
-          than cycling there. */}
-      {appWindows.length > 1 && (
-        <>
-          {appWindows.map((w, i) => (
-            <ContextMenuItem
-              key={w.id}
-              onSelect={() => focus(w.id)}
-              className={cn(w.id === activeWindowId && 'font-semibold', w.minimized && 'text-muted-foreground')}
-            >
-              <span className="truncate">{w.title ?? `${app.name} ${i + 1}`}</span>
-            </ContextMenuItem>
-          ))}
-          <ContextMenuSeparator />
-        </>
-      )}
-      {app.actions && app.actions.length > 0 && (
-        <>
-          {app.actions.map((action) => (
-            <ContextMenuItem key={action.label} onSelect={() => open(app.id, { ...action.params, actionAt: Date.now() })}>
-              {action.label}
-            </ContextMenuItem>
-          ))}
-          <ContextMenuSeparator />
-        </>
-      )}
-      {!app.singleInstance && (
-        <ContextMenuItem onSelect={() => open(app.id)}>
-          {/* Native apps decide for themselves whether a second launch opens
-              another window or just raises the running one. */}
-          <Plus aria-hidden /> {app.native ? 'New instance' : 'New window'}
-        </ContextMenuItem>
-      )}
-      <ContextMenuItem onSelect={() => onTogglePin(app.id)}>
-        {isPinned ? (
-          <>
-            <PinOff aria-hidden /> Remove from Dock
-          </>
-        ) : (
-          <>
-            <Pin aria-hidden /> Keep in Dock
-          </>
-        )}
-      </ContextMenuItem>
-      {appWindows.length > 0 && (
-        <>
-          <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => closeAll(app.id, appWindows)}>
-            <X aria-hidden />{' '}
-            {appWindows.length > 1 ? 'Close all windows' : 'Close window'}
-          </ContextMenuItem>
-        </>
-      )}
-      {onUninstall && (
-        <>
-          <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onSelect={() => onUninstall(app.id)}>
-            <Trash2 aria-hidden /> Uninstall
-          </ContextMenuItem>
-        </>
-      )}
-    </ContextMenuContent>
+    <TileMenuContent
+      app={app}
+      appWindows={appWindows}
+      activeWindowId={activeWindowId}
+      controls={controls}
+      isPinned={isPinned}
+      bar="dock"
+      onTogglePin={onTogglePin}
+      onUninstall={onUninstall}
+    />
   );
 
   // Stable identity is load-bearing beyond render perf: React detaches a
