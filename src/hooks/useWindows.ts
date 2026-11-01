@@ -26,6 +26,15 @@ function liveNativeWindow(w: WindowState | undefined): number | null {
   return typeof xid === 'number' && isNativeWindowOpen(xid) ? xid : null;
 }
 
+/**
+ * A window's params without the app that opened it last time: a relaunch
+ * says who opens it now, if anyone, rather than keeping the last one's.
+ */
+function withoutOpener(params: WindowParams | undefined): WindowParams {
+  const { opener: _opener, ...rest } = params ?? {};
+  return rest;
+}
+
 /** Highest z among the given windows (0 if none). */
 function maxZ(windows: WindowState[]): number {
   return windows.reduce((max, w) => Math.max(max, w.z), 0);
@@ -586,7 +595,7 @@ export function useWindows(
           setWindows((ws) =>
             ws.map((w) =>
               w.id === existing.id
-                ? { ...w, params: { ...w.params, ...params } }
+                ? { ...w, params: { ...withoutOpener(w.params), ...params } }
                 : w,
             ),
           );

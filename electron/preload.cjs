@@ -89,6 +89,8 @@
 //     running (see ScreenShareHost.tsx / electron/screen-share.mts)
 //   - window.dinos.screenRecorder: recording the screen to a video (see
 //     src/lib/screenRecorder.ts / electron/screen-recorder.mts)
+//   - window.dinos.capture: Studio's takes and live streams (see
+//     src/lib/capture.ts / electron/capture.mts)
 //   - window.dinos.media: what web pages and native apps are playing, and their
 //     play/pause/next/previous (see src/lib/nowPlaying.ts / electron/media.mts)
 //
@@ -3392,6 +3394,30 @@ expose('screenRecorder', {
     ipcRenderer.on('screen-recorder:finished', listener);
     return () => ipcRenderer.removeListener('screen-recorder:finished', listener);
   },
+});
+
+// Studio's takes and live streams (window.dinos.capture), backed by
+// electron/capture.mts. Studio itself reaches it over its own port
+// (din.system.capture); the desktop has it for the menu bar's recording and
+// live indicators and for `din studio`.
+/** @type {Record<string, (...args: unknown[]) => Promise<unknown>>} */
+const capture = {};
+for (const method of [
+  'status', 'pointer', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
+  'destinations', 'saveDestination', 'removeDestination', 'streamStart', 'streamStop',
+]) {
+  capture[method] = (...args) => ipcRenderer.invoke(`capture:${method}`, ...args);
+}
+expose('capture', {
+  ...capture,
+  /** @param {Uint8Array} data */
+  streamWrite: (data) => ipcRenderer.send('capture:streamWrite', data),
+  /** @param {(state: unknown) => void} callback */
+  onState: (callback) => listen('capture:state', callback),
+  /** @param {(take: unknown) => void} callback */
+  onChanged: (callback) => listen('capture:changed', callback),
+  /** @param {(ended: unknown) => void} callback */
+  onStreamEnded: (callback) => listen('capture:streamEnded', callback),
 });
 
 // Media playing in web pages and native apps (window.dinos.media), backed by

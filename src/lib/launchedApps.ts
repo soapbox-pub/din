@@ -90,6 +90,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   phone: 'Read and send text messages from your phones',
   passwords: 'See and change all your saved passwords',
   vms: 'Run virtual machines, with any of your files as their disks',
+  capture: 'Use the camera, the microphone and the screen, and go live',
   'file-folders': 'Reach the folders of files you give it',
 };
 

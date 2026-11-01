@@ -5,6 +5,7 @@ import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, pri
 import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, specOf } from './parse';
 import { phoneArea } from './phone';
 import { settingsArea } from './settings';
+import { studioArea } from './studio';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
 import { vmsArea } from './vms';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
@@ -23,6 +24,7 @@ export const AREAS: readonly Area[] = [
   browserArea,
   openArea,
   screenshotArea,
+  studioArea,
   wifiArea,
   bluetoothArea,
   phoneArea,

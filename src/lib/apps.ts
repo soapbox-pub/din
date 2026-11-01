@@ -233,6 +233,10 @@ export const APPS: readonly AppDefinition[] = [
   // Media Player (.wmz) skins. Files opens songs, playlists and skins here.
   // Launch params `{ paths, how: 'play' | 'enqueue' }` (or `{ path }`).
   dinApp('media-player'),
+  // Recording yourself and the screen for the Assistant to edit, and going
+  // live. One window; `{ action: 'record' | 'stop' | 'mark' | 'live', nonce }`
+  // presses its buttons (`din studio`, the menu bar's stop button).
+  dinApp('studio'),
   // Conversations with OpenCode, the coding agent. One window, which
   // notifications and the menu bar's robot point at a conversation by
   // its `sessionID` launch param.

@@ -31,6 +31,7 @@ import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
+import type { CaptureBridge } from '@/lib/capture';
 
 export type Unsubscribe = () => void;
 
@@ -107,6 +108,12 @@ export interface LaunchContext {
    * the window is reopened after its app crashed. Null otherwise.
    */
   state: unknown;
+  /**
+   * The app that launched it with `din.app.open`, by id, as the desktop saw
+   * it (an app can't say it's another); null when it was the user or the
+   * desktop.
+   */
+  opener: string | null;
 }
 
 export interface DinApp {
@@ -785,6 +792,13 @@ export type Permission =
   /** QEMU virtual machines in ~/VMs: running them, their screens, snapshots (`din.system.vms`). Virtual Machines. */
   | 'vms'
   /**
+   * The camera, the microphone and the whole screen in the app's own page
+   * (getUserMedia, getDisplayMedia with no picker), and `din.system.capture`:
+   * takes in ~/Videos/Studio, the screen recorded with its pointer, live
+   * streams over RTMP. Studio.
+   */
+  | 'capture'
+  /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.
    * Preview (stepping through a folder, archives), Publisher (linked
@@ -821,6 +835,7 @@ export interface DinSystem {
   phone?: PhoneAppBridge;
   passwords?: PasswordsBridge;
   vms?: VmsBridge;
+  capture?: CaptureBridge;
 }
 
 // ---------------------------------------------------------------------------

@@ -428,6 +428,11 @@ let
     # Screen recording (electron/screen-recorder.mts), through din-shell's
     # screencopy, encoded with VA-API.
     export DIN_WF_RECORDER=${pkgs.wf-recorder}/bin/wf-recorder
+    # Studio (electron/capture.mts): FFmpeg finishes its takes into MP4s and
+    # carries its live streams to RTMP, and whisper.cpp's command-line tool
+    # transcribes the takes, with dictation's model.
+    export DIN_FFMPEG=${pkgs.ffmpeg}/bin/ffmpeg
+    export DIN_WHISPER_CLI=${whisper}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${whisper}/bin/whisper-server
     export DIN_WHISPER_MODEL=${whisper-model}
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
@@ -1174,8 +1179,9 @@ in
   # userland with its own package manager, sharing $HOME, in rootless podman
   # (also answering to `docker`). ngit brings git-remote-nostr, so git takes
   # nostr:// remotes, Din's own among them.
-  # din-update is there for DIN_UPDATER, above.
-  environment.systemPackages = with pkgs; [ git ngit unzip distrobox din-keyring din-cli din-updater ]
+  # din-update is there for DIN_UPDATER, above. FFmpeg is how the Assistant
+  # edits Studio's takes (os/opencode/skills/studio).
+  environment.systemPackages = with pkgs; [ git ngit unzip distrobox din-keyring din-cli din-updater ffmpeg ]
     # The command-line userland a Mac ships with, so nobody who sits down at a
     # terminal finds their usual tools missing.
     ++ [

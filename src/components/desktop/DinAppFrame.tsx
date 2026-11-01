@@ -384,13 +384,14 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   }, [grantFile]);
 
   const launchOf = useCallback(async (p: Record<string, unknown> | undefined, reason: Hello['launch']['reason']): Promise<Hello['launch']> => {
-    const { path: _path, paths: _paths, actionAt: _actionAt, shortcut, ...rest } = (p ?? {}) as Record<string, unknown>;
+    const { path: _path, paths: _paths, actionAt: _actionAt, shortcut, opener, ...rest } = (p ?? {}) as Record<string, unknown>;
     return {
       reason,
       params: rest,
       files: await grantPaths(launchPaths(p)),
       shortcut: typeof shortcut === 'string' ? shortcut : null,
       state: reason === 'relaunch' ? null : windowStateOf(windowId),
+      opener: typeof opener === 'string' ? opener : null,
     };
   }, [grantPaths, windowId]);
 
@@ -466,7 +467,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const { path: _path, paths: _paths, ...clean } = (p ?? {}) as Record<string, unknown>;
         const paths = (handles ?? []).map((id) => grantOf(id).path);
         const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };
-        live.current.actions.open(target, { ...clean, ...files });
+        // Who asked, which the opened app reads as `launch.opener`.
+        live.current.actions.open(target, { ...clean, ...files, opener: appId });
       },
       'app.openFiles': async ({ handles }) => {
         for (const id of handles) {

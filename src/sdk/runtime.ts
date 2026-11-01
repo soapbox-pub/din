@@ -57,6 +57,7 @@ import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
+import type { CaptureBridge } from '@/lib/capture';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
@@ -409,7 +410,7 @@ export function installDin(transport: Transport): void {
   pushes.on((p) => {
     if (p.type === 'windowMessage') windowMessages.emit({ from: p.from, data: p.data });
   });
-  let launch: LaunchContext = { reason: 'new', params: {}, files: [], shortcut: null, state: null };
+  let launch: LaunchContext = { reason: 'new', params: {}, files: [], shortcut: null, state: null, opener: null };
   pushes.on((p) => {
     if (p.type === 'launch') {
       launch = launchOf(p.launch);
@@ -1056,6 +1057,21 @@ export function installDin(transport: Transport): void {
         v.onDisplayClosed = (cb: (conn: number) => void) => sys.on('vms', 'vms:displayClosed', (conn) => cb(conn as number));
         v.onChanged = (cb: (vms: unknown) => void) => sys.on('vms', 'vms:changed', (list) => cb(list));
         system.vms = v as unknown as VmsBridge;
+      }
+      if (permissions.has('capture')) {
+        await sys.ready('capture');
+        const c: Record<string, unknown> = {};
+        for (const m of [
+          'status', 'pointer', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
+          'destinations', 'saveDestination', 'removeDestination', 'streamStart', 'streamStop',
+        ]) {
+          c[m] = (...args: unknown[]) => sys.call('capture', `capture:${m}`, args);
+        }
+        c.streamWrite = (...args: unknown[]) => sys.send('capture', 'capture:streamWrite', args);
+        c.onState = (cb: (state: unknown) => void) => sys.on('capture', 'capture:state', (s) => cb(s));
+        c.onChanged = (cb: (take: unknown) => void) => sys.on('capture', 'capture:changed', (t) => cb(t));
+        c.onStreamEnded = (cb: (ended: unknown) => void) => sys.on('capture', 'capture:streamEnded', (e) => cb(e));
+        system.capture = c as unknown as CaptureBridge;
       }
     }
 

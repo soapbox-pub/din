@@ -881,15 +881,22 @@ export interface StartConversation {
   directory?: string;
   /** Begin with this slash command, `text` being what follows it. */
   command?: string;
+  /**
+   * What the agent should know that the user didn't type (where an app's
+   * intent came from), given ahead of the first message and shown in the
+   * conversation as `description`.
+   */
+  context?: { text: string; description: string };
 }
 
 /** Start a conversation with its first message; resolves with the new session. */
 export function useStartConversation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ text, files, model, agent, directory, command }: StartConversation) => {
+    mutationFn: async ({ text, files, model, agent, directory, command, context }: StartConversation) => {
       const session = await assistantApi.create({ directory, model: model ?? undefined, agent });
       followDinSession(session.id);
+      if (context) await assistantApi.synthetic(session.id, context.text, context.description);
       if (command) await assistantApi.command(session.id, command, text, files);
       else await assistantApi.prompt(session.id, text, files);
       return session;

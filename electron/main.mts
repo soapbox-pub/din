@@ -141,6 +141,7 @@ import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
 import { registerScreenRecorderHandlers, stopScreenRecording } from './screen-recorder.mts';
+import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
@@ -5819,6 +5820,12 @@ app.whenReady().then(() => {
     shellWindow: () => shellWindow,
     primaryBounds: async () => (await primaryDisplay(screen.getAllDisplays())).bounds,
   });
+  registerCaptureHandlers({
+    assertShellSender,
+    sendToShell,
+    shellWindow: () => shellWindow,
+    primaryBounds: async () => (await primaryDisplay(screen.getAllDisplays())).bounds,
+  });
   watchEvdevKeys();
   registerCrxHandlers();
   registerCertificateHandling();
@@ -6249,6 +6256,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   stopNightLight();
   stopScreenRecording();
+  stopCapture();
 });
 
 const VIEW_SOURCE_LINE_WRAP_CSS = `

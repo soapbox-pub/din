@@ -87,3 +87,59 @@ A conversation Din follows is announced when it finishes, unless the
 window in front shows it; requests and questions likewise. The shared
 hooks in `src/hooks/useAssistant.ts` do this in both documents
 (`followDinSession`, `useMarkViewedSession`, the stored model).
+
+### Asking the Assistant for something (no permission)
+
+Any app can open the Assistant with an **intent**: launch params naming
+what it wants done, as data. What the agent is told about an intent is
+written in the Assistant (`src/apps/assistant/intents.ts`), never by the
+app, which fills in only its fields:
+
+```ts
+const nonce = Date.now();
+await din.app.open('assistant', {
+  intent: 'studio.edit',
+  directory: take.path,        // the conversation works here
+  prompt: 'A vertical clip with captions',
+  title: take.title,
+  nonce, intentNonce: nonce,   // this launch's own (params merge into the last launch's)
+});
+```
+
+The conversation starts at once, with the intent's context ahead of the
+request (shown in it as "From Studio: Take 3"), only when `launch.opener`
+is an app the intent trusts. For any other app, a new conversation opens in
+the folder with the request in the composer, for the user to send.
+
+| Intent | Trusts | Fields |
+|---|---|---|
+| `studio.edit` | Studio | `directory` (a take's folder), `prompt`, `title`; the agent is pointed at the `studio` skill |
+
+## `din.system.capture` (permission `capture`)
+
+Studio's recordings and live streams (`src/lib/capture.ts` has the
+types, `electron/capture.mts` the work). The app records in its own page,
+with the camera, the microphone and the screen the permission gives it,
+and hands the bytes to main as they come:
+
+```ts
+const { take } = await capture.begin({ scene, aspect, canvas, screen: { audio: false } });
+const writer = await capture.open(take, '.program.webm');
+recorder.ondataavailable = async (e) => capture.write(writer, new Uint8Array(await e.data.arrayBuffer()));
+// …
+await capture.close(writer);
+const saved = await capture.end({ startedAt, durationMs, tracks: { program: { file: '.program.webm', start: startedAt } }, switches, markers });
+```
+
+`begin` makes the take's folder and starts recording the screen (with its
+pointer, by wf-recorder) and resolves once its first frame is in, with
+when that was. `end` stops it, turns the WebM tracks into MP4s, writes
+`take.json` with every track's place on the take's clock, and starts the
+transcript. The take's format is the `studio` skill's to explain
+(`os/opencode/skills/studio`).
+
+Going live: `streamStart(destination)`, then `streamWrite` the WebM
+(H.264 and Opus) as it's encoded; main copies the picture and turns the
+sound into AAC for RTMP. Destinations are saved with `saveDestination`,
+and their stream keys never come back. `onState` says what's recording and
+what's live, as the menu bar shows it.

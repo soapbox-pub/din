@@ -443,6 +443,13 @@ export const assistantApi = {
       ...(files.length > 0 ? { files } : {}),
     }),
 
+  /**
+   * Give the agent something the user didn't type, ahead of their next
+   * message, without starting it: shown in the conversation as `description`.
+   */
+  synthetic: (sessionID: string, text: string, description: string) =>
+    call<unknown>('POST', `/api/session/${id(sessionID)}/synthetic`, { text, description, resume: false }),
+
   /** Run a slash command (`/review branch` is `review` with `branch`). */
   command: (sessionID: string, name: string, text: string, files: PromptAttachment[] = []) =>
     call<unknown>('POST', `/api/session/${id(sessionID)}/command`, {

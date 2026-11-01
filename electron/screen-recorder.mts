@@ -26,7 +26,7 @@ import { ipcMain, screen, type BrowserWindow } from 'electron';
 const START_GRACE_MS = 1200;
 /** How long it gets to finish the file once asked to stop. */
 const STOP_TIMEOUT_MS = 15_000;
-const RENDER_NODE = '/dev/dri/renderD128';
+export const RENDER_NODE = '/dev/dri/renderD128';
 
 export type RecordingAudio = 'none' | 'system' | 'microphone';
 
@@ -80,7 +80,7 @@ interface Running extends ActiveRecording {
 let current: Running | null = null;
 
 /** wf-recorder: DinOS's, else one on PATH, else null. */
-function findRecorder(): string | null {
+export function findRecorder(): string | null {
   const named = process.env.DIN_WF_RECORDER;
   if (named) return fs.existsSync(named) ? named : null;
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
@@ -167,7 +167,7 @@ async function geometry(region: RecordingStart['region']): Promise<Electron.Rect
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-function recorderArgs(area: Electron.Rectangle, file: string, audio: RecordingAudio, gpu: boolean): string[] {
+export function recorderArgs(area: Electron.Rectangle, file: string, audio: RecordingAudio, gpu: boolean): string[] {
   const args = ['-y', '-g', `${area.x},${area.y} ${area.width}x${area.height}`];
   if (gpu) args.push('-c', 'h264_vaapi', '-d', RENDER_NODE);
   else args.push('-c', 'libx264', '-x', 'yuv420p', '-p', 'preset=veryfast');
@@ -178,7 +178,7 @@ function recorderArgs(area: Electron.Rectangle, file: string, audio: RecordingAu
 }
 
 /** The last thing wf-recorder (or FFmpeg) said that reads like an error. */
-function lastError(log: string): string {
+export function lastError(log: string): string {
   const lines = log.split('\n').map((l) => l.trim()).filter(Boolean);
   const error = [...lines].reverse().find((l) => /fail|error|invalid|cannot|could not|unable/i.test(l));
   return error ?? lines.at(-1) ?? 'The recorder stopped';

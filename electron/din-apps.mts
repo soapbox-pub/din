@@ -65,6 +65,7 @@ const SYSTEM_PERMISSIONS = {
   passwords: /^passwords:(state|create|unlock|lock|setAutoUnlock|forgetNever|changePassword|list|get|save|setFavorite|move|trash|restore|deleteForever|emptyTrash|createGroup|renameGroup|deleteGroup|generate|copy)$/,
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,
+  capture: /^capture:(status|pointer|takes|take|rename|begin|end|open|write|close|transcribe|destinations|saveDestination|removeDestination|streamStart|streamWrite|streamStop)$/,
 } as const;
 export type SystemPermission = keyof typeof SYSTEM_PERMISSIONS;
 
@@ -81,6 +82,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   phone: /^phone:(changed|messages|incoming)$/,
   // A screen's bytes go to the sender that opened it.
   vms: /^vms:changed$/,
+  capture: /^capture:(state|changed|streamEnded)$/,
 };
 
 /**
@@ -157,10 +159,22 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
   s.protocol.handle(DIN_SCHEME, (request) => serve(request));
   s.protocol.handle(LOCAL_FILE_SCHEME, (request) => serveFileUrl(request));
   s.registerPreloadScript({ id: 'din-app', type: 'frame', filePath: preloadPath });
-  // Apps get what a document app needs and nothing that would prompt.
+  // Apps get what a document app needs and nothing that would prompt. An
+  // app granted capture (Studio) has the camera, the microphone and the
+  // screen too: the whole screen, as the shell draws it, with no picker,
+  // since choosing to record in the app is the choice.
   const allowed = new Set(['clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
-  s.setPermissionRequestHandler((_contents, permission, callback) => callback(allowed.has(permission)));
-  s.setPermissionCheckHandler((_contents, permission) => allowed.has(permission));
+  const captures = (contents: Electron.WebContents | null | undefined) => !!contents && grants.get(contents.id)?.has('capture') === true;
+  s.setPermissionRequestHandler((contents, permission, callback) =>
+    callback(allowed.has(permission) || ((permission === 'media' || permission === 'display-capture') && captures(contents))),
+  );
+  s.setPermissionCheckHandler((contents, permission) => allowed.has(permission) || (permission === 'media' && captures(contents)));
+  s.setDisplayMediaRequestHandler((request, callback) => {
+    const requester = request.frame ? webContents.fromFrame(request.frame) : undefined;
+    const shell = opts.shell();
+    if (!shell || !request.videoRequested || !captures(requester)) callback({});
+    else callback({ video: shell.mainFrame });
+  });
 
   // An app's preload asking for its port to the desktop.
   ipcMain.on('din-app:connect', (event) => {

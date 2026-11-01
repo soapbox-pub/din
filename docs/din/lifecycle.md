@@ -13,7 +13,7 @@ and the app's code starts with everything in place:
 
 ```ts
 await din.ready;  // window.din is Din's; ready resolves after the desktop's hello
-const { reason, params, files, shortcut, state } = din.app.launch;
+const { reason, params, files, shortcut, state, opener } = din.app.launch;
 ```
 
 | Field | |
@@ -23,6 +23,7 @@ const { reason, params, files, shortcut, state } = din.app.launch;
 | `shortcut` | The manifest shortcut's `din.id`, for Dock and launcher jump lists |
 | `reason` | `new`, `relaunch` for `onLaunch` below, or `restore` when Din reopened the window on starting again |
 | `state` | What the window last gave `din.app.saveState`, on `restore` (and on **Reopen** after a crash); else null |
+| `opener` | The app that opened it with `din.app.open`, by id, as the desktop saw it; null when the user or the desktop did. An app can't claim to be another, so it's what an app trusts a request by (the Assistant's intents) |
 
 Launch params are structured-cloneable data. Paths an app puts in
 `din.app.open` params are dropped: files travel as handles. On the

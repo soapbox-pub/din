@@ -49,6 +49,7 @@ import { TrayItems } from '@/components/desktop/TrayMenu';
 import { AssistantMenuItem } from '@/components/desktop/AssistantIndicator';
 import { ScreenShareMenuItem } from '@/components/desktop/ScreenShareHost';
 import { ScreenRecordingMenuItem } from '@/components/desktop/ScreenRecordingHost';
+import { StudioMenuItem } from '@/components/desktop/StudioMenuItem';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { parseQuery } from '@/lib/settingsSearch';
@@ -152,6 +153,7 @@ export function MenuBar() {
       <ClockMenuItem />
       <div className="flex min-w-0 items-center justify-end gap-1.5">
         <ScreenRecordingMenuItem />
+        <StudioMenuItem />
         <ScreenShareMenuItem />
         <WorkspacesMenuItem />
         <TrayItems />

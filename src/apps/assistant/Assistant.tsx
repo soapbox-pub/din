@@ -99,6 +99,7 @@ import {
   type AssistantTab,
 } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
+import { intentOf, type LaunchIntent } from './intents';
 
 const SUGGESTIONS = [
   'What’s taking up the most space in my home folder?',
@@ -268,7 +269,8 @@ function AssistantWindow() {
   const { data: status } = useAssistantStatus();
   const [{ tabs, activeId }, setState] = useState(() => {
     const { sessionID, directory } = launchRequest(din.app.launch);
-    return initialTabs(sessionID, directory);
+    // An intent opens its own conversation, once it's started (below).
+    return initialTabs(sessionID, intentOf(din.app.launch) ? null : directory);
   });
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   const [passwordFocus, setPasswordFocus] = useState<PasswordFocus | null>(() => {
@@ -290,14 +292,51 @@ function AssistantWindow() {
   // params. One with no session asks for a new one. Launch params are merged
   // into the window's old ones, so launchers name both `sessionID` and
   // `directory`, clearing whichever they don't use, and a fresh `nonce`.
+  // Another app asking for something (Studio's "Make with Assistant"): a
+  // conversation in its folder, started at once if the app is one the intent
+  // trusts, else with the request waiting in the composer.
+  const { mutateAsync: startConversation } = useStartConversation();
+  const { model } = usePreferredModel();
+  const runIntent = useCallback(
+    (intent: LaunchIntent) => {
+      if (!intent.context) {
+        const tab = newAssistantTab(null, intent.directory);
+        saveDraft(newConversationDraftKey(tab.id), intent.prompt);
+        setState((prev) => placeTab(prev, tab));
+        return;
+      }
+      startConversation({ text: intent.prompt, model, agent: 'build', directory: intent.directory, context: intent.context })
+        .then(
+          (session) => setState((prev) => showSession(prev, session.id)),
+          (error: unknown) =>
+            host.notify({ title: 'Couldn’t start the conversation', description: cleanAssistantError(error), destructive: true }),
+        );
+    },
+    [host, model, startConversation],
+  );
+  const ranIntent = useRef<unknown>(null);
+  useEffect(() => {
+    const intent = intentOf(din.app.launch);
+    if (!intent || ranIntent.current === din.app.launch.params.nonce) return;
+    ranIntent.current = din.app.launch.params.nonce;
+    runIntent(intent);
+  }, [din, runIntent]);
+
   useEffect(
     () =>
       din.app.onLaunch((launch) => {
+        const intent = intentOf(launch);
+        if (intent) {
+          if (ranIntent.current === launch.params.nonce) return;
+          ranIntent.current = launch.params.nonce;
+          runIntent(intent);
+          return;
+        }
         const { sessionID, directory, focusPassword } = launchRequest(launch);
         setPasswordFocus((prev) => (sessionID && focusPassword ? { sessionID, key: (prev?.key ?? 0) + 1 } : null));
         setState((prev) => (sessionID ? showSession(prev, sessionID) : placeTab(prev, newAssistantTab(null, directory))));
       }),
-    [din],
+    [din, runIntent],
   );
 
   useEffect(() => saveAssistantTabs(tabs, activeId), [tabs, activeId]);

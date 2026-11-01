@@ -815,6 +815,8 @@ function Note({ message, home }: { message: SessionMessage; home?: string }) {
       return <Compaction message={message} />;
     case 'skill':
       return <Divider>Using skill: {message.name}</Divider>;
+    case 'synthetic':
+      return message.description ? <Divider>{message.description}</Divider> : null;
     case 'shell':
       return (
         <div className="rounded-lg bg-muted/50 p-2.5">
