@@ -143,19 +143,21 @@ export function monitorsSignature(monitors: Monitor[]): string {
 export interface WorkArea extends Rect {
   id: string;
   primary: boolean;
-  /** The whole monitor; the work area itself leaves out the menu bar. */
+  /** The whole monitor; the work area itself leaves out the menu bar or taskbar. */
   bounds: Rect;
 }
 
 /**
  * Work areas for the given monitors, with the workspace's top-left at
  * `origin` in the viewport. The primary monitor's work area starts at the
- * workspace's top edge, below the menu bar.
+ * workspace's top edge, below the menu bar, and stops `bottom` px above the
+ * monitor's bottom edge, above a taskbar.
  */
-export function workAreas(monitors: Monitor[], origin: { x: number; y: number }): WorkArea[] {
+export function workAreas(monitors: Monitor[], origin: { x: number; y: number }, bottom = 0): WorkArea[] {
   return monitors.map((m) => {
     const bounds = { x: m.x - origin.x, y: m.y - origin.y, width: m.width, height: m.height };
     const top = m.primary ? Math.max(bounds.y, 0) : bounds.y;
+    const inset = m.primary ? Math.max(bottom, 0) : 0;
     return {
       id: m.id,
       primary: m.primary,
@@ -163,7 +165,7 @@ export function workAreas(monitors: Monitor[], origin: { x: number; y: number })
       x: bounds.x,
       y: top,
       width: bounds.width,
-      height: Math.max(0, bounds.y + bounds.height - top),
+      height: Math.max(0, bounds.y + bounds.height - top - inset),
     };
   });
 }

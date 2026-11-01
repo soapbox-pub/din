@@ -115,26 +115,36 @@ function DesktopSession() {
   const workspaceRef = useRef<HTMLElement>(null);
 
   // Each monitor's work area in workspace coordinates. The workspace's
-  // origin is where the primary monitor's menu bar ends, measured once
-  // laid out (and again whenever the monitors change). Measured against the
-  // Wallpaper's full-screen root rather than the viewport: <body> may not
-  // have moved to the primary monitor yet (MonitorsProvider's effect runs
-  // after this one), but the offset between the two is already final.
+  // origin is where the primary monitor's menu bar ends, and its bottom where
+  // the taskbar starts (the Dock overlays it instead), measured once laid out
+  // and again whenever the monitors or the workspace's size change. Measured
+  // against the Wallpaper's full-screen root rather than the viewport: <body>
+  // may not have moved to the primary monitor yet (MonitorsProvider's effect
+  // runs after this one), but the offset between the two is already final.
   const [areas, setAreas] = useState<WorkArea[]>(() => workAreas(monitors, { x: 0, y: 0 }));
   useLayoutEffect(() => {
+    const workspace = workspaceRef.current;
     const measure = () => {
-      const workspace = workspaceRef.current;
       const rect = workspace?.getBoundingClientRect();
       const screen = workspace?.closest('[data-screen-root]')?.getBoundingClientRect();
+      const primary = monitors.find((m) => m.primary);
+      const bottom = rect && screen && primary
+        ? Math.round(primary.y + primary.height - (rect.bottom - screen.top))
+        : 0;
       const next = workAreas(monitors, {
         x: (rect?.left ?? 0) - (screen?.left ?? 0),
         y: (rect?.top ?? 0) - (screen?.top ?? 0),
-      });
+      }, bottom);
       setAreas((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     };
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    const observer = new ResizeObserver(measure);
+    if (workspace) observer.observe(workspace);
+    return () => {
+      window.removeEventListener('resize', measure);
+      observer.disconnect();
+    };
   }, [monitors]);
   const areasRef = useRef(areas);
   useLayoutEffect(() => {
