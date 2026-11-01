@@ -60,7 +60,7 @@ export function PhoneSetupWizard({ onClose, onOpenMessages }: { onClose: () => v
       </header>
 
       {step.kind === 'pair' ? (
-        <PairStep state={state} onPaired={(address, name) => setStep({ kind: 'share', address, name })} />
+        <PairStep onPaired={(address, name) => setStep({ kind: 'share', address, name })} />
       ) : step.kind === 'share' ? (
         <ShareStep name={step.name} error={null} onDone={() => setStep({ kind: 'connect', address: step.address, name: step.name })} />
       ) : step.kind === 'connect' ? (
@@ -105,7 +105,7 @@ function StepHeader({ step, title, children }: { step?: number; title: string; c
   );
 }
 
-function PairStep({ state, onPaired }: { state: PhoneState | undefined; onPaired: (address: string, name: string) => void }) {
+function PairStep({ onPaired }: { onPaired: (address: string, name: string) => void }) {
   const bluetooth = useBluetoothState();
   const { setPowered } = useBluetoothActions();
   const [pairing, setPairing] = useState<string | null>(null);
@@ -115,9 +115,7 @@ function PairStep({ state, onPaired }: { state: PhoneState | undefined; onPaired
   useBluetoothDiscovery(powered);
 
   const phones = (bluetooth.data?.devices ?? []).filter((d) => d.icon === 'phone');
-  const paired = phones.filter((d) => d.paired);
   const nearby = phones.filter((d) => !d.paired);
-  const added = new Set(state?.phones.map((p) => p.id) ?? []);
 
   const pair = async (device: BluetoothDevice) => {
     const bridge = getBluetoothBridge();
@@ -161,21 +159,6 @@ function PairStep({ state, onPaired }: { state: PhoneState | undefined; onPaired
         </Notice>
       ) : (
         <div className="flex flex-col gap-3">
-          {paired.length > 0 && (
-            <DeviceList label="Already paired">
-              {paired.map((d) => (
-                <DeviceRow key={d.path} name={d.name}>
-                  {added.has(bluetoothPhoneId(d.address)) ? (
-                    <span className="text-xs text-muted-foreground">Already added</span>
-                  ) : (
-                    <Button size="sm" onClick={() => onPaired(d.address, d.name)}>
-                      Use This Phone
-                    </Button>
-                  )}
-                </DeviceRow>
-              ))}
-            </DeviceList>
-          )}
           <DeviceList label="Nearby" busy={adapter.discovering}>
             {nearby.length === 0 ? (
               <p className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-center text-sm text-muted-foreground">
