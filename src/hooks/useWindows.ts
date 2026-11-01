@@ -17,6 +17,7 @@ import {
   treeLeaves,
   type TileNode,
 } from '@/lib/tiling';
+import { takeNativePlacement, type SavedWindow } from '@/lib/windowSession';
 import type { Direction } from '@/lib/wmBindings';
 
 /** The X window a Din window hosts, if it hosts a live one. */
@@ -204,6 +205,9 @@ interface WmState {
   /** The workspace each monitor showed before, for Super+Ctrl+Tab. */
   previous: Record<string, number>;
 }
+
+/** The window manager's state, as the saved session sees it. */
+export type WindowSession = WmState;
 
 /** Workspaces per monitor, Super+1 to Super+0. */
 export const WORKSPACE_COUNT = 10;
@@ -426,6 +430,43 @@ function showWorkspace(s: WmState, areas: WorkArea[], areaId: string, n: number,
 }
 
 /**
+ * Bring windows home to the monitors there are: a maximized or tiled
+ * window whose monitor went away fills the primary instead, and a window
+ * whose title bar no longer lands on any monitor (it was on one that was
+ * unplugged, or now sits in the dead area beside a smaller one) moves to
+ * the primary, keeping its size. Restore spots are moved the same way.
+ * Either way it joins the workspace the primary is showing, whichever
+ * workspace it was on before.
+ */
+function fitWindows(s: WmState, areas: WorkArea[]): WmState {
+  if (areas.length === 0) return s;
+  const primary = primaryArea(areas);
+  const ids = new Set(areas.map((a) => a.id));
+  /** A rect moved onto the primary if its title bar is lost, else null. */
+  const rehome = (r: { x: number; y: number; width: number }, i: number) =>
+    [40, r.width / 2, r.width - 40].some((dx) => areaAt(areas, r.x + dx, r.y + 18))
+      ? null
+      : { x: primary.x + 80 + i * CASCADE_PX, y: primary.y + 60 + i * CASCADE_PX };
+  let changed = false;
+  let lost = 0;
+  const workspace = activeWorkspace(s.active, primary.id);
+  const next = s.windows.map((w) => {
+    let out = w;
+    if (w.monitor !== null && !ids.has(w.monitor)) out = { ...out, monitor: primary.id, workspace };
+    const moved = rehome(w, lost);
+    if (moved) out = { ...out, ...moved, workspace };
+    const restoreMoved = w.restore ? rehome(w.restore, lost) : null;
+    if (w.restore && restoreMoved) out = { ...out, restore: { ...w.restore, ...restoreMoved } };
+    if (out !== w) {
+      changed = true;
+      if (moved || restoreMoved) lost++;
+    }
+    return out;
+  });
+  return changed ? { ...s, windows: next } : s;
+}
+
+/**
  * Manages the set of open windows and their stacking/focus/geometry.
  *
  * @param getApp Resolver from app id to definition (built-in or installed
@@ -568,6 +609,9 @@ export function useWindows(
     // Dialogs and small tools float in the tiling layout, as Hyprland's
     // window rules have them.
     const floating = params?.floating === true || app.floating === true;
+    // A native app started again by the saved session maps its windows
+    // where they were.
+    const placed = typeof params?.xid === 'number' ? takeNativePlacement(appId) : null;
     update((s) => {
       const ws = s.windows;
       // New windows open on the monitor the user just clicked on (or last
@@ -617,9 +661,21 @@ export function useWindows(
           floating,
           tiled: null,
           away: false,
+          ...(placed && {
+            x: placed.x,
+            y: placed.y,
+            ...(placed.frameless === frameless ? clampSize(placed.width, placed.height, frameless) : {}),
+            minimized: placed.minimized,
+            maximized: placed.maximized,
+            snapped: placed.snapped,
+            monitor: placed.monitor,
+            restore: placed.restore,
+            workspace: Math.min(placed.workspace, WORKSPACE_COUNT),
+            floating: placed.floating,
+          }),
         },
       ];
-      return { ...s, windows };
+      return placed ? fitWindows({ ...s, windows }, areas) : { ...s, windows };
     });
     return id;
   }, [getApp, getAreas, getLaunchMonitor, update, setWindows, focus]);
@@ -889,44 +945,69 @@ export function useWindows(
     });
   }, [getAreas, setWindows]);
 
-  /**
-   * Bring windows home after the monitors change: a maximized or tiled
-   * window whose monitor went away fills the primary instead, and a window
-   * whose title bar no longer lands on any monitor (it was on one that was
-   * unplugged, or now sits in the dead area beside a smaller one) moves to
-   * the primary, keeping its size. Restore spots are moved the same way.
-   * Either way it joins the workspace the primary is showing, whichever
-   * workspace it was on before. Tiled windows then re-tile there.
-   */
+  /** Bring windows home after the monitors change (fitWindows); tiled ones then re-tile. */
   const fitToAreas = useCallback((areas: WorkArea[]) => {
-    if (areas.length === 0) return;
-    const primary = primaryArea(areas);
-    const ids = new Set(areas.map((a) => a.id));
-    /** A rect moved onto the primary if its title bar is lost, else null. */
-    const rehome = (r: { x: number; y: number; width: number }, i: number) =>
-      [40, r.width / 2, r.width - 40].some((dx) => areaAt(areas, r.x + dx, r.y + 18))
-        ? null
-        : { x: primary.x + 80 + i * CASCADE_PX, y: primary.y + 60 + i * CASCADE_PX };
-    update((s) => {
-      let changed = false;
-      let lost = 0;
-      const workspace = activeWorkspace(s.active, primary.id);
-      const next = s.windows.map((w) => {
-        let out = w;
-        if (w.monitor !== null && !ids.has(w.monitor)) out = { ...out, monitor: primary.id, workspace };
-        const moved = rehome(w, lost);
-        if (moved) out = { ...out, ...moved, workspace };
-        const restoreMoved = w.restore ? rehome(w.restore, lost) : null;
-        if (w.restore && restoreMoved) out = { ...out, restore: { ...w.restore, ...restoreMoved } };
-        if (out !== w) {
-          changed = true;
-          if (moved || restoreMoved) lost++;
-        }
-        return out;
-      });
-      return changed ? { ...s, windows: next } : s;
-    });
+    update((s) => fitWindows(s, areas));
   }, [update]);
+
+  /**
+   * Put back windows from the saved session (src/lib/windowSession.ts):
+   * each where it was, with its tiling trees and the workspace each monitor
+   * showed, above any window already open. Windows of monitors no longer
+   * there come home as fitToAreas brings them. Returns each saved window's
+   * new id, by its old one.
+   */
+  const adoptSession = useCallback(
+    (saved: SavedWindow[], trees: Record<string, TileNode>, active: Record<string, number>): Map<string, string> => {
+      const ids = new Map(saved.map((s) => [s.id, nextWindowId()]));
+      update((s) => {
+        const areas = getAreas();
+        const known = new Set(areas.map((a) => a.id));
+        const top = maxZ(s.windows);
+        const adopted = saved.map((w): WindowState => ({
+          id: ids.get(w.id)!,
+          appId: w.appId,
+          params: w.params,
+          ...clampSize(w.width, w.height, w.frameless),
+          x: w.x,
+          y: w.y,
+          z: top + w.z,
+          minimized: w.minimized,
+          closing: false,
+          maximized: w.maximized,
+          snapped: w.snapped,
+          monitor: w.monitor,
+          restore: w.restore,
+          frameless: w.frameless,
+          title: null,
+          icon: null,
+          accent: null,
+          workspace: Math.min(w.workspace, WORKSPACE_COUNT),
+          floating: w.floating,
+          tiled: null,
+          away: false,
+        }));
+        // Leaves of windows not coming back get names no window has, for
+        // settle() to prune.
+        const nextTrees = { ...s.trees };
+        for (const [key, tree] of Object.entries(trees)) {
+          if (nextTrees[key]) continue;
+          const names = new Map(treeLeaves(tree).map((leaf) => [leaf, ids.get(leaf) ?? `gone:${leaf}`]));
+          nextTrees[key] = renameLeaves(tree, names)!;
+        }
+        const nextActive = { ...s.active };
+        for (const [areaId, n] of Object.entries(active)) {
+          if (known.has(areaId) && nextActive[areaId] === undefined) nextActive[areaId] = Math.min(n, WORKSPACE_COUNT);
+        }
+        return fitWindows({ ...s, windows: [...s.windows, ...adopted], trees: nextTrees, active: nextActive }, areas);
+      });
+      return ids;
+    },
+    [getAreas, update],
+  );
+
+  /** The whole state, for the saved session. */
+  const getSession = useCallback((): WindowSession => stateRef.current, []);
 
   /** The monitor keyboard commands act on. */
   const commandArea = useCallback((): WorkArea | null => {
@@ -1208,8 +1289,10 @@ export function useWindows(
       toggleSplit,
       resizeBy,
       relayout,
+      adoptSession,
+      getSession,
     }),
-    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout],
+    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

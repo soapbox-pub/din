@@ -118,6 +118,11 @@ export function Stopwatch() {
 }
 ```
 
+Din reopens windows when it starts again. To come back as it was, an app
+saves what it shows as that changes, with `din.app.saveState(value)`, and
+reads it from `din.app.launch.state` when `launch.reason` is `restore`
+([din/lifecycle.md](din/lifecycle.md#restoring-after-a-restart)).
+
 ## 6. Run it
 
 - `npm run dev`: Din in Electron; the app is served by Vite at

@@ -72,6 +72,7 @@ const defaultConfig: AppConfig = {
   powerModeShake: true,
   tilingEnabled: false,
   tilingGap: 8,
+  restoreWindows: true,
   dockMagnification: true,
   dockMagnificationScale: 1.5,
   dockSize: 80,

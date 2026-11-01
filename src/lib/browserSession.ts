@@ -147,6 +147,22 @@ function takeSession(windowId: string): SessionClaim | null {
   return last && last.tabs.length > 0 ? { window: last, others: [] } : null;
 }
 
+/**
+ * The tabs of a window Din reopened on starting again (src/lib/windowSession.ts),
+ * which keeps each browser window's tabs with the window. The windows still on
+ * file from the earlier run are forgotten: they're being reopened as they were,
+ * so the next browser opened mustn't bring them back again.
+ */
+export function restoredBrowserWindow(state: unknown): SavedWindow | null {
+  const parsed = savedWindowSchema.safeParse(state);
+  if (!parsed.success) return null;
+  const live = readLive();
+  const current = Object.fromEntries(Object.entries(live).filter(([, entry]) => entry.run === RUN));
+  if (Object.keys(current).length !== Object.keys(live).length) write(LIVE_KEY, current);
+  write(LAST_KEY, null);
+  return parsed.data;
+}
+
 /** A saved window passed in launch params (one restored alongside another). */
 export function restoredWindowParam(params: Record<string, unknown> | undefined): SavedWindow | null {
   const parsed = savedWindowSchema.safeParse(params?.restoreSession);

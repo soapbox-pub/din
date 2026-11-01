@@ -90,6 +90,7 @@ import { acceptDrag, dragInfo, finishDrag, registerDrag, setDragPoint, subscribe
 import { guestElements, guestsAvailable, isGuestFullscreen } from '@/platform/guest';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
+import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession';
 import type { AssistantSettings, DinManifest, FrameStyle, MediaSession, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
 import type { AccountSnapshot, FromApp, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
@@ -382,15 +383,16 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     return out;
   }, [grantFile]);
 
-  const launchOf = useCallback(async (p: Record<string, unknown> | undefined, reason: 'new' | 'relaunch'): Promise<Hello['launch']> => {
+  const launchOf = useCallback(async (p: Record<string, unknown> | undefined, reason: Hello['launch']['reason']): Promise<Hello['launch']> => {
     const { path: _path, paths: _paths, actionAt: _actionAt, shortcut, ...rest } = (p ?? {}) as Record<string, unknown>;
     return {
       reason,
       params: rest,
       files: await grantPaths(launchPaths(p)),
       shortcut: typeof shortcut === 'string' ? shortcut : null,
+      state: reason === 'relaunch' ? null : windowStateOf(windowId),
     };
-  }, [grantPaths]);
+  }, [grantPaths, windowId]);
 
   // ---- requests ----
   const handlers = useRef<{ [M in Method]?: (params: Requests[M][0]) => Promise<Requests[M][1]> | Requests[M][1] }>({});
@@ -502,6 +504,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'app.sessionGet': ({ key }) => appSessionState(appId).get(String(key)),
       'app.sessionSet': ({ key, value }) => {
         appSessionState(appId).set(String(key), value);
+      },
+      'app.saveState': ({ state }) => {
+        if (!saveWindowState(windowId, state)) console.warn(`din: ${appName}'s saved state is too big or isn't JSON; not kept`);
       },
       'window.tabDragMove': ({ at, label }) => {
         setTabDragLabel(typeof label === 'string' ? label.slice(0, 200) : '');
@@ -1055,7 +1060,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     };
 
     // Launch files first: with file-folders, their folders are what fs reaches.
-    const launch = await launchOf(params, 'new');
+    const launch = await launchOf(params, wasRestored(windowId) ? 'restore' : 'new');
 
     // The bridges it's granted get their own ports to main, before hello.
     const apps = getAppsBridge();

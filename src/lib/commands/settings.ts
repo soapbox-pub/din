@@ -56,6 +56,7 @@ const SETTINGS: Setting[] = [
   { key: 'appearance.power-mode-shake', field: 'powerModeShake', help: 'Power mode shakes the window being typed in', param: bool },
   { key: 'windows.tiling', field: 'tilingEnabled', help: 'Windows tile instead of floating', param: bool },
   { key: 'windows.gaps', field: 'tilingGap', help: 'Pixels between tiled windows', param: { type: 'integer', min: 0, max: 32 } },
+  { key: 'windows.reopen', field: 'restoreWindows', help: 'Din reopens your windows when it starts again', param: bool },
   { key: 'dock.size', field: 'dockSize', help: 'The size of a Dock icon, in pixels', param: { type: 'integer', min: 32, max: 160 } },
   { key: 'dock.magnification', field: 'dockMagnification', help: 'Dock icons grow under the pointer', param: bool },
   { key: 'dock.magnification-scale', field: 'dockMagnificationScale', help: 'How much they grow (1.5 is half again)', param: { type: 'number', min: 1, max: 3 } },

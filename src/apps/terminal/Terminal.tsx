@@ -247,6 +247,26 @@ function tabFromPayload(payload: TabPayload): TermTab {
   return { id: newTabId(), layout, activePaneId: activePaneId || firstPaneId(layout) };
 }
 
+/** What a window keeps for Din to reopen it with (din.app.saveState). */
+interface SavedTerminal {
+  tabs: TabPayload[];
+  /** Index of the selected tab. */
+  active: number;
+}
+
+/** The tabs of a window Din reopened, from what it saved, or null. */
+function restoredTabs(state: unknown): { tabs: TermTab[]; active: number } | null {
+  if (typeof state !== 'object' || state === null) return null;
+  const { tabs, active } = state as Partial<SavedTerminal>;
+  if (!Array.isArray(tabs)) return null;
+  // Saved panes never carry a pty to take over.
+  const fresh = (node: LayoutNode): LayoutNode =>
+    node.type === 'split' ? { ...node, a: fresh(node.a), b: fresh(node.b) } : { ...node, handover: undefined };
+  const list = tabs.filter(isTabPayload).map((t) => tabFromPayload({ ...t, layout: fresh(t.layout) }));
+  if (list.length === 0) return null;
+  return { tabs: list, active: typeof active === 'number' && active >= 0 && active < list.length ? active : 0 };
+}
+
 /** Tab-management actions triggered by keyboard shortcuts inside a pane. */
 type TabShortcut = 'next-tab' | 'prev-tab' | 'new-tab' | 'close-tab';
 
@@ -458,8 +478,14 @@ export function Terminal() {
   // A window opened for a tab torn off another one starts empty, and gets
   // the tab.
   const adopting = hasAdoptedTab(din);
-  const [tabs, setTabs] = useState<TermTab[]>(() => (adopting ? [] : [firstTab(params)]));
-  const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
+  // Reopened by Din on starting again, it has the tabs it had, in the
+  // folders they were in (with fresh shells: the old ones died with Din).
+  const [initial] = useState(() => {
+    if (adopting) return { tabs: [], active: 0 };
+    return (din.app.launch.state !== null && restoredTabs(din.app.launch.state)) || { tabs: [firstTab(params)], active: 0 };
+  });
+  const [tabs, setTabs] = useState<TermTab[]>(initial.tabs);
+  const [activeId, setActiveId] = useState<string>(() => tabs[initial.active]?.id ?? tabs[0]?.id ?? '');
   const adoptStarted = useRef(false);
   useEffect(() => {
     if (!adopting || adoptStarted.current) return;
@@ -496,6 +522,20 @@ export function Terminal() {
     panesCwd.current.set(paneId, cwd);
     updateLabel(paneId, { cwd });
   }, [updateLabel]);
+
+  // Kept for when Din reopens the window: each tab's panes, where they are.
+  useEffect(() => {
+    if (tabs.length === 0) return;
+    const keep = (node: LayoutNode): LayoutNode =>
+      node.type === 'split'
+        ? { ...node, a: keep(node.a), b: keep(node.b) }
+        : { type: 'leaf', paneId: node.paneId, initialCwd: panesCwd.current.get(node.paneId) ?? node.initialCwd, app: node.app };
+    const saved: SavedTerminal = {
+      tabs: tabs.map((t) => ({ layout: keep(t.layout), activePaneId: t.activePaneId })),
+      active: Math.max(0, tabs.findIndex((t) => t.id === activeId)),
+    };
+    din.app.saveState(saved);
+  }, [din, tabs, activeId, labels]);
 
   const openTab = useCallback(() => {
     const paneId = newSessionId();

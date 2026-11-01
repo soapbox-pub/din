@@ -10,6 +10,8 @@ export interface MonitorsLayout {
   /** The whole viewport. */
   width: number;
   height: number;
+  /** Whether the host's monitors are known yet (until then, the viewport stands in). */
+  ready: boolean;
 }
 
 export const MonitorsContext = createContext<MonitorsLayout | undefined>(undefined);

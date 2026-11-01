@@ -110,6 +110,11 @@ export interface AppConfig {
   tilingEnabled: boolean;
   /** Pixels between tiled windows, and between them and the screen's edges. */
   tilingGap: number;
+  /**
+   * Whether Din reopens the windows it had open when it starts again, each
+   * where it was (src/lib/windowSession.ts). Kept on this device.
+   */
+  restoreWindows: boolean;
   /** Whether Dock icons grow as the pointer sweeps across them. */
   dockMagnification: boolean;
   /** How large an icon under the pointer grows, as a multiple of its size (1.5 = half again). */

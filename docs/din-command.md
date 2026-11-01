@@ -38,7 +38,7 @@ a missing or bad argument).
 | --- | --- |
 | `settings` | Din's own preferences by key (`appearance.theme`, `dock.size`, `windows.tiling`, `datetime.clock-format`, `notifications.do-not-disturb`…), like `gsettings` |
 | `apps` | List, open, install (websites, nsites), remove; `apps run` runs your own (below) |
-| `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace; show a workspace |
+| `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace, reopen the ones a failed start left closed; show a workspace |
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
 | `notifications` | List, send, click, dismiss, clear |
 | `browser` | The Web Browser's site data: delete one site's cookies and storage, as its site info does |

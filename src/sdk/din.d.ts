@@ -90,14 +90,23 @@ declare global {
 
 /** Why the app (or this window) was opened. */
 export interface LaunchContext {
-  /** `new` for a fresh window; `relaunch` when a running single-instance app is launched again. */
-  reason: 'new' | 'relaunch';
+  /**
+   * `new` for a fresh window; `relaunch` when a running single-instance app
+   * is launched again; `restore` when Din reopened the window on starting
+   * again, as it was before (its `params` too, and its `state`).
+   */
+  reason: 'new' | 'relaunch' | 'restore';
   /** App-defined launch parameters, as passed to `din.app.open()` or a shortcut. */
   params: Record<string, unknown>;
   /** Files the app was opened with (from Files, a drop on its Dock tile). Granted to it. */
   files: DinFileHandle[];
   /** The manifest shortcut that launched it, by `id`, if any. */
   shortcut: string | null;
+  /**
+   * What this window last gave `din.app.saveState`: on `restore`, and when
+   * the window is reopened after its app crashed. Null otherwise.
+   */
+  state: unknown;
 }
 
 export interface DinApp {
@@ -145,6 +154,14 @@ export interface DinApp {
     get(key: string): Promise<unknown>;
     set(key: string, value: unknown): void;
   };
+  /**
+   * Keep what this window shows (its tabs, the folder it's in), for when Din
+   * reopens it after restarting: it comes back as `launch.state`, with
+   * `launch.reason` `restore`. JSON, up to 512 KB (more is dropped, with a
+   * warning); each call replaces the last, and null forgets it. Save as it
+   * changes: Din can stop at any time.
+   */
+  saveState(state: unknown): void;
   /** Open a URL in the Web Browser (or the app that handles its scheme). */
   openUrl(url: string): Promise<void>;
   /**

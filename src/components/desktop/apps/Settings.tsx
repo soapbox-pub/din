@@ -15,6 +15,7 @@ import {
   Gauge,
   Globe,
   Headphones,
+  History,
   KeyRound,
   Keyboard,
   Laptop,
@@ -3262,6 +3263,14 @@ function WindowsSection() {
         description="Windows share the screen side by side instead of overlapping, like Hyprland. Super+T floats one. Super+Shift+T turns tiling on or off."
         checked={config.tilingEnabled}
         onCheckedChange={(checked) => updateConfig((current) => ({ ...current, tilingEnabled: checked }))}
+      />
+      <SettingSwitchRow
+        id="restore-windows"
+        icon={History}
+        label="Reopen windows when Din starts"
+        description="After Din restarts, updates or the computer starts up, your windows come back where they were, with their tabs and folders. Anything unsaved in them is still lost."
+        checked={config.restoreWindows}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, restoreWindows: checked }))}
       />
       <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
         <div className="flex items-center justify-between gap-4">

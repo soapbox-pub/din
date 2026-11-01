@@ -100,6 +100,7 @@ export interface Requests {
   'app.postToWindow': [{ windowId: string; data: unknown }, void];
   'app.sessionGet': [{ key: string }, unknown];
   'app.sessionSet': [{ key: string; value: unknown }, void];
+  'app.saveState': [{ state: unknown }, void];
   'window.tabDragMove': [{ at: Point; label: string }, { windowId: string; at: Point } | null];
   'window.tabDragEnd': [{ at: Point }, { windowId: string; at: Point } | null];
   'files.parent': [{ handle: string }, HandleData | null];

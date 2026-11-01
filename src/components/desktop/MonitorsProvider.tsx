@@ -38,6 +38,7 @@ function useViewportSize(): { width: number; height: number } {
  */
 export function MonitorsProvider({ children }: { children: React.ReactNode }) {
   const [host, setHost] = useState<HostMonitor[] | null>(simulatedMonitors);
+  const [asked, setAsked] = useState(() => !getMonitorsBridge() || simulatedMonitors() !== null);
   const viewport = useViewportSize();
 
   useEffect(() => {
@@ -49,7 +50,9 @@ export function MonitorsProvider({ children }: { children: React.ReactNode }) {
         if (live) setHost(monitors);
       },
       () => {},
-    );
+    ).finally(() => {
+      if (live) setAsked(true);
+    });
     const unsubscribe = bridge.onChange(setHost);
     return () => {
       live = false;
@@ -58,7 +61,7 @@ export function MonitorsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const monitors = toMonitors(host, getMonitorsBridge()?.zoomFactor() ?? 1);
-  const signature = `${monitorsSignature(monitors)}@${viewport.width}x${viewport.height}`;
+  const signature = `${monitorsSignature(monitors)}@${viewport.width}x${viewport.height}:${asked}`;
   // Rebuilt only when the layout actually changes, so the desktop doesn't
   // re-render for a re-report of the same monitors.
   const layout = useMemo<MonitorsLayout>(
@@ -67,6 +70,7 @@ export function MonitorsProvider({ children }: { children: React.ReactNode }) {
       primary: monitors.find((m) => m.primary) ?? monitors[0],
       width: viewport.width,
       height: viewport.height,
+      ready: asked,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [signature],

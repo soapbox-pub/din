@@ -10,6 +10,7 @@ import {
   getScreenRecorderBridge, startRecording, stopRecording, type RecordingAudio, type RecordingRequest,
 } from '@/lib/screenRecorder';
 import { builtinWidget, builtinWidgets, widgetTitle, WIDGET_SIZES, type WidgetSize } from '@/lib/widgets';
+import { reopenSkippedSession } from '@/lib/windowSession';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
@@ -167,6 +168,9 @@ export const windowsArea: Area = {
       { name: 'follow', type: 'boolean', optional: true, help: 'Go there with it' },
     ], (args, ctx) => {
       ctx.actions.moveToWorkspace(findWindow(ctx, args.string('window')).id, args.number('n'), args.optBool('follow') ?? false);
+    }),
+    command('windows', 'reopen', 'Reopen the windows from before Din started, when it left them closed after a failed start', [], () => {
+      if (!reopenSkippedSession()) throw new CommandError('There are no windows to reopen');
     }),
   ],
 };

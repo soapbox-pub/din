@@ -102,10 +102,12 @@ import { isWindowsProgram } from '@/lib/nativeApps';
 import {
   claimBrowserSession,
   forgetBrowserWindow,
+  restoredBrowserWindow,
   restoredWindowParam,
   saveBrowserWindow,
   type SavedWindow,
 } from '@/lib/browserSession';
+import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession';
 import { TabContextMenu } from '@/shared/TabContextMenu';
 import {
   newTabButtonClass,
@@ -421,14 +423,18 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       const tab = adoptTab(adopted);
       return { tabs: [tab], activeId: tab.id, otherWindows: [] };
     }
-    // Reopening the browser brings back the tabs it had (see browserSession).
-    const passed = restoredWindowParam(params);
+    // Reopening the browser brings back the tabs it had (see browserSession);
+    // a window Din reopened on starting again, the tabs it had itself.
+    // The other browser windows Din reopened come back on their own.
+    const restored = wasRestored(windowId);
+    const passed =
+      restoredWindowParam(params) ?? (restored ? restoredBrowserWindow(windowStateOf(windowId)) : null);
     const claim = isPrivate
       ? null
       : passed
         ? { window: passed, others: [] }
         : claimBrowserSession(windowId);
-    if (claim) return { ...restoreTabs(claim.window), otherWindows: claim.others };
+    if (claim) return { ...restoreTabs(claim.window), otherWindows: restored ? [] : claim.others };
     const tab = createTab(NEW_TAB_URL);
     return { tabs: [tab], activeId: tab.id, otherWindows: [] };
   });
@@ -458,7 +464,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   }, [activeId]);
   // Keep this window's tabs on file so reopening the browser restores them.
   useEffect(() => {
-    if (!isPrivate) saveBrowserWindow(windowId, saveTabs(tabs, activeId));
+    if (isPrivate) return;
+    const saved = saveTabs(tabs, activeId);
+    saveBrowserWindow(windowId, saved);
+    saveWindowState(windowId, saved);
   }, [isPrivate, windowId, tabs, activeId]);
   useEffect(() => {
     if (!isPrivate) return () => forgetBrowserWindow(windowId);

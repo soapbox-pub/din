@@ -42,6 +42,7 @@ export const AppConfigSchema = z.object({
   powerModeShake: z.boolean(),
   tilingEnabled: z.boolean(),
   tilingGap: z.number().min(0).max(64),
+  restoreWindows: z.boolean(),
   dockMagnification: z.boolean(),
   dockMagnificationScale: z.number().min(1).max(3),
   dockSize: z.number().min(32).max(160),

@@ -409,7 +409,7 @@ export function installDin(transport: Transport): void {
   pushes.on((p) => {
     if (p.type === 'windowMessage') windowMessages.emit({ from: p.from, data: p.data });
   });
-  let launch: LaunchContext = { reason: 'new', params: {}, files: [], shortcut: null };
+  let launch: LaunchContext = { reason: 'new', params: {}, files: [], shortcut: null, state: null };
   pushes.on((p) => {
     if (p.type === 'launch') {
       launch = launchOf(p.launch);
@@ -441,6 +441,7 @@ export function installDin(transport: Transport): void {
       get: (key) => request('app.sessionGet', { key }),
       set: (key, value) => tell('app.sessionSet', { key, value }),
     },
+    saveState: (state) => tell('app.saveState', { state }),
   };
 
   // ---- window ----

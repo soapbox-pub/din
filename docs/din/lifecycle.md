@@ -13,7 +13,7 @@ and the app's code starts with everything in place:
 
 ```ts
 await din.ready;  // window.din is Din's; ready resolves after the desktop's hello
-const { reason, params, files, shortcut } = din.app.launch;
+const { reason, params, files, shortcut, state } = din.app.launch;
 ```
 
 | Field | |
@@ -21,7 +21,8 @@ const { reason, params, files, shortcut } = din.app.launch;
 | `params` | What `din.app.open(id, params)` or a shortcut passed: `{ width, height }` for Paint's File > New |
 | `files` | Files the app was opened with, already granted: from Files, a drop on the Dock tile, Open With |
 | `shortcut` | The manifest shortcut's `din.id`, for Dock and launcher jump lists |
-| `reason` | `new`, or `relaunch` for `onLaunch` below |
+| `reason` | `new`, `relaunch` for `onLaunch` below, or `restore` when Din reopened the window on starting again |
+| `state` | What the window last gave `din.app.saveState`, on `restore` (and on **Reopen** after a crash); else null |
 
 Launch params are structured-cloneable data. Paths an app puts in
 `din.app.open` params are dropped: files travel as handles. On the
@@ -43,6 +44,31 @@ din.app.onLaunch(({ params, files, shortcut }) => {
 ```
 
 This replaces today's `actionAt` timestamps on dock action params.
+
+### Restoring after a restart
+
+Din keeps the windows open on file, on this device, and reopens them when
+it starts again (Settings → Windows, `din settings set windows.reopen`):
+after Restart Din, an update, a crash, logging out or a reboot. Each
+window comes back on its monitor and workspace, at its size, maximized,
+tiled or minimized as it was, with the launch params it was opened with
+(less a shortcut, which would run again) and `reason: 'restore'`. Native
+Linux apps are started again, and their windows go back where they were
+as they map.
+
+Din is stopped without warning, so there's no moment to save at quit.
+An app that wants to come back as it was saves what it shows as that
+changes, and reads it back from `launch.state`:
+
+```ts
+din.app.saveState({ folder: current.path, view });   // JSON, up to 512 KB; null forgets it
+if (din.app.launch.reason === 'restore') openFolder(din.app.launch.state);
+```
+
+The Terminal saves its tabs and panes with each one's folder (its shells
+start fresh there), and the Web Browser its tabs. If Din stops while
+reopening windows twice in a row, the next start leaves them closed and
+offers to reopen them (`din windows reopen`).
 
 ## `ready`
 
@@ -74,10 +100,12 @@ don't hold.
 
 ## Closing
 
-Every way a window closes (its close button, Super+Q, the Dock's Quit,
-logging out) goes through the app's `onCloseRequest`, if it set one
+Every way a window closes (its close button, Super+Q, the Dock's Quit)
+goes through the app's `onCloseRequest`, if it set one
 ([window.md](window.md#closing)). The desktop then destroys the webview,
-which ends the process.
+which ends the process. Logging out, restarting Din and shutting down
+don't ask: Din stops with the windows open, and reopens them when it
+starts again (see [Restoring after a restart](#restoring-after-a-restart)).
 
 Quitting an app (Dock > Quit) closes each of its windows in turn and
 stops at the first that's kept open.
