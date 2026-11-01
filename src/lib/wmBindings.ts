@@ -149,7 +149,7 @@ export const WM_BINDING_HELP: { group: string; bindings: { keys: string[]; label
     ],
   },
   {
-    group: 'Cursor effects (when turned on in Appearance)',
+    group: 'Cursor effects (when turned on in Settings → Cursors)',
     bindings: [
       { keys: ['Super', 'Shift', 'K'], label: 'Show where the pointer is (or shake the mouse)' },
       { keys: ['Super', 'Shift', 'Drag'], label: 'Paint with fire' },

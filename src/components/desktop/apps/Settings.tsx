@@ -247,10 +247,12 @@ import type { SectionId } from '@/lib/settingsSections';
  * sync, NIP-65 relay list, and Blossom server list. Connected apps lists the
  * sites and apps that may use the account through Din's signer
  * (ConnectedAppsSection). Assistant turns OpenCode, the AI agent, on or off
- * and connects its providers (AssistantSettingsSection). Appearance switches the
- * shell theme between light, dark and a custom one of colors, fonts and a
- * background picture, synced with the profile theme or kept on this computer
- * (ThemeSettings), and toggles desktop effects like wobbly windows.
+ * and connects its providers (AssistantSettingsSection). The Appearance group's
+ * Themes switches the shell theme between light, dark and a custom one of
+ * colors, fonts and a background picture, synced with the profile theme or
+ * kept on this computer (ThemeSettings); Cursors picks the pointer and its
+ * effects; Icons the icon theme; and Effects toggles desktop effects like
+ * wobbly windows.
  * Windows turns Hyprland-style tiling on or off, sets its gaps, and lists the
  * Super-key shortcuts for windows and workspaces (src/lib/wmBindings.ts).
  * Dock turns its magnification on or off and picks its backdrop, as its own
@@ -271,6 +273,8 @@ function paramSection(params: AppComponentProps['params']): SectionId | undefine
   if (s === 'updates') return 'about';
   // So did Battery, apart from Power.
   if (s === 'battery') return 'power';
+  // And Appearance, before its pages were sections of their own.
+  if (s === 'appearance') return 'themes';
   return typeof s === 'string' && SECTION_IDS.has(s) ? (s as SectionId) : undefined;
 }
 
@@ -368,8 +372,14 @@ export function Settings({ params, windowId }: AppComponentProps) {
       />
     ) : id === 'assistant' ? (
       <AssistantSettingsSection />
-    ) : id === 'appearance' ? (
-      <AppearanceSection windowId={windowId} />
+    ) : id === 'themes' ? (
+      <ThemesSection />
+    ) : id === 'cursors' ? (
+      <CursorsSection />
+    ) : id === 'icons' ? (
+      <IconsSection />
+    ) : id === 'effects' ? (
+      <EffectsSection windowId={windowId} />
     ) : id === 'windows' ? (
       <WindowsSection />
     ) : id === 'dock' ? (
@@ -3389,14 +3399,47 @@ function SyncStatusBadge({ status }: { status: ReturnType<typeof useAppDataSyncS
 // Appearance
 // ---------------------------------------------------------------------------
 
-function AppearanceSection({ windowId }: { windowId: string }) {
+function ThemesSection() {
+  return (
+    <SectionShell title="Themes">
+      <ThemeSettings />
+    </SectionShell>
+  );
+}
+
+function CursorsSection() {
+  return (
+    <SectionShell title="Cursors">
+      {getSystemCursorBridge() ? (
+        <SystemCursorPicker />
+      ) : (
+        <FallbackCard>The cursor is your browser’s.</FallbackCard>
+      )}
+
+      <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor effects</p>
+      <CursorEffectsSettings />
+    </SectionShell>
+  );
+}
+
+function IconsSection() {
+  return (
+    <SectionShell title="Icons">
+      {getIconThemeBridge() ? (
+        <IconThemePicker />
+      ) : (
+        <FallbackCard>Din uses its own icons in the browser.</FallbackCard>
+      )}
+    </SectionShell>
+  );
+}
+
+function EffectsSection({ windowId }: { windowId: string }) {
   const { config, updateConfig } = useAppContext();
 
   return (
-    <SectionShell title="Appearance">
-      <ThemeSettings />
-
-      <p className="mb-3 mt-4 text-sm text-muted-foreground">Effects</p>
+    <SectionShell title="Effects">
+      <p className="mb-3 text-sm text-muted-foreground">Windows</p>
       <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
         <div className="min-w-0">
           <Label htmlFor="wobbly-windows" className="cursor-pointer text-sm">
@@ -3433,25 +3476,6 @@ function AppearanceSection({ windowId }: { windowId: string }) {
           onChange={(closeEffect) => updateConfig((current) => ({ ...current, closeEffect }))}
         />
       </div>
-
-      <p className="mb-3 mt-4 text-sm text-muted-foreground">Icons</p>
-      {getIconThemeBridge() ? (
-        <IconThemePicker />
-      ) : (
-        <FallbackCard>Din uses its own icons in the browser.</FallbackCard>
-      )}
-
-      <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor</p>
-      <div className="flex flex-col gap-3">
-        {getSystemCursorBridge() ? (
-          <SystemCursorPicker />
-        ) : (
-          <FallbackCard>The cursor is your browser’s.</FallbackCard>
-        )}
-      </div>
-
-      <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor effects</p>
-      <CursorEffectsSettings />
 
       <p className="mb-3 mt-4 text-sm text-muted-foreground">Typing</p>
       <PowerModeSettings />

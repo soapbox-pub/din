@@ -46,7 +46,7 @@ interface ThemeAction {
 }
 
 /**
- * Settings → Appearance's "Your themes": the named themes the user has
+ * Settings → Themes' "Your themes": the named themes the user has
  * published (kind 36767) and the ones they've added from the App Store.
  * Picking one wears it at once; the one worn is checked.
  */

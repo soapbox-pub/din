@@ -1,6 +1,6 @@
 // Icon themes, per the freedesktop Icon Theme spec: the session's theme,
 // which native apps' icons, tray items and notifications come from, and
-// which Settings → Appearance shows and changes.
+// which Settings → Icons shows and changes.
 //
 // GTK takes the theme from GSettings (org.gnome.desktop.interface
 // icon-theme), so that's where Din reads and writes it. Din's own icons

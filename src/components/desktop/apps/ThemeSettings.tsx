@@ -54,7 +54,7 @@ const COLOR_ROLES: { role: keyof DesktopTheme['colors']; name: string }[] = [
 const HEX_COLOR = /^#[0-9a-f]{6}$/;
 
 /**
- * Settings → Appearance's theme: built-in light or dark, or a custom one of
+ * Settings → Themes' theme: built-in light or dark, or a custom one of
  * colors, fonts and a background picture, and whether the custom one is the
  * profile theme or this computer's own (see useDesktopThemeEditor). Below
  * them, the user's named themes (YourThemes); a custom theme can be saved

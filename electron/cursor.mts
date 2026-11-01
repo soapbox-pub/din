@@ -1,4 +1,4 @@
-// The pointer: its theme and size, which Settings → Appearance shows and
+// The pointer: its theme and size, which Settings → Cursors shows and
 // changes, and the themes the user imports (electron/cursorImport.mts).
 //
 // Chromium on Wayland draws its own cursors (din-shell has no cursor-shape

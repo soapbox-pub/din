@@ -65,7 +65,7 @@ function previewOver(ref: RefObject<HTMLElement | null>, kind: PreviewKind, id: 
 }
 
 /**
- * Cursor effects, for Settings → Appearance: a carousel of trails and one of
+ * Cursor effects, for Settings → Cursors: a carousel of trails and one of
  * click effects (built in, and any imported with a CursorFX file), then
  * Compiz's Show Mouse, Fire Paint and Water to switch on. Choosing an effect
  * plays it over the picker.

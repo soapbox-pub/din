@@ -1,4 +1,4 @@
-// Who keeps the look-and-feel settings Din shows in Settings → Appearance
+// Who keeps the look-and-feel settings Din shows under Settings → Appearance
 // (the icon theme, the pointer): GSettings (org.gnome.desktop.interface),
 // on DinOS and on the desktops that use it too, or a desktop of its own.
 //

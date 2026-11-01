@@ -50,7 +50,7 @@ interface Streak {
  * publishers, the people the user follows, and the user (useThemeCatalog).
  *
  * Clicking a theme wears it at once and adds it to the user's themes, which
- * Settings → Appearance lists. A bar then offers Revert, which puts back
+ * Settings → Themes lists. A bar then offers Revert, which puts back
  * what was worn before the first theme clicked and takes back what the
  * clicks added.
  *
@@ -200,7 +200,7 @@ export function ThemeStore({
                 ) : catalog.isError ? (
                   <EmptyState message="Could not load themes. Check your relay connections and try refreshing." />
                 ) : catalog.themes.length === 0 ? (
-                  <EmptyState message="No themes found on your relays yet. Make one in Settings → Appearance and save it, or follow people who share theirs." />
+                  <EmptyState message="No themes found on your relays yet. Make one in Settings → Themes and save it, or follow people who share theirs." />
                 ) : (
                   <>
                     <ThemeGrid themes={catalog.themes} handlers={handlers} />

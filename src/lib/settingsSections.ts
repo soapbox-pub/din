@@ -13,9 +13,12 @@ import {
   LayoutDashboard,
   Link2,
   Monitor,
+  MousePointer2,
   Palette,
   Printer,
+  Shapes,
   Smartphone,
+  Sparkles,
   Sun,
   Volume2,
   Wifi,
@@ -40,13 +43,16 @@ export type SectionId =
   | 'nostr'
   | 'connected'
   | 'assistant'
-  | 'appearance'
+  | 'themes'
+  | 'cursors'
+  | 'icons'
+  | 'effects'
   | 'windows'
   | 'dock'
   | 'developers'
   | 'about';
 
-export type SectionGroup = 'Connections' | 'Personal' | 'Devices' | 'Account' | 'System';
+export type SectionGroup = 'Connections' | 'Appearance' | 'Personal' | 'Devices' | 'Account' | 'System';
 
 export interface SettingsSection {
   id: SectionId;
@@ -86,11 +92,32 @@ export const SECTIONS: SettingsSection[] = [
     search: ['My phones', 'Add a phone', 'Show Notifications', 'Sync Contacts', 'Allow access to messages', 'Bluetooth', 'Messages', 'texts', 'SMS', 'iMessage', 'Phone Link', 'Android', 'iPhone', 'mobile', 'cell'],
   },
   {
-    id: 'appearance',
-    group: 'Personal',
-    name: 'Appearance',
+    id: 'themes',
+    group: 'Appearance',
+    name: 'Themes',
     icon: Palette,
-    search: ['Sync with your profile theme', 'Effects', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Compiz', 'animation', 'genie', 'magic lamp', 'burn', 'explode', 'Cursor', 'Cursor style', 'Cursor size', 'theme', 'dark mode', 'light mode', 'colors', 'fonts', 'background', 'wallpaper', 'desktop picture', 'mouse pointer'],
+    search: ['Appearance', 'Sync with your profile theme', 'Your themes', 'theme', 'dark mode', 'light mode', 'colors', 'fonts', 'background', 'wallpaper', 'desktop picture'],
+  },
+  {
+    id: 'cursors',
+    group: 'Appearance',
+    name: 'Cursors',
+    icon: MousePointer2,
+    search: ['Appearance', 'Cursor', 'Cursor style', 'Cursor size', 'Cursor effects', 'Trail', 'Click effect', 'Match theme color', 'Show Mouse', 'Fire Paint', 'Water', 'CursorFX', 'Compiz', 'mouse pointer'],
+  },
+  {
+    id: 'icons',
+    group: 'Appearance',
+    name: 'Icons',
+    icon: Shapes,
+    search: ['Appearance', 'Icon theme', 'app icons', 'folder icons', 'file icons'],
+  },
+  {
+    id: 'effects',
+    group: 'Appearance',
+    name: 'Effects',
+    icon: Sparkles,
+    search: ['Appearance', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Typing', 'Power mode', 'Shake the window', 'Compiz', 'animation', 'genie', 'magic lamp', 'burn', 'explode', 'sparks'],
   },
   {
     id: 'windows',

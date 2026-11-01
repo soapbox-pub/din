@@ -5,7 +5,7 @@ import { EffectPicture } from '@/components/desktop/apps/CursorEffectPicker';
 import { useAppContext } from '@/hooks/useAppContext';
 import { previewPowerMode } from '@/lib/powerMode';
 
-/** Power mode, for Settings → Appearance: its switch, and whether it shakes windows. */
+/** Power mode, for Settings → Effects: its switch, and whether it shakes windows. */
 export function PowerModeSettings() {
   const { config, updateConfig } = useAppContext();
   return (

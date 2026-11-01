@@ -28,7 +28,7 @@ export function DesktopMenu() {
         <ContextMenuItem onSelect={() => void chooseBackground()}>
           <Wallpaper aria-hidden /> Change Background…
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => open('settings', { section: 'appearance' })}>
+        <ContextMenuItem onSelect={() => open('settings', { section: 'themes' })}>
           <Palette aria-hidden /> Customize…
         </ContextMenuItem>
         <ContextMenuSeparator />

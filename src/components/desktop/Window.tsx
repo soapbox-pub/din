@@ -309,7 +309,7 @@ interface WobblyDrag {
  * past a small threshold it un-maximizes under the cursor and the gesture
  * continues as a normal drag.
  *
- * Wobbly windows: when enabled (Settings → Appearance) and the user doesn't
+ * Wobbly windows: when enabled (Settings → Effects) and the user doesn't
  * prefer reduced motion, title-bar drags run the Compiz wobbly spring model
  * (see src/lib/wobbly.ts). The pointer drives the lattice anchor, a rAF loop
  * integrates the springs, and the deformation is painted as a CSS matrix3d()

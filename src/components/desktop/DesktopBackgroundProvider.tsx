@@ -160,7 +160,7 @@ export function DesktopBackgroundProvider({ children }: { children: ReactNode })
 
   const chooseBackground = useCallback(async () => {
     if (!getFsBridge()) {
-      open('settings', { section: 'appearance' });
+      open('settings', { section: 'themes' });
       return;
     }
     const path = await pickFile({

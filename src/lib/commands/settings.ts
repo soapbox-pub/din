@@ -84,7 +84,7 @@ export const CONFIG_FIELDS_ELSEWHERE: Partial<Record<keyof AppConfig, string>> =
   relayMetadata: 'din nostr relays',
   blossomServerMetadata: 'din nostr blossom',
   profileThemeMetadata: 'the profile theme itself, kept in step by the desktop',
-  localTheme: 'the theme editor in Settings → Appearance (not yet a command)',
+  localTheme: 'the theme editor in Settings → Themes (not yet a command)',
 };
 
 export const SETTING_FIELDS: (keyof AppConfig)[] = SETTINGS.flatMap((s) => (s.field ? [s.field] : []));
