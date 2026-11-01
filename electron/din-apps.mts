@@ -58,7 +58,10 @@ export function appOrigin(appId: string): string {
 const SYSTEM_PERMISSIONS = {
   fs: /^fs:[a-zA-Z]+$/,
   pty: /^pty:(spawn|write|resize|kill|release|adopt)$/,
-  assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request|passwords|answerPassword|approve)$/,
+  assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request)$/,
+  // Answering sudo in a conversation: the Assistant's own cards, never an app
+  // that only talks to the agent (askpass.mts).
+  'assistant-sudo': /^assistant:(passwords|answerPassword|approve)$/,
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|unlock|eject)$/,
   mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|attachment|setFlags|move|remove|send|saveDraft)$/,
@@ -73,6 +76,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   // A pty's output goes to the sender that spawned it.
   pty: null,
   assistant: /^assistant:(status|event)$/,
+  'assistant-sudo': null,
   indd: null,
   volumes: /^volumes:(changed|event)$/,
   mail: /^mail:changed$/,

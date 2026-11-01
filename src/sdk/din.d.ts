@@ -754,6 +754,12 @@ export type Permission =
   | 'cursor'
   /** The Assistant's OpenCode service (`din.system.assistant`). Assistant, CAD. */
   | 'assistant'
+  /**
+   * Answering sudo's password and approval requests in a conversation
+   * (`din.system.assistant`'s `passwords`, `answerPassword`, `approve`).
+   * Built-in apps only. Assistant.
+   */
+  | 'assistant-sudo'
   /** InDesign conversion (`din.system.indd`). Publisher. */
   | 'indd'
   /** Removable disks: list, mount, unlock, eject (`din.system.volumes`). Files. */

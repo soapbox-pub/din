@@ -24,6 +24,8 @@ import {
   type SiteGrant,
 } from '@/lib/signerPermissions';
 import { originLabel, questionTitle } from '@/lib/signerLabels';
+import { APP_DATA_KIND, MAX_CLOCK_SKEW_SECONDS, isAppDataDTag } from '@/lib/appData';
+import { serveAppSignerRequests } from '@/lib/appSigner';
 import { SignerPrompt, type PromptAnswer, type SignerPromptItem } from '@/components/desktop/SignerPrompt';
 
 /** At most this many questions per site in RATE_WINDOW_MS; more are refused unasked. */
@@ -54,9 +56,18 @@ function parseTemplate(input: unknown): EventTemplate {
   if (!Array.isArray(tags) || !tags.every((t) => Array.isArray(t) && t.every((v) => typeof v === 'string'))) {
     throw new Error('Invalid event: tags');
   }
-  const createdAt = e.created_at ?? Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000);
+  const createdAt = e.created_at ?? now;
   if (typeof createdAt !== 'number' || !Number.isInteger(createdAt) || createdAt < 0) {
     throw new Error('Invalid event: created_at');
+  }
+  // An event from the future would outrank every later one of its kind.
+  if (createdAt > now + MAX_CLOCK_SKEW_SECONDS) throw new Error('Invalid event: created_at is in the future');
+  // Din's own app data (which sites may use the signer, installed apps) is
+  // Din's to write: a site that may keep its settings in kind 30078 mustn't
+  // keep them under Din's names.
+  if (e.kind === APP_DATA_KIND && (tags as string[][]).some(([name, value]) => name === 'd' && isAppDataDTag(value))) {
+    throw new Error("Din's own settings can only be written by Din");
   }
   return { kind: e.kind, content, tags: tags as string[][], created_at: createdAt };
 }
@@ -70,13 +81,15 @@ function stringParam(params: Record<string, unknown>, name: string): string {
 /**
  * Desktop-lifetime host for Din's signer as other software sees it: NIP-07
  * window.nostr in browser tabs and installed web apps (electron/nostr-preload.cjs),
- * and apps connected over NIP-46 (electron/bunker.mts). Main establishes who
- * is asking; this decides, asks the user when it has to, and signs with the
- * account's signer.
+ * Din's own app windows with the nostr permission (din.account.nostr, by way
+ * of src/lib/appSigner.ts), and apps connected over NIP-46 (electron/bunker.mts).
+ * Main, or the app's window, establishes who is asking; this decides, asks
+ * the user when it has to, and signs with the account's signer.
  *
  * - A browser tab has to be **connected** before it learns who the user is,
  *   and asking to connect needs a click on the page, so sites can't pop the
- *   question on load. Installed apps are connected by being installed.
+ *   question on load. Installed apps are connected by being installed, and
+ *   Din's apps by holding the nostr permission.
  * - Signing (per kind) and encrypting or decrypting (per method) are asked
  *   about, unless the user remembered an answer for that site. NIP-42 relay
  *   AUTH is signed without asking once a site is connected.
@@ -85,7 +98,7 @@ function stringParam(params: Record<string, unknown>, name: string): string {
  * - One question at a time; queued ones that a remembered answer has since
  *   settled are answered without being shown.
  *
- * Renders the prompt; does nothing outside the Electron shell.
+ * Renders the prompt. Outside the Electron shell only Din's apps ask.
  */
 export function NostrBridgeHost() {
   const { user, users } = useCurrentUser();
@@ -183,7 +196,6 @@ export function NostrBridgeHost() {
 
   useEffect(() => {
     const bridge = getNostrHostBridge();
-    if (!bridge) return;
 
     const updateGrant = (origin: string, update: (grant: SiteGrant | undefined) => SiteGrant | undefined) => {
       setGrants((prev) => {
@@ -388,6 +400,13 @@ export function NostrBridgeHost() {
       return { result: await fulfill(signerUser.signer, account, method, params, preview), remember };
     }
 
+    // Din's own app windows, with the nostr permission (DinAppFrame).
+    const offApps = serveAppSignerRequests((request) => {
+      if (!isSignerMethod(request.method)) return Promise.reject(new Error(`Unsupported method: ${request.method}`));
+      return handlePage(request, request.method);
+    });
+    if (!bridge) return offApps;
+
     const offRequest = bridge.onRequest(async (request) => {
       const response: NostrBridgeResponse = { requestId: request.requestId, ok: false };
       try {
@@ -419,6 +438,7 @@ export function NostrBridgeHost() {
     });
 
     return () => {
+      offApps();
       offRequest();
       offCancel();
       offPage();

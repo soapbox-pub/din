@@ -15,6 +15,7 @@
   "din": {
     "permissions": [
       "assistant",
+      "assistant-sudo",
       "fs",
       "notifications"
     ],

@@ -11,7 +11,7 @@ import type { Push } from '@/sdk/protocol';
 export const DIN_APPS_PARTITION = 'persist:din-apps';
 
 /** Permissions whose bridges get a port of their own to main (SYSTEM_PERMISSIONS in electron/din-apps.mts). */
-export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'indd', 'volumes', 'mail', 'passwords', 'vms'] as const;
+export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'assistant-sudo', 'indd', 'volumes', 'mail', 'passwords', 'vms'] as const;
 export type SystemPermission = (typeof SYSTEM_PERMISSIONS)[number];
 
 /** What the desktop's preload exposes for hosting apps (electron/preload.cjs). */
@@ -105,6 +105,22 @@ export function manifestSize(manifest: DinManifest): Size | undefined {
 /** Whether an id is an app's from a folder, at din+file://<host>/ (`file-<host>`; src/lib/fileApps.ts). */
 export function isFileAppId(id: string): boolean {
   return /^file-[a-z2-7]{52}$/.test(id);
+}
+
+/**
+ * What Din's signer knows an app by, wherever its window loads from:
+ * din+file://<host> for one from a folder, else din://<id> (appOrigin in
+ * electron/din-apps.mts).
+ */
+export function appOrigin(id: string): string {
+  return isFileAppId(id) ? `din+file://${id.slice('file-'.length)}` : `din://${id}`;
+}
+
+/** The app an origin from appOrigin names, or null. */
+export function appIdOfOrigin(origin: string): string | null {
+  const match = /^(din|din\+file):\/\/([a-z0-9][a-z0-9-]*)$/.exec(origin);
+  if (!match) return null;
+  return match[1] === 'din' ? match[2] : `file-${match[2]}`;
 }
 
 /** The URL an app's window loads. */

@@ -34,6 +34,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
 | `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |
 | `assistant` | `din.system.assistant`: the Assistant's OpenCode service | Assistant, CAD |
+| `assistant-sudo` | `din.system.assistant`'s `passwords`, `answerPassword` and `approve`: answering sudo when a conversation's command asks. An app with `assistant` alone hears no requests and can't answer one. Built-in apps only: an app from a folder or the `din` command can't ask for it | Assistant |
 | `indd` | `din.system.indd`: InDesign conversion | Publisher |
 | `volumes` | `din.system.volumes`: removable disks, mounting, unlocking and ejecting | Files |
 | `mail` | `din.system.mail`: the user's IMAP and SMTP accounts (`src/lib/mail.ts`), run in main by `electron/mail.mts`. Passwords stay in main, sealed with the keyring; the app never sees them | Mail |
@@ -65,7 +66,7 @@ They don't go through the desktop. When the app connects, the desktop
 checks its grants and asks main for a port from the app straight to each
 granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made)):
 
-Bridges with ports of their own: `fs`, `pty`, `assistant`, `indd`, `volumes`, `mail`, `passwords`, `vms`
+Bridges with ports of their own: `fs`, `pty`, `assistant`, `assistant-sudo`, `indd`, `volumes`, `mail`, `passwords`, `vms`
 (`SYSTEM_PERMISSIONS` in `electron/din-apps.mts`, mirrored in
 `src/lib/dinApps.ts` and `src/sdk/runtime.ts`). A bridge's pushes reach the apps
 granted it: a pty's output goes to the app that spawned it, and what main
