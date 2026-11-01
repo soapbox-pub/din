@@ -178,6 +178,16 @@ interface PlayedEffect {
   seed: number;
 }
 
+/**
+ * What a window closing or minimizing paints at, over `win.z`. The window
+ * under it is raised (and focused) the moment it starts leaving, which is
+ * right for focus and input but would cover the animation; leaving windows
+ * paint above every live one (which `raise` keeps under 5000) until they're
+ * gone, without their place in the stack changing. Adding `win.z` keeps
+ * several leaving at once in their order.
+ */
+const DEPARTING_Z = 1_000_000;
+
 function newSeed(): number {
   return Math.floor(Math.random() * 0xffffffff);
 }
@@ -334,6 +344,9 @@ export const Window = memo(function Window({
   const closeWithEngine =
     hasCaptureBridge() &&
     (config.closeEffect === 'random' || effectsFor('close').some((e) => e.id === config.closeEffect));
+  // A closing window keeps painting over the one raised in its place while
+  // its exit plays (DEPARTING_Z).
+  const renderedZ = win.closing ? DEPARTING_Z + win.z : win.z;
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
   const areas = useWorkAreas();
@@ -629,6 +642,14 @@ export const Window = memo(function Window({
   // off-screen and can't be re-captured - can replay it reversed. Outside the
   // shell (a plain browser: no capture bridge) the genie falls back to
   // warping the live element, as before, whatever effect is chosen.
+  //
+  // Minimizing lifts the section (while it's still showing) and the effect
+  // over the windows raised in its place (DEPARTING_Z); the section goes back
+  // to its committed z once the effect is done or cancelled.
+  const renderedZRef = useRef(renderedZ);
+  useLayoutEffect(() => {
+    renderedZRef.current = renderedZ;
+  });
   const prevMinimized = useRef(win.minimized);
   useLayoutEffect(() => {
     if (prevMinimized.current === win.minimized) return;
@@ -638,6 +659,10 @@ export const Window = memo(function Window({
 
     animCancel.current?.();
     animCancel.current = null;
+    const settleZ = () => {
+      el.style.zIndex = String(renderedZRef.current);
+    };
+    settleZ();
 
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
@@ -665,14 +690,18 @@ export const Window = memo(function Window({
 
     const parent = el.parentElement;
     const target = dockTarget(parent, app?.dockAs ?? win.appId);
+    const effectZ = minimizing ? DEPARTING_Z + win.z : win.z;
 
     // Warp the live element directly (the pre-snapshot behaviour). Used
     // outside the shell and as a fallback when a capture fails.
     const runLiveGenie = () => {
       beginGesture();
       el.style.pointerEvents = 'none';
-      if (minimizing) el.style.visibility = 'visible';
-      animCancel.current = animateGenie(el, winRect, target, minimizing ? 'minimize' : 'restore', () => {
+      if (minimizing) {
+        el.style.visibility = 'visible';
+        el.style.zIndex = String(effectZ);
+      }
+      const cancel = animateGenie(el, winRect, target, minimizing ? 'minimize' : 'restore', () => {
         animCancel.current = null;
         el.style.transform = '';
         el.style.transformOrigin = '';
@@ -681,8 +710,13 @@ export const Window = memo(function Window({
         // Hand visibility back to the React-committed value (hidden while
         // minimized; the property is absent otherwise).
         el.style.visibility = minimizing ? 'hidden' : '';
+        settleZ();
         endGesture();
       });
+      animCancel.current = () => {
+        cancel();
+        settleZ();
+      };
     };
 
     // Play the effect on the decoded snapshot - in WebGL, or failing that
@@ -694,6 +728,7 @@ export const Window = memo(function Window({
       const showSection = () => {
         el.style.pointerEvents = '';
         el.style.visibility = minimizing ? 'hidden' : '';
+        settleZ();
       };
 
       const effectCancel = runWindowEffect(
@@ -703,7 +738,7 @@ export const Window = memo(function Window({
         winRect,
         target,
         minimizing ? 'out' : 'in',
-        win.z,
+        effectZ,
         seed,
         () => {
           animCancel.current = null;
@@ -732,7 +767,7 @@ export const Window = memo(function Window({
       img.style.transformOrigin = '0 0';
       img.style.pointerEvents = 'none';
       img.style.willChange = 'transform';
-      img.style.zIndex = String(win.z);
+      img.style.zIndex = String(effectZ);
       parent.appendChild(img);
 
       el.style.visibility = 'hidden';
@@ -757,14 +792,17 @@ export const Window = memo(function Window({
     if (minimizing && capture) {
       // Snapshot the window at rest, then play the bitmap. Keep the live
       // section visible for the capture (React just committed it hidden);
-      // the overlay takes over the instant the capture resolves.
+      // the overlay takes over the instant the capture resolves. Lifted over
+      // the window raised in its place, so the capture is of this one alone.
       el.style.visibility = 'visible';
       el.style.pointerEvents = 'none';
+      el.style.zIndex = String(effectZ);
       let cancelled = false;
       animCancel.current = () => {
         cancelled = true;
         el.style.pointerEvents = '';
         el.style.visibility = 'hidden';
+        settleZ();
       };
       capture
         .then((snapshot) => {
@@ -915,7 +953,7 @@ export const Window = memo(function Window({
     capture
       .then((snapshot) => {
         if (cancelled) return;
-        const played = runWindowEffect(parent, snapshot, effect, winRect, null, 'out', win.z, newSeed(), () =>
+        const played = runWindowEffect(parent, snapshot, effect, winRect, null, 'out', DEPARTING_Z + win.z, newSeed(), () =>
           destroy(win.id),
         );
         if (played) el.style.visibility = 'hidden';
@@ -1505,7 +1543,7 @@ export const Window = memo(function Window({
     top: rect.y,
     width: rect.width,
     height: rect.height,
-    zIndex: win.z,
+    zIndex: renderedZ,
   };
 
   // Minimized windows stay mounted but hidden so app state (terminal
