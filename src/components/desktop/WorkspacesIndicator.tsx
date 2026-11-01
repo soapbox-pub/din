@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Keyboard, LayoutDashboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Popover, PopoverClose, PopoverTrigger } from '@/components/ui/popover';
+import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
 import { Switch } from '@/components/ui/switch';
 import { useAppContext } from '@/hooks/useAppContext';
 import { activeWorkspace, homeArea, WORKSPACE_COUNT } from '@/hooks/useWindows';
@@ -102,9 +103,9 @@ const WorkspacesButton = memo(function WorkspacesButton({
           </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-80 p-0">
+      <BarPopoverContent align="end" className="w-80 p-0">
         <WorkspacesPopoverBody tiling={tiling} monitors={monitors} />
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });

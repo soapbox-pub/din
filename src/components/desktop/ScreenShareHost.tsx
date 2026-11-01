@@ -10,7 +10,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Popover, PopoverTrigger } from '@/components/ui/popover';
+import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
 import { Switch } from '@/components/ui/switch';
 import {
   displayHost,
@@ -236,7 +237,7 @@ export const ScreenShareMenuItem = memo(function ScreenShareMenuItem() {
           <MonitorUp className="size-4.5" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-80 p-0">
+      <BarPopoverContent align="end" className="w-80 p-0">
         <div className="border-b border-border/60 px-4 py-2.5">
           <p className="text-sm font-semibold">Screen sharing</p>
         </div>
@@ -257,7 +258,7 @@ export const ScreenShareMenuItem = memo(function ScreenShareMenuItem() {
             </li>
           ))}
         </ul>
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });

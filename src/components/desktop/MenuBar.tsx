@@ -15,7 +15,6 @@ import {
 import {
   Popover,
   PopoverClose,
-  PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
 import {
@@ -31,6 +30,8 @@ import { QuickLoginDialog } from '@/components/auth/QuickLoginDialog';
 import { RemoveAccountDialog } from '@/components/auth/RemoveAccountDialog';
 import { EditProfileForm } from '@/components/EditProfileForm';
 import { AppIcon } from '@/components/desktop/AppIcon';
+import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
+import { useBarSide } from '@/contexts/BarSideContext';
 import { setMenuBarSlot } from '@/lib/menuBarSlot';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
@@ -188,27 +189,62 @@ const FocusedAppName = memo(function FocusedAppName({ appId }: { appId: string |
 
 /** Left menu: the full searchable apps launcher. */
 const AppsMenu = memo(function AppsMenu() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Super+Space (see DesktopHotkeys) toggles the menu.
+  useEffect(() => onToggleAppsMenu(() => setMenuOpen((open) => !open)), []);
+
+  return (
+    <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Open apps menu"
+          className="h-7 gap-1.5 rounded-md px-2.5 text-sm font-medium text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
+        >
+          <LayoutGrid className="size-4" aria-hidden />
+          Apps
+        </Button>
+      </PopoverTrigger>
+      <BarPopoverContent
+        align="start"
+        className="w-96 rounded-2xl p-0"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          searchRef.current?.focus();
+        }}
+      >
+        <AppLauncher searchRef={searchRef} onClose={() => setMenuOpen(false)} />
+      </BarPopoverContent>
+    </Popover>
+  );
+});
+
+/**
+ * The apps launcher: a search over the apps and Settings' sections, and
+ * their tiles. It lives in a popover (the apps menu, the Start menu), whose
+ * tiles close it, and mounts afresh each time that opens, so it always opens
+ * on a fresh search. The Start menu puts the search under the tiles.
+ */
+export function AppLauncher({
+  searchRef,
+  onClose,
+  searchAtBottom = false,
+  listClassName,
+}: {
+  searchRef: React.RefObject<HTMLInputElement | null>;
+  /** Closes the popover, when Enter launches the first match. */
+  onClose: () => void;
+  searchAtBottom?: boolean;
+  listClassName?: string;
+}) {
   const { apps, uninstallApp, canUninstall } = useInstalledApps();
   // Actions only: keeps the launcher (a large Radix popover tree) out of
   // the per-window-commit re-render cascade.
   const { open, closeApp } = useWindowActions();
-  const [menuOpen, setMenuOpenState] = useState(false);
   const [query, setQuery] = useState('');
-  const searchRef = useRef<HTMLInputElement>(null);
-  const menuOpenRef = useRef(menuOpen);
-
-  /** Open or close the menu; it always opens on a fresh search. */
-  const setMenuOpen = useCallback((next: boolean) => {
-    if (next && !menuOpenRef.current) setQuery('');
-    menuOpenRef.current = next;
-    setMenuOpenState(next);
-  }, []);
-
-  // Super+Space (see DesktopHotkeys) toggles the menu.
-  useEffect(
-    () => onToggleAppsMenu(() => setMenuOpen(!menuOpenRef.current)),
-    [setMenuOpen],
-  );
 
   /** Uninstall an app: close its windows, then drop the entry. */
   const uninstall = useCallback((appId: string) => {
@@ -241,94 +277,81 @@ const AppsMenu = memo(function AppsMenu() {
   const launchFirst = () => {
     const first = dinApps[0];
     if (first) {
-      setMenuOpen(false);
+      onClose();
       open(first.id);
     } else if (settings[0]) {
-      setMenuOpen(false);
+      onClose();
       openSetting(settings[0]);
     } else if (nativeApps[0]) {
-      setMenuOpen(false);
+      onClose();
       open(nativeApps[0].id);
     }
   };
 
-  return (
-    <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="Open apps menu"
-          className="h-7 gap-1.5 rounded-md px-2.5 text-sm font-medium text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
-        >
-          <LayoutGrid className="size-4" aria-hidden />
-          Apps
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="bottom"
-        align="start"
-        sideOffset={8}
-        className="w-96 rounded-2xl p-0"
-        onOpenAutoFocus={(e) => {
+  const search = (
+    <div
+      className={cn(
+        'flex items-center gap-2.5 border-border/60 px-4 py-3',
+        searchAtBottom ? 'order-last border-t' : 'border-b',
+      )}
+    >
+      <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <input
+        ref={searchRef}
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return;
           e.preventDefault();
-          searchRef.current?.focus();
+          launchFirst();
         }}
-      >
-        <div className="flex items-center gap-2.5 border-b border-border/60 px-4 py-3">
-          <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          <input
-            ref={searchRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter') return;
-              e.preventDefault();
-              launchFirst();
-            }}
-            placeholder="Search your apps…"
-            aria-label="Search apps"
-            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-          />
-        </div>
-        <div className="max-h-96 overflow-y-auto p-3">
-          {launcherApps.length === 0 && settings.length === 0 ? (
-            <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-              No apps or settings match “{query}”.
-            </p>
-          ) : (
-            <>
-              <AppGrid
-                apps={dinApps}
-                onOpen={open}
-                onUninstall={uninstall}
-                canUninstall={canUninstall}
-              />
-              {settings.length > 0 && (
-                <>
-                  {dinApps.length > 0 && <LauncherHeading>Settings</LauncherHeading>}
-                  <SettingsList sections={settings} onOpen={openSetting} />
-                </>
-              )}
-              {nativeApps.length > 0 && (
-                <>
-                  {(dinApps.length > 0 || settings.length > 0) && <LauncherHeading>System</LauncherHeading>}
-                  <AppGrid
-                    apps={nativeApps}
-                    onOpen={open}
-                    onUninstall={uninstall}
-                    canUninstall={canUninstall}
-                  />
-                </>
-              )}
-            </>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+        placeholder="Search your apps…"
+        aria-label="Search apps"
+        className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+      />
+    </div>
   );
-});
+
+  return (
+    <div className="flex min-h-0 flex-col">
+      {search}
+      <div className={cn('max-h-96 overflow-y-auto p-3', listClassName)}>
+        {launcherApps.length === 0 && settings.length === 0 ? (
+          <p className="px-2 py-8 text-center text-sm text-muted-foreground">
+            No apps or settings match “{query}”.
+          </p>
+        ) : (
+          <>
+            <AppGrid
+              apps={dinApps}
+              onOpen={open}
+              onUninstall={uninstall}
+              canUninstall={canUninstall}
+            />
+            {settings.length > 0 && (
+              <>
+                {dinApps.length > 0 && <LauncherHeading>Settings</LauncherHeading>}
+                <SettingsList sections={settings} onOpen={openSetting} />
+              </>
+            )}
+            {nativeApps.length > 0 && (
+              <>
+                {(dinApps.length > 0 || settings.length > 0) && <LauncherHeading>System</LauncherHeading>}
+                <AppGrid
+                  apps={nativeApps}
+                  onOpen={open}
+                  onUninstall={uninstall}
+                  canUninstall={canUninstall}
+                />
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function LauncherHeading({ children }: { children: ReactNode }) {
   return (
@@ -458,7 +481,7 @@ const AppTile = memo(function AppTile({
  * extending and mirroring. Without deckmon it's dimmed, and its panel says
  * what's missing. Renders nothing outside the Electron shell.
  */
-const AirPlayMenuItem = memo(function AirPlayMenuItem() {
+export const AirPlayMenuItem = memo(function AirPlayMenuItem() {
   const bridge = getAirPlayBridge();
   const { data } = useAirPlayState();
 
@@ -489,9 +512,9 @@ const AirPlayMenuItem = memo(function AirPlayMenuItem() {
           <Airplay className="size-4.5" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-80 p-0">
+      <BarPopoverContent align="end" className="w-80 p-0">
         <AirPlayPopoverBody />
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });
@@ -502,7 +525,7 @@ const AirPlayMenuItem = memo(function AirPlayMenuItem() {
  * or where neither the backlight nor a gamma tool is present, like the other
  * hardware indicators.
  */
-const BrightnessMenuItem = memo(function BrightnessMenuItem() {
+export const BrightnessMenuItem = memo(function BrightnessMenuItem() {
   const bridge = getBrightnessBridge();
   const status = useBrightnessStatus();
 
@@ -525,9 +548,9 @@ const BrightnessMenuItem = memo(function BrightnessMenuItem() {
           <BrightnessGlyph brightness={data.brightness} className="size-4.5" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">
+      <BarPopoverContent align="end" className="w-72 p-0">
         <BrightnessPopoverBody />
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });
@@ -537,7 +560,7 @@ const BrightnessMenuItem = memo(function BrightnessMenuItem() {
  * Renders nothing outside the Electron shell or where PipeWire/wpctl is
  * absent, like the other hardware indicators.
  */
-const VolumeMenuItem = memo(function VolumeMenuItem() {
+export const VolumeMenuItem = memo(function VolumeMenuItem() {
   const bridge = getAudioBridge();
   const status = useAudioStatus();
 
@@ -562,9 +585,9 @@ const VolumeMenuItem = memo(function VolumeMenuItem() {
           <VolumeGlyph volume={volume} muted={muted} className="size-4.5" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">
+      <BarPopoverContent align="end" className="w-72 p-0">
         <VolumePopoverBody />
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });
@@ -575,7 +598,7 @@ const VolumeMenuItem = memo(function VolumeMenuItem() {
  * shell or on machines with no battery (desktops, the VM), like the other
  * hardware indicators.
  */
-const BatteryMenuItem = memo(function BatteryMenuItem() {
+export const BatteryMenuItem = memo(function BatteryMenuItem() {
   const bridge = getPowerBridge();
   const status = useBatteryStatus();
 
@@ -608,9 +631,9 @@ const BatteryMenuItem = memo(function BatteryMenuItem() {
           />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">
+      <BarPopoverContent align="end" className="w-72 p-0">
         <BatteryPopoverBody />
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });
@@ -620,7 +643,7 @@ const BatteryMenuItem = memo(function BatteryMenuItem() {
  * to something; clicking lists the paired devices. Renders nothing outside
  * the Electron shell or without an adapter.
  */
-const BluetoothMenuItem = memo(function BluetoothMenuItem() {
+export const BluetoothMenuItem = memo(function BluetoothMenuItem() {
   const bridge = getBluetoothBridge();
   const { data } = useBluetoothState();
 
@@ -651,9 +674,9 @@ const BluetoothMenuItem = memo(function BluetoothMenuItem() {
           <Icon className="size-4.5" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-72 p-0">
+      <BarPopoverContent align="end" className="w-72 p-0">
         <BluetoothPopoverBody />
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });
@@ -663,7 +686,7 @@ const BluetoothMenuItem = memo(function BluetoothMenuItem() {
  * quick-connect panel. Renders nothing outside the Electron shell or on
  * systems without an adapter, like hardware indicators do.
  */
-const WifiMenuItem = memo(function WifiMenuItem() {
+export const WifiMenuItem = memo(function WifiMenuItem() {
   const bridge = getWifiBridge();
   const status = useWifiStatus();
   const radioEnabled = status.data?.radioEnabled ?? false;
@@ -711,15 +734,15 @@ const WifiMenuItem = memo(function WifiMenuItem() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-80 p-0">
+      <BarPopoverContent align="end" className="w-80 p-0">
         <WifiPopoverBody />
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });
 
 /** Account status item: avatar opens the account panel. */
-const AccountMenuItem = memo(function AccountMenuItem() {
+export const AccountMenuItem = memo(function AccountMenuItem() {
   const { currentUser } = useLoggedInAccounts();
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
@@ -748,12 +771,7 @@ const AccountMenuItem = memo(function AccountMenuItem() {
             )}
           </button>
         </PopoverTrigger>
-        <PopoverContent
-          side="bottom"
-          align="end"
-          sideOffset={8}
-          className="w-80 overflow-hidden p-0"
-        >
+        <BarPopoverContent align="end" className="w-80 overflow-hidden p-0">
           <AccountPanel
             onAddAccount={() => setAuthDialogOpen(true)}
             onJoin={() => setAuthDialogOpen(true)}
@@ -762,7 +780,7 @@ const AccountMenuItem = memo(function AccountMenuItem() {
             onRemoveAccount={setRemoving}
             onPower={setPowerAction}
           />
-        </PopoverContent>
+        </BarPopoverContent>
       </Popover>
 
       <RemoveAccountDialog account={removing} onClose={() => setRemoving(null)} />
@@ -806,7 +824,7 @@ const AccountMenuItem = memo(function AccountMenuItem() {
  * take; log out only where Din is another Linux's login session; restart
  * and shut down only where logind lets this session do them.
  */
-function SystemButtons({ onPower }: { onPower: (action: PowerAction) => void }) {
+export function SystemButtons({ onPower }: { onPower: (action: PowerAction) => void }) {
   const lockBridge = getLockBridge();
   const powerBridge = getPowerBridge();
   const sessionBridge = getSessionBridge();
@@ -887,10 +905,13 @@ function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect:
 /**
  * Menu-bar clock: weekday, date, and time. Clicking opens a calendar beside
  * the notification center; a dot beside the time marks unread notifications.
+ * In the taskbar it's the time over the date, Windows style, at the corner
+ * of the screen.
  */
-const ClockMenuItem = memo(function ClockMenuItem() {
+export const ClockMenuItem = memo(function ClockMenuItem() {
   const { hasUnread, doNotDisturb } = useNotificationsBadge();
   const [open, setOpen] = useState(false);
+  const taskbar = useBarSide() === 'top';
   // The viewport can span several monitors (stacked ones make it taller than
   // any of them), so size the panel to the primary monitor's work area.
   const maxHeight = Math.round(primaryArea(useWorkAreas()).height * 0.85);
@@ -903,9 +924,12 @@ const ClockMenuItem = memo(function ClockMenuItem() {
           size="sm"
           aria-label={hasUnread ? 'Calendar and notifications, unread' : 'Calendar and notifications'}
           title={doNotDisturb ? 'Calendar and notifications (Do Not Disturb)' : undefined}
-          className="h-7 gap-1.5 rounded-md px-2.5 text-sm font-medium text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
+          className={cn(
+            'gap-1.5 rounded-md px-2.5 font-medium text-foreground/90 hover:bg-foreground/10 hover:text-foreground',
+            taskbar ? 'h-full text-xs' : 'h-7 text-sm',
+          )}
         >
-          <ClockText />
+          <ClockText stacked={taskbar} />
           {doNotDisturb ? (
             <BellOff className="size-3.5 text-muted-foreground" aria-hidden />
           ) : (
@@ -913,10 +937,8 @@ const ClockMenuItem = memo(function ClockMenuItem() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent
-        side="bottom"
-        align="center"
-        sideOffset={8}
+      <BarPopoverContent
+        align={taskbar ? 'end' : 'center'}
         style={{ maxHeight }}
         className="flex w-96 flex-col overflow-hidden p-0 md:w-auto md:flex-row"
       >
@@ -930,15 +952,25 @@ const ClockMenuItem = memo(function ClockMenuItem() {
             className="min-h-0 flex-1 md:absolute md:inset-0"
           />
         </div>
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });
 
 /** The clock's text. Its own component so only it re-renders as the time turns over. */
-function ClockText() {
+function ClockText({ stacked }: { stacked: boolean }) {
   const { config } = useAppContext();
   const now = useClock(config.clockShowSeconds ? 'second' : 'minute');
+  const time = now.toLocaleTimeString([], timeFormatOptions(config.clockFormat, config.clockShowSeconds));
+
+  if (stacked) {
+    return (
+      <time dateTime={now.toISOString()} className="flex flex-col items-center leading-tight tabular-nums">
+        <span>{time}</span>
+        {config.clockShowDate && <span>{now.toLocaleDateString()}</span>}
+      </time>
+    );
+  }
 
   return (
     <time dateTime={now.toISOString()} className="tabular-nums">
@@ -948,7 +980,7 @@ function ClockText() {
           {now.toLocaleDateString([], { month: 'short', day: 'numeric' })}{' '}
         </>
       )}
-      {now.toLocaleTimeString([], timeFormatOptions(config.clockFormat, config.clockShowSeconds))}
+      {time}
     </time>
   );
 }

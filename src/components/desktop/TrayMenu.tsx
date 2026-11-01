@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
+import { useBarSide } from '@/contexts/BarSideContext';
 import { useTrayItems } from '@/hooks/useTray';
 import { getTrayBridge, type TrayItem, type TrayMenuEntry } from '@/lib/tray';
 
@@ -135,6 +136,7 @@ function TrayButton({ item }: { item: TrayItem }) {
 
 /** An item's menu, read when it opens and again whenever the app changes it. */
 function TrayMenuContent({ item }: { item: TrayItem }) {
+  const side = useBarSide();
   const [entries, setEntries] = useState<TrayMenuEntry[] | null>(null);
 
   useEffect(() => {
@@ -159,7 +161,7 @@ function TrayMenuContent({ item }: { item: TrayItem }) {
   const pick = (entry: TrayMenuEntry) => void getTrayBridge()?.menuEvent(item.id, entry.id);
 
   return (
-    <DropdownMenuContent side="bottom" align="end" sideOffset={8} className="min-w-48 max-w-80">
+    <DropdownMenuContent side={side} align="end" sideOffset={8} className="min-w-48 max-w-80">
       {entries === null ? (
         <div className="space-y-2 p-2" aria-label="Loading menu">
           <Skeleton className="h-4 w-32" />

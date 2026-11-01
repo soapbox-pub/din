@@ -1,7 +1,8 @@
 import { memo, useState } from 'react';
 import { Bot, Loader2, Maximize2, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Popover, PopoverTrigger } from '@/components/ui/popover';
+import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { Composer } from '@/shared/assistant/Composer';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
@@ -83,9 +84,9 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={8} className="w-96 p-0">
+      <BarPopoverContent align="end" className="w-96 p-0">
         <AssistantPanel onDone={() => setOpen(false)} />
-      </PopoverContent>
+      </BarPopoverContent>
     </Popover>
   );
 });
