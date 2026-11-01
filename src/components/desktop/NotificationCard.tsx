@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bell, BellOff, X } from 'lucide-react';
+import { Bell, BellOff, Loader2, Reply, SendHorizontal, X } from 'lucide-react';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import {
   ContextMenu,
@@ -32,6 +32,7 @@ export function NotificationCard({
   variant,
   onActivated,
   onMenuOpenChange,
+  onReplyingChange,
 }: {
   notification: DesktopNotification;
   variant: 'popup' | 'list';
@@ -39,6 +40,8 @@ export function NotificationCard({
   onActivated?: () => void;
   /** Its right-click menu opened or closed (a popup holds its timeout meanwhile). */
   onMenuOpenChange?: (open: boolean) => void;
+  /** Its reply field opened or closed (a popup holds its timeout meanwhile). */
+  onReplyingChange?: (replying: boolean) => void;
 }) {
   const { getApp } = useInstalledApps();
   const { open } = useWindowActions();
@@ -48,6 +51,12 @@ export function NotificationCard({
   const sourceIcon = app?.icon ?? source.icon ?? Bell;
   const browser = getBrowserBridge();
   const blockable = browser && source.origin ? { browser, origin: source.origin } : null;
+
+  const [replying, setReplyingState] = useState(false);
+  const setReplying = (on: boolean) => {
+    setReplyingState(on);
+    onReplyingChange?.(on);
+  };
 
   /** The body opens what it's about, so the list closes; an action is done in place. */
   const activate = (action?: string) => {
@@ -102,8 +111,24 @@ export function NotificationCard({
             </div>
           </button>
 
-          {notification.actions.length > 0 && (
+          {notification.reply && replying ? (
+            <ReplyField
+              reply={notification.reply}
+              onCancel={() => setReplying(false)}
+              onSent={() => closeNotification(notification.id, 'closed')}
+            />
+          ) : (notification.actions.length > 0 || notification.reply) && (
             <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {notification.reply && (
+                <button
+                  type="button"
+                  onClick={() => setReplying(true)}
+                  className="flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate rounded-lg bg-foreground/10 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Reply className="size-3.5" aria-hidden />
+                  Reply
+                </button>
+              )}
               {notification.actions.map((action) => (
                 <button
                   key={action.id}
@@ -121,6 +146,12 @@ export function NotificationCard({
       {/* Above the popups (z-[9998]). */}
       <ContextMenuContent className="z-[10000] w-56">
         <ContextMenuItem onSelect={() => activate()}>Open</ContextMenuItem>
+        {notification.reply && (
+          <ContextMenuItem onSelect={() => setReplying(true)}>
+            <Reply />
+            Reply
+          </ContextMenuItem>
+        )}
         {notification.actions.map((action) => (
           <ContextMenuItem key={action.id} onSelect={() => activate(action.id)}>
             <span className="truncate">{action.label}</span>
@@ -147,6 +178,76 @@ export function NotificationCard({
         <ContextMenuItem onSelect={clearNotifications}>Clear all</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+function ReplyField({
+  reply,
+  onCancel,
+  onSent,
+}: {
+  reply: NonNullable<DesktopNotification['reply']>;
+  onCancel: () => void;
+  onSent: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = () => {
+    const answer = text.trim();
+    if (!answer || sending) return;
+    setSending(true);
+    setError(null);
+    reply.send(answer).then(onSent, (e: unknown) => {
+      setSending(false);
+      setError(e instanceof Error ? e.message : String(e));
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-1 pt-0.5">
+      <form
+        className="flex items-end gap-1.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          send();
+        }}
+      >
+        <textarea
+          autoFocus
+          rows={1}
+          value={text}
+          disabled={sending}
+          placeholder={reply.placeholder}
+          aria-label={reply.placeholder}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            } else if (e.key === 'Escape') {
+              e.stopPropagation();
+              onCancel();
+            }
+          }}
+          className="max-h-24 min-h-8 flex-1 resize-none rounded-lg border border-border/60 bg-background/60 px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [field-sizing:content]"
+        />
+        <button
+          type="submit"
+          aria-label="Send"
+          disabled={!text.trim() || sending}
+          className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {sending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <SendHorizontal className="size-4" aria-hidden />}
+        </button>
+      </form>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

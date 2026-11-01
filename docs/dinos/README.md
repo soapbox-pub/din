@@ -43,6 +43,7 @@ interface Dinos {
   siteLocations: SiteLocationsBridge;
   bluetooth: BluetoothBridge;
   bluetoothLogin: BluetoothLoginBridge;
+  phone: PhoneBridge;
   airplay: AirPlayBridge;
 
   // Displays and input
@@ -144,7 +145,7 @@ directly by components.
 |---|---|
 | Session and boot | `boot`, `session`, `bootScreen`, `lock`, `power`, `installer`, `updater`, `firmware` |
 | Files and terminals | `fs`, `volumes`, `pty`, `indd`, `passwords` |
-| Network | `wifi`, `vpn`, `tor`, `siteLocations`, `bluetooth`, `bluetoothLogin`, `airplay` |
+| Network | `wifi`, `vpn`, `tor`, `siteLocations`, `bluetooth`, `bluetoothLogin`, `phone`, `airplay` |
 | Displays and input | `display`, `monitors`, `zoom`, `brightness`, `keyboard`, `cursor`, `iconTheme`, `screenshot`, `dictation`, `shellShortcuts` |
 | Sound and media | `audio`, `media` |
 | System | `datetime`, `theme`, `systemEvents`, `systemMonitor`, `systemNotifications`, `tray`, `printing` |
@@ -166,7 +167,7 @@ One namespace is new: `dinos.apps`, the desktop's side of hosting apps
 
 | Method | Does |
 |---|---|
-| `grant(webContentsId, permission)` | Have main open a port from that app straight to a system bridge (`fs`, `pty`, `assistant`, `indd`, `volumes`, `passwords`), bound to the app and permission ([../din/permissions.md](../din/permissions.md#dinsystem)). For `fs`, resolves with the URL base the app loads files from by path |
+| `grant(webContentsId, permission)` | Have main open a port from that app straight to a system bridge (`fs`, `pty`, `assistant`, `indd`, `volumes`, `mail`, `phone`, `passwords`, `vms`), bound to the app and permission ([../din/permissions.md](../din/permissions.md#dinsystem)). For `fs`, resolves with the URL base the app loads files from by path |
 | `addFsRoot(webContentsId, root, writable)` | Another folder a scoped `fs` grant reaches, writable or not (`grant`'s third argument, `{ path, writable }[]`, scopes it). Main refuses `/`, home and above, and Din's profile |
 | `reaches(webContentsId, paths, write)` | Whether the app's `fs` grant reaches each path (to write it, with `write`), checked as main checks the app's own calls: `..` and symlinks resolved, Din's profile refused |
 | `sinceInput(webContentsId)` | Milliseconds since the user last pressed a key or clicked in that app window, or null: the gesture a paste from the file clipboard needs |

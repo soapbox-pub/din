@@ -3,6 +3,7 @@ import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
 import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, printersArea, soundArea } from './devices';
 import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, specOf } from './parse';
+import { phoneArea } from './phone';
 import { settingsArea } from './settings';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
 import { vmsArea } from './vms';
@@ -24,6 +25,7 @@ export const AREAS: readonly Area[] = [
   screenshotArea,
   wifiArea,
   bluetoothArea,
+  phoneArea,
   vpnArea,
   torArea,
   soundArea,
@@ -48,6 +50,7 @@ export const AREAS: readonly Area[] = [
 export const SECTION_AREAS: Record<string, string | { not: string }> = {
   wifi: 'wifi',
   bluetooth: 'bluetooth',
+  phone: 'phone',
   appearance: 'settings',
   windows: 'settings',
   dock: 'settings',

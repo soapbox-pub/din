@@ -1,0 +1,15 @@
+{
+  "name": "Messages",
+  "description": "Read and answer the texts on your iPhone or Android phone, from your computer.",
+  "icons": [{ "src": "/icons/apps/messages.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "shortcuts": [
+    { "name": "New Message", "url": "/", "din": { "id": "new" } }
+  ],
+  "din": {
+    "permissions": ["phone"],
+    "window": { "size": { "width": 980, "height": 680 }, "frame": "custom" },
+    "keywords": ["texts", "sms", "mms", "imessage", "phone", "iphone", "android", "phone link", "kde connect", "chat"]
+  }
+}

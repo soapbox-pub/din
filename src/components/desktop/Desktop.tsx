@@ -16,6 +16,7 @@ import { BrightnessOsd } from './BrightnessOsd';
 import { ScreenDimmer } from './ScreenDimmer';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
+import { PhoneHost } from './PhoneHost';
 import { GuestInputHost } from './GuestInputHost';
 import { CursorEffectsLayer } from './CursorEffectsLayer';
 import { DinDragOverlay } from './DinDragOverlay';
@@ -223,6 +224,7 @@ function DesktopSession() {
                   <LaunchHost />
                   <CommandHost />
                   <SystemNotificationsHost />
+                  <PhoneHost />
                   <GuestInputHost />
                   <CursorEffectsLayer />
                   <DinDragOverlay />

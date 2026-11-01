@@ -42,6 +42,9 @@ const AGENT = 'org.bluez.Agent1';
 
 const AGENT_PATH = '/pub/din/bluetooth/agent';
 
+/** Message Access Server: a phone that shares its texts (phone-map.mts). */
+const MAS_UUID = '00001132-0000-1000-8000-00805f9b34fb';
+
 const SYSTEM_BUS = process.env.DBUS_SYSTEM_BUS_ADDRESS || 'unix:path=/run/dbus/system_bus_socket';
 
 /** How long a search runs unless the shell asks again. */
@@ -137,6 +140,7 @@ let pending: PendingRequest | null = null;
 let nextRequestId = 1;
 
 let sendToShell: (channel: string, payload?: unknown) => void = () => {};
+const listeners = new Set<() => void>();
 let emitTimer: NodeJS.Timeout | null = null;
 let lastSent = '';
 
@@ -202,6 +206,7 @@ function changed(): void {
   if (emitTimer) return;
   emitTimer = setTimeout(() => {
     emitTimer = null;
+    for (const listener of listeners) listener();
     const current = state();
     const json = JSON.stringify(current);
     if (json === lastSent) return;
@@ -677,6 +682,41 @@ async function forget(path: string): Promise<void> {
 async function cancelPairing(path: string): Promise<void> {
   if (pending?.request.device === path) cancelRequest();
   if (busy.get(path) === 'pairing') await call('CancelPairing', path, DEVICE).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Phones, for Messages (phone.mts)
+// ---------------------------------------------------------------------------
+
+export interface BluetoothPhone {
+  address: string;
+  name: string;
+  connected: boolean;
+}
+
+/**
+ * Paired phones that may share their texts: those offering a Message Access
+ * Server, or calling themselves a phone (an iPhone lists its services only
+ * once it's connected). Null when Bluetooth can't be reached.
+ */
+export async function bluetoothPhones(): Promise<BluetoothPhone[] | null> {
+  if (!(await connection()) || !bluezOwner) return null;
+  const phones: BluetoothPhone[] = [];
+  for (const [, ifaces] of objects) {
+    const props = ifaces.get(DEVICE);
+    if (!props || props.get('Paired') !== true) continue;
+    const uuids = props.get('UUIDs');
+    const mas = Array.isArray(uuids) && uuids.includes(MAS_UUID);
+    if (!mas && props.get('Icon') !== 'phone') continue;
+    phones.push({ address: String(props.get('Address') ?? ''), name: deviceName(props), connected: props.get('Connected') === true });
+  }
+  return phones;
+}
+
+/** Hear when anything about Bluetooth's devices changes. */
+export function onBluetoothChanged(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 export function registerBluetoothHandlers(options: {

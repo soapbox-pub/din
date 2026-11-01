@@ -4,8 +4,8 @@ import { expirePopup, useNotificationCenter, type DesktopNotification } from '@/
 
 /**
  * New notifications, popped up in the top-right corner under the menu bar.
- * Each goes after its timeout (held while the pointer is over it or its menu
- * is open) and stays
+ * Each goes after its timeout (held while the pointer is over it, its menu
+ * is open, or its reply field is) and stays
  * in the notification center.
  */
 export function NotificationPopups() {
@@ -27,14 +27,15 @@ export function NotificationPopups() {
 function Popup({ notification }: { notification: DesktopNotification }) {
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [replying, setReplying] = useState(false);
   const { id, timeout, createdAt } = notification;
 
   // createdAt restarts the clock when a notification is replaced in place.
   useEffect(() => {
-    if (hovered || menuOpen || timeout <= 0) return;
+    if (hovered || menuOpen || replying || timeout <= 0) return;
     const timer = window.setTimeout(() => expirePopup(id), timeout);
     return () => window.clearTimeout(timer);
-  }, [id, timeout, createdAt, hovered, menuOpen]);
+  }, [id, timeout, createdAt, hovered, menuOpen, replying]);
 
   return (
     <div
@@ -42,7 +43,12 @@ function Popup({ notification }: { notification: DesktopNotification }) {
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
     >
-      <NotificationCard notification={notification} variant="popup" onMenuOpenChange={setMenuOpen} />
+      <NotificationCard
+        notification={notification}
+        variant="popup"
+        onMenuOpenChange={setMenuOpen}
+        onReplyingChange={setReplying}
+      />
     </div>
   );
 }

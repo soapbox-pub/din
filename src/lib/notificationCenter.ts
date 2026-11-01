@@ -23,6 +23,12 @@ export interface NotificationAction {
   label: string;
 }
 
+export interface NotificationReply {
+  placeholder: string;
+  /** Send the answer; the notification goes once it resolves, and shows the error if it rejects. */
+  send: (text: string) => Promise<void>;
+}
+
 /** Who sent a notification. */
 export interface NotificationSource {
   /** An app Din knows (built-in, web app, or Linux app): its name and icon. */
@@ -50,6 +56,8 @@ export interface DesktopNotification {
   /** A small icon on the picture's corner. */
   badge?: LucideIcon;
   actions: NotificationAction[];
+  /** A text field to answer in, right in the notification (a text message's). */
+  reply?: NotificationReply;
   urgency: NotificationUrgency;
   /** How long the popup stays, in ms; 0 keeps it until dismissed. */
   timeout: number;

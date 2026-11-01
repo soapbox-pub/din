@@ -55,6 +55,7 @@ import type { InddBridge } from '@/lib/indd';
 import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
+import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
@@ -1013,6 +1014,17 @@ export function installDin(transport: Transport): void {
         }
         m.onChanged = (cb: (change: unknown) => void) => sys.on('mail', 'mail:changed', (c) => cb(c));
         system.mail = m as unknown as MailBridge;
+      }
+      if (permissions.has('phone')) {
+        await sys.ready('phone');
+        const p: Record<string, unknown> = {};
+        for (const m of ['state', 'conversations', 'messages', 'contacts', 'send', 'markRead', 'deleteConversation', 'refresh']) {
+          p[m] = (...args: unknown[]) => sys.call('phone', `phone:${m}`, args);
+        }
+        p.onChanged = (cb: (state: unknown) => void) => sys.on('phone', 'phone:changed', (s) => cb(s));
+        p.onMessages = (cb: (change: unknown) => void) => sys.on('phone', 'phone:messages', (c) => cb(c));
+        p.onIncoming = (cb: (incoming: unknown) => void) => sys.on('phone', 'phone:incoming', (i) => cb(i));
+        system.phone = p as unknown as PhoneAppBridge;
       }
       if (permissions.has('passwords')) {
         await sys.ready('passwords');

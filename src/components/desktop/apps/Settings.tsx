@@ -213,6 +213,7 @@ import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSec
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
 import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
+import { PhoneSettingsSection } from '@/components/desktop/apps/PhoneSettingsSection';
 import { LoginSessionSection } from '@/components/desktop/apps/LoginSessionSection';
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 import { DockPreview } from '@/components/desktop/Dock';
@@ -228,7 +229,8 @@ import type { SectionId } from '@/lib/settingsSections';
  * preload + nmcli in the main process): toggle the radio, scan, join,
  * disconnect and forget networks. Outside the Electron shell it renders an
  * explanatory fallback. The Bluetooth section pairs, connects and forgets
- * devices through `window.dinos.bluetooth` (BlueZ over D-Bus). The Display section arranges the monitors through
+ * devices through `window.dinos.bluetooth` (BlueZ over D-Bus). Phone adds the
+ * phones whose texts Messages shows (PhoneSettingsSection). The Display section arranges the monitors through
  * `window.dinos.display` (wlr-randr under din-shell, xrandr on bare X11), falling back
  * where neither can manage them. Battery & Power reads the battery through
  * `window.dinos.power` (/sys/class/power_supply), leaving it out on machines with
@@ -337,6 +339,8 @@ export function Settings({ params, windowId }: AppComponentProps) {
       />
     ) : id === 'bluetooth' ? (
       <BluetoothSection />
+    ) : id === 'phone' ? (
+      <PhoneSettingsSection />
     ) : id === 'display' ? (
       <DisplaySection />
     ) : id === 'brightness' ? (

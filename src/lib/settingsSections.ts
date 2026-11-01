@@ -15,6 +15,7 @@ import {
   Monitor,
   Palette,
   Printer,
+  Smartphone,
   Sun,
   Volume2,
   Wifi,
@@ -26,6 +27,7 @@ import { WM_BINDING_HELP } from '@/lib/wmBindings';
 export type SectionId =
   | 'wifi'
   | 'bluetooth'
+  | 'phone'
   | 'display'
   | 'brightness'
   | 'power'
@@ -75,6 +77,13 @@ export const SECTIONS: SettingsSection[] = [
     name: 'Bluetooth',
     icon: Bluetooth,
     search: ['My devices', 'Devices nearby', 'pair', 'headphones', 'speaker', 'mouse', 'keyboard', 'wireless', 'device'],
+  },
+  {
+    id: 'phone',
+    group: 'Connections',
+    name: 'Phone',
+    icon: Smartphone,
+    search: ['My phones', 'Add an iPhone', 'Add an Android phone', 'Show Notifications', 'Sync Contacts', 'KDE Connect', 'Messages', 'texts', 'SMS', 'iMessage', 'Phone Link', 'Android', 'iPhone', 'mobile', 'cell'],
   },
   {
     id: 'appearance',

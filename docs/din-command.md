@@ -44,6 +44,7 @@ a missing or bad argument).
 | `browser` | The Web Browser's site data: delete one site's cookies and storage, as its site info does |
 | `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save or record the screen; lock it |
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
+| `phone` | Phones in Settings → Phone and their texts, as Messages has them: list phones and conversations, read one, send a text, mark read, add or forget a phone |
 | `sound`, `display`, `brightness`, `keyboard`, `printers`, `power`, `datetime` | Settings' Devices and System sections |
 | `disks` | Removable disks, as Files' sidebar has them: list them, mount, unlock an encrypted one with its passphrase, eject |
 | `vms` | Virtual machines: list them, install Windows, macOS, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them |
@@ -58,10 +59,11 @@ areas' commands rather than `settings` keys, since they act on the system.
 Commands act at once, as the user's own clicks would, except where Din
 asks the user anyway or the act can't be taken back: restarting or shutting
 down (`din power restart|off`), restarting Din (`din update restart`),
-installing firmware and deleting a site's data (`din browser clear-site-data`) put the question on
+installing firmware, deleting a site's data (`din browser clear-site-data`), sending a text
+(`din phone send`) and forgetting a phone with its messages (`din phone forget`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
-away, the password, what sudo asks for, and the signer's connected apps
-aren't commands; the user changes those in Settings.
+away, the password, what sudo asks for, the signer's connected apps and
+accepting a phone's pairing aren't commands; the user changes those in Settings.
 
 ## How it works
 

@@ -180,6 +180,10 @@ export const APPS: readonly AppDefinition[] = [
   // them, a reader that holds remote content back. Launch params
   // `{ compose: ComposeSeed }` or `{ mailto }` open a new message.
   dinApp('mail'),
+  // Texts from the user's phones (Settings → Phone), iMessage style. Launch
+  // params `{ phoneId, threadId }` open a conversation (a notification's
+  // click).
+  dinApp('messages'),
   dinApp('file-browser'),
   dinApp('terminal'),
   // Plain text and code, VS Code style: a folder, tabs, quick open and

@@ -29,6 +29,7 @@ import type { InddBridge } from '@/lib/indd';
 import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
+import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
 
 export type Unsubscribe = () => void;
@@ -760,6 +761,8 @@ export type Permission =
   | 'volumes'
   /** IMAP and SMTP accounts: read, file and send mail (`din.system.mail`). Mail. */
   | 'mail'
+  /** The user's phones' text messages: read, send, mark read (`din.system.phone`). Messages. */
+  | 'phone'
   /** The password vault: its items, locking, generating (`din.system.passwords`). Passwords. */
   | 'passwords'
   /** QEMU virtual machines in ~/VMs: running them, their screens, snapshots (`din.system.vms`). Virtual Machines. */
@@ -797,6 +800,8 @@ export interface DinSystem {
   indd?: InddBridge;
   volumes?: VolumesBridge;
   mail?: MailBridge;
+  /** Phones' messages. Adding, pairing and forgetting phones are Settings', not the app's. */
+  phone?: PhoneAppBridge;
   passwords?: PasswordsBridge;
   vms?: VmsBridge;
 }
