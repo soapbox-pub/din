@@ -383,6 +383,9 @@ export const KIND_LABELS: Record<number, string> = {
   34139: 'Music playlist',
   // NIP-72
   34550: 'Community definition',
+  // Din
+  34628: 'Cursor theme',
+  34642: 'Icon theme',
   // NIP-5A
   34128: 'Nsite (legacy)',
   35128: 'Nsite',

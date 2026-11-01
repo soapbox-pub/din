@@ -1,6 +1,7 @@
 import { appsArea, browserArea, notificationsArea, openArea, screenshotArea, widgetsArea, windowsArea, workspaceArea } from './desktop';
 import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
+import { cursorsArea, iconsArea } from './looks';
 import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, printersArea, soundArea } from './devices';
 import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, specOf } from './parse';
 import { phoneArea } from './phone';
@@ -16,6 +17,8 @@ export type { CommandContext, CommandSpec } from './types';
 /** Every area of the `din` command, in the order help lists them. */
 export const AREAS: readonly Area[] = [
   settingsArea,
+  cursorsArea,
+  iconsArea,
   appsArea,
   windowsArea,
   workspaceArea,
@@ -55,7 +58,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   phone: 'phone',
   themes: 'settings',
   cursors: 'settings',
-  icons: 'settings',
+  icons: 'icons',
   effects: 'settings',
   windows: 'settings',
   dock: 'settings',

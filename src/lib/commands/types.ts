@@ -1,3 +1,4 @@
+import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
 import type { AppConfig } from '@/contexts/AppContext';
 import type { InstalledAppsManager } from '@/contexts/InstalledAppsContext';
 import type { WidgetsContextValue } from '@/contexts/WidgetsContext';
@@ -107,6 +108,10 @@ export interface CommandContext {
   readonly pubkey: string | undefined;
   /** Sign and publish an event as the signed-in account. */
   publish(template: { kind: number; content: string; tags: string[][] }): Promise<unknown>;
+  /** Upload a file to the account's Blossom servers; resolves with its NIP-94 tags. */
+  upload(file: File): Promise<string[][]>;
+  /** Ask the user's read relays (and the App Store's) for events. */
+  query(filters: NostrFilter[]): Promise<NostrEvent[]>;
   /** Open a link as the desktop routes clicked ones (an installed app, the Web Browser, Mail…). */
   openUrl(url: string): void;
   /** Ask the user on screen; resolves with their answer. For what gives trust away or can't be undone. */

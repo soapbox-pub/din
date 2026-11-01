@@ -37,6 +37,7 @@ a missing or bad argument).
 | Area | What it covers |
 | --- | --- |
 | `settings` | Din's own preferences by key (`appearance.theme`, `dock.size`, `windows.tiling`, `datetime.clock-format`, `notifications.do-not-disturb`…), like `gsettings` |
+| `cursors`, `icons` | Cursor and icon themes: list, use, publish to Nostr (asks on screen first), find in the App Store (`store`), install one by its address, remove one Din installed |
 | `apps` | List, open, install (websites, nsites), remove; `apps run` runs your own (below) |
 | `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace, reopen the ones a failed start left closed; show a workspace |
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
@@ -60,7 +61,8 @@ areas' commands rather than `settings` keys, since they act on the system.
 Commands act at once, as the user's own clicks would, except where Din
 asks the user anyway or the act can't be taken back: restarting or shutting
 down (`din power restart|off`), restarting Din (`din update restart`),
-installing firmware, deleting a site's data (`din browser clear-site-data`), sending a text
+installing firmware, deleting a site's data (`din browser clear-site-data`), publishing a cursor or
+icon theme (`din cursors|icons publish`), sending a text
 (`din phone send`) and forgetting a phone with its messages (`din phone forget`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps

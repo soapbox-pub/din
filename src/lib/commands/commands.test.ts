@@ -20,6 +20,8 @@ function context(config: Partial<AppConfig> = {}): CommandContext & { config: Ap
     monitors: [],
     pubkey: undefined,
     publish: vi.fn(),
+    upload: vi.fn(async () => []),
+    query: vi.fn(async () => []),
     openUrl: vi.fn(),
     confirm: vi.fn(async () => false),
     cwd: '/home/din',

@@ -15,7 +15,9 @@ import { useWidgets } from '@/contexts/WidgetsContext';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useManifestRelays } from '@/hooks/useNsiteCatalog';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useUploadFile } from '@/hooks/useUploadFile';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { runCommandLine, runStructured, type CommandContext } from '@/lib/commands';
 import { getCommandBridge, parseCommandRequest } from '@/lib/commands/bridge';
@@ -42,11 +44,13 @@ export function CommandHost() {
   const openUrl = useOpenUrl();
   const { user } = useCurrentUser();
   const { mutateAsync: publish } = useNostrPublish();
+  const { mutateAsync: upload } = useUploadFile();
+  const relays = useManifestRelays();
   const [asking, setAsking] = useState<Asking[]>([]);
 
-  const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, areas, openUrl, user, publish });
+  const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, areas, openUrl, user, publish, upload, relays });
   useLayoutEffect(() => {
-    live.current = { config, updateConfig, windows, active, actions, apps, widgets, areas, openUrl, user, publish };
+    live.current = { config, updateConfig, windows, active, actions, apps, widgets, areas, openUrl, user, publish, upload, relays };
   });
 
   useEffect(() => {
@@ -67,6 +71,8 @@ export function CommandHost() {
         get monitors() { return live.current.areas.map((area) => area.id); },
         get pubkey() { return live.current.user?.pubkey; },
         publish: (template) => live.current.publish(template),
+        upload: (file) => live.current.upload(file),
+        query: (filters) => live.current.relays.query(filters, { signal: AbortSignal.timeout(8000) }),
         openUrl: (url) => live.current.openUrl(url),
         confirm: (question) => new Promise<boolean>((resolve) => {
           setAsking((queue) => [...queue, { ...question, resolve }]);

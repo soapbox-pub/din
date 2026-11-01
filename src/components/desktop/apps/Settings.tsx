@@ -33,6 +33,8 @@ import {
   Plus,
   RotateCw,
   Search,
+  Share,
+  Store,
   Sun,
   TriangleAlert,
   Trash2,
@@ -139,6 +141,8 @@ import { useFilePicker } from '@/contexts/FilePickerContext';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
 import { getIconThemeBridge } from '@/lib/iconTheme';
 import { IconThemePicker } from '@/components/desktop/apps/IconThemePicker';
+import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import type { SystemCursorTheme } from '@/lib/systemCursor';
 import {
@@ -3512,6 +3516,8 @@ function SystemCursorPicker() {
   const { pickFiles } = useFilePicker();
   const { toast } = useToast();
   const { updateConfig } = useAppContext();
+  const { open } = useWindowActions();
+  const [publishing, setPublishing] = useState<PublishTarget | null>(null);
 
   if (status.isLoading || themes.isLoading) {
     return <Skeleton className="h-40 w-full bg-foreground/10" aria-hidden />;
@@ -3616,6 +3622,7 @@ function SystemCursorPicker() {
                 selected={theme === option.id}
                 disabled={!canChange || busy}
                 onChoose={() => choose({ theme: option.id, size })}
+                onPublish={() => setPublishing({ type: 'cursor', id: option.id, name: option.name })}
                 onRemove={() => remove(option)}
               />
             ))}
@@ -3645,6 +3652,10 @@ function SystemCursorPicker() {
             >
               <FolderOpen aria-hidden />
               Import folder…
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => open('app-store', { tab: 'cursors' })}>
+              <Store aria-hidden />
+              Find Cursors
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -3697,6 +3708,7 @@ function SystemCursorPicker() {
           {setCursor.error instanceof Error ? setCursor.error.message : 'Could not change the cursor.'}
         </p>
       )}
+      <PublishThemePackage target={publishing} onClose={() => setPublishing(null)} />
     </div>
   );
 }
@@ -3714,20 +3726,22 @@ function cleanIpcError(message: string): string {
 }
 
 /**
- * One style in the cursor picker. Every style's right-click menu can use it;
- * imported ones can also be removed, from there or their ⋯ menu.
+ * One style in the cursor picker. Its ⋯ and right-click menus can use it
+ * and publish it to Nostr; imported ones can also be removed.
  */
 function SystemCursorOption({
   option,
   selected,
   disabled,
   onChoose,
+  onPublish,
   onRemove,
 }: {
   option: SystemCursorTheme;
   selected: boolean;
   disabled: boolean;
   onChoose: () => void;
+  onPublish: () => void;
   onRemove: () => void;
 }) {
   return (
@@ -3744,7 +3758,7 @@ function SystemCursorOption({
               'flex w-full flex-col items-start gap-2 rounded-xl border p-3 text-left',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               'disabled:cursor-not-allowed disabled:opacity-60',
-              option.imported && 'pr-10',
+              'pr-10',
               selected
                 ? 'border-primary bg-primary/10 text-foreground'
                 : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
@@ -3753,39 +3767,49 @@ function SystemCursorOption({
             <SystemCursorPreview id={option.id} />
             <span className="w-full truncate text-sm">{option.name}</span>
           </button>
-          {option.imported && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  disabled={disabled}
-                  className="absolute right-1 top-1 size-8 text-muted-foreground"
-                  aria-label={`More for ${option.name}`}
-                >
-                  <MoreHorizontal aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem disabled={selected} onSelect={onChoose}>
-                  <Check aria-hidden />
-                  Use this cursor
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={onRemove}>
-                  <Trash2 aria-hidden />
-                  Remove
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={disabled}
+                className="absolute right-1 top-1 size-8 text-muted-foreground"
+                aria-label={`More for ${option.name}`}
+              >
+                <MoreHorizontal aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={selected} onSelect={onChoose}>
+                <Check aria-hidden />
+                Use this cursor
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onPublish}>
+                <Share aria-hidden />
+                Publish to Nostr…
+              </DropdownMenuItem>
+              {option.imported && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onSelect={onRemove}>
+                    <Trash2 aria-hidden />
+                    Remove
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem disabled={selected} onSelect={onChoose}>
           <Check aria-hidden />
           Use this cursor
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={onPublish}>
+          <Share aria-hidden />
+          Publish to Nostr…
         </ContextMenuItem>
         {option.imported && (
           <>

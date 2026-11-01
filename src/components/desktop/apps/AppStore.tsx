@@ -37,8 +37,11 @@ import { FolderAppDetail, FolderAppsSection } from '@/components/desktop/apps/ap
 import { useChooseAppFolder } from '@/hooks/useChooseAppFolder';
 import { canAddFileApps, type OpenedFolder } from '@/lib/fileApps';
 import { ThemeStore, type ThemeAddress } from '@/components/desktop/apps/appstore/ThemeStore';
+import { PackageStore } from '@/components/desktop/apps/appstore/PackageStore';
 import { useThemeCatalog } from '@/hooks/useThemes';
+import { usePackageCatalog } from '@/hooks/useThemePackages';
 import { parseThemeNaddr } from '@/lib/themeDefinition';
+import { parsePackageNaddr, type PackageAddress } from '@/lib/themePackages';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -48,17 +51,28 @@ const APP_STORE_ICON = '/icons/apps/app-store.png';
 /** Opens a site's detail page; provided by AppStore to every card. */
 const SelectAppContext = createContext<(app: StoreApp) => void>(() => {});
 
-type StoreTab = 'apps' | 'themes';
+type StoreTab = 'apps' | 'themes' | 'cursors' | 'icons';
 
-const TABS: { id: StoreTab; name: string }[] = [
-  { id: 'apps', name: 'Apps' },
-  { id: 'themes', name: 'Themes' },
+const TABS: { id: StoreTab; name: string; search: string }[] = [
+  { id: 'apps', name: 'Apps', search: 'Search apps, or paste an address' },
+  { id: 'themes', name: 'Themes', search: 'Search themes, or paste an address' },
+  { id: 'cursors', name: 'Cursors', search: 'Search cursors, or paste an address' },
+  { id: 'icons', name: 'Icons', search: 'Search icon sets, or paste an address' },
 ];
 
+/** The tab a launch opens on: the one asked for, or the one an address it names is in. */
+function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | null): StoreTab {
+  if (pkg) return pkg.type === 'cursor' ? 'cursors' : 'icons';
+  if (typeof params?.theme === 'string') return 'themes';
+  return TABS.some((t) => t.id === params?.tab) ? (params?.tab as StoreTab) : 'apps';
+}
+
 /**
- * The App Store, in categories picked in the title bar: Apps, and Themes
- * (see ThemeStore). Launch params `{ tab: 'themes' }` open on Themes, and
- * `{ theme: 'naddr1…' }` on one theme's page.
+ * The App Store, in categories picked in the title bar: Apps, Themes (see
+ * ThemeStore), and Cursors and Icons (see PackageStore). Launch params
+ * `{ tab: 'themes' | 'cursors' | 'icons' }` open on a category,
+ * `{ theme: 'naddr1…' }` on one theme's page, and `{ package: 'naddr1…' }`
+ * on one cursor theme's or icon set's.
  *
  * Apps are nsites (NIP-5A static websites), installed in one click.
  *
@@ -86,10 +100,14 @@ const TABS: { id: StoreTab; name: string }[] = [
 export function AppStore({ params }: AppComponentProps) {
   const catalog = useNsiteCatalog();
   const featured = useFeaturedApps();
-  const [tab, setTab] = useState<StoreTab>(() =>
-    params?.tab === 'themes' || typeof params?.theme === 'string' ? 'themes' : 'apps',
+  const [selectedPackage, setSelectedPackage] = useState<PackageAddress | null>(() =>
+    typeof params?.package === 'string' ? parsePackageNaddr(params.package) : null,
   );
+  const [tab, setTab] = useState<StoreTab>(() => initialTab(params, selectedPackage));
   const themes = useThemeCatalog(tab === 'themes');
+  const cursors = usePackageCatalog('cursor', tab === 'cursors');
+  const icons = usePackageCatalog('icon', tab === 'icons');
+  const packages = tab === 'cursors' ? cursors : tab === 'icons' ? icons : null;
   const [search, setSearch] = useState('');
   // The site whose detail page is showing. The list stays mounted underneath
   // so going back returns to the same scroll position.
@@ -101,11 +119,15 @@ export function AppStore({ params }: AppComponentProps) {
   const [folderApp, setFolderApp] = useState<OpenedFolder | null>(null);
   const { choose: chooseAppFolder, busy: choosingFolder } = useChooseAppFolder();
   const onThemes = tab === 'themes';
-  const detailOpen = onThemes ? !!selectedTheme : !!selected || !!folderApp;
+  const onPackages = packages !== null;
+  const detailOpen = onThemes ? !!selectedTheme : onPackages ? !!selectedPackage : !!selected || !!folderApp;
   const closeDetail = () => {
     setSelected(null);
     setFolderApp(null);
+    setSelectedTheme(null);
+    setSelectedPackage(null);
   };
+  const searchLabel = TABS.find((t) => t.id === tab)?.search ?? '';
 
   const rawQuery = search.trim();
   const searching = rawQuery.length > 0;
@@ -136,8 +158,13 @@ export function AppStore({ params }: AppComponentProps) {
   const refetchCatalog = catalog.refresh;
   const refetchFeatured = featured.refetch;
   const refetchThemes = themes.refresh;
-  const refreshing = onThemes ? themes.refreshing : catalog.refreshing || featured.isRefetching;
-  const refreshDisabled = (onThemes ? themes.isLoading : catalog.isLoading) || refreshing;
+  const refetchPackages = packages?.refresh;
+  const refreshing = onThemes
+    ? themes.refreshing
+    : packages
+      ? packages.refreshing
+      : catalog.refreshing || featured.isRefetching;
+  const refreshDisabled = (onThemes ? themes.isLoading : packages ? packages.isLoading : catalog.isLoading) || refreshing;
   useEffect(() => {
     setTitlebar(
       <div className="flex min-w-0 flex-1 items-center gap-2 pl-1">
@@ -145,8 +172,8 @@ export function AppStore({ params }: AppComponentProps) {
           <button
             type="button"
             data-window-no-drag
-            onClick={() => (onThemes ? setSelectedTheme(null) : closeDetail())}
-            aria-label={onThemes ? 'Back to all themes' : 'Back to all apps'}
+            onClick={closeDetail}
+            aria-label={`Back to all ${(TABS.find((t) => t.id === tab)?.name ?? 'apps').toLowerCase()}`}
             title="Back"
             className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -174,6 +201,7 @@ export function AppStore({ params }: AppComponentProps) {
                 if (tab === id) return;
                 setTab(id);
                 setSearch('');
+                setSelectedPackage(null);
               }}
               className={cn(
                 'rounded px-2.5 py-0.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -199,17 +227,16 @@ export function AppStore({ params }: AppComponentProps) {
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
-              if (onThemes) setSelectedTheme(null);
-              else closeDetail();
+              closeDetail();
             }}
-            placeholder={onThemes ? 'Search themes, or paste an address' : 'Search apps, or paste an address'}
-            aria-label={onThemes ? 'Search themes, or paste an address' : 'Search apps, or paste an address'}
+            placeholder={searchLabel}
+            aria-label={searchLabel}
             autoComplete="off"
             spellCheck={false}
             className="h-7 pl-7 text-sm md:text-sm"
           />
         </div>
-        {!onThemes && canAddFileApps() && (
+        {tab === 'apps' && canAddFileApps() && (
           <button
             type="button"
             onClick={() => {
@@ -234,6 +261,10 @@ export function AppStore({ params }: AppComponentProps) {
               void refetchThemes();
               return;
             }
+            if (refetchPackages) {
+              void refetchPackages();
+              return;
+            }
             refetchCatalog();
             refetchFeatured();
           }}
@@ -252,9 +283,11 @@ export function AppStore({ params }: AppComponentProps) {
     onThemes,
     detailOpen,
     search,
+    searchLabel,
     refetchCatalog,
     refetchFeatured,
     refetchThemes,
+    refetchPackages,
     refreshing,
     refreshDisabled,
     chooseAppFolder,
@@ -273,6 +306,21 @@ export function AppStore({ params }: AppComponentProps) {
     }
     return apps;
   }, [selected, featured.data, catalog.allApps]);
+
+  if (packages) {
+    return (
+      <div className="flex h-full w-full flex-col bg-background text-foreground">
+        <PackageStore
+          key={tab}
+          type={tab === 'cursors' ? 'cursor' : 'icon'}
+          catalog={packages}
+          search={search}
+          selected={selectedPackage}
+          onSelect={setSelectedPackage}
+        />
+      </div>
+    );
+  }
 
   if (onThemes) {
     return (
