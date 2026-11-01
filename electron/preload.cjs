@@ -138,6 +138,12 @@ expose('boot', {
    * @returns {Promise<void>}
    */
   ready: () => ipcRenderer.invoke('shell:bootReady'),
+  /**
+   * Whether ~/.config/din/skip-restore was there (it's removed): this start
+   * leaves the saved windows closed.
+   * @returns {Promise<boolean>}
+   */
+  skipRestore: () => ipcRenderer.invoke('shell:skipRestore'),
 });
 
 // Session bridge (window.dinos.session): "Log out" quits the shell cleanly. As

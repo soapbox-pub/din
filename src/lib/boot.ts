@@ -11,6 +11,11 @@
 export interface BootBridge {
   /** Signal that the shell's first frame is ready to be shown. Resolves once the window is on screen. */
   ready(): Promise<void>;
+  /**
+   * Whether `~/.config/din/skip-restore` was there, asking this start to
+   * leave the saved windows closed. Removes it, so it's true once.
+   */
+  skipRestore(): Promise<boolean>;
 }
 
 declare global {

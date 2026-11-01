@@ -67,9 +67,18 @@ if (din.app.launch.reason === 'restore') openFolder(din.app.launch.state);
 ```
 
 The Terminal saves its tabs and panes with each one's folder (its shells
-start fresh there), and the Web Browser its tabs. If Din stops while
-reopening windows twice in a row, the next start leaves them closed and
-offers to reopen them (`din windows reopen`).
+start fresh there), and the Web Browser its tabs.
+
+A window that brings Din down mustn't keep it down:
+
+- For a moment before the windows come back, **Start without them** (or
+  Esc) leaves them closed.
+- If Din stops within two minutes of reopening windows, twice in a row,
+  the next start leaves them closed.
+- `touch ~/.config/din/skip-restore` (from a text console, Ctrl+Alt+F2)
+  has the next start leave them closed; in a browser, `?norestore` does.
+
+Each way, a notification offers to reopen them (`din windows reopen`).
 
 ## `ready`
 

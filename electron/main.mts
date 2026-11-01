@@ -6235,6 +6235,19 @@ app.whenReady().then(() => {
     win.show();
     watchLiveStick();
   };
+  // `touch ~/.config/din/skip-restore` (from a text console, Ctrl+Alt+F2)
+  // has the next start leave the saved windows closed. Taken once.
+  ipcMain.handle('shell:skipRestore', (event) => {
+    assertShellSender(event);
+    const config = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+    const flag = path.join(config, 'din', 'skip-restore');
+    try {
+      fs.unlinkSync(flag);
+      return true;
+    } catch {
+      return false;
+    }
+  });
   ipcMain.handle('shell:bootReady', async (event) => {
     if (event.sender !== win.webContents) return;
     await new Promise((resolve) => setTimeout(resolve, 400));
