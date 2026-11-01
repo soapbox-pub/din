@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Airplay,
   BatteryFull,
@@ -321,6 +321,10 @@ export function Settings({ params, windowId }: AppComponentProps) {
   const searchRef = useRef<HTMLInputElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   useSearchHighlight(paneRef, searching ? terms : NO_TERMS);
+  // The pane outlives its sections, so a new one would open at the last one's scroll.
+  useLayoutEffect(() => {
+    if (paneRef.current) paneRef.current.scrollTop = 0;
+  }, [section, searching]);
 
   // A DinOS update's notice dots About until About is seen.
   const updatePending = useUpdateNoticePending();
