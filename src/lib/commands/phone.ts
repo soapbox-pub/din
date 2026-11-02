@@ -1,4 +1,5 @@
 import { describePhone, getPhoneDesktopBridge, type PhoneConversation, type PhoneDevice } from '@/lib/phone';
+import { getQuickShareBridge } from '@/lib/quickShare';
 import { formatAddress, phoneDigits } from '@/shared/phone';
 import { CommandError, type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
@@ -35,7 +36,7 @@ function time(ms: number): string {
 
 export const phoneArea: Area = {
   name: 'phone',
-  summary: 'Phones and their text messages: list, read, send',
+  summary: 'Phones and their text messages: list, read, send; Quick Share',
   commands: [
     command('phone', 'list', 'The phones, and whether each is connected', [], async () => {
       const state = await call(phone().state());
@@ -122,6 +123,20 @@ export const phoneArea: Area = {
       if (state !== 'on' && state !== 'off') throw new CommandError('Say on or off', 'usage');
       await call(phone().setReceiveFiles(p.id, state === 'on'));
       return { text: `Receiving files from ${p.name} is ${state}` };
+    }),
+    command('phone', 'quick-share', 'Whether Android devices on the same Wi-Fi can share files and links here with Quick Share', [
+      { name: 'state', type: 'string', positional: true, optional: true, help: 'on or off (leave out to see which)' },
+    ], async (args) => {
+      const quickShare = need(getQuickShareBridge(), 'Quick Share');
+      const state = args.optString('state');
+      if (state === undefined) {
+        const s = await call(quickShare.state());
+        const status = !s.enabled ? 'off' : s.visible ? `on, visible as “${s.name}”` : `on, but not visible: ${s.error ?? 'starting…'}`;
+        return { data: s, text: `Quick Share is ${status}` };
+      }
+      if (state !== 'on' && state !== 'off') throw new CommandError('Say on or off', 'usage');
+      await call(quickShare.setEnabled(state === 'on'));
+      return { text: `Quick Share is ${state}` };
     }),
     command('phone', 'add', 'Add a phone paired in Bluetooth (din bluetooth pair) to read its texts here', [
       { name: 'name', type: 'string', positional: true, help: 'The phone’s name' },

@@ -663,10 +663,21 @@ in
     rm -f $out/share/applications/cups.desktop
   '';
   services.ipp-usb.enable = true;
+  # Avahi also announces Quick Share (electron/quickshare.mts) while it's on
+  # in Settings → Phone, so Android devices on the network can share here;
+  # that needs publishing, and this computer's own name published (as
+  # dinos.local) for them to find it at. Its port is let in below.
   services.avahi = {
     enable = true;
     nssmdns4 = true;
+    publish = {
+      enable = true;
+      userServices = true;
+    };
   };
+  # Quick Share's port (PORT in electron/quickshare.mts). Nothing listens
+  # on it unless Quick Share is on.
+  networking.firewall.allowedTCPPorts = [ 47331 ];
 
   # The user Din runs as. `networkmanager` group membership lets the
   # WiFi settings panel control connections without polkit prompts; `video`

@@ -97,6 +97,7 @@ import { registerIconThemeHandlers } from './icon-theme.mts';
 import { registerInddHandlers } from './indd.mts';
 import { registerMailHandlers } from './mail.mts';
 import { registerPhoneHandlers } from './phone.mts';
+import { registerQuickShareHandlers } from './quickshare.mts';
 import { registerVmsHandlers } from './vms.mts';
 import {
   ensureNightLightTool,
@@ -5837,6 +5838,7 @@ app.whenReady().then(() => {
   registerInddHandlers({ assertShellSender });
   registerMailHandlers({ assertShellSender, sendToShell });
   registerPhoneHandlers({ assertShellSender, sendToShell });
+  registerQuickShareHandlers({ assertShellSender, sendToShell });
   registerVmsHandlers({ assertShellSender, sendToShell });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerOpenUri({ sendToShell });

@@ -621,6 +621,14 @@ files — `git add` new source files before `npm run os:build`.
   share for its progress and then Open or Show in Files. Other devices are
   turned away; "Receive files" on the phone's page (`din phone
   receive-files`) turns it off.
+- Android phones and tablets on the same network can share files, text and
+  links with Quick Share (`electron/quickshare.mts`), once "Receive with
+  Quick Share" is on in Settings → Phone (`din phone quick-share on`).
+  Din announces itself over mDNS through Avahi and listens on TCP 47331
+  (open in the firewall); no server is involved. Anyone on the network could
+  be sending, so each share asks first, with the code the sender's screen
+  shows, then lands in Downloads. Wi-Fi Direct and hotspot upgrades are
+  turned down, so both devices have to be on the same network.
 - On hardware, Din runs GPU-accelerated (Mesa via `hardware.graphics`, plus
   redistributable firmware). Only the QEMU demo variant passes
   `--disable-gpu` (no virgl) and falls back to software rendering.
