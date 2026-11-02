@@ -1,7 +1,7 @@
 import { createContext, useContext, useRef, useState, type CSSProperties } from 'react';
 import { useDin } from '@/sdk/react';
-import type { WinampSkin } from './skin';
-import type { SpriteDef } from './sprites';
+import type { WinampSkin } from '@/shared/skins/winamp/skin';
+import type { SpriteDef } from '@/shared/skins/winamp/sprites';
 
 export const SkinContext = createContext<WinampSkin | null>(null);
 

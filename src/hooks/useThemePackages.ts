@@ -7,7 +7,9 @@ import { useFollowingPubkeys } from '@/hooks/useFollowingPubkeys';
 import { useManifestRelays } from '@/hooks/useNsiteCatalog';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { getEffectiveBlossomServers } from '@/lib/appBlossom';
+import { getFsBridge } from '@/lib/fs';
 import { getIconThemeBridge } from '@/lib/iconTheme';
 import { NSITE_CATALOG_PUBKEYS } from '@/lib/nsiteCatalog';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
@@ -16,6 +18,7 @@ import {
   buildPackageCatalog,
   fetchThemePackage,
   installThemePackage,
+  installedPackages,
   applyTheme,
   packageDeletion,
   packageDeletionsFilter,
@@ -42,7 +45,13 @@ export function useCatalogAuthors(): string[] {
   }, [user, following]);
 }
 
-/** The App Store's published cursor or icon themes, newest first, a page at a time. */
+/** Whether this computer can keep themes of a type: the Din desktop app, not a browser. */
+export function canKeepPackages(type: PackageType): boolean {
+  if (type === 'skin') return getFsBridge() !== undefined;
+  return (type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge()) !== undefined;
+}
+
+/** The App Store's published cursor themes, icon themes or skins, newest first, a page at a time. */
 export function usePackageCatalog(type: PackageType, enabled = true) {
   const relays = useManifestRelays();
   const authors = useCatalogAuthors();
@@ -101,10 +110,9 @@ export function useThemePackage(address: PackageAddress | null) {
 export function useInstalledPackages(type: PackageType) {
   return useQuery({
     queryKey: ['theme-packages', 'installed', type],
-    enabled: (type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge()) !== undefined,
+    enabled: canKeepPackages(type),
     queryFn: async () => {
-      const bridge = type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge();
-      const installed = (await bridge?.published()) ?? [];
+      const installed = await installedPackages(type);
       return new Map(installed.map((t) => [t.source.coordinate, { id: t.id, publishedAt: t.source.publishedAt }]));
     },
     staleTime: 60_000,
@@ -129,11 +137,12 @@ export function useThemePackageActions() {
   const relays = useManifestRelays();
   const queryClient = useQueryClient();
   const { mutateAsync: publish } = useNostrPublish();
+  const { open } = useWindowActions();
 
   const refresh = useCallback(
     (type: PackageType) => {
       void queryClient.invalidateQueries({ queryKey: ['theme-packages', 'installed', type] });
-      void queryClient.invalidateQueries({ queryKey: type === 'cursor' ? ['cursor'] : ['icon-theme'] });
+      if (type !== 'skin') void queryClient.invalidateQueries({ queryKey: type === 'cursor' ? ['cursor'] : ['icon-theme'] });
     },
     [queryClient],
   );
@@ -148,24 +157,24 @@ export function useThemePackageActions() {
     async (pkg: ThemePackage, size?: number) => {
       try {
         const id = await installThemePackage(pkg, installDeps);
-        await applyTheme(pkg.type, id, size);
+        await applyTheme(pkg.type, id, { size, open });
         return id;
       } finally {
         refresh(pkg.type);
       }
     },
-    [installDeps, refresh],
+    [installDeps, refresh, open],
   );
 
   const use = useCallback(
     async (type: PackageType, id: string, size?: number) => {
       try {
-        await applyTheme(type, id, size);
+        await applyTheme(type, id, { size, open });
       } finally {
         refresh(type);
       }
     },
-    [refresh],
+    [refresh, open],
   );
 
   const remove = useCallback(

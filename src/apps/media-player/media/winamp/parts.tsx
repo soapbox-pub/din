@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useWindowState } from '@/sdk/react';
 import { spriteStyle, useSkin } from './hooks';
-import { FONT, SPRITES, type SpriteDef, type SpriteName } from './sprites';
+import { FONT, SPRITES, type SpriteDef, type SpriteName } from '@/shared/skins/winamp/sprites';
 import { readFrame } from '../visualizations';
 import { player } from '../engine';
 

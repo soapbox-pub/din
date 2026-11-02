@@ -2,7 +2,8 @@ import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { cleanFsError } from '@/lib/fs';
 import { DRAG_MIME, type FrameMode, type LaunchContext, type Rect } from '@/sdk';
 import { useCurrentDrag, useDin, useWindowState, useWindowTitle } from '@/sdk/react';
-import { openHandles } from './media/actions';
+import { useQueryClient } from '@tanstack/react-query';
+import { openHandles, skinKindOf, skinsDir } from './media/actions';
 import { readLocal } from './media/grants';
 import { keepGrants } from './media/keep';
 import { connectMediaSession, player, usePlayer } from './media/engine';
@@ -11,11 +12,11 @@ import { useCommands, type Commands } from './media/useCommands';
 import { AppMenus } from './media/din/AppMenus';
 import { DinSkin } from './media/din/DinSkin';
 import { TextPromptHost } from './media/din/TextPrompt';
-import { loadWinampSkin, type WinampSkin } from './media/winamp/skin';
+import { loadWinampSkin, type WinampSkin } from '@/shared/skins/winamp/skin';
 import { WinampPlayer } from './media/winamp/WinampPlayer';
 import { W, winampLayout } from './media/winamp/layout';
 import { WmpPlayer } from './media/wmp/WmpPlayer';
-import { openWmz, type WmzPackage } from './media/wmp/wms';
+import { openWmz, type WmzPackage } from '@/shared/skins/wmp/wms';
 import { builtinSkinBytes, isBuiltinSkin } from './media/wmp/builtin';
 import './media/din/player.css';
 
@@ -207,11 +208,27 @@ function useShortcuts(commands: Commands, winamp: boolean) {
   };
 }
 
-/** Open what Files (or a Dock shortcut) asked for. */
+/** Wear a skin already in the skins folder, as the App Store asks once it's got one. */
+async function wearInstalledSkin(path: string): Promise<boolean> {
+  const dir = await skinsDir();
+  const kind = skinKindOf(path);
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  if (!dir || !kind || path !== `${dir}/${name}` || name.startsWith('.')) return false;
+  setPrefs({ skin: { kind, path } });
+  return true;
+}
+
+/** Open what Files (or a Dock shortcut, or the App Store) asked for. */
 function useLaunches(setMessage: (message: string) => void) {
   const din = useDin();
+  const queryClient = useQueryClient();
   useEffect(() => {
     const take = ({ params, files, shortcut }: LaunchContext) => {
+      if (typeof params.skin === 'string') {
+        void wearInstalledSkin(params.skin).then((worn) => {
+          if (worn) void queryClient.invalidateQueries({ queryKey: ['music', 'skins'] });
+        });
+      }
       if (files.length > 0) {
         void openHandles(files, params.how === 'enqueue' ? 'enqueue' : 'play').then((message) => message && setMessage(message));
       }
@@ -223,7 +240,7 @@ function useLaunches(setMessage: (message: string) => void) {
     };
     take(din.app.launch);
     return din.app.onLaunch(take);
-  }, [din, setMessage]);
+  }, [din, setMessage, queryClient]);
 }
 
 /**
@@ -232,7 +249,9 @@ function useLaunches(setMessage: (message: string) => void) {
  * Winamp (.wsz) and Windows Media Player (.wmz) skins.
  *
  * Opened with files (songs, videos, playlists, folders or skin files) and
- * `how: 'play' | 'enqueue'`. It reaches its own folders by path (Music,
+ * `how: 'play' | 'enqueue'`, or `skin: <path>` to wear one already in its
+ * skins folder (the App Store's Use). Publish to Nostr… hands a skin to the
+ * App Store (`publishSkin`), which signs and uploads it. It reaches its own folders by path (Music,
  * Videos, its skins and library index) and the folders of files it's
  * handed (`file-folders`): playlists name songs by path.
  */

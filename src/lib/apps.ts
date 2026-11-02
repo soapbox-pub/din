@@ -231,7 +231,8 @@ export const APPS: readonly AppDefinition[] = [
   // Now Playing list, a library of the Music and Videos folders, internet
   // radio, the equalizer and visualizations, and Winamp (.wsz) and Windows
   // Media Player (.wmz) skins. Files opens songs, playlists and skins here.
-  // Launch params `{ paths, how: 'play' | 'enqueue' }` (or `{ path }`).
+  // Launch params `{ paths, how: 'play' | 'enqueue' }` (or `{ path }`), or
+  // `{ skin }`, a skin in its skins folder to wear (the App Store's Use).
   dinApp('media-player'),
   // Recording yourself and the screen for the Assistant to edit, and going
   // live. One window; `{ action: 'record' | 'stop' | 'mark' | 'live', nonce }`

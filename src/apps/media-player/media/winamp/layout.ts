@@ -1,5 +1,5 @@
 import type { MusicPrefs } from '../prefs';
-import type { WinampSkin } from './skin';
+import type { WinampSkin } from '@/shared/skins/winamp/skin';
 
 export const MAIN_H = 116;
 export const SHADE_H = 14;

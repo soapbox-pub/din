@@ -41,7 +41,9 @@ import { PackageStore } from '@/components/desktop/apps/appstore/PackageStore';
 import { useThemeCatalog } from '@/hooks/useThemes';
 import { usePackageCatalog } from '@/hooks/useThemePackages';
 import { parseThemeNaddr } from '@/lib/themeDefinition';
-import { parsePackageNaddr, type PackageAddress } from '@/lib/themePackages';
+import { parsePackageNaddr, type PackageAddress, type PackageType } from '@/lib/themePackages';
+import { isSkinFileName } from '@/lib/skinPackages';
+import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -51,28 +53,44 @@ const APP_STORE_ICON = '/icons/apps/app-store.png';
 /** Opens a site's detail page; provided by AppStore to every card. */
 const SelectAppContext = createContext<(app: StoreApp) => void>(() => {});
 
-type StoreTab = 'apps' | 'themes' | 'cursors' | 'icons';
+type StoreTab = 'apps' | 'themes' | 'cursors' | 'icons' | 'skins';
 
 const TABS: { id: StoreTab; name: string; search: string }[] = [
   { id: 'apps', name: 'Apps', search: 'Search apps, or paste an address' },
   { id: 'themes', name: 'Themes', search: 'Search themes, or paste an address' },
   { id: 'cursors', name: 'Cursors', search: 'Search cursors, or paste an address' },
   { id: 'icons', name: 'Icons', search: 'Search icon sets, or paste an address' },
+  { id: 'skins', name: 'Skins', search: 'Search skins, or paste an address' },
 ];
+
+/** The tab each kind of published theme is in, and back. */
+const PACKAGE_TABS: Record<PackageType, StoreTab> = { cursor: 'cursors', icon: 'icons', skin: 'skins' };
+const TAB_PACKAGES: Partial<Record<StoreTab, PackageType>> = { cursors: 'cursor', icons: 'icon', skins: 'skin' };
+
+/** The skin file a launch asks to publish: a name in the Media Player's skins folder, never a path. */
+function skinToPublish(params: AppComponentProps['params']): PublishTarget | null {
+  const name = params?.publishSkin;
+  if (typeof name !== 'string' || !isSkinFileName(name)) return null;
+  return { type: 'skin', id: name, name: name.replace(/\.[^.]+$/, '').replace(/_/g, ' ') };
+}
 
 /** The tab a launch opens on: the one asked for, or the one an address it names is in. */
 function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | null): StoreTab {
-  if (pkg) return pkg.type === 'cursor' ? 'cursors' : 'icons';
+  if (pkg) return PACKAGE_TABS[pkg.type];
+  if (skinToPublish(params)) return 'skins';
   if (typeof params?.theme === 'string') return 'themes';
   return TABS.some((t) => t.id === params?.tab) ? (params?.tab as StoreTab) : 'apps';
 }
 
 /**
  * The App Store, in categories picked in the title bar: Apps, Themes (see
- * ThemeStore), and Cursors and Icons (see PackageStore). Launch params
- * `{ tab: 'themes' | 'cursors' | 'icons' }` open on a category,
- * `{ theme: 'naddr1…' }` on one theme's page, and `{ package: 'naddr1…' }`
- * on one cursor theme's or icon set's.
+ * ThemeStore), and Cursors, Icons and Media Player Skins (see PackageStore).
+ * Launch params `{ tab: 'themes' | 'cursors' | 'icons' | 'skins' }` open on
+ * a category, `{ theme: 'naddr1…' }` on one theme's page, and
+ * `{ package: 'naddr1…' }` on one cursor theme's, icon set's or skin's.
+ * `{ publishSkin: '<file name>' }`, which the Media Player sends, opens
+ * Skins with Publish to Nostr… for that file in its skins folder, since an
+ * app can't sign or upload itself.
  *
  * Apps are nsites (NIP-5A static websites), installed in one click.
  *
@@ -107,7 +125,10 @@ export function AppStore({ params }: AppComponentProps) {
   const themes = useThemeCatalog(tab === 'themes');
   const cursors = usePackageCatalog('cursor', tab === 'cursors');
   const icons = usePackageCatalog('icon', tab === 'icons');
-  const packages = tab === 'cursors' ? cursors : tab === 'icons' ? icons : null;
+  const skins = usePackageCatalog('skin', tab === 'skins');
+  const packageType = TAB_PACKAGES[tab] ?? null;
+  const packages = packageType === 'cursor' ? cursors : packageType === 'icon' ? icons : packageType === 'skin' ? skins : null;
+  const [publishing, setPublishing] = useState<PublishTarget | null>(() => skinToPublish(params));
   const [search, setSearch] = useState('');
   // The site whose detail page is showing. The list stays mounted underneath
   // so going back returns to the same scroll position.
@@ -307,17 +328,18 @@ export function AppStore({ params }: AppComponentProps) {
     return apps;
   }, [selected, featured.data, catalog.allApps]);
 
-  if (packages) {
+  if (packages && packageType) {
     return (
       <div className="flex h-full w-full flex-col bg-background text-foreground">
         <PackageStore
           key={tab}
-          type={tab === 'cursors' ? 'cursor' : 'icon'}
+          type={packageType}
           catalog={packages}
           search={search}
           selected={selectedPackage}
           onSelect={setSelectedPackage}
         />
+        <PublishThemePackage target={publishing} onClose={() => setPublishing(null)} />
       </div>
     );
   }

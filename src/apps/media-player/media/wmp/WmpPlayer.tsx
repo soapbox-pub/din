@@ -9,13 +9,13 @@ import { openUrl } from '../host';
 import { useCover } from '../din/useCover';
 import { Element } from './elements';
 import { WMP_EFFECTS } from './effects';
-import { SkinImages } from './images';
+import { SkinImages } from '@/shared/skins/wmp/images';
 import { Mirror, ViewContext } from './mirror';
-import { prepareView, themeViews } from './prepare';
-import type { HostToVm, PlayerSnapshot, VmToHost } from './protocol';
+import { prepareView, themeViews } from '@/shared/skins/wmp/prepare';
+import type { HostToVm, PlayerSnapshot, VmToHost } from '@/shared/skins/wmp/protocol';
 import { wmpVmRuntime } from './vm';
-import type { WmsNode, WmzPackage } from './wms';
-import { decodeSkinText } from './wms';
+import type { WmsNode, WmzPackage } from '@/shared/skins/wmp/wms';
+import { decodeSkinText } from '@/shared/skins/wmp/wms';
 
 const RUNTIME_SOURCE = `(${wmpVmRuntime.toString()})();`;
 

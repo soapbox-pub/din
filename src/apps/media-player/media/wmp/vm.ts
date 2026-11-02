@@ -14,7 +14,7 @@
  * refer to anything outside itself. Types are erased, so the protocol types
  * are only imported as types.
  */
-import type { HostToVm, PlayerSnapshot, VmInit, VmNode, VmToHost } from './protocol';
+import type { HostToVm, PlayerSnapshot, VmInit, VmNode, VmToHost } from '@/shared/skins/wmp/protocol';
 
 export function wmpVmRuntime(): void {
   type Fn = (...args: unknown[]) => unknown;

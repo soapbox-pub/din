@@ -1,8 +1,9 @@
 # Din Nostr Schemas
 
 This document describes how Din uses Nostr to store desktop state and share
-what a desktop looks like. Din builds on existing NIPs, and defines two kinds
-of its own, for cursor and icon themes, in a range it keeps for itself:
+what a desktop looks like. Din builds on existing NIPs, and defines three
+kinds of its own, for cursor themes, icon themes and Media Player skins, in a
+range it keeps for itself:
 **346xx**, "DIN" on a phone keypad. The last two digits spell the type the
 same way.
 
@@ -10,6 +11,7 @@ same way.
 |---|---|---|
 | 34628 | DIN-**CU** | [Cursor theme](#cursor-themes-kind-34628) |
 | 34642 | DIN-**IC** | [Icon theme](#icon-themes-kind-34642) |
+| 34675 | DIN-**SK** | [Media Player skin](#media-player-skins-kind-34675) |
 
 ## Encrypted App Data (NIP-78, kind 30078)
 
@@ -148,6 +150,38 @@ to a file it wrote, so none can lead out of the theme, and installs the
 parents an icon theme names but the computer lacks when the same author
 published them.
 
+## Media Player skins (kind 34675)
+
+A skin for Din's Media Player: a classic Winamp skin (`.wsz`) or a Windows
+Media Player skin (`.wmz`), each already one zip file, as one Blossom blob.
+Addressable like cursor and icon themes.
+
+| Tag | Required | Meaning |
+|---|---|---|
+| `["d", <id>]` | yes | The skin's file name without its extension |
+| `["title", <name>]` | yes | Its name, as people see it |
+| `["summary", <text>]` | no | A description |
+| `["alt", "Media Player skin: <name>"]` | yes | NIP-31 |
+| `["skin", <sha256>, "winamp" \| "wmp", <bytes>]` | yes | The skin file (a Blossom blob), which player it's for, and its size, which the App Store shows |
+| `["image", <url>]` | no | A PNG of the skin, as the Media Player's skin chooser draws it |
+| `["server", <url>]` | yes, one or more | Blossom servers holding its file |
+| `["t", "media-player-skin"]` | yes | |
+
+A `winamp` skin is a zip of Winamp 2.x bitmaps and text files; a `wmp` skin
+is a zip holding a `.wms` file, or a bare `.wms`. `content` is empty.
+
+The Media Player's Skins tab publishes a skin from its toolbar and
+right-click menu, by handing it to the App Store, which signs and uploads it;
+`din skins publish` does the same. The App Store's Skins tab lists them as it
+does cursor and icon themes, honoring deletions with `["k", "34675"]`.
+Installing downloads the blob as for themes, checks its hash and that it is
+a skin of the format it says, and writes it into the player's skins folder,
+`~/.local/share/din/skins/<d>.wsz` (or `.wmz`), numbered if another file has
+that name. A file has no `index.theme`, so `.nostr.json` in that folder
+records, by file name, the `coordinate` (`<kind>:<pubkey>:<d>`) and
+`publishedAt` (`created_at`) each came from, for Update and Remove. Use opens
+the Media Player wearing it.
+
 ## Other kinds Din reads/writes (standard usage, no extensions)
 
 | Kind | NIP | Usage |
@@ -159,5 +193,5 @@ published them.
 | 16767 | Profile Themes | Active profile theme; applied as the OS theme, and published when a synced custom theme changes. A theme worn from a named one carries Ditto's credit tags: `["a", "36767:<pubkey>:<d>"]`, plus `["p", <pubkey>]` when someone else made it. Editing someone else's theme drops both |
 | 36767 | Profile Themes | Named themes, in the same `c`/`f`/`bg` tags as 16767 plus `d`, `title`, optional `description`, `alt` and `["t", "theme"]`, as Ditto writes them. The App Store's Themes lists those by its catalog publishers, the people the user follows, and the user; Settings → Themes saves the custom theme as one, updates one under its `d`, and deletes one with a NIP-09 kind 5 carrying `e`, `a` and `["k", "36767"]` |
 | 3 | NIP-02 | Follow list; read to list what the people the user follows publish in the App Store |
-| 5 | NIP-09 | Deletions of the user's own named themes and cursor and icon themes |
+| 5 | NIP-09 | Deletions of the user's own named themes, cursor and icon themes, and Media Player skins |
 | 22242 | NIP-42 | Relay authentication |

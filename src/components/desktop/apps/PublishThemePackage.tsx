@@ -24,11 +24,11 @@ type State =
   | { state: 'done'; naddr: string }
   | { state: 'error'; message: string };
 
-const WHAT: Record<PackageType, string> = { cursor: 'cursor', icon: 'icons' };
+const WHAT: Record<PackageType, string> = { cursor: 'this cursor', icon: 'these icons', skin: 'this skin' };
 
 /**
- * Publish to Nostr…: an installed cursor theme (kind 34628) or icon theme
- * (kind 34642), its files on the user's Blossom servers, signed by the
+ * Publish to Nostr…: an installed cursor theme (kind 34628), icon theme
+ * (kind 34642) or Media Player skin (kind 34675), its files on the user's Blossom servers, signed by the
  * user, for others to find in the App Store (src/lib/themePackages.ts).
  */
 export function PublishThemePackage({ target, onClose }: { target: PublishTarget | null; onClose: () => void }) {
@@ -120,7 +120,7 @@ function PublishForm({ target, onClose }: { target: PublishTarget; onClose: () =
       <DialogHeader>
         <DialogTitle className="text-xl">Publish {target.name} to Nostr</DialogTitle>
         <DialogDescription>
-          Shares these {WHAT[target.type]} with people who follow you, in the App Store.
+          Shares {WHAT[target.type]} with people who follow you, in the App Store.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-2">

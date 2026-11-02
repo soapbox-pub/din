@@ -4,10 +4,20 @@ import { APP_BLOSSOM_SERVERS, parseBlossomServerList } from '@/lib/appBlossom';
 import { formatBytes } from '@/lib/fs';
 import { getIconThemeBridge } from '@/lib/iconTheme';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
-import { getSystemCursorBridge, type SystemCursorPreview } from '@/lib/systemCursor';
+import {
+  MAX_SKIN_BYTES,
+  checkSkin,
+  installedSkins,
+  readSkin,
+  saveSkin,
+  skinPreview,
+  trashSkin,
+  type SkinFormat,
+} from '@/lib/skinPackages';
+import { getSystemCursorBridge, type PublishedThemeInstall, type SystemCursorPreview } from '@/lib/systemCursor';
 
 /**
- * Cursor and icon themes on Nostr (NIP.md): Din's own kinds, in a range of
+ * Cursor themes, icon themes and Media Player skins on Nostr (NIP.md): Din's own kinds, in a range of
  * its own, 346xx, DIN on a dialpad, the last two digits spelling the type
  * the same way.
  *
@@ -17,21 +27,34 @@ import { getSystemCursorBridge, type SystemCursorPreview } from '@/lib/systemCur
  * - **34642 (IC), an icon theme:** a freedesktop icon theme's directory as
  *   one gzipped tarball blob (`archive`), since a big set has tens of
  *   thousands of files, plus a few of its icons for showing it (`icon`).
+ * - **34675 (SK), a Media Player skin:** a Winamp .wsz or Windows Media
+ *   Player .wmz, already one file, as one blob (`skin`).
  *
- * Both are addressable, `d` being the theme's directory name, so publishing
- * a theme again updates it. Publishing and installing are here, shared by
- * Settings, the App Store and the `din` command; the files are read and
- * written by the main process (electron/themePackages.mts).
+ * All are addressable, `d` being the theme's directory name (a skin's file
+ * name without its extension), so publishing one again updates it.
+ * Publishing and installing are here, shared by Settings, the Media Player,
+ * the App Store and the `din` command; themes' files are read and written by
+ * the main process (electron/themePackages.mts), skins' through the fs
+ * bridge (src/lib/skinPackages.ts).
  */
 
 export const CURSOR_THEME_KIND = 34628;
 export const ICON_THEME_KIND = 34642;
+export const MEDIA_SKIN_KIND = 34675;
 
-export type PackageType = 'cursor' | 'icon';
+export type PackageType = 'cursor' | 'icon' | 'skin';
 
 export const PACKAGE_KIND: Record<PackageType, number> = {
   cursor: CURSOR_THEME_KIND,
   icon: ICON_THEME_KIND,
+  skin: MEDIA_SKIN_KIND,
+};
+
+/** What each is called in a sentence, and what its `alt` and `t` tags say. */
+const PACKAGE_WORDS: Record<PackageType, { alt: string; t: string }> = {
+  cursor: { alt: 'Cursor theme', t: 'cursor-theme' },
+  icon: { alt: 'Icon theme', t: 'icon-theme' },
+  skin: { alt: 'Media Player skin', t: 'media-player-skin' },
 };
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -66,7 +89,14 @@ export interface IconPackage extends PackageCommon {
   icons: { name: string; sha256: string; mime: string }[];
 }
 
-export type ThemePackage = CursorPackage | IconPackage;
+export interface SkinPackage extends PackageCommon {
+  type: 'skin';
+  skin: { sha256: string; format: SkinFormat; size: number };
+  /** The picture the Media Player's skin chooser draws of it. */
+  image: string | null;
+}
+
+export type ThemePackage = CursorPackage | IconPackage | SkinPackage;
 
 export interface PackageAddress {
   type: PackageType;
@@ -97,7 +127,7 @@ function size(value: string | undefined): number {
   return Number.isSafeInteger(n) && n > 0 ? n : 0;
 }
 
-/** Parse a kind 34628 or 34642 event, or null when it lacks what installing needs. */
+/** Parse a kind 34628, 34642 or 34675 event, or null when it lacks what installing needs. */
 export function parseThemePackage(event: NostrEvent): ThemePackage | null {
   const identifier = tagValue(event, 'd');
   if (!identifier) return null;
@@ -146,11 +176,24 @@ export function parseThemePackage(event: NostrEvent): ThemePackage | null {
     };
   }
 
+  if (event.kind === MEDIA_SKIN_KIND) {
+    const skin = event.tags.find(([n, sha, format]) => n === 'skin' && SHA256.test(sha ?? '') && (format === 'winamp' || format === 'wmp'));
+    if (!skin) return null;
+    const image = tagValue(event, 'image');
+    return {
+      ...common,
+      type: 'skin',
+      skin: { sha256: skin[1], format: skin[2] as SkinFormat, size: size(skin[3]) },
+      image: image ? sanitizeImageUrl(image) ?? null : null,
+      size: size(skin[3]),
+    };
+  }
+
   return null;
 }
 
 export function packageTypeOf(kind: number): PackageType | null {
-  return kind === CURSOR_THEME_KIND ? 'cursor' : kind === ICON_THEME_KIND ? 'icon' : null;
+  return (Object.keys(PACKAGE_KIND) as PackageType[]).find((type) => PACKAGE_KIND[type] === kind) ?? null;
 }
 
 /** The `<kind>:<pubkey>:<d>` coordinate of a published theme. */
@@ -285,10 +328,10 @@ async function cursorStrip(previews: SystemCursorPreview[]): Promise<Blob | null
 function commonTags(type: PackageType, id: string, details: PublishDetails, inherits: string[], servers: string[]): string[][] {
   const tags: string[][] = [['d', id], ['title', details.title]];
   if (details.summary) tags.push(['summary', details.summary]);
-  tags.push(['alt', `${type === 'cursor' ? 'Cursor theme' : 'Icon theme'}: ${details.title}`]);
+  tags.push(['alt', `${PACKAGE_WORDS[type].alt}: ${details.title}`]);
   for (const name of inherits) tags.push(['inherits', name]);
   for (const server of servers) tags.push(['server', server]);
-  tags.push(['t', type === 'cursor' ? 'cursor-theme' : 'icon-theme']);
+  tags.push(['t', PACKAGE_WORDS[type].t]);
   return tags;
 }
 
@@ -343,6 +386,39 @@ export async function publishIconTheme(id: string, details: PublishDetails, deps
   return id;
 }
 
+/** A data: URL's bytes. */
+function dataUrlBlob(url: string): Blob | null {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(url);
+  if (!match) return null;
+  const binary = atob(match[2]);
+  return new Blob([Uint8Array.from(binary, (c) => c.charCodeAt(0))], { type: match[1] });
+}
+
+/**
+ * Publish a skin in the Media Player's skins folder as kind 34675, by its
+ * file name; resolves with its `d` tag, the name without its extension.
+ */
+export async function publishMediaSkin(id: string, details: PublishDetails, deps: PublishDeps): Promise<string> {
+  deps.progress?.('Reading the skin');
+  const { data, format } = await readSkin(id);
+  const d = id.replace(/\.[^.]+$/, '');
+
+  deps.progress?.('Drawing a picture of it', 10);
+  const preview = await skinPreview(data, format).catch(() => null);
+  const picture = preview ? dataUrlBlob(preview) : null;
+  const image = picture ? ((await uploadBlob(deps, picture, `${d}.png`, 'image/png').catch(() => null))?.url ?? null) : null;
+
+  deps.progress?.(`Uploading the skin (${formatBytes(data.length)})`, 30);
+  const { sha256 } = await uploadBlob(deps, data, id, 'application/zip');
+
+  deps.progress?.('Publishing', 90);
+  const tags = commonTags('skin', d, details, [], deps.servers);
+  tags.splice(tags.length - 1, 0, ['skin', sha256, format, String(data.length)]);
+  if (image) tags.push(['image', image]);
+  await deps.publish({ kind: MEDIA_SKIN_KIND, content: '', tags });
+  return d;
+}
+
 /** The kind 5 deletion of one of the user's own published themes (NIP-09). */
 export function packageDeletion(pkg: ThemePackage): { kind: number; content: string; tags: string[][] } {
   return {
@@ -375,9 +451,37 @@ async function serversFor(pkg: ThemePackage, deps: InstallDeps): Promise<string[
   return httpsUrls([...pkg.servers, ...authors, ...APP_BLOSSOM_SERVERS.servers]);
 }
 
+/** A skin's file from the first server whose copy matches its hash and is a skin of its format. */
+async function downloadSkin(pkg: SkinPackage, servers: string[]): Promise<Uint8Array> {
+  for (const server of servers) {
+    let url: string;
+    try {
+      url = new URL(pkg.skin.sha256, server.endsWith('/') ? server : `${server}/`).toString();
+    } catch {
+      continue;
+    }
+    try {
+      const response = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(5 * 60_000) });
+      if (!response.ok) continue;
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > MAX_SKIN_BYTES) continue;
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buffer));
+      // The event is signed; the server isn't trusted.
+      if ([...digest].map((b) => b.toString(16).padStart(2, '0')).join('') !== pkg.skin.sha256) continue;
+      const data = new Uint8Array(buffer);
+      if (!checkSkin(data, pkg.skin.format)) throw new Error(`${pkg.title} isn’t a ${pkg.skin.format === 'winamp' ? 'Winamp' : 'Windows Media Player'} skin the Media Player can wear.`);
+      return data;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith(pkg.title)) throw error;
+      // Unreachable or too slow: the next server.
+    }
+  }
+  throw new Error('The skin couldn’t be downloaded from its servers.');
+}
+
 /**
- * Download and install a published theme; resolves with its directory name.
- * An icon theme's parents that aren't installed are installed too, when the
+ * Download and install a published theme; resolves with its directory name
+ * (a skin's file name). An icon theme's parents that aren't installed are installed too, when the
  * same author published them.
  */
 export async function installThemePackage(pkg: ThemePackage, deps: InstallDeps, depth = 0): Promise<string> {
@@ -400,6 +504,12 @@ export async function installThemePackage(pkg: ThemePackage, deps: InstallDeps, 
       cursors: pkg.cursors.map(({ name, sha256 }) => ({ name, sha256 })),
       links: pkg.links,
     });
+  }
+
+  if (pkg.type === 'skin') {
+    deps.progress?.(`Downloading ${pkg.title}`);
+    const data = await downloadSkin(pkg, servers);
+    return saveSkin(data, pkg.skin.format, base);
   }
 
   const bridge = getIconThemeBridge();
@@ -433,13 +543,38 @@ export async function fetchThemePackage(address: PackageAddress, query: InstallD
 // Installed themes
 // ---------------------------------------------------------------------------
 
-/** Publish an installed theme of either type; resolves with its `d` tag. */
+/** Publish an installed theme of any type; resolves with its `d` tag. */
 export function publishThemePackage(type: PackageType, id: string, details: PublishDetails, deps: PublishDeps): Promise<string> {
-  return type === 'cursor' ? publishCursorTheme(id, details, deps) : publishIconTheme(id, details, deps);
+  if (type === 'cursor') return publishCursorTheme(id, details, deps);
+  if (type === 'icon') return publishIconTheme(id, details, deps);
+  return publishMediaSkin(id, details, deps);
 }
 
-/** Make an installed theme the pointer's (at `size`, else the current size) or the icons'. */
-export async function applyTheme(type: PackageType, id: string, size?: number): Promise<void> {
+/** The themes of a type installed from Nostr, and where each was published. */
+export async function installedPackages(type: PackageType): Promise<PublishedThemeInstall[]> {
+  if (type === 'skin') {
+    return (await installedSkins()).flatMap((skin) => (skin.source ? [{ id: skin.id, source: skin.source }] : []));
+  }
+  const bridge = type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge();
+  return (await bridge?.published()) ?? [];
+}
+
+/** Opens an app, as the window manager does; a skin is worn by opening the Media Player in it. */
+export type OpenApp = (appId: string, params?: Record<string, unknown>) => unknown;
+
+/**
+ * Make an installed theme the pointer's (at `size`, else the current size)
+ * or the icons', or open the Media Player wearing a skin.
+ */
+export async function applyTheme(type: PackageType, id: string, options: { size?: number; open?: OpenApp } = {}): Promise<void> {
+  const { size } = options;
+  if (type === 'skin') {
+    if (!options.open) throw new Error('Skins are worn in the Media Player');
+    const { path } = await readSkin(id);
+    // `at` makes the same skin twice two launches.
+    options.open('media-player', { skin: path, at: Date.now() });
+    return;
+  }
   if (type === 'cursor') {
     const bridge = getSystemCursorBridge();
     if (!bridge) throw new Error('The cursor can’t be changed here');
@@ -453,6 +588,7 @@ export async function applyTheme(type: PackageType, id: string, size?: number): 
 
 /** Delete a theme Din installed. */
 export async function removeTheme(type: PackageType, id: string): Promise<void> {
+  if (type === 'skin') return trashSkin(id);
   const bridge = type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge();
   if (!bridge) throw new Error('Themes can’t be removed here');
   await bridge.removeTheme(id);

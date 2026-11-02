@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { formatTime, player, usePlayer } from '../engine';
 import { VisCanvas } from '../din/common';
 import { useWindowDrag } from '../winamp/hooks';
-import { cssColor, maskRegion, type SkinImages } from './images';
+import { cssColor, maskRegion, type SkinImages } from '@/shared/skins/wmp/images';
 import { useAttrs, useView } from './mirror';
-import type { VmNode } from './protocol';
+import type { VmNode } from '@/shared/skins/wmp/protocol';
 import { visForEffect } from './effects';
 
 type Attrs = Record<string, unknown>;

@@ -10,11 +10,11 @@ import { EQ_PRESETS, parseEqf, writeEqf } from '../eq';
 import { setPrefs, setWinampPrefs, usePrefs } from '../prefs';
 import type { Commands } from '../useCommands';
 import { pickFiles, pickSave } from '../host';
-import { regionClip, type WinampSkin } from './skin';
+import { regionClip, type WinampSkin } from '@/shared/skins/winamp/skin';
 import { SkinText, Sprite, SpriteButton, WinampVis } from './parts';
 import { SkinContext, spriteStyle, useSkin, useSliderDrag, useWindowDrag } from './hooks';
 import { MAIN_H, SHADE_H, W, winampLayout } from './layout';
-import { PL_MENUS, SPRITES } from './sprites';
+import { PL_MENUS, SPRITES } from '@/shared/skins/winamp/sprites';
 
 /** "SEEK TO: 1:23/4:56 (30%)" and friends replace the title while dragging. */
 function useMarqueeOverride(): [string | null, (text: string | null) => void] {

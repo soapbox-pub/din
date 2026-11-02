@@ -1,6 +1,6 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
-import type { HostToVm } from './protocol';
-import type { SkinImages } from './images';
+import type { HostToVm } from '@/shared/skins/wmp/protocol';
+import type { SkinImages } from '@/shared/skins/wmp/images';
 
 type Attrs = Record<string, unknown>;
 

@@ -386,6 +386,7 @@ export const KIND_LABELS: Record<number, string> = {
   // Din
   34628: 'Cursor theme',
   34642: 'Icon theme',
+  34675: 'Media Player skin',
   // NIP-5A
   34128: 'Nsite (legacy)',
   35128: 'Nsite',

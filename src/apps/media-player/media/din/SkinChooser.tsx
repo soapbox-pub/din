@@ -1,17 +1,17 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ExternalLink, Palette, Plus, Trash2 } from 'lucide-react';
+import { Check, ExternalLink, Palette, Plus, Share, Store, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cleanFsError, getFsBridge, joinPath } from '@/lib/fs';
 import { skinKindOf, skinsDir } from '../actions';
 import { setPrefs, usePrefs, type SkinChoice } from '../prefs';
-import { winampPreview } from '../winamp/skin';
-import { wmpPreview } from '../wmp/preview';
+import { winampPreview } from '@/shared/skins/winamp/skin';
+import { wmpPreview } from '@/shared/skins/wmp/preview';
 import { BUILTIN_WMP_SKINS, builtinSkinBytes, isBuiltinSkin } from '../wmp/builtin';
 import type { Commands } from '../useCommands';
-import { openUrl } from '../host';
+import { findSkins, openUrl, publishSkin } from '../host';
 
 interface SkinEntry {
   id: string;
@@ -73,7 +73,8 @@ function Preview({ entry }: { entry: SkinEntry }) {
 export function SkinChooser({ commands }: { commands: Commands }) {
   const current = usePrefs((p) => p.skin);
   const queryClient = useQueryClient();
-  const skins = useQuery({ queryKey: ['music', 'skins'], queryFn: listSkins });
+  // Asked again on focus: skins got from the App Store land in the folder meanwhile.
+  const skins = useQuery({ queryKey: ['music', 'skins'], queryFn: listSkins, staleTime: 0, refetchOnWindowFocus: 'always' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const list = skins.data ?? BUILT_IN;
@@ -105,6 +106,17 @@ export function SkinChooser({ commands }: { commands: Commands }) {
           >
             <Plus className="size-4" /> Add Skin…
           </button>
+          {selected?.removable && selected.choice.kind !== 'din' && (
+            <button
+              type="button"
+              className="mp-icon-btn size-8"
+              aria-label={`Publish ${selected.name} to Nostr`}
+              title="Publish to Nostr…"
+              onClick={() => selected.choice.kind !== 'din' && publishSkin(selected.choice.path)}
+            >
+              <Share className="size-4" />
+            </button>
+          )}
           {selected?.removable && (
             <button
               type="button"
@@ -144,6 +156,11 @@ export function SkinChooser({ commands }: { commands: Commands }) {
                   <ContextMenuItem disabled={sameChoice(s.choice, current)} onSelect={() => setPrefs({ skin: s.choice })}>
                     <Check /> Apply Skin
                   </ContextMenuItem>
+                  {s.removable && s.choice.kind !== 'din' && (
+                    <ContextMenuItem onSelect={() => s.choice.kind !== 'din' && publishSkin(s.choice.path)}>
+                      <Share /> Publish to Nostr…
+                    </ContextMenuItem>
+                  )}
                   {s.removable && (
                     <>
                       <ContextMenuSeparator />
@@ -158,6 +175,9 @@ export function SkinChooser({ commands }: { commands: Commands }) {
           ))}
         </ul>
         <div className="space-y-1 border-t border-[var(--mp-line)] p-2 text-xs">
+          <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-[var(--mp-ink)]" onClick={findSkins}>
+            <Store className="size-3" /> Find Skins in the App Store
+          </button>
           <button type="button" className="flex items-center gap-1 text-[var(--mp-ink-dim)] hover:text-[var(--mp-ink)]" onClick={() => openUrl('https://skins.webamp.org/')}>
             <ExternalLink className="size-3" /> Winamp Skin Museum
           </button>

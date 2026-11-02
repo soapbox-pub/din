@@ -50,3 +50,17 @@ export function showFileInFiles(path: string): Promise<void> {
 export function openUrl(url: string): void {
   void din().app.openUrl(url);
 }
+
+/** Open the App Store at its Media Player skins. */
+export function findSkins(): void {
+  void din().app.open('app-store', { tab: 'skins' });
+}
+
+/**
+ * Ask the desktop to publish a skin in the skins folder to Nostr, by its
+ * file name: the App Store asks what to call it, then signs and uploads it,
+ * which the player can't do itself.
+ */
+export function publishSkin(path: string): void {
+  void din().app.open('app-store', { publishSkin: path.slice(path.lastIndexOf('/') + 1) });
+}

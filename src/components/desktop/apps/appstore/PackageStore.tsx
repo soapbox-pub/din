@@ -27,6 +27,7 @@ import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useFollowingPubkeys } from '@/hooks/useFollowingPubkeys';
 import { useIconThemeStatus } from '@/hooks/useIconTheme';
+import { canKeepPackages } from '@/hooks/useThemePackages';
 import { useSystemCursorStatus } from '@/hooks/useSystemCursor';
 import {
   useInstalledPackages,
@@ -38,9 +39,7 @@ import { useToast } from '@/hooks/useToast';
 import { Budget } from '@/lib/cursorImport/bytes';
 import { decodeXcursor } from '@/lib/cursorImport/xcursor';
 import { formatBytes } from '@/lib/fs';
-import { getIconThemeBridge } from '@/lib/iconTheme';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
-import { getSystemCursorBridge } from '@/lib/systemCursor';
 import {
   blobUrl,
   iconPreviewUrls,
@@ -70,6 +69,19 @@ const COPY: Record<PackageType, { title: string; subtitle: string; noun: string;
     noun: 'icon set',
     empty: 'No icon sets found on your relays yet. Publish one from Settings → Icons, or follow people who share theirs.',
   },
+  skin: {
+    title: 'Skins',
+    subtitle: 'Winamp and Windows Media Player skins for the Media Player, from Din’s publishers and the people you follow.',
+    noun: 'skin',
+    empty: 'No skins found on your relays yet. Publish one from the Media Player’s Skins tab, or follow people who share theirs.',
+  },
+};
+
+/** What a theme becomes once it's got, for the toast. */
+const BECOMES: Record<PackageType, string> = {
+  cursor: 'It’s now your pointer.',
+  icon: 'They’re now your icons.',
+  skin: 'The Media Player is wearing it.',
 };
 
 /** Where a published theme stands on this computer, and what its button does. */
@@ -246,10 +258,12 @@ function usePackageHandlers(type: PackageType, onSelect: (address: PackageAddres
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<ThemePackage | null>(null);
 
-  const current = type === 'cursor' ? cursorStatus.data?.theme : iconStatus.data?.theme;
-  const canInstall = type === 'cursor'
-    ? !!getSystemCursorBridge() && cursorStatus.data?.canChange !== false
-    : !!getIconThemeBridge() && iconStatus.data?.canChange !== false;
+  // Which skin the Media Player wears is its own, so a skin is never In Use here.
+  const current = type === 'cursor' ? cursorStatus.data?.theme : type === 'icon' ? iconStatus.data?.theme : undefined;
+  const canInstall = canKeepPackages(type) && (
+    type === 'cursor' ? cursorStatus.data?.canChange !== false
+      : type === 'icon' ? iconStatus.data?.canChange !== false
+        : true);
 
   const stateOf = (pkg: ThemePackage): PackageState => {
     const entry = installed.data?.get(packageCoordinate(pkg));
@@ -288,7 +302,7 @@ function usePackageHandlers(type: PackageType, onSelect: (address: PackageAddres
       pkg,
       async () => {
         await actions.install(pkg);
-        toast({ title: `${pkg.title} ${state.id ? 'updated' : 'installed'}`, description: `It’s now your ${pkg.type === 'cursor' ? 'pointer' : 'icons'}.` });
+        toast({ title: `${pkg.title} ${state.id ? 'updated' : 'installed'}`, description: BECOMES[pkg.type] });
       },
       `Couldn’t get ${pkg.title}`,
     );
@@ -369,13 +383,14 @@ function PackageCard({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHa
   );
 }
 
-/** A cursor theme's picture of its cursors, or an icon set's icons, on a soft backdrop. */
+/** A cursor theme's or skin's picture, or an icon set's icons, on a soft backdrop. */
 function PackagePreview({ pkg, visible, className, large = false }: { pkg: ThemePackage; visible: boolean; className?: string; large?: boolean }) {
   const [failed, setFailed] = useState<ReadonlySet<string>>(new Set());
   if (!visible) return <Skeleton className={cn('rounded-none', className)} />;
   const backdrop = 'bg-gradient-to-br from-muted/60 to-muted';
 
-  if (pkg.type === 'cursor') {
+  if (pkg.type === 'cursor' || pkg.type === 'skin') {
+    const skin = pkg.type === 'skin';
     return (
       <div className={cn('grid place-items-center p-4', backdrop, className)} aria-hidden>
         {pkg.image && !failed.has(pkg.image) ? (
@@ -385,10 +400,15 @@ function PackagePreview({ pkg, visible, className, large = false }: { pkg: Theme
             referrerPolicy="no-referrer"
             draggable={false}
             onError={() => setFailed(new Set([pkg.image as string]))}
-            className={cn('max-h-full max-w-full object-contain', large ? 'h-24' : 'h-14')}
+            className={cn(
+              'max-h-full max-w-full object-contain',
+              skin ? cn('[image-rendering:pixelated]', large ? 'h-64' : 'h-full') : large ? 'h-24' : 'h-14',
+            )}
           />
         ) : (
-          <span className="text-xs text-muted-foreground">{pkg.cursors.length} cursors</span>
+          <span className="text-xs text-muted-foreground">
+            {skin ? (pkg.skin.format === 'winamp' ? 'Winamp skin' : 'Windows Media Player skin') : `${pkg.cursors.length} cursors`}
+          </span>
         )}
       </div>
     );
@@ -610,6 +630,9 @@ function PackageDetailPage({
             <InfoRow label="Download size">{pkg.size ? formatBytes(pkg.size) : 'Unknown'}</InfoRow>
             {pkg.type === 'cursor' ? (
               <InfoRow label="Cursors">{`${pkg.cursors.length.toLocaleString()}${pkg.links.length ? `, under ${(pkg.cursors.length + pkg.links.length).toLocaleString()} names` : ''}`}</InfoRow>
+            ) : null}
+            {pkg.type === 'skin' ? (
+              <InfoRow label="Kind">{pkg.skin.format === 'winamp' ? 'Winamp classic skin (.wsz)' : 'Windows Media Player skin (.wmz)'}</InfoRow>
             ) : null}
             {pkg.inherits.length > 0 && <InfoRow label="Builds on">{pkg.inherits.join(', ')}</InfoRow>}
             <InfoRow label="Creator">{author.name ?? 'Unknown'}</InfoRow>
