@@ -539,10 +539,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         appWindowIds(appId)
           .filter((id) => id !== windowId)
           .map((id) => ({ id, title: appWindows.get(id)?.title() ?? appName })),
-      'app.postToWindow': ({ windowId: to, data }) => {
-        const target = typeof to === 'string' ? appWindows.get(to) : undefined;
-        if (target?.appId === appId) target.push({ type: 'windowMessage', from: windowId, data });
-      },
       'app.sessionGet': ({ key }) => appSessionState(appId).get(String(key)),
       'app.sessionSet': ({ key, value }) => {
         appSessionState(appId).set(String(key), value);
@@ -1305,7 +1301,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     return subscribeNotifications(update);
   }, [hasAssistant, push]);
 
-  // Reachable by the app's other windows (din.app.postToWindow, tab drags).
+  // Reachable by the app's other windows (din.app.windows, tab drags).
   useEffect(() => {
     appWindows.set(windowId, {
       appId,

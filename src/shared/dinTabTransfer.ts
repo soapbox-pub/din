@@ -11,8 +11,15 @@ import type { TabTransfer } from '@/shared/TabContextMenu';
  *
  * The desktop says which of the app's windows is frontmost under the
  * pointer (din.window.tabDragMove) and shows the tab's label there; the
- * tab itself travels as a message to that window (din.app.postToWindow),
- * or, for a new window, waits in din.app.session for it.
+ * tab itself travels to that window on a BroadcastChannel, or, for a new
+ * window, waits in din.app.session for it.
+ *
+ * A channel reaches every window of the app and nothing else: each app is
+ * an origin of its own, and the only foreign content apps frame can't join
+ * (Mail's messages run no scripts; Media Player's skins are sandboxed to an
+ * opaque origin). So a message names the window it's for, and the others
+ * ignore it. They're the same app, so a tab's contents (a terminal's
+ * hand-over token) seen by another of its windows gives nothing away.
  */
 export interface DinTabTransferOptions {
   din: Din;
@@ -30,6 +37,7 @@ export interface DinTabTransferOptions {
 }
 
 const MESSAGE = 'din:tab';
+const CHANNEL = 'din:tabs';
 const ADOPT_PARAM = 'adoptTab';
 
 /** Where a new window's title bar goes, relative to the pointer that dropped its tab. */
@@ -37,6 +45,8 @@ const GRAB = { x: 100, y: 16 };
 
 interface TabMessage {
   type: typeof MESSAGE;
+  /** The window it's for. */
+  to: string;
   payload: unknown;
   /** Where in the strip: a slot index, or the x it was dropped at. */
   index?: number;
@@ -111,17 +121,22 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
   }, [din]);
 
   // Another window's tab arriving, and where one hovering would land.
-  useEffect(
-    () =>
-      din.app.onWindowMessage((_from, data) => {
-        if (!isTabMessage(data)) return;
-        const strip = latest.current.list;
-        const index = data.index ?? (strip && typeof data.x === 'number' ? slotAt(strip, data.x).index : Infinity);
-        latest.current.options.receive(data.payload, index);
-        din.window.focus();
-      }),
-    [din],
-  );
+  const channel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    const open = new BroadcastChannel(CHANNEL);
+    channel.current = open;
+    open.onmessage = ({ data }: MessageEvent<unknown>) => {
+      if (!isTabMessage(data) || data.to !== din.window.state.id) return;
+      const strip = latest.current.list;
+      const index = data.index ?? (strip && typeof data.x === 'number' ? slotAt(strip, data.x).index : Infinity);
+      latest.current.options.receive(data.payload, index);
+      din.window.focus();
+    };
+    return () => {
+      open.close();
+      if (channel.current === open) channel.current = null;
+    };
+  }, [din]);
   const marker = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const hide = () => {
@@ -153,8 +168,8 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
 
   const moveToWindow = useCallback(async (id: string, windowId: string, index = Infinity) => {
     const payload = await latest.current.options.take(id);
-    din.app.postToWindow(windowId, { type: MESSAGE, payload, index: Number.isFinite(index) ? index : undefined } satisfies TabMessage);
-  }, [din]);
+    channel.current?.postMessage({ type: MESSAGE, to: windowId, payload, index: Number.isFinite(index) ? index : undefined } satisfies TabMessage);
+  }, []);
 
   const moveToNewWindow = useCallback(async (id: string, point?: DragPoint) => {
     const { options: o } = latest.current;
@@ -179,7 +194,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
         const { tabCount } = latest.current;
         if (target && target.windowId !== din.window.state.id) {
           void Promise.resolve(latest.current.options.take(id)).then((payload) =>
-            din.app.postToWindow(target.windowId, { type: MESSAGE, payload, x: target.at.x } satisfies TabMessage),
+            channel.current?.postMessage({ type: MESSAGE, to: target.windowId, payload, x: target.at.x } satisfies TabMessage),
           );
           return;
         }

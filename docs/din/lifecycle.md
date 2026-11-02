@@ -111,7 +111,9 @@ await din.app.canOpen('assistant');                          // installed (and, 
 ```
 
 An app's windows reach each other: `din.app.windows()` lists the others,
-front to back, `din.app.postToWindow(id, data)` sends one a message, and
+front to back, with their ids; a `BroadcastChannel` carries messages
+between them, reaching every window of the app (each app is an origin of
+its own) and nothing else, so a message for one names it; and
 `din.app.session` keeps state the desktop holds for the app for as long as
 it runs, across its windows opening and closing (Files' undo history).
 

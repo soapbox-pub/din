@@ -409,10 +409,6 @@ export function installDin(transport: Transport): void {
 
   // ---- app ----
   const launches = new Emitter<LaunchContext>();
-  const windowMessages = new Emitter<{ from: string; data: unknown }>();
-  pushes.on((p) => {
-    if (p.type === 'windowMessage') windowMessages.emit({ from: p.from, data: p.data });
-  });
   let launch: LaunchContext = { reason: 'new', params: {}, files: [], shortcut: null, state: null, opener: null };
   pushes.on((p) => {
     if (p.type === 'launch') {
@@ -439,8 +435,6 @@ export function installDin(transport: Transport): void {
     openUrl: (url) => request('app.openUrl', { url }),
     canOpen: (appId) => request('app.canOpen', { appId }),
     windows: () => request('app.windows'),
-    postToWindow: (windowId, data) => tell('app.postToWindow', { windowId, data }),
-    onWindowMessage: (cb) => windowMessages.on(({ from, data }) => cb(from, data)),
     session: {
       get: (key) => request('app.sessionGet', { key }),
       set: (key, value) => tell('app.sessionSet', { key, value }),

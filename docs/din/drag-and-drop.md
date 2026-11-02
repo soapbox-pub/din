@@ -90,8 +90,8 @@ drop; the desktop helps instead:
   `din.window.onTabHover(at)` and marks where the tab would land.
 - `din.window.tabDragEnd(at)` when it's let go: the same answer, and the
   label and marker go.
-- The tab itself travels with `din.app.postToWindow(windowId, payload)` to
-  that window (`din.app.onWindowMessage`), or for a new window waits in
+- The tab itself travels on a `BroadcastChannel`, addressed to that
+  window's id (the app's other windows ignore it), or for a new window waits in
   `din.app.session` under a token passed in its launch params.
 
 `useDinTabTransfer` (`src/shared/dinTabTransfer.ts`) does all of it and

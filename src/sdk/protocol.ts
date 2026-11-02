@@ -118,7 +118,6 @@ export interface Requests {
   'app.openUrl': [{ url: string }, void];
   'app.canOpen': [{ appId: string }, boolean];
   'app.windows': [void, { id: string; title: string }[]];
-  'app.postToWindow': [{ windowId: string; data: unknown }, void];
   'app.sessionGet': [{ key: string }, unknown];
   'app.sessionSet': [{ key: string; value: unknown }, void];
   'app.saveState': [{ state: unknown }, void];
@@ -252,7 +251,6 @@ export type Push =
   | { type: 'notification'; id: number; event: 'click' | 'close'; action: string | null }
   | { type: 'mediaAction'; action: MediaAction }
   | { type: 'dictation'; status: DictationStatus; here: boolean }
-  | { type: 'windowMessage'; from: string; data: unknown }
   | { type: 'tabHover'; at: Point | null }
   | { type: 'assistantSettings'; settings: AssistantSettings }
   | { type: 'assistantUnread'; sessionIDs: string[] }

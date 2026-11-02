@@ -156,12 +156,11 @@ export interface DinApp {
    * set up and switched on.
    */
   canOpen(appId: string): Promise<boolean>;
-  /** The app's other open windows, front to back. */
+  /**
+   * The app's other open windows, front to back. They talk to each other
+   * on a BroadcastChannel, which reaches the app's windows and nothing else.
+   */
   windows(): Promise<{ id: string; title: string }[]>;
-  /** Send another of the app's windows a message (structured-cloneable). */
-  postToWindow(windowId: string, data: unknown): void;
-  /** Hear messages from the app's other windows. */
-  onWindowMessage(cb: (from: string, data: unknown) => void): Unsubscribe;
   /**
    * State the desktop keeps for the app for as long as it runs, across its
    * windows opening and closing (Files' undo history). Not saved to disk.
