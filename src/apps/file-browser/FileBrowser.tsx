@@ -397,23 +397,21 @@ function useClipboardFiles(din: Din): { count: number; cutPaths: string[] } | nu
   const [state, setState] = useState<{ count: number; cutPaths: string[] } | null>(null);
   useEffect(() => {
     let seq = 0;
-    const update = (has: { count: number; cut: boolean } | null) => {
+    // What's there now, and again each time the clipboard changes.
+    const update = () => {
       const n = ++seq;
-      if (!has || has.count === 0) setState(null);
-      else if (!has.cut) setState({ count: has.count, cutPaths: [] });
-      else {
-        void din.clipboard.readFiles().then((board) => {
+      din.clipboard.readFiles().then(
+        (board) => {
           if (n !== seq) return;
-          const cutPaths = board?.cut ? board.files.map((f) => din.files.path(f)) : [];
-          setState({ count: has.count, cutPaths });
-        });
-      }
+          if (!board || board.files.length === 0) setState(null);
+          else setState({ count: board.files.length, cutPaths: board.cut ? board.files.map((f) => din.files.path(f)) : [] });
+        },
+        () => {},
+      );
     };
-    // What's there already; the desktop says when it changes from now on.
-    void din.clipboard.readFiles().then((board) => {
-      if (seq === 0) update(board && { count: board.files.length, cut: board.cut });
-    });
-    return din.clipboard.onFilesChange(update);
+    update();
+    navigator.clipboard.addEventListener('clipboardchange', update);
+    return () => navigator.clipboard.removeEventListener('clipboardchange', update);
   }, [din]);
   return state;
 }

@@ -518,6 +518,11 @@ export interface DinDrag {
 // din.clipboard: cut, copy and paste of files
 // ---------------------------------------------------------------------------
 
+/**
+ * When files come onto Din's clipboard or go, `navigator.clipboard` fires
+ * the Clipboard API draft's `clipboardchange`, its `types` holding `Files`
+ * while some are there (for enabling Paste).
+ */
 export interface DinClipboard {
   /**
    * Files on Din's clipboard, as Cut or Copy left them. Text and images use
@@ -527,8 +532,6 @@ export interface DinClipboard {
    */
   readFiles(): Promise<{ files: FileSystemHandle[]; cut: boolean } | null>;
   writeFiles(files: FileSystemHandle[], cut: boolean): void;
-  /** Whether files are on the clipboard (for enabling Paste), and from now on when that changes. */
-  onFilesChange(cb: (has: { count: number; cut: boolean } | null) => void): Unsubscribe;
 }
 
 // ---------------------------------------------------------------------------

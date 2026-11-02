@@ -111,7 +111,7 @@ own clipboard, which Files, Media Player and native apps share:
 
 ```ts
 din.clipboard.writeFiles(selected, /* cut */ false);
-din.clipboard.onFilesChange((has) => setCanPaste(has !== null));
+navigator.clipboard.addEventListener('clipboardchange', (e) => setCanPaste(e.types.includes('Files')));
 const pasted = await din.clipboard.readFiles();   // handles, granted on read
 ```
 
@@ -122,8 +122,10 @@ The clipboard holds files the user meant for wherever they paste, so an
 app without `fs` reads it only on a paste: its window must be focused, and
 the user must have pressed a key or clicked in it (main watches the
 guest's input) or picked from its menus in the last few seconds. Otherwise
-`readFiles` rejects with `NotAllowedError`. `onFilesChange` says whether
-anything is there at any time.
+`readFiles` rejects with `NotAllowedError`. The Clipboard API draft's
+`clipboardchange` event on `navigator.clipboard` says when files come or
+go, its `types` holding `Files` while some are there; an app with `fs`
+reads them at any time to know what's there to start with.
 
 ## Streaming and paths
 

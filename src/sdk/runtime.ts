@@ -772,9 +772,12 @@ export function installDin(transport: Transport): void {
   };
 
   // ---- clipboard ----
-  const clipboardChanges = new Emitter<{ count: number; cut: boolean } | null>();
+  // The Clipboard API draft's clipboardchange, when files come or go.
   pushes.on((p) => {
-    if (p.type === 'clipboardFiles') clipboardChanges.emit(p.has);
+    if (p.type !== 'clipboardFiles' || !navigator.clipboard) return;
+    const event = new Event('clipboardchange');
+    Object.defineProperty(event, 'types', { value: Object.freeze(p.has ? ['Files'] : []), enumerable: true });
+    navigator.clipboard.dispatchEvent(event);
   });
   const clipboard: DinClipboard = {
     readFiles: async () => {
@@ -782,7 +785,6 @@ export function installDin(transport: Transport): void {
       return r ? { files: r.files.map(wrap), cut: r.cut } : null;
     },
     writeFiles: (list, cut) => tell('clipboard.writeFiles', { handles: list.map(idOf), cut }),
-    onFilesChange: (cb) => clipboardChanges.on(cb),
   };
 
   // ---- theme ----
