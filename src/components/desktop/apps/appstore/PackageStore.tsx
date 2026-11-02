@@ -278,7 +278,10 @@ function usePackageHandlers(type: PackageType, onSelect: (address: PackageAddres
     const entry = installed.data?.get(packageCoordinate(pkg));
     return {
       id: entry?.id ?? null,
-      outdated: !!entry && entry.publishedAt < pkg.createdAt,
+      // An extension's newest release is only known once fetched; it's out of date when its package is another.
+      outdated: !!entry && (pkg.type === 'extension'
+        ? !!pkg.asset && !!entry.sha256 && entry.sha256 !== pkg.asset.sha256
+        : entry.publishedAt < pkg.createdAt),
       // An extension is at work as soon as it's installed.
       inUse: !!entry && (pkg.type === 'extension' || entry.id === current),
       busy: busy.has(packageCoordinate(pkg)),
@@ -580,7 +583,8 @@ function PackageDetailPage({
   more: ThemePackage[];
   handlers: PackageHandlers;
 }) {
-  const lookup = useThemePackage(known ? null : address);
+  // An extension's release and package are fetched on opening it, when they aren't known yet.
+  const lookup = useThemePackage(known && !(known.type === 'extension' && !known.asset) ? null : address);
   const pkg = known ?? lookup.data ?? null;
   const author = usePackageAuthor(address.pubkey);
   const copy = useCopyAddress();

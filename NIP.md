@@ -223,14 +223,17 @@ from any of the user's computers.
 
 **Finding them.** `about:extensions`, an internal page of the browser, lists
 the extensions Din's publishers, the people the user follows, and the user
-publish. Din keeps those authors' applications, releases and assets with
-`["f", "chromium"]`, and their deletions (kind 5 with `["k", "32267"]`,
-`"30063"` or `"3063"`), in IndexedDB. The page
-draws from that at once, then syncs: an author new to it is asked for
-everything, the rest for what's newer than their last sync, and what comes
-back is merged in. Get installs an app's newest `main` release (by
-`created_at`, which NIP-82 makes the release date) with a `.crx` asset,
-fetching its newest releases first when none is on disk. A `nostr:` link to an app the page knows to
+publish. Din keeps those authors' applications with `["f", "chromium"]`,
+one event per extension, and their deletions (kind 5 with `["k", "32267"]`,
+`"30063"` or `"3063"`), in IndexedDB. The page draws from that at once, then
+syncs: an author new to it is asked for everything, the rest for what's newer
+than their last sync, and what comes back is merged in. Releases and assets,
+which pile up with every version, aren't synced: an app's newest `main`
+release (`{"kinds": [30063], "#i": [<d>], "#c": ["main"], "limit": 1}`, the
+newest by `created_at`, which NIP-82 makes the release date) and its asset by
+id are fetched, and kept, when its page is opened or it's got, and for every
+installed extension after each sync, in one request, to tell which have an
+update (its newest package's hash differs from the installed one's). A `nostr:` link to an app the page knows to
 be an extension opens its page there.
 
 **Installing.** Get downloads the package from the asset's servers, the

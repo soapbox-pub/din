@@ -13,8 +13,11 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { getCrxBridge } from '@/lib/crx';
 import {
+  APP_KIND,
   extensionCatalog,
   extensionCatalogSync,
+  fetchLatestReleases,
+  type CatalogQuery,
   getExtensionCatalogVersion,
   ingestPublished,
   isExtensionCatalogLoaded,
@@ -76,14 +79,18 @@ export function useExtensionCatalog(): PackageCatalogState {
   const authors = useCatalogAuthors();
   const version = useSyncExternalStore(subscribeExtensionCatalog, getExtensionCatalogVersion);
 
-  const sync = useCallback(
-    () =>
-      syncExtensionCatalog(
-        (filters, signal) => relays.query(filters, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]) }),
-        authors,
-      ).catch(() => {}),
-    [relays, authors],
-  );
+  const sync = useCallback(async () => {
+    const query: CatalogQuery = (filters, signal) =>
+      relays.query(filters, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]) });
+    await syncExtensionCatalog(query, authors).catch(() => {});
+    // The installed ones' newest releases, to tell which have an update.
+    const installed = (await getCrxBridge()?.published().catch(() => [])) ?? [];
+    const addresses = installed.flatMap(({ source }) => {
+      const [kind, pubkey, ...d] = source.coordinate.split(':');
+      return kind === String(APP_KIND) && pubkey ? [{ pubkey, identifier: d.join(':') }] : [];
+    });
+    await fetchLatestReleases(addresses, query).catch(() => {});
+  }, [relays, authors]);
 
   useEffect(() => {
     void loadExtensionCatalog();
@@ -214,7 +221,10 @@ export function useInstalledPackages(type: PackageType) {
     enabled: canKeepPackages(type),
     queryFn: async () => {
       const installed = await installedPackages(type);
-      return new Map(installed.map((t) => [t.source.coordinate, { id: t.id, publishedAt: t.source.publishedAt }]));
+      return new Map(installed.map((t) => [
+        t.source.coordinate,
+        { id: t.id, publishedAt: t.source.publishedAt, sha256: 'sha256' in t.source ? t.source.sha256 : undefined },
+      ]));
     },
     staleTime: 60_000,
   });

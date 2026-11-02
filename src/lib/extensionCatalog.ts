@@ -10,19 +10,20 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
  * All three carry the platform `["f", "chromium"]` (a Chromium-based
  * browser, which is what runs a .crx; Din's addition to NIP-82's platform
  * identifiers), so relays hand over only extensions with `#f`.
- * about:extensions keeps what its authors (Din's publishers, the people the
- * user follows, and the user) publish that way in IndexedDB, plus the
- * deletions that cover it. It opens on what's on disk, then syncs in the
- * background: each author is asked for everything once, then only for
- * what's newer than when they were last synced. What arrives is merged in,
- * never swapped for the whole: the newest app and release per address win,
- * and a deletion removes what it covers and keeps out anything older that
+ * about:extensions keeps its authors' (Din's publishers, the people the
+ * user follows, and the user) extension apps in IndexedDB, plus the
+ * deletions that cover them: one event per extension, where releases and
+ * assets pile up with every version. It opens on what's on disk, then syncs
+ * in the background: each author is asked for everything once, then only
+ * for what's newer than when they were last synced. What arrives is merged
+ * in, never swapped for the whole: the newest app per address wins, and a
+ * deletion removes what it covers and keeps out anything older that
  * arrives later.
  *
- * An app is listed when it has the platform; its newest release on the
- * `main` channel (by `created_at`, which NIP-82 makes the release date) with
- * a .crx asset on disk is what Get installs, and is fetched when it's opened
- * or got if none is on disk yet.
+ * An app's newest release (by `created_at`, which NIP-82 makes the release
+ * date) and its .crx asset are only fetched when they're needed: on opening
+ * its page, getting it, or checking an installed one for an update. They're
+ * kept with the rest.
  */
 
 export const APP_KIND = 32267;
@@ -422,7 +423,7 @@ export type CatalogQuery = (filters: NostrFilter[], signal?: AbortSignal) => Pro
 
 function catalogFilters(authors: string[]): NostrFilter[] {
   return [
-    { kinds: [APP_KIND, RELEASE_KIND, ASSET_KIND], authors, '#f': [CHROMIUM_PLATFORM] },
+    { kinds: [APP_KIND], authors, '#f': [CHROMIUM_PLATFORM] },
     { kinds: [DELETION_KIND], authors, '#k': [String(APP_KIND), String(RELEASE_KIND), String(ASSET_KIND)] },
   ];
 }
@@ -486,26 +487,47 @@ export function syncExtensionCatalog(query: CatalogQuery, authors: string[], sig
   return run;
 }
 
-/** One app, its newest releases and their .crx assets, from relays into the catalog; resolves with it. */
+/**
+ * The newest release of each of some apps, and its .crx asset, from relays
+ * into the catalog, in one request for the releases and one for the assets.
+ * With `withApps`, the apps themselves and their deletions too.
+ */
+export async function fetchLatestReleases(
+  addresses: { pubkey: string; identifier: string }[],
+  query: CatalogQuery,
+  options: { withApps?: boolean; signal?: AbortSignal } = {},
+): Promise<void> {
+  await loadExtensionCatalog();
+  if (!addresses.length) return;
+  const authors = new Set(addresses.map((a) => a.pubkey));
+  const filters: NostrFilter[] = addresses.map(({ pubkey, identifier }) => (
+    { kinds: [RELEASE_KIND], authors: [pubkey], '#i': [identifier], '#c': ['main'], limit: 1 }
+  ));
+  if (options.withApps) {
+    for (const { pubkey, identifier } of addresses) {
+      filters.push(
+        { kinds: [APP_KIND], authors: [pubkey], '#d': [identifier] },
+        { kinds: [DELETION_KIND], authors: [pubkey], '#a': [`${APP_KIND}:${pubkey}:${identifier}`] },
+      );
+    }
+  }
+  ingest(await query(filters, options.signal), authors);
+  const wanted = new Set(addresses.map((a) => `${a.pubkey}:${a.identifier}`));
+  const ids = [...releases.values()]
+    .filter((r) => wanted.has(`${r.pubkey}:${r.app}`))
+    .flatMap((r) => r.assets)
+    .filter((id) => !assets.has(id));
+  if (ids.length) ingest(await query([{ kinds: [ASSET_KIND], authors: [...authors], ids }], options.signal), authors);
+}
+
+/** One app, its newest release and that release's .crx asset, from relays into the catalog; resolves with it. */
 export async function fetchExtension(
   address: { pubkey: string; identifier: string },
   query: CatalogQuery,
   signal?: AbortSignal,
 ): Promise<ExtensionPackage | null> {
-  await loadExtensionCatalog();
-  const { pubkey, identifier } = address;
-  const author = new Set([pubkey]);
-  ingest(await query([
-    { kinds: [APP_KIND], authors: [pubkey], '#d': [identifier] },
-    { kinds: [RELEASE_KIND], authors: [pubkey], '#i': [identifier], limit: 5 },
-    { kinds: [DELETION_KIND], authors: [pubkey], '#a': [`${APP_KIND}:${pubkey}:${identifier}`] },
-  ], signal), author);
-  const ids = [...releases.values()]
-    .filter((r) => r.pubkey === pubkey && r.app === identifier)
-    .flatMap((r) => r.assets)
-    .filter((id) => !assets.has(id));
-  if (ids.length) ingest(await query([{ kinds: [ASSET_KIND], authors: [pubkey], ids, '#m': [CRX_MIME] }], signal), author);
-  return storedExtension(pubkey, identifier);
+  await fetchLatestReleases([address], query, { withApps: true, signal });
+  return storedExtension(address.pubkey, address.identifier);
 }
 
 // ---------------------------------------------------------------------------
