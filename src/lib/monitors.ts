@@ -150,21 +150,23 @@ export interface WorkArea extends Rect {
 /**
  * Work areas for the given monitors, with the workspace's top-left at
  * `origin` in the viewport. The primary monitor's work area starts at the
- * workspace's top edge, below the menu bar, and stops `bottom` px above the
- * monitor's bottom edge, above a taskbar.
+ * workspace's top-left corner, below the menu bar or a taskbar along the top
+ * and right of one down the left, and stops `bottom` px above the monitor's
+ * bottom edge, above a taskbar along the bottom.
  */
 export function workAreas(monitors: Monitor[], origin: { x: number; y: number }, bottom = 0): WorkArea[] {
   return monitors.map((m) => {
     const bounds = { x: m.x - origin.x, y: m.y - origin.y, width: m.width, height: m.height };
+    const left = m.primary ? Math.max(bounds.x, 0) : bounds.x;
     const top = m.primary ? Math.max(bounds.y, 0) : bounds.y;
     const inset = m.primary ? Math.max(bottom, 0) : 0;
     return {
       id: m.id,
       primary: m.primary,
       bounds,
-      x: bounds.x,
+      x: left,
       y: top,
-      width: bounds.width,
+      width: Math.max(0, bounds.x + bounds.width - left),
       height: Math.max(0, bounds.y + bounds.height - top - inset),
     };
   });

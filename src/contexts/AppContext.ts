@@ -22,6 +22,12 @@ export type DockStyle = "none" | "modern" | "classic";
 export type TaskbarStyle = "tall" | "slim";
 
 /**
+ * The screen edge the taskbar runs along: the bottom, Windows style, the
+ * top, or the left, Ubuntu style.
+ */
+export type TaskbarPosition = "bottom" | "top" | "left";
+
+/**
  * What the taskbar's buttons stand for: an app each, its windows combined
  * (Windows 7), or a window each, labeled with its title (Windows XP, Vista).
  */
@@ -134,7 +140,7 @@ export interface AppConfig {
    */
   restoreWindows: boolean;
   /**
-   * The menu bar and Dock (default), or a taskbar along the bottom of the
+   * The menu bar and Dock (default), or a taskbar along an edge of the
    * screen in their place, with the Start menu, open windows and status icons.
    */
   desktopLayout: DesktopLayout;
@@ -151,6 +157,8 @@ export interface AppConfig {
   dockStyle: DockStyle;
   /** The taskbar's build: tall (Windows 7) or slim (Windows Vista). */
   taskbarStyle: TaskbarStyle;
+  /** The screen edge the taskbar runs along: bottom, top, or left. */
+  taskbarPosition: TaskbarPosition;
   /** Whether the taskbar has a button per app, its windows combined, or one per window. */
   taskbarButtons: TaskbarButtons;
   /**

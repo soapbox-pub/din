@@ -10,6 +10,8 @@ import { ScreenshotHost } from './ScreenshotHost';
 import { ScreenRecordingHost } from './ScreenRecordingHost';
 import { MenuBar } from './MenuBar';
 import { Taskbar } from './Taskbar';
+import { taskbarWorkspaceClass } from '@/lib/taskbarStyles';
+import { cn } from '@/lib/utils';
 import { VolumeOsd } from './VolumeOsd';
 import { WorkspaceOsd } from './WorkspacesIndicator';
 import { DictationOverlay } from './DictationOverlay';
@@ -101,7 +103,8 @@ function coveredWindows(
 
 /**
  * The desktop session: top menu bar, wallpaper workspace, bottom dock; or
- * the workspace above a taskbar (AppConfig's desktopLayout).
+ * the workspace beside a taskbar along the bottom, top or left (AppConfig's
+ * desktopLayout and taskbarPosition).
  */
 export function Desktop() {
   return (
@@ -120,8 +123,9 @@ function DesktopSession() {
   const workspaceRef = useRef<HTMLElement>(null);
 
   // Each monitor's work area in workspace coordinates. The workspace's
-  // origin is where the primary monitor's menu bar ends, and its bottom where
-  // the taskbar starts (the Dock overlays it instead), measured once laid out
+  // origin is where the primary monitor's menu bar or taskbar ends, and its
+  // bottom where a taskbar along the bottom starts (the Dock overlays it
+  // instead), measured once laid out
   // and again whenever the monitors or the workspace's size change. Measured
   // against the Wallpaper's full-screen root rather than the viewport: <body>
   // may not have moved to the primary monitor yet (MonitorsProvider's effect
@@ -262,7 +266,9 @@ function DesktopSession() {
                         the other monitors (the Wallpaper clips to the whole screen,
                         not to this). The Dock overlays its bottom edge and
                         auto-hides, so windows can use the full height; the
-                        taskbar takes its own room below it instead.
+                        taskbar takes its own room below, above or beside it
+                        instead (the taskbar comes after it in either case, so
+                        moving the bar never remounts the windows).
                         `isolate` gives the window stack its own stacking context so
                         each window's inline z-index (a counter that only climbs as
                         windows are raised) stays contained here. Without it, a window
@@ -273,7 +279,7 @@ function DesktopSession() {
                     <main
                       ref={workspaceRef}
                       aria-label="Desktop"
-                      className="relative isolate flex-1"
+                      className={cn('relative isolate flex-1', taskbar && taskbarWorkspaceClass(config))}
                     >
                       <DesktopMenu />
                       {/* Widgets: over the wallpaper, under every window. */}

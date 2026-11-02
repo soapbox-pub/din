@@ -1,13 +1,24 @@
 import { createContext, useContext } from 'react';
+import type { TaskbarPosition } from '@/contexts/AppContext';
 
 /**
- * Which way the panels of a bar's items open: down from the menu bar along
- * the top of the screen, or up from the taskbar along the bottom. The status
- * items (the clock, Wi-Fi, volume, the account…) are shared by both bars.
+ * The screen edge of the taskbar a bar item sits in, or null in the menu bar.
+ * The status items (the clock, Wi-Fi, volume, the account…) are shared by
+ * both bars, and their panels open away from whichever edge theirs is on.
  */
-export const BarSideContext = createContext<'top' | 'bottom'>('bottom');
+export const BarSideContext = createContext<TaskbarPosition | null>(null);
 
-/** The side a bar item's popover opens on. */
-export function useBarSide(): 'top' | 'bottom' {
+/** The screen edge of the taskbar a bar item is in, or null in the menu bar. */
+export function useTaskbarEdge(): TaskbarPosition | null {
   return useContext(BarSideContext);
+}
+
+/**
+ * The side a bar item's popover opens on: down from the menu bar or a
+ * taskbar along the top, up from one along the bottom, right of one down the
+ * left.
+ */
+export function useBarSide(): 'top' | 'bottom' | 'right' {
+  const edge = useContext(BarSideContext);
+  return edge === 'bottom' ? 'top' : edge === 'left' ? 'right' : 'bottom';
 }

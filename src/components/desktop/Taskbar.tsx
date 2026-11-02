@@ -41,7 +41,7 @@ import { ScreenRecordingMenuItem } from '@/components/desktop/ScreenRecordingHos
 import { StudioMenuItem } from '@/components/desktop/StudioMenuItem';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
 import type { TaskbarStyle } from '@/contexts/AppContext';
-import { BarSideContext } from '@/contexts/BarSideContext';
+import { BarSideContext, useBarSide, useTaskbarEdge } from '@/contexts/BarSideContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -57,7 +57,7 @@ import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { registerDockTile } from '@/lib/dockTiles';
 import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
 import { getFsBridge } from '@/lib/fs';
-import { TASKBAR_STYLES } from '@/lib/taskbarStyles';
+import { TASKBAR_POSITIONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
 import { cn } from '@/lib/utils';
 import { USER_DIRS } from '@/shared/userDirs';
 
@@ -66,22 +66,37 @@ const WHEEL_STEP = 50;
 /** Minimum time between wheel steps, in ms. */
 const WHEEL_COOLDOWN = 120;
 
-/** How each build of the taskbar (AppConfig's taskbarStyle) sizes its parts. */
+/**
+ * How each build of the taskbar (AppConfig's taskbarStyle) sizes its parts,
+ * across the bottom or top of the screen or down its left side.
+ */
 interface TaskbarSizes {
+  /** Whether the bar runs down the side of the screen, its buttons in a column. */
+  vertical: boolean;
+  /** The bar's thickness: its height across the screen, its width down it. */
   bar: string;
   /** The bar's glass: Vista's darker, 7's clearer. */
   glass: string;
-  /** An app's button. */
+  /** An app's button, and the Start button: its width in a row, its height in a column. */
   tile: string;
   /** The icon on an app's button. */
   icon: string;
   /** The icon on a window's button, beside its title. */
   windowIcon: string;
+  /** The Start button's logo. */
+  logo: string;
 }
 
-const TASKBAR_SIZES: Record<TaskbarStyle, TaskbarSizes> = {
-  slim: { bar: 'h-10', glass: 'bg-background/70', tile: 'w-14', icon: 'size-7', windowIcon: 'size-5' },
-  tall: { bar: 'h-13', glass: 'bg-background/55', tile: 'w-16', icon: 'size-9', windowIcon: 'size-6' },
+// Down the left, `bar` matches taskbarWorkspaceClass's margin.
+const TASKBAR_SIZES: Record<TaskbarStyle, Record<'row' | 'column', TaskbarSizes>> = {
+  slim: {
+    row: { vertical: false, bar: 'h-10', glass: 'bg-background/70', tile: 'w-14', icon: 'size-7', windowIcon: 'size-5', logo: 'h-6' },
+    column: { vertical: true, bar: 'w-14', glass: 'bg-background/70', tile: 'h-12', icon: 'size-7', windowIcon: 'size-7', logo: 'h-6' },
+  },
+  tall: {
+    row: { vertical: false, bar: 'h-13', glass: 'bg-background/55', tile: 'w-16', icon: 'size-9', windowIcon: 'size-6', logo: 'h-8' },
+    column: { vertical: true, bar: 'w-16', glass: 'bg-background/55', tile: 'h-14', icon: 'size-9', windowIcon: 'size-9', logo: 'h-8' },
+  },
 };
 
 /** One window on the taskbar, with what its button's menu needs to know. */
@@ -96,6 +111,7 @@ interface WindowControls {
 /**
  * The taskbar, Windows style: one bar along the bottom of the primary
  * monitor in place of the menu bar and the Dock (AppConfig's desktopLayout),
+ * or along its top, or down its left side as Ubuntu's is (taskbarPosition),
  * slim like Vista's or tall like 7's (taskbarStyle). The Start button opens
  * the apps launcher beside the user's folders and the power buttons; then
  * come the pinned apps and the running ones, either a button per app that
@@ -106,24 +122,32 @@ interface WindowControls {
  */
 export function Taskbar() {
   const { config } = useAppContext();
-  const sizes = TASKBAR_SIZES[config.taskbarStyle];
+  const position = config.taskbarPosition;
+  const sizes = TASKBAR_SIZES[config.taskbarStyle][position === 'left' ? 'column' : 'row'];
+  const vertical = sizes.vertical;
   return (
-    <BarSideContext.Provider value="top">
+    <BarSideContext.Provider value={position}>
       <footer
         aria-label="Taskbar"
         className={cn(
           // Chrome, not content: no text cursor or selection anywhere in it.
-          'relative z-20 flex shrink-0 cursor-default select-none items-stretch gap-1 px-1 tracking-tight',
+          'z-20 flex shrink-0 cursor-default select-none items-stretch gap-1 tracking-tight',
           sizes.bar,
           sizes.glass,
-          'border-t border-border/60 backdrop-blur-2xl backdrop-saturate-150',
-          // A lit top edge, like glass catching the light.
-          'before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-1/2 before:bg-linear-to-b before:from-foreground/[0.06] before:to-transparent',
+          'border-border/60 backdrop-blur-2xl backdrop-saturate-150',
+          // Glass catching the light along its top or left edge.
+          'before:pointer-events-none before:absolute before:from-foreground/[0.06] before:to-transparent',
+          vertical
+            ? 'absolute inset-y-0 left-0 flex-col border-r py-1 before:inset-y-0 before:left-0 before:w-1/2 before:bg-linear-to-r'
+            : 'relative px-1 before:inset-x-0 before:top-0 before:h-1/2 before:bg-linear-to-b',
+          position === 'bottom' && 'border-t',
+          // Laid out after the workspace, but shown above it.
+          position === 'top' && 'order-first border-b',
         )}
       >
-        <StartMenu taskbarStyle={config.taskbarStyle} />
+        <StartMenu sizes={sizes} />
         <TaskButtons sizes={sizes} separate={config.taskbarButtons === 'separate'} />
-        <div className="flex shrink-0 items-center gap-1 pl-1">
+        <div className={cn('flex shrink-0 items-center gap-1', vertical ? 'flex-wrap justify-center px-1' : 'pl-1')}>
           <ScreenRecordingMenuItem />
           <StudioMenuItem />
           <ScreenShareMenuItem />
@@ -138,7 +162,7 @@ export function Taskbar() {
           <WifiMenuItem />
           <AccountMenuItem />
         </div>
-        <div className="flex shrink-0 items-stretch py-0.5">
+        <div className={cn('flex shrink-0 items-stretch', vertical ? 'px-0.5' : 'py-0.5')}>
           <ClockMenuItem />
         </div>
       </footer>
@@ -151,8 +175,9 @@ export function Taskbar() {
  * beside the user, their folders, Settings and the power buttons. Super+Space
  * opens it, as it does the apps menu. The button is Din's logo on its own.
  */
-const StartMenu = memo(function StartMenu({ taskbarStyle }: { taskbarStyle: TaskbarStyle }) {
-  const slim = taskbarStyle === 'slim';
+const StartMenu = memo(function StartMenu({ sizes }: { sizes: TaskbarSizes }) {
+  const side = useBarSide();
+  const edge = useTaskbarEdge();
   const [open, setOpen] = useState(false);
   const [powerAction, setPowerAction] = useState<PowerAction | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -168,8 +193,9 @@ const StartMenu = memo(function StartMenu({ taskbarStyle }: { taskbarStyle: Task
             aria-label="Start"
             title="Start"
             className={cn(
-              'my-0.5 grid shrink-0 place-items-center rounded-md border border-transparent transition-colors',
-              slim ? 'w-14' : 'w-16',
+              'grid shrink-0 place-items-center rounded-md border border-transparent transition-colors',
+              sizes.vertical ? 'mx-0.5' : 'my-0.5',
+              sizes.tile,
               'hover:border-foreground/15 hover:bg-foreground/10',
               'data-[state=open]:border-foreground/25 data-[state=open]:bg-foreground/20 data-[state=open]:shadow-inner',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -178,13 +204,13 @@ const StartMenu = memo(function StartMenu({ taskbarStyle }: { taskbarStyle: Task
             <img
               src="/din-logo.svg"
               alt=""
-              className={cn('w-auto drop-shadow-sm', slim ? 'h-6' : 'h-8')}
+              className={cn('w-auto max-w-[80%] object-contain drop-shadow-sm', sizes.logo)}
               draggable={false}
             />
           </button>
         </PopoverTrigger>
         <PopoverContent
-          side="top"
+          side={side}
           align="start"
           sideOffset={4}
           className="flex w-[min(36rem,calc(100vw-1rem))] overflow-hidden rounded-xl p-0"
@@ -197,7 +223,7 @@ const StartMenu = memo(function StartMenu({ taskbarStyle }: { taskbarStyle: Task
             <AppLauncher
               searchRef={searchRef}
               onClose={() => setOpen(false)}
-              searchAtBottom
+              searchAtBottom={edge === 'bottom'}
               listClassName="h-[28rem] max-h-[60vh]"
             />
           </div>
@@ -346,6 +372,7 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
       }
     },
     constrain: (appId, to) => (pinned.includes(appId) ? Math.min(to, pinnedIds.length - 1) : to),
+    axis: sizes.vertical ? 'y' : 'x',
   });
   const { register } = reorder;
   // Also the tiles the minimize animation flies windows into (dockTiles).
@@ -358,7 +385,15 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild {...menuAbove.trigger}>
-        <div role="toolbar" aria-label="Apps" className="flex min-w-0 flex-1 items-stretch gap-0.5 overflow-hidden py-0.5">
+        <div
+          role="toolbar"
+          aria-label="Apps"
+          aria-orientation={sizes.vertical ? 'vertical' : 'horizontal'}
+          className={cn(
+            'flex flex-1 items-stretch gap-0.5 overflow-hidden',
+            sizes.vertical ? 'min-h-0 flex-col px-0.5' : 'min-w-0 py-0.5',
+          )}
+        >
           {entryIds.map((appId) => {
             const app = getApp(appId);
             if (!app) return null;
@@ -464,7 +499,13 @@ const TaskButton = memo(function TaskButton({
   return (
     <div ref={ref} data-app-id={app.id} className={cn('relative flex shrink-0', sizes.tile)}>
       {appWindows.length > 1 && (
-        <span aria-hidden className="absolute inset-y-0.5 right-0 left-1 rounded-md border border-foreground/15 bg-foreground/5" />
+        <span
+          aria-hidden
+          className={cn(
+            'absolute rounded-md border border-foreground/15 bg-foreground/5',
+            sizes.vertical ? 'inset-x-0.5 top-1 bottom-0' : 'inset-y-0.5 right-0 left-1',
+          )}
+        />
       )}
       <ContextMenu>
         <ContextMenuTrigger asChild {...menuAbove.trigger}>
@@ -484,7 +525,7 @@ const TaskButton = memo(function TaskButton({
             className={cn(
               'relative grid flex-1 place-items-center rounded-md border transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              appWindows.length > 1 && 'mr-1',
+              appWindows.length > 1 && (sizes.vertical ? 'mb-1' : 'mr-1'),
               active
                 ? 'border-foreground/25 bg-foreground/20 shadow-inner'
                 : running
@@ -558,7 +599,8 @@ function TileBadge({ badge }: { badge: AppBadge }) {
  * as the bar fills. A click raises its window or, if it's the active one,
  * minimizes it; middle-click opens a new one; its menu acts on that window
  * first, then on its app. The group drags as one, where the app's button
- * would be.
+ * would be. Down a taskbar on the left there's no room for titles, so each
+ * window's button is its icon alone.
  */
 const WindowButtons = memo(function WindowButtons({
   app,
@@ -595,9 +637,9 @@ const WindowButtons = memo(function WindowButtons({
     <div
       ref={ref}
       data-app-id={app.id}
-      className="flex min-w-0 gap-0.5"
+      className={cn('flex gap-0.5', sizes.vertical ? 'shrink-0 flex-col' : 'min-w-0')}
       // As wide as its buttons at their widest, shrinking with the bar.
-      style={{ flex: `0 1 calc(${appWindows.length} * 10rem + ${appWindows.length - 1} * 0.125rem)` }}
+      style={sizes.vertical ? undefined : { flex: `0 1 calc(${appWindows.length} * 10rem + ${appWindows.length - 1} * 0.125rem)` }}
     >
       {appWindows.map((w, i) => {
         const active = w.id === activeWindowId;
@@ -622,7 +664,10 @@ const WindowButtons = memo(function WindowButtons({
                   if (e.button === 1) controls.open(app.id);
                 }}
                 className={cn(
-                  'relative flex max-w-40 min-w-10 flex-1 basis-0 items-center gap-2 overflow-hidden rounded-md border px-2 text-left text-xs transition-colors',
+                  'relative flex items-center overflow-hidden rounded-md border text-xs transition-colors',
+                  sizes.vertical
+                    ? cn('shrink-0 justify-center', sizes.tile)
+                    : 'max-w-40 min-w-10 flex-1 basis-0 gap-2 px-2 text-left',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   active
                     ? 'border-foreground/25 bg-foreground/20 font-medium text-foreground shadow-inner'
@@ -634,7 +679,7 @@ const WindowButtons = memo(function WindowButtons({
                   web={app.web}
                   className={cn(sizes.windowIcon, 'shrink-0 text-foreground drop-shadow-sm', w.minimized && 'opacity-70')}
                 />
-                <span className="min-w-0 flex-1 truncate">{title}</span>
+                {!sizes.vertical && <span className="min-w-0 flex-1 truncate">{title}</span>}
                 {shownBadge !== null && <TileBadge badge={shownBadge} />}
               </button>
             </ContextMenuTrigger>
@@ -670,7 +715,7 @@ const WindowButtons = memo(function WindowButtons({
   sameWindows(prev.appWindows, next.appWindows));
 
 /**
- * The menu between the taskbar's buttons: its size, whether windows combine,
+ * The menu between the taskbar's buttons: its size and position, whether windows combine,
  * back to the menu bar and Dock, or its settings.
  */
 function TaskbarMenuContent({ above }: { above: MenuAboveContentProps }) {
@@ -691,6 +736,24 @@ function TaskbarMenuContent({ above }: { above: MenuAboveContentProps }) {
             {TASKBAR_STYLES.map((s) => (
               <ContextMenuRadioItem key={s.value} value={s.value}>
                 {s.name}
+              </ContextMenuRadioItem>
+            ))}
+          </ContextMenuRadioGroup>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>Position</ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-40">
+          <ContextMenuRadioGroup
+            value={config.taskbarPosition}
+            onValueChange={(value) => {
+              const position = TASKBAR_POSITIONS.find((p) => p.value === value);
+              if (position) updateConfig((current) => ({ ...current, taskbarPosition: position.value }));
+            }}
+          >
+            {TASKBAR_POSITIONS.map((p) => (
+              <ContextMenuRadioItem key={p.value} value={p.value}>
+                {p.name}
               </ContextMenuRadioItem>
             ))}
           </ContextMenuRadioGroup>

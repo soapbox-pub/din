@@ -62,6 +62,7 @@ export function TestApp({ children }: TestAppProps) {
     dockSize: 80,
     dockStyle: 'none',
     taskbarStyle: 'tall',
+    taskbarPosition: 'bottom',
     taskbarButtons: 'combine',
     zoomLevel: 100,
     clockFormat: 'auto',

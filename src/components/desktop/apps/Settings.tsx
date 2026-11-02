@@ -112,7 +112,7 @@ import {
   useTimeZones,
 } from '@/hooks/useDateTime';
 import { useClock } from '@/hooks/useClock';
-import type { ClockFormat, DesktopLayout, TaskbarButtons, TaskbarStyle } from '@/contexts/AppContext';
+import type { ClockFormat, DesktopLayout, TaskbarButtons, TaskbarPosition, TaskbarStyle } from '@/contexts/AppContext';
 import {
   useKeyboardLayouts,
   useKeyboardStatus,
@@ -215,7 +215,7 @@ import { LoginSessionSection } from '@/components/desktop/apps/LoginSessionSecti
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 import { DockPreview } from '@/components/desktop/Dock';
 import { DOCK_STYLES } from '@/lib/dockStyles';
-import { TASKBAR_BUTTONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
+import { TASKBAR_BUTTONS, TASKBAR_POSITIONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
 import { WM_BINDING_HELP } from '@/lib/wmBindings';
 import { SECTIONS, matchingSections } from '@/lib/settingsSections';
 import type { SectionId } from '@/lib/settingsSections';
@@ -3336,9 +3336,9 @@ const DESKTOP_LAYOUTS: { value: DesktopLayout; name: string }[] = [
 
 /**
  * The desktop's layout, then the Dock's size, magnification and backdrop,
- * or the taskbar's size and whether it combines windows. The Dock's own
- * right-click menu offers the last two, less the magnification level; the
- * taskbar's offers its two and the way back to the Dock.
+ * or the taskbar's position, size and whether it combines windows. The
+ * Dock's own right-click menu offers the last two, less the magnification
+ * level; the taskbar's offers its three and the way back to the Dock.
  */
 function DockSection() {
   const { config, updateConfig } = useAppContext();
@@ -3371,7 +3371,7 @@ function DockSection() {
         })}
       </div>
       <p className="text-xs text-muted-foreground">
-        The taskbar puts the Start menu, your apps and windows, and the status icons and clock in one bar along the bottom of the screen, Windows style. It keeps the Dock’s pinned apps, and apps’ menus move into their windows.
+        The taskbar puts the Start menu, your apps and windows, and the status icons and clock in one bar along an edge of the screen, Windows style. It keeps the Dock’s pinned apps, and apps’ menus move into their windows.
       </p>
       {config.desktopLayout === 'dock' ? <DockOptions /> : <TaskbarOptions />}
     </SectionShell>
@@ -3510,7 +3510,7 @@ function PicturedChoices<T extends string>({
   preview: (value: T) => React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={label}>
+    <div className={cn('grid gap-2', options.length === 3 ? 'grid-cols-3' : 'grid-cols-2')} role="radiogroup" aria-label={label}>
       {options.map((option) => {
         const active = value === option.value;
         return (
@@ -3541,6 +3541,27 @@ function PicturedChoices<T extends string>({
 
 /** Colors of the stand-in apps in the taskbar previews. */
 const TASKBAR_PREVIEW_APPS = ['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'];
+
+/** A small taskbar along the bottom, top or left of a desktop, Din's logo as its Start button. */
+function TaskbarPositionPreview({ position }: { position: TaskbarPosition }) {
+  const vertical = position === 'left';
+  return (
+    <span
+      className={cn(
+        'absolute flex items-center gap-1 bg-black/45',
+        vertical ? 'inset-y-0 left-0 w-4 flex-col py-1' : 'inset-x-0 h-4 px-1',
+        position === 'bottom' && 'bottom-0',
+        position === 'top' && 'top-0',
+      )}
+    >
+      <img src="/din-logo.svg" alt="" className="h-2.5 w-auto max-w-3" draggable={false} />
+      {TASKBAR_PREVIEW_APPS.map((color) => (
+        <span key={color} className={cn('size-2.5 rounded-[2px]', color)} />
+      ))}
+      <span className={cn('rounded-full bg-white/60', vertical ? 'mt-auto h-3 w-1.5' : 'ml-auto h-1.5 w-4')} />
+    </span>
+  );
+}
 
 /** A small taskbar of either build, Din's logo as its Start button. */
 function TaskbarStylePreview({ style }: { style: TaskbarStyle }) {
@@ -3577,12 +3598,23 @@ function TaskbarButtonsPreview({ buttons }: { buttons: TaskbarButtons }) {
   );
 }
 
-/** The taskbar's size and whether it combines an app's windows into one button. */
+/** The taskbar's position, its size, and whether it combines an app's windows into one button. */
 function TaskbarOptions() {
   const { config, updateConfig } = useAppContext();
 
   return (
     <>
+      <SubHeading>Taskbar position</SubHeading>
+      <PicturedChoices
+        label="Taskbar position"
+        options={TASKBAR_POSITIONS}
+        value={config.taskbarPosition}
+        onChange={(value) => updateConfig((current) => ({ ...current, taskbarPosition: value }))}
+        preview={(value) => <TaskbarPositionPreview position={value} />}
+      />
+      <p className="text-xs text-muted-foreground">
+        Along the bottom of the screen as on Windows, along the top, or down the left side as on Ubuntu. Down the side, each window’s button is its icon alone.
+      </p>
       <SubHeading>Taskbar size</SubHeading>
       <PicturedChoices
         label="Taskbar size"
@@ -3603,7 +3635,7 @@ function TaskbarOptions() {
         preview={(value) => <TaskbarButtonsPreview buttons={value} />}
       />
       <p className="text-xs text-muted-foreground">
-        Combined, each app has one button for all its windows, as on Windows 7. Separate, each window has its own button with its title, as on Windows XP and Vista, and pinned apps keep their icons until they open. You can also right-click the taskbar between its buttons to change these.
+        Combined, each app has one button for all its windows, as on Windows 7. Separate, each window has its own button with its title, as on Windows XP and Vista, and pinned apps keep their icons until they open. You can also right-click the taskbar between its buttons to change these, and its position.
       </p>
     </>
   );

@@ -15,14 +15,34 @@ export function moveItem<T extends { id: string }>(list: T[], id: string, to: nu
   return copy;
 }
 
-/** Left edge an element would have without our transform. */
-function naturalLeft(el: HTMLElement): number {
-  const translate = new DOMMatrixReadOnly(getComputedStyle(el).transform).m41;
-  return el.getBoundingClientRect().left - translate;
+/** The axis a row of items runs along: across, or down a column. */
+export type ReorderAxis = 'x' | 'y';
+
+/** Left (or top, down a column) edge an element would have without our transform. */
+function naturalStart(el: HTMLElement, axis: ReorderAxis = 'x'): number {
+  const matrix = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+  const rect = el.getBoundingClientRect();
+  return axis === 'y' ? rect.top - matrix.m42 : rect.left - matrix.m41;
+}
+
+/** An element's left edge, or its top down a column. */
+function start(el: HTMLElement, axis: ReorderAxis): number {
+  const rect = el.getBoundingClientRect();
+  return axis === 'y' ? rect.top : rect.left;
+}
+
+/** An element's width, or its height down a column. */
+function length(el: HTMLElement, axis: ReorderAxis): number {
+  return axis === 'y' ? el.offsetHeight : el.offsetWidth;
+}
+
+/** A transform moving an element `px` along the axis. */
+function translate(axis: ReorderAxis, px: number): string {
+  return axis === 'y' ? `translateY(${px}px)` : `translateX(${px}px)`;
 }
 
 /** Animate `el` from `delta` px away back to its natural slot. */
-function settle(el: HTMLElement, delta: number): void {
+function settle(el: HTMLElement, delta: number, axis: ReorderAxis): void {
   // Inline transitions only last as long as our animation, then the
   // element's own classes (the dock's width animation, for one) take over.
   const release = () => {
@@ -34,7 +54,7 @@ function settle(el: HTMLElement, delta: number): void {
     return;
   }
   el.style.transition = 'none';
-  el.style.transform = `translateX(${delta}px)`;
+  el.style.transform = translate(axis, delta);
   void el.offsetWidth;
   el.style.transition = `transform ${SETTLE_MS}ms ease-out`;
   el.style.transform = '';
@@ -138,7 +158,8 @@ function createGhost(el: HTMLElement, d: Drag): HTMLElement {
 }
 
 /**
- * Drag-to-reorder for a horizontal row of items (tab strips, dock tiles).
+ * Drag-to-reorder for a horizontal row of items (tab strips, dock tiles), or
+ * a column of them with `axis: 'y'` (a taskbar down the side of the screen).
  *
  * The dragged item follows the pointer, and as its center crosses a
  * neighbor's, `onMove(id, toIndex)` reorders the list right away (Chrome's
@@ -167,6 +188,7 @@ export function useDragReorder({
   relayout,
   tearOff,
   moveWindow,
+  axis = 'x',
 }: {
   /** The reorderable items' ids, in display order. */
   ids: string[];
@@ -182,6 +204,8 @@ export function useDragReorder({
   tearOff?: TearOff;
   /** Drags move this window instead of the item. */
   moveWindow?: WindowMoveGesture;
+  /** Whether the items run across (the default) or down. */
+  axis?: ReorderAxis;
 }) {
   const elements = useRef(new Map<string, HTMLElement>());
   const drag = useRef<Drag | null>(null);
@@ -189,9 +213,9 @@ export function useDragReorder({
   // Sibling positions just before a reorder, to slide them from (FLIP).
   const before = useRef<Map<string, number> | null>(null);
 
-  const latest = useRef({ ids, onMove, constrain, relayout, tearOff, moveWindow });
+  const latest = useRef({ ids, onMove, constrain, relayout, tearOff, moveWindow, axis });
   useLayoutEffect(() => {
-    latest.current = { ids, onMove, constrain, relayout, tearOff, moveWindow };
+    latest.current = { ids, onMove, constrain, relayout, tearOff, moveWindow, axis };
   });
 
   /** Put the dragged element under the pointer, and reorder if it crossed a neighbor. */
@@ -200,25 +224,25 @@ export function useDragReorder({
     if (!d?.active || d.ghost) return;
     const el = elements.current.get(d.id);
     if (!el) return;
-    const left = naturalLeft(el);
-    el.style.transform = `translateX(${d.lastX - d.grabOffset - left}px)`;
+    const { ids, onMove, constrain, axis } = latest.current;
+    const grabbed = axis === 'y' ? d.lastY - d.grabOffsetY : d.lastX - d.grabOffset;
+    el.style.transform = translate(axis, grabbed - naturalStart(el, axis));
 
-    const center = d.lastX - d.grabOffset + el.offsetWidth / 2;
-    const { ids, onMove, constrain } = latest.current;
+    const center = grabbed + length(el, axis) / 2;
     const others = ids.filter((id) => id !== d.id);
     let to = 0;
     for (const id of others) {
       const sibling = elements.current.get(id);
       if (!sibling) continue;
       // Where it's headed, not where a slide-in animation has it right now.
-      if (naturalLeft(sibling) + sibling.offsetWidth / 2 < center) to++;
+      if (naturalStart(sibling, axis) + length(sibling, axis) / 2 < center) to++;
     }
     if (constrain) to = constrain(d.id, to);
     if (to === ids.indexOf(d.id)) return;
     before.current = new Map(
       others.flatMap((id) => {
         const sibling = elements.current.get(id);
-        return sibling ? [[id, sibling.getBoundingClientRect().left] as const] : [];
+        return sibling ? [[id, start(sibling, axis)] as const] : [];
       }),
     );
     onMove(d.id, to);
@@ -259,10 +283,11 @@ export function useDragReorder({
     const old = before.current;
     if (!old) return;
     before.current = null;
-    latest.current.relayout?.();
-    for (const [id, left] of old) {
+    const { relayout, axis } = latest.current;
+    relayout?.();
+    for (const [id, was] of old) {
       const el = elements.current.get(id);
-      if (el) settle(el, left - el.getBoundingClientRect().left);
+      if (el) settle(el, was - start(el, axis), axis);
     }
     follow();
   });
@@ -280,7 +305,8 @@ export function useDragReorder({
         delete el.dataset.reorderDragging;
         el.style.zIndex = '';
         el.style.opacity = '';
-        settle(el, el.getBoundingClientRect().left - naturalLeft(el));
+        const { axis } = latest.current;
+        settle(el, start(el, axis) - naturalStart(el, axis), axis);
       }
       if (d.ghost) {
         const tearOff = latest.current.tearOff;
@@ -312,8 +338,8 @@ export function useDragReorder({
       pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
-      grabOffset: e.clientX - naturalLeft(el),
-      grabOffsetY: e.clientY - el.getBoundingClientRect().top,
+      grabOffset: e.clientX - naturalStart(el, 'x'),
+      grabOffsetY: e.clientY - naturalStart(el, 'y'),
       lastX: e.clientX,
       lastY: e.clientY,
       active: false,
@@ -333,12 +359,12 @@ export function useDragReorder({
       d.lastX = ev.clientX;
       d.lastY = ev.clientY;
       if (!d.active) {
-        const { tearOff, moveWindow } = latest.current;
+        const { tearOff, moveWindow, axis } = latest.current;
         // An item that can be torn off, or that moves its window, starts
         // dragging in any direction.
         const travel = tearable(tearOff, d.id) || moveWindow
           ? Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY)
-          : Math.abs(ev.clientX - d.startX);
+          : axis === 'y' ? Math.abs(ev.clientY - d.startY) : Math.abs(ev.clientX - d.startX);
         if (travel < DRAG_THRESHOLD) return;
         d.active = true;
         target.setPointerCapture(d.pointerId);

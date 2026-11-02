@@ -31,7 +31,7 @@ import { RemoveAccountDialog } from '@/components/auth/RemoveAccountDialog';
 import { EditProfileForm } from '@/components/EditProfileForm';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
-import { useBarSide } from '@/contexts/BarSideContext';
+import { useTaskbarEdge } from '@/contexts/BarSideContext';
 import { setMenuBarSlot } from '@/lib/menuBarSlot';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
@@ -906,12 +906,13 @@ function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect:
  * Menu-bar clock: weekday, date, and time. Clicking opens a calendar beside
  * the notification center; a dot beside the time marks unread notifications.
  * In the taskbar it's the time over the date, Windows style, at the corner
- * of the screen.
+ * of the screen; down a taskbar on the left, the time over the day and month.
  */
 export const ClockMenuItem = memo(function ClockMenuItem() {
   const { hasUnread, doNotDisturb } = useNotificationsBadge();
   const [open, setOpen] = useState(false);
-  const taskbar = useBarSide() === 'top';
+  const edge = useTaskbarEdge();
+  const taskbar = edge !== null;
   // The viewport can span several monitors (stacked ones make it taller than
   // any of them), so size the panel to the primary monitor's work area.
   const maxHeight = Math.round(primaryArea(useWorkAreas()).height * 0.85);
@@ -926,10 +927,10 @@ export const ClockMenuItem = memo(function ClockMenuItem() {
           title={doNotDisturb ? 'Calendar and notifications (Do Not Disturb)' : undefined}
           className={cn(
             'gap-1.5 rounded-md px-2.5 font-medium text-foreground/90 hover:bg-foreground/10 hover:text-foreground',
-            taskbar ? 'h-full text-xs' : 'h-7 text-sm',
+            edge === 'left' ? 'h-auto w-full flex-col gap-0.5 px-0 py-1.5 text-xs' : taskbar ? 'h-full text-xs' : 'h-7 text-sm',
           )}
         >
-          <ClockText stacked={taskbar} />
+          <ClockText stacked={taskbar} narrow={edge === 'left'} />
           {doNotDisturb ? (
             <BellOff className="size-3.5 text-muted-foreground" aria-hidden />
           ) : (
@@ -958,7 +959,7 @@ export const ClockMenuItem = memo(function ClockMenuItem() {
 });
 
 /** The clock's text. Its own component so only it re-renders as the time turns over. */
-function ClockText({ stacked }: { stacked: boolean }) {
+function ClockText({ stacked, narrow = false }: { stacked: boolean; narrow?: boolean }) {
   const { config } = useAppContext();
   const now = useClock(config.clockShowSeconds ? 'second' : 'minute');
   const time = now.toLocaleTimeString([], timeFormatOptions(config.clockFormat, config.clockShowSeconds));
@@ -967,7 +968,9 @@ function ClockText({ stacked }: { stacked: boolean }) {
     return (
       <time dateTime={now.toISOString()} className="flex flex-col items-center leading-tight tabular-nums">
         <span>{time}</span>
-        {config.clockShowDate && <span>{now.toLocaleDateString()}</span>}
+        {config.clockShowDate && (
+          <span>{narrow ? now.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) : now.toLocaleDateString()}</span>
+        )}
       </time>
     );
   }
